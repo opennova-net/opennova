@@ -1,6 +1,7 @@
 extends GutTest
 
-# STR-2 (docs/oned/workspace-maturity-program.md): the encoding audit — pin the
+# STR-2, the maturity program's string-encoding audit (see git history of
+# docs/oned/workspace-maturity-program.md, removed 2026-09-28): pin the
 # retail code-page behavior end to end, table bytes -> glyphs.
 #
 # The pipeline under audit:

@@ -28,11 +28,7 @@ jobs:
   # PDB flags, so every object is cacheable as-is. First run after a cache miss
   # is cold; after that only changed sources recompile.
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
@@ -425,11 +421,7 @@ jobs:
           path: godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
 
   godot-tests:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -499,10 +491,7 @@ jobs:
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite core 2>&1 | tee gut.log
-          exit "${PIPESTATUS[0]}"
-
-
+          bash scripts/test_godot.sh --suite core
 
       - name: Upload godot core test reports
         if: always()
@@ -648,11 +637,7 @@ jobs:
   test-retail:
     needs: [retail-availability]
     if: needs.retail-availability.outputs.available == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
@@ -664,9 +649,6 @@ jobs:
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
           submodules: recursive
-          # Full history so the diff-scoped maturity lint can resolve
-          # origin/master...HEAD on PR builds (it self-skips without a base).
-          fetch-depth: 0
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -722,11 +704,7 @@ jobs:
 
   godot-tests-retail:
     if: needs.retail-availability.outputs.available == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     needs: [build-gdextension-windows, retail-availability]
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -803,8 +781,7 @@ jobs:
         shell: bash
         run: |
           export GODOT_BIN="${PWD}/.godot-bin/Godot_v${GODOT_VERSION}_win64_console.exe"
-          bash scripts/test_godot.sh --suite retail 2>&1 | tee gut.log
-          exit "${PIPESTATUS[0]}"
+          bash scripts/test_godot.sh --suite retail
 
       - name: Upload godot retail test reports
         if: always()

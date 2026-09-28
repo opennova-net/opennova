@@ -11,12 +11,9 @@ const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
 # ArmoryFixture authors the small menu, catalog and string tables used here.
-const STAGED_FIXTURES := {
-	"mnu/jo_weapon.mnu": "weapon.mnu",
-	"def/weapon.def": "weapon.def",
-	"rtxt/menutxt.bin": "menutxt.BIN",
-	"rtxt/gametext.bin": "gametext.bin",
-}
+const STAGED_FIXTURES: Array[String] = [
+	"weapon.mnu", "weapon.def", "menutxt.BIN", "gametext.bin",
+]
 
 
 class FakeArmoryView:

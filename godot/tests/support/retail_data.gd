@@ -33,7 +33,8 @@ static func fixture(rel: String) -> String:
 
 
 ## The pending() text for a missing reference fixture; names OPENNOVA_JO_ASSETS
-## because scripts/ci/retail_gates_ran.py keys on the root's variable.
+## because scripts/ci/test_suites.py (check_log / check_report) keys on the
+## root's variable to tell a retail-data skip from any other pending.
 static func fixture_pending_text(rel: String) -> String:
 	return "OPENNOVA_JO_ASSETS/fixtures/%s (the reference fixture set) is required" % rel
 

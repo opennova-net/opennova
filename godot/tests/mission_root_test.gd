@@ -49,11 +49,6 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 
 
 
-# The flashbang's effects_table tag-1 "move" effect (retail ammo.def grenadefb):
-# the round-bound particle the pose-follow test below watches.
-const FLASHBANG_MOVE_EFFECT := "Effect_FlashBangToss"
-
-
 # One synthetic in-memory particle catalog authoring that move effect as a
 # FOREVEREMIT definition (the effect_world_test recipe), so a REAL EffectWorld
 # interns and spawns it without a resource root and the round-bound group

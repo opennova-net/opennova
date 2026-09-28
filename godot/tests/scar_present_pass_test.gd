@@ -47,19 +47,7 @@ func _texture_root(names: Array) -> ResourceRoot:
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
 	_temp_dirs.append(dir_path)
 	for texture_name in names:
-		var bytes := PackedByteArray()
-		bytes.resize(18 + 2 * 2 * 4)
-		bytes[2] = 2
-		bytes[12] = 2
-		bytes[14] = 2
-		bytes[16] = 32
-		bytes[17] = 0x28
-		for i in range(18, bytes.size()):
-			bytes[i] = 0xff
-		var file := FileAccess.open(dir_path.path_join(texture_name), FileAccess.WRITE)
-		assert_not_null(file)
-		file.store_buffer(bytes)
-		file.close()
+		TestFs.write_bytes(self, dir_path.path_join(texture_name), TestFs.tga_bytes(Vector2i(2, 2)))
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir_path), OK)
 	return root

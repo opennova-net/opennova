@@ -7,7 +7,9 @@
 # Usage: scripts/test_godot.sh [--keep-user-dir] [--suite core|retail|all] [--windowed]
 #   --keep-user-dir  leave the run's isolated user:// (.godot-test-user) in
 #                    place to inspect what the suite wrote
-#   --windowed       run only the retail graphics scripts with Forward+
+#   --windowed       run only the suite's graphics scripts (tests/windowed/ for
+#                    core, tests/retail/windowed/ for retail) under Forward+;
+#                    a pending test there (no RenderingDevice) fails the run
 #
 # The suite runs against an ISOLATED user:// (see below). Tests that persist
 # settings or drop scratch files therefore cannot reach the developer's real
@@ -38,8 +40,7 @@ label="$suite"
 display=(--headless)
 selection=()
 if [[ "$windowed" == "1" ]]; then
-  [[ "$suite" == "retail" ]] || { echo "--windowed requires --suite retail" >&2; exit 2; }
-  label=retail-windowed
+  label="$suite-windowed"
   display=(--rendering-method forward_plus)
   selection=(--windowed)
 fi
@@ -122,4 +123,4 @@ fi
 
 [[ "$status" == "0" ]] || exit "$status"
 python "$root/scripts/ci/test_suites.py" --suite "$suite" --inventory "$inventory" \
-  --report "$report" --gut-log "$log"
+  --report "$report" --gut-log "$log" "${selection[@]}"

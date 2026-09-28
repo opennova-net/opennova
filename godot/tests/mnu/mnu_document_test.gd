@@ -4,9 +4,6 @@ extends GutTest
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
-# The shipped menus and style sheet come from the reference fixture set; the
-# legs that read them pend without it.
-const MNS_REL := "mns/menu_style.mns"
 
 
 func _load_doc() -> MnuDocument:

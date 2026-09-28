@@ -4,11 +4,10 @@ extends GutTest
 # parts name synthetic .3di basenames no root carries, so load_combo composes
 # zero models but must not error (a missing graphic skips its slot); the
 # lifecycle (clear()/load_combo) is exercised on the SubViewport scaffold. The
-# retail-root tests compose the shipped table's parts (the reference fixture
-# set's Avatars.def over the install's PFFs).
+# retail-root cases over the shipped table live in the retail half
+# (tests/retail/avatar/avatar_preview_test.gd).
 const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
-const RETAIL_AVATARS_REL := "avatars/Avatars.def"
 
 var _preview: AvatarPreview
 
@@ -30,8 +29,7 @@ func _resolved_combo() -> AvatarComboRow:
 	return _first_combo(db)
 
 
-# The shipped table from the reference fixture set: its parts name the retail
-# .3di the mounted install carries. Null without OPENNOVA_JO_ASSETS/fixtures.
+# First nationality/division with a combo.
 func _first_combo(db: AvatarDatabase) -> AvatarComboRow:
 	for n in range(db.get_nationality_count()):
 		for d in range(db.get_division_count(n)):
@@ -280,8 +278,8 @@ func _staged_idle_root():
 	return root
 
 
-# A ResourceRoot on the retail PFF install (RetailData.install(): OPENNOVA_JO_DIR, machine-specific;
-# set in settings.local.json env, never tracked). Null when unset or the .bad set is absent.
+# A ResourceRoot over the committed avatars fixture directory (no .3di lives
+# there, so it only exercises the has_file paths). Null when it cannot mount.
 func _resource_root_for_fixture():
 	var dir := ProjectSettings.globalize_path("res://../fixtures/avatars")
 	var root := ResourceRoot.new()

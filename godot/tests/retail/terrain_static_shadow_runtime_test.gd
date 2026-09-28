@@ -1,15 +1,5 @@
 extends GutTest
 
-const HOUSE_3DI := "res://../fixtures/threedi/synth/house.3di"
-# house with a live LOD0 sine rotation row; the same plus material 0's UV
-# generator set to style 1; house with material 0 alpha-tested and
-# time-scrolled at one texture per second (style 16, rate 1). Minted once
-# from the retired edit surface (fixtures/README.md).
-const SYN_HOUSE_SINE := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
-const SYN_HOUSE_SINE_UV1 := "res://../fixtures/threedi/synth/house_lod0_sine_rotx_uv1.3di"
-const SYN_HOUSE_UVSCROLL := "res://../fixtures/threedi/synth/house_mtrl0_uvscroll16_alphatest.3di"
-
-
 # The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
 # assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
 const TMAP_STAGE := "static_shadow"

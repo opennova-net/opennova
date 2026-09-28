@@ -540,19 +540,7 @@ func _norm(path: String) -> String:
 
 
 func _normal_test_tga(blue: int) -> PackedByteArray:
-	var bytes := PackedByteArray()
-	bytes.resize(18 + 64)
-	bytes[2] = 2
-	bytes.encode_u16(12, 4)
-	bytes.encode_u16(14, 4)
-	bytes[16] = 32
-	bytes[17] = 40
-	for i in range(16):
-		bytes[18 + i * 4] = blue
-		bytes[19 + i * 4] = 70
-		bytes[20 + i * 4] = 90
-		bytes[21 + i * 4] = 128
-	return bytes
+	return TestFs.tga_bytes(Vector2i(4, 4), Color8(90, 70, blue, 128))
 
 
 func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> void:

@@ -9,8 +9,6 @@ extends GutTest
 # retail kit) run in the live render_fixture_capture probe over the retail
 # fixture, never against a double.
 
-const Probe := preload("res://probes/render/render_fixture_capture_probe.gd")
-
 
 func test_comparison_contract_uses_production_spawn_profile_and_presentation_witness() -> void:
 	var contract := {

@@ -3,14 +3,11 @@ extends GutTest
 ## Real child processes prove the public CLI exit contract without terminating GUT.
 
 var _dirs: Array[String] = []
-var _saved_config := PackedByteArray()
-var _had_config := false
+var _config: TestFs.Snapshot
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(ResourceDirSettings.CONFIG_PATH)
-	if _had_config:
-		_saved_config = FileAccess.get_file_as_bytes(ResourceDirSettings.CONFIG_PATH)
+	_config = TestFs.snapshot(ResourceDirSettings.CONFIG_PATH)
 	ResourceDirSettings.set_expansion("")
 	ResourceDirSettings.set_game("jo")
 
@@ -19,20 +16,20 @@ func after_each() -> void:
 	for dir in _dirs:
 		TestFs.remove_dir_recursive(dir)
 	_dirs.clear()
-	if _had_config:
-		var config := FileAccess.open(ResourceDirSettings.CONFIG_PATH, FileAccess.WRITE)
-		config.store_buffer(_saved_config)
-		config.close()
-	elif FileAccess.file_exists(ResourceDirSettings.CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(ResourceDirSettings.CONFIG_PATH))
+	_config.restore()
 
 
-func _launch(args: PackedStringArray, expected_exit: int) -> String:
+## Run the game binary with `args` after `--`; `verbose` turns on Godot's
+## --verbose log so print_verbose boot markers reach the captured output.
+func _launch(args: PackedStringArray, expected_exit: int, verbose := false) -> String:
 	var output: Array = []
 	var command := PackedStringArray([
 		"--headless", "--path", ProjectSettings.globalize_path("res://"),
-		"--disable-render-loop", "--disable-crash-handler", "--quit-after", "10", "--",
+		"--disable-render-loop", "--disable-crash-handler", "--quit-after", "10",
 	])
+	if verbose:
+		command.append("--verbose")
+	command.append("--")
 	command.append_array(args)
 	var status := OS.execute(OS.get_executable_path(), command, output, true)
 	var log_text := "\n".join(output)
@@ -43,8 +40,10 @@ func _launch(args: PackedStringArray, expected_exit: int) -> String:
 
 
 func test_no_path_boots_the_bundled_menu() -> void:
-	# ADR 0048: no --resource-dir mounts the bundled assets/ placeholder menu.
-	var log_text := _launch([], 0)
+	# ADR 0048: no --resource-dir mounts the bundled assets/ placeholder menu;
+	# MainGame logs the marker once that menu is up.
+	var log_text := _launch([], 0, true)
+	assert_string_contains(log_text, "OpenNova: bundled menu up from")
 	assert_false(log_text.contains("bundled assets not found"), log_text)
 	assert_false(log_text.contains("no menu found in resource dir"), log_text)
 

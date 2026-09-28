@@ -6,16 +6,13 @@ extends GutTest
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
-var _saved_config := PackedByteArray()
-var _had_config := false
+var _config: TestFs.Snapshot
 var _retail_dir := ""
 var _shell: MainGame = null
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
-			if _had_config else PackedByteArray()
+	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	# No launch flags: the shell boots the bundled menu.
 	LaunchFlags.set_args_override(PackedStringArray([]))
 	ResourceDirSettings.set_expansion("")
@@ -31,13 +28,7 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_retail_dir)
 		_retail_dir = ""
 	LaunchFlags.clear_args_override()
-	if _had_config:
-		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(_saved_config)
-			file.close()
-	elif FileAccess.file_exists(STATE_CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	_config.restore()
 	Strings.clear()
 
 
@@ -112,6 +103,19 @@ func test_play_retail_without_a_saved_install_keeps_the_bundled_menu() -> void:
 	await get_tree().process_frame
 	assert_eq(_shell.current_resource_root(), bundled)
 	assert_true(_shell.get_menu_shell().get_driver().has_widget("PLAY_RETAIL"))
+
+
+func test_a_saved_install_that_no_longer_exists_is_forgotten() -> void:
+	_retail_dir = _stage_retail()
+	ResourceDirSettings.set_retail_dir(_retail_dir)
+	_shell = await _boot()
+	var bundled := _shell.current_resource_root()
+	TestFs.remove_dir_recursive(_retail_dir)
+	assert_false(_shell.play_retail(), "nothing mounts: PLAY RETAIL falls back to the picker")
+	assert_eq(_shell.current_resource_root(), bundled, "the bundled menu stays")
+	assert_eq(String(ConfigStore.read(ResourceDirSettings.CONFIG_PATH, ResourceDirSettings.SECTION,
+			ResourceDirSettings.RETAIL_DIR_KEY, "")), "",
+			"the stale install is cleared from the persisted settings")
 
 
 func test_a_folder_without_game_archives_is_refused_and_not_saved() -> void:

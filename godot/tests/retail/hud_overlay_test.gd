@@ -6,8 +6,6 @@ extends GutTest
 # compiled draw list (get_draw_list_stats) plus the visible canvas geometry.
 # The shell-side HudSightsCard child stack is covered here too.
 
-const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
-const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 
 var _temp_dirs: Array[String] = []
@@ -19,38 +17,30 @@ func after_each() -> void:
 	_temp_dirs.clear()
 
 
+# A scratch root carrying a synthetic hudpos.def and solid white textures.
+class TempLayout:
+	extends RefCounted
+	var layout: HudPos
+	var root: ResourceRoot
+	var dir: String
+
+
 func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
-		texture_sizes: Dictionary = {}) -> Dictionary:
-	var dir_path := OS.get_temp_dir().path_join("hud_overlay_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
-	_temp_dirs.append(dir_path)
+		texture_sizes: Dictionary = {}) -> TempLayout:
+	var fixture := TempLayout.new()
+	fixture.dir = TestFs.cache_dir(self, "hud_overlay")
+	_temp_dirs.append(fixture.dir)
 	for texture_name in textures:
 		# Minimal uncompressed BGRA TGA, loaded through the overlay's real VFS path.
 		var texture_size: Vector2i = texture_sizes.get(texture_name, Vector2i(2, 2))
-		var bytes := PackedByteArray()
-		bytes.resize(18 + texture_size.x * texture_size.y * 4)
-		bytes[2] = 2
-		bytes[12] = texture_size.x & 0xff
-		bytes[13] = (texture_size.x >> 8) & 0xff
-		bytes[14] = texture_size.y & 0xff
-		bytes[15] = (texture_size.y >> 8) & 0xff
-		bytes[16] = 32
-		bytes[17] = 0x28
-		for i in range(18, bytes.size()):
-			bytes[i] = 0xff
-		var texture_file := FileAccess.open(dir_path.path_join(texture_name), FileAccess.WRITE)
-		assert_not_null(texture_file)
-		texture_file.store_buffer(bytes)
-		texture_file.close()
-	var def_file := FileAccess.open(dir_path.path_join("hudpos.def"), FileAccess.WRITE)
-	assert_not_null(def_file)
-	def_file.store_string("\n".join(lines))
-	def_file.close()
-	var layout := HudPos.new()
-	assert_eq(layout.load(dir_path.path_join("hudpos.def")), OK)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(dir_path), OK)
-	return {"layout": layout, "root": root, "dir": dir_path}
+		TestFs.write_bytes(self, fixture.dir.path_join(texture_name),
+				TestFs.tga_bytes(texture_size))
+	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"), "\n".join(lines))
+	fixture.layout = HudPos.new()
+	assert_eq(fixture.layout.load(fixture.dir.path_join("hudpos.def")), OK)
+	fixture.root = ResourceRoot.new()
+	assert_eq(fixture.root.set_root_dir(fixture.dir), OK)
+	return fixture
 
 
 func _make_overlay() -> HudOverlay:
@@ -103,7 +93,7 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 	var card := HudSightsCardScript.new()
 	card.size = Vector2(1024, 768)
 	add_child_autofree(card)
-	card.set_weapon_sights(sights, fixture["root"])
+	card.set_weapon_sights(sights, fixture.root)
 	card.set_card_up(true)
 	await get_tree().process_frame
 
@@ -218,6 +208,10 @@ func test_weapon_cluster_artless_safe() -> void:
 	_set_hud_weapon(hud, PlayerHudWeaponDef.from_weapon_def(weapon), "AK-47")
 	hud.set_weapon_state(true, 12, 90, 0, 0, false, false, false, 0)
 	await get_tree().process_frame
+	var armed := hud.get_draw_list_stats()
+	assert_eq(armed.tris, 0, "no crosshair texture resolves without a root: no reticle")
+	assert_eq(armed.glyphs, 0, "no font resolves without a root: no ammo text")
+	assert_eq(armed.quads, 0, "no clip or round art resolves without a root: no clip indicator")
 	# A settled aimed shot hides the crosshair; clearing the weapon clears the cluster.
 	hud.set_weapon_state(true, 12, 90, 0, 0, true, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().tris, 0,
@@ -225,4 +219,7 @@ func test_weapon_cluster_artless_safe() -> void:
 	await get_tree().process_frame
 	hud.clear_weapon()
 	await get_tree().process_frame
+	var cleared := hud.get_draw_list_stats()
+	assert_eq(cleared.quads + cleared.tris + cleared.glyphs, 0,
+		"clearing the weapon clears the whole cluster")
 	assert_true(is_instance_valid(hud), "Weapon cluster draw is art-less safe.")

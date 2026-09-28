@@ -7,46 +7,35 @@ extends GutTest
 
 const MenuShellScript := preload("res://game/menu_shell.gd")
 
-# The retail menu set, mission text and music program come from the reference
-# fixture set (docs/asset-gated-tests.md, RetailData.fixture); the whole script
-# skips without it.
+# The menu names below key the synthetic screens _fixture_bytes authors; the
+# retail half (tests/retail/game/menu_shell_test.gd) reads the reference
+# fixture set under the same names.
 const MAIN_FIXTURE := "mnu/jo_main.mnu"   # STARTUP, MUSICVAR 1
 const SP_FIXTURE := "mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
-const GAME_FIXTURE := "mnu/jo_game.mnu"  # pause menu with inline OPTIONS_WRAPPER
-const SP_PLAY_FIXTURE := "mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
-const MISSION_BIN_FIXTURE := "rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
-const MUS_FIXTURE := "mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
-const SBF_FIXTURE := "res://../fixtures/sbf/synth_gamemus.sbf"  # synthetic SBF bank (banks stream loose)
 
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
-var _saved_state_config := PackedByteArray()
-var _had_state_config := false
-var _saved_controls_cfg := PackedByteArray()
-var _had_controls_cfg := false
+var _state_config: TestFs.Snapshot
+var _controls_cfg: TestFs.Snapshot
 
 
 func before_each() -> void:
-	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
-	if _had_state_config:
+	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
+	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_had_controls_cfg = FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
-	_saved_controls_cfg = FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
-			if _had_controls_cfg else PackedByteArray()
+	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
 
 
 func after_each() -> void:
 	# The music service is an autoload; leave no context behind for the next test.
 	MusicService.stop_context()
-	TestFs.restore_file(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
+	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults and the on-disk cfg even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	TestFs.restore_file(ControlsBindings.CONFIG_PATH, _had_controls_cfg,
-			_saved_controls_cfg)
+	_controls_cfg.restore()
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -66,22 +55,15 @@ func _make_shell(dir: String, options: PlayerOptions = null):
 
 
 func _make_dir() -> String:
-	var dir := OS.get_temp_dir().path_join("menu_shell_%d" % Time.get_ticks_usec())
-	DirAccess.make_dir_recursive_absolute(dir)
+	var dir := TestFs.cache_dir(self, "menu_shell")
 	_copy(MAIN_FIXTURE, dir.path_join("main.mnu"))
 	_copy(SP_FIXTURE, dir.path_join("sp.mnu"))
-	var f := FileAccess.open(dir.path_join("test.bms"), FileAccess.WRITE)
-	if f != null:
-		f.store_buffer(PackedByteArray([0]))
-		f.close()
+	TestFs.write_bytes(self, dir.path_join("test.bms"), PackedByteArray([0]))
 	return dir
 
 
 func _copy(source: String, dst: String) -> void:
-	var f := FileAccess.open(dst, FileAccess.WRITE)
-	if f != null:
-		f.store_buffer(_fixture_bytes(source))
-		f.close()
+	TestFs.write_bytes(self, dst, _fixture_bytes(source))
 
 
 # The bytes of a fixture: a res:// path reads directly (the synthetic SBF bank);
@@ -118,11 +100,6 @@ func test_hidden_menu_suspends_shell_frame_processing() -> void:
 	for name in ["main.mnu", "sp.mnu", "test.bms"]:
 		DirAccess.remove_absolute(dir.path_join(name))
 	DirAccess.remove_absolute(dir)
-
-
-# bms::AttribFlags game-mode bits (engine/formats/mission/bms.h).
-const BMS_ATTRIB_COOP := 0x1000000
-const BMS_ATTRIB_TDM := 0x20000000
 
 
 # A minimal parseable .bms: the 616-byte header with magic BMS v19, the
@@ -358,6 +335,33 @@ func test_companion_released_when_document_changes_hands() -> void:
 	assert_eq(stub.released, 1, "a re-claim is not a release")
 	_cleanup(dir)
 
+
+
+# A root switch reloads every text table: a root without menutxt.BIN clears
+# the previous root's registration instead of keeping its strings alive.
+func test_root_switch_drops_the_previous_roots_text_table() -> void:
+	Strings.clear()
+	var dir := _make_dir()
+	var table := RtxtStringFile.new()
+	table.add_section("Menu")
+	table.add_entry("BTN_OK", "OK", 0, Vector2i())
+	TestFs.write_bytes(self, dir.path_join("menutxt.BIN"), table.to_byte_array())
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		TestFs.remove_dir_recursive(dir)
+		return
+	assert_not_null(Strings.get_table(Strings.TABLE_MENUTXT),
+			"the first root registers its menutxt table")
+	var bare := _make_dir()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(bare), OK)
+	assert_true(shell.setup(root), "the shell re-opens over the bare root")
+	assert_null(Strings.get_table(Strings.TABLE_MENUTXT),
+			"a root without menutxt.BIN leaves no stale table behind")
+	Strings.clear()
+	TestFs.remove_dir_recursive(dir)
+	TestFs.remove_dir_recursive(bare)
 
 
 func test_missing_assets_degrade_without_crashing() -> void:

@@ -5,16 +5,13 @@ extends GutTest
 
 const BUS_NAMES := [&"SFX", &"Ambient", &"Voice", &"Music"]
 
-var _saved_config := PackedByteArray()
-var _had_config := false
+var _config: TestFs.Snapshot
 var _saved_bus_volumes: Dictionary = {}
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(PlayerOptions.CONFIG_PATH)
-	_saved_config = FileAccess.get_file_as_bytes(PlayerOptions.CONFIG_PATH) \
-			if _had_config else PackedByteArray()
-	if _had_config:
+	_config = TestFs.snapshot(PlayerOptions.CONFIG_PATH)
+	if _config.existed:
 		DirAccess.remove_absolute(
 				ProjectSettings.globalize_path(PlayerOptions.CONFIG_PATH))
 	_saved_bus_volumes.clear()
@@ -25,15 +22,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	if _had_config:
-		var file := FileAccess.open(PlayerOptions.CONFIG_PATH, FileAccess.WRITE)
-		assert_not_null(file)
-		if file != null:
-			file.store_buffer(_saved_config)
-			file.close()
-	elif FileAccess.file_exists(PlayerOptions.CONFIG_PATH):
-		DirAccess.remove_absolute(
-				ProjectSettings.globalize_path(PlayerOptions.CONFIG_PATH))
+	_config.restore()
 	for bus_name: StringName in _saved_bus_volumes:
 		var bus := AudioServer.get_bus_index(bus_name)
 		if bus >= 0:

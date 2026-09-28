@@ -632,21 +632,25 @@ func _enter_bundled_menu() -> bool:
 	if root == null:
 		return false
 	_root = root
-	return _enter_menu(root.get_root_dir())
+	if not _enter_menu(root.get_root_dir()):
+		return false
+	# The boot marker the CLI startup contract test reads (--verbose).
+	print_verbose("OpenNova: bundled menu up from %s" % root.get_root_dir())
+	return true
 
 
 ## PLAY RETAIL: the saved retail install when it still mounts, else the picker.
-## Public so lifecycle tests drive the same leg the button does.
+## A saved install that fails to mount is forgotten, so the next PLAY RETAIL
+## goes straight to the picker. Public so lifecycle tests drive the same leg
+## the button does.
 func play_retail() -> bool:
 	var saved := ResourceDirSettings.get_retail_dir()
-	if not saved.is_empty() and enter_retail_dir(saved):
-		return true
+	if not saved.is_empty():
+		if enter_retail_dir(saved):
+			return true
+		ResourceDirSettings.set_retail_dir("")
 	request_retail_dir()
 	return false
-
-
-func _on_play_retail() -> void:
-	play_retail()
 
 
 ## Mount `dir` as the session's retail install and open its menu, saving it for
@@ -714,7 +718,7 @@ func _wire_shell() -> void:
 	_menu_shell.resume_requested.connect(resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_bundled_companion = BundledMenuCompanion.new()
-	_bundled_companion.play_retail_requested.connect(_on_play_retail)
+	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
 	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.

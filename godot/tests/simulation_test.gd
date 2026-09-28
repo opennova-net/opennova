@@ -49,7 +49,6 @@ func after_each() -> void:
 # Authored 3DI variants minted once from the retired edit surface
 # (fixtures/README.md): CTRL names, PANM rows and flags the
 # sim's own parse-once cache consumes from disk.
-const SYN_MOUNT_HEAT_GLOW_SLIDE := "res://../fixtures/threedi/synth/mount_heat_glow_slide_part1.3di"
 const SYN_ARMRY_SPECIAL1_SLIDE := "res://../fixtures/threedi/synth/armory_special1_slide_part1.3di"
 const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synth/armory_special2_slide_part1.3di"
 const SYN_TANK_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synth/tank_special1_slide_ewep01.3di"
@@ -61,29 +60,13 @@ const MountLook := preload("res://tests/support/mount_look.gd")
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("sim_native_%d_%d" % [
-			Time.get_ticks_usec(), _native_fixture_dirs.size()])
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var dir := TestFs.cache_dir(self, "sim_native")
 	_native_fixture_dirs.append(dir)
 	return dir
 
 
-func _write_fixture_bytes(dir: String, name: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return
-	file.store_buffer(bytes)
-	file.close()
-
-
 func _copy_fixture(dir: String, source_res_path: String, dest_name: String) -> void:
-	_write_fixture_bytes(dir, dest_name, FileAccess.get_file_as_bytes(source_res_path))
-
-
-func _fixture_items_text() -> String:
-	return FileAccess.get_file_as_bytes(
-			"res://../fixtures/def/items.def").get_string_from_ascii()
+	TestFs.copy(self, source_res_path, dir.path_join(dest_name))
 
 
 func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
@@ -120,11 +103,6 @@ func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
 	return bytes
 
 
-const BINOC_REL := "bad/BINOC.bad"
-
-
-# The shipped BINOC.bad from the reference fixture set; "" (after pending)
-# without OPENNOVA_JO_ASSETS. Every rig test starts by checking it.
 func _seat_fixture_spawn(model_path: String, point_name: String,
 		position: Vector3, rotation: Vector3 = Vector3.ZERO) -> Vector3:
 	var model := ObjectData.new()
@@ -1046,7 +1024,7 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 	if renames.has(seat_type):
 		model_bytes = _bytes_with_renamed_user_point(
 				model_bytes, "Usegun", String(renames[seat_type]))
-	_write_fixture_bytes(dir, "seatgun.3di", model_bytes)
+	TestFs.write_bytes(self, dir.path_join("seatgun.3di"),model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Seat Verdict Gun"
   id 101294
   attrib: EWeap PlayerControl
@@ -2056,7 +2034,7 @@ func test_attach_labels_seats() -> void:
 			"res://../fixtures/threedi/synth/mount.3di")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "BCasing", "armory1")
-	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
+	TestFs.write_bytes(self, dir.path_join("labelgun.3di"),model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Labels Gun"
   id 101294
   type object
@@ -2092,7 +2070,7 @@ func test_attach_labels_share_complete_can_fire_verdict() -> void:
 	var dir := _native_fixture_dir()
 	var model_bytes := FileAccess.get_file_as_bytes(
 			"res://../fixtures/threedi/synth/mount.3di")
-	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
+	TestFs.write_bytes(self, dir.path_join("labelgun.3di"),model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Labels Gun"
   id 101294
   type object
@@ -2160,7 +2138,7 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 			"res://../fixtures/threedi/synth/mount.3di")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "Usegun", "ctrlx00")
 	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
-	_write_fixture_bytes(dir, "ctrlgun.3di", model_bytes)
+	TestFs.write_bytes(self, dir.path_join("ctrlgun.3di"),model_bytes)
 	var item_db := _item_db_from_text(dir, """begin "Occupied Labels Gun"
   id 101294
   attrib: EWeap PlayerControl
@@ -2194,7 +2172,7 @@ func test_attach_labels_empty_out_of_range() -> void:
 	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("sitgun.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "One Seat Gun"
@@ -2310,7 +2288,7 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	assert_not_null(vehicle)
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("sitgun.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "One Seat Truck"
@@ -2368,7 +2346,7 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -2388,7 +2366,7 @@ func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
 	# A passenger-only carrier (no primary weapon): mount's Usegun row renamed
 	# to sitex00 in a minimal authored def.
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("sitgun.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/mount.3di"),
 			"Usegun", "sitex00"))
 	var item_db := _item_db_from_text(dir, """begin "Unarmed Seat Carrier"
@@ -2833,7 +2811,7 @@ func test_building_feed_carries_the_def_forced_sections() -> void:
   num_doors 1
   First_Door 3
 end
-""" + _fixture_items_text())
+""" + ItemDbFixture.fixture_text(self))
 	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/house.3di", "GuardTwr1.3di")
@@ -3038,10 +3016,10 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	# Both graphics are the committed armory model with its Armory point
 	# byte-renamed to ctrlx00 (the fixture defs' graphic).
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("StaticCrate1.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/armory.3di"),
 			"Armory", "ctrlx00"))
-	var item_db := _item_db_from_text(dir, _fixture_items_text() + PART_ANIM_CARRIER_ROW)
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self) + PART_ANIM_CARRIER_ROW)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004, 5012]))
 	assert_true(sim.load_from_mission_data(md))
 	for _tick in range(80):
@@ -3117,7 +3095,7 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("StaticCrate1.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes("res://../fixtures/threedi/synth/armory.3di"),
 			"Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
@@ -3196,7 +3174,7 @@ func test_listen_snapshot_attachment_holds_its_resting_userpoint() -> void:
 	# the fixture superset, not an isolated FastRope fixture.
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, SYN_TANK_SPECIAL1_SLIDE_EWEP01, "tank.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text()
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self)
 			.replace("graphic Dbuggy1", "graphic tank")
 			.replace("move_function cveh", "move_function null")
 			.replace("id 101291", "id 101291\n  addeweap ewep01 101419"))
@@ -3330,7 +3308,7 @@ func _fast_rope_collision_moved_vertices(fixture_res_path: String, channel: int)
 	# VEHICLE_SPECIAL1 or VEHICLE_SPECIAL2) and, after the byte rename below,
 	# the ctrlx00 controller seat (Armory renamed post-export).
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("StaticCrate1.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes(fixture_res_path), "Armory", "ctrlx00"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
@@ -3399,9 +3377,9 @@ func test_register_driven_collision_holds_its_rest_pose_headlessly() -> void:
 
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
-	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+	TestFs.write_bytes(self, dir.path_join("StaticCrate1.3di"),_bytes_with_renamed_user_point(
 			FileAccess.get_file_as_bytes(SYN_ARMRY_SPECIAL1_SLIDE), "Armory", "ctrlx00"))
-	var item_db := _item_db_from_text(dir, _fixture_items_text() + PART_ANIM_CARRIER_ROW)
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self) + PART_ANIM_CARRIER_ROW)
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5012]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_count(), 1, "the carrier owns the AI brain")

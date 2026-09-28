@@ -89,16 +89,76 @@ static func write_text(test: GutTest, path: String, text: String) -> void:
 		file.close()
 
 
-## Put a snapshotted config file back: rewrite `bytes` when it existed before
-## the test, else remove whatever the test left behind.
-static func restore_file(path: String, existed: bool, bytes: PackedByteArray) -> void:
-	if existed:
-		var file := FileAccess.open(path, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(bytes)
-			file.close()
-	elif FileAccess.file_exists(path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+## Copy `source` (a res:// or absolute path) to `target`, asserting on the test
+## that the source held bytes and the target opened.
+static func copy(test: GutTest, source: String, target: String) -> void:
+	var bytes := FileAccess.get_file_as_bytes(source)
+	test.assert_gt(bytes.size(), 0, "Fixture should be readable: %s" % source)
+	write_bytes(test, target, bytes)
+
+
+# The scratch directories this process made, so two made in the same
+# microsecond never share a name.
+static var _scratch_count := 0
+
+
+## A fresh scratch directory under the cache dir (ResourceRoot rejects
+## user:// roots), named after `label`; callers remove it with
+## remove_dir_recursive, typically from after_each.
+static func cache_dir(test: GutTest, label: String) -> String:
+	_scratch_count += 1
+	var dir := OS.get_cache_dir().path_join(
+			"opennova_%s_%d_%d" % [label, Time.get_ticks_usec(), _scratch_count])
+	test.assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK, "scratch dir %s" % dir)
+	return dir
+
+
+## The smallest texture the overlay's real VFS/texture path loads: an
+## uncompressed 32-bit BGRA TGA (image type 2, top-left origin with 8 alpha
+## bits) of `size`, every texel `texel`.
+static func tga_bytes(size: Vector2i, texel := Color.WHITE) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(18 + size.x * size.y * 4)
+	bytes[2] = 2
+	bytes.encode_u16(12, size.x)
+	bytes.encode_u16(14, size.y)
+	bytes[16] = 32
+	bytes[17] = 0x28
+	for i in range(size.x * size.y):
+		var at := 18 + i * 4
+		bytes[at] = texel.b8
+		bytes[at + 1] = texel.g8
+		bytes[at + 2] = texel.r8
+		bytes[at + 3] = texel.a8
+	return bytes
+
+
+## One file's contents before a test touches it (typically a user:// config):
+## restore() rewrites the bytes when the file existed, else removes whatever
+## the test left behind.
+class Snapshot:
+	extends RefCounted
+	var path: String
+	var existed: bool
+	var bytes: PackedByteArray
+
+	func restore() -> void:
+		if existed:
+			var file := FileAccess.open(path, FileAccess.WRITE)
+			if file != null:
+				file.store_buffer(bytes)
+				file.close()
+		elif FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+## Snapshot `path` in before_each; after_each calls restore() on it.
+static func snapshot(path: String) -> Snapshot:
+	var snap := Snapshot.new()
+	snap.path = path
+	snap.existed = FileAccess.file_exists(path)
+	snap.bytes = FileAccess.get_file_as_bytes(path) if snap.existed else PackedByteArray()
+	return snap
 
 
 ## Delete a directory tree (a missing path is a no-op).

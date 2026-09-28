@@ -1,9 +1,5 @@
 extends GutTest
 
-# The USE scan admits a seat only inside the player's view cone (just under
-# 90 deg standing, 5 deg seated); a test that presses USE looks at the seat first.
-const MountLook := preload("res://tests/support/mount_look.gd")
-
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
 # Simulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
@@ -26,16 +22,9 @@ func after_each() -> void:
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("listen_native_%d_%d" % [
-			Time.get_ticks_usec(), _native_fixture_dirs.size()])
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var dir := TestFs.cache_dir(self, "listen_native")
 	_native_fixture_dirs.append(dir)
 	return dir
-
-
-func _fixture_items_text() -> String:
-	return FileAccess.get_file_as_bytes(
-			"res://../fixtures/def/items.def").get_string_from_ascii()
 
 
 # Compose <dir>/items.def from the fixture superset text, load it, wire the dir
@@ -127,7 +116,7 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	# graphic cannot anchor: the child keeps the parent-root fallback frame and
 	# the first authored row's stored slot — the old missing-anchor spec.
 	var dir := _native_fixture_dir()
-	var items := _install_native_seats(sim, dir, _fixture_items_text().replace(
+	var items := _install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101291", "id 101291\n  addeweap gunanchor 101419"),
 			PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))

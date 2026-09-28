@@ -321,19 +321,8 @@ func _stage_inset_weapons() -> void:
 			"flags       auto", "flags auto\nflags scoped").replace("statid   100", "statid   103")
 	WorldFixture.write_file(_staged_dir.path_join("weapon.def"), source + inset + plain)
 	# The actual texture loader receives a synthetic white 8x8 reticle atlas.
-	var bytes := PackedByteArray()
-	bytes.resize(18 + 8 * 8 * 4)
-	bytes.fill(255)
-	for i in range(18):
-		bytes[i] = 0
-	bytes[2] = 2
-	bytes[12] = 8
-	bytes[14] = 8
-	bytes[16] = 32
-	bytes[17] = 0x28
-	var texture := FileAccess.open(_staged_dir.path_join("cross01.tga"), FileAccess.WRITE)
-	texture.store_buffer(bytes)
-	texture.close()
+	TestFs.write_bytes(self, _staged_dir.path_join("cross01.tga"),
+			TestFs.tga_bytes(Vector2i(8, 8)))
 
 
 # Exercise the live GameWorld -> PlayerLocalView -> presenter -> draw-list path.

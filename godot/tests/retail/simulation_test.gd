@@ -1,30 +1,5 @@
 extends GutTest
 
-const NATIVE_RUNTIME_TIMING_KEYS := [
-	"sim_tick_us",
-	"net_tick_us",
-	"present_snapshot_us",
-	"occlusion_build_us",
-	"occlusion_probe_us",
-]
-
-# The world-update rows every role's logic tick lands on the frame-stats
-# board through the kernel's one tick profile (ADR 0043 d5), plus the bare
-# local role's frame tail: the direct (no-net) tick fills these; the
-# host/joiner-only rows stay unsampled.
-const WORLD_PHASE_SLOTS := [
-	FrameStats.SIM_SERVER_WORLD, FrameStats.SIM_WORLD_SETUP,
-	FrameStats.SIM_WORLD_SCRIPTS, FrameStats.SIM_UPDATE_ENTITIES,
-	FrameStats.SIM_UPDATE_ATTACHMENTS, FrameStats.SIM_UPDATE_PRECIPITATION,
-	FrameStats.SIM_UPDATE_PROJECTILES, FrameStats.SIM_UPDATE_EXPLOSIONS,
-	FrameStats.SIM_WORLD_HOUSEKEEPING, FrameStats.SIM_PLAYER_TAIL,
-	FrameStats.SIM_WEAPON_WALK, FrameStats.SIM_ADM_RESOLVE,
-]
-const HOST_ONLY_SLOTS := [
-	FrameStats.SIM_HOST_PUMP, FrameStats.SIM_SERVER_TICK,
-	FrameStats.SIM_SERVER_INPUT, FrameStats.SIM_SERVER_REPLICATION,
-]
-
 # Simulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
@@ -46,44 +21,23 @@ func after_each() -> void:
 	_native_fixture_dirs.clear()
 
 
-# Authored 3DI variants minted once from the retired edit surface
-# (fixtures/README.md): CTRL names, PANM rows and flags the
-# sim's own parse-once cache consumes from disk.
+# An authored 3DI variant minted once from the retired edit surface
+# (fixtures/README.md): the CTRL names, PANM rows and flags the sim's own
+# parse-once cache consumes from disk.
 const SYN_MOUNT_HEAT_GLOW_SLIDE := "res://../fixtures/threedi/synth/mount_heat_glow_slide_part1.3di"
-const SYN_ARMRY_SPECIAL1_SLIDE := "res://../fixtures/threedi/synth/armory_special1_slide_part1.3di"
-const SYN_ARMRY_SPECIAL2_SLIDE := "res://../fixtures/threedi/synth/armory_special2_slide_part1.3di"
-const SYN_TANK_SPECIAL1_SLIDE_EWEP01 := "res://../fixtures/threedi/synth/tank_special1_slide_ewep01.3di"
-const SYN_PMP_LOD0_INERT_LOD1_LIVE := "res://../fixtures/threedi/synth/pump_lod0_inert_lod1_sine_rotz.3di"
-const SYN_PANM_LIVENESS_DIR := "res://../fixtures/threedi/synth/"
 # The USE scan admits a seat only inside the player's view cone (just under
 # 90 deg standing, 5 deg seated); a test that presses USE looks at the seat first.
 const MountLook := preload("res://tests/support/mount_look.gd")
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("sim_native_%d_%d" % [
-			Time.get_ticks_usec(), _native_fixture_dirs.size()])
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var dir := TestFs.cache_dir(self, "sim_native")
 	_native_fixture_dirs.append(dir)
 	return dir
 
 
-func _write_fixture_bytes(dir: String, name: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
-	assert_not_null(file)
-	if file == null:
-		return
-	file.store_buffer(bytes)
-	file.close()
-
-
 func _copy_fixture(dir: String, source_res_path: String, dest_name: String) -> void:
-	_write_fixture_bytes(dir, dest_name, FileAccess.get_file_as_bytes(source_res_path))
-
-
-func _fixture_items_text() -> String:
-	return FileAccess.get_file_as_bytes(
-			"res://../fixtures/def/items.def").get_string_from_ascii()
+	TestFs.copy(self, source_res_path, dir.path_join(dest_name))
 
 
 func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
@@ -93,9 +47,6 @@ func _item_db_from_text(dir: String, text: String) -> ItemDatabase:
 	return db
 
 
-# Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) —
-# the same byte-patch technique the KZ husk test uses — so a committed model
-# can stand in for any retail seat prefix without another binary fixture.
 const BINOC_REL := "bad/BINOC.bad"
 
 
@@ -115,7 +66,7 @@ func _binoc_path() -> String:
 func _write_char_rig(dir: String, graphic: String) -> void:
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/person.3di",
 			graphic + ".3di")
-	_write_fixture_bytes(dir, "BINOC.bad", FileAccess.get_file_as_bytes(RetailData.fixture(BINOC_REL)))
+	TestFs.copy(self, RetailData.fixture(BINOC_REL), dir.path_join("BINOC.bad"))
 	var quote := String.chr(34)
 	TestFs.write_text(self, dir.path_join(graphic + ".adm"),
 			"anim_reset %sBINOC.bad%s\r\n" % [quote, quote]
@@ -467,7 +418,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_write_char_rig(dir, "us02")
-	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -622,7 +573,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
 	_write_char_rig(dir, "us02")
-	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101294", "id 101294\n  graphic mount\n  phrase_set 6"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -1049,7 +1000,7 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	# authored gfx1), so the superset def overrides the fixture's AVENGER row.
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text()
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self)
 			.replace("id 101294", "id 101294\n  graphic mount")
 			.replace("primary_weapon WPN_AVENGER", "primary_weapon WPN_EMPLCD50"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
@@ -1381,7 +1332,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 	# superset adds the mount graphic for the authored Usegun seat.
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -1569,7 +1520,7 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	# one authored Usegun seat per gun.
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text()
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self)
 			.replace("id 101294", "id 101294\n  graphic mount")
 			.replace("id 101295", "id 101295\n  graphic mount")
 			.replace("id 101296", "id 101296\n  graphic mount"))
@@ -1699,7 +1650,7 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	var sim := Simulation.new()
 	var dir := _native_fixture_dir()
 	_copy_fixture(dir, "res://../fixtures/threedi/synth/mount.3di", "mount.3di")
-	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+	var item_db := _item_db_from_text(dir, ItemDbFixture.fixture_text(self).replace(
 			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
@@ -1746,26 +1697,8 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_false(sim.get_local_player_weapon_state().borrowed_usegun_slot)
 
 
-const _ANCHOR_CAMERA := Transform3D(Basis(), Vector3(24.0, 2.0, 0.0))
-
-
 func _admit_standalone_script_ticks(sim: Simulation) -> void:
 	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(ticks,-1)"])))
-
-
-const PART_ANIM_CARRIER_ROW := """
-begin "Part Anim Carrier"
-  id 105012
-  type vehicle
-  graphic StaticCrate1
-  sid partanimcarrier
-  ai_function cveh
-  render_function cveh
-  move_function cveh
-  attrib: AIData neutral
-  hp 3000
-end
-"""
 
 
 func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:

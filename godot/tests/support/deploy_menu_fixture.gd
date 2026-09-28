@@ -3,7 +3,9 @@ extends RefCounted
 
 ## The named controls consumed by DeployScreenPresenter, with authored text.
 ## Shipped death.mnu remains covered by the retail menu-corpus compilation test.
-static func stage(test: GutTest, res_dir: String, staged: Dictionary) -> void:
+## `targets` names the files to author into `res_dir` (death.mnu, gametext.bin,
+## menutxt.bin).
+static func stage(test: GutTest, res_dir: String, targets: PackedStringArray) -> void:
 	var dir := ProjectSettings.globalize_path(res_dir)
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
 	var body := MenuDriverFixture.wnd("list", "SPAWNPOINTS_LIST", 40)
@@ -15,7 +17,7 @@ static func stage(test: GutTest, res_dir: String, staged: Dictionary) -> void:
 	texts.add_section("Overlays")
 	for key in ["STROVER_RESPAWN1", "STROVER_RESPAWN2"]:
 		texts.add_entry(key, "Choose an authored spawn point.", 0, Vector2i())
-	for target in staged.values():
+	for target in targets:
 		var bytes := PackedByteArray()
 		match String(target).to_lower():
 			"death.mnu":

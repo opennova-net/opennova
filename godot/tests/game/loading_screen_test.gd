@@ -219,11 +219,8 @@ func _setup_screen(info: LoadingScreenInfo) -> LoadingScreen:
 	return screen
 
 
-# The shipped gametext.bin (the LTGT_* game-type labels live in its table) comes
-# from the reference fixture set (docs/asset-gated-tests.md); false = pending.
 func _make_temp_dir(name: String) -> String:
-	var dir := OS.get_cache_dir().path_join("opennova_%s_%d" % [name, Time.get_ticks_usec()])
-	DirAccess.make_dir_recursive_absolute(dir)
+	var dir := TestFs.cache_dir(self, name)
 	_temp_dirs.append(dir)
 	return dir
 

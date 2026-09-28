@@ -7,25 +7,14 @@ extends GutTest
 # the per-frame local view (active, the carrier's packed handle, the lowercased
 # graphic key; the ctest local_player_view suite pins that rule) while the
 # hull's present row is PF_LOCAL_VIEW_SUPPRESSED the same frame.
-# EntityPresenter.present_virtual_display is the device half. The synthetic
-# cases feed it the same triple over real components: real ObjectModel nodes
-# over the minted models, a real EntityIndex / wire registry, a real
-# MissionObjectPlacer and PF-layout rows through the public present_snapshot.
-# The installed cases drive the whole path (GameWorld frame legs -> Simulation
-# -> LocalPlayerPresenter -> EntityPresenter) over the retail M1A1; they pend
-# without OPENNOVA_JO_DIR.
+# EntityPresenter.present_virtual_display is the device half; the synthetic
+# cases over real components live in the core half (tests/
+# virtual_display_present_test.gd). These installed cases drive the whole
+# path (GameWorld frame legs -> Simulation -> LocalPlayerPresenter ->
+# EntityPresenter) over the retail M1A1; they pend without OPENNOVA_JO_DIR.
 
 const MountLook := preload("res://tests/support/mount_look.gd")
 
-const HULL_3DI := "res://../fixtures/threedi/synth/tank.3di"
-# The stand-in cockpit: like the retail driver displays, `mount` authors a
-# `Camera` userpoint.
-const DISPLAY_3DI := "res://../fixtures/threedi/synth/mount.3di"
-const OTHER_DISPLAY_3DI := "res://../fixtures/threedi/synth/crate.3di"
-const DISPLAY_KEY := "tankdrvr"
-const OTHER_DISPLAY_KEY := "t80_drvr"
-const HULL_BMS_ID := 41
-const HULL_HANDLE := 0x1005 # pool 1, slot 5
 const M1A1_ITEM := 100164
 const TRAINING_MISSION := "07TR.bms"
 

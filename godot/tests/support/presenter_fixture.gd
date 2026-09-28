@@ -37,10 +37,11 @@ static func stage(test: GutTest, res_dir: String, staged: Dictionary) -> void:
 			output.close()
 
 
-## Remove what stage() wrote, then the directory itself.
-static func unstage(res_dir: String, staged: Dictionary) -> void:
+## Remove the staged files named in `targets` (what stage() or an authored
+## fixture's stage() wrote), then the directory itself.
+static func unstage(res_dir: String, targets: PackedStringArray) -> void:
 	var dir := ProjectSettings.globalize_path(res_dir)
-	for staged_name in staged.values():
+	for staged_name in targets:
 		var path := dir.path_join(String(staged_name))
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)

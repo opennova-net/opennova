@@ -1,14 +1,9 @@
 extends GutTest
 
-# Skeletal-animation runtime (.bad/.adm) tests:
-#  - skin plumbing: build_lod_submeshes emits ARRAY_BONES/ARRAY_WEIGHTS for skinned models
-#    and nothing extra for static ones (regression-safe).
-#  - SkeletalAnim resource basics (graceful failure, empty state).
-#  - ObjectModel's new skeletal methods parse and no-op safely without a skeletal set.
-
-const PERSON := "res://../fixtures/threedi/synth/person.3di"
-const SHED := "res://../fixtures/threedi/synth/shed.3di"
-const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
+# Skeletal-animation runtime (.bad/.adm) over the retail install: the native
+# pose_skeleton and the scripted eval_pose bone loop agree on a shipped rig.
+# The synthetic skin-plumbing and resource cases live in the core half
+# (tests/skeletal_anim_test.gd).
 
 
 func test_pose_skeleton_matches_script_bone_loop() -> void:
