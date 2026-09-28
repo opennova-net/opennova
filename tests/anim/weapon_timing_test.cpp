@@ -9,6 +9,7 @@
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/fp_viewmodel_spec.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/weapon_table_build.h>
 
 #include <cmath>
 #include <cstdio>
@@ -484,6 +485,72 @@ int main(int argc, char **argv) {
 		CHECK(merge_weapon_def(commented_end, cut_edits, merged, notes, error));
 		CHECK(merged == "weapon \"WPN_CUT\"\r\n\tFLAGS\tAUTO\r\n\tpos 1 2 3\t0\t0\t0// hip\r\n"
 		                "\tACTION\t\"FIRE\"\r\n\tDELAYEND\t3// recoil\r\n\tEND\r\nend // WPN_CUT\r\n");
+	}
+	// A final `end` with no CR LF: the game's tail leg drops the line's last
+	// byte, so it reads `en` and never closes the entry, which the merge
+	// refuses; a trailing byte after the `end` (here a space) is what the tail
+	// leg drops, and that entry closes. [orig: File_ParseASCIIFile @ 0x53D8E9 /
+	// @ 0x53D8EC]
+	{
+		std::vector<WeaponEditEntry> tail_edits;
+		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_TAIL auto\naction fire delayend 3\n", tail_edits, error));
+		const std::string tail = "weapon \"WPN_TAIL\"\r\n\tFLAGS\tAUTO\r\n\tACTION\t\"FIRE\"\r\n\tDELAYEND\t5\r\n"
+		                         "\tEND\r\nend";
+		CHECK(!merge_weapon_def(tail, tail_edits, merged, notes, error) && contains(error, "WPN_TAIL has no `end`"));
+		CHECK(merge_weapon_def(tail + " ", tail_edits, merged, notes, error));
+		CHECK(merged == "weapon \"WPN_TAIL\"\r\n\tFLAGS\tAUTO\r\n\tACTION\t\"FIRE\"\r\n\tDELAYEND\t3\r\n"
+		                "\tEND\r\nend ");
+	}
+	// An entry the text never closes is an entry with no `end`, not a missing
+	// one: the game allocates its slot at the `weapon` line.
+	// [orig: WeaponDefs_ParseLineCallback @ 0x5436D3..0x543737]
+	{
+		std::vector<WeaponEditEntry> open_edits;
+		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_OPEN auto\naction fire delayend 3\n", open_edits, error));
+		const std::string open = "weapon \"WPN_OPEN\"\r\n\tFLAGS\tAUTO\r\n\tACTION\t\"FIRE\"\r\n\tEND\r\n";
+		CHECK(!merge_weapon_def(open, open_edits, merged, notes, error) && contains(error, "WPN_OPEN has no `end`"));
+	}
+	// A pos line inside a dead ACTION block (an earlier block of a name a later
+	// one replaces) is forwarded to the action parser, which reads no pos, so
+	// it is no view line: the merge leaves it and adds the entry's own pos
+	// ahead of its first ACTION line. [orig: WeaponDefs_ParseLineCallback, the
+	// in-block forward @ 0x54388D, the block flag @ 0x54393B / @ 0x543790]
+	{
+		std::vector<WeaponEditEntry> dead_edits;
+		CHECK(parse_weapon_edits("weapon_edits 1\nentry WPN_DEAD auto\npos 12.8 0 -51.2\naction fire delayend 3\n",
+		                         dead_edits, error));
+		const std::string dead = "weapon \"WPN_DEAD\"\r\n\tFLAGS\tAUTO\r\n"
+		                         "\tACTION\t\"FIRE\"\r\n\tpos\t1\t2\t3\t0\t0\t0\r\n\tDELAYEND\t5\r\n\tEND\r\n"
+		                         "\tACTION\t\"FIRE\"\r\n\tDELAYEND\t7\r\n\tEND\r\nend\r\n";
+		CHECK(merge_weapon_def(dead, dead_edits, merged, notes, error));
+		CHECK(merged == "weapon \"WPN_DEAD\"\r\n\tFLAGS\tAUTO\r\n\tpos\t12.8\t0\t-51.2\t0\t0\t0\r\n"
+		                "\tACTION\t\"FIRE\"\r\n\tpos\t1\t2\t3\t0\t0\t0\r\n\tDELAYEND\t5\r\n\tEND\r\n"
+		                "\tACTION\t\"FIRE\"\r\n\tDELAYEND\t3\r\n\tEND\r\nend\r\n");
+	}
+	// `ammoclass_max_carry` reads its class and abs(atol) of its value from the
+	// tokens, so the comma form and the quoted key both bind and a negative cap
+	// is its magnitude. [orig: WeaponDefs_ParseLineCallback @ 0x5437F2, tokens[2]
+	// @ 0x5437FE, abs(atol(tokens[3])) @ 0x543862..0x543873]
+	{
+		const std::string carry = "ammoclass_max_carry,CLASS_TESTX,-300\r\n"
+		                          "\"ammoclass_max_carry\" CLASS_TESTY 40\r\n"
+		                          "weapon \"WPN_CARRY\"\r\nend\r\n";
+		opennova::def::DefWeaponsFile parsed{};
+		CHECK(opennova::def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(carry.data()), carry.size(),
+		                                              &parsed) == 0);
+		CHECK(parsed.ammo_class_carries_count == 2);
+		if (parsed.ammo_class_carries_count == 2) {
+			CHECK(std::strcmp(parsed.ammo_class_carries[0].name, "CLASS_TESTX") == 0);
+			CHECK(parsed.ammo_class_carries[0].cap == 300);
+			CHECK(std::strcmp(parsed.ammo_class_carries[1].name, "CLASS_TESTY") == 0);
+			CHECK(parsed.ammo_class_carries[1].cap == 40);
+		}
+		const opennova::world::WeaponTable table = opennova::world::build_weapon_table(parsed);
+		const int x = table.ammo_class_id_of("CLASS_TESTX");
+		const int y = table.ammo_class_id_of("CLASS_TESTY");
+		CHECK(x > 0 && table.ammo_class_caps[static_cast<size_t>(x)] == 300);
+		CHECK(y > 0 && table.ammo_class_caps[static_cast<size_t>(y)] == 40);
+		opennova::def::def_free_weapons(&parsed);
 	}
 	// Refusals: an entry the def lacks, a mode its FLAGS contradict, an
 	// encrypted def, and edits that do not read.

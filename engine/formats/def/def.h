@@ -210,11 +210,15 @@ typedef struct DefWeaponAction {
 	int action_value; /* ActionDef+52: mounted tank recoil amplitude [orig: @0x40270F] */
 	char (*raw_lines)[512];
 	size_t raw_lines_count;
-	/* Where the row's live block stands in the parsed text: the 0-based index,
-	   in the file's line list as the retail walk numbers it, of the `action`
-	   line that opened it and of the `end` that closed it. A later block of the
-	   same name replaces the row, lines included. A tool that rewrites the file
-	   in place (opennova-3di weapon merge) maps them back onto the text. */
+	/* Where the row's live block stands in the parsed text: the 0-based index
+	   of the `action` line that opened it and of the `end` that closed it. A
+	   later block of the same name replaces the row, lines included. Lines are
+	   numbered as the parser splits them, at LF with a CR before it dropped;
+	   for CR LF text that is the retail walk's numbering (File_ParseASCIIFile
+	   @0x53D810 cuts at CR LF only), but the parser keeps an unterminated tail
+	   line whole where retail drops its last byte (@0x53D8E9 / @0x53D8EC).
+	   A tool that rewrites the file in place (opennova-3di weapon merge) maps
+	   them back onto the text and checks the retail reading of those lines. */
 	size_t open_line;
 	size_t end_line;
 } DefWeaponAction;
@@ -505,17 +509,29 @@ typedef struct DefWeaponDef {
     /* Mounted HUD stance selector; zero uses the carrier/default icon.
        [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
     int emplacedstance;
-    /* Where the entry stands in the parsed text: the 0-based index, in the
-       file's line list as the retail walk numbers it, of its `weapon` line and
-       of the `end` that closed it (an entry the text never closes is not
-       parsed). See DefWeaponAction::open_line. */
+    /* Where the entry stands in the parsed text: the 0-based index of its
+       `weapon` line and of the `end` that closed it (an entry the text never
+       closes is not parsed). See DefWeaponAction::open_line for the line
+       numbering. */
     size_t open_line;
     size_t end_line;
 } DefWeaponDef;
 
+/* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
+   the absolute value of atol of the next token (both "" / 0 when the line
+   lacks them). A table row wherever it stands in the file.
+   [orig: WeaponDefs_ParseLineCallback @0x543680 — the key @0x5437F2, the class
+   lookup of tokens[2] @0x5437FE -> sub_540590 @0x540590 (registered when new
+   @0x543811..0x54385B), the cap abs(atol(tokens[3])) @0x543862..0x543873 into
+   dword_24E7DE0] */
+typedef struct DefAmmoClassCarry {
+    char name[64];
+    int cap;
+} DefAmmoClassCarry;
+
 typedef struct DefWeaponsFile {
-    char (*ammo_class_lines)[512];
-    size_t ammo_class_lines_count;
+    DefAmmoClassCarry *ammo_class_carries;
+    size_t ammo_class_carries_count;
     DefWeaponDef *entries;
     size_t count;
 } DefWeaponsFile;
