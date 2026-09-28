@@ -104,7 +104,7 @@ listen-host queue, including repeated return switches and distinct depleted
 cannon/coax ammunition. The prior preservation check now uses a movement packet,
 which actually belongs to the later decoder. It failed before the fix.
 
-`godot/tests/mounted_weapon_switch_test.gd` loads the installed `07TR.bms`,
+`godot/tests/retail/mounted_weapon_switch_test.gd` loads the installed `07TR.bms`,
 places each candidate carrier that authors a designated-G child (`addeweapG`)
 unoccupied beside the authored M1A1, boards the seat that borrows that child
 and drives three action-6 switches through the real simulation and
@@ -180,7 +180,7 @@ passed (91 assertions). The reported NPC detachment was not reproduced before
 these changes; that coverage records the tested flight rather than attributing
 an unobserved failure to one fix.
 
-`godot/tests/tank_training_test.gd` loads the authored course through GameWorld,
+`godot/tests/retail/tank_training_test.gd` loads the authored course through GameWorld,
 boards the live cannon seat with USE once LCAC 38 has landed (see below),
 switches/fires alternate guns when
 installed, follows the instructor and landing-craft convoy, and destroys

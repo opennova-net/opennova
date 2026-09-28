@@ -62,12 +62,14 @@ Code at it), host 8975 / joiner 8976 for a LAN pair (`scripts/net/run_lan_pair.p
 `.mcp.json` at session start; a game started later is reached with `/mcp`
 reconnect, or through the script clients.
 
-`--mcp-port` is a debug / Mod Tools capability (ADR 0043 d12): the transport
-(`godot/game/mcp/`) ships in the editor, the debug packaging and the Mod
-Tools export, and the Runtime export excludes it (`export_presets.cfg`). A
-Runtime build launched with the flag logs a warning and serves no endpoint;
-the game shell loads the service by path, so nothing else in the shell
-depends on it. The probe object model (`godot/game/probe/`) ships in every
+`--mcp-port` is a development capability (ADR 0043 d12): the transport
+(`godot/game/mcp/`) exists only when the game runs from the project source
+(the editor, or `$GODOT_BIN --path godot`). The one export preset, `OpenNova
+Runtime` (`godot/export_presets.cfg`), excludes `game/mcp/*`, and both packaging
+modes (`scripts/package_godot_windows.ps1 -ExportMode release|debug`) export
+that same preset, so no packaged build carries it. A packaged build launched
+with the flag logs a warning and serves no endpoint; the game shell loads the
+service by path, so nothing else in the shell depends on it. The probe object model (`godot/game/probe/`) ships in every
 flavour: the catalog lists in any build that carries the transport.
 
 The `Godot_v4.6.1-stable_win64_console.exe` wrapper stalls when its launching

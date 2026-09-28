@@ -20,15 +20,18 @@ scripts/test_godot.sh --suite retail
 scripts/build.sh --no-godot --suite all
 scripts/test_godot.sh --suite all
 
-# Separate graphics validation, on a Forward+ capable machine with retail data.
-scripts/test_godot.sh --suite retail --windowed
+# Separate graphics validation, on a Forward+ capable machine.
+scripts/test_godot.sh --suite core --windowed     # godot/tests/windowed/, no retail data
+scripts/test_godot.sh --suite retail --windowed   # godot/tests/retail/windowed/
 ```
 
 `all` is the default for both runners. `core` unsets `OPENNOVA_JO_DIR` and
 `OPENNOVA_JO_ASSETS` before launching tests, even when the developer has them set.
 `retail` requires both directories and rejects every skipped test and `SKIP-LEG:`.
 A green `all` run with missing data proves only the tests that executed. Windowed
-retail graphics tests are excluded from all headless selections.
+graphics tests (`godot/tests/windowed/`, `godot/tests/retail/windowed/`) are excluded
+from all headless selections, and a windowed run rejects every pending test: a
+missing RenderingDevice is a failure, never a skip.
 
 CTest's `retail` label is the native source of truth. List it with:
 
@@ -38,7 +41,8 @@ ctest --test-dir build -C Release -N -LE '^retail$'
 ```
 
 Godot compatibility scripts live under `godot/tests/retail/`; graphics-only scripts
-live under its `windowed/` subdirectory. All other GUT scripts are core.
+live under its `windowed/` subdirectory. Core graphics-only scripts live under
+`godot/tests/windowed/`. All other GUT scripts are core.
 `scripts/ci/test_suites.py` generates the exact GUT configuration and snapshots the
 selected scripts and methods, or the actual CTest inventory, before execution.
 The runners compare that inventory with JUnit afterward. Empty runs, missing
@@ -57,7 +61,9 @@ formerly mixed entries now have a core invocation and a separately labelled
 `<name>_retail` invocation. The latter passes `--retail`, enabling the original
 corpus leg in the same executable; it also repeats the synthetic assertions.
 The 52 wholly retail entries retain their original names. No native assertions
-were removed. `scripts/ci/native_migration.json` records the 36 pairs and sources.
+were removed. `scripts/ci/native_migration.json` records the 36 pairs and sources;
+`scripts/ci/test_suites.py --check-layout` verifies each pair is still registered
+and each source still exists.
 
 The audit followed retail access paths from 260 Godot methods (259 headless and
 one graphics-only). **146 had their retail inputs replaced**, and one already
@@ -130,7 +136,7 @@ The separate `test-retail` and
 `godot-tests-retail` jobs run on the same PR, master-push and manual triggers
 when reference-data credentials are available. Retail compatibility runs on
 Windows; the Windows Godot jobs consume the same `template_debug` DLL artifact.
-Windowed retail graphics validation is a separate
+Windowed graphics validation (core and retail) is a separate
 local run; hosted headless CI does not establish its pixel/instance-row coverage.
 
 `retail-availability` explicitly reports unavailable credentials, such as on a

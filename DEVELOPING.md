@@ -95,9 +95,12 @@ $GODOT_BIN --headless --path godot --import
 ```
 
 The import can crash on a cold cache; retry it as CI does. The main scene is
-the runtime game. Every launch requires `--resource-dir`; use `--loose-root /d`
-for an extracted loose tree. The repository and downloads contain no game data.
-See [README.md](README.md) for packaged launch examples and exit codes.
+the runtime game. With no arguments it boots the bundled placeholder menu from
+`assets/` (ADR 0048), whose PLAY RETAIL picks and remembers a retail install;
+pass `--resource-dir <dir>` to boot a game-data directory directly, with
+`--loose-root /d` for an extracted loose tree. The repository and downloads
+contain no retail game data. See [README.md](README.md) for packaged launch
+examples and exit codes.
 
 ## Run the NovaWorld servers locally
 

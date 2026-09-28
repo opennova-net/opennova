@@ -66,9 +66,8 @@ health. Divergences from the original engine belong in
       is where the next attribution round reads it (the #403 live sessions observed the
       remaining frame cost concentrated outside the model system after the
       park/submission gates)
-- [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
-- [ ] Converge `engine/formats/cpt`'s bit codec on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private copy; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` § migration exceptions).
+- [ ] Converge `engine/formats/cpt`'s bit WRITER on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`; the reader already rides the shared `io::BitReader`): `io/bit_stream.h` carries no writer, and cpt's private `BitWriter` carries a normalizing `set_position` and a `write_to_file`, so this is a real migration (add the shared writer, then move cpt onto it), not a swap, which is why `engine/CLAUDE.md` tracks it as a named exception. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private writer; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` migration exceptions).
 - [ ] Dev-tools windows (ADR 0039; `engine/runtime/devtools/README.md` is the
       recipe) still open: the occlusion decision inspector (portal walk,
       culled entities), rounds, animation (the FP-weapon half is the Weapon
@@ -87,14 +86,16 @@ health. Divergences from the original engine belong in
       Each returns as a VALUE slot fed by the shell sampler that owns the
       source (the draws/objects/primitives/nodes and the live effect counts
       are the Render and Particles windows' now).
+- [ ] The `route_frame_times` frame-timing probe from the PR #679 hitch work is unlanded:
+      it lives on the render-parity worktree's `fix/frame-hitches-2026-09-25` branch as a
+      safekeeping commit, not on master. Land it as a registered `game_probe` tool
+      (`ProbeDef.definitions()`, `godot/probes/`, ADR 0041) with its catalog contract
+      under `godot/tests/probes/`, or drop it deliberately and delete the branch.
+
 ## Project health follow-ups
 
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
-- [ ] Full Linux core tests on PRs: `test-linux` (`.github/workflows/ci.yml`) already runs the whole ctest suite on ubuntu for master pushes and manual runs; extend it to pull requests once its cost is acceptable, after triaging any platform-only failures. Acceptance: the full CTest suite runs on Linux for every PR without relying on the net-only or packaging jobs.
 - [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
-- [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
-      --server` and a packaging boot-smoke leg — tracked future work, never
-      implemented; specs live in `docs/maturity-program.md` §PROD.
 - [ ] NovaWorld session-builder residue (PAR-NET): the 0x81/0x82 builders
       (`build_server_hello` / `build_server_auth`, `engine/net/npwire/session_hello.h` +
       `engine/net/npwire/session/session_hello.cpp`) were grilled and fixed 2026-06-27

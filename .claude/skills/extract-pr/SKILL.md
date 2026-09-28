@@ -20,7 +20,8 @@ All commands are Git Bash, inside the current worktree only.
 ## 2. Cut a slice
 
 - Branch from current `master` with a short topic name (existing convention:
-  `b6-detachable-panels`, `c12-pie-overlay` — a few words, no deep paths).
+  `fix/render-parity-2026-09-24`, `tidy/retire-tools-net`, `ci/package-apps`: a
+  prefix and a few words, no deep paths).
 - Bring changes over by `git checkout <mega-branch> -- <paths>` or cherry-pick,
   whichever yields a cleaner minimal diff. Re-read the resulting diff: a slice
   must not smuggle unrelated hunks that ride along in shared files.
@@ -48,7 +49,11 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
   comments. Do not merge — the maintainer merges.
 - CI gate: require the applicable jobs in `.github/workflows/ci.yml` green.
   PRs build the `template_debug` GDExtension; master and manual runs also build
-  `template_release`. Packaging publishes one runtime archive; users provide game data through CLI. There are no Python or add-on jobs.
+  `template_release`. Packaging publishes three Windows zips (`package-godot-windows`,
+  `package-blender-windows`, `package-apps-windows`): the game runtime with its bundled
+  `assets/` placeholder (ADR 0048; retail data comes through `--resource-dir` or PLAY
+  RETAIL), the Blender add-on (that workflow also runs `tests/blender/*_test.py` under
+  Blender against the packaged add-on), and the native apps. PRs package debug-mode exports.
 
 ## 5. Advance the train
 

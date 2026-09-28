@@ -9100,8 +9100,70 @@ held respawn-pending by a spawn-zone host. Selecting the initial overlay must
 queue the same request from the completed admission stage; closing the local
 UI alone leaves retail's hold set and causes vehicle prediction snapback.
 The local retail AAS comparison measured 0 m server movement before the fix
-and 31.071 m after the same four-second driving action (details and scope in
-[the regression record](retail-vehicle-deployment-regression.md)).
+and 31.071 m after the same four-second driving action.
+
+**Retail vehicle snapback after initial deployment (investigated and fixed 2026-09-09; its
+standalone regression record folded in here 2026-09-28).** Cause: the initial deploy-map
+selection closed the local dialog without sending the reliable C2S `0x0E`; both
+`ClientRuntime::queue_deployment_pick` and `JoinerConnection::prepare_deployment_pick`
+rejected selections once initial admission reached `Complete`, conflating completed
+admission with completed deployment, while retail admits an alive player and still holds
+that player respawn-pending on a mission with selectable spawn zones. The server kept the
+driver's undeployed bit set; local vehicle prediction advanced the buggy, retail kept its
+vehicle stationary, and later server updates pulled the client back. Fix: the corrected
+row and default-key handlers queue the real selection, the runtime accepts it from the
+active initial overlay, closes the gameplay gate and uses the existing ACK-qualified `0x5A`
+release; admission still permits an automatic spawn without forcing a selection on every
+host. SP and a listen host's own player bypass this exchange; the failure also reproduced
+against a locally hosted retail AAS game, so public matchmaking is not required to trigger
+it. Retail witnesses: the initial hold `[orig: Server_OnPlayerJoin @0x51A680 (the set
+@0x51A6F2)]` sets player-slot state bit `0x10` when the spawn-zone list is nonempty; the
+per-frame hold `[orig: NetPacket_WritePlayerState @0x4FF6B0]` exposes that bit as `0x0A
+flags1 & 2` (`@0x4FF7BD`) and reasserts entity `Flags & 1` (`@0x4FF7DD`), so alive health
+never proves deployment released; selection `[orig: DeathScreen_OnSpawnListSelect
+@0x553630]` queues input case 12 for any row whose node is not -1 (`@0x55364D`), and
+`[orig: Input_HandleActionBinding @0x49AD40]` case 12 (`@0x49B0C5..0x49B17B`) resets
+dialogs and queues `0x0E`, including for an alive initial overlay; acceptance
+`[orig: Server_ProcessClientRequestRespawn @0x519AF0]` takes dead-or-pending players
+(`@0x519CC7`), and the successful deployment leg in `[orig: Server_ProcessPlayerDeath
+@0x517740]` clears the slot bit (`@0x517791`) and regrants the loadout and spawn seed; the
+hidden-player body gate `[orig: Entity_UpdateInfantryPlayerBody @0x4B40E0]` returns early
+on entity `Flags & 1` (`@0x4B411B`), which the matched live result ties to the vehicle
+consequence without a separate direct test of that bit inside the vehicle mover. Matched
+comparison (the retail executable hosting AAS with `lanmode=1`, one private fixture derived
+from AS - Dormant Volcano Isle with only its team-2 start markers moved, the same buggy,
+type 1291 / wire handle `0x1013`, control bone 1 confirmed then forward held about four
+seconds, zero analog bytes in both runs): server driver flags before driving `0x141` ->
+`0x140`; server vehicle displacement 0.000 m -> 31.071 m; client final displacement
+1.233 m -> 27.064 m; client maximum 2.756 m -> 27.064 m; forward-input interval 4.040 s vs
+4.026 s (the second server sample follows the probe's return and is not simultaneous with
+the final client sample; both captures closed with zero dropped, truncated or write-error
+packets; temporary instrumentation removed; no public NovaWorld endpoint exercised).
+Related paths checked the same day: the six-minute `t35` kick (§5.64; `[orig:
+Server_TickUpdate @0x51D7E0]`, sites `@0x51E0D4..0x51E13D`, needs a pending state-6
+player and elapsed time strictly greater than 360000 ms; a baseline session received it;
+`npruntime_host_punt` pins both timer boundaries and that clearing pending prevents the
+kick beyond the deadline; the fixed live session's 360.25 s from connection is not
+evidence of six minutes after state-6 entry); the three analog control bytes
+`build_player_uplink` omitted (now preserved as the signed byte patterns at body offsets
+21..23, matching `[orig: NetPacket_SerializePlayerState @0x4C09C0]` case 3
+`@0x4C1B2E..0x4C1B74` and case 4 `@0x4C1E6A..0x4C1EA4`; `netsim_build_player_uplink`
+pins `(-64, 37, -128)`; a wire-omission fix, not complete joystick support); the
+joiner-role fixture (`inmatch_joiner_role`) keeps an independent authoritative vehicle,
+applies newly emitted C2S controls and feeds real framed S2C vehicle updates back into
+prediction under both ordinary sending and a dictated twelve-tick period with six ticks of
+latency each way (it guards the carrier/seat and control paths, not the retail
+pending-player physics gate). Remaining audit gap: the uplink builder still supplies zero
+entity-interest feedback pairs, which retail uses for replication priority; their live
+effect was not established and they were not attributed as the snapback cause. Pinned by
+`npruntime_client_runtime` (`zones: the initial deploy-map selection queues a real C2S
+0x0E`, failing before the fix, incl. the twelve-tick boundary), `netsim_build_player_uplink`
+(`mounted throttle and steering reach authority through the real uplink`, failing before
+the analog fix), `vehicle_motor`, `vehicle_mount`, `npruntime_server_spawn`,
+`deploy_screen_feed`, `inmatch_joiner_role`, `npruntime_host_punt`, and the GUT
+`deploy_screen_presenter_test.gd` over real UDP host/joiner Simulations (initial
+row/default-key selection, death re-picks and release; check for parse errors as well as
+totals, since GUT returns zero after dropping a script).
 Queueing `0x0E` closes
 only the gameplay gate, and the ACK-qualified post-pick `0x5A` opens it again; it cannot force
 local health to zero. A real death closes the authoritative spawn/health latch. The local pose
@@ -14300,8 +14362,9 @@ row/default-key selection now sends C2S `0x0E` from completed admission and
 uses the existing ACK-qualified release. Matched retail AAS driving changed
 from 0 m authoritative displacement to 31.071 m; the pending driver's flags
 changed from `0x141` to `0x140`. The same unreleased hold also arms the section
-5.64 `t35` idle punt. See [the regression record](retail-vehicle-deployment-regression.md)
-for witnesses, test coverage, and the local-retail/public-endpoint distinction.
+5.64 `t35` idle punt. Witnesses, the matched retail comparison, test coverage and the
+local-retail/public-endpoint distinction: the 2026-09-09 snapback paragraph in §5.61 (the
+standalone regression record was folded there 2026-09-28).
 
 **D-NET-155** [reimpl gap, FIXED 2026-07-03 (v29)] **The 0x16 player-list re-push was
 one-shot-per-connection to the JOINING client only — every existing client's roster (and

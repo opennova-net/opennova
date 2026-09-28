@@ -174,8 +174,9 @@ truth (ADR 0013). The **in-match session**
 (`opennova::inmatch::Session`, `engine/runtime/inmatch`) owns lifecycle, role,
 fixed cadence, retained input, and tick outcomes. The authoritative **Match**
 (`world::Match`) owns rules, player/team statistics, clock, winner evaluation,
-and the frozen end-round result. `npruntime` and `netsim` are implementation
-directories beneath those boundaries, not peer layers or extension seams.
+and the frozen end-round result. `runtime/inmatch` (ex `npruntime`) and
+`runtime/replication` (ex `netsim`; `tests/netsim` keeps the old name) are
+implementation directories beneath those boundaries, not peer layers or extension seams.
 _Avoid_: "the netcode" (name the wire transaction, session behavior, or match rule);
 "net seam" / "net runtime layer" as public architecture
 
@@ -329,9 +330,11 @@ _Avoid_: animation file, clip file (a `.bad` is one clip)
 
 **`opennova-3di`**:
 The command-line tool (`apps/threedi_cli`) over the engine's one `.3di` reader and
-writer: `build` / `scene` over the `.o3d` text, `info`, `compare` and `catalog`, and
+writer: `build` / `scene` over the `.o3d` text, `info`, `compare` and `catalog`,
 `anim build|scene|info|compare` for a rig's `.bad` clips and `.adm` table over the
-`.o3a` text. The Blender add-on bundles it.
+`.o3a` text, and `weapon timing` / `weapon merge` (the timing request measured with the
+engine's weapon FSM, and its edits file applied to a `weapon.def` copy;
+`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
 _Avoid_: the exporter (the add-on is the front end; the CLI mints the files)
 
 **Blender add-on**:
