@@ -382,6 +382,21 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 			label_font_large_valid_ ? &label_font_large_ : nullptr,
 			choice.scale, choice.large_scale,
 			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
+
+	// The hudpos HUD font for this width, after the label fonts so an empty
+	// name or a failed load falls back to the bold slot just loaded
+	// [orig: HUD_InitAllFonts @0x51EFAB -> HUD_SelectHudposFont @0x591890].
+	if (font_valid_) {
+		fnt_free(&font_);
+		font_ = {};
+		font_valid_ = false;
+	}
+	opennova::hud::HudLayoutAssets names;
+	names.font_lo = hudpos_font_lo_;
+	names.font_hi = hudpos_font_hi_;
+	font_valid_ = load_fnt_(opennova::to_gd(opennova::hud::hudpos_font_for_width(names, w)),
+			font_, opennova::hud::kHudFontSlotHud);
+	compiler_.set_hudpos_font(font_valid_ ? &font_ : nullptr);
 }
 
 Ref<Texture2D> HudOverlay::double_saturate_texture_(
@@ -582,13 +597,17 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
 			load_hud_texture_("WPIndctr.tga");
 
-	// The HUD font hudpos names (the engine's hi-first pick), parsed by the
-	// engine fnt lib; page bitmaps become one texture each for glyph quads.
-	font_valid_ = load_fnt_(opennova::to_gd(assets.font), font_,
-			opennova::hud::kHudFontSlotHud);
+	// The two hudpos font names; the width pick and the load ride
+	// ensure_label_fonts_, which runs on the first draw and on every width-tier
+	// change, as retail's HUD_InitAllFonts reloads them together.
+	hudpos_font_lo_ = assets.font_lo;
+	hudpos_font_hi_ = assets.font_hi;
 
 	configured_ = true;
-	compiler_.configure(layout_, font_valid_ ? &font_ : nullptr);
+	compiler_.configure(layout_, nullptr);
+	// Retail loads the overlay fonts at HUD init as well as on a resolution
+	// change; clear_font_ reset the tier, so this loads them for the fresh root.
+	ensure_label_fonts_(draw_surface_().x);
 	queue_redraw();
 }
 
@@ -1405,6 +1424,7 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	int64_t big_map_glyphs = 0;
 	if (configured_) {
 		const Vector2 surface = draw_surface_();
+		ensure_label_fonts_(surface.x); // the fonts the draw would have loaded
 		const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
 		for (const opennova::hud::HudQuad &quad : list.quads) {
 			if (!quad.filled) {

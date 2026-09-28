@@ -149,8 +149,26 @@ static void synthetic() {
 	// The static frame: the LAST authored line draws.
 	CHECK(layout.frame_pos.present && layout.frame_pos.x == 508 && layout.frame_pos.y == 685);
 	CHECK(assets.static_frame == "CompMark.tga");
-	// The font: hi first, lo as the fallback.
-	CHECK(assets.font == "fontlo");
+	// The fonts: each key fills its own name, and the width pick has no
+	// fallback from one to the other [orig: HUD_SelectHudposFont @0x591890].
+	CHECK(assets.font_lo == "fontlo" && assets.font_hi.empty());
+	CHECK(hudpos_font_for_width(assets, 640) == "fontlo");
+	CHECK(hudpos_font_for_width(assets, 641).empty());
+	def_free_hudpos(&file);
+
+	// A bare `fonthud1` line (the JOX hudpos.def's) is no key: HUD_ParseHudposToken
+	// compares whole tokens with _stricmp, so both names stay empty and the HUD
+	// slot takes the bold label font.
+	static const char bare_font[] = "fonthud1\tGunpb18b.fnt\nHUDCHLINE\t9\n";
+	if (!parse(bare_font, file)) {
+		std::printf("FAIL: bare fonthud1 parse\n");
+		++failures;
+		return;
+	}
+	layout = HudLayout();
+	assets = HudLayoutAssets();
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK(assets.font_lo.empty() && assets.font_hi.empty() && layout.chat_lines == 9);
 	def_free_hudpos(&file);
 
 	// A minimal file: no frame, no spinmap extent, a chline, the hi font.
@@ -173,7 +191,9 @@ static void synthetic() {
 	CHECK(!layout.frame_pos.present && assets.static_frame.empty());
 	CHECK(!layout.spinmap_rect.present);
 	CHECK(layout.chat_lines == 12);
-	CHECK(assets.font == "fonthi");
+	CHECK(assets.font_hi == "fonthi" && assets.font_lo == "fontlo");
+	CHECK(hudpos_font_for_width(assets, 1024) == "fonthi");
+	CHECK(hudpos_font_for_width(assets, 640) == "fontlo");
 	CHECK(layout.spinmap_wp_dist_off == 0 && layout.map_coords_off == 0);
 	// An unauthored BREATHTIME keeps the zero anchor (0, 0, left): the bar has
 	// no presence gate.

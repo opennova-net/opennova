@@ -768,7 +768,17 @@ bool hud_stance_group_visible(const HudFrameState &state);
 
 class HudFrameCompiler {
 public:
+	// `font` is the hudpos font loaded for the current width (null when hudpos
+	// names none or the load failed); see set_hudpos_font for the HUD slot rule.
 	void configure(const HudLayout &layout, const opennova::fnt::fnt_font_t *font);
+
+	// The HUD font slot: the hudpos font at scale 1.0 when one loaded, else a
+	// copy of the bold label slot, font and width scale alike
+	// [orig: HUD_SelectHudposFont @0x591890: HUD_LoadFontIntoSlot(name, slot,
+	// 0x10000) when the name is set @0x5918B4; a slot still empty takes
+	// g_HUDLabelFontBold @0x5918C3..0x5918D6]. The overlay reloads it with the
+	// label fonts on a width-tier change, as HUD_InitAllFonts @0x51EE20 does.
+	void set_hudpos_font(const opennova::fnt::fnt_font_t *font);
 
 	// The overlay label fonts + their resolution scales — the Arial pair and
 	// the large slot retail loads beside the hudpos HUD font
@@ -921,8 +931,13 @@ private:
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);
 
+	void resolve_hud_font_();
+
 	HudLayout layout_{};
+	// The HUD slot (resolve_hud_font_): the hudpos font, or the bold label font.
 	GameFont font_;
+	float hud_font_scale_ = 1.0f;
+	const opennova::fnt::fnt_font_t *hudpos_font_ = nullptr;
 	// The Arial label pair + the large slot + scales (configure_label_fonts).
 	GameFont label_font_;
 	GameFont label_font_bold_;

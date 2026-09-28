@@ -188,8 +188,15 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 		assets.static_frame = frame.texture;
 	}
 
-	// The HUD font named by hudpos (hi first, lo fallback).
-	assets.font = hud.font_hi[0] != '\0' ? hud.font_hi : hud.font_lo;
+	// Both HUD font names; the width pick is hudpos_font_for_width.
+	assets.font_lo = hud.font_lo;
+	assets.font_hi = hud.font_hi;
+}
+
+const std::string &hudpos_font_for_width(const HudLayoutAssets &assets, int surface_w) {
+	// [orig: HUD_SelectHudposFont @0x591890: byte_2723C54 (the LO name), or
+	// unk_2723C64 (the HI name) when screenWidth > 640 @0x59189D]
+	return surface_w > 640 ? assets.font_hi : assets.font_lo;
 }
 
 } // namespace opennova::hud
