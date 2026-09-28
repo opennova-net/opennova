@@ -10,10 +10,12 @@
 - `--suite core` unsets the retail roots; `--suite retail` requires both roots
   and rejects skipped compatibility tests. The default `--suite all` allows
   explicit missing-data skips. Retail scripts live under `tests/retail/`.
-  Graphics scripts (they need a RenderingDevice) live under `tests/windowed/`
+  Scripts whose every test needs a RenderingDevice live under `tests/windowed/`
   (core) and `tests/retail/windowed/` (retail): both are excluded from every
-  headless selection and run only with `--windowed` on their suite, where any
-  pending test is a failure (a missing RenderingDevice fails, never skips).
+  headless selection and run only with `--windowed` on their suite, where a
+  pending test is a failure (a missing RenderingDevice fails; under `all` a
+  missing-data skip stays allowed). Headless scripts that mix in RD-gated
+  methods keep them `pending` there until they are split into windowed siblings.
   The runner snapshots selected scripts/methods and checks the JUnit report
   for missing coverage. See `docs/asset-gated-tests.md` for migration records.
 - No probes live here. Runtime probes are `game_probe` tools under `godot/probes/`

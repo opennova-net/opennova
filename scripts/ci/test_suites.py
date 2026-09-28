@@ -137,9 +137,11 @@ def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
         skip_text = "" if skipped is None else ET.tostring(skipped, encoding="unicode")
         if suite == "retail" and skipped is not None:
             errors.append(f"retail test skipped: {name}")
-        elif windowed and skipped is not None:
+        elif windowed and skipped is not None and not (
+                suite == "all" and any(root in skip_text for root in ROOTS)):
             # A windowed script exists to draw: a pending there (no
-            # RenderingDevice, the wrong renderer) is missing coverage.
+            # RenderingDevice, the wrong renderer) is missing coverage. Local
+            # `all` keeps its explicit missing-data skips, as headless does.
             errors.append(f"windowed test skipped: {name}")
         if suite != "all" and ("SKIP-LEG:" in output or any(root in skip_text for root in ROOTS)):
             errors.append(f"retail coverage not exercised: {name}")
@@ -171,7 +173,7 @@ def check_log(path: Path, suite: str, *, windowed: bool = False) -> list[str]:
         if suite != "all" and ("SKIP-LEG:" in line or (
                 pending and any(root in line for root in ROOTS))):
             errors.append(line.strip())
-        elif windowed and pending:
+        elif windowed and pending and not (suite == "all" and any(root in line for root in ROOTS)):
             errors.append(line.strip())
     return errors
 

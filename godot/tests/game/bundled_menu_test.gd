@@ -105,7 +105,7 @@ func test_play_retail_without_a_saved_install_keeps_the_bundled_menu() -> void:
 	assert_true(_shell.get_menu_shell().get_driver().has_widget("PLAY_RETAIL"))
 
 
-func test_a_saved_install_that_no_longer_exists_is_forgotten() -> void:
+func test_a_saved_install_that_is_absent_is_kept_for_when_it_returns() -> void:
 	_retail_dir = _stage_retail()
 	ResourceDirSettings.set_retail_dir(_retail_dir)
 	_shell = await _boot()
@@ -113,9 +113,23 @@ func test_a_saved_install_that_no_longer_exists_is_forgotten() -> void:
 	TestFs.remove_dir_recursive(_retail_dir)
 	assert_false(_shell.play_retail(), "nothing mounts: PLAY RETAIL falls back to the picker")
 	assert_eq(_shell.current_resource_root(), bundled, "the bundled menu stays")
+	assert_true(_same_dir(String(ConfigStore.read(ResourceDirSettings.CONFIG_PATH,
+			ResourceDirSettings.SECTION, ResourceDirSettings.RETAIL_DIR_KEY, "")), _retail_dir),
+			"an absent install (an offline drive) keeps its saved path")
+
+
+func test_a_saved_install_that_no_longer_mounts_is_forgotten() -> void:
+	_retail_dir = OS.get_cache_dir().path_join(
+			"opennova_bundled_menu_test_%d_unmountable" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(_retail_dir), OK)
+	ResourceDirSettings.set_retail_dir(_retail_dir)
+	_shell = await _boot()
+	var bundled := _shell.current_resource_root()
+	assert_false(_shell.play_retail(), "a folder with no game archives does not mount")
+	assert_eq(_shell.current_resource_root(), bundled, "the bundled menu stays")
 	assert_eq(String(ConfigStore.read(ResourceDirSettings.CONFIG_PATH, ResourceDirSettings.SECTION,
 			ResourceDirSettings.RETAIL_DIR_KEY, "")), "",
-			"the stale install is cleared from the persisted settings")
+			"a present install that no longer mounts is cleared from the persisted settings")
 
 
 func test_a_folder_without_game_archives_is_refused_and_not_saved() -> void:

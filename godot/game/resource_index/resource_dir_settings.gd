@@ -34,16 +34,16 @@ static func set_game(code: String) -> void:
 	ConfigStore.write(CONFIG_PATH, SECTION, GAME_KEY, code.strip_edges().to_lower())
 
 
-## The retail install PLAY RETAIL last mounted, or "" when unset. A saved
-## directory that no longer holds a game install is forgotten on read (the
-## persisted value is cleared), so a stale pick never comes back; the shell
-## also clears a saved install that fails to mount (MainGame.play_retail).
+## The retail install PLAY RETAIL last mounted, or "" when unset or when the
+## saved directory is absent right now. The persisted value is kept, so an
+## install on a drive that is offline comes back once the drive does; only
+## MainGame.play_retail forgets a saved install, when it exists but no longer
+## mounts.
 static func get_retail_dir() -> String:
 	var dir := String(ConfigStore.read(CONFIG_PATH, SECTION, RETAIL_DIR_KEY, "")).strip_edges()
-	if dir.is_empty() or ResourceRoot.is_valid_root(dir):
-		return dir
-	set_retail_dir("")
-	return ""
+	if dir.is_empty() or not ResourceRoot.is_valid_root(dir):
+		return ""
+	return dir
 
 
 ## Persist the picked retail install, preserving any other sections in the config.

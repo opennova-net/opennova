@@ -102,8 +102,6 @@ func test_hidden_menu_suspends_shell_frame_processing() -> void:
 	DirAccess.remove_absolute(dir)
 
 
-# A minimal parseable .bms: the 616-byte header with magic BMS v19, the
-# embedded mission_name, and one game-mode attrib bit.
 func _cleanup(dir: String) -> void:
 	for f in ["main.mnu", "sp.mnu", "options.mnu", "game.mnu", "test.bms"]:
 		DirAccess.remove_absolute(dir.path_join(f))

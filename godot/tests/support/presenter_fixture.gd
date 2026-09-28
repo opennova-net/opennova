@@ -22,23 +22,8 @@ class FakeWorldView:
 		return root
 
 
-## Copy each reference fixture of `staged` (`<rel under fixtures/>` -> staged
-## file name) into `res_dir`, creating the directory first.
-static func stage(test: GutTest, res_dir: String, staged: Dictionary) -> void:
-	var dir := ProjectSettings.globalize_path(res_dir)
-	if not DirAccess.dir_exists_absolute(dir):
-		test.assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	for rel in staged:
-		var target := dir.path_join(String(staged[rel]))
-		var output := FileAccess.open(target, FileAccess.WRITE)
-		test.assert_not_null(output, "temporary presenter fixture opens for write: %s" % target)
-		if output != null:
-			output.store_buffer(FileAccess.get_file_as_bytes(RetailData.fixture(String(rel))))
-			output.close()
-
-
-## Remove the staged files named in `targets` (what stage() or an authored
-## fixture's stage() wrote), then the directory itself.
+## Remove the staged files named in `targets` (what an authored fixture's
+## stage() wrote), then the directory itself.
 static func unstage(res_dir: String, targets: PackedStringArray) -> void:
 	var dir := ProjectSettings.globalize_path(res_dir)
 	for staged_name in targets:
