@@ -148,7 +148,7 @@ then apply:
 State lives in its own 1Password document (`tfstate-github`). The Actions secrets
 let each expansion repo's build workflow upload its package to S3 and call the
 server's `/admin/internal/.../publish` endpoint. See `infra/github/README.md` for
-the full pipeline and `docs/net/expansion-publish-workflow.yml.example` for the
+the full pipeline and `infra/github/expansion-publish-workflow.yml.example` for the
 workflow the expansion repos copy in. On a brand-new GitHub org with no repos,
 skip `github import` and run `github apply` directly.
 

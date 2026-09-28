@@ -107,8 +107,9 @@ one.
 
 ## Documentation
 
-Start with [docs/README.md](docs/README.md) for the architecture, format notes,
-reverse-engineering records, and current implementation status. Deployment is
+The architecture, format notes, reverse-engineering records, and implementation
+status live in `docs/`, a submodule of a private repository that
+`git submodule update --init --recursive` skips. Deployment is
 documented separately in [DEPLOY.md](DEPLOY.md).
 
 ## License

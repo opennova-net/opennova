@@ -75,7 +75,7 @@ The pipeline, end to end:
    pushes `refs/tags/<repo_ref>` onto the expansion repo (using
    `EXPANSION_GITHUB_TOKEN`) and records a `tagged` release row.
 2. The tag push triggers the expansion repo's build workflow (lives in that
-   repo — see `docs/net/expansion-publish-workflow.yml.example` for a template).
+   repo — see `infra/github/expansion-publish-workflow.yml.example` for a template).
    It packages the content, computes `sha256` + size, and uploads to
    `s3://$DOWNLOADS_BUCKET/expansion/<slug>/<slug>-<version>.zip`.
 3. The workflow calls back:

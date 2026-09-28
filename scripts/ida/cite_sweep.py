@@ -169,7 +169,8 @@ def py_eval_big(code, rid):
 # ---------------------------------------------------------------- extraction
 
 def tracked_files(roots, exts):
-    out = subprocess.run(["git", "ls-files", "--", *roots], cwd=REPO,
+    # --recurse-submodules reaches into docs/, the private docs submodule
+    out = subprocess.run(["git", "ls-files", "--recurse-submodules", "--", *roots], cwd=REPO,
                          capture_output=True, text=True, check=True).stdout
     return [p for p in out.split("\n") if p and p.endswith(exts)]
 
@@ -505,6 +506,9 @@ def main():
     global URL
     URL = args.url
 
+    if not args.no_docs and not os.path.exists(os.path.join(REPO, "docs", ".git")):
+        sys.exit("cite_sweep: docs/ (the private docs submodule) is not checked out; run "
+                 "`git submodule update --init docs`, or pass --no-docs")
     code_paths = tracked_files(CODE_ROOTS, CODE_EXT)
     doc_paths = [] if args.no_docs else tracked_files(DOC_ROOTS, DOC_EXT)
     pairs = list(extract(code_paths + doc_paths))

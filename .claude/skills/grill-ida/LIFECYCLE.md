@@ -100,5 +100,6 @@ confidence:
 
 `docs/correspondence.md` is shared across systems, and agent work happens in worktrees
 (`.claude/worktrees/`). Convention: **one system per worktree**; each session lands its own
-rows via `re-doc`, so the conflict surface is the landing PR, not the session. If two
-landings race, rows are independent: sort by address and dedupe at merge.
+rows via `re-doc`, so the conflict surface is the landing, not the session. `docs/` is the
+private docs submodule, so a race surfaces at `scripts/land_docs.sh`'s rebase onto docs
+`master`; rows are independent: sort by address and dedupe there.

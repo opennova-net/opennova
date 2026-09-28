@@ -14,7 +14,7 @@ health. Divergences from the original engine belong in
       `backend/seed/0002_expansions.generated.sql`, which would now break server boot, so
       drop that output first), `deploy/bin/on-deploy github`,
       `deploy/env/github.tfvars.json.tpl`, the `expansion_*` 1Password items, and
-      `docs/net/expansion-publish-workflow.yml.example`. Empty the bucket before `apply`,
+      `infra/github/expansion-publish-workflow.yml.example`. Empty the bucket before `apply`,
       and keep the expansion repos (`removed` blocks, not destroy).
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`

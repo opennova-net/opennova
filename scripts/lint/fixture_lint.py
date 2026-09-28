@@ -23,7 +23,8 @@ Rules (each hit names the file and the rule):
                 the few oversize assets with a reason
   referenced    every fixtures/ file is referenced (by path, parent directory
                 or basename) from tests/, godot/tests/, tests/CMakeLists.txt,
-                .github/workflows/, scripts/, docs/ or fixtures/README.md
+                .github/workflows/, scripts/ or fixtures/README.md (never
+                docs/: the private docs submodule CI does not check out)
   provenance    every fixtures/ file is MINTED (its path or parent directory
                 is named by a tests/fixtures/*_gen.cpp, or a "minted_by" row
                 names the test that regenerates it), or matches an
@@ -57,7 +58,7 @@ REPO = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = Path(__file__).resolve().parent / "fixture_allowlist.json"
 SIZE_LIMIT = 2 * 1024 * 1024
 REFERENCE_ROOTS = ("tests/", "godot/tests/", "godot/probes/", ".github/workflows/", "scripts/",
-                   "docs/", "fixtures/README.md")
+                   "fixtures/README.md")
 REFERENCE_SUFFIXES = (".cpp", ".h", ".c", ".gd", ".tscn", ".txt", ".cmake", ".py", ".ps1",
                       ".sh", ".yml", ".yaml", ".md", ".json", ".cfg")
 GENERATOR_GLOB = "tests/fixtures/*_gen.cpp"

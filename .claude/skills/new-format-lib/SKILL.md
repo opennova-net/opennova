@@ -27,7 +27,8 @@ Then decide, before writing code:
 - Parse-only or writer? The project norm is a byte-exact parse→write roundtrip.
   If write policy diverges from the original bytes (it must never be raw
   passthrough — see docs/adr/0003-no-raw-passthrough-create-from-scratch.md),
-  capture the policy in a new `docs/adr/NNNN-*.md` like ADR 0008 (PFF writer).
+  capture the policy in a new `docs/adr/NNNN-*.md` like ADR 0008 (PFF writer),
+  landed on the private docs repo with `scripts/land_docs.sh`.
 - Behavior taken from the original binary gets inline `[orig: Name @ 0xADDR]`
   citations (retail Jointops.exe unless stated; conventions in
   `docs/README.md`). RE findings land via the `re-doc` skill.
