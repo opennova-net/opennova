@@ -18,12 +18,14 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import addon_harness  # noqa: E402
+import clip_scene  # noqa: E402
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 addon, CLI = addon_harness.load()
-export, importer, rig, o3dtext = addon.export, addon.importer, addon.rig, addon.o3dtext
+animation, export, importer, rig, o3dtext = (addon.animation, addon.export, addon.importer, addon.rig,
+                                             addon.o3dtext)
 OUT = addon_harness.scratch("opennova_model_test_")
 FAILURES = []
 
@@ -621,6 +623,33 @@ def a_sheet_stored_in_both_windings_keeps_its_normals():
 
 
 @case
+def a_panm_flags_word_the_tracks_do_not_imply_is_noted_not_kept():
+    # A stored PANM flags word that is not the one the row's tracks imply
+    # (here a rotation mode with no rotation track) is what the scene cannot
+    # express: import reports it and leaves the part's word derived (ADR
+    # 0047: nothing stashed for a round trip), so the model comes back with
+    # the word its tracks imply.
+    folder_path = os.path.join(OUT, "panmword")
+    os.makedirs(folder_path, exist_ok=True)
+    scene = os.path.join(folder_path, "src.o3d")
+    with open(scene, "w", encoding="utf-8") as f:
+        f.write("o3d 1\nmodel PANMWORD\nmaterial FF_ST_OP\ntexture wire.tga\nlod 0 gnrc\npart 0 0 0 0\nstrip 0\n"
+                "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\npanm 0 0 0x00000200\ncobj 0\n")
+    first = os.path.join(folder_path, "panmword.3di")
+    subprocess.run([CLI, "build", scene, "-o", first], check=True, capture_output=True)
+    stored = records(scene_lines(first), "panm")
+    assert len(stored) == 1 and int(stored[0][2], 0) == 0x200, stored
+    ((_, imported, notes),) = importer.import_files(bpy.context, [first])
+    assert imported is not None, notes
+    assert any("part 01" in n and "0x00000200" in n and "0x00000000" in n for n in notes), notes
+    pn1 = next(o for o in imported.children_recursive if rig.clean_name(o.name) == "PN01")
+    assert pn1.o3d.panm_flags == -1 and len(pn1.o3d.tracks) == 0, (pn1.o3d.panm_flags, len(pn1.o3d.tracks))
+    imported.o3d.output_path = os.path.join(OUT, "panmword2", "panmword.3di").replace("\\", "/")
+    _, lines = export_model(imported)
+    assert records(lines, "panm") == [["0", "0"]], records(lines, "panm")
+
+
+@case
 def registers_are_declared_in_oed_order():
     # OED collected the materials' registers, then the tracks', then the
     # lights' (every JOTAC model that declares registers keeps that order),
@@ -781,6 +810,25 @@ def stock_arm_rig_checked_on_a_first_person_gun():
 
 
 @case
+def stock_arms_table_is_armsg():
+    # assembly.STOCK_ARMS transcribes ArmsG.3di's parts 0-36 (each part's
+    # parent and pivot): the reference model, read by the add-on's own reader
+    # (opennova-3di scene, read_o3d), must give the table to the bit. The
+    # retail leg: without the reference file it returns (addon_harness).
+    path = addon_harness.retail_asset("ArmsG.3di")
+    if path is None:
+        return
+    out = os.path.join(OUT, "armsg", "ArmsG.o3d")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    subprocess.run([CLI, "scene", path, "-o", out], check=True, capture_output=True)
+    parts = importer.read_o3d(out)["lods"][0]["parts"]
+    table = addon.assembly.STOCK_ARMS
+    assert len(parts) >= len(table), len(parts)
+    got = tuple((p["parent"], tuple(p["pivot"])) for p in parts[:len(table)])
+    assert got == table, [(f"part {i + 1:02d}", a, b) for i, (a, b) in enumerate(zip(got, table)) if a != b]
+
+
+@case
 def a_part_on_another_armatures_bone_is_refused():
     # A `!` armature is left out, and so is its pose: a mesh or a part hung
     # from one of its bones would be read as that armature stands posed, on a
@@ -876,6 +924,38 @@ def export_all_passes_by_what_blender_does_not_evaluate():
         assert bpy.ops.opennova_3di.export_all() == {"FINISHED"}
         assert os.path.isfile(export.output_path(shown)) and not os.path.exists(export.output_path(parked))
         refused(parked, "parked", "does not evaluate")
+    finally:
+        bpy.data.collections.remove(collection)
+
+
+@case
+def export_all_animations_passes_by_what_blender_does_not_evaluate():
+    # A rig in an excluded collection keeps the pose Blender last evaluated,
+    # so its clips would sample that pose: Export All Animations passes the
+    # model by, and exporting its clips alone is refused.
+    # Table names of at most 7 characters: <table>_rst.bad must fit the 15 a
+    # retail archive holds.
+    shown, shown_rig = clip_scene.gun(OUT, "shownc")
+    parked, parked_rig = clip_scene.gun(OUT, "parkedc")
+    for root, arm in ((shown, shown_rig), (parked, parked_rig)):
+        idle = clip_scene.clip(arm, f"{root.name} Idle", clip_scene.bolt_turns())
+        clip_scene.set_rows(root, [("anim_wpn_idle", [idle])])
+    collection = bpy.data.collections.new("Parked")
+    bpy.context.scene.collection.children.link(collection)
+    for ob in [parked] + list(parked.children_recursive):
+        for holder in list(ob.users_collection):
+            holder.objects.unlink(ob)
+        collection.objects.link(ob)
+    bpy.context.view_layer.layer_collection.children["Parked"].exclude = True
+    try:
+        assert bpy.ops.opennova_3di.export_all_anim() == {"FINISHED"}
+        assert os.path.isfile(shown.o3d.adm_path) and not os.path.exists(parked.o3d.adm_path)
+        try:
+            animation.export_animations(bpy.context, parked)
+        except o3dtext.ExportError as e:
+            assert "does not evaluate" in str(e) and "parkedc" in str(e), str(e)
+        else:
+            raise AssertionError("parkedc exported its clips although Blender does not evaluate it")
     finally:
         bpy.data.collections.remove(collection)
 

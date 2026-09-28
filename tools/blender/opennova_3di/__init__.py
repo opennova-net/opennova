@@ -301,7 +301,9 @@ class O3DObjectProps(bpy.types.PropertyGroup):
                                 description="A camera at the eye the gun is aimed from: the entries' TPOS")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
-                            description="The part's raw PANM flags word; -1 derives it from the tracks")
+                            description="A PANM flags word written instead of the one the tracks imply; -1 "
+                                        "writes what the tracks imply (import never sets it: a stored word the "
+                                        "tracks do not imply is reported)")
     part_parent: part_parent_prop()
     lod_threshold: IntProperty(name="LOD threshold", default=0, min=0,
                                description="On a LOD root: the projected radius in pixels above which this "
@@ -325,7 +327,9 @@ class O3DBoneProps(bpy.types.PropertyGroup):
                                          "it, as some retail bones")
     tracks: CollectionProperty(type=O3DTrack)
     panm_flags: IntProperty(name="PANM flags", default=-1,
-                            description="The part's raw PANM flags word; -1 derives it from the tracks")
+                            description="A PANM flags word written instead of the one the tracks imply; -1 "
+                                        "writes what the tracks imply (import never sets it: a stored word the "
+                                        "tracks do not imply is reported)")
     part_parent: part_parent_prop()
     frame: FloatVectorProperty(name="Track frame", subtype="MATRIX", size=(3, 3),
                                default=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
@@ -927,15 +931,24 @@ class O3D_OT_export_all_anim(bpy.types.Operator):
             self.report({"ERROR"}, "the scene holds no model with a rig of its own (an Armature of BN## bones under "
                                    "its LOD 0 root)")
             return {"CANCELLED"}
+        # A model Blender does not evaluate (in an excluded collection, or
+        # disabled in viewports), whose clips would sample the pose Blender
+        # last evaluated and which export refuses, is passed by with a
+        # warning so the others still export, as Export All Models does.
+        depsgraph = context.evaluated_depsgraph_get()
         ready = []
         for model in models:
             gap = animation.clip_set_gap(model)
-            if gap is None:
-                ready.append(model)
-            else:
+            blind = export.unevaluated(depsgraph, model) if gap is None else None
+            if gap is not None:
                 self.report({"WARNING"}, f"{model.name}: {gap}; skipped")
+            elif blind is not None:
+                self.report({"WARNING"}, f"{model.name}: Blender does not evaluate {blind.name} (disabled in "
+                                         "viewports, or in an excluded collection); skipped")
+            else:
+                ready.append(model)
         if not ready:
-            self.report({"ERROR"}, "no rigged model carries a clip set (a table row naming a clip)")
+            self.report({"ERROR"}, "no rigged model Blender evaluates carries a clip set (a table row naming a clip)")
             return {"CANCELLED"}
         return export_animation_sets(self, context, ready)
 

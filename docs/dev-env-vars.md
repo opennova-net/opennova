@@ -8,9 +8,10 @@ fails on any other read, and a new hook lands here in the same PR that adds it.
 
 ## The two machine roots
 
-Read only by the three resolvers — `tests/common/retail_paths.h` (ctests),
+Read only by the four resolvers — `tests/common/retail_paths.h` (ctests),
 `godot/tests/support/retail_data.gd` (GUT), `scripts/net/lib.ps1` (the
-PowerShell getters) — plus the `--resource-dir` default of
+PowerShell getters), `tests/blender/addon_harness.py` (the Blender tests'
+`retail_asset`, `OPENNOVA_JO_ASSETS` only) — plus the `--resource-dir` default of
 `scripts/mcp/game_mcp.py launch`. The test-runner preflight in
 `scripts/ci/test_suites.py` checks that both roots name existing directories.
 Machine paths go in
@@ -101,7 +102,7 @@ the normal map spawn selection.
 | `opennova-extract` | `--game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...` |
 | `renderer_state_vectors_test`, `nw_codec_identity_test` | `--dump` (print the replacement vector table) |
 | `nw_self_capture_test` | `--write-fixture` (regenerate `fixtures/novaworld/self-capture-session.pcap`) |
-| `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures); `minimal_pff_package_test --write-pff` / `--install <dir>` |
+| `minimal_*_gen_test` | `--write` (regenerate that generator's minted fixtures) |
 | `ai_path_conformance_test` | `--report`, `--ticks`, `--bms` |
 | `mnu_compat_test` | extra loose menus as positional arguments |
 | `wac_corpus_test` | extra corpus directories as positional arguments |
