@@ -194,6 +194,12 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         } else if (lower_starts_with(lower, ll, "fonthud1_lo", 11)) {
             if (nvals >= 1) safe_copy(hud->font_lo, sizeof(hud->font_lo), vals[0].s, vals[0].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "fonthud1", 8)) {
+            if (nvals >= 1) {
+                if (hud->font_hi[0] == '\0') safe_copy(hud->font_hi, sizeof(hud->font_hi), vals[0].s, vals[0].len);
+                if (hud->font_lo[0] == '\0') safe_copy(hud->font_lo, sizeof(hud->font_lo), vals[0].s, vals[0].len);
+            }
+            parsed = 1;
         }
         /* Rects */
         else if (lower_starts_with(lower, ll, "mrclippynormal", 14)) {
