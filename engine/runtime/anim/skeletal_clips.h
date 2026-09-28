@@ -79,7 +79,12 @@ public:
 	std::vector<float> clip_variant_lengths(const std::string &key) const;
 	float clip_length(const std::string &key, int variant = 0) const;
 	float clip_fps(const std::string &key, int variant = 0) const;
-	double clip_seconds_at_tick(const std::string &key, int32_t ticks, int variant = 0) const;
+	// `armed_boundary` is the tick an armed end-notify parks a loop on (the
+	// channel's boundary when its *_phase_parked() holds), -1 unarmed: that tick
+	// samples the parked last frame [orig: AnimChannel_AdvancePlayback
+	// @0x40B1A2..0x40B1B1].
+	double clip_seconds_at_tick(const std::string &key, int32_t ticks, int variant = 0,
+	                            int32_t armed_boundary = -1) const;
 
 	// The raw stage evaluations, public for diagnostics/tests: a plain clip
 	// sample (bind-pose fallback on unknown/empty keys) and the retail-window

@@ -2160,8 +2160,8 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("play_body_clip_variant_at_time", "key", "variant", "seconds"),
 			&ObjectModel::play_body_clip_variant_at_time);
-	ClassDB::bind_method(D_METHOD("play_body_clip_at", "key", "phase_ticks", "variant"),
-			&ObjectModel::play_body_clip_at, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("play_body_clip_at", "key", "phase_ticks", "variant", "parked"),
+			&ObjectModel::play_body_clip_at, DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(
 			D_METHOD("play_body_blend_at", "source_key", "source_phase_ticks",
 					"target_key", "target_phase_ticks", "weight", "source_variant",
@@ -2202,9 +2202,9 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_active_part_anim_registers);
 	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks",
 								 "prev_key", "prev_phase_ticks", "blend_weight",
-								 "variant", "prev_variant"),
+								 "variant", "prev_variant", "parked"),
 			&ObjectModel::set_weapon_channel, DEFVAL(String()), DEFVAL(0),
-			DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+			DEFVAL(1.0f), DEFVAL(0), DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("has_weapon_channel"),
 			&ObjectModel::has_weapon_channel);
 	ClassDB::bind_method(D_METHOD("get_weapon_channel_key"),

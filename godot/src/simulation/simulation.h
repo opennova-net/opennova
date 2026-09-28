@@ -219,8 +219,7 @@ public:
 	// the enum with its field documentation — and this class enum re-exports
 	// every entry with the engine's values so GDScript reads it as bound
 	// constants (BIND_ENUM_CONSTANT needs a class-scope enum; the assignments
-	// make drift impossible). Add new fields engine-side first, then mirror
-	// the entry here.
+	// make drift impossible). Add fields engine-side first, then mirror here.
 	enum PresentField {
 		PF_KIND = opennova::world::PF_KIND,
 		PF_INDEX = opennova::world::PF_INDEX,
@@ -352,6 +351,8 @@ public:
 		PF_SLOT_MARCH_OFFSET_X = opennova::world::PF_SLOT_MARCH_OFFSET_X,
 		PF_SLOT_MARCH_OFFSET_Y = opennova::world::PF_SLOT_MARCH_OFFSET_Y,
 		PF_SLOT_MARCH_OFFSET_Z = opennova::world::PF_SLOT_MARCH_OFFSET_Z,
+		PF_ANIM_PHASE_PARKED = opennova::world::PF_ANIM_PHASE_PARKED,
+		PF_WPN_PHASE_PARKED = opennova::world::PF_WPN_PHASE_PARKED,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 

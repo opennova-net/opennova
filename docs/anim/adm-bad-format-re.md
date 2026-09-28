@@ -685,11 +685,14 @@ and latches 0x20000 without the 0x10000 stop, so the wrap tick samples the clip
 end (rec[frames-1]..rec[frames], trigger[frames-1]) and the promoted clip's
 frame 0 lands on the next tick. `ClipTimeline::normalized_at(ticks,
 armed_boundary)` and `AdmRootMotion::advance_armed` carry that park (ctest
-`anim_adm_playback`), and both consumers take it through the
-`IRootMotionSource::advance_armed` seam: the local primary channel arms its
-step-3b promotion clock (`clip_length_ticks`, the clip's first end) and the
-replica channel arms its lazily computed `net_anim_pending_boundary`; each
-promotes on the next tick.
+`anim_adm_playback`), and every consumer takes it through the
+`IRootMotionSource::advance_armed` seam: the local primary and secondary
+(weapon) channels arm once, on the tick a deferred state is first seen, at the
+clip's next wrap after that tick or a one-shot's end (`arm_end_notify`; a
+one-shot already stopped never latches), keep the arm on the channel until the
+promotion or a re-init, and re-park an armed loop on its boundary; the replica
+channel arms its lazily computed `net_anim_pending_boundary`; each promotes on
+the next tick.
 [orig: AnimMap_UpdateEntity pending check @ 0x40B77B..0x40B7E1 (promote
 @ 0x40B795 / @ 0x40B7C3, arm @ 0x40B7AD / @ 0x40B7DB), advance @ 0x40B7FE,
 sample @ 0x40B82A; AnimChannel_AdvancePlayback @ 0x40B193 (0x40000 test), wrap

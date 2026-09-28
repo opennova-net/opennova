@@ -49,7 +49,7 @@ int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, i
     // A one-shot past its end carries 0x10000: the arm lands, the advance body
     // is skipped whole, the end flag never latches [orig:
     // AnimChannel_AdvancePlayback @0x40B14D].
-    if (!source.clip_loops(adm_id, state) && phase >= length) return kEndNotifyNeverLatches;
+    if (!source.clip_loops(adm_id, state, variant) && phase >= length) return kEndNotifyNeverLatches;
     return source.clip_boundary_after(adm_id, state, phase, variant);
 }
 
@@ -126,7 +126,7 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
         //  AnimMap_AdvanceToNextAnim @0x40BDF0: the serve @0x40BE02..0x40BE07,
         //  the latch compare @0x40BE09..0x40BE0C, the fade @0x40BE24]
         const bool wrapped = arm == ChannelArm::kReleased
-                ? source.clip_loops(inf.adm_id, state)
+                ? source.clip_loops(inf.adm_id, state, variant)
                 : arm == ChannelArm::kUnarmed &&
                           source.clip_wraps_at(inf.adm_id, state, variant, inf.clip_phase);
         if (have && wrapped) {

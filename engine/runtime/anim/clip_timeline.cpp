@@ -67,6 +67,10 @@ double ClipTimeline::seconds_at(int32_t ticks) const {
 	return fps_ ? frame_at(ticks) / fps_ : 0.0;
 }
 
+double ClipTimeline::seconds_at(int32_t ticks, int32_t armed_boundary) const {
+	return fps_ ? double(normalized_at(ticks, armed_boundary)) * frames_ / fps_ : 0.0;
+}
+
 bool ClipTimeline::stopped_at(int32_t ticks) const {
 	normalized_at(ticks);
 	return !loop_ && first_end_tick_ >= 0 && ticks >= first_end_tick_;

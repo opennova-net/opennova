@@ -656,6 +656,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 				r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
 				r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
+				// [orig: AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1]
+				r[PF_ANIM_PHASE_PARKED] = ae->inf.body_phase_parked() ? 1.0f : 0.0f;
 				if (ae->inf.body_blend_active()) {
 					r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
 					r[PF_ANIM_SOURCE_PHASE_TICKS] =
@@ -676,6 +678,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 					r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 					r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
+					r[PF_WPN_PHASE_PARKED] = ae->inf.weapon_phase_parked() ? 1.0f : 0.0f;
 					if (ae->inf.weapon_blend_active()) {
 						r[PF_WPN_SOURCE_STATE] = static_cast<float>(ae->inf.wpn_prev);
 						r[PF_WPN_SOURCE_PHASE_TICKS] =
@@ -963,6 +966,8 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_ANIM_STATE] = static_cast<float>(ae->inf.body_clip_state());
 	r[PF_ANIM_PHASE_TICKS] = static_cast<float>(ae->inf.clip_phase);
 	r[PF_ANIM_VARIANT] = static_cast<float>(ae->inf.anim_variant);
+	// [orig: AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1]
+	r[PF_ANIM_PHASE_PARKED] = ae->inf.body_phase_parked() ? 1.0f : 0.0f;
 	if (ae->inf.body_blend_active()) {
 		r[PF_ANIM_SOURCE_STATE] = static_cast<float>(ae->inf.anim_prev);
 		r[PF_ANIM_SOURCE_PHASE_TICKS] =
@@ -979,6 +984,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 		r[PF_WPN_ANIM_STATE] = static_cast<float>(ae->inf.weapon_clip_state());
 		r[PF_WPN_PHASE_TICKS] = static_cast<float>(ae->inf.wpn_clip_phase);
 		r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
+		r[PF_WPN_PHASE_PARKED] = ae->inf.weapon_phase_parked() ? 1.0f : 0.0f;
 		if (ae->inf.weapon_blend_active()) {
 			r[PF_WPN_SOURCE_STATE] = static_cast<float>(ae->inf.wpn_prev);
 			r[PF_WPN_SOURCE_PHASE_TICKS] =

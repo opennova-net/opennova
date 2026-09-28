@@ -163,7 +163,7 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
             //  @0x40B908 -> AnimChannel_AdvancePlayback @0x40B7FE -> the callback
             //  @0x40B1C8, AnimMap_AdvanceToNextAnim @0x40BDF0]
             const bool wrapped = released
-                    ? root_motion->clip_loops(inf.adm_id, state)
+                    ? root_motion->clip_loops(inf.adm_id, state, variant)
                     : !armed && root_motion->clip_wraps_at(inf.adm_id, state, variant,
                                                            inf.wpn_clip_phase);
             if (have && wrapped) {

@@ -92,9 +92,9 @@ int main() {
 	expect(root_motion.has_clip(adm, as::kRollRight), "US01 carries anim_roll_right");
 	const int32_t roll_len = root_motion.clip_length_ticks(adm, as::kRollLeft, 0);
 	std::printf("remote_body_state: US01 roll_left %d ticks (loops=%d), idle_prone %d ticks (loops=%d)\n",
-			roll_len, int(root_motion.clip_loops(adm, as::kRollLeft)),
+			roll_len, int(root_motion.clip_loops(adm, as::kRollLeft, 0)),
 			root_motion.clip_length_ticks(adm, as::kIdleProne, 0),
-			int(root_motion.clip_loops(adm, as::kIdleProne)));
+			int(root_motion.clip_loops(adm, as::kIdleProne, 0)));
 	expect(roll_len > 0, "roll_left has a length");
 	expect((world::infantry_anim_flags(as::kRollLeft) & 0x4u) != 0u,
 			"roll_left is a hold-class (locking) state");

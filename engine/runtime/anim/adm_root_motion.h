@@ -78,7 +78,7 @@ public:
 	// [orig: the ring rotate @0x40b740-0x40b749 re-inits the channel from the
 	// served entry; frame_count read @0x40b25d runs on that clip].
 	int32_t clip_length_ticks(int adm_id, int state_id, int variant) const override;
-	bool clip_loops(int adm_id, int state_id) const override;
+	bool clip_loops(int adm_id, int state_id, int variant) const override;
 	int32_t clip_boundary_after(int adm_id, int state_id, int32_t phase_ticks,
 	                            int variant = 0) const override;
 	// The served entry's own clock and loop bit decide the wrap.

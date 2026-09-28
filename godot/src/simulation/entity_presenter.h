@@ -484,6 +484,7 @@ private:
 		float body_blend_weight = 1.0f;
 		int32_t body_variant = 0;
 		int32_t body_source_variant = 0;
+		bool body_parked = false; // PF_ANIM_PHASE_PARKED on the clip/slot paths
 	};
 
 	struct WireRow {
@@ -518,6 +519,7 @@ private:
 		float wpn_weight = 1.0f;
 		int32_t wpn_variant = 0;
 		int32_t wpn_src_variant = 0;
+		bool wpn_parked = false; // PF_WPN_PHASE_PARKED
 		int32_t wpn_phase = INT32_MIN;
 		// The footstep scan's consumed playhead: the last wire clip phase
 		// whose authored trigger words were queued, and the clip state it

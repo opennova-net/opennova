@@ -308,10 +308,11 @@ public:
                                  int32_t &target_phase_ticks,
                                  float target_weight, RootMotionFrame &out);
     // Clip length for a state's track, in the phase-tick convention advance() uses
-    // (simulation ticks), or -1 when the state has no track. The weapon channel's
-    // deferred-state promotion fires when the playhead reaches this — the original's
-    // clip-end channel flag [orig: the 0x20000 end-flag promotion in
-    // AnimMap_UpdateEntity @ 0x40b77b; witness world-wac-ai-re.md §14.8.1].
+    // (simulation ticks), or -1 when the state has no track: a one-shot's end,
+    // where both channels' armed end-notify parks it (arm_end_notify in
+    // infantry_internal.h picks the tick a deferred state promotes on) [orig: the
+    // 0x20000 end-flag promotion in AnimMap_UpdateEntity @ 0x40b77b; witness
+    // world-wac-ai-re.md §14.8.1].
     // Ringed rows serve per-entry clips whose lengths may differ, and the served
     // entry's length is the promotion clock: the state-entry ring rotate re-inits
     // the channel from the served entry, so every later length/keyframe read runs
@@ -319,19 +320,23 @@ public:
     // frame_count read in AnimChannel_InterpolateKeyframe @0x40b25d]. Both
     // channels pass their served entry; a provider without rings ignores it.
     virtual int32_t clip_length_ticks(int adm_id, int state_id, int variant) const = 0;
-    // Whether the state's track loops — the channel's own loop bit, seeded from
-    // the clip data flags [orig: AnimChannel_InitFromData flag word @0x410577;
-    // AnimChannel_AdvancePlayback wraps on it @0x40b16a]. A LOOPING current
-    // holding a deferred body state promotes at its next wrap boundary; a
-    // one-shot promotes at its end. Default false suits providers whose clips
-    // are one-shots (the weapon channel's existing consumers).
-    virtual bool clip_loops(int /*adm_id*/, int /*state_id*/) const { return false; }
+    // Whether the served ring entry's track loops — the channel's own loop bit,
+    // copied from THAT clip's data flags when the channel inits from it, so
+    // ring entries of one state may differ [orig: AnimChannel_InitFromData, the
+    // 0x1000 test @0x410577 taking the clip's flag word @0x410579, stored
+    // @0x410586; AnimChannel_AdvancePlayback
+    // wraps on it @0x40b16a]. A LOOPING current holding a deferred body state
+    // promotes at its next wrap boundary; a one-shot promotes at its end.
+    // Default false suits providers whose clips are one-shots.
+    virtual bool clip_loops(int /*adm_id*/, int /*state_id*/, int /*variant*/) const {
+        return false;
+    }
     // Next loop wrap, or the one-shot end. Concrete clip sources preserve
     // fractional loop remainders; simple providers retain integer periods.
     virtual int32_t clip_boundary_after(int adm_id, int state_id, int32_t phase_ticks,
                                         int variant = 0) const {
         const int32_t length = clip_length_ticks(adm_id, state_id, variant);
-        return length > 0 && clip_loops(adm_id, state_id)
+        return length > 0 && clip_loops(adm_id, state_id, variant)
                 ? (phase_ticks / length + 1) * length : length;
     }
     // Whether the channel's step INTO `phase_ticks` wrapped the served entry's
@@ -342,7 +347,7 @@ public:
     // loop bit @0x40B167, t -= 1 @0x40B199]
     virtual bool clip_wraps_at(int adm_id, int state_id, int variant,
                                int32_t phase_ticks) const {
-        return phase_ticks > 0 && clip_loops(adm_id, state_id) &&
+        return phase_ticks > 0 && clip_loops(adm_id, state_id, variant) &&
                clip_boundary_after(adm_id, state_id, phase_ticks - 1, variant) == phase_ticks;
     }
 
@@ -492,6 +497,16 @@ struct InfantryState {
     }
 
     bool body_blend_active() const { return anim_blend_weight < 1.0f; }
+    // Whether this tick's body pose samples the armed park: the armed
+    // end-notify holds the unblended channel on its boundary, where the clip
+    // reads t = 0.99999 (its last frame), not the wrapped start. The pose
+    // sampler passes clip_phase as the armed boundary on such a tick.
+    // [orig: AnimChannel_AdvancePlayback's armed wrap @0x40B19E..0x40B1B1]
+    bool body_phase_parked() const {
+        return !body_blend_active() && anim_pending_boundary >= 0 &&
+               anim_pending_boundary != kEndNotifyNeverLatches &&
+               clip_phase == anim_pending_boundary;
+    }
 
     // `blend_key_state` is the state whose flags pick the blend duration when
     // it differs from the played clip (the gait->stance insert); -1 = the
@@ -656,6 +671,13 @@ struct InfantryState {
     void request_weapon_animation(int state) { wpn_state = state; }
 
     bool weapon_blend_active() const { return wpn_blend_weight < 1.0f; }
+    // The secondary's armed park, as body_phase_parked.
+    // [orig: the shared AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1]
+    bool weapon_phase_parked() const {
+        return !weapon_blend_active() && wpn_deferred_boundary >= 0 &&
+               wpn_deferred_boundary != kEndNotifyNeverLatches &&
+               wpn_clip_phase == wpn_deferred_boundary;
+    }
 
     // Re-init the secondary channel onto `target_state`, keeping the outgoing
     // clip alive for the blend window. Mirrors begin_body_transition: retargeting
