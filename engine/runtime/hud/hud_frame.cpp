@@ -54,8 +54,32 @@ float HudFrameCompiler::sy(float design_y, float surface_h) const {
 void HudFrameCompiler::configure(const HudLayout &layout,
 		const fnt_font_t *font) {
 	layout_ = layout;
-	font_.set_font(font);
+	hudpos_font_ = font;
+	resolve_hud_font_();
 	reset_runtime_state();
+}
+
+void HudFrameCompiler::set_hudpos_font(const fnt_font_t *font) {
+	hudpos_font_ = font;
+	resolve_hud_font_();
+}
+
+void HudFrameCompiler::resolve_hud_font_() {
+	// [orig: HUD_SelectHudposFont @0x591890: the named font at 0x10000 (1.0)
+	// @0x5918B4, else the whole bold slot, font and scale @0x5918C3..0x5918D6]
+	if (hudpos_font_ != nullptr) {
+		font_.set_font(hudpos_font_);
+		font_.set_page_base(static_cast<uint32_t>(kHudFontSlotHud * FNT_MAX_PAGES));
+		hud_font_scale_ = 1.0f;
+	} else if (label_font_bold_.font() != nullptr) {
+		font_.set_font(label_font_bold_.font());
+		font_.set_page_base(static_cast<uint32_t>(kHudFontSlotLabelBold * FNT_MAX_PAGES));
+		hud_font_scale_ = label_scale_;
+	} else {
+		font_.set_font(nullptr);
+		font_.set_page_base(static_cast<uint32_t>(kHudFontSlotHud * FNT_MAX_PAGES));
+		hud_font_scale_ = 1.0f;
+	}
 }
 
 void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
@@ -77,6 +101,7 @@ void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 			static_cast<uint32_t>(kHudFontSlotImpact38 * FNT_MAX_PAGES));
 	label_scale_ = scale > 0.0f ? scale : 1.0f;
 	label_large_scale_ = large_scale > 0.0f ? large_scale : 1.0f;
+	resolve_hud_font_();
 }
 
 void HudFrameCompiler::update_layout(const HudLayout &layout) {
@@ -291,12 +316,12 @@ void HudFrameCompiler::emit_wire_rect(float x0, float y0, float x1, float y1,
 float HudFrameCompiler::measure_text_w(const char *text) const {
 	int w = 0;
 	int h = 0;
-	font_.measure(text, 1.0f, 1.0f, &w, &h);
+	font_.measure(text, hud_font_scale_, hud_font_scale_, &w, &h);
 	return static_cast<float>(w);
 }
 
 float HudFrameCompiler::text_line_h() const {
-	return font_.line_height(1.0f);
+	return font_.line_height(hud_font_scale_);
 }
 
 void HudFrameCompiler::emit_text(const char *text, float design_x,
@@ -306,7 +331,7 @@ void HudFrameCompiler::emit_text(const char *text, float design_x,
 		return;
 	}
 	const GameFontRun run = font_.layout(text, sx(design_x, surface_w),
-			sy(design_y, surface_h), 1.0f, 1.0f, flags, argb);
+			sy(design_y, surface_h), hud_font_scale_, hud_font_scale_, flags, argb);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 			run.quads.end());
 	draw_list_.underlines.insert(draw_list_.underlines.end(),

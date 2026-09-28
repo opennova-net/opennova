@@ -1410,6 +1410,42 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 	CHECK(all_page0, "absent label fonts fall back to the hudpos font");
 }
 
+// No hudpos font (none named, or the load failed): the HUD slot is a copy of
+// the bold label slot, font AND width scale [orig: HUD_SelectHudposFont
+// @0x591890, @0x5918C3..0x5918D6]; a hudpos font set later takes the slot back
+// at scale 1.0 (0x10000 @0x5918B4).
+void test_compiler_hud_font_falls_back_to_bold(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, nullptr);
+	compiler.configure_label_fonts(font, font, font, 2.0f, 2.0f);
+
+	// The objective line draws through the HUD slot (emit_text).
+	HudFrameState state;
+	state.objective_text = "Sit";
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	bool all_bold = list.glyphs.size() == 3;
+	for (const opennova::hud::GameFontQuad &g : list.glyphs) {
+		all_bold = all_bold &&
+				g.page == static_cast<uint32_t>(opennova::hud::kHudFontSlotLabelBold) * FNT_MAX_PAGES;
+	}
+	CHECK(all_bold, "HUD text rides the bold label font's pages when hudpos names no font");
+	const float bold_glyph_h = list.glyphs.empty() ? 0.0f
+			: list.glyphs[0].y_bottom - list.glyphs[0].y_top;
+
+	compiler.set_hudpos_font(font);
+	const HudDrawList &named = compiler.compile(state, 1024.0f, 768.0f);
+	bool all_hud = named.glyphs.size() == 3;
+	for (const opennova::hud::GameFontQuad &g : named.glyphs) {
+		all_hud = all_hud && g.page == static_cast<uint32_t>(opennova::hud::kHudFontSlotHud) * FNT_MAX_PAGES;
+	}
+	CHECK(all_hud, "a hudpos font takes the HUD slot back");
+	const float named_glyph_h = named.glyphs.empty() ? 0.0f
+			: named.glyphs[0].y_bottom - named.glyphs[0].y_top;
+	CHECK(named_glyph_h > 0.0f && bold_glyph_h == 2.0f * named_glyph_h,
+			"the fallback slot carries the bold slot's scale; the hudpos font draws at 1.0");
+}
+
 } // namespace
 
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
@@ -2580,6 +2616,7 @@ int main() {
 	test_spinmap_mesh_layers_and_waypoint(&font);
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
+	test_compiler_hud_font_falls_back_to_bold(&font);
 	test_static_frame_pick();
 	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);

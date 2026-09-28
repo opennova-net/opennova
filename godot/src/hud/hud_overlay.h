@@ -340,6 +340,10 @@ private:
 	opennova::fnt::fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
 	bool label_font_impact38_valid_ = false;
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
+	// The hudpos FONTHUD1_LO / _HI names (engine hudpos_font_for_width picks one
+	// per width); loaded into font_ by ensure_label_fonts_.
+	std::string hudpos_font_lo_;
+	std::string hudpos_font_hi_;
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
 	uint32_t crosshair_color_ = opennova::hud::HudLayout::kCrosshairColorDefault;
