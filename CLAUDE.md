@@ -33,11 +33,14 @@ easier to relay than to rediscover.
 - `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
   land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
-- `tests/blender/` — the Blender add-on's Python tests, run under Blender 5.x against the
-  packaged add-on (`tools/blender/opennova_3di/README.md`); a third runner, neither ctest nor GUT.
+- `tests/blender/` — the Blender add-on's Python tests: ctest registers each as a mixed
+  row (`blender_<name>` plus a retail-labelled `_retail` row) when Blender 5.x is on PATH,
+  run against the source-tree add-on; the Blender packaging workflow runs them against
+  the installed zip (`tools/blender/opennova_3di/README.md`).
 - `fixtures/` — test inputs, each minted (by a `tests/fixtures/minimal_*_gen.cpp` generator
-  through our own writer), authored, or keep (the small retail-interop set); LFS-tracked and
-  classified by `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
+  through our own writer), authored, or keep (the small retail-interop set); binaries are
+  LFS-tracked, text fixtures plain blobs (`.gitattributes`), and each is classified by
+  `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
 - `scripts/` — the build/test/bootstrap/package entry points, `ci/` (suite selection and
   attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
   `oracles/`, `parity/` and `render/` helper scripts.
@@ -62,7 +65,7 @@ processes.
 ```bash
 scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
-scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all)
+scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ scripts (local, no CI job)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)
 ```
 

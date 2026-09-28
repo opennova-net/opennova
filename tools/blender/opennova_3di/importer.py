@@ -671,7 +671,7 @@ class Builder(Notes):
         return arm
 
     def bone_rows(self, lod, count):
-        """Each bone's part animation: its tracks, flags and track frame."""
+        """Each bone's part animation: its tracks and track frame."""
         rows = {p["part"]: p for p in lod["panm"]}
         for pi in range(count):
             row = rows.get(pi)

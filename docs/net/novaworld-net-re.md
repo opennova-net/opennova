@@ -9100,7 +9100,21 @@ held respawn-pending by a spawn-zone host. Selecting the initial overlay must
 queue the same request from the completed admission stage; closing the local
 UI alone leaves retail's hold set and causes vehicle prediction snapback.
 The local retail AAS comparison measured 0 m server movement before the fix
-and 31.071 m after the same four-second driving action.
+and 31.071 m after the same four-second driving action (details and scope in
+the snapback note after this paragraph).
+Queueing `0x0E` closes
+only the gameplay gate, and the ACK-qualified post-pick `0x5A` opens it again; it cannot force
+local health to zero. A real death closes the authoritative spawn/health latch. The local pose
+protection/snap edge uses `deployment_release_revision()`—not the gameplay revision or a stale
+positive `0x0A` tail—and accepts revival only with a later positive authoritative-health tail.
+`npruntime_client_runtime::run_roundtrip_with_spawn_zones` pins admission without
+an automatic pick, then a real user selection and host/client release, including
+the dictated twelve-tick send period. The existing spawn tests retain the
+pre-release uplink fence that prevents an older staged pose from overwriting
+the selected spawn. `deploy_screen_presenter_test.gd` covers initial row and
+Space-key selection through real UDP and server release.
+`coop_two_sim_test.gd` pins both the live initial-pick hold and the death/stale-positive boundary
+over real loopback UDP.
 
 **Retail vehicle snapback after initial deployment (investigated and fixed 2026-09-09; its
 standalone regression record folded in here 2026-09-28).** Cause: the initial deploy-map
@@ -9164,19 +9178,6 @@ the analog fix), `vehicle_motor`, `vehicle_mount`, `npruntime_server_spawn`,
 `deploy_screen_presenter_test.gd` over real UDP host/joiner Simulations (initial
 row/default-key selection, death re-picks and release; check for parse errors as well as
 totals, since GUT returns zero after dropping a script).
-Queueing `0x0E` closes
-only the gameplay gate, and the ACK-qualified post-pick `0x5A` opens it again; it cannot force
-local health to zero. A real death closes the authoritative spawn/health latch. The local pose
-protection/snap edge uses `deployment_release_revision()`—not the gameplay revision or a stale
-positive `0x0A` tail—and accepts revival only with a later positive authoritative-health tail.
-`npruntime_client_runtime::run_roundtrip_with_spawn_zones` pins admission without
-an automatic pick, then a real user selection and host/client release, including
-the dictated twelve-tick send period. The existing spawn tests retain the
-pre-release uplink fence that prevents an older staged pose from overwriting
-the selected spawn. `deploy_screen_presenter_test.gd` covers initial row and
-Space-key selection through real UDP and server release.
-`coop_two_sim_test.gd` pins both the live initial-pick hold and the death/stale-positive boundary
-over real loopback UDP.
 
 Reimpl (2026-07-24, the deploy-screen slice; address tie completed 2026-08-22):
 `world::build_spawn_zone_list` / `spawn_zone_index_of`
