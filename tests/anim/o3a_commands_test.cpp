@@ -341,6 +341,66 @@ int main(int argc, char **argv) {
 				"a variant with no clip differs");
 	}
 
+	// A bone count that differs is one difference and the rest still compares:
+	// a clip with a dead fourth bone and its root turned twice as far at key 1
+	// reports both.
+	{
+		const std::string extra = head +
+				replace(root, " k 0 0 0.0871557427 0.996194698\n", " k 0 0 0.173648178 0.984807753\n") +
+				spine + hand +
+				"bone 2 0 0.5 1 0.1 \"BN04 Dead\"\n k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n k 0 0 0 1\n"
+				" tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n tr 0 0 0\n" +
+				events;
+		const std::string table = build("extra-bone", extra);
+		threedi_cli::AnimLoadedSet a;
+		threedi_cli::AnimLoadedSet b;
+		std::string error;
+		const bool loaded =
+				threedi_cli::anim_load((std::filesystem::path(original).parent_path() / "walk.bad").string(), a,
+						error) &&
+				threedi_cli::anim_load((std::filesystem::path(table).parent_path() / "walk.bad").string(), b,
+						error);
+		check(loaded && a.clips.size() == 1 && b.clips.size() == 1, "load the two clips");
+		if (loaded && a.clips.size() == 1 && b.clips.size() == 1) {
+			const std::vector<std::string> found = threedi_cli::anim_compare_clips(a.clips[0], b.clips[0]);
+			const auto has = [&](const char *what) {
+				return std::any_of(found.begin(), found.end(),
+						[&](const std::string &d) { return d.find(what) != std::string::npos; });
+			};
+			check(has("3 bones vs 4"), "compare names the bone count");
+			check(has("bone 0 key 1"), "compare goes on over the bones both clips hold");
+		}
+		threedi_cli::anim_free(a);
+		threedi_cli::anim_free(b);
+	}
+
+	// A row whose key names no anim slot: build refuses it and scene notes and
+	// drops it, since the game registers nothing under it. And an output the
+	// game could not pack (over 15 bytes with its extension) is refused.
+	{
+		build("no-slot-row", replace(text, "row anim_walk_forward", "row anim_notaslot \"walk\"\nrow anim_walk_forward"),
+				false);
+		const std::filesystem::path home = dir / "no-slot-scene";
+		std::filesystem::remove_all(home);
+		std::filesystem::create_directories(home);
+		std::filesystem::copy_file(std::filesystem::path(original).parent_path() / "walk.bad", home / "walk.bad");
+		std::ofstream(home / "SLOTS.adm", std::ios::binary)
+				<< "\r\nanim_reset\t\t\t\t\"walk\"\r\nanim_notaslot\t\t\t\t\"walk\"\r\n";
+		const std::string scene = (home / "set.o3a").string();
+		check(threedi_cli::cmd_anim_scene((home / "SLOTS.adm").string().c_str(), scene.c_str()) == 0,
+				"scene of a table with a row naming no slot");
+		std::string written;
+		check(read_file_text(scene, written) &&
+						written.find("# dropped: row 'anim_notaslot' (its key names no anim slot") !=
+								std::string::npos &&
+						written.find("row anim_notaslot") == std::string::npos,
+				"a row naming no slot is noted and dropped");
+		std::ofstream(home / "long.o3a") << text;
+		check(threedi_cli::cmd_anim_build((home / "long.o3a").string().c_str(),
+					  (home / "CHECK_TOO_LONG.adm").string().c_str()) != 0,
+				"an output name over 15 bytes is refused");
+	}
+
 	// A table with no reset row is noted: build refuses it.
 	{
 		const std::filesystem::path home = dir / "no-reset-scene";
@@ -353,7 +413,7 @@ int main(int argc, char **argv) {
 				"scene of a table with no reset row");
 		std::string text_out;
 		check(read_file_text(scene, text_out) &&
-						text_out.find("# note: the table has no reset row") != std::string::npos,
+						text_out.find("# dropped: the table's binding (it has no reset row") != std::string::npos,
 				"a table with no reset row is noted");
 	}
 
@@ -374,7 +434,7 @@ int main(int argc, char **argv) {
 				"scene of a clip it cannot express");
 		std::string written;
 		check(read_file_text(scene, written), "read the scene");
-		check(written.find("# note: left out clip 'walk'") != std::string::npos &&
+		check(written.find("# dropped: clip 'walk' (") != std::string::npos &&
 						written.find("\nclip ") == std::string::npos,
 				"the clip is noted and left out");
 	}

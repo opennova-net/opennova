@@ -102,12 +102,29 @@ endforeach()
 add_executable(anim_o3a_commands_test anim/o3a_commands_test.cpp)
 target_link_libraries(anim_o3a_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME anim_o3a_commands COMMAND anim_o3a_commands_test ${CMAKE_CURRENT_BINARY_DIR})
-# `catalog` prints the anim slot keys and the event trigger bits a front end
-# offers (the Blender add-on parses both), and `info` refuses a flag it does
-# not take.
+add_executable(weapon_timing_test anim/weapon_timing_test.cpp)
+target_link_libraries(weapon_timing_test PRIVATE opennova_3di_commands)
+target_include_directories(weapon_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(weapon_timing COMMAND weapon_timing_test ${CMAKE_CURRENT_BINARY_DIR})
+# The Blender add-on's tests, headless, when Blender is found (set
+# BLENDER_EXECUTABLE when it is not on PATH): every tests/blender/*_test.py
+# loads the source tree's add-on through tests/blender/addon_harness.py and
+# runs the opennova-3di built here, authoring what it exports from scratch.
+find_program(BLENDER_EXECUTABLE NAMES blender)
+if(BLENDER_EXECUTABLE)
+    file(GLOB OPENNOVA_BLENDER_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/blender/*_test.py)
+    foreach(test ${OPENNOVA_BLENDER_TESTS})
+        get_filename_component(name ${test} NAME_WE)
+        add_test(NAME blender_${name} COMMAND ${BLENDER_EXECUTABLE}
+            --background --factory-startup --python-exit-code 1 --python ${test} -- $<TARGET_FILE:opennova_3di>)
+    endforeach()
+endif()
+# `catalog` prints the 252 anim slot keys, the weapon actions an author times
+# with their slot keys, and the event trigger bits a front end offers (the
+# Blender add-on parses them), and `info` refuses a flag it does not take.
 add_test(NAME threedi_cli_catalog_anim COMMAND opennova_3di catalog)
 set_tests_properties(threedi_cli_catalog_anim PROPERTIES PASS_REGULAR_EXPRESSION
-    "animslot anim_reset.*animslot anim_guard.*trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
+    "animslot 0 anim_reset[\r\n]+.*animslot 140 anim_guard[\r\n]+.*animslot 239 anim_death_bullet_leftfoot_left[\r\n]+.*animslot 251 anim_wpn_scopedown[\r\n]+weaponaction idle 241 anim_wpn_idle[\r\n]+weaponaction emptyidle 242 anim_wpn_empty_idle[\r\n]+.*weaponaction scopedown 251 anim_wpn_scopedown[\r\n]+trigger 0x1 FOOT_LEFT.*trigger 0x10 FIRE_MARKER3.*trigger 0x400 FOLEY_6")
 add_test(NAME threedi_cli_anim_info_flag COMMAND opennova_3di anim info unread.adm --bogus)
 set_tests_properties(threedi_cli_anim_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
     "anim info takes --verbose or --keys")
@@ -119,10 +136,13 @@ set_tests_properties(threedi_cli_info_flag PROPERTIES PASS_REGULAR_EXPRESSION
 add_executable(threedi_o3d_commands_test threedi/o3d_commands_test.cpp)
 target_link_libraries(threedi_o3d_commands_test PRIVATE opennova_3di_commands)
 add_test(NAME threedi_o3d_commands COMMAND threedi_o3d_commands_test ${CMAKE_CURRENT_BINARY_DIR})
-# build -> scene -> build over small scenes, and the records build refuses.
+# build -> scene -> build over small scenes, and the records build refuses
+# (the executable too, where a refusal must say why).
 add_executable(threedi_o3d_build_test threedi/o3d_build_test.cpp)
 target_link_libraries(threedi_o3d_build_test PRIVATE opennova_3di_commands)
-add_test(NAME threedi_o3d_build COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(threedi_o3d_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_o3d_build
+         COMMAND threedi_o3d_build_test ${CMAKE_CURRENT_BINARY_DIR} $<TARGET_FILE:opennova_3di>)
 # opennova-3di over paths the ANSI code page cannot hold (the exe's UTF-8
 # manifest); the test embeds the manifest so its own command line is UTF-8.
 add_executable(threedi_o3d_unicode_test threedi/o3d_unicode_test.cpp)
@@ -914,6 +934,14 @@ add_executable(anim_adm_clip_index_test anim/adm_clip_index_test.cpp)
 target_link_libraries(anim_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(anim_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME anim_adm_clip_index COMMAND anim_adm_clip_index_test)
+
+# The first-person weapon rings: one table per .adm shared by every weapon
+# naming it, last token first; the weapon table's load sequence; the FP
+# channel's loop-wrap fade.
+add_executable(anim_adm_ring_table_test anim/adm_ring_table_test.cpp)
+target_link_libraries(anim_adm_ring_table_test PRIVATE opennova_runtime)
+target_include_directories(anim_adm_ring_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME anim_adm_ring_table COMMAND anim_adm_ring_table_test)
 
 # The SECONDARY (weapon) channel composition over the shipped BINOC.bad rig
 # plus its BINOC_twist.bad (the two-bone twist minted once from the retired

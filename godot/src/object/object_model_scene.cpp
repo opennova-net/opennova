@@ -55,6 +55,7 @@ void ObjectModel::rebuild_scene() {
 	skeletal_scene_ = false;
 	skeleton_ = nullptr;
 	skeleton_skin_.unref();
+	clear_skin_palette();
 	muzzle_bone_ = -1;
 	surface_material_indices_.clear();
 	surface_materials_.clear();
@@ -65,6 +66,7 @@ void ObjectModel::rebuild_scene() {
 	set_notify_transform(false);
 	anim_frames_by_mat_.clear();
 	material_cache_.clear();
+	material_skin_programs_.clear();
 	postmultiply_cache_.clear();
 	body_pose_dirty_ = true;
 	bounds_dirty_ = true;
@@ -158,6 +160,14 @@ void ObjectModel::rebuild_scene() {
 				FrameFx::clone_q3_object_material(shared_material, material);
 			}
 			surface.material = material;
+			// A skinned effect's vertex program poses the strip from the
+			// model's bone palette instead of Godot's skinning
+			// (object_model_skin_palette.cpp).
+			surface.skin_palette = surface.is_skinned &&
+					material_runs_skin_program(surface.material_index);
+			if (surface.skin_palette) {
+				surface.bone_bounds = submesh.get("bone_bounds", Dictionary());
+			}
 			// Retail multi-pass effects retain one logical material but submit the
 			// same strip geometry again. Pair the cached proxy by material index
 			// and duplicate geometry only; never duplicate logical rows.
@@ -205,6 +215,7 @@ void ObjectModel::rebuild_scene() {
 		surface_slots_[slot].instance = instance;
 	}
 	apply_level_surfaces();
+	build_skin_palette();
 
 	refresh_active_lod_rest_transforms();
 	if (authored_lod_enabled_ && !presenter_driven_lod_ &&
@@ -353,7 +364,7 @@ void ObjectModel::apply_level_surfaces() {
 		if (instance->get_material_override() != surface.material) {
 			instance->set_material_override(surface.material);
 		}
-		bind_skin(instance, surface.is_skinned);
+		bind_skin(instance, surface.is_skinned && !surface.skin_palette);
 		instance->set_visible(geometry_visible_);
 		// The level's collector decides the Q3 copy (never a per-vertex
 		// skinned level); the registration follows the material's glow
@@ -394,7 +405,7 @@ void ObjectModel::apply_level_surfaces() {
 			if (auxiliary->get_material_override() != surface.auxiliary_material) {
 				auxiliary->set_material_override(surface.auxiliary_material);
 			}
-			bind_skin(auxiliary, surface.is_skinned);
+			bind_skin(auxiliary, surface.is_skinned && !surface.skin_palette);
 			auxiliary->set_visible(geometry_visible_);
 		} else if (slot.auxiliary != nullptr) {
 			slot.auxiliary->set_visible(false);
@@ -411,6 +422,7 @@ void ObjectModel::apply_level_surfaces() {
 		}
 	}
 	applied_lod_ = active_lod_;
+	apply_skin_palette_bounds();
 	for (std::size_t i = 0; i < level_bound_visuals_.size();) {
 		VisualInstance3D *visual = Object::cast_to<VisualInstance3D>(
 				ObjectDB::get_instance(level_bound_visuals_[i].id));
@@ -532,6 +544,10 @@ void ObjectModel::build_skeleton() {
 		skeleton_->reset_bone_pose(i);
 	}
 	skeleton_skin_ = skeleton_->create_skin_from_rest_transforms();
+	// Every pose writer ends in the skeleton's deferred update, where Godot
+	// uploads the skeleton's own skins: the bone palette republishes there.
+	skeleton_->connect("skeleton_updated",
+			callable_mp(this, &ObjectModel::publish_skin_palette));
 }
 
 // Keep the submission notifier matching the model's current mesh bounds. An

@@ -280,6 +280,18 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         clip.bones[b].rest_position[1] = origin.y;
         clip.bones[b].rest_position[2] = origin.z;
     }
+    // Each bone's model-space pivot (the ROBJ abs): its parent chain's offsets
+    // summed, whatever the parents' numbering.
+    std::vector<Vec3> rest_pivots(bone_count, kZeroVec);
+    for (size_t b = 0; b < bone_count; ++b) {
+        Vec3 pivot = rest_origins[b];
+        int parent = clip.bones[b].parent_index;
+        for (size_t steps = 0; parent >= 0 && steps < bone_count; ++steps) {
+            pivot = vec_add(pivot, rest_origins[static_cast<size_t>(parent)]);
+            parent = clip.bones[static_cast<size_t>(parent)].parent_index;
+        }
+        rest_pivots[b] = pivot;
+    }
 
     // The channel tables carry frame_count + 1 keys — the header counts INTERVALS
     // (fence-post): a 16-frame idle stores 17 keys, and a ONE-frame clip stores its
@@ -290,10 +302,15 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
     // [orig: BoneAnim_FindKeyframeAtTime @0x410220 walks every channel key; the
     //  final window holds key_last]
     clip.frames.resize(clip.frame_count + 1);
+    std::vector<Quat> raw_rotation(bone_count, kIdentityQuat);
     for (uint32_t f = 0; f <= clip.frame_count; ++f) {
         std::vector<BoneSample> &frame = clip.frames[f];
         frame.resize(bone_count);
 
+        // Every bone's rotation before any position: a channel row is a model-space
+        // rotation that needs no parent, and the FK below reads a parent numbered AFTER
+        // its child as this raw entry, its rotation at the model origin, because the
+        // original builds the matrices in place and reaches that parent later.
         for (size_t b = 0; b < bone_count; ++b) {
             // Per-bone WORLD rotation at tick f, walking THIS bone's own keyframe duration table
             // (sample_bone_world_rot / BoneAnim_FindKeyframeAtTime @0x410220) -- NOT a flat
@@ -304,20 +321,9 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
             } else if (model_table) {
                 // Model rows past the .bad's channels take row 0's already-COMPOSED rotation --
                 // the original copies bone 0's finished matrix into every extra slot before the
-                // FK [orig: the padding loop @0x40c5a1]. Rows 0..b-1 are complete (ascending b);
-                // with no channels at all the identity stands.
-                frame[b].world_rotation = (bad.num_channels > 0) ? frame[0].world_rotation
-                                                                 : kIdentityQuat;
-                Vec3 pad_translation = kZeroVec;  // orig sums uninitialized stack here (UB): D-INF-15
-                const int pad_parent = clip.bones[b].parent_index;
-                if (pad_parent < 0) {
-                    frame[b].world_position = vec_add(rest_origins[b], pad_translation);
-                } else {
-                    const BoneSample &pp = frame[static_cast<size_t>(pad_parent)];
-                    frame[b].world_position = vec_add(
-                            vec_add(pp.world_position, quat_rotate(pp.world_rotation, rest_origins[b])),
-                            pad_translation);
-                }
+                // FK [orig: the padding loop @0x40c5a1]; with no channels at all the identity
+                // stands.
+                raw_rotation[b] = (bad.num_channels > 0) ? raw_rotation[0] : kIdentityQuat;
                 continue;
             }
             if (model_bind) {
@@ -335,6 +341,38 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                 // whole composition into the pose over identity rests.
                 // [orig: AnimChannel_ComputeBoneMatrices @0x410da0; sense pin D-INF-14.]
                 world_rot = quat_normalize(quat_mul(bind_rot[b], world_rot));
+            }
+            raw_rotation[b] = world_rot;
+        }
+
+        // A bone's parent: the finished bone for a lower index; for a parent numbered
+        // after the bone, the parent's raw entry, its rotation with no translation: the
+        // bone's own model-space pivot turned about the model origin (its ancestors'
+        // motion lost, not its place). A self-parent stays the root (above): the shipped
+        // one is part 0, whose rest is the origin, where the raw read changes nothing.
+        // [orig: BoneAnim_BuildWorldMatrices @0x40C400 -- the in-place FK reads
+        //  outputMatrices[parent] @0x40C674 (parent from the row's +20 @0x40C5F6), filled
+        //  raw by the first loop with the translation zeroed @0x40C53F..0x40C553, or with
+        //  matrix 0's copy past the clip's bones @0x40C5B6; the pivot it carries is the
+        //  row's +36 @0x40C5F2..0x40C619, the ROBJ abs GPM_LoadRenderModel @0x5B5000
+        //  stores there]
+        const auto place = [&](size_t b, const Vec3 &translation) {
+            const int parent = clip.bones[b].parent_index;
+            Vec3 carried = rest_origins[b];
+            if (parent >= 0 && static_cast<size_t>(parent) < b) {
+                const BoneSample &p = frame[static_cast<size_t>(parent)];
+                carried = vec_add(p.world_position, quat_rotate(p.world_rotation, rest_origins[b]));
+            } else if (parent >= 0) {
+                carried = quat_rotate(raw_rotation[static_cast<size_t>(parent)], rest_pivots[b]);
+            }
+            frame[b].world_position = vec_add(carried, translation);
+        };
+
+        for (size_t b = 0; b < bone_count; ++b) {
+            frame[b].world_rotation = raw_rotation[b];
+            if (b >= bad.num_channels && model_table) {
+                place(b, kZeroVec);  // orig sums uninitialized stack here (UB): D-INF-15
+                continue;
             }
 
             Vec3 translation = kZeroVec;
@@ -360,18 +398,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
                     translation = {t[0], t[1], t[2]};
                 }
             }
-
-            const int parent = clip.bones[b].parent_index;
-            BoneSample &out = frame[b];
-            out.world_rotation = world_rot;
-            if (parent < 0) {
-                out.world_position = vec_add(rest_origins[b], translation);
-            } else {
-                const BoneSample &p = frame[static_cast<size_t>(parent)];
-                out.world_position = vec_add(
-                    vec_add(p.world_position, quat_rotate(p.world_rotation, rest_origins[b])),
-                    translation);
-            }
+            place(b, translation);
         }
 
         // Second pass: parent-relative (local) transforms.

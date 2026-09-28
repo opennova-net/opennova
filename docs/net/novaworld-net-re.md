@@ -9724,7 +9724,12 @@ fire pipeline and §5.58 reload round-trip plug into.
 "<name>"` find-or-creates a global ActionDef pool entry named `<prefix>_<name>` (the
 prefix argument is the weapon's name; entry name at +122, `ActionDef_InitDefaults
 @ 0x4022b0` memsets the record — so **absent keys default to 0**, only an explicit
-`auto` writes the bake sentinel −1). The weapon.def driver
+`auto` writes the bake sentinel −1). The found and the created entry both run
+InitDefaults (found `@ 0x4024A1` -> `@ 0x4024DA`), so a second block of a suffix in one
+weapon REPLACES the first wholesale: its own keys over the defaults, nothing of the
+first kept, never a key merge (IDA 2026-09-27; `def_parse_weapons` keeps one row per
+name and the bake binds the last row it is given). The name is the line's second token,
+quotes optional: the AT4 and RPG open their scopeup rows with a bare `ACTION SCOPEUP`. The weapon.def driver
 (`WeaponDefs_ParseLineCallback @ 0x543680`) latches `g_WeaponParseInActionBlock
 @ 0x252DB88` on `action` (after validating the name against the 12-suffix table;
 the created row — `ActionDef_GetCurrent @ 0x401ef0` — is stored per-suffix at
@@ -9745,9 +9750,19 @@ END-terminated; only malformed data reaches the refusal.) Keys: `function` → +
 @ 0x829F30 = 18, 12-byte rows `{name, fn, min_params}`): `null`, `wpn_std_null`,
 `wpn_std_{idle,emptyidle,fire,recoil,reload,empty,switchto,switchfrom,switchrank,
 scopeup,scopeup_map,scopedown,scopedown_map,switchfrom_map}`, `powerup_pickup`,
-`powerup_respawn`. Data sweep (JOX + REVX weapon.def corpora): only the NINE bare
-suffixes ship as ACTION names (never scopeup/scopedown/overheated), and FUNCTION only
-ever names `wpn_std_<own suffix>` — the `*_map` variants are unused by weapons.
+`powerup_respawn`. Data sweep (2026-09-27, read through the retail tokenizer: the JOTAC
+install's weapon.def, 1,205 ACTION rows, then its RevX02 expansion's, 1,334; an earlier
+JOX + REVX sweep here said only nine suffixes ship and FUNCTION always names
+`wpn_std_<own suffix>`, both wrong): all twelve suffixes ship, scopeup 60/67, scopedown
+60/67 and overheated 27/33 rows included. FUNCTION often names another handler.
+EMPTYIDLE names `wpn_std_idle` in 77/83 rows and `wpn_std_empty` in 16/19 (its own
+`wpn_std_emptyidle` in 18/18); OVERHEATED names `wpn_std_emptyidle` in 27/31 and
+`wpn_std_reload` in 0/2 (RevX02's `WPN_ROCKET_Apache`, `WPN_ROCKET_KA52`); SWITCHTO
+names `wpn_std_reload` in `WPN_AT4` and `WPN_RPG` and `wpn_std_idle` in `WPN_STAFF`;
+SCOPEUP and SCOPEDOWN name the bare, unregistered `scopeup`/`scopedown` in 47/51 and
+49/53 rows (the two bare `ACTION SCOPEUP` rows name none), `wpn_std_scope*` in 10/13;
+`WPN_MORTAR` names the three `*_map` wrappers; `WPN_STAFF`'s FIRE row names
+`ANIM_WPN_IDLE`, a typo the registry does not hold. How each binds is the next paragraph.
 
 **The bind + bake** [orig: `Anim_InitActions @ 0x541fa0`]. After a weapon block parses,
 each of the 12 slots at `WeaponDef+0x2A4` binds by looking up `<weaponName>_<suffix>`
@@ -9755,8 +9770,25 @@ against the suffix table `@ 0x830B90` — 12 `{suffix, defaultHandler}` pairs in
 idle `@ 0x542920`, emptyidle `@ 0x542A20`, fire `@ 0x542B10`, recoil `@ 0x542DD0`,
 reload `@ 0x5430B0`, empty `@ 0x543180`, switchto `@ 0x5431D0`, switchfrom `@ 0x5433B0`,
 switchrank `@ 0x543500`, scopeup `@ 0x543290`, scopedown `@ 0x543320`, overheated →
-the idle handler. Missing rows become generated defaults; a null/placeholder handler
-takes the table default. The ANIM name resolves to an AnimMap slot (+24 via
+the idle handler. Missing rows become generated defaults. The bind's ONLY handler
+rewrite gives a row whose handler is null or the placeholder `ActionSlot_ExecuteAction`
+the suffix's default (`@ 0x542117..0x542139`); the placeholder is what no FUNCTION,
+`FUNCTION null` (registry row 0) and an unknown name (`@ 0x4028F7`, the bare `scopeup`
+rows, STAFF's `ANIM_WPN_IDLE`) all leave, so it never stays bound. Every other row
+keeps the handler its FUNCTION named, whatever slot it sits in, and the pump calls the
+bound handler (`@ 0x54142A` / `@ 0x5413FF` / `@ 0x541482` / `@ 0x5414A2`), never one
+chosen by the slot number (IDA 2026-09-27). So the empty AK (EMPTYIDLE `wpn_std_idle`)
+runs `WeaponAction_Idle` there: it plays the hardcoded slot 241 `anim_wpn_idle` once
+per entry and requests the reload only under `g_AutoReloadEnabled` (`@ 0x5429AC`),
+where the default EmptyIdle reloads unconditionally (`@ 0x542AA3`); `wpn_std_empty`
+holds with no reload at all (`@ 0x5431B0..0x5431B9`); the AT4 and RPG draws run the
+reload handler. OVERHEATED's binding is moot: no writer of `MountSlot+0x30` stores 11
+(WeaponSlot_RequestReload's `== 11` test `@ 0x53F12D` is dead), so the action is never
+entered and its row serves only the heat-glow leg (D-WPN-28). `wpn_std_null`
+(`WeaponAction_Null @ 0x4010B0`) returns without touching the slot, so its action never
+finishes. Ported (D-WPN-1 FIXED 2026-09-27): `weapon_handler_named` resolves the
+FUNCTION's first token through the 18 names, `weapon_fsm_bake` binds each slot's
+handler, `run_handler` dispatches on it. The ANIM name resolves to an AnimMap slot (+24 via
 `AnimMap_FindSlotByName @ 0x40cfa0` — **stricmp, case-insensitive**, comparing from
 name+5 so the `anim_` prefix is skipped against the unprefixed 252-entry
 `g_AnimStateNameTable @ 0x8135F0`; JOTAC-era defs author `ANIM_WPN_*` uppercase
@@ -9775,30 +9807,40 @@ adm (`@ 0x542180`) / no anim key (`@ 0x542152`) → −1 collapses to 0 (existen
 `FindSlotByName` LOOKUP `@ 0x5421ae`, never a read). Ends by playing global slot 241
 (`wpn_idle`) on the weapon's adm.
 
-**Multi-clip variant rings** (2026-07-11). A .adm row may list several quoted clips —
+**Multi-clip variant rings** (2026-07-11; serve order, sharing and the loop wrap
+corrected 2026-09-27). A .adm row may list several quoted clips —
 `anim_wpn_reload	"m4_1r" "m4_1r" "m4_1r2"` — and `AnimMap_ParseConfigLine @ 0x40cb60`
 registers EVERY token on the same anim slot: `AnimMap_RegisterBoneNode @ 0x40c2d0`
-links each into a per-slot CIRCULAR list (node+36 = next), so the slot is a variant
-ring in authored order, and the duplication is the rotation weighting (r plays twice
-per r2 cycle). Both consumers serve-then-advance the ring head (the per-entity
-animState's slot array +72): `Anim_GetDurationTicks @ 0x53ee10` (the bake reads
-above) and `AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry
-into the animState (+68 entry / +64 data / +60 slot) — playback samples the latch
-while the head moves on. Corpus: 792 multi-clip rows across the REVX02 .adm set
-(max 6 variants on one row), 72 in JOX. Worked REVVY M4 example: RELOAD authors
-`delaystart 200 / delayend auto` → ONE bake read (serves entry 0, head → 1), so the
-first reload PLAY serves entry 1 and the next served play is entry 2 — live-verified
-in the weapon_round probe (a refused reload request advances nothing). Port mapping:
-`engine/formats/adm` keeps every token (`AdmEntry.values[]`, `value` = first);
-`SkeletalAnim` registers one clip per token under the same key (peek-only —
-`get_clip_variant_count/lengths`, variant-arg getters/eval); the ring CURSORS live on
-`Simulation` (the animState+72 analog — `weapon_fsm_bake`’s per-auto-field reads
-and the FSM play events consume them, and the play latch rides the weapon view as
-`anim_variant`, the +68 analog, so both viewmodel parts follow one serve). Riders:
-the sim re-seeds the rings per equip, riding the existing per-equip re-bake shape
-(retail bakes a def once globally, so its rings persist across re-equips — D-WPN-6
-family); the 3P body weapon channel and AI body clips still play variant 0 (the
-per-entity body-adm rings are an open tail of §14.8).
+allocates a node per token and inserts it ahead of the head, pointing the slot at it
+(`@ 0x40C385`), so the ring serves the row's LAST token first and walks back through
+the file order (m4_1r2, m4_1r, m4_1r, ...), and a repeated token is its own node, the
+rotation weighting (r plays twice per r2 cycle). The head table is one per loaded
+.adm (the record's +0x48 points at it): the first weapon naming an ANIMADM loads it
+and every later weapon naming the same file shares it (`AnimMap_LoadAdmFile
+@ 0x40cc40`, the cached entry `@ 0x40CD45..0x40CD5C`). Three reads serve-then-advance
+the head: `Anim_GetDurationTicks @ 0x53ee10` (the bake reads above),
+`AnimMap_PlayAnimBySlot @ 0x40bda0`, which also LATCHES the served entry into the
+record (+0x44 node / +0x40 clip / +0x3C slot) so playback samples the latch while the
+head moves on, and every loop wrap of the playing clip (`AnimMap_AdvanceToNextAnim
+@ 0x40BDF0`, which cross-fades a different served entry in over eight advances;
+adm-bad-format-re.md carries the witness). The load serves before the match: each
+def's bake reads in action order, its END plays 241 (`@ 0x54225A`), and after the
+whole file `WeaponDefs_PlayIdleAnimAll @ 0x53FC10` plays 241 once more per def with a
+table (`@ 0x53FC2C`). Corpus: 792 multi-clip rows across the REVX02 .adm set (max 6
+variants on one row), 72 in JOX. Worked REVVY M4 example: `M4_1ST.adm` is shared by
+twelve defs (WPN_M4AUTO through WPN_M16_ET), each RELOAD `delaystart 200 / delayend
+auto` (one read), so the load reads the reload ring twelve times (2, 1, 0, four
+times over) and the first reload played in the match serves entry 2 (`m4_1r2`), then
+1, then 0; its idle ring (`"m4_1i" "m4_1i2"`) takes 48 serves at load (IDLE and
+EMPTYIDLE `delayend auto` and the END play per def, then the twelve mission-start
+plays), so the first idle in the match serves entry 1 (`m4_1i2`). Port mapping:
+`engine/formats/adm` keeps every token (`AdmEntry.variants[]`); `anim::AdmRingTable`
+holds the heads, one table per ANIMADM, in the weapon table (`WeaponTable::rings`);
+`build_weapon_table` bakes each def once in weapon.def order and runs the END and
+mission-start plays, a mount runs the descriptors that load baked, and
+`fp_channel_play` / `fp_channel_advance` serve the plays and the wraps, the latch
+riding the weapon view as `anim_key` / `anim_variant` so both viewmodel parts follow
+one serve (ctest `anim_adm_ring_table`).
 
 **The slot + the pump** [orig: `WeaponAction_ProcessFrame @ 0x540e60`, driven per
 pooled entity by `WeaponAction_ProcessAllEntities @ 0x542690`]. MountSlot (100 B):
@@ -9911,13 +9953,14 @@ recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund ma
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
 D-WPN-26 is closed (2026-08-15): the production table builder now resolves each
-weapon's ADM through the mounted `ResourceIndex`, gives `weapon_fsm_bake`
-definition-local consuming clip rings, and converts authored automatic start/end fields
-to the retail 62.5 Hz clip duration. `npruntime_weapon_table_test` pins the committed
+weapon's ADM through the mounted `ResourceIndex`, bakes each def once in weapon.def
+order against the table's shared ANIMADM rings (one per file, the multi-clip paragraph
+above), and converts authored automatic start/end fields to the retail 62.5 Hz clip
+duration. `npruntime_weapon_table_test` pins the committed
 `soldier` `anim_idle` clip at 18 ticks plus the intentional assetless zero fallback.
 
-**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
-shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire and Finish gates are now ported (D-WPN-3); the heat model
+**Divergences** (ledger D-WPN-1..15): the FUNCTION registry binding (D-WPN-1, FIXED
+2026-09-27); single-pool ammo vs per-class pools (D-WPN-2); CanFire and Finish gates are now ported (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
 with remote borrowed/hot-slot receive coverage now ported and authority personal-slot coverage still open (D-WPN-6); interim
@@ -10582,17 +10625,17 @@ has the signed CTRL catalog/consumer path and both dedicated model publishers;
 D-WPN-28 remains open for the particle emitter and compact-joiner
 reconstruction. The generic animator and remaining producer census are D-3DI-2.
 
-A related find while walking this: `ActionSlot_ExecuteAction @ 0x4020a0` (the DEFAULT
-action handler) carries its own copy of the heat-window stamp, gated on
+A related find while walking this: `ActionSlot_ExecuteAction @ 0x4020a0` (the
+placeholder handler) carries its own copy of the heat-window stamp, gated on
 `MountSlot+0x2C == RECOIL(3)` `[orig: @ 0x402242..0x402299]`, byte-identical to the one
-in `WeaponAction_Recoil`. It only runs for a recoil row that does NOT name
-`wpn_std_recoil`, which no shipped row does (D-WPN-1), so there is no double stamp in
-practice and the port's single stamp in the recoil handler is correct for all shipped
-data.
+in `WeaponAction_Recoil`. The bind rewrites the placeholder to the suffix default, so it
+never runs as a slot's handler; it is reached only by direct calls (the Idle handler's
+effect legs `@ 0x54296C` / `@ 0x5429A0`, the receive-side replay), where its RECOIL gate
+holds only for a recoil row bound to `wpn_std_idle`, which no shipped row is. So there is
+no double stamp in shipped data and the port's single stamp in the recoil handler is
+correct for it.
 
-**Open follow-ups:** who queues OVERHEATED(11) as an ACTION (its ROW is consumed as
-glow data by the heat window leg above — whether anything transitions TO state 11
-remains unwalked);
+**Open follow-ups:**
 the `*_map` scope function variants;
 the `g_FpWeaponViewFlags` option bits beyond bit 0; the `word_B7C670` transition write vs the §5.16 shot-seq;
 remote-entity action sounds/effects (the `@ 0x541a83` leg) once remote slots pump;
@@ -14664,7 +14707,7 @@ De-tabled ledger rows without a prior §8 entry (transplanted verbatim 2026-08-0
 - **D-WPN-30** [FIXED 2026-08-12] Every ammo.def fixed-point key parses through the witnessed digit walker `parse_fixed16_digits_n` — the round-half-up local helper is deleted. The IDA sweep pinned all seven callers to `Math_ParseFixedPoint16 @0x6131f0` (`error @0x40aaf6`, `drag @0x40aac8`, `bullet_radius @0x40a865`, `kz_minradius @0x40acfe`, `kz_maxradius @0x40ad2c`, `tumble_error @0x40ab24`, `light_move @0x40af3a`, all in `AmmoDef_ParseProperty @0x40a2d0`; `max_age`/`arm_age` via `AmmoDef_ParseSecondsToTicks @0x40a0f0` (ex `sub_40A0F0`)). Corpus diff over the retail JO ammo.def + the byte-exact fixture: 1038 key values, 8 one-LSB shifts (`bullet_radius 0.005715/0.00277`, `drag 0.292`), zero signed forms (the walker's leading-`-`-yields-0 leg is inert on retail data). ctest `def_parse_ammo` pins the "0.07" -> 4587 divergent form on every migrated key plus both corpus-shifting decimals.
 
 `weapon_fsm` + `weapon_inventory` + the loadout, the D-WPN weapon-system rows (§5.16, §5.60, §5.62, §5.63; the ledger tabled these first, and each bullet carries its ledger row verbatim):
-- **D-WPN-1** [WITNESSED-READY-DEFERRED (registry table witnessed; port when a non-std consumer appears)] weapon.def FUNCTION rows resolve through the `g_ActionFuncDefTable @0x829E58` name registry (18 entries incl. the `*_map` scope variants + `powerup_*`); the port fixes each state's behavior instead — safe because every shipped row (JOX + REVX sweeps) names `wpn_std_<its own suffix>` (net-re §5.62) (ledger class A, slice PAR-WORLD)
+- **D-WPN-1** [FIXED 2026-09-27] weapon.def FUNCTION rows resolve through the `g_ActionFuncDefTable @0x829E58` name registry (18 entries incl. the `*_map` scope variants + `powerup_*`) and the pump runs each slot's BOUND handler; the port had fixed each state's behavior on the premise that every shipped row names `wpn_std_<its own suffix>`, which the 2026-09-27 sweep refuted (EMPTYIDLE `wpn_std_idle` in 77 JOTAC rows, `wpn_std_empty` in 16; SWITCHTO `wpn_std_reload` on the AT4/RPG). Now `weapon_handler_named` resolves the FUNCTION's first token, `weapon_fsm_bake` binds it with retail's only rewrite (a null or placeholder handler, which no FUNCTION, `null` and an unknown name leave, takes the suffix default), and `run_handler` dispatches on the bound handler. [orig: ActionFuncDef_FindByName @0x401040; the FUNCTION key @0x4028D2 / unknown-name store @0x4028F7; Anim_InitActions @0x541FA0, the rewrite @0x542117..0x542139; WeaponAction_ProcessFrame @0x540E60, the bound-handler call @0x54142A / @0x5413FF / @0x541482 / @0x5414A2] (ctest `weapon_fsm`; net-re §5.62)
 - **D-WPN-5** [OPEN (inventory switching + local UseGun borrow/swap/restore and resolved parent-model cull landed 2026-07-20; joiner-side cull fixed 2026-08-05; broader loadout/network ownership residuals remain)] Weapon-switch machinery — FULLY WITNESSED (net-re §5.62 switch-chain block): `Player_SwitchToWeaponByHandle @0x4e0170` category scan over `weaponSlotArrayBase @0xB75FD4` → `Player_MountWeaponSlot @0x4dfa40` writes `g_PendingWeaponSlot` + queues SWITCHRANK(8)/`ForceQueueSwitchFrom`(7); the switchfrom swap + `TryQueueSwitchTo`, the −901 instant paths when either Def has Flags 0x80, the recoil def+0x168 auto-switch, and mount-scoped auto-engage. The inventory switch path is ported. Local UseGun now follows retail's distinct branch: `Entity_AttachToUseGunSlot @0x546b80` saves the personal slot and passes parent `+0x2B4` through `Player_MountWeaponSlot`; detach passes the saved slot through the same path (`@0x43565f`); a gun-to-gun swap overwrites only the latest pending parent. SWITCHFROM uses the exact `TryQueueSwitchTo` predicate, while SWITCHRANK does not modify the committed target. The committed slot drives both the action FSM and FP model, and the borrowed parent's ammo/FSM state survives detach/remount. The retail render side is now witnessed too: `Entity_RenderVehicleModel @0x4407d0` skips its sole parent-model submit `@0x440918` only for the local first-person slot-3 parent when the embedded MountSlot `+0x2B4` is the live `EquippedSlot` and its Def has a resolved `fpModel` pointer at `+0x16C`; `Def.flags2(+0x0C) & 0x800` (Invisible) is the alternate force-cull leg without that FP-model/equipped-slot comparison. OpenNova re-derives the transient `PF_LOCAL_VIEW_SUPPRESSED` presentation verdict from the exact parent/camera/slot state and the host's actual FP gun-resolution result plus owning Def identity, so same-Def parent swaps reuse the model while different Defs cannot inherit it; zero-fixed-tick render frames still present the verdict. Authoritative hidden state, collision/simulation, and separately rendered attached actors remain untouched. Authored-but-unresolved or absent `gfx1` therefore keeps the world parent visible and never substitutes the bring-up AK; pre-commit, third person, and detach restore the world model immediately. 2026-08-05: the verdict was computed only inside the host-only registry-enrichment branch of the present builder, so a JOINER never suppressed and drew a mounted 50cal TWICE (its wire world model plus the FP model); the cull is now computed role-blind from the local mount state against the exact-handle materialized mount row — retail's render walk is role-blind [orig: @0x4407f6..0x44084c] (`wire_header_world_materialization_test`) (ledger class A, slice PAR-WORLD)
 - **D-WPN-7** [OPEN (rides D-PLAYERINFO-1/-11)] Interim ammo seed: the FSM installs with clip=clipsize + reserve=startrounds from the def; the original resolves ammo through the PLAYER_INFO loadout + S2C 0x5A apply (§5.30/§5.57) (net-re §5.62) (ledger class A, slice PAR-WORLD)
 - **D-WPN-8** [OPEN (joiner fire/reload + listen-host loopback relay + client tag-2 visual round + witnessed 0x06 tick/pose-delta producer landed 2026-07-22; decoded non-player Infantry/vehicle projectile-collision projection — wire-keyed person + authored-geometry dynamic proxies at the decoded pose with visual-client native/proxy de-duplication — landed 2026-07-23; bounded producer/validation/presentation tails remain)] FIRE-context residual: authority/listen-host and single-player fire append the round ring with the witnessed pre-consume-magazine mode byte `((clip & 3) << 4) \| 2`, the retail fire composite `(Player_IsOpticalViewVisible ? 0x80 : 0) + Weapon_GetScopeZoomLevel(can_fire, 12)` as the subtype (ported 2026-09-24; the spawn reads bit 7 as the aimed ERROR row 3 and the low six bits as the zero-elevation step, net-re §5.60), and spawn `world::RoundSim` synchronously. The remote-joiner path predicts its own visual round, emits C2S 0x06 with the client-runtime `currentTick`, retail-rounded Yaw/Pitch high words, and the five modulo-u16 fire-pose deltas, completes payload-addressed reload through C2S 0x25 → S2C 0x49, and feeds decoded S2C tag-2 events into a visual-only client `RoundSim`. The listen host now also sends its reload through transport-mode-1 C2S 0x25 so the shared dispatcher broadcasts S2C 0x49 without refilling authority twice; parentSlot 3 names the authoritative mounted parent handle and derives its combo from the mounted Def. Remaining mounted-reload parity: a remote joiner has no authoritative local-parent → host-wire-H mapping, and host/client vehicle-slot 0x49 refill/application is not modeled, so the joiner-mounted producer stays deferred rather than guessing a handle. Remaining C2S-producer parity: OpenNova's resolved posed-eye/fallback origin does not yet reproduce retail's exact `Position+CameraOffset`, `Pitch+pitchBlend`, or mounted/scoped `Entity_CalcWeaponFirePosition` branches, the C2S `0x06` `hit_part` word (off30) shipped a BARE shot sequence where retail packs `(roster slot << 9) \| (seq & 0x1FF)` — **FIXED 2026-07-26**: zero slot bits named roster slot 0, which on a listen host is the HOST ITSELF, and a live retail co-op host attributed every round our joiner fired to its own player, so its first-person weapon reacted on our shots (same-weapon only; a retail↔retail pair never reproduced it). The host copies our raw word into the global `word_B7C670` verbatim on the network arm [orig: `Server_ClientFiredRound @0x50c2ba`/`@0x50c774`] and composes its own the packed way [orig: `@0x50bda5`]. Now built by `opennova::pack_fired_round_hit_part` from the S2C `0x04` body-byte-17 roster id [orig: `NetPacket_WriteSlotAssignment @0x502b30`], pinned by `nw_ingame_c2s_uplink_test::test_fired_round_hit_part_packing`; net-re §5.16. Separately `extra_byte1` (`entity+352`, C2S `0x06` off32) is STILL unmodeled/zero — **now witnessed live**: all six retail fired-rounds in `retail-coop-playerinfo-join.pcapng` carry `extras = (0x03, 0x0c, 0x00)`, so retail ships `0x03` where we ship `0x00` (net-re §5.66). The same capture CLOSES the adjacent suspicion about off34: retail sends `0x00` there too, so emitting zero on that byte is not a divergence. Remaining host validation: the `AdmDef[276]` cooldown/freshness stamp, savedLivePose compensation, and moving-carrier re-anchor. Presentation residuals: remote/vehicle 0x49 presentation; per-weapon tracer metadata (shooter TEAM is no longer a residual — `ClientEntityState::team` is retained and consumed as of 2026-07-25); posed-bone person collision (player AND decoded-infantry proxies use the torso fallback); PANM/turret section posing and husk substitution for wire dynamic proxies, plus movement-contact/blink/LOS projection (those queries still lack complete replica contact/indoors state). Clean-disconnect proxy retirement and the 0x46/0x5D lifecycle fold are NO LONGER residual here — ported under D-NET-176 (FIXED 2026-07-25; net-re §5.62, §5.16, §5.58). 2026-09-08 (PR #640 review), generic C2S 0x06 producer gaps recorded for follow-up: off33 `extra_byte2` (CLOSED 2026-09-24, the local pump composes retail's byte) — the reimpl sent `round.subtype` (12 on the on-foot hip-fire leg, 0 on settled-FP/mounted legs, never bit 0x80) where retail sends `Weapon_GetScopeZoomLevel(can_fire, 12) \| (can_fire ? 0x80 : 0)` composed in `Entity_FireWeaponAndSendPacket @0x42BD80` `@0x42bdd6..0x42bdf9` (`Player_IsOpticalViewVisible @0x5cf780` gates, `Weapon_GetScopeZoomLevel @0x422fc0`); off32 `extra_byte1` for a MOUNTED GUNNER — the reimpl reads `by_index(equipped_adm_index)->ammo_index` after `bind_use_gun_slot` swapped the adm to the vehicle weapon's, where retail's `entity+352` is written only by `WeaponSlot_InitFromEntityDef @0x54673b`, `PlayerClass_InitEntity @0x4b1105` and the host store in `Server_ClientFiredRound @0x50bd48` (it stays the handheld's; a weapon-switch restamp was not witnessed). The pilot flare descriptor itself is ported (net-re §5.16) (ledger class A, slice PAR-WORLD)
@@ -14839,7 +14882,7 @@ standard handler skips its phase-one recheck, fires and hardcodes next=3;
 Finish receives that same next value from the stack. The subsequent next==5
 check cannot reject this shot. The JOX corpus has 93 explicit FIRE rows:
 91 name wpn_std_fire and two receive the default. The function registry permits
-custom cross-bound handlers; that pre-existing D-WPN-1 boundary remains open.
+custom cross-bound handlers, which the port binds since D-WPN-1 closed (2026-09-27).
 [orig: Anim_InitActions @ 0x541FA0; ActionDef_ParseScriptLine @ 0x4023C0;
 WeaponAction_Fire @ 0x542B10; ActionSlot_FinishActivePhase @ 0x53F7B0]
 

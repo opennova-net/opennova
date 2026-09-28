@@ -19,6 +19,10 @@
 #include <cstdint>
 #include <string>
 
+namespace opennova::threedi {
+struct Threedi3di3;
+}
+
 namespace opennova::renderer {
 
 struct FpViewmodelSpec {
@@ -119,5 +123,16 @@ inline constexpr uint32_t kWeaponFlagEmplaced = 0x80u;
 FpViewmodelSpec fp_viewmodel_spec(bool has_def, const std::string &gfx1,
 		const std::string &character_arms, const std::string &animadm,
 		uint32_t flags);
+
+// How far into the gun's bone array an arms model reaches: one past the
+// highest part its LOD0 strips draw with (a skinned strip's bone table, a
+// rigid strip's own part); 0 for a model with no strip. The game draws the
+// arms with the GUN's array, arms part i by the gun's part i, so a reach past
+// the gun's parts leaves those arms parts without a posed matrix (the playing
+// clip's raw sample, or stale stack). Stock arms stay within their guns: an
+// arms model's meshless helper rows draw with nothing.
+// [orig: Player_RenderFirstPersonViewModel @0x4DED60, the arms submit with
+//  the gun's array @0x4DF088]
+int fp_arms_part_reach(const threedi::Threedi3di3 &arms);
 
 } // namespace opennova::renderer

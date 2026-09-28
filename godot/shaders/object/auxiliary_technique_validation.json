@@ -19,7 +19,7 @@
     "TECHNIQUE_NORMAL": {
       "scope": "live",
       "parity_status": "matching",
-      "disposition": "ported_to_24_runtime_techniques_d3d12_raster_validated",
+      "disposition": "ported_to_26_runtime_techniques_d3d12_raster_validated",
       "declaration_count": 30,
       "pass_declaration_count": 101,
       "manifest_contracts": ["techniques", "specular_alpha_contracts"],
@@ -97,7 +97,7 @@
         {"file": "BDiffT2.fx", "symbols": ["technique TSegTanDiff_Clip", "vscTanDot3PointClip"]}
       ],
       "runtime_evidence": [
-        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "OBJ_CLIP_EXPLICIT_UNSKINNED_OR_SUBMIT_SKIP_SKINNED", "v_world_pos.y < opennova_water_height", "v_water_mirror_pass"]},
+        {"path": "godot/shaders/object/shared.gdshaderinc", "tokens": ["OBJ_CLIP_EXPLICIT", "v_world_pos.y < opennova_water_height", "v_water_mirror_pass"]},
         {"path": "godot/shaders/object/surface.gdshaderinc", "tokens": ["obj_evaluate_ffp_clip_surface", "v_ff_clip_diffuse", "128.0 / 255.0"]},
         {"path": "godot/shaders/object/fog/regular.gdshaderinc", "tokens": ["OBJ_CLIP_FOG_GRAY", "127.0 / 255.0", "OBJ_CLIP_DOT3"]},
         {"path": "godot/shaders/object/surface.gdshaderinc", "tokens": ["obj_evaluate_dot3_clip_surface", "obj_dot3_clip_point", "2.0 * source * target"]},

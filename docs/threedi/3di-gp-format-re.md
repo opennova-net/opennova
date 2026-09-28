@@ -68,7 +68,7 @@ is the record. Sizes are payload bytes (exclusive of the 8-byte header).
 | ROOT/CDTA/CMDL | 64 | no | find at `0x472358` | via `WriteCDTA` | 16 dwords of model totals: bbox (6 f32), radii (3 f32), num_vertices, num_normals, num_faces, num_objects, num_transforms, num_planes, num_volumes. |
 | ROOT/CDTA/CVRT | 104 | no | find `0x472373`, loop `0x47267B` | `[orig: WriteCVRT @ 0x454450]` | `{count, record_size, vertex_records[]}`; position as 16.16 fixed packed as 4 x i16. |
 | ROOT/CDTA/CNRM | 112 | no | find `0x47238F`, loop `0x47270B` | `[orig: WriteCNRM @ 0x454600]` | 8 B runtime each: 3 x i16 16.16 normal + i16 dominant axis. |
-| ROOT/CDTA/CFAC | 800 | no | find `0x4723AA`, loop `0x4727A9` | `[orig: WriteCFAC @ 0x454830]` | 44 B (11 dwords) per face: vert_idx[3] i16, normal_idx i16, plane_dist fp16.16, bbox min/max fp16.16, material_flags, poly_type u8. |
+| ROOT/CDTA/CFAC | 800 | no | find `0x4723AA`, loop `0x4727A9` | `[orig: WriteCFAC @ 0x454830]` | 44 B (11 dwords) per face: vert_idx[3] i16, normal_idx i16 (the runtime reads all four signed, §2.11), plane_dist fp16.16, bbox min/max fp16.16, material_flags, poly_type u8. |
 | ROOT/CDTA/BPLN | 80 | no | find `0x4723C5`, loop `0x472D0A` | `[orig: WriteBPLN @ 0x455A80]` | Per record: flags i16, normal 3 x i16 16.16, radius i32. 12 B runtime. |
 | ROOT/CDTA/BVOL | 44 | no | find `0x4723E1`, loop `0x472DF3` | `[orig: WriteBVOL @ 0x455CE0]` | 36 B disk -> 40 B runtime; collidable_type remapped via switch (cases 0,1,4..C,E,10..13) from `0x472E60`. |
 | ROOT/CDTA/COBJ | 96 | no | find `0x4723FC`, loop `0x4729A1` | `[orig: WriteCOBJ @ 0x454E70]` | 88 B disk -> 108 B runtime per object (pointer wiring at `0x473108..0x473272`). |
@@ -550,13 +550,17 @@ store model axes on disk.
 | OCCL | A record's plane table is its six bounding-box planes (+x -x +y -y +z -z), then each face's own plane unless one already matches it (normal within 0.005 per axis, distance within 0.03; the last match wins), at most 32 `[orig: ConvertToInternal @ 0x4268B3]` | Armry01, all 8 records (types 1, 0 x4, 2, 3 x2); `threedi_build` `add_occ_record` reproduces them plane for plane, ctest `threedi_o3d_building` pins the layout |
 | OCCL | Faces wind counter-clockwise about their outward normal in mission axes; edge words are `lo \| hi << 8`, plus `0x8000` when the edge runs from the higher vertex to the lower | Armry01; `occ_edge` reproduces every edge word |
 | OCCL | Occluder (0) and open (1) records carry a connecting byte the runtime never reads (Armry01's occluders say 2), the leftover the retired exporter's `classify_name` carried across objects | Armry01 |
+| OCCL | A record's stored sphere is its vertices' mean (summed in double, stored as a float) and the farthest vertex from it, as OED took them; in 206 models every centre is instead that mean mirrored across y, the radius still the farthest vertex from the true mean. The portal-slot collector reads the centre as stored, through the entity pose that carries the vertices `[orig: Terrain_CollectVisibleSectorUserpoints @ 0x5c6b60 (the centre's transform @0x5c6df8); Terrain_BuildClipPlanesFromCollision @ 0x5b34e0 (@0x5b3595)]`, so a mirrored sphere misses its occluder | JOTAC 2026-09-27: 182 models store the mean (Armry01 and ChmLFP1 within 5e-7 m of it), 206 the mirror (Crdrblk2, DRGVLA, 3400), 72 more lie on y = 0; no model mixes the two |
 | CFAC | Bullet faces wind counter-clockwise about their CNRM normal in mission axes; the rare exception stores a normal against its own winding | Dtruck2 905/906, Armry01 250/250, Dblkhwk1 1594/1597 |
 | CVRT/CFAC | Collision vertices sit on the 8.8 grid, and faces the grid collapses keep valid normals: the normals were taken before quantization | Mp5b_1st 276 such faces, Dblkhwk1 13 |
-| COBJ | A rigid model's section offset is its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels) |
+| CVRT/CFAC | A section holds at most 32,768 vertices: the runtime reads a face's corners as signed 16-bit indices (§2.11) | 13,780 of the 13,781 sections of the JOTAC archives with the revx02 expansion (bld1's is the largest, 30,734); Pinegr_L's holds 40,824 and is broken in retail too |
+| COBJ | A rigid model's section offset is, nearly always, its part's pivot | Dblkhwk1 (rotors), DAH62, Dtruck2 (wheels); 46 JOTAC models store others (MWalA2X, NCar1X and TrnBld1 pivot every part on the origin, their sections sit at the pieces), 2026-09-27 |
 | CXLT | The rows are the collision LOD's attach points (`~PPx attach` helpers) in order, truncated to 16.16 `[orig: WriteCXLT @ 0x455920]`, not the section offsets; the runtime reads them by row (a palm item's broken pieces pivot on rows 0 and 1, `engine/runtime/world/item_sections.cpp`) | 917 of 958 models carry one row per non-root section (per section when skinned) and 723 of those rows equal the section offsets; Oiltnk2X's 15 rows sit near the origin while its sections reach 24 m out; Chair03X has 7 sections and no row; rlpad1ax 16 sections and 1 row |
+| CXLT | The table is the attach helpers in name order (the retired port's `convert_internal.cpp` sorts them), so it need not be one row per part: M24_1st's 42 rows for 42 sections run in its parts' parent order, the order of its helpers' names | JOTAC 2026-09-27: 156 of 2,409 models are not one per part (37 empty, 46 with a row for the root too, 73 of other counts, dM1A1's 33 for 25 sections) |
 | COBJ | One section per part of the collision LOD (WriteCOBJ walks that LOD's subobjects), whatever LOD 0 holds; a model with no section still carries a CDTA | Dtruck2 LOD 0 8 parts, collision LOD 7 / 7 sections; APLFP1 1 / 1; CNet01 0 / 0 with a CMDL |
 | COBJ | A section's bounds cover its vertices (a rigid model's: its part's render floats in the collision LOD; a skinned model's: the LOD 0 vertices weighted to it, so the mesh section, which no weight names, keeps the sentinels: US01 19, ArmsG 37), its volume boxes and the occlusion records it parents (Armry01's window sets section 1's min z, its portal section 3's min x); its midpoint is the floor of their truncated mean; its radius is the farthest vertex from the midpoint, so a volume-only section's is 0; its offset is its part's pivot truncated to 16.16 | 3,224 of 3,255 sections; all 52 volume-only sections radius 0 (2026-09-24 sweep); all 5,046 odd-sum midpoint axes round down; truncating the collision LOD's float pivots gives all 15,837 offset words (rounding 10,182). 97.5% of the bound words lie off the 8.8 grid: the retail tool bounded the authored corners |
 | CFAC | The plane distance is `-(n . v0)`: the runtime tests `n . p + plane_dist` (`collision_query.cpp`) | 600,378 of 600,378 unambiguous faces (2026-09-24 sweep) |
+| CFAC | A face's both-sides flag (1) follows its material's two-sided flag (4) in most models, as OED took both from one render attribute (the retired port's `material_flags`), but not all | JOTAC 2026-09-27: 154 models disagree (113 two-sided materials with one-sided faces: Baricd02's wire, drawn both ways by storing each triangle in both windings; 41 culled materials with both-sided faces) |
 | CMDL | The box envelops the collision LOD's faces and LOD 0's triangles; the radii and height (`radii[2]`) are the collision LOD's alone | Derived from the stored corners the box comes back for 679 of 958 models (Dblkhwk1, Armry01, CNet01; not Dtruck2 or ArmsG) and the radii for 24: the retail tool read the authored corners, which the file does not keep. CNet01 (no face) stores radii 0, 0, -20000 |
 | MTRL | A GLASS shader is glass with reflection 128 grey; an EMISSIVE (`*_LUM`) shader is emissive 2; no other material is either | every material of the 958 JO models |
 | BPLN | The plane flag word marks a seam. ModSuperOed's rule (the retired port): each volume triangle's box, shrunk by 0.01, inside another `CB` volume's box flags its plane; retail's own tool is **not witnessed** (§2.14). The line-of-sight sweep keeps a flagged plane's radius non-negative (`engine/runtime/world/collision_los.cpp`, `[orig: Physics_RaycastAgainstEntityPool @ 0x538720, flag test @ 0x538d00]`) | 19,695 of 132,856 planes flagged; the OED rule over rebuilt faces agrees on 89.2% of 116,716 |
@@ -564,17 +568,21 @@ store model axes on disk.
 | LGHT | An omni light stores rotation `{+0, -1, 0, 1}` (straight down, no cone), falloff 0, and a `view_proj` whose first two columns are NaN (the perspective of a zero cone); the retired OED exporter's `build_light_view_proj` reproduces the record to within one ulp in two entries | Armry01's three lights (styles 55 and 24) |
 | LGHT | The flag byte carries `0x40`, a bit the retired exporter never set (meaning unknown, §2.14) | Armry01 (`0x40`, `0x41`) |
 | STRP | Every strip is a triangle list | 11,264 strips, none `is_strip` |
+| STRP | A material's skinned strips split first-fit, a table counting each corner's bones anew where it lacks them (the retired port's `rdta.cpp` grouping), so a 15-bone table takes no triangle bringing a 16th bone on more than one corner | JOTAC 2026-09-27: 56 skinned materials split across strips whose tables together hold 16 bones or fewer (JNTOPSB2 15 + 2, CIndo01 15 + 1), which a plain count never splits |
 | RMDL | Model types `gnrc` 2917, `bldg` 310, `door` 12, `veh0` 1 | all LODs |
 | CTRL | Tables name registers outside the 96-entry catalog (`VEHICLE_TIRE14`, `VEHICLE_WHEELS04`, an empty name); the loader aliases them to LOD_FRAC `[orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640]` | DT801, Dbtr801, IBlock02 |
+| CTRL | The table is in OED's collection order: the materials' registers in material order (each one's U, V, alpha and RGB generators above style 112, then a register-driven flipbook), then every LOD's tracks part by part in record order, then LOD 0's lights (the retired port's `collect_control_registers`) | JOTAC 2026-09-27: all 256 models whose registers anything references; 30 more declare only names nothing references |
 | MTRL/USRP/VERT | Shader tags hold `#` (`VS_PHONGT#UV`, `VS_SKBASIC#UV`); user point names hold spaces (`FLARE 01`, `ground `); some vertex normals are zero-length | CSlide01, dM1A1; DCHNK1, JoLFP1; Dblkhwk1's rotor |
 | PANM/MTRX | Skinned models carry non-finite MTRX rows that no PANM row selects (selectors 0 or 255); 258 models carry a non-identity row 0, which a zero selector bypasses | US01, ArmsG; corpus |
+| PANM | A LOD's table may stop short of its parts; every such table is static, and the loader keeps no table for a LOD none of whose rows sets a scale, rotation or translate type, so nothing reads it `[orig: GPM_LoadRenderModel @ 0x5B5000 (@0x5B5450..0x5B5471)]` | JOTAC 2026-09-27: 251 LODs (DRGVLA's one row for two parts, Garg01, DJsas) |
 
 `opennova-3di scene` then `build` gives back the same model (`opennova-3di
-compare`, which checks everything the runtime reads) for 881 of the 958
-models; the rest differ in words retail derived from data the file does not
-keep (docs/threedi/o3d-scene-format.md lists them), and two draw with a
-material id they lack. Ctest `threedi_o3d_retail_roundtrip` runs
-Armry01, Dblkhwk1, US01, ArmsG and Mp5b_1st.
+compare`, which checks everything the runtime reads) for 2,042 of the 2,396
+JOTAC models whose scene builds (2026-09-27); the rest differ in words retail
+derived from data the file does not keep, or draw with a material id they
+lack (docs/threedi/o3d-scene-format.md lists them). Ctest
+`threedi_o3d_retail_roundtrip` runs Armry01, Dblkhwk1, US01, ArmsG and
+Mp5b_1st.
 
 ### Retail RMDL thresholds, OOBJ priority and texture-row flags (2026-09-24)
 
@@ -606,6 +614,123 @@ witnessed in retail `Jointops.exe`:
   not a clamp flag. Stock carriers: the soldier camo body flipbooks
   (JntOpsB1/B2/B4, RebelB1/B4, slot 1 flags 3), IJava05, Imdec07
   (render-material-re.md §2026-09-24 rendering parity pass).
+
+### Retail skinned vertex blend (2026-09-27)
+
+Witnessed in retail `Jointops.exe` and in the install's decrypted `_BaseInc.fx`
+(`CalcSkinWorldPosAndNormal`, with the skinned techniques that call it):
+
+- **Loader.** `GPM_LoadRenderModel @ 0x5B5000` finds VERT (`@ 0x5B5041`) and
+  converts it in `[orig: ThreediGp_ConvertVerticesToGPUFormat @ 0x5B4C90]`,
+  which copies a skinned record field for field: the three weights verbatim
+  (`@ 0x5B4E2C`, `@ 0x5B4E38`, `@ 0x5B4E3E`) and the four index bytes as one
+  dword (`@ 0x5B4E45..0x5B4E5A`) in the 56 B layout (flags 0x41), the same in
+  the 80 B one (0x55, `@ 0x5B4D0D..0x5B4D98`). No weight is normalized at load
+  and no fourth weight is stored.
+- **Declarations.** `[orig: D3DDevice_CreateVertexDeclarations @ 0x5B0A00]`
+  builds both skinned layouts with BLENDWEIGHT FLOAT3 at +12 and BLENDINDICES
+  D3DCOLOR at +24 (56 B: POSITION, BLENDWEIGHT, BLENDINDICES, NORMAL,
+  TEXCOORD0, TEXCOORD1; the 80 B one adds TANGENT at +56 and BINORMAL at +68),
+  chosen per model by `RenderModel_GetVertexStrideAndDecl @ 0x5B1480` (56
+  `@ 0x5B14B8`, 80 `@ 0x5B14A1`). The shader's `D3DCOLORtoUBYTE4` undoes the
+  D3DCOLOR swizzle, so index byte k is its `IndexArray[k]`.
+- **Palette.** Per skinned strip, `CRenderBatchQueue_FlushBatches @ 0x5D9F50`
+  uploads palette entry k = the matrix of the strip's bone-table entry k (the
+  table byte read `movsx`, `[orig: @0x5DA170]`)
+  for k below the table's length, then `SetMatrixArray` (`@ 0x5DA1B2`); the
+  shader holds at most 16 (`MAX_SKIN_MATRICES`). An index byte past the table
+  reads whatever that constant last held.
+- **Blend.** Every skinned vertex shader compiles `NumBones = 4`: the loop adds
+  w0, w1 and w2 on `IndexArray[0..2]` and `lastweight = 1 - (w0 + w1 + w2)` on
+  `IndexArray[3]`, never renormalized. A vertex with no stored weight rides
+  byte 3's bone wholly; stored weights summing past 1 give byte 3 a negative
+  weight.
+- **Normal.** Only `vsSkinBasic` (VS_SKBASIC), `vsSkinGlass`, `vsSkinDepth` and
+  `vsSkinFlatSpotDepth` blend the normal with the same four weights and
+  normalize it (`skinnormal = true`). The lit techniques (`vsObjSkinDot3*`,
+  `vsTanSkinDot3*`, `vsTanSkinPhong*`, `vsObjSkinPhong*`, `vsSkinPost*`) pass
+  `skinnormal = false`: the normal takes the vertex's first bone alone
+  (`IndexArray[0]`, not normalized; SkBDiffT2/SkBDiffO2 and SkBPhongT read its
+  y for their Gouraud hemisphere, `HemicolorFromVectorY(norm.y)`), and they
+  light the undeformed `In.Tangent`, `In.Binormal` and `In.Norm` in that
+  bone's frame: the directional light through `SkinModelLightArray
+  [indexvector.x]` (SkBDiffT/O, SkBDiffT2/O2) or through the in-shader
+  `transpose((float3x3)SkinWorldMatrixArray[indexvector.x])` (SkBPhongT/O,
+  normalized), the bumped hemisphere and the eye vector through that
+  transpose, and each point light as `SkinModelLightArray[indexvector.x] -
+  In.Pos`, its attenuation and `CalcSelfShadowTerm` measured in that space
+  (`_vsSkDfT.fx`, `_vsSkDfO.fx`, `_vsSkPhT.fx`, `_vsSkPhO.fx`).
+- **Light entries.** `SkinModelLightArray` is filled per pass inside
+  `CRenderBatchQueue_FlushBatches @ 0x5D9F50`, not in the palette block
+  (`@ 0x5DA1B2` uploads `SkinWorldMatrixArray` only), one entry per palette
+  entry k below the strip's table length (the fill and the `SetVectorArray`
+  count, `@ 0x5DA5AD`, `@ 0x5DA9A3`, `@ 0x5DAC43`), w always 1. The pass flags
+  word comes from `HLSLEffect_ParsePassData @ 0x5AE120` (bit 0 = passsetup
+  `PASSSETUP_SET_OBJSPACELIGHT_DIR`, `@ 0x5AE4DD`; bits 1..5 = passrules,
+  `@ 0x5AE4AC`), and the handle from `GetParameterByName("SkinModelLightArray")`
+  (`@ 0x5AF615`). A bit-0 pass on a skinned model gets DirLightVector (the unit
+  vector toward the light) through the upper 3x3 of the true inverse of M_k
+  (`@ 0x5DA4F6..0x5DA5CE`, the inverse `@ 0x5DA54B`); a ONCE_PER_POINTLIGHT
+  pass (bit 2, `@ 0x5DA84F`) gets, per selected light, the `PointLightCoord`
+  it just uploaded through the full affine inverse (`@ 0x5DA950..0x5DA9A1`, the
+  inverse `@ 0x5DA967`, the upload `@ 0x5DA9C4`) before that light's draw
+  (`@ 0x5DAA07`); a ONCE_PER_SPOTLIGHT pass (bit 3, `@ 0x5DAA2F`) does the same
+  with the projector position (`@ 0x5DABF0..0x5DAC41`, upload `@ 0x5DAC64`).
+  The inverse is D3DXMatrixInverse (a full 4x4 cofactor inverse; the IDB's
+  `j_D3DXTex_WriteRow_G16R16_Dither`, `jmp [0x85075C]`, is its PSGP thunk, and
+  `j_psgp_init_and_dispatch_850728` / `_850714` are D3DXVec3TransformNormal /
+  D3DXVec3Transform, names left as the IDB has them). So the light entries use
+  the true inverse where the shaders' own vectors use the transpose: the two
+  agree for the rigid matrices the rigs pose, and a scaled entry would give
+  the light a length of 1/s that nothing renormalizes. D3DXMatrixInverse
+  writes nothing when the determinant is zero or its reciprocal is not
+  finite, and the fill runs k in table order through one inverse buffer, so a
+  singular entry (the right hand's zero-scale row, world-wac-ai-re §14.1.5)
+  keeps the last inverse made: the nearest earlier table entry that inverted.
+  For k = 0 the buffer holds stale stack from an earlier fill.
+
+Corpus (the JOTAC archives with the revx02 expansion, 607,473 skinned vertices
+in 623 LODs): the weights are four-decimal values, none negative, above 1 or
+not finite, and no vertex stores three zeros; 12,398 sum past 1 in float (at
+most 1.0001, ArmGlovD), leaving byte 3 at most -1e-4, and 9,501 vertices in 118
+models give byte 3 a real share (over 1e-4; JntOpsB3 202, IndoArms 187). Of
+the 640 skinned strip tables holding part 16 (BN17, the right hand, on the
+person rigs), 153 hold it as entry 0: on a person, a collapsed hand's vertices
+there read stale stack. Port:
+`threedi_skin_influences` (engine/formats/threedi/threedi_3di3.h) resolves a
+vertex's four influences; `opennova-3di` carries byte 3 through the `.o3d`
+text (docs/threedi/o3d-scene-format.md), `compare` compares the resolved blend,
+the builder bounds a skinned section over it, and the renderer draws it
+(engine/runtime/renderer/model_mesh_prepare.cpp lays the four weights out as
+they are for the skeleton, and the projected-shadow slot capture blends them
+unnormalized).
+
+The lighting is ported as of 2026-09-27. The object shaders run the vertex
+program over a per-model bone palette (`godot/shaders/object/skin.gdshaderinc`):
+`ObjectModel` publishes the skeleton's pose x bind per bone into an RGBA32F
+texture on every settled pose (`godot/src/object/object_model_skin_palette.cpp`)
+and binds it on the materials of the strips whose technique names a
+skinnormal rule (`renderer::ObjectSkinNormal`,
+engine/runtime/renderer/object_shader_template.h); those strips leave Godot's
+skinning, which blends one matrix for position, normal and tangent alike.
+SkBasic and SkGlass light the blended, normalized normal; the lit effects
+light the undeformed frame through the vertex's light entry (the palette
+entry whose inverse its `SkinModelLightArray` entry carries) and measure
+point lights from the vertex that entry carries rigidly, the world-space form
+of the entry-space vectors (exact for rigid entries). A singular first entry
+lights through the nearest earlier table entry that inverts
+(`prepare_model_mesh` records up to four earlier entries per vertex, carried
+on the mesh's CUSTOM0 channel) and reads a level Gouraud hemisphere from its
+own zero normal; where retail reads stale stack (k = 0) the port reads the
+identity, as it does past four collapsed entries, and where retail normalizes
+a zeroed transpose vector to no defined value (the phong light and eye, the
+bumped hemisphere) the port lights in the light entry's frame. The palette strips cull by their per-bone
+bind boxes carried through the posed palette, and the render-slot capture
+skins its silhouettes with the same matrices. Pinned by GUT
+`skinned_first_bone_lighting_test` (D3D12 raster: every skinned tag's frame
+rule, the collapsed first entry), `object_model_skin_palette_test` and
+`render_shader_cache_handoff_test`, and ctests `renderer_model_mesh_prepare`,
+`renderer_material_classify` and `renderer_state_vectors`.
 
 ## 2. GP runtime format — corpus probe findings
 
@@ -826,7 +951,7 @@ decoded at load time (physics/raycast functions consume them later).
 44 B CollisionFace layout:
 
 ```
-+0x00  vertex_indices[3]  u16 x 3
++0x00  vertex_indices[3]  i16 x 3
 +0x06  normal_index       i16
 +0x08  plane_d            i32
 +0x0C  bbox min/max x,y,z i32 x 6
@@ -835,6 +960,20 @@ decoded at load time (physics/raycast functions consume them later).
 +0x29  pad                u8
 +0x2A  pad_face_2A        i16
 ```
+
+The corner and normal indices are signed: every retail reader of the 3DI3
+CFAC record loads them with `movsx`. The loader copies the 44-byte record word
+for word `[orig: Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0, corners and
+normal @ 0x5B3EC7..0x5B3EEA]`; the corners are read in the triangle test every
+ray path shares `[orig: Math_PointInTriangle2D @ 0x414050, the reads @ 0x414071,
+@ 0x414079, @ 0x414095]` (the same pattern in its other two axis branches), the normal
+index in `[orig: Physics_RaycastAgainstBoneCollision @ 0x4E4CB0 (@0x4E5079)]`, and the
+corners again in the debris spawner `[orig: Entity_SpawnSectionDebris
+@ 0x43F580 (@0x43F5F6..0x43F5FE)]`; no `movzx` reader exists. A section therefore
+addresses at most 32,768 vertices, and a corner past 32,767 reads before the
+section's vertex table: retail Pinegr_L's one 40,824-vertex section (13,608
+faces, 2,686 of them naming such corners) is broken in retail too.
+`opennova-3di build` refuses a section over 32,768 vertices.
 
 96 B CollisionVolume layout (offsets verified by counting the parser read
 sequence; an earlier plan spec was off by one field):
@@ -881,8 +1020,11 @@ fixture with extra_polys surfaces.
   lost); whether retail's tool differed is unwitnessed.
 - 3DI3: the LGHT flag bit `0x40` (Armry01's lights carry it); the retired
   exporter set only bits 0-3.
-- 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
-  decompiled; the loader side of the VERT stride/flag mapping is unverified.
+- 3DI3: OED's reader `[orig: LoadRenderVertexBuffer @ 0x474380]`
+  (ModSuperOed.exe) was catalogued but not decompiled. The retail runtime's
+  side is witnessed for the skinned layouts (§1 "Retail skinned vertex blend":
+  the 56 B and 80 B declarations and the verbatim copy); for the static
+  layouts it is unverified.
   The WRITER-variant selection is witnessed (2026-08-19): one flag word drives
   both writers — `[orig: ComputeVertexFormatFlags @ 0x457a10]` ORs in `0x14`
   iff ANY scene material slot's `gMaterialInfoTable` row carries the TANGENT
@@ -899,10 +1041,14 @@ fixture with extra_polys surfaces.
   the TANGENT semantic (457/457), and SkinnedBasic (0x41, 56 B) otherwise
   (VS_SKBASIC / object-space bump only: Bird1, Boonie, ArmsGb — 147/147);
   static LODs carry Extended (0x15, 64 B) with the tangent-space VS shaders
-  (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). Every first-person
-  arms model referenced by `Avatars.def` is 0x55; a 0x41 arms model renders as
-  garbage in retail's first-person pass (observed live, 2026-08-17) while the
-  same model is fine in the world skinned pass. The since-retired OED conversion path
+  (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). The first-person
+  arms `Avatars.def` names are ArmGlove, ArmsG and ArmsR (0x55) and IndoArms
+  (0x41, object-space bump: `JO_ARMS_BARE`, `INDO_ARMS`, `INDO_ARMS_BARE`),
+  and the runtime declares both skinned layouts, so an arms model need not be
+  0x55. A 0x41 arms model was seen drawing as garbage in retail's first-person
+  pass (observed live, 2026-08-17) while the same model is fine in the world
+  skinned pass; its vertex layout alone does not explain that, since IndoArms
+  ships as 0x41. The since-retired OED conversion path
   implemented the witnessed rule over the D-RMAT-4-corrected descriptor rows
   (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`; both went
   with ADR 0038, the runtime consumes the authored 3DI3 descriptors directly).

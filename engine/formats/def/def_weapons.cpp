@@ -7,10 +7,15 @@
 
 #include "def_scan.h"
 
+#include <base/io/ascii_config.h>
+#include <base/io/strutil.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <string>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
 
@@ -19,6 +24,19 @@ namespace opennova::def {
 /* ========================================================================= */
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
+
+/* A `weapon` or `action` line's name: the line's second token as the retail
+   tokenizer cuts it, so quotes are optional (the AT4 and RPG entries open
+   their scopeup rows with a bare `ACTION SCOPEUP`).
+   [orig: WeaponDefs_ParseLineCallback @0x543680 over File_ParseASCIIFile
+   @0x53D810's tokens, Terrain_TokenizeConfigLine @0x53CB60] */
+static void token_name(const char *line, size_t len, char *dst, size_t dst_size) {
+    const std::string copy(line, len);
+    io::ConfigTokens tokens;
+    io::tokenize_config_line(copy.c_str(), tokens);
+    const char *name = tokens.token(1);
+    safe_copy(dst, dst_size, name, strlen(name));
+}
 
 /* CRT atof on a token span: the double the retail parse multiplies before its
    ftol, kept unnarrowed (parse_float_n rounds through a float). */
@@ -87,7 +105,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.scope_min_mag = 2;
                 /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
                 for (int &stability : cw.stability_fp16) stability = 0x10000;
-                extract_quoted(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
+                token_name(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
                 state = ST_WEAPON;
             }
             continue;
@@ -97,7 +115,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             if (lower_starts_with(lower, ll, "action", 6)) {
                 memset(&ca, 0, sizeof(ca));
                 ca_raw_cap = 0;
-                extract_quoted(trimmed, tlen, ca.name, sizeof(ca.name));
+                token_name(trimmed, tlen, ca.name, sizeof(ca.name));
                 state = ST_ACTION;
                 continue;
             }
@@ -569,7 +587,21 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
         if (state == ST_ACTION) {
             if (ll == 3 && memcmp(lower, "end", 3) == 0) {
-                DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
+                /* One row per suffix: a later block of the same name finds the
+                   row and re-runs ActionDef_InitDefaults on it, so it replaces
+                   the earlier block wholesale and nothing of that one survives.
+                   [orig: ActionDef_ParseScriptLine @0x4023C0 — the name lookup
+                   ActionDef_FindByNameInTable @0x402360, found @0x4024A1, both
+                   paths into InitDefaults @0x4024DA] */
+                size_t row = cw.actions_count;
+                for (size_t i = 0; i < cw.actions_count; ++i)
+                    if (strutil::iequals(cw.actions[i].name, ca.name)) row = i;
+                if (row < cw.actions_count) {
+                    free(cw.actions[row].raw_lines);
+                    cw.actions[row] = ca;
+                } else {
+                    DA_PUSH(cw.actions, cw.actions_count, cw_act_cap, ca);
+                }
                 memset(&ca, 0, sizeof(ca));
                 ca_raw_cap = 0;
                 state = ST_WEAPON;

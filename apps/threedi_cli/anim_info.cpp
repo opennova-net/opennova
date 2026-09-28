@@ -124,6 +124,9 @@ int cmd_anim_info(const char *in_path, int verbose) {
 		std::printf("table %s: %zu rows, %zu clips\n", set.table_name.c_str(), set.rows.size(),
 				set.clips.size());
 		for (const BadBuildRow &row : set.rows) std::printf("  %s\n", anim_info_row(row).c_str());
+		for (const BadBuildRow &row : set.dropped_rows)
+			std::printf("  dropped: %s (its key names no anim slot, so the game registers nothing)\n",
+					row.key.c_str());
 		for (const AnimMissingClip &absent : set.missing)
 			std::printf("  missing: %s (%s)\n", absent.variant.c_str(), absent.reason.c_str());
 	}

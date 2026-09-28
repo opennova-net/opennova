@@ -1,0 +1,4 @@
+weapon_timing 2
+action fire 0 0
+action reload 1 0
+entry WPN_TIMING auto 0.08

@@ -39,7 +39,10 @@ struct AnimMissingClip {
 struct AnimLoadedSet {
 	std::string table_name;  // the `.adm` file name, empty for a lone clip
 	std::string table_path;  // as given
-	std::vector<opennova::bad::BadBuildRow> rows;
+	std::vector<opennova::bad::BadBuildRow> rows; // the rows the game registers
+	// Rows whose key names no anim slot: the game registers nothing under them,
+	// so they are no part of the table's rows and name no clip here.
+	std::vector<opennova::bad::BadBuildRow> dropped_rows;
 	std::vector<AnimLoadedClip> clips; // in the order the rows first name them
 	std::vector<AnimMissingClip> missing; // in table order, each variant once
 };
@@ -56,6 +59,12 @@ void anim_free(AnimLoadedSet &set);
 // One table row as `info` prints it: the key, then the variants in the order
 // the engine serves them (a ring from the last back; a reset row is no ring).
 std::string anim_info_row(const opennova::bad::BadBuildRow &row);
+
+// What `compare` reports for one pair of clips, in order (the first 40): a
+// bone or event count that differs is one difference, and what both clips
+// hold still compares.
+std::vector<std::string> anim_compare_clips(const AnimLoadedClip &expected,
+		const AnimLoadedClip &actual);
 
 int cmd_anim_build(const char *scene_path, const char *out_path);
 int cmd_anim_scene(const char *in_path, const char *out_path);

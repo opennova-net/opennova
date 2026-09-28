@@ -33,12 +33,16 @@ const char *shader_technique_directory(opennova::renderer::ObjectShaderTechnique
 		case opennova::renderer::ObjectShaderTechnique::Flag: return "flag";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuse:
 			return "phong_tangent_diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuseSkinned:
+			return "phong_tangent_diffuse_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecular:
 			return "phong_tangent_specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned:
 			return "phong_tangent_specular_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuse:
 			return "phong_object_diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuseSkinned:
+			return "phong_object_diffuse_skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecular:
 			return "phong_object_specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap:
@@ -191,6 +195,7 @@ void ObjectShaderCache::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("classify", "shader_tag", "material_flags", "emissive_type", "is_glass_flag", "alpha_test_byte"), &ObjectShaderCache::classify);
 	ClassDB::bind_method(D_METHOD("get_known_shader_tags"), &ObjectShaderCache::get_known_shader_tags);
 	ClassDB::bind_method(D_METHOD("projected_shadow_coverage_for_key", "key"), &ObjectShaderCache::projected_shadow_coverage_for_key);
+	ClassDB::bind_method(D_METHOD("skin_normal_for_key", "key"), &ObjectShaderCache::skin_normal_for_key);
 	ClassDB::bind_method(D_METHOD("clear"), &ObjectShaderCache::clear);
 	ClassDB::bind_method(D_METHOD("set_water_plane", "height", "camera_above"), &ObjectShaderCache::set_water_plane);
 	ClassDB::bind_method(D_METHOD("clear_water_plane"), &ObjectShaderCache::clear_water_plane);
@@ -304,6 +309,13 @@ String ObjectShaderCache::projected_shadow_coverage_for_key(int32_t key) const {
 					static_cast<opennova::renderer::ObjectShaderKey>(key));
 	return String(opennova::renderer::object_projected_shadow_coverage_name(
 			opennova::renderer::object_projected_shadow_coverage(pipeline.technique)));
+}
+
+String ObjectShaderCache::skin_normal_for_key(int32_t key) const {
+	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
+			opennova::renderer::describe_object_shader_pipeline(
+					static_cast<opennova::renderer::ObjectShaderKey>(key));
+	return String(opennova::renderer::object_skin_normal_name(pipeline.skin_normal));
 }
 
 void ObjectShaderCache::set_water_plane(float height, bool camera_above) {

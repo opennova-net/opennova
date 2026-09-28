@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 
+#include <runtime/world/infantry.h>
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
@@ -165,6 +166,33 @@ void test_bake() {
     weapon_fsm_bake(&upper, 1, clip_resolves, clip_seconds, nullptr, def4);
     CHECK(def4.actions[wa::kReload].delay_start == 3);
     CHECK(def4.actions[wa::kReload].delay_end == 4);
+
+    // Repeated rows of a suffix: the last binds, as a later block replaces
+    // the row [orig: ActionDef_ParseScriptLine @ 0x4024a1 -> @ 0x4024da].
+    WeaponFsmActionRow twice[2];
+    set_row(twice[0], "fire", "anim_wpn_fire", 4, 6);
+    set_row(twice[1], "FIRE", "", 0, 2);
+    WeaponFsmDef def5;
+    weapon_fsm_bake(twice, 2, clip_resolves, clip_seconds, nullptr, def5);
+    CHECK(def5.actions[wa::kFire].delay_start == 0);
+    CHECK(def5.actions[wa::kFire].delay_end == 2);
+    CHECK(!def5.actions[wa::kFire].has_anim);
+}
+
+// The wpn_* slots run in suffix order from wpn_idle (241), the two the idle
+// handlers replay by number; overheated has none. [orig: g_AnimStateNameTable
+// @ 0x8135F0; WeaponAction_Idle @ 0x542955; WeaponAction_EmptyIdle @ 0x542a53]
+void test_action_anim_slots() {
+	CHECK(weapon_action_anim_slot(wa::kIdle) == 241);
+	CHECK(weapon_action_anim_slot(wa::kEmptyIdle) == 242);
+	CHECK(weapon_action_anim_slot(wa::kScopeDown) == 251);
+	CHECK(weapon_action_anim_slot(wa::kOverheated) == -1);
+	CHECK(weapon_action_anim_slot(-1) == -1 && weapon_action_anim_slot(wa::kCount) == -1);
+	for (int a = wa::kIdle; a < wa::kOverheated; ++a) {
+		const std::string key = infantry_anim_key(weapon_action_anim_slot(a));
+		const std::string suffix = kWeaponActionSuffixes[a];
+		CHECK(key == (a == wa::kEmptyIdle ? std::string("anim_wpn_empty_idle") : "anim_wpn_" + suffix));
+	}
 }
 
 // Drive N ticks with fixed inputs, collecting the last events.
@@ -173,6 +201,134 @@ WeaponFsmEvents run_ticks(const WeaponFsmDef &def, WeaponSlotState &s,
     WeaponFsmEvents ev;
     for (int i = 0; i < n; ++i) weapon_fsm_tick(def, s, in, ev);
     return ev;
+}
+
+// A row's FUNCTION binds the handler its slot runs; no FUNCTION, `null` or an
+// unknown name take the suffix default [orig: ActionFuncDef_FindByName @ 0x401040;
+// Anim_InitActions' rewrite @ 0x542117..0x542139; g_WeaponActionTable @ 0x830B90].
+void test_function_binds_the_handler() {
+	namespace wh = opennova::world::weapon_handler;
+	CHECK(weapon_handler_named("WPN_STD_EMPTYIDLE") == wh::kEmptyIdle);
+	CHECK(weapon_handler_named("wpn_std_fire 1 5 6") == wh::kFire); // the SR25 row's parameters
+	CHECK(weapon_handler_named("scopeup") == wh::kPlaceholder);     // 47 bare JOTAC rows
+	CHECK(weapon_handler_named("ANIM_WPN_IDLE") == wh::kPlaceholder); // the STAFF fire typo
+	CHECK(weapon_handler_named("null") == wh::kPlaceholder);
+	CHECK(weapon_handler_named("") == wh::kPlaceholder);
+	CHECK(weapon_handler_named("wpn_std_scopedown_map") == wh::kScopeDownMap);
+	CHECK(weapon_action_default_handler(wa::kOverheated) == wh::kIdle);
+
+	WeaponFsmActionRow rows[6];
+	set_row(rows[0], "emptyidle", "anim_wpn_idle", 0, -1);
+	std::strcpy(rows[0].function, "wpn_std_idle");
+	set_row(rows[1], "switchto", "anim_wpn_switchrank", 1, 1);
+	std::strcpy(rows[1].function, "WPN_STD_RELOAD");
+	set_row(rows[2], "scopeup", "", 1, 1);
+	std::strcpy(rows[2].function, "scopeup");
+	set_row(rows[3], "overheated", "anim_wpn_idle", 0, 0);
+	std::strcpy(rows[3].function, "WPN_STD_EMPTYIDLE");
+	set_row(rows[4], "scopedown", "", 60, 1);
+	std::strcpy(rows[4].function, "wpn_std_scopedown_map");
+	set_row(rows[5], "fire", "anim_wpn_fire", 0, 3);
+	std::strcpy(rows[5].function, "null");
+	WeaponFsmDef def;
+	weapon_fsm_bake(rows, 6, clip_resolves, clip_seconds, nullptr, def);
+	CHECK(def.actions[wa::kEmptyIdle].handler == wh::kIdle);
+	CHECK(def.actions[wa::kSwitchTo].handler == wh::kReload);
+	CHECK(def.actions[wa::kScopeUp].handler == wh::kScopeUp);
+	CHECK(def.actions[wa::kOverheated].handler == wh::kEmptyIdle);
+	CHECK(def.actions[wa::kScopeDown].handler == wh::kScopeDownMap);
+	CHECK(def.actions[wa::kScopeDown].map_command == -1);
+	CHECK(def.actions[wa::kFire].handler == wh::kFire);
+	CHECK(def.actions[wa::kReload].handler == wh::kReload); // no row: the default
+}
+
+// The shipped AK EMPTYIDLE names wpn_std_idle, so the empty gun runs the idle
+// handler: it shows the hardcoded idle clip (241), not 242, and reloads only
+// with auto-reload on; the wpn_std_empty binding holds with no reload at all.
+// [orig: WeaponAction_Idle @ 0x542920 — the 241 play @ 0x542955, the
+//  g_AutoReloadEnabled gate @ 0x5429AC, the hold @ 0x5429CF; WeaponAction_Empty
+//  @ 0x543180, the hold @ 0x5431B0..0x5431B9]
+void test_emptyidle_bound_to_idle_or_empty() {
+	for (const char *function : {"wpn_std_idle", "wpn_std_empty", ""}) {
+		for (const bool auto_reload : {true, false}) {
+			WeaponFsmDef def = make_ak_def();
+			WeaponFsmActionRow rows[2];
+			set_row(rows[0], "emptyidle", "anim_wpn_empty", 0, 5);
+			std::strcpy(rows[0].function, function);
+			set_row(rows[1], "reload", "anim_wpn_reload", 10, 0);
+			WeaponFsmDef bound;
+			weapon_fsm_bake(rows, 2, clip_resolves, clip_seconds, nullptr, bound);
+			def.actions[wa::kEmptyIdle] = bound.actions[wa::kEmptyIdle];
+			def.actions[wa::kReload] = bound.actions[wa::kReload];
+			WeaponSlotState s = make_ak_slot();
+			s.clip = 0;
+			s.reserve = 60;
+			s.next = wa::kEmptyIdle;
+			WeaponFsmInputs in;
+			in.auto_reload = auto_reload;
+			WeaponFsmEvents ev;
+			weapon_fsm_tick(def, s, in, ev); // idle -> EMPTYIDLE
+			CHECK(s.current == wa::kEmptyIdle);
+			CHECK(ev.play_anim);
+			const std::string played = ev.anim_key;
+			bool reloaded = false;
+			for (int t = 0; t < 30; ++t) {
+				weapon_fsm_tick(def, s, in, ev);
+				reloaded |= s.current == wa::kReload;
+			}
+			if (std::strcmp(function, "wpn_std_idle") == 0) {
+				CHECK(played == "anim_wpn_idle");
+				CHECK(reloaded == auto_reload);
+			} else if (std::strcmp(function, "wpn_std_empty") == 0) {
+				CHECK(played == "anim_wpn_empty"); // the row's own ANIM
+				CHECK(!reloaded);
+				CHECK(s.current == wa::kEmptyIdle);
+			} else {
+				CHECK(played == "anim_wpn_empty_idle"); // the default handler's 242
+				CHECK(reloaded);                        // unconditional [orig: @ 0x542aa3]
+			}
+		}
+	}
+}
+
+// wpn_std_null returns without touching the slot: its action never finishes
+// [orig: WeaponAction_Null @ 0x4010B0].
+void test_null_handler_never_finishes() {
+	WeaponFsmDef def = make_ak_def();
+	WeaponFsmActionRow row;
+	set_row(row, "reload", "anim_wpn_reload", 2, 2);
+	std::strcpy(row.function, "wpn_std_null");
+	WeaponFsmDef bound;
+	weapon_fsm_bake(&row, 1, clip_resolves, clip_seconds, nullptr, bound);
+	def.actions[wa::kReload] = bound.actions[wa::kReload];
+	WeaponSlotState s = make_ak_slot();
+	s.clip = 10;
+	s.next = wa::kReload;
+	WeaponFsmInputs in;
+	run_ticks(def, s, in, 50);
+	CHECK(s.current == wa::kReload);
+	CHECK(s.clip == 10);
+}
+
+// A def built in code and never baked (an emplacement's, a test rig's) holds
+// the placeholder in every slot, and each slot runs its suffix's default
+// handler, as the bind would have bound it: the fire request fires.
+// [orig: Anim_InitActions, the rewrite @ 0x542117..0x542139]
+void test_unbaked_def_runs_the_default_handlers() {
+	WeaponFsmDef def;
+	for (int a = 0; a < wa::kCount; ++a) def.actions[a].id = a;
+	def.actions[wa::kRecoil].delay_end = 1;
+	def.clip_capacity = -1;
+	WeaponSlotState s;
+	WeaponFsmInputs in;
+	in.fire_pressed = true;
+	in.fire_held = true;
+	WeaponFsmEvents ev;
+	weapon_fsm_tick(def, s, in, ev);
+	CHECK(def.actions[wa::kFire].handler == weapon_handler::kPlaceholder);
+	CHECK(s.current == wa::kFire);
+	CHECK(ev.fired);
+	CHECK(s.next == wa::kRecoil);
 }
 
 void test_fire_chains_recoil() {
@@ -568,6 +724,58 @@ void test_channel_advance_is_counter_gated() {
     CHECK(advances == 0);
 }
 
+// The two holds whose clip never steps. An idle window of one tick or none
+// (DELAYSTART + DELAYEND <= 1) reseeds a counter the same tick drains, so the
+// idle clip plays once and stays on its first frame; EMPTYIDLE has no reseed,
+// so its hold keeps the counter at 0 and never steps either.
+// [orig: WeaponAction_ProcessFrame — the idle reseed @0x54134C..0x54135D, for
+//  action 0 only, the decrement @0x541424; ActionSlot_ExecuteActionNoEffect
+//  @0x541A4D; WeaponAction_EmptyIdle, the hold @0x542AB2]
+void test_short_idle_and_emptyidle_hold_never_step() {
+	for (const int32_t window : {0, 1}) {
+		WeaponFsmActionRow row;
+		set_row(row, "idle", "anim_wpn_idle", 0, window);
+		WeaponFsmDef def;
+		weapon_fsm_bake(&row, 1, clip_resolves, clip_seconds, nullptr, def);
+		def.clip_capacity = 30;
+		WeaponSlotState s = make_ak_slot();
+		WeaponFsmInputs in;
+		WeaponFsmEvents ev;
+		int advances = 0;
+		int plays = 0;
+		for (int t = 0; t < 120; ++t) {
+			weapon_fsm_tick(def, s, in, ev);
+			advances += ev.advance_anim ? 1 : 0;
+			plays += ev.play_anim ? 1 : 0;
+		}
+		CHECK(s.current == wa::kIdle);
+		CHECK(plays == 1);
+		CHECK(advances == 0);
+	}
+	WeaponFsmActionRow rows[2];
+	set_row(rows[0], "idle", "anim_wpn_idle", 0, 8);
+	set_row(rows[1], "emptyidle", "anim_wpn_empty_idle", 0, 8);
+	WeaponFsmDef def;
+	weapon_fsm_bake(rows, 2, clip_resolves, clip_seconds, nullptr, def);
+	def.clip_capacity = 30;
+	WeaponSlotState s = make_ak_slot();
+	s.clip = 0;
+	s.reserve = 0;
+	s.next = wa::kEmptyIdle;
+	WeaponFsmInputs in;
+	WeaponFsmEvents ev;
+	weapon_fsm_tick(def, s, in, ev);
+	CHECK(s.current == wa::kEmptyIdle && ev.play_anim);
+	int advances = 0;
+	for (int t = 0; t < 120; ++t) {
+		weapon_fsm_tick(def, s, in, ev);
+		advances += ev.advance_anim ? 1 : 0;
+		CHECK(!ev.play_anim);
+	}
+	CHECK(s.current == wa::kEmptyIdle && s.counter == 0);
+	CHECK(advances == 0);
+}
+
 void test_action_sound_legs() {
     // The corpus split: fire rows carry the gunshot in soundsetEND (118/130 REVX,
     // 83/89 JOX), reload rows in soundset (start). The shot tick begins AND finishes
@@ -827,6 +1035,28 @@ void test_recoil_effect_leg() {
     CHECK(fired_tick >= 0);
     CHECK(casing_tick >= 0);
     CHECK(casing_tick - fired_tick >= 60); // the bolt-work delay carried the eject
+
+    // Bound to another slot by FUNCTION, the recoil handler spawns nothing: the
+    // gate asks that RECOIL be the slot's current action.
+    // [orig: WeaponAction_Recoil gate @ 0x542efa]
+    WeaponFsmDef bound = make_ak_def();
+    bound.actions[wa::kReload].handler = opennova::world::weapon_handler::kRecoil;
+    std::snprintf(bound.actions[wa::kReload].particle,
+                  sizeof(bound.actions[wa::kReload].particle), "Effect_CAR15Cas");
+    WeaponSlotState rs = make_ak_slot();
+    rs.clip = 1; // room to reload
+    WeaponFsmInputs rin;
+    rin.reload_pressed = true;
+    int reloading = 0, bound_effects = 0;
+    for (int t = 0; t < 120; ++t) {
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(bound, rs, rin, ev);
+        rin.reload_pressed = false;
+        if (rs.current == wa::kReload) ++reloading;
+        if (ev.action_effect >= 0) ++bound_effects;
+    }
+    CHECK(reloading > 0);
+    CHECK(bound_effects == 0);
 }
 
 void test_switch_completion_signal() {
@@ -1314,7 +1544,12 @@ int main() {
     test_weapon_level_sound_and_kick_gate();
     test_sights_card_eligibility();
     test_bake();
+    test_action_anim_slots();
+    test_function_binds_the_handler();
+    test_emptyidle_bound_to_idle_or_empty();
+    test_null_handler_never_finishes();
     test_bake_ring_read_multiplicity();
+    test_unbaked_def_runs_the_default_handlers();
     test_fire_chains_recoil();
     test_auto_refire_cadence();
     test_revx_m4_zero_recoil_auto_cadence();
@@ -1329,6 +1564,7 @@ int main() {
     test_scope_queue();
     test_idle_plays_once_per_entry();
     test_channel_advance_is_counter_gated();
+    test_short_idle_and_emptyidle_hold_never_step();
     test_action_sound_legs();
     test_held_replay_skips_the_begin_sound_leg();
     test_fire_abort_finishes_silently();

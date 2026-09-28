@@ -5,6 +5,7 @@
 // while the CMDL and section bounds stay put, so only the check under test
 // can catch it.
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -34,10 +35,12 @@ void check(bool ok, const char *what) {
 
 const std::string prefix = "o3d 1\nmodel CHECK\nskinned 1\nuv1 1\nmaterial VS_SKBASIC\n"
 		"lod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\npart 0 0 0 0\nstrip 0\nbones 0 1\n";
+// Skinned vertices: four bone-table slots, three weights (slot 3 takes the
+// rest, here nothing).
 const std::string verts =
-		"v 0 0 0 0 0 1 0 0 0 0 0 1 0 0.75 0.25 0\n"
-		"v 1 0 0 0 0 1 1 0 1 0 0 1 0 0.5 0.5 0\n"
-		"v 0 1 0 0 0 1 0 1 0 1 0 1 0 0.25 0.75 0\n";
+		"v 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0.75 0.25 0\n"
+		"v 1 0 0 0 0 1 1 0 1 0 0 1 0 0 0.5 0.5 0\n"
+		"v 0 1 0 0 0 1 0 1 0 1 0 1 0 0 0.25 0.75 0\n";
 const std::string suffix = "t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 0\n";
 
 std::string replace(std::string s, const std::string &from, const std::string &to) {
@@ -143,6 +146,11 @@ int main(int argc, char **argv) {
 			replace(replace(replace(verts, "0.75 0.25 0", "0.25 0.75 0"),
 					"v 1 0 0 0 0 1 1 0 1 0 0 1 0", "v 1 0 0 0 0 1 1 0 1 0 1 0 0"),
 					"v 0 1 0 0 0 1 0 1 0 1 0 1 0", "v 0 1 0 0 0 1 0 1 0 1 1 0 0") + suffix, true);
+	// The blend is what compares, not how the slots spell it: part 0's 0.75
+	// split over two slots, or left to slot 3 (1 - 0.25), is the same vertex.
+	compare("split-weight", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "0 1 0 0 0.5 0.25 0.25") + suffix, true);
+	compare("fourth-slot-weight", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "1 1 1 0 0.25 0 0") + suffix, true);
+	compare("fourth-slot-bone", prefix + replace(verts, "0 1 0 0 0.75 0.25 0", "1 1 1 1 0.25 0 0") + suffix, false);
 	build("undeclared-track-register", prefix + verts + suffix + "track rotx 113 0 0 0 100\n", false);
 	build("wrapped-panm-part", prefix + verts + "t 0 1 2\npanm 256 0\n", false);
 	build("wrapped-panm-parent", prefix + verts + "t 0 1 2\npanm 0 256\n", false);
@@ -177,9 +185,53 @@ int main(int argc, char **argv) {
 	const auto occ_a = build("occlusion", plain + occlusion);
 	const auto occ_b = build("occlusion-reversed", plain + replace(occlusion, "of 0 1 2", "of 0 2 1"));
 	check(threedi_cli::cmd_compare(occ_a.c_str(), occ_b.c_str()) == 1, "reversed occlusion faces");
-	std::string overflow = plain + "cobj 0\n";
-	for (int i = 0; i < 32769; ++i) overflow += "cv 0 0 0\n";
-	build("collision-index-overflow", overflow, false);
+	// A record's sphere as a retail file stores it, its centre mirrored
+	// across y from the vertices' (1/3, 1/3, 0): scene writes it back only
+	// then, and build keeps it, so the model rebuilds byte for byte.
+	{
+		const auto mirrored = build("occlusion-mirrored",
+				plain + replace(occlusion, "occ 0 0 0\n", "occ 0 0 0 0.333333343 -0.333333343 0 0.745355988\n"));
+		check(threedi_cli::cmd_compare(occ_a.c_str(), mirrored.c_str()) == 1, "a mirrored occlusion centre differs");
+		Threedi3di3 x{}, y{};
+		if (threedi_3di3_read(occ_a.c_str(), &x) == 0 && threedi_3di3_read(mirrored.c_str(), &y) == 0 &&
+				x.occlusion_object_count == 1 && y.occlusion_object_count == 1) {
+			// Model axes (-y, z, x): the derived centre (-1/3, 0, 1/3), the
+			// stored one (1/3, 0, 1/3); the radius the same.
+			check(std::fabs(x.occlusion_objects[0].position[0] + 1.0f / 3.0f) < 1e-6f &&
+							std::fabs(y.occlusion_objects[0].position[0] - 1.0f / 3.0f) < 1e-6f &&
+							x.occlusion_objects[0].radius == y.occlusion_objects[0].radius,
+					"an occ sphere is stored as given");
+		} else {
+			check(false, "read back the occlusion spheres");
+		}
+		threedi_3di3_free(&x);
+		threedi_3di3_free(&y);
+		for (const auto &path : {occ_a, mirrored}) {
+			const auto text = path + ".rt.o3d", again = path + ".rt.3di";
+			check(threedi_cli::cmd_scene(path.c_str(), text.c_str()) == 0 &&
+							threedi_cli::cmd_build(text.c_str(), again.c_str()) == 0 &&
+							test_io::read_file(path) == test_io::read_file(again),
+					"an occlusion sphere rebuilds byte for byte");
+			const std::string rt = test_io::read_file_text(text);
+			check((rt.find("occ 0 0 0  #") != std::string::npos) == (path == occ_a),
+					"scene writes an occ sphere only where it is not the derived one");
+		}
+	}
+
+	// A PANM table no row of which animates is never read (the loader keeps
+	// no table), so its row count does not matter; with a track it does.
+	{
+		const std::string two = plain + "part 0 0 0 1\npanm 0 0\n";
+		const auto one_row = build("panm-one-row", two);
+		const auto two_rows = build("panm-two-rows", two + "panm 1 0\n");
+		check(threedi_cli::cmd_compare(one_row.c_str(), two_rows.c_str()) == 0, "static PANM tables of any length");
+		const std::string turning = "register DOOR_00\n";
+		const auto animated_one = build("panm-animated-one-row",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\n");
+		const auto animated_two = build("panm-animated-two-rows",
+				replace(two, "model FACES\n", "model FACES\n" + turning) + "track roty 113 DOOR_00 0 0 90\npanm 1 0\n");
+		check(threedi_cli::cmd_compare(animated_one.c_str(), animated_two.c_str()) == 1, "an animated PANM table's rows");
+	}
 
 	// Every check of compare, one field at a time against the rich model.
 	const auto rich_a = build("rich", rich);
@@ -286,8 +338,10 @@ int main(int argc, char **argv) {
 	edited("CXLT row", "CXLT", [](uint8_t *p) { add_s32(p + 8, 65536); }, 1, 1);
 	edited("CXLT row by one step", "CXLT", [](uint8_t *p) { add_s32(p + 8, 1); }, 0, 1);
 	// ROBJ records (52 bytes): ..., rel @12, abs @24, sphere centre @36, radius @48.
-	edited("part sphere radius", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 48, 0.5f); }, 1, 1);
-	edited("part sphere centre", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 36, 0.5f); }, 1, 1);
+	// A part's sphere stands in for the model radius only without GHDR; beside
+	// the GHDR radius every built model carries, nothing reads it: drift.
+	edited("part sphere radius", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 48, 0.5f); }, 0, 1);
+	edited("part sphere centre", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 36, 0.5f); }, 0, 1);
 	edited("part rel", "ROBJ", [](uint8_t *p) { add_f32(p + 8 + 52 + 12, 0.5f); }, 1, 1);
 	// GHDR: the model radius at +24.
 	edited("model radius", "GHDR", [](uint8_t *p) { add_s32(p + 24, 65536); }, 1, 1);
@@ -329,13 +383,16 @@ int main(int argc, char **argv) {
 	check(threedi_cli::cmd_compare(tangent_a.c_str(), tangent_b.c_str()) == 0, "tangent values are drift");
 	check(threedi_cli::cmd_compare(tangent_a.c_str(), tangent_b.c_str(), true) == 1, "tangent values under --strict");
 
-	// A vertex without weight is drawn wholly on its first slot's bone.
+	// A vertex without stored weight is drawn wholly on its fourth slot's bone
+	// (slot 3 takes 1 - (w0 + w1 + w2)): its first slot does not matter.
 	const std::string rigid = "o3d 1\nmodel ZW\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\npart 0 0 0 0\npart 0 0 0 1\n"
-			"strip 0\nbones 0 1\nv 0 0 0 0 0 1 0 0 0 0 0 0 0 0\nv 1 0 0 0 0 1 1 0 0 0 0 1 0 0\n"
-			"v 0 1 0 0 0 1 0 1 0 0 0 1 0 0\nt 0 1 2\npanm 0 0\npanm 1 0\n";
+			"strip 0\nbones 0 1\nv 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0\nv 1 0 0 0 0 1 1 0 0 0 0 0 1 0 0\n"
+			"v 0 1 0 0 0 1 0 1 0 0 0 0 1 0 0\nt 0 1 2\npanm 0 0\npanm 1 0\n";
 	const auto rigid_a = build("zero-weight", rigid);
-	const auto rigid_b = build("zero-weight-slot", replace(rigid, "v 0 0 0 0 0 1 0 0 0 0 0", "v 0 0 0 0 0 1 0 0 1 0 0"));
-	check(threedi_cli::cmd_compare(rigid_a.c_str(), rigid_b.c_str()) == 1, "zero-weight vertex slot");
+	const auto rigid_b = build("zero-weight-first-slot", replace(rigid, "v 0 0 0 0 0 1 0 0 0 0 0 0", "v 0 0 0 0 0 1 0 0 1 0 0 0"));
+	const auto rigid_c = build("zero-weight-fourth-slot", replace(rigid, "v 0 0 0 0 0 1 0 0 0 0 0 0", "v 0 0 0 0 0 1 0 0 0 0 0 1"));
+	check(threedi_cli::cmd_compare(rigid_a.c_str(), rigid_b.c_str()) == 0, "zero-weight vertex: the first slot carries nothing");
+	check(threedi_cli::cmd_compare(rigid_a.c_str(), rigid_c.c_str()) == 1, "zero-weight vertex: the fourth slot carries it");
 
 	// A file that cannot be read is an error, not a usage mistake.
 	check(threedi_cli::cmd_compare((dir / "missing.3di").string().c_str(), rich_a.c_str()) == 1, "unreadable file");

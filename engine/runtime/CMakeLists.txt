@@ -10,6 +10,7 @@
 add_library(opennova_runtime STATIC
     # anim — skeletal sampling + the aim overlay (.adm parse: engine/formats/adm)
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/adm_clip_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/anim/adm_ring_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/adm_root_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/skeletal_clips.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/anim/aim_overlay.cpp

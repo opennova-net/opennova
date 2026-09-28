@@ -96,7 +96,7 @@ separately. Debug builds include the game's F3 tools.
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include
 `opennova-blender-addon-windows-v<version>.zip`. Install that zip directly in
-Blender 4.2 or newer using **Preferences > Get Extensions > Install from Disk**.
+Blender 5.0 or newer using **Preferences > Get Extensions > Install from Disk**.
 The add-on currently supports Windows x64.
 
 The native apps ship together in `opennova-apps-windows.zip` (on a PR's build

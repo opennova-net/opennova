@@ -28,7 +28,6 @@
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 #include <runtime/mission/runtime_boot.h>
-#include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
@@ -276,6 +275,10 @@ public:
 	// scope state (the F3 Weapon window's `auto`/ANIM edits).
 	bool install_weapon(const std::string &weapon_name,
 			bool preserve_slot_state = false, bool allow_same_weapon_rebake = false);
+	// Keep an F3 Weapon window edit of the mounted weapon's ACTION row for
+	// its next mount: a by-name mount copies the weapon table's descriptors,
+	// so the table entry takes the row as the live weapon now runs it.
+	void keep_weapon_action_edit(int action_id);
 	// The armory table (weapon.def -> world.tables.weapons + the retained rows), the
 	// mission loadout-chunk promotion and the spawn-kit rebuild — the boot's
 	// load_weapon_table step over an explicit source so the embedder's
@@ -392,7 +395,6 @@ public:
 	opennova::def::DefWeaponsFile weapon_defs{};
 	bool weapon_defs_ok = false;
 	bool ammo_ok = false;
-	anim::AdmClipIndex clip_index;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD for the PANM pose clock; -1 = deterministic logic time
 	// (world::mounted_pose_time_ms consumes it).

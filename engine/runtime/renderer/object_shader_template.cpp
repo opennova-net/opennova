@@ -85,9 +85,11 @@ ObjectProjectedShadowPolicy object_projected_shadow_policy(
 
 		case ObjectShaderTechnique::FixedSkinned:
 		case ObjectShaderTechnique::PhongTangentDiffuse:
+		case ObjectShaderTechnique::PhongTangentDiffuseSkinned:
 		case ObjectShaderTechnique::PhongTangentSpecular:
 		case ObjectShaderTechnique::PhongTangentSpecularSkinned:
 		case ObjectShaderTechnique::PhongObjectDiffuse:
+		case ObjectShaderTechnique::PhongObjectDiffuseSkinned:
 		case ObjectShaderTechnique::PhongObjectSpecular:
 		case ObjectShaderTechnique::PhongObjectSpecularPhongMap:
 		case ObjectShaderTechnique::Dot3Tangent:
@@ -127,9 +129,11 @@ ObjectProjectedShadowCoverage object_projected_shadow_coverage(
 
 		case ObjectShaderTechnique::FixedSkinned:
 		case ObjectShaderTechnique::PhongTangentDiffuse:
+		case ObjectShaderTechnique::PhongTangentDiffuseSkinned:
 		case ObjectShaderTechnique::PhongTangentSpecular:
 		case ObjectShaderTechnique::PhongTangentSpecularSkinned:
 		case ObjectShaderTechnique::PhongObjectDiffuse:
+		case ObjectShaderTechnique::PhongObjectDiffuseSkinned:
 		case ObjectShaderTechnique::PhongObjectSpecular:
 		case ObjectShaderTechnique::PhongObjectSpecularPhongMap:
 		case ObjectShaderTechnique::Dot3Tangent:
@@ -163,6 +167,60 @@ const char *object_projected_shadow_coverage_name(
 			return "diffuse_detail_alpha_ffp";
 	}
 	return "no_pass";
+}
+
+// The retail skinned effects' skinnormal argument per technique: SkBasic and
+// SkGlass blend the normal, every lit bump effect lights the first palette
+// entry's frame (object_shader_template.h carries the witness).
+// [orig: _BaseInc.fx CalcSkinWorldPosAndNormal; SkBasic.fx vsSkinBasic;
+//  SkGlass.fx vsSkinGlass; _vsSkDfT.fx vsTanSkinDot3Dir/DirPS/Point/PointPS;
+//  _vsSkPhT.fx vsTanSkinPhongDir/Point; _vsSkDfO.fx vsObjSkinDot3Dir/DirPS/
+//  Point/PointPS; _vsSkPhO.fx vsObjSkinPhongDir/Point]
+ObjectSkinNormal object_skin_normal(ObjectShaderTechnique technique) noexcept {
+	switch (technique) {
+		case ObjectShaderTechnique::FixedSkinned:
+		case ObjectShaderTechnique::GlassSkinned:
+			return ObjectSkinNormal::Blended;
+
+		case ObjectShaderTechnique::PhongTangentDiffuseSkinned:
+		case ObjectShaderTechnique::PhongTangentSpecularSkinned:
+		case ObjectShaderTechnique::PhongObjectDiffuseSkinned:
+		case ObjectShaderTechnique::PhongObjectSpecularPhongMap:
+		case ObjectShaderTechnique::Dot3TangentSkinned:
+		case ObjectShaderTechnique::Dot3TangentDetailSkinned:
+		case ObjectShaderTechnique::Dot3Object:
+		case ObjectShaderTechnique::Dot3ObjectDetail:
+			return ObjectSkinNormal::FirstBone;
+
+		case ObjectShaderTechnique::Unsupported:
+		case ObjectShaderTechnique::Fixed:
+		case ObjectShaderTechnique::FixedDetail:
+		case ObjectShaderTechnique::SelfLit:
+		case ObjectShaderTechnique::SelfLitDetail:
+		case ObjectShaderTechnique::Tracer:
+		case ObjectShaderTechnique::Flag:
+		case ObjectShaderTechnique::PhongTangentDiffuse:
+		case ObjectShaderTechnique::PhongTangentSpecular:
+		case ObjectShaderTechnique::PhongObjectDiffuse:
+		case ObjectShaderTechnique::PhongObjectSpecular:
+		case ObjectShaderTechnique::Dot3Tangent:
+		case ObjectShaderTechnique::Dot3TangentDetail:
+		case ObjectShaderTechnique::EnvironmentMirror:
+		case ObjectShaderTechnique::EnvironmentMirrorTextured:
+		case ObjectShaderTechnique::EnvironmentPhong:
+		case ObjectShaderTechnique::GlassFixed:
+			return ObjectSkinNormal::None;
+	}
+	return ObjectSkinNormal::None;
+}
+
+const char *object_skin_normal_name(ObjectSkinNormal skin_normal) noexcept {
+	switch (skin_normal) {
+		case ObjectSkinNormal::None: return "none";
+		case ObjectSkinNormal::Blended: return "blended";
+		case ObjectSkinNormal::FirstBone: return "first_bone";
+	}
+	return "none";
 }
 
 // The finite technique choices preserve the witnessed retail material families
@@ -268,7 +326,9 @@ ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey k
 							? ObjectShaderTechnique::PhongObjectSpecularPhongMap
 							: ObjectShaderTechnique::PhongObjectSpecular;
 				} else {
-					descriptor.technique = ObjectShaderTechnique::PhongObjectDiffuse;
+					descriptor.technique = descriptor.is_skinned
+							? ObjectShaderTechnique::PhongObjectDiffuseSkinned
+							: ObjectShaderTechnique::PhongObjectDiffuse;
 				}
 			} else if (descriptor.normal_space == ObjectNormalSpace::Tangent) {
 				if (descriptor.uses_specular) {
@@ -276,7 +336,9 @@ ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey k
 							? ObjectShaderTechnique::PhongTangentSpecularSkinned
 							: ObjectShaderTechnique::PhongTangentSpecular;
 				} else {
-					descriptor.technique = ObjectShaderTechnique::PhongTangentDiffuse;
+					descriptor.technique = descriptor.is_skinned
+							? ObjectShaderTechnique::PhongTangentDiffuseSkinned
+							: ObjectShaderTechnique::PhongTangentDiffuse;
 				}
 			}
 		}
@@ -317,6 +379,7 @@ ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey k
 					: ObjectShaderTechnique::GlassFixed;
 		}
 	}
+	descriptor.skin_normal = object_skin_normal(descriptor.technique);
 	return descriptor;
 }
 

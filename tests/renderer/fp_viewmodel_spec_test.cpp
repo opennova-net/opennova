@@ -4,6 +4,8 @@
 
 #include <runtime/renderer/fp_viewmodel_spec.h>
 
+#include <formats/threedi/threedi_3di3.h>
+
 #include <cstdio>
 
 namespace {
@@ -67,6 +69,39 @@ int main() {
 		check(s.gun == "ak47_1st" && s.arms == "ArmsG" && s.adm == "ak47_1st" &&
 						s.show_arms,
 				"the bring-up path submits the AK set with the character arms");
+	}
+
+	// How far the arms reach into the gun's bone array: one past the highest
+	// part a strip draws with, a skinned strip through its bone table, a rigid
+	// one through its own part; a part with no strip reaches nothing
+	// [orig: the arms submit with the gun's array @0x4DF088].
+	{
+		opennova::threedi::ThreediRenderObject parts[4] = {};
+		opennova::threedi::ThreediTriangleStrip strips[3] = {};
+		parts[0].num_strips = 1; // rigid, part 0
+		parts[1].num_strips = 1; // skinned over parts 2 and 5
+		parts[2].num_alpha_strips = 1;
+		strips[0].num_vertices = 3;
+		strips[1].num_vertices = 3;
+		strips[1].bone_table[0] = 2;
+		strips[1].bone_table[1] = 5;
+		strips[1].bone_table_length = 2;
+		strips[2].num_vertices = 3; // rigid alpha strip, part 2
+		opennova::threedi::ThreediLod lod = {};
+		lod.render_objects = parts;
+		lod.render_object_count = 4; // part 3: a meshless helper
+		lod.strips = strips;
+		lod.strip_count = 3;
+		opennova::threedi::Threedi3di3 arms = {};
+		arms.lods = &lod;
+		arms.lod_count = 1;
+		check(opennova::renderer::fp_arms_part_reach(arms) == 6,
+				"the skinned strip's bone table sets the reach");
+		strips[1].bone_table_length = 1;
+		check(opennova::renderer::fp_arms_part_reach(arms) == 3,
+				"a rigid strip reaches its own part; a meshless helper nothing");
+		arms.lod_count = 0;
+		check(opennova::renderer::fp_arms_part_reach(arms) == 0, "no LOD reaches nothing");
 	}
 
 	if (failures) {

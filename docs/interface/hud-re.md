@@ -2393,17 +2393,25 @@ builds the mode's ctx and calls the same `HUD_DrawMapOverlay`:
   edge, the second `HudMapPass` (`HudDrawList::big_map` + its own glyph
   list and raised canvas sandwich), and the mode legs in
   `HudMinimapCompiler`. The map-material alpha stage ignores texture
-  alpha (the colormap binds as RGB). Witnessed-unported: the pan/drag
-  input handlers (`sub_5432D0`/`sub_543360`/`@0x5434e0` family), the
+  alpha (the colormap binds as RGB). The mortar's `wpn_std_*_map` weapon
+  actions (once filed here as pan/drag input handlers) open and close mode
+  2 and are ported in the weapon FSM (`weapon_handler::kScopeUpMap` /
+  `kScopeDownMap` / `kSwitchFromMap`,
+  [weapon-vehicle-hud-validation.md](weapon-vehicle-hud-validation.md)):
+  `WeaponAction_ScopeUpMap @0x5432D0` and `WeaponAction_ScopeDownMap
+  @0x543360` are standalone handlers that run `ActionSlot_ExecuteActionTick`
+  and only in their finish leg set `g_MapOverlayMode` 0 → 2 [orig:
+  `@0x54330C`] and 2 → 0 [orig: `@0x54339C`]; `WeaponAction_SwitchFromMap
+  @0x5434E0` alone wraps, clearing mode 2 to 0 and tail-jumping to
+  `WeaponAction_SwitchFrom @0x5433b0`. Witnessed-unported: the
   0xAF937 bits 11/13/14/15 semantics, mode 1, the mode-4 DEATH window
   (D-HUD-19), and the objectives-family draws retail layers above the
   big map (ours ride the flat pass).
 
 Scope boundary: this ports the normal gameplay spinmap AND the M-map modes
 2/3 above (the 400×400 window, the fullscreen north-up map, the bit-12 grid
-leg). Still deferred: the pan/drag input hosting (the
-`sub_5432D0`/`sub_543360`/`@0x5434e0` family), the 0xAF937 mask bits
-11/13/14/15, mode 1, the windowed CMAP/DEATH `MapOverlay_DrawView` views
+leg) and the mortar map actions' mode-2 open and close. Still deferred: the
+0xAF937 mask bits 11/13/14/15, mode 1, the windowed CMAP/DEATH `MapOverlay_DrawView` views
 (D-HUD-19 — they share the banks above plus the §5.59 `MinimapSlot_*` player
 registry, `MinimapSlot_FindOrAllocByEntityId @0x57b1e0`, fed by the player
 wire messages), and the objectives-family-above-big-map frame ordering.
@@ -2660,8 +2668,9 @@ were made for this review.
 - **Command/deploy map surfaces.** The normal `HUDSPINMAP*` call into
   `HUD_DrawMapOverlay @0x5a5f40` AND the M-map modes 2/3 — including the
   bit-12 300-unit grid with its `HUD_FormatGridCoordinate @0x598600`
-  coordinate labels — are now ported above. Still deferred are the pan/drag
-  input hosting (the `sub_5432D0` family), the 0xAF937 mask bits
+  coordinate labels — are now ported above, as are the mortar's
+  `wpn_std_*_map` mode-2 actions (the `WeaponAction_ScopeUpMap @0x5432D0`
+  family). Still deferred are the 0xAF937 mask bits
   11/13/14/15, mode 1, the objectives-above-big-map ordering, and the
   WINDOWED sibling
   `MapOverlay_DrawView @0x5a58e0` (ex-sub_5A58E0; `(rect, centerX, centerY,

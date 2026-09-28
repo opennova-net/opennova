@@ -953,22 +953,24 @@ bool MissionKernel::install_weapon(const std::string &weapon_name, bool preserve
 		}
 	}
 	if (row == nullptr) return false;
-	clip_index.load(&assets(), row->animadm);
+	// The mount runs the descriptors the weapon table baked as it loaded, and
+	// its channel plays from the table's shared ANIMADM rings. A same-weapon
+	// re-bake (the dev tools' live ACTION edits) bakes the retained row as
+	// edited instead. [orig: Player_MountWeaponSlot @ 0x4dfa40; Anim_InitActions
+	// @ 0x541fa0 at the def's END]
 	w::WeaponInstallData data = w::weapon_install_data_from_def(*row);
-	const auto add_key = [&](const char *key) {
-		if (key == nullptr || key[0] == '\0') return;
-		const std::string lowered = strutil::to_lower(key);
-		for (const auto &kv : data.clip_rings)
-			if (kv.first == lowered) return;
-		if (const std::vector<float> *lengths = clip_index.lengths_for(key))
-			data.clip_rings.emplace_back(lowered, *lengths);
-	};
-	add_key("anim_wpn_idle");
-	add_key("anim_wpn_empty_idle");
-	for (size_t a = 0; a < row->actions_count; ++a) add_key(row->actions[a].anim);
+	data.table_baked = !allow_same_weapon_rebake;
 	w::local_weapon_install(world, local.weapon, data, preserve_slot_state,
 			allow_same_weapon_rebake, local.inventory_valid ? &local.inventory : nullptr, local.view);
 	return true;
+}
+
+void MissionKernel::keep_weapon_action_edit(int action_id) {
+	if (action_id < 0 || action_id >= w::weapon_action::kCount) return;
+	const int index = world.tables.weapons.index_of(local.weapon.def_name.c_str());
+	if (index < 0) return;
+	world.tables.weapons.entries[static_cast<size_t>(index)].action_fsm.actions[action_id] =
+			local.weapon.def.actions[action_id];
 }
 
 

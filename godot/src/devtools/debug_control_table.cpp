@@ -11,6 +11,7 @@
 #include "env/weather.h"
 #include "mission/mission_root.h"
 #include "player/local_player_presenter.h"
+#include "player/player_weapon_effects.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain.h"
 #include "world/game_world.h"
@@ -909,19 +910,33 @@ void DebugControlTable::register_automation_actions() {
 			DebugControlRow::TARGET_WORLD, DebugControlRow::OWNER_DEVICE,
 			args_of(DebugArgSpec::text("weapon")));
 	viewmodel.row->requires_confirm_ = true;
-	viewmodel.invoke = [this](const Array &p_args) -> Outcome {
+	// Both controls take the path a committed switch or clear takes, so the
+	// viewmodel is rebuilt for the new def, not left on the old one.
+	const auto weapon_effects = [this]() -> PlayerWeaponEffects * {
 		GameWorld *value = world();
-		if (value == nullptr) {
+		LocalPlayerPresenter *presenter = value != nullptr ? value->local_view_presenter() : nullptr;
+		return presenter != nullptr ? presenter->weapon_effects() : nullptr;
+	};
+	viewmodel.invoke = [weapon_effects](const Array &p_args) -> Outcome {
+		PlayerWeaponEffects *effects = weapon_effects();
+		if (effects == nullptr) {
 			return outcome_error(ERR_UNAVAILABLE);
 		}
-		return outcome_result(value->set_local_player_weapon_by_name(from_variant<String>(p_args[0])));
+		return outcome_result(effects->apply_weapon_switch(from_variant<String>(p_args[0]), false));
 	};
 
 	Entry &clear_viewmodel = action(control_id::kClearViewmodelWeapon, "Player",
 			"Clear viewmodel weapon", "Drop the equipped viewmodel (the armory NONE row).",
 			DebugControlRow::TARGET_WORLD, DebugControlRow::OWNER_DEVICE);
 	clear_viewmodel.row->requires_confirm_ = true;
-	bind_action(clear_viewmodel, &DebugControlTable::world, &GameWorld::clear_local_player_weapon);
+	clear_viewmodel.invoke = [weapon_effects](const Array &) -> Outcome {
+		PlayerWeaponEffects *effects = weapon_effects();
+		if (effects == nullptr) {
+			return outcome_error(ERR_UNAVAILABLE);
+		}
+		effects->apply_weapon_clear();
+		return outcome_result(Variant());
+	};
 
 	Entry &diagnostics = check(control_id::kNetJoinerDiagnostics, "Net", "Joiner diagnostics",
 			"Emit the per-second joiner freeze-tripwire trace (renders via print_verbose; run with --verbose).",

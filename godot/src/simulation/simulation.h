@@ -108,7 +108,6 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include "wac/wac_program.h"
 #include <formats/def/def.h> // the retained weapon.def parse (S6b)
-#include <runtime/anim/adm_clip_index.h> // the equipped rig's clip lengths (S6b)
 #include <runtime/world/player_loadout.h> // the moved loadout cluster (S7b, ADR 0028)
 #include <runtime/world/player_weapon.h> // the moved equipped-weapon cluster (S7a, ADR 0028)
 #include <runtime/world/present_rows.h> // the engine-owned PF_* present-row layout (ADR 0031)
@@ -1511,20 +1510,20 @@ public:
 	// {actions, flags, clipsize, startrounds} slice is consumed) and p_clip_seconds
 	// maps each .adm clip key to its VARIANT lengths in SECONDS — a
 	// PackedFloat32Array in .adm file order (SkeletalAnim.get_clip_variant_lengths;
-	// a plain float is accepted as a single-variant convenience). The lengths seed the
-	// per-slot rings and the Anim_InitActions bake consumes them ring-wise: one
-	// serve-then-advance read per 'auto' delay field (engine: runtime/world/player_weapon.cpp). A normal install is a real mount and
+	// a plain float is accepted as a single-variant convenience); they stand in for the
+	// def's ANIMADM rings when no table of that name loaded, one read per 'auto' field,
+	// last variant first (engine: runtime/world/player_weapon.cpp). A normal install is a real mount and
 	// resets the personal slot unless p_preserve_slot_state selects an already-live
 	// UseGun parent/personal slot.
 	void set_local_player_weapon(const Ref<WeaponDef> &p_def, const Dictionary &p_clip_seconds,
 	                             bool p_preserve_slot_state = false);
 	// The production mount (S6b, ADR 0028): find the row in the RETAINED
-	// weapon.def parse, bake the FSM def from it, and seed the clip rings from
-	// the rig's own .adm through the sim's mounted index — one step at ACCEPT
-	// time, no shell dictionary and no render dependency (engine: runtime/anim/adm_clip_index.h). Returns false
-	// when the name is not in the retained table (caller keeps the current
-	// weapon, mirroring the armory guard). The Dictionary pair above survives
-	// as the GUT synthetic-def seam and retires with S7a.
+	// weapon.def parse and run the descriptors the weapon table baked for it as
+	// it loaded; the channel plays from the table's shared ANIMADM rings
+	// (engine: runtime/anim/adm_ring_table.h). Returns false when the name is
+	// not in the retained table (caller keeps the current weapon, mirroring the
+	// armory guard). The Dictionary pair above survives as the GUT
+	// synthetic-def seam and retires with S7a.
 	bool install_local_player_weapon_by_name(const String &p_weapon_name,
 	                                         bool p_preserve_slot_state = false);
 	// Render-side late binding of .adm clip lengths for the already-mounted def.
@@ -2012,6 +2011,7 @@ public:
 	const opennova::world::WeaponSlotState *native_active_weapon_slot() const;
 	const char *native_weapon_input_block() const;
 	std::vector<std::string> native_equipped_weapon_clip_keys() const;
+	const opennova::anim::AdmRingTable *native_weapon_rings() const; // the tools peek
 	// Live ACTION edits — never the filesystem. Delays arrive AUTHORED and
 	// mirror into the retained row so a re-install keeps them; only explicit
 	// legs patch the live baked slot; `p_rebake` (a leg newly `auto`) or an

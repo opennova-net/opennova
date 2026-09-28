@@ -21,6 +21,9 @@ using namespace opennova::threedi;
 
 namespace {
 
+// A skinned vertex's light fallback byte naming no part.
+constexpr int32_t kLightFallbackNone = 255;
+
 Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
 	PackedVector3Array vertices, normals;
 	PackedVector2Array uvs, uvs2;
@@ -48,8 +51,34 @@ Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
 		arrays[Mesh::ARRAY_BONES] = bones;
 		arrays[Mesh::ARRAY_WEIGHTS] = weights;
 	}
+	if (!surface.light_fallback_bones.empty()) {
+		// The parts a vertex's lit skinned effects fall back to when its first
+		// palette entry has no inverse (skin.gdshaderinc), four bytes per
+		// vertex, 255 for none.
+		PackedByteArray fallbacks;
+		fallbacks.resize(static_cast<int64_t>(surface.light_fallback_bones.size()) * 4);
+		uint8_t *bytes = fallbacks.ptrw();
+		for (const auto &chain : surface.light_fallback_bones)
+			for (const auto part : chain)
+				*bytes++ = part < 0 || part > kLightFallbackNone
+						? static_cast<uint8_t>(kLightFallbackNone)
+						: static_cast<uint8_t>(part);
+		arrays[Mesh::ARRAY_CUSTOM0] = fallbacks;
+	}
 	arrays[Mesh::ARRAY_INDEX] = indices;
 	return arrays;
+}
+
+// The per-bone bind boxes (renderer::prepared_surface_bone_boxes) as AABBs
+// keyed by bone, for ObjectModel::publish_skin_palette.
+Dictionary pack_bone_bounds(const opennova::renderer::PreparedMeshSurface &surface) {
+	Dictionary out;
+	for (const opennova::renderer::BoneBindBox &box :
+			opennova::renderer::prepared_surface_bone_boxes(surface)) {
+		const Vector3 min(box.min[0], box.min[1], box.min[2]);
+		out[box.bone] = AABB(min, Vector3(box.max[0], box.max[1], box.max[2]) - min);
+	}
+	return out;
 }
 
 } // namespace
@@ -288,6 +317,9 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		entry["parent_index"] = surface.parent_index;
 		entry["primitive_index"] = static_cast<int64_t>(surface.primitive_index);
 		entry["is_skinned"] = !surface.bones.empty();
+		if (!surface.bones.empty()) {
+			entry["bone_bounds"] = pack_bone_bounds(surface);
+		}
 		result.push_back(entry);
 	}
 	// Keep the pristine copy; the caller gets its own entry dictionaries. The

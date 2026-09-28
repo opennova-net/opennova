@@ -42,6 +42,14 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	// nothing free-runs the playhead [orig: the counter-gated
 	// AnimChannel_AdvanceDispatch @ 0x40b960 callers, net-re §5.40].
 	v.anim_advance_ticks = static_cast<int32_t>(w.anim_key.empty() ? 0u : w.anim_advance_ticks);
+	// A loop wrap's fade: the presenter slerps the primary clip toward the
+	// incoming ring entry by the weight [orig: AnimChannel_BlendTwoChannels
+	// @ 0x410DBD over the two halves AnimMap_AdvanceToNextAnim @ 0x40BDF0 set].
+	v.anim_blending = w.anim_blending;
+	v.anim_blend_key = w.anim_blending ? w.anim_blend_key : std::string();
+	v.anim_blend_variant = w.anim_blending ? w.anim_blend_variant : 0;
+	v.anim_blend_ticks = w.anim_blending ? static_cast<int32_t>(w.anim_blend_ticks) : 0;
+	v.anim_blend_weight = w.anim_blending ? w.anim_blend_weight : 0.0f;
 	v.play_serial = static_cast<int32_t>(w.play_serial);
 	// The last-started action's audio/effect legs remain useful snapshot diagnostics;
 	// ordered delivery uses drain_local_player_weapon_events().

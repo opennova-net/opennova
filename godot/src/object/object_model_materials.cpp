@@ -138,12 +138,14 @@ Ref<ShaderMaterial> ObjectModel::material_for_index(int p_material_array_index) 
 			? object_data_->find_material_array_index(p_material_array_index)
 			: -1;
 	Ref<ShaderMaterial> postmultiply;
+	bool skin_program = false;
 	const Ref<ShaderMaterial> material =
-			create_material(array_index, postmultiply);
+			create_material(array_index, postmultiply, skin_program);
 	if (material.is_valid() && render_rung_override_ != kRenderRungFromWaterSide) {
 		material->set_render_priority(render_rung_override_);
 	}
 	material_cache_[cache_key] = material;
+	material_skin_programs_[cache_key] = skin_program;
 	if (postmultiply.is_valid()) {
 		postmultiply_cache_[cache_key] = postmultiply;
 	}
@@ -158,8 +160,9 @@ Ref<ShaderMaterial> ObjectModel::postmultiply_material_for_index(
 }
 
 Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
-		Ref<ShaderMaterial> &r_postmultiply) {
+		Ref<ShaderMaterial> &r_postmultiply, bool &r_skin_program) {
 	r_postmultiply = Ref<ShaderMaterial>();
+	r_skin_program = false;
 	Ref<ShaderMaterial> material;
 	material.instantiate();
 	// The authored MTRL row; a surface with no row builds the FF_ST_OP defaults.
@@ -218,6 +221,9 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_array_index,
 	shader_cache->configure_material_for_key(material, key);
 	const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
 			opennova::renderer::describe_object_shader_pipeline(static_cast<uint32_t>(key));
+	// A skinned effect's vertex program poses the strip from the model's
+	// bone palette (object_model_skin_palette.cpp).
+	r_skin_program = pipeline.skin_normal != opennova::renderer::ObjectSkinNormal::None;
 	// BmTxMirrT.fx P3 is an independent raw-UV, regular-fogged draw with
 	// DESTCOLOR/SRCCOLOR (2*source*framebuffer). Keep it paired with the P0/P1
 	// material so animated Diffuse1 and environment state update atomically.

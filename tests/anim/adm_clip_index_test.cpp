@@ -1,5 +1,5 @@
-/* engine/runtime/anim AdmClipIndex — the native clip-length source the
-   weapon FSM bake rings from (S6b). Pinned over the authored fixtures/anim
+/* engine/runtime/anim AdmClipIndex — the native clip source the weapon
+   table's rings load from (S6b). Pinned over the authored fixtures/anim
    (resolvable .bads) and a rig map staged in a temp dir whose .bads are
    absent (the continue-on-failure edge). */
 
@@ -36,24 +36,21 @@ int main() {
         const int keys = clips.load(&index_assets, "soldier");
         std::printf("[clipindex] soldier keys=%d\n", keys);
         TEST_EXPECT(keys == 7);
-        TEST_EXPECT(clips.loaded());
-        TEST_EXPECT(clips.adm_name() == "soldier.adm");
 
-        const std::vector<float> *idle = clips.lengths_for("ANIM_IDLE");
+        const auto *idle = clips.clips_for("ANIM_IDLE");
         TEST_EXPECT(idle != nullptr && idle->size() == 1);
-        TEST_EXPECT((*idle)[0] > 0.0f);
-        const std::vector<float> *walk = clips.lengths_for("anim_walk_forward");
+        TEST_EXPECT((*idle)[0].seconds > 0.0f);
+        const auto *walk = clips.clips_for("anim_walk_forward");
         TEST_EXPECT(walk != nullptr && walk->size() == 1);
-        std::printf("[clipindex] idle=%f walk=%f\n", (*idle)[0], (*walk)[0]);
+        std::printf("[clipindex] idle=%f walk=%f\n", (*idle)[0].seconds, (*walk)[0].seconds);
         // Distinct .bads produce their own lengths; shared .bads agree.
-        const std::vector<float> *jog = clips.lengths_for("anim_jog_forward");
-        TEST_EXPECT(jog != nullptr && (*jog)[0] == (*walk)[0]);
-        TEST_EXPECT(clips.lengths_for("anim_wpn_fire") == nullptr);
+        const auto *jog = clips.clips_for("anim_jog_forward");
+        TEST_EXPECT(jog != nullptr && (*jog)[0].seconds == (*walk)[0].seconds);
+        TEST_EXPECT(clips.clips_for("anim_wpn_fire") == nullptr);
 
         // Reload replaces wholesale.
         TEST_EXPECT(clips.load(&index_assets, "US01.adm") > 0);
-        TEST_EXPECT(clips.adm_name() == "US01.adm");
-        TEST_EXPECT(clips.lengths_for("anim_walk_forward") == nullptr);
+        TEST_EXPECT(clips.clips_for("anim_walk_forward") == nullptr);
     }
 
     {
@@ -79,8 +76,7 @@ int main() {
         TEST_EXPECT(index.scan(dir));
         AdmClipIndex clips;
         TEST_EXPECT(clips.load(&index_assets, "mp5_1st.adm") == 0);
-        TEST_EXPECT(!clips.loaded());
-        TEST_EXPECT(clips.lengths_for("anim_wpn_fire") == nullptr);
+        TEST_EXPECT(clips.clips_for("anim_wpn_fire") == nullptr);
     }
 
     {
@@ -102,16 +98,27 @@ int main() {
             std::ofstream bad(dir + "/idle.bad", std::ios::binary);
             bad.write(reinterpret_cast<const char *>(idle.data()), static_cast<std::streamsize>(idle.size()));
             std::ofstream f(dir + "/slots.adm", std::ios::binary);
-            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\nxxxx_idle\t\t\t\t\"idle\"\r\n";
+            f << "\r\nANIM_RESET\t\t\t\t\"idle\"\r\nxxxx_idle\t\t\t\t\"idle\"\r\n"
+                 "anim_wpn_fire_long\t\t\t\t\"idle\"\r\nanim_notaslot\t\t\t\t\"idle\"\r\n";
             TEST_EXPECT(static_cast<bool>(bad) && static_cast<bool>(f));
         }
         opennova::ResourceIndex index;
         opennova::assets::AssetStore index_assets{&index};
         TEST_EXPECT(index.scan(dir));
         AdmClipIndex clips;
+        // A key naming none of the 252 slots registers nothing [orig:
+        // AnimMap_FindSlotByName @ 0x40cfa0 -1 @ 0x40cfce; the gate @ 0x40cba4].
         TEST_EXPECT(clips.load(&index_assets, "slots.adm") == 2);
-        TEST_EXPECT(clips.lengths_for("anim_reset") != nullptr);
-        TEST_EXPECT(clips.lengths_for("anim_idle") != nullptr);
+        TEST_EXPECT(clips.clips_for("anim_reset") != nullptr);
+        TEST_EXPECT(clips.clips_for("anim_idle") != nullptr);
+        TEST_EXPECT(clips.clips_for("ANIM_IDLE") != nullptr);
+        TEST_EXPECT(clips.clips_for("yyyy_idle") != nullptr); // the query names its slot too
+        TEST_EXPECT(clips.clips_for("anim_notaslot") == nullptr);
+        TEST_EXPECT(clips.clips_for("anim_wpn_fire_long") == nullptr);
+        TEST_EXPECT(opennova::anim::adm_slot_index("ANIM_WPN_SCOPEDOWN") == 251);
+        TEST_EXPECT(opennova::anim::adm_slot_index("xxxx_reset") == 0);
+        TEST_EXPECT(opennova::anim::adm_slot_index("anim_notaslot") == -1);
+        TEST_EXPECT(opennova::anim::adm_slot_index("anim_") == -1);
     }
 
     {

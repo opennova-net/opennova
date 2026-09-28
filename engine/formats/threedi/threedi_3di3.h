@@ -119,6 +119,45 @@ typedef struct ThreediTriangleStrip {
     int32_t bone_table_length; // 0 if absent.
 } ThreediTriangleStrip;
 
+// One influence of a skinned vertex: the bone-table slot its index byte
+// names, the part that slot of the strip's table holds (-1 for a slot past
+// the table: the palette uploaded for the strip holds no matrix there, so
+// retail reads whatever that constant last held), and its weight.
+typedef struct ThreediSkinInfluence {
+    int32_t slot;
+    int32_t part;
+    float weight;
+} ThreediSkinInfluence;
+
+// A skinned vertex's four influences as the retail vertex shader blends
+// them: the three stored weights on slots bone_indices[0..2], and the
+// remainder 1 - (w0 + w1 + w2) on slot bone_indices[3], the sum added in
+// float in slot order and never renormalized. A vertex with no stored
+// weight rides slot 3 wholly; one whose weights sum past 1 gives slot 3 a
+// small negative weight (retail's four-decimal weights reach 1.0001,
+// ArmGlovD). `bone_table` is the strip's table (STRP), at most 16 slots.
+// The loader copies the three weights and the four index bytes verbatim;
+// the declaration feeds them as BLENDWEIGHT FLOAT3 and BLENDINDICES
+// D3DCOLOR, which D3DCOLORtoUBYTE4 turns back into index byte k =
+// IndexArray[k]; the strip's palette entry k is its bone-table entry k's
+// matrix; every skinned vertex shader compiles NumBones 4.
+// [orig: ThreediGp_ConvertVerticesToGPUFormat @ 0x5B4C90 (the weights
+// @ 0x5B4E2C); D3DDevice_CreateVertexDeclarations @ 0x5B0A00;
+// CRenderBatchQueue_FlushBatches @ 0x5DA170; _BaseInc.fx
+// CalcSkinWorldPosAndNormal: lastweight = 1 - (w0 + w1 + w2) on
+// IndexArray[NumBones - 1]]
+static inline void threedi_skin_influences(const ThreediVertex *v, const uint8_t *bone_table,
+                                           int32_t bone_table_length, ThreediSkinInfluence out[4]) {
+    float sum = 0.0f;
+    for (int k = 0; k < 3; ++k) sum += v->bone_weights[k];
+    for (int k = 0; k < 4; ++k) {
+        const int32_t slot = v->bone_indices[k];
+        out[k].slot = slot;
+        out[k].part = slot < bone_table_length && slot < 16 ? bone_table[slot] : -1;
+        out[k].weight = k < 3 ? v->bone_weights[k] : 1.0f - sum;
+    }
+}
+
 typedef struct ThreediRenderObject {
     int32_t num_strips;
     int32_t num_alpha_strips;
@@ -296,6 +335,13 @@ typedef struct ThreediCollisionNormal {
     int16_t dominate_axis;
 } ThreediCollisionNormal;
 
+// The corner and CNRM indices are SIGNED 16-bit words, as every retail
+// reader takes them (movsx), so a section addresses at most 32,768 vertices:
+// a corner past 32,767 reads before the section's vertex table (retail
+// Pinegr_L's 40,824-vertex section is broken in retail too).
+// [orig: Math_PointInTriangle2D @ 0x414071..0x414095 (the corners, shared by
+// every ray path); Physics_RaycastAgainstBoneCollision @ 0x4E5079 (the normal
+// index); Entity_SpawnSectionDebris @ 0x43F5F6..0x43F5FE]
 typedef struct ThreediCollisionFace {
     int16_t vert_index[3];   // Local subobject vertex indices.
     int16_t normal_index;    // Index into CNRM for this subobject.
@@ -835,10 +881,23 @@ int threedi_3di3_read_memory(const uint8_t *data, size_t size,
 // Convenience: write a previously-read model back to disk (round-trip).
 int threedi_3di3_write(const char *path, const Threedi3di3 *model);
 
+// A chunk too large for its header: a 3DI3 chunk says its payload length in
+// 24 bits (THREEDI_3DI3_LENGTH_MASK), and a parent's payload is its children,
+// so ROOT holds the whole model and an RLOD one LOD. `chunk` is its path from
+// ROOT, a repeated chunk by its index ("ROOT/RDTA/RLOD[1]/VERT"), and
+// `bytes` its payload.
+typedef struct ThreediChunkOverflow {
+    char chunk[48];
+    size_t bytes;
+} ThreediChunkOverflow;
+
 // The same parity writer into memory: `out` receives exactly the bytes
 // threedi_3di3_write puts on disk. Returns 0 on success, -1 when the writer
-// refuses the model.
-int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out);
+// refuses the model; when it refuses it because a chunk outgrew its length
+// field, `overflow` (when given) receives the first such chunk, children
+// before their parent, in file order (otherwise its chunk is left empty).
+int threedi_3di3_write_memory(const Threedi3di3 *model, std::vector<uint8_t> &out,
+                              ThreediChunkOverflow *overflow = nullptr);
 
 // Free allocations inside a Threedi3di3.
 void threedi_3di3_free(Threedi3di3 *model);

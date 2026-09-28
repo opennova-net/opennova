@@ -1,14 +1,30 @@
 # .3di -> opennova-3di scene -> .o3d text -> a Blender scene.
 #
 # The engine decodes the model (`opennova-3di scene`, the inverse of the
-# exporter's `build`); this module only lays the .o3d out by the naming
-# contract export.py reads (docs/threedi/scene-naming-contract.md), so an
+# exporter's `build`); this module only lays the .o3d out in the scene shape
+# export.py reads (rig.py, docs/threedi/scene-naming-contract.md), so an
 # imported model exports again. Each file comes into the current scene under a
-# model root of its own (in a collection named after the model; export reads
-# one model root), with LOD 1 and up hidden. Textures load from the file
-# `opennova-3di` resolved beside the .3di by the runtime's candidate order
-# (`texfile` records). What the scene cannot carry is reported as a note; a
-# file that fails leaves nothing of itself behind.
+# model root of its own (in a collection named after the model), with LOD 1
+# and up hidden:
+#
+#   a static model     its parts as PN## empties, each part's geometry and
+#                      helpers under its empty;
+#   a skinned model    one Armature under LOD 0's root whose BN## bones are its
+#                      parts, its skinned geometry one mesh per LOD deforming
+#                      with it (on the mesh part, whose pivot is the mesh's
+#                      origin, when the file keeps one), its helpers hung from
+#                      the bones;
+#   a first-person gun imported with its arms: the gun's parts as the bones of
+#                      a rig (its geometry and helpers hung from them), and the
+#                      arms, whose bones are the gun's first parts, deform with
+#                      that rig: their model root sits under the gun's, and
+#                      their helpers under their own LOD root, naming their
+#                      part (`_05 hit`).
+#
+# Textures load from the files `opennova-3di` resolved beside the .3di by the
+# runtime's candidate order (`texfile` records). What the scene cannot carry
+# is reported as a note, never stashed; a file that fails leaves nothing of
+# itself behind.
 
 import math
 import os
@@ -16,7 +32,7 @@ import os
 import bpy
 from mathutils import Matrix, Vector
 
-from . import export
+from . import export, materials, rig
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, Notes, axis_basis, blender_axes,
                       import_text, num, strip_comment, tokens)
 
@@ -118,8 +134,10 @@ def read_o3d(path):
                 else:
                     vert["uv1"] = vert["uv"]
                 if sc["skinned"]:
-                    vert["bi"] = [int(x) for x in rest[0:3]]
-                    vert["bw"] = rest[3:6]
+                    # Contract C1: four bone-table slots, three stored weights;
+                    # slot 3 takes 1 - (w0 + w1 + w2).
+                    vert["bi"] = [int(x) for x in rest[0:4]]
+                    vert["bw"] = rest[4:7]
                 strip["verts"].append(vert)
             elif k == "t":
                 strip["tris"].append(tuple(int(x) for x in a[:3]))
@@ -144,7 +162,8 @@ def read_o3d(path):
                     light["falloff"] = num(a[19])
                 sc["lights"].append(light)
             elif k == "occ":
-                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": []}
+                occ = {"type": int(a[0]), "a": int(a[1]), "b": int(a[2]), "verts": [], "faces": [],
+                       "sphere": tuple(num(x) for x in a[3:7]) if len(a) >= 7 else None}
                 sc["occ"].append(occ)
             elif k == "ov":
                 occ["verts"].append(tuple(num(x) for x in a[:3]))
@@ -152,10 +171,11 @@ def read_o3d(path):
                 occ["faces"].append(tuple(int(x) for x in a[:3]))
             elif k == "cobj":
                 cobj = {"parent": int(a[0]), "offset": tuple(num(x) for x in a[1:4]) if len(a) >= 4 else (0, 0, 0),
-                        "sphere": None, "verts": [], "faces": [], "volumes": []}
+                        "sphere": None, "box": None, "verts": [], "faces": [], "volumes": []}
                 sc["cobjs"].append(cobj)
             elif k == "csphere":
                 cobj["sphere"] = tuple(num(x) for x in a[:4])
+                cobj["box"] = tuple(num(x) for x in a[4:10]) if len(a) >= 10 else None
             elif k == "cv":
                 cobj["verts"].append(tuple(num(x) for x in a[:3]))
             elif k == "cf":
@@ -178,30 +198,170 @@ def read_o3d(path):
     return sc
 
 
+def top_parent(parts, pi):
+    """A part's parent as the scene holds it: none (a top part) for the root,
+    for a part naming itself or -1, or one the LOD lacks."""
+    parent = parts[pi]["parent"]
+    return None if pi == 0 or parent == pi or not 0 <= parent < len(parts) else parent
+
+
+def skin_layout(sc):
+    """A skinned model's parts as the scene holds them: (the number of bones,
+    the mesh part or None). The mesh part is the part `scene` writes the
+    skinned strips on that no bone table names (ArmsG part 37, US01 part 19);
+    without one the strips are the root's (Delta04, ArmGlovD)."""
+    parts = sc["lods"][0]["parts"] if sc["lods"] else []
+    named = {b for lod in sc["lods"] for p in lod["parts"] for s in p["strips"] for b in s["bones"]}
+    mesh = [pi for pi, p in enumerate(parts) if pi > 0 and p["strips"] and pi not in named]
+    if mesh and mesh[0] == len(parts) - 1:
+        return len(parts) - 1, mesh[0]
+    return len(parts), None
+
+
+def weighted_top(sc):
+    """One past the highest part any skinned vertex of the model weights."""
+    top = 0
+    for lod in sc["lods"]:
+        for p in lod["parts"]:
+            for s in p["strips"]:
+                for v in s["verts"]:
+                    for part, w in influences(s, v):
+                        if w >= rig.WEIGHT_EPS:
+                            top = max(top, part + 1)
+    return top
+
+
+def influences(s, v):
+    """A skinned vertex's (part, weight) pairs, the implicit fourth included
+    (contract C1: slot 3 takes 1 - (w0 + w1 + w2), so a vertex whose stored
+    weights are all zero lies wholly on it), summed per part; slots past the
+    strip's bone table are left out."""
+    table = s["bones"]
+    out = {}
+    weights = list(v["bw"]) + [max(0.0, 1.0 - sum(v["bw"]))]
+    for slot, w in zip(v["bi"], weights):
+        if w > 0.0 and slot < len(table):
+            out[table[slot]] = out.get(table[slot], 0.0) + w
+    return sorted(out.items())
+
+
+def same_turn(face, ref):
+    """Whether a triangle winds as `ref` does (a cyclic turn of its corners)."""
+    return face in (ref, (ref[1], ref[2], ref[0]), (ref[2], ref[0], ref[1]))
+
+
+def back_sides(tris, normal):
+    """Which of a mesh's triangles, [(strip corners, strip, material slot,
+    merged vertices)], lie on the back of a two-sided sheet: of the triangles
+    over one set of vertices in both windings, those wound against their
+    corners' stored normals (a scene triangle winds counter-clockwise about
+    its outward normal in mission axes); where the normals give no side, the
+    first triangle's winding is the front."""
+    by_corners = {}
+    for i, (_, _, _, merged) in enumerate(tris):
+        if len(set(merged)) == 3:
+            by_corners.setdefault(frozenset(merged), []).append(i)
+    back = set()
+    for group in by_corners.values():
+        ref = tris[group[0]][3]
+        turns = [same_turn(tris[i][3], ref) for i in group]
+        if all(turns):
+            continue
+        corners, s, _, _ = tris[group[0]]
+        p = [s["verts"][x]["p"] for x in corners]
+        n = [normal(s["verts"][x]) for x in corners]
+        e1 = [p[1][k] - p[0][k] for k in range(3)]
+        e2 = [p[2][k] - p[0][k] for k in range(3)]
+        cross = (e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0])
+        facing = sum(cross[k] * (n[0][k] + n[1][k] + n[2][k]) for k in range(3)) >= 0.0
+        back.update(i for i, same in zip(group, turns) if same != facing)
+    return back
+
+
+# A section's bounds are stored on the 16.16 grid: the builder rounds a hit
+# sphere's centre to it and truncates its radius and box
+# (formats/threedi/threedi_build.cpp).
+Q16 = 65536.0
+
+
+def on_grid(stored, derived, rounded=False):
+    """Whether stored 16.16 values (read back exactly) are the ones the
+    builder writes for `derived` values (rounded, else truncated), within one
+    step: the float noise of the vertices they come from can move a
+    truncation a whole step."""
+    q = round if rounded else int
+    return all(abs(round(a * Q16) - q(b * Q16)) <= 1 for a, b in zip(stored, derived))
+
+
+def pair(read):
+    """Which skinned model of an import deforms with which rigid model's rig:
+    {skinned index: (gun index, worst pivot distance)}. A skinned model pairs
+    with the rigid model whose first parts are its bones (the same parents,
+    pivots within rig.PAIR_TOLERANCE, best fit first), as retail draws a gun's
+    arms with the gun's part matrices; only when its weights reach its last
+    bone (a shared rig gives the arms exactly those parts) and the gun has at
+    least as many parts as the arms."""
+    out = {}
+    guns = [(i, sc) for i, (_, sc, _, _) in enumerate(read) if sc is not None and not sc["skinned"] and sc["lods"]]
+    for i, (_, sc, _, _) in enumerate(read):
+        if sc is None or not sc["skinned"] or not sc["lods"]:
+            continue
+        bones, mesh_part = skin_layout(sc)
+        if bones == 0 or weighted_top(sc) != bones:
+            continue
+        arms = sc["lods"][0]["parts"]
+        need = bones + (1 if mesh_part is not None else 0)
+        fits = []
+        for g, gun in guns:
+            parts = gun["lods"][0]["parts"]
+            if len(parts) < need:
+                continue
+            if any(top_parent(arms, k) != top_parent(parts, k) for k in range(bones)):
+                continue
+            worst = max(math.dist(arms[k]["pivot"], parts[k]["pivot"]) for k in range(bones))
+            if worst <= rig.PAIR_TOLERANCE:
+                fits.append((worst, g))
+        if fits:
+            worst, g = min(fits)
+            out[i] = (g, worst)
+    return out
+
+
 # --- scene building ------------------------------------------------------------
 
 class Builder(Notes):
-    def __init__(self, context, sc, source_path, op):
+    """One file's model, built into the scene. `rigged`: a first-person gun
+    imported with its arms, whose LOD 0 parts become a rig."""
+
+    def __init__(self, context, sc, source_path, op, rigged=False):
         self.context = context
         self.sc = sc
         self.stem = os.path.splitext(os.path.basename(source_path))[0]
         self.op = op
+        self.rigged = rigged
         self.notes = []
         self.images = {}
         self.collection = None
-        self.made_materials = []
-        self.part_objects = {}  # LOD -> {part: its PN## empty}
-        self.skinned_parts = {}  # LOD -> (armature, {mesh part: its mesh})
-        self.attach_helpers = {}  # (LOD, part) -> its `~PPx attach` helper
+        self.made = []           # data-blocks a failed build removes (not its objects: its collection's)
+        self.world = {}          # object name -> its matrix as Blender holds it
+        self.blender = blender_axes()  # mission -> Blender, the export's axis map inverted
+        self.model = None
+        self.roots = []          # LOD roots
+        self.rig = None          # the model's rig
+        self.part_empties = {}   # LOD -> {part: its PN## empty}
+        self.mesh_part = None    # a skinned model's mesh part
 
     def discard(self):
-        """Remove what a failed build made."""
-        if self.collection is not None:
-            for ob in list(self.collection.objects):
-                bpy.data.objects.remove(ob)
-            bpy.data.collections.remove(self.collection)
-        for mat in self.made_materials:
-            bpy.data.materials.remove(mat)
+        """Remove what a failed build made: its objects and collection, and
+        every data-block it made (materials, meshes, lights, the rig's
+        armature, the images it loaded)."""
+        doomed = list(self.collection.objects) + [self.collection] if self.collection is not None else []
+        bpy.data.batch_remove(doomed + self.made)
+
+    def data(self, block):
+        """A data-block the build made, which a failed build removes."""
+        self.made.append(block)
+        return block
 
     def link(self, ob, parent=None, world=None, part=False):
         """Put `ob` at `world` under `parent`. Blender holds an object's own
@@ -232,164 +392,38 @@ class Builder(Notes):
         ob.empty_display_size = size
         return self.link(ob, parent, world, part)
 
-    # --- materials ---------------------------------------------------------
-    def image(self, name):
-        if name in self.images:
-            return self.images[name]
-        path = self.sc["texfiles"].get(name)
-        img = None
-        if not path:
-            self.note(f"texture {name} not found beside the model")
-        else:
-            try:
-                img = bpy.data.images.load(path, check_existing=True)
-                img.name = name
-                # The game samples colour and alpha independently: a texture's
-                # alpha is often a mask a shader reads (specular, bump), not
-                # opacity (the arms' camo averages 0.001). Blender's default
-                # straight alpha premultiplies on load and loses the colour
-                # wherever alpha is near zero; channel-packed keeps both.
-                img.alpha_mode = "CHANNEL_PACKED"
-                # Blender loads what it cannot decode (PCX, archive-compressed
-                # files) as an image without pixels.
-                if img.size[0] == 0:
-                    self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-            except RuntimeError:
-                self.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-        self.images[name] = img
-        return img
-
-    def materials(self):
-        out = []
-        reg = self.sc["registers"]
-        alpha_by_material = {}
-        for lod in self.sc["lods"]:
-            for part in lod["parts"]:
-                for s in part["strips"]:
-                    alpha_by_material[s["material"]] = alpha_by_material.get(s["material"], False) or s["alpha"]
-
-        def regname(style, index):
-            if style > CTRL_REFERENCE_THRESHOLD and 0 <= index < len(reg):
-                return reg[index]
-            return ""
-
-        for i, m in enumerate(self.sc["materials"]):
-            # The name carries the export index and the shader tag.
-            mat = bpy.data.materials.new(f"Material_{i}_{m['shader']}")
-            self.made_materials.append(mat)
-            p = mat.o3d
-            flags = m["matflags"]
-            p.alpha_test = bool(flags & 1)
-            p.two_sided = bool(flags & 4)
-            p.other_flags = flags & ~5 & 0xFF
-            p.alpha_test_value = m["alphatest"]
-            if m["alphatest"] and not p.alpha_test:
-                self.note(f"material {i}: an alpha-test value without the alpha-test flag")
-            # Glass and emissive follow the shader on export (OED's rule).
-            caps = export.shader_flags(m["shader"])
-            if bool(m["glass"]) != bool(caps & export.FLAG_GLASS and m["reflect"] and any(m["reflect"][:3])):
-                self.note(f"material {i}: glass {m['glass']} is not what its shader {m['shader']} gives")
-            if m["emissive"] != (2 if caps & export.FLAG_EMISSIVE else 0):
-                self.note(f"material {i}: emissive {m['emissive']} is not what its shader {m['shader']} gives")
-            if m["reflect"]:
-                p.reflect = [c / 255.0 for c in m["reflect"]]
-            blended = bool(export.shader_flags(m["shader"]) & export.FLAG_BLENDING)
-            p.alpha_strips = alpha_by_material.get(i, False) and not blended
-            for name, slot, typ, tflags, frame in m["textures"]:
-                t = p.textures.add()
-                t.name = name
-                t.slot, t.type, t.flags, t.frame = slot, typ, tflags, frame
-                t.image = self.image(name)
-                t.write = False  # the file beside the model already serves it
-            if m["texanim"]:
-                frames, typ, time_or_register = m["texanim"]
-                p.anim_frames, p.anim_type = frames, typ
-                if typ == 1:
-                    p.anim_register = reg[time_or_register] if 0 <= time_or_register < len(reg) else ""
-                else:
-                    p.anim_time = time_or_register
-            if m["rgbgen"]:
-                style, r, rate, s0, s1, phase = m["rgbgen"]
-                p.rgb_style, p.rgb_register, p.rgb_rate, p.rgb_phase = style, regname(style, r), rate, phase
-                p.rgb_start = [c / 255.0 for c in s0]
-                p.rgb_end = [c / 255.0 for c in s1]
-            if m["alphagen"]:
-                style, r, rate, start, end, phase = m["alphagen"]
-                p.alpha_style, p.alpha_register, p.alpha_rate, p.alpha_phase = style, regname(style, r), rate, phase
-                p.alpha_start, p.alpha_end = int(start), int(end)
-            for axis in ("u", "v"):
-                g = m[axis + "gen"]
-                if g:
-                    style, r, rate, start, end, phase = g
-                    setattr(p, axis + "_style", style)
-                    setattr(p, axis + "_register", regname(style, r))
-                    setattr(p, axis + "_rate", rate)
-                    setattr(p, axis + "_start", start)
-                    setattr(p, axis + "_end", end)
-                    setattr(p, axis + "_phase", phase)
-            self.shade(mat, m, blended)
-            out.append(mat)
-        return out
-
-    def shade(self, mat, m, blended):
-        """A preview node tree: slot 1 as the base colour (times a slot-2 detail
-        texture on UV1, Modulate2x, for FF_MT shaders), alpha for blended and
-        alpha-tested shaders, emission for *_LUM, a tint for glass."""
-        mat.use_nodes = True
-        nodes, links = mat.node_tree.nodes, mat.node_tree.links
-        bsdf = next(n for n in nodes if n.type == "BSDF_PRINCIPLED")
-        mat.use_backface_culling = not mat.o3d.two_sided
-        by_slot = {}
-        for name, slot, *_ in m["textures"]:
-            by_slot.setdefault(slot, name)
-        color = None
-        if 1 in by_slot and self.images.get(by_slot[1]) is not None:
-            tex = nodes.new("ShaderNodeTexImage")
-            tex.image = self.images[by_slot[1]]
-            tex.location = (-600, 300)
-            color = tex.outputs["Color"]
-            if blended or mat.o3d.alpha_test:
-                links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
-                if hasattr(mat, "surface_render_method"):
-                    mat.surface_render_method = "BLENDED" if blended else "DITHERED"
-        if 2 in by_slot and self.images.get(by_slot[2]) is not None and color is not None:
-            uv = nodes.new("ShaderNodeUVMap")
-            uv.uv_map = "UV1"
-            uv.location = (-900, -100)
-            detail = nodes.new("ShaderNodeTexImage")
-            detail.image = self.images[by_slot[2]]
-            detail.location = (-600, -100)
-            links.new(uv.outputs["UV"], detail.inputs["Vector"])
-            mix = nodes.new("ShaderNodeMix")
-            mix.data_type = "RGBA"
-            mix.blend_type = "MULTIPLY"
-            mix.inputs[0].default_value = 1.0
-            mix.location = (-300, 200)
-            links.new(color, mix.inputs[6])
-            links.new(detail.outputs["Color"], mix.inputs[7])
-            scale = nodes.new("ShaderNodeVectorMath")
-            scale.operation = "SCALE"
-            scale.inputs[3].default_value = 2.0
-            scale.location = (-120, 200)
-            links.new(mix.outputs[2], scale.inputs[0])
-            color = scale.outputs[0]
-        if color is not None:
-            links.new(color, bsdf.inputs["Base Color"])
-            if m["emissive"] or export.shader_flags(m["shader"]) & export.FLAG_EMISSIVE:
-                links.new(color, bsdf.inputs["Emission Color"])
-                bsdf.inputs["Emission Strength"].default_value = 1.0
-        if m["glass"] or export.shader_flags(m["shader"]) & export.FLAG_GLASS:
-            bsdf.inputs["Base Color"].default_value = (0.6, 0.75, 0.85, 1.0)
-            bsdf.inputs["Alpha"].default_value = 0.35
-            if hasattr(mat, "surface_render_method"):
-                mat.surface_render_method = "BLENDED"
+    def put(self, ob, li, part, world=None):
+        """Put `ob` on part `part` of LOD li at `world`: under the part's PN##
+        empty, hung from its bone, or under the LOD root when the LOD holds no
+        bones of its own (a later LOD of a skinned model, arms on a gun's rig;
+        the object's name then names its part); part -1 is no part, under the
+        LOD root."""
+        world = world if world is not None else Matrix.Identity(4)
+        empties = self.part_empties.get(li)
+        if part >= 0 and empties is not None:
+            return self.link(ob, empties[part], world)
+        if part >= 0 and li == 0 and self.rig is not None:
+            self.collection.objects.link(ob)
+            rig.hang(ob, self.rig, self.rig.data.bones[f"BN{part + 1:02d}"], world)
+            self.world[ob.name] = world
+            return ob
+        return self.link(ob, self.roots[li], world)
 
     # --- meshes ---------------------------------------------------------------
-    def mesh(self, name, strips, pivot, materials, skinned):
-        """One mesh from a part's strips: vertices merged by position, normal
-        (and weights), loops carrying UVMap/UV1 and the stored normals."""
+    def mesh(self, name, strips, origin, mats, skinned):
+        """One mesh from strips, its vertices relative to `origin` (Blender
+        axes): vertices merged by position, normal (and weights), loops
+        carrying UVMap/UV1 and the stored normals. A triangle whose corners
+        another takes in the opposite winding (a two-sided sheet stored as
+        both windings over one set of vertices: Baricd02's wire) goes on
+        vertices of the side it faces, so that each side is a sheet of its
+        own: Blender holds a custom normal relative to the smooth fan around
+        its corner, and a fan holding two faces back to back has no
+        direction to hold it in. Returns the mesh and each vertex's (part,
+        weight) influences."""
         index, verts, loops, faces, face_mat, slots = {}, [], [], [], [], []
         weights = []
+        dropped = 0
 
         def normal(v):
             # Zero-length and not-finite (J_bsh1's NaN) normals alike: Blender
@@ -400,6 +434,7 @@ class Builder(Notes):
                 return (0.0, 0.0, 0.0)
             return n
 
+        tris = []  # (the strip's corners, the strip, material slot, the merged vertices)
         for s in strips:
             mi = s["material"]
             if mi not in slots:
@@ -409,90 +444,103 @@ class Builder(Notes):
                 key = (tuple(round(x, 6) for x in v["p"]), tuple(round(x, 4) for x in normal(v)))
                 infl = ()
                 if skinned:
-                    infl = tuple(sorted((s["bones"][b], round(w, 5)) for b, w in zip(v["bi"], v["bw"])
-                                        if w > 0 and b < len(s["bones"])))
-                    if not infl and v["bi"] and v["bi"][0] < len(s["bones"]):
-                        # Every weight zero (dM1A1's LOD 3; the renderer
-                        # draws such a vertex wholly on its slot 0 bone,
-                        # runtime/renderer/model_mesh_prepare.cpp): a weight 0
-                        # membership of that bone, which export writes back.
-                        infl = ((s["bones"][v["bi"][0]], 0.0),)
+                    infl = tuple((b, round(w, 6)) for b, w in influences(s, v))
+                    table = len(s["bones"])
+                    dropped += sum(1 for slot, w in zip(v["bi"], list(v["bw"]) + [1.0 - sum(v["bw"])])
+                                   if w > 1e-6 and slot >= table)
                     key += (infl,)
                 if key not in index:
                     index[key] = len(verts)
-                    verts.append(self.blender(v["p"]) - pivot)
+                    verts.append(self.blender(v["p"]) - origin)
                     weights.append(infl)
                 ids.append(index[key])
             for a, b, c in s["tris"]:
-                face = [ids[a], ids[b], ids[c]]
-                if len(set(face)) < 3:
-                    # Corners the merge collapsed (a sliver): keep the face
-                    # on vertices of its own so its triangle survives.
-                    for k, x in enumerate((a, b, c)):
-                        face[k] = len(verts)
-                        verts.append(self.blender(s["verts"][x]["p"]) - pivot)
-                        weights.append(weights[ids[x]])
-                faces.append(tuple(face))
-                face_mat.append(slots.index(mi))
-                loops.extend((s["verts"][a], s["verts"][b], s["verts"][c]))
-        me = bpy.data.meshes.new(name)
+                tris.append(((a, b, c), s, slots.index(mi), (ids[a], ids[b], ids[c])))
+        back = back_sides(tris, normal)
+        second = {}  # a vertex -> its copy on the back side
+        for i, (corners, s, slot, merged) in enumerate(tris):
+            face = list(merged)
+            if len(set(face)) < 3:
+                # Corners the merge collapsed (a sliver): keep the face on
+                # vertices of its own so its triangle survives.
+                for k, x in enumerate(corners):
+                    face[k] = len(verts)
+                    verts.append(self.blender(s["verts"][x]["p"]) - origin)
+                    weights.append(weights[merged[k]])
+            elif i in back:
+                for k, vi in enumerate(face):
+                    if vi not in second:
+                        second[vi] = len(verts)
+                        verts.append(verts[vi].copy())
+                        weights.append(weights[vi])
+                    face[k] = second[vi]
+            faces.append(tuple(face))
+            face_mat.append(slot)
+            loops.extend(s["verts"][x] for x in corners)
+        if dropped:
+            self.note(f"{dropped} weights on bone-table slots past their strip's table (retail FSldr03 ships them) are "
+                      "not kept")
+        me = self.data(bpy.data.meshes.new(name))
         me.from_pydata([tuple(v) for v in verts], [], faces)
         for mi in slots:
-            me.materials.append(materials[mi] if 0 <= mi < len(materials) else None)
+            me.materials.append(mats[mi] if 0 <= mi < len(mats) else None)
         me.polygons.foreach_set("material_index", face_mat)
         me.polygons.foreach_set("use_smooth", [True] * len(faces))
-        uv0 = me.uv_layers.new(name="UVMap")
-        uv1 = me.uv_layers.new(name="UV1") if self.sc["uv1"] else None
-        for li, v in enumerate(loops):
-            # D3D texture space runs v down; Blender's runs up.
-            uv0.data[li].uv = (v["uv"][0], 1.0 - v["uv"][1])
-            if uv1 is not None:
-                uv1.data[li].uv = (v["uv1"][0], 1.0 - v["uv1"][1])
+        # D3D texture space runs v down; Blender's runs up. One bulk write per
+        # map: a write per loop through the legacy accessor is quadratic.
+        me.uv_layers.new(name="UVMap").data.foreach_set(
+            "uv", [x for v in loops for x in (v["uv"][0], 1.0 - v["uv"][1])])
+        if self.sc["uv1"]:
+            me.uv_layers.new(name="UV1").data.foreach_set(
+                "uv", [x for v in loops for x in (v["uv1"][0], 1.0 - v["uv1"][1])])
         me.normals_split_custom_set([tuple(self.blender(normal(v)).normalized()) for v in loops])
         me.update()
         return me, weights
+
+    def groups(self, ob, weights):
+        """The influences as vertex groups named after the rig's bones, one
+        call per group and weight."""
+        by = {}
+        for vi, infl in enumerate(weights):
+            for part, w in infl:
+                by.setdefault((part, w), []).append(vi)
+        made = {}
+        for (part, w), verts in sorted(by.items()):
+            g = made.get(part)
+            if g is None:
+                g = made[part] = ob.vertex_groups.new(name=self.rig.data.bones[f"BN{part + 1:02d}"].name)
+            g.add(verts, w, "REPLACE")
 
     # --- the model --------------------------------------------------------------
     def build(self, scene):
         sc = self.sc
         self.scene = scene
-        self.forward = scene.o3d.forward
-        # mission -> Blender, the inverse of the export's axis map
-        self.blender = blender_axes(self.forward)
-        self.world = {}
-        # The output path follows the imported file (Excavatr.3di's GHDR name
-        # is OrngFlag), one per model root: a second import of one file writes
-        # beside the first, not over it.
-        taken = {m.o3d.output_path.lower() for m in export.model_roots(scene)}
-        output = f"//{self.stem}.3di"
-        n = 2
-        while output.lower() in taken:
-            output = f"//{self.stem}_{n}.3di"
-            n += 1
         self.collection = bpy.data.collections.new(sc["name"])
         scene.collection.children.link(self.collection)
-        mats = self.materials()
+        mats = materials.import_materials(self)
         # The model root: one .3di, its LOD roots below it. It holds the
         # model's own settings, so several models share a scene.
         self.model = self.empty(sc["name"], size=1.0, display="CUBE")
         self.model.o3d.model_name = sc["name"]
-        self.model.o3d.output_path = output
-        lod_objects = []
-        self.lod0_parts = {}
-        self.split = self.skinned_split() if sc["skinned"] else None
+        self.model.o3d.output_path = self.output_path(scene)
+        self.model.o3d.export_bullet_faces = any(c["faces"] for c in sc["cobjs"])
         for li, lod in enumerate(sc["lods"]):
             root = self.empty(f"{sc['name']}_LOD{li}", self.model, size=0.5, display="ARROWS")
             root["_lod_index"] = li
             root.o3d.lod_threshold = lod["threshold"]
             root.o3d.lod_type = lod["type"]
-            objs = [root]
+            self.roots.append(root)
+        lod_objects = [[r] for r in self.roots]
+        for li, lod in enumerate(sc["lods"]):
             if not lod["parts"]:
                 self.note(f"LOD {li} has no parts")
             elif sc["skinned"]:
-                objs += self.skinned_lod(li, lod, root, mats)
+                lod_objects[li] += self.skinned_lod(li, lod, mats)
+            elif li == 0 and self.rigged:
+                lod_objects[li] += self.rig_lod(lod, mats)
             else:
-                objs += self.rigid_lod(li, lod, root, mats)
-            lod_objects.append(objs)
+                lod_objects[li] += self.rigid_lod(li, lod, mats)
+        materials.keep_unused(self, mats, lod_objects)
         self.points(lod_objects)
         if self.op is None or self.op.import_lights:
             self.lights(lod_objects)
@@ -500,15 +548,26 @@ class Builder(Notes):
             self.occlusion(lod_objects)
         if self.op is None or self.op.import_collision:
             self.collision(lod_objects)
+        self.hit_spheres(lod_objects)
         self.bullet_lod(mats)
         self.attach_points(lod_objects)
-        if sc["skinned"] and sc["cobjs"]:
-            self.note("skin weights are normalized on export and skinned hit spheres are regenerated from them")
         vl = self.context.view_layer
         for li, objs in enumerate(lod_objects):
             if li > 0:
                 for ob in objs:
                     ob.hide_set(True, view_layer=vl)
+
+    def output_path(self, scene):
+        """The file the model writes: the imported file's name beside the
+        .blend (Excavatr.3di's GHDR name is OrngFlag), a number added when
+        another model already writes it."""
+        taken = {export.output_path(m).lower() for m in rig.model_roots(scene)}
+        output = f"//{self.stem}.3di"
+        n = 2
+        while bpy.path.abspath(output).lower() in taken:
+            output = f"//{self.stem}_{n}.3di"
+            n += 1
+        return output
 
     def frame_rotation(self, index):
         """A PANM row's MTRX frame (mission axes, row-major, p' = p R) as a
@@ -517,157 +576,157 @@ class Builder(Notes):
             return Matrix.Identity(3)
         r = self.sc["frames"][index - 1]
         q = Matrix(((r[0], r[3], r[6]), (r[1], r[4], r[7]), (r[2], r[5], r[8])))
-        b = axis_basis(self.forward)
+        b = axis_basis()
         return b @ q @ b.transposed()
 
-    def rigid_lod(self, li, lod, root, mats):
+    def parent_notes(self, li, parts):
+        for pi, part in enumerate(parts):
+            if part["parent"] >= len(parts):
+                self.note(f"LOD {li} part {pi + 1:02d} names part {part['parent'] + 1:02d} as its parent, which the "
+                          "LOD lacks; it exports as a top part (parent 01)")
+
+    @staticmethod
+    def store_parent(holder, parts, pi):
+        """A part that names itself or no part as its parent, which a
+        hierarchy cannot say: its Parent setting (rig.stored_parent)."""
+        parent = parts[pi]["parent"]
+        if pi > 0 and parent == pi:
+            holder.part_parent = "SELF"
+        elif parent < 0:
+            holder.part_parent = "NONE"
+
+    def rigid_lod(self, li, lod, mats):
         objs = []
         parts = []
         rows = {p["part"]: p for p in lod["panm"]}
-        count = len(lod["parts"])
+        self.parent_notes(li, lod["parts"])
+        root = self.roots[li]
         for pi, part in enumerate(lod["parts"]):
             pivot = self.blender(part["pivot"])
             row = rows.get(pi)
             rot = self.frame_rotation(row["matrix"]) if row else Matrix.Identity(3)
             world = Matrix.Translation(pivot) @ rot.to_4x4()
-            parent = part["parent"]
-            if pi == 0 or parent == pi or parent < 0 or parent >= count:
-                parent_ob = root
-                if pi == 0 and parent != 0 or parent >= count:
-                    self.note(f"LOD {li} part {pi} names parent {parent}; it exports under the root")
-            elif parent < len(parts):
-                parent_ob = parts[parent]
-            else:
-                parent_ob = root  # re-parented below once the parent exists
+            parent = top_parent(lod["parts"], pi)
+            parent_ob = parts[parent] if parent is not None and parent < len(parts) else root
             ob = self.empty(f"PN{pi + 1:02d}", parent_ob, world, part=True)
+            self.store_parent(ob.o3d, lod["parts"], pi)
             parts.append(ob)
             objs.append(ob)
-            if pi > 0 and (parent == pi or parent < 0):
-                # A part that is its own parent (Eturret, APLFP1) or names -1
-                # (Excavatr): the Blender hierarchy cannot say it, an attach
-                # helper can (`~PP attach`, PP its own number or 00).
-                objs.append(self.attach_helper(li, pi, ob, parent))
             if row is not None:
                 self.tracks(ob.o3d, row)
-            if part["strips"]:
-                me, _ = self.mesh(f"{pi + 1:02d} Mesh0", part["strips"], pivot, mats, False)
-                mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
-                objs.append(self.link(mob, ob, Matrix.Translation(pivot)))
-            elif part["centre"] is not None:
-                objs.append(self.centre_helper(pi, ob, part["centre"]))
         for pi, part in enumerate(lod["parts"]):
-            parent = part["parent"]
-            if pi < parent < len(parts):
-                # A parent listed after its child (retail ships some).
+            parent = top_parent(lod["parts"], pi)
+            if parent is not None and parent > pi:
+                # A parent listed after its child (17 retail models).
                 ob = parts[pi]
                 above = self.world[parts[parent].name]
                 ob.parent = parts[parent]
                 ob.matrix_parent_inverse = Matrix.Identity(4)
                 ob.matrix_basis = above.inverted() @ self.world[ob.name]
                 self.world[ob.name] = above @ ob.matrix_basis
-        self.part_objects[li] = dict(enumerate(parts))
-        if li == 0:
-            self.lod0_parts = {i: ob for i, ob in enumerate(parts)}
+        self.part_empties[li] = dict(enumerate(parts))
+        objs += self.part_geometry(li, lod, mats)
         return objs
 
-    def centre_helper(self, pi, part_ob, centre):
+    def part_geometry(self, li, lod, mats):
+        """A rigid LOD's part meshes and the centre helpers of the parts that
+        draw nothing, on their parts."""
+        objs = []
+        for pi, part in enumerate(lod["parts"]):
+            pivot = self.blender(part["pivot"])
+            if part["strips"]:
+                me, _ = self.mesh(f"{pi + 1:02d} Mesh", part["strips"], pivot, mats, False)
+                objs.append(self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot)))
+            elif part["centre"] is not None:
+                objs.append(self.centre_helper(li, pi, part["centre"]))
+        return objs
+
+    def centre_helper(self, li, pi, centre):
         """Part pi's `_## center` helper mesh, for a part that draws nothing:
         OED seeded such a part with its helper's first vertex, the point its
         bounds sit on at radius 0 (5fc5b4f6a^ engine/formats/oed/
         convert_internal.cpp, the placeholder injection), which retail keeps
-        near the pivot. The helper's origin is the part's pivot, as export
-        reads it, so it sits on its PN## empty with no offset of its own and
-        its one vertex is that point."""
-        me = bpy.data.meshes.new(f"_{pi + 1:02d} center")
-        me.from_pydata([tuple(self.world[part_ob.name].inverted() @ self.blender(centre))], [], [])
-        ob = bpy.data.objects.new(f"_{pi + 1:02d} center", me)
-        self.collection.objects.link(ob)
-        ob.parent = part_ob
-        ob.matrix_parent_inverse = Matrix.Identity(4)
-        self.world[ob.name] = self.world[part_ob.name]
-        return ob
+        near the pivot. It stands on the part's pivot, its one vertex that
+        point."""
+        pivot = self.blender(self.sc["lods"][li]["parts"][pi]["pivot"])
+        me = self.data(bpy.data.meshes.new(f"_{pi + 1:02d} center"))
+        me.from_pydata([tuple(self.blender(centre) - pivot)], [], [])
+        return self.put(bpy.data.objects.new(me.name, me), li, pi, Matrix.Translation(pivot))
 
-    def attach_helper(self, li, pi, parent_ob, parent, world=None, bone=None):
-        """Part pi's `~PP attach` helper in LOD li, naming its parent part
-        (PP 1-based; 00 for -1), at `world`: under its PN## empty, or on a
-        skinned model under its bone (or its mesh part's mesh). Without a
-        `world` it sits on its PN## empty's origin, the part's pivot, with no
-        offset of its own, so it reads back as the very pivot (its attach
-        point is then the row the builder would derive)."""
-        ob = bpy.data.objects.new(f"~{parent + 1 if parent >= 0 else 0:02d} attach", None)
-        ob.empty_display_type = "PLAIN_AXES"
-        ob.empty_display_size = 0.05
-        if world is None:
-            self.collection.objects.link(ob)
-            ob.parent = parent_ob
-            ob.matrix_parent_inverse = Matrix.Identity(4)
-            self.world[ob.name] = self.world[parent_ob.name]
-        elif bone is None:
-            self.link(ob, parent_ob, world)
-        else:
-            # A bone child hangs off the bone's tail, at rest here.
-            self.collection.objects.link(ob)
-            ob.parent = parent_ob
-            ob.parent_type = "BONE"
-            ob.parent_bone = bone.name
-            ob.matrix_parent_inverse = Matrix.Identity(4)
-            tail = self.world[parent_ob.name] @ bone.matrix_local @ Matrix.Translation((0.0, bone.length, 0.0))
-            ob.matrix_basis = tail.inverted() @ world
-            self.world[ob.name] = world
-        self.attach_helpers[(li, pi)] = ob
-        return ob
+    def armature(self, parts, count):
+        """The model's rig under LOD 0's root: a BN## bone per part up to
+        `count`, its head at the part's pivot, in the part hierarchy."""
+        data = self.data(bpy.data.armatures.new(f"{self.sc['name']} Rig"))
+        arm = bpy.data.objects.new(data.name, data)
+        self.link(arm, self.roots[0])
+        names = {pi: f"BN{pi + 1:02d}" for pi in range(count)}
+        heads = {pi: self.blender(parts[pi]["pivot"]) for pi in range(count)}
+        parents = {pi: top_parent(parts, pi) for pi in range(count)}
+        parents = {pi: (p if p is not None and p < count else None) for pi, p in parents.items()}
+        with rig.editing(self.context, arm) as edit_bones:
+            rig.lay_bones(edit_bones, names, heads, parents)
+        for pi in range(count):
+            self.store_parent(data.bones[names[pi]].o3d, parts, pi)
+        self.rig = arm
+        return arm
 
-    def attach_points(self, lod_objects):
-        """The CXLT attach points: retail stores one per part after the root
-        on a rigid model and one per part on a skinned one (the builder's
-        derivation, formats/threedi/threedi_build.cpp), each at its part's
-        `~PPx attach` helper in the collision LOD, OED's WriteCXLT source
-        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row that is its
-        section's own offset, the row the builder derives, needs no helper:
-        export writes a part without one at its pivot. A row count that does
-        not fit places none, and an empty table (Chair03X: seven sections, no
-        row) has no scene form: an attach point is a helper, and a collision
-        LOD without one exports the rows the builder derives."""
-        rows = self.sc["cxlt"]
-        if not rows:
-            if self.sc["cxlt_given"]:
-                self.note("the model stores no CXLT attach point, which a scene cannot say: export leaves the rows to "
-                          "the builder, which derives one per collision section"
-                          f"{'' if self.sc['skinned'] else ' after the root'} at its pivot")
-            return
-        li = self.model.o3d.poly_collision_lod
-        parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
-        first = 0 if self.sc["skinned"] else 1
-        if len(rows) != len(parts) - first:
-            self.note(f"{len(rows)} CXLT attach points do not fit the collision LOD's {len(parts)} parts (one per "
-                      f"part{'' if first == 0 else ' after the root'}); export puts each at its part's pivot")
-            return
-        cobjs = self.sc["cobjs"]
-        for i, row in enumerate(rows):
-            pi = i + first
-            if pi < len(cobjs) and all(round(a * 65536.0) == round(b * 65536.0)
-                                       for a, b in zip(row, cobjs[pi]["offset"])):
-                continue  # the same 16.16 row as the section's offset
-            world = Matrix.Translation(self.blender(row))
-            helper = self.attach_helpers.get((li, pi))
-            if helper is not None:
-                # A rigid part's own helper (it names itself or none): moved
-                # off its pivot the way link() places an object.
-                above = self.world[helper.parent.name]
-                helper.matrix_parent_inverse = above.inverted()
-                helper.matrix_basis = world
-                self.world[helper.name] = above @ helper.matrix_parent_inverse @ helper.matrix_basis
+    def bone_rows(self, lod, count):
+        """Each bone's part animation: its tracks, flags and track frame."""
+        rows = {p["part"]: p for p in lod["panm"]}
+        for pi in range(count):
+            row = rows.get(pi)
+            if row is None:
                 continue
-            parent = parts[pi]["parent"]
-            if self.sc["skinned"]:
-                arm, meshes = self.skinned_parts[li]
-                if pi in meshes:
-                    helper = self.attach_helper(li, pi, meshes[pi], parent, world)
-                else:
-                    helper = self.attach_helper(li, pi, arm, parent, world, arm.data.bones[f"BN{pi + 1:02d}"])
-            else:
-                helper = self.attach_helper(li, pi, self.part_objects[li][pi], parent, world)
-            lod_objects[li].append(helper)
+            p = self.rig.data.bones[f"BN{pi + 1:02d}"].o3d
+            p.frame = self.frame_rotation(row["matrix"])
+            self.tracks(p, row)
+
+    def rig_lod(self, lod, mats):
+        """A first-person gun's LOD 0 as a rig: a bone per part, the parts'
+        meshes and helpers hung from their bones."""
+        count = len(lod["parts"])
+        self.parent_notes(0, lod["parts"])
+        arm = self.armature(lod["parts"], count)
+        self.bone_rows(lod, count)
+        return [arm] + self.part_geometry(0, lod, mats)
+
+    def skinned_lod(self, li, lod, mats):
+        """A skinned model's LOD: its rig (LOD 0 of a model that owns one), and
+        its skinned strips as one mesh deforming with the rig, on the mesh part
+        (the mesh's origin its pivot) when the file keeps one."""
+        objs = []
+        bones, mesh_part = skin_layout(self.sc)
+        if li == 0:
+            if mesh_part is not None:
+                self.mesh_part = mesh_part
+                self.model.o3d.mesh_part = True
+            self.parent_notes(0, lod["parts"][:bones])
+            objs.append(self.armature(lod["parts"], bones))
+            self.bone_rows(lod, bones)
+        elif len(lod["parts"]) != len(self.sc["lods"][0]["parts"]):
+            self.note(f"LOD {li} has {len(lod['parts'])} parts, LOD 0 {len(self.sc['lods'][0]['parts'])}; every LOD "
+                      "of a skinned model reads its parts from the one rig")
+        strips = [s for p in lod["parts"] for s in p["strips"]]
+        on = [pi for pi, p in enumerate(lod["parts"]) if p["strips"]]
+        authored = self.mesh_part if self.mesh_part is not None else 0
+        if any(pi != authored for pi in on):
+            self.note(f"LOD {li}: skinned geometry authored on its bones (dM1A1, DT801, Ftruck1X) is authored on one "
+                      "part in a scene; each part's own bounds are not kept")
+        if not strips:
+            return objs
+        pivot = self.blender(lod["parts"][authored]["pivot"]) if authored < len(lod["parts"]) else Vector()
+        name = f"{self.sc['name']} Skin" + (f" LOD{li}" if li else "")
+        me, weights = self.mesh(name, strips, pivot, mats, True)
+        ob = bpy.data.objects.new(name, me)
+        world = Matrix.Translation(pivot)
+        if li == 0:
+            self.link(ob, self.rig, world)
+        else:
+            self.link(ob, self.roots[li], world)
+        self.groups(ob, weights)
+        ob.modifiers.new("Armature", "ARMATURE").object = self.rig
+        objs.append(ob)
+        return objs
 
     def tracks(self, p, row):
         """A PANM row's flags and tracks onto a part's animation (an empty's
@@ -695,145 +754,21 @@ class Builder(Notes):
             if target == "trans":
                 t.axis = str(axis or axis_default or 3)
 
-    def skinned_lod(self, li, lod, root, mats):
-        objs = []
-        # The mesh parts are the parts `scene` authored strips on that no
-        # bone table names (ArmsG part 37); every other part is a bone, the
-        # root among them, and strips `scene` kept on a bone stay on it
-        # (dM1A1's hull, which has no mesh part, on BN01).
-        named = {b for p in lod["parts"] for s in p["strips"] for b in s["bones"]}
-        mesh_parts = [pi for pi, p in enumerate(lod["parts"]) if pi > 0 and p["strips"] and pi not in named]
-        bone_parts = [pi for pi in range(len(lod["parts"])) if pi not in mesh_parts]
-        if bone_parts != list(range(len(bone_parts))):
-            self.note(f"LOD {li}: the mesh parts are not the last parts; export renumbers them after the bones")
-        arm = bpy.data.armatures.new(f"{self.sc['name']}_Rig{li}")
-        arm_ob = bpy.data.objects.new(f"{self.sc['name']}_Rig{li}", arm)
-        self.link(arm_ob, root)
-        objs.append(arm_ob)
-        vl = self.context.view_layer
-        with self.context.temp_override(scene=self.scene, view_layer=vl, active_object=arm_ob, object=arm_ob,
-                                        selected_objects=[arm_ob]):
-            vl.objects.active = arm_ob
-            bpy.ops.object.mode_set(mode="EDIT")
-            bones = {}
-            for pi in bone_parts:
-                b = arm.edit_bones.new(f"BN{pi + 1:02d}")
-                b.head = self.blender(lod["parts"][pi]["pivot"])
-                b.use_connect = False
-                bones[pi] = b
-            for pi in bone_parts:
-                b = bones[pi]
-                kids = [c for c in bone_parts if lod["parts"][c]["parent"] == pi and c != pi]
-                tail = None
-                if kids:
-                    t = self.blender(lod["parts"][kids[0]]["pivot"])
-                    if (t - b.head).length > 1e-3:
-                        tail = t
-                b.tail = tail if tail is not None else b.head + Vector((0.0, 0.0, 0.05))
-                parent = lod["parts"][pi]["parent"]
-                if parent != pi and parent in bones:
-                    b.parent = bones[parent]
-                elif pi > 0:
-                    # DT801's LOD 3 names -1: a bone without a parent bone
-                    # exports parent 0.
-                    self.note(f"LOD {li} bone BN{pi + 1:02d} names parent {parent}; it exports under the root (0)")
-            bpy.ops.object.mode_set(mode="OBJECT")
-        # Each bone's part animation: its tracks, flags and track frame.
-        rows = {p["part"]: p for p in lod["panm"]}
-        for pi in bone_parts:
-            row = rows.get(pi)
-            if row is None:
-                continue
-            p = arm.bones[f"BN{pi + 1:02d}"].o3d
-            p.frame = self.frame_rotation(row["matrix"]).to_euler()
-            self.tracks(p, row)
-        authored = {}
-        for pi, part in enumerate(lod["parts"]):
-            for s in part["strips"]:
-                if self.split is not None and self.split[0] == li:
-                    # The collision LOD of a model without a mesh part: each
-                    # triangle back on the part whose section holds it.
-                    by_part = {}
-                    for ti, tri in enumerate(s["tris"]):
-                        by_part.setdefault(self.split[1][(id(s), ti)], []).append(tri)
-                    for owner, tris in by_part.items():
-                        authored.setdefault(owner, []).append(sub_strip(s, tris))
-                else:
-                    authored.setdefault(pi, []).append(s)
-        meshes = {}
-        for pi, strips in sorted(authored.items()):
-            part = lod["parts"][pi]
-            pivot = self.blender(part["pivot"])
-            me, weights = self.mesh(f"{pi + 1:02d} Mesh0", strips, pivot, mats, True)
-            mob = bpy.data.objects.new(f"{pi + 1:02d} Mesh0", me)
-            self.link(mob, arm_ob, Matrix.Translation(pivot))
-            if pi in mesh_parts:
-                meshes[pi] = mob
-            groups = {}
-            for vi, infl in enumerate(weights):
-                for bone, w in infl:
-                    g = groups.get(bone)
-                    if g is None:
-                        g = groups[bone] = mob.vertex_groups.new(name=f"BN{bone + 1:02d}")
-                    g.add([vi], w, "REPLACE")
-            mod = mob.modifiers.new("Armature", "ARMATURE")
-            mod.object = arm_ob
-            objs.append(mob)
-        self.skinned_parts[li] = (arm_ob, meshes)
-        seeded = sum(1 for p in lod["parts"] if p["centre"] is not None)
-        if seeded:
-            # dM1A1 and DT801 only: a skinned part's pivot is its bone head,
-            # and no helper of a skinned model carries this point.
-            self.note(f"LOD {li}: {seeded} bones that draw nothing keep the point their bounds sit on, which a "
-                      "skinned model's scene does not carry; export leaves it at the origin")
-        if li == 0:
-            self.lod0_parts = {pi: arm_ob for pi in range(len(lod["parts"]))}
-        return objs
-
-    def skinned_split(self):
-        """A skinned model with no mesh part keeps every strip on the root
-        (dM1A1's hull), yet each part was authored with geometry of its own:
-        the collision LOD's triangles are exactly the bullet faces of the
-        sections, one section per part (dM1A1: LOD 1, 875 hull faces and 40
-        a wheel). Returns (that LOD, {(strip id, triangle): part}) matched by
-        centroid, or None when no LOD's triangles are the bullet faces."""
-        cobjs = self.sc["cobjs"]
-        total = sum(len(c["faces"]) for c in cobjs)
-        if not total or len(cobjs) < 2:
-            return None
-        buckets = {}
-        for si, c in enumerate(cobjs):
-            for a, b, cc, _, _ in c["faces"]:
-                centre = centroid([c["verts"][x] for x in (a, b, cc)])
-                buckets.setdefault(tuple(round(x, 1) for x in centre), []).append((centre, si))
-        for li, lod in enumerate(self.sc["lods"]):
-            strips = [s for p in lod["parts"] for s in p["strips"]]
-            if len(lod["parts"]) != len(cobjs) or any(p["strips"] for p in lod["parts"][1:]) or \
-                    sum(len(s["tris"]) for s in strips) != total:
-                continue
-            owners = {}
-            for s in strips:
-                for ti, tri in enumerate(s["tris"]):
-                    centre = centroid([s["verts"][x]["p"] for x in tri])
-                    key = tuple(round(x, 1) for x in centre)
-                    near = [e for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
-                            for e in buckets.get((round(key[0] + dx / 10, 1), round(key[1] + dy / 10, 1),
-                                                  round(key[2] + dz / 10, 1)), [])]
-                    best = min(near, key=lambda e: sum((e[0][k] - centre[k]) ** 2 for k in range(3)), default=None)
-                    if best is None or sum((best[0][k] - centre[k]) ** 2 for k in range(3)) > 0.05 ** 2:
-                        break
-                    owners[(id(s), ti)] = best[1]
-                else:
-                    continue
-                break
-            else:
-                return li, owners
-        return None
-
     # --- points, lights, occlusion, collision ---------------------------------
-    def owner(self, part, lod_objects):
-        ob = self.lod0_parts.get(part)
-        return ob if ob is not None else lod_objects[0][0]
+    def section_part(self, index, what):
+        """The LOD 0 part record `what` of part `index` sits on: the root, with
+        a note, when the LOD lacks that part, or when it is a skinned model's
+        mesh part, which holds the skinned geometry alone and has no bone to
+        hang a record from (export refuses anything else there)."""
+        count = len(self.sc["lods"][0]["parts"]) if self.sc["lods"] else 0
+        if index == self.mesh_part:
+            self.note(f"{what}: on the mesh part ({index + 1:02d}), which holds the skinned geometry alone; it sits "
+                      "on the root")
+            return 0
+        if not 0 <= index < count:
+            self.note(f"{what}: its part {index + 1:02d} is past the model's parts; it sits on the root")
+            return 0
+        return index
 
     def points(self, lod_objects):
         for order, u in enumerate(self.sc["points"]):
@@ -841,25 +776,27 @@ class Builder(Notes):
             if letter != chr(u["type"]):
                 self.note(f"user point {u['name']}: type {u['type']} has no letter; written as G")
             label = u["name"] if u["name"] else "Noname"
-            name = f"UP{letter}{u['part'] + 1:02d} {label}" if u["part"] >= 0 else f"UP{letter}00 {label}"
+            part = self.section_part(u["part"], f"user point {u['name']}") if u["part"] >= 0 else -1
+            name = f"UP{letter}{part + 1:02d} {label}"
             d = self.blender(u["d"])
             rot = d.to_track_quat("Z", "Y").to_matrix() if d.length > 1e-9 else Matrix.Identity(3)
             world = Matrix.Translation(self.blender(u["p"])) @ rot.to_4x4()
-            parent = self.owner(u["part"], lod_objects)
-            ob = self.empty(name, parent, world, size=0.15, display="SINGLE_ARROW")
+            ob = bpy.data.objects.new(name, None)
+            ob.empty_display_type = "SINGLE_ARROW"
+            ob.empty_display_size = 0.15
             ob.o3d.order = order
-            lod_objects[0].append(ob)
+            lod_objects[0].append(self.put(ob, 0, part, world))
 
     def lights(self, lod_objects):
         dups = {}
         for i, l in enumerate(self.sc["lights"]):
             spot = bool(l["flags"] & 0x08)
-            data = bpy.data.lights.new(f"LP{l['part'] + 1:02d}", "SPOT" if spot else "POINT")
+            part = self.section_part(max(0, l["part"]), f"light {i}")
+            data = self.data(bpy.data.lights.new(f"LP{part + 1:02d}", "SPOT" if spot else "POINT"))
             data.color = [c / 255.0 for c in l["rgb0"]]
             data.energy = 50.0
-            if hasattr(data, "use_custom_distance"):
-                data.use_custom_distance = True
-                data.cutoff_distance = max(l["atten"][1], 0.01)
+            data.use_custom_distance = True
+            data.cutoff_distance = max(l["atten"][1], 0.01)
             p = data.o3d
             p.style = l["style"]
             if l["style"] > CTRL_REFERENCE_THRESHOLD:
@@ -883,13 +820,10 @@ class Builder(Notes):
             rot = d.to_track_quat("-Z", "Y").to_matrix()
             if spot:
                 data.spot_size = math.radians(max(1.0, 2.0 * l["falloff"]))
-            name = f"LP{l['part'] + 1:02d}" + dup_suffix(dups, l["part"])
-            ob = bpy.data.objects.new(name, data)
-            world = Matrix.Translation(self.blender(l["p"])) @ rot.to_4x4()
-            parent = self.owner(l["part"], lod_objects)
-            self.link(ob, parent, world)
+            ob = bpy.data.objects.new(f"LP{part + 1:02d}" + dup_suffix(dups, part), data)
             ob.o3d.order = i
-            lod_objects[0].append(ob)
+            world = Matrix.Translation(self.blender(l["p"])) @ rot.to_4x4()
+            lod_objects[0].append(self.put(ob, 0, part, world))
 
     def occlusion(self, lod_objects):
         dups = {}
@@ -898,8 +832,9 @@ class Builder(Notes):
             if prefix is None:
                 self.note(f"occlusion record {i}: type {o['type']} has no name form")
                 continue
-            key = (prefix, o["a"], o["type"] == 3 and o["b"])
-            name = f"{prefix}{o['a'] + 1:02d}" + dup_suffix(dups, key)
+            section = self.section_part(o["a"], f"occlusion record {i}")
+            key = (prefix, section, o["type"] == 3 and o["b"])
+            name = f"{prefix}{section + 1:02d}" + dup_suffix(dups, key)
             if o["type"] == 3:
                 name += f"-{o['b'] + 1:02d}"
             elif o["type"] == 2 and o["b"] != 0:
@@ -907,20 +842,32 @@ class Builder(Notes):
             if not o["verts"]:
                 self.note(f"occlusion record {i} holds no polygon (ChmLFP1's stored planes are not finite); it "
                           "exports with none")
-            me = bpy.data.meshes.new(name + "-occonly")
+            me = self.data(bpy.data.meshes.new(name + "-occonly"))
             me.from_pydata([tuple(self.blender(v)) for v in o["verts"]], [], o["faces"])
             me.update()
             ob = bpy.data.objects.new(name + "-occonly", me)
             ob.display_type = "WIRE"
-            parent = lod_objects[0][0]
-            self.link(ob, parent)
             ob.o3d.order = i
-            lod_objects[0].append(ob)
+            lod_objects[0].append(self.put(ob, 0, section))
+            if o["sphere"] is not None and not finite(o["sphere"]):
+                self.note(f"occlusion record {i}: its stored sphere is not finite; it exports with the one its mesh "
+                          "gives")
+            elif o["sphere"] is not None:
+                # The record's sphere as the file stores it, which is not the
+                # one export derives from the mesh (206 retail models mirror
+                # its centre across y): a `_sphere` Empty on the mesh keeps it.
+                centre, radius = self.blender(o["sphere"][:3]), o["sphere"][3]
+                sphere = self.empty("_sphere", ob, Matrix.Translation(centre), size=radius, display="SPHERE")
+                sphere.hide_set(True)
+                lod_objects[0].append(sphere)
 
     def collision(self, lod_objects):
         dups = {}
         unbuilt = 0
         for si, c in enumerate(self.sc["cobjs"]):
+            if not c["volumes"]:
+                continue
+            part = self.section_part(si, f"collision section {si}'s volumes")
             for v in c["volumes"]:
                 code = VOLUME_NAMES.get(v["type"])
                 if code is None:
@@ -946,7 +893,7 @@ class Builder(Notes):
                         continue
                     facets = [(0, flat[0])]
                 unbuilt += missing
-                name = f"{code}{letters}{si + 1:02d}" + dup_suffix(dups, (code + letters, si)) + "-colonly"
+                name = f"{code}{letters}{part + 1:02d}" + dup_suffix(dups, (code + letters, part)) + "-colonly"
                 verts, index, polys = [], {}, []
                 for _, facet in facets:
                     poly = []
@@ -961,17 +908,121 @@ class Builder(Notes):
                         poly.pop()
                     if len(set(poly)) >= 3:
                         polys.append(poly)
-                me = bpy.data.meshes.new(name)
+                me = self.data(bpy.data.meshes.new(name))
                 me.from_pydata(verts, [], polys)
                 me.update()
                 ob = bpy.data.objects.new(name, me)
                 ob.display_type = "WIRE"
-                parent = self.owner(si, lod_objects)
-                self.link(ob, parent)
-                lod_objects[0].append(ob)
+                lod_objects[0].append(self.put(ob, 0, part))
         if unbuilt:
             self.note(f"{unbuilt} collision volume planes touch their volume in no face of 1 cm2 or more (or not at "
                       "all); export derives planes from faces, so it does not rebuild them")
+
+    def moved_points(self):
+        """The LOD 0 vertices each part's bone moves (mission axes), as export
+        gathers them from the mesh import makes of them: every part a
+        vertex's weights give rig.WEIGHT_EPS or more."""
+        points = {}
+        for p in self.sc["lods"][0]["parts"] if self.sc["lods"] else ():
+            for s in p["strips"]:
+                for v in s["verts"]:
+                    for part, w in influences(s, v):
+                        if round(w, 6) >= rig.WEIGHT_EPS:
+                            points.setdefault(part, []).append(v["p"])
+        return points
+
+    def hit_spheres(self, lod_objects):
+        """A skinned model's bone sections (those without collision geometry)
+        as export writes them back: a section whose stored sphere is not the
+        one export derives from the LOD 0 vertices its bone moves
+        (export.bone_bounds, compared on the file's 16.16 grid) gets a
+        `_## hit` sphere Empty on the bone (its origin the centre, its scale
+        the radius), and one whose box is not the derived one (with no
+        vertices, the sphere's cube) a `_## bounds` box Empty (its origin the
+        middle, its scale the half extents), both hidden; a section that
+        stores none although its bone moves vertices turns the bone's Hit
+        sphere off. A model this export wrote imports with none of them. A
+        sphere stored on a section that is no bone (the mesh part's) is noted
+        and left out: a scene holds none there."""
+        if not self.sc["skinned"]:
+            return
+        points = self.moved_points()
+        for si, c in enumerate(self.sc["cobjs"]):
+            if c["verts"]:
+                continue
+            derived = export.bone_bounds(points[si]) if si in points else None
+            bone = self.rig.data.bones.get(f"BN{si + 1:02d}") if self.rig is not None else None
+            if c["sphere"] is None:
+                if derived is not None and bone is not None:
+                    bone.o3d.hit_sphere = False
+                continue
+            if bone is None:
+                self.note(f"collision section {si}: its stored hit sphere is on no bone (the mesh part's section, or "
+                          "one past the bones), where a scene holds none; it exports without it")
+                continue
+            part = si
+            centre, radius = c["sphere"][:3], c["sphere"][3]
+            if derived is None or not on_grid(centre, derived[0], True) or not on_grid([radius], [derived[1]]):
+                ob = bpy.data.objects.new(f"_{si + 1:02d} hit", None)
+                ob.empty_display_type = "SPHERE"
+                ob.empty_display_size = 1.0
+                world = Matrix.Translation(self.blender(centre)) @ Matrix.Scale(radius, 4)
+                lod_objects[0].append(self.put(ob, 0, part, world))
+                ob.hide_set(True)
+            cube = [x - radius for x in centre] + [x + radius for x in centre]
+            if c["box"] is not None and not on_grid(c["box"], derived[2] if derived is not None else cube):
+                lo, hi = self.blender(c["box"][:3]), self.blender(c["box"][3:6])
+                box = bpy.data.objects.new(f"_{si + 1:02d} bounds", None)
+                box.empty_display_type = "CUBE"
+                box.empty_display_size = 1.0
+                half = [abs(hi[k] - lo[k]) * 0.5 for k in range(3)]
+                world = Matrix.Translation((lo + hi) * 0.5) @ Matrix.Diagonal((*half, 1.0))
+                lod_objects[0].append(self.put(box, 0, part, world))
+                box.hide_set(True)
+
+    def attach_points(self, lod_objects):
+        """The CXLT attach points: retail stores one per part after the root
+        on a rigid model and one per part on a skinned one (the builder's
+        derivation, formats/threedi/threedi_build.cpp), OED's WriteCXLT source
+        (5fc5b4f6a^ engine/formats/oed/export_3di.cpp). A row at its part's
+        pivot, the row export writes for a part without a helper, needs
+        none; any other is an `_## attach` Empty on its part in the
+        collision LOD (a section's stored offset is not always that pivot:
+        MWalA2X's parts all pivot on the origin). A table of another count
+        or none (156 JOTAC models: M24_1st's 42 rows for 42 sections,
+        Chair03X's none for seven) sets the model's Attach points to the
+        attach helpers: an Empty per row, in its order, on the part it is
+        the pivot of (else the root)."""
+        rows = self.sc["cxlt"]
+        li = self.model.o3d.poly_collision_lod
+        parts = self.sc["lods"][li]["parts"] if li < len(self.sc["lods"]) else []
+        first = 0 if self.sc["skinned"] else 1
+
+        def attach(i, pi, row):
+            ob = bpy.data.objects.new(f"_{pi + 1:02d} attach", None)
+            ob.empty_display_type = "PLAIN_AXES"
+            ob.empty_display_size = 0.05
+            ob.o3d.order = i
+            lod_objects[li].append(self.put(ob, li, pi, Matrix.Translation(self.blender(row))))
+
+        def at_pivot(row, part):
+            # The row the builder writes for the pivot: truncated to 16.16
+            # (threedi_q16_trunc), as the stored row is.
+            return all(round(a * 65536.0) == int(b * 65536.0) for a, b in zip(row, part["pivot"]))
+
+        if not rows and not self.sc["cxlt_given"]:
+            return
+        if rows and len(rows) == len(parts) - first:
+            off = [i for i, row in enumerate(rows) if not at_pivot(row, parts[i + first])]
+            # A skinned model's mesh part is no bone, so nothing hangs there.
+            if all(i + first != self.mesh_part for i in off):
+                for i in off:
+                    attach(i, i + first, rows[i])
+                return
+        self.model.o3d.attach_points = "HELPERS"
+        for i, row in enumerate(rows):
+            attach(i, next((pi for pi, part in enumerate(parts) if pi != self.mesh_part and at_pivot(row, part)), 0),
+                   row)
 
     def bullet_lod(self, mats):
         """The render LOD whose parts are the collision sections and whose
@@ -985,11 +1036,10 @@ class Builder(Notes):
             return
         self.note("bullet faces are rebuilt from the collision LOD's triangles on export; their stored normals are "
                   "not kept")
-        chosen = self.split[0] if self.split is not None else None
+        chosen = None
         for li, lod in enumerate(self.sc["lods"]):
-            if chosen is not None or len(lod["parts"]) != len(counts):
-                continue
-            if [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]] == counts:
+            if len(lod["parts"]) == len(counts) and \
+                    [sum(len(s["tris"]) for s in p["strips"]) for p in lod["parts"]] == counts:
                 chosen = li
                 break
         if chosen is not None:
@@ -1016,9 +1066,10 @@ class Builder(Notes):
             p.face_never_hit = bool(flags & 0x100)
             p.face_front_only = bool(flags & 0x800)
             p.face_other_flags = flags & ~0x901
-            if bool(flags & 1) != p.two_sided:
-                self.note(f"material {mi}: its bullet faces' both-sides flag differs from its two-sided flag; "
-                          "export takes it from Two sided")
+            if bool(flags & 1) != materials.two_sided(mats[mi]):
+                # Its faces' "both sides" is not its drawing's (154 JOTAC
+                # models: Baricd02's two-sided wire stores its faces one-sided).
+                p.face_both_sides = "YES" if flags & 1 else "NO"
         if outvoted:
             self.note(f"{outvoted} bullet faces take their material's most common surface and flags, not their own "
                       "(a material carries one set)")
@@ -1033,9 +1084,8 @@ class Builder(Notes):
         section_tris = {}
         for pi, part in enumerate(lod["parts"]):
             for s in part["strips"]:
-                for ti, tri in enumerate(s["tris"]):
-                    si = self.split[1][(id(s), ti)] if self.split is not None and self.split[0] == li else pi
-                    section_tris.setdefault(si, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
+                for tri in s["tris"]:
+                    section_tris.setdefault(pi, []).append((s["material"], [s["verts"][x]["p"] for x in tri]))
         for si, c in enumerate(self.sc["cobjs"]):
             by_centre = {}
             for a, b, cc, poly, flags in c["faces"]:
@@ -1048,17 +1098,6 @@ class Builder(Notes):
                     votes[material][by_centre[key]] += 1
                     met += 1
         return votes, met
-
-
-def centroid(points):
-    return tuple(sum(p[k] for p in points) / 3.0 for k in range(3))
-
-
-def sub_strip(s, tris):
-    """A strip holding only some of its triangles (and the vertices they use)."""
-    used = sorted({x for t in tris for x in t})
-    remap = {old: new for new, old in enumerate(used)}
-    return dict(s, verts=[s["verts"][i] for i in used], tris=[tuple(remap[x] for x in t) for t in tris])
 
 
 def solve_planes(a, b, c):
@@ -1152,17 +1191,39 @@ def volume_facets(planes, ladder=False):
     return facets, missing
 
 
-def import_file(context, path, op=None):
-    """Import one .3di into the current scene under a model root of its own;
-    returns the model root and the notes. A file that fails leaves nothing of
-    itself in the scene."""
-    sc, notes = import_text(context, ["scene"], path, "scene.o3d", read_o3d)
-    builder = Builder(context, sc, path, op)
-    try:
-        builder.build(context.scene)
-    except Exception as e:
-        builder.discard()
-        if isinstance(e, ExportError):
-            raise ImportFailed(str(e)) from e
-        raise
-    return builder.model, ["not carried: " + n for n in notes] + builder.notes
+def import_files(context, paths, op=None):
+    """Import .3di files into the current scene, each under a model root of
+    its own; a first-person gun and the arms imported with it share the gun's
+    rig (pair, rig.share_rig). Returns [(path, model or None, notes or the
+    error)], in the order given. A file that fails leaves nothing of itself
+    behind and does not stop the others."""
+    read = []
+    for path in paths:
+        try:
+            sc, notes = import_text(context, ["scene"], path, "scene.o3d", read_o3d)
+            read.append((path, sc, notes, None))
+        except Exception as e:  # noqa: BLE001 (reported per file)
+            read.append((path, None, None, e))
+    pairs = pair(read)
+    guns = {g for g, _ in pairs.values()}
+    built, results = {}, [None] * len(read)
+    for i, (path, sc, notes, error) in enumerate(read):
+        if error is not None:
+            results[i] = (path, None, error)
+            continue
+        builder = Builder(context, sc, path, op, rigged=i in guns)
+        try:
+            builder.build(context.scene)
+        except Exception as e:  # noqa: BLE001 (reported per file)
+            builder.discard()
+            results[i] = (path, None, ImportFailed(str(e)) if isinstance(e, ExportError) else e)
+            continue
+        built[i] = builder
+        results[i] = (path, builder.model, ["not carried: " + n for n in notes] + builder.notes)
+    for i, (g, _) in sorted(pairs.items()):
+        if i in built and g in built:
+            try:
+                results[i][2].extend(rig.share_rig(context, built[i].model, built[g].model))
+            except ExportError as e:
+                results[i][2].append(f"it keeps its own rig: {e}")
+    return results

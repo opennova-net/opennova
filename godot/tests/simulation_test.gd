@@ -1268,8 +1268,9 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	# lengths arrive as per-key VARIANT arrays; the bake consumes ONE ring entry per
 	# 'auto' delay field (serve-then-advance), and every play consumes + latches the
 	# served variant into the state dict. A both-auto reload over a 3-ring therefore
-	# eats entries 0 and 1 at bake — the FIRST reload PLAY serves variant 2, the
-	# next serves 0 (the REVVY M4 "m4_1r" "m4_1r" "m4_1r2" shape).
+	# eats entries 2 and 1 at bake (a ring serves its last token first) — the FIRST
+	# reload PLAY serves variant 0, the next serves 2 (the REVVY M4 "m4_1r" "m4_1r"
+	# "m4_1r2" shape).
 	# [orig: Anim_InitActions reads @0x5421c5/@0x5421d8 via Anim_GetDurationTicks
 	#  @0x53ee10; AnimMap_PlayAnimBySlot @0x40bda0 latches at animState+68]
 	var md := MissionData.new()
@@ -1299,8 +1300,8 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	assert_eq(state.anim_variant, 0, "single-entry rings always serve 0")
 
 	# Spend a round (letting the fire+recoil chain settle back to idle — the reload
-	# dispatch gate refuses the edge mid-FIRE), then reload: the bake left the reload
-	# ring's head at 2 (two 'auto' reads), so the FIRST reload serves variant 2.
+	# dispatch gate refuses the edge mid-FIRE), then reload: the bake's two 'auto'
+	# reads served entries 2 then 1, so the FIRST reload serves variant 0.
 	sim.set_local_player_weapon_input(false, true, false)
 	for _i in range(6):
 		sim.step()
@@ -1315,11 +1316,11 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 			reload_variant = state.anim_variant
 			first_reload_serial = state.play_serial
 			break
-	assert_eq(reload_variant, 2,
-		"the first reload serves variant 2 — the both-auto bake consumed entries 0+1")
+	assert_eq(reload_variant, 0,
+		"the first reload serves variant 0 — the both-auto bake consumed entries 2 and 1")
 
-	# Let the reload finish (ds 32 + de 32 ticks and the transitions), spend another
-	# round, reload again: the ring wrapped, so the play serves variant 0.
+	# Let the reload finish (ds 17 + de 47 ticks and the transitions), spend another
+	# round, reload again: the ring wrapped, so the play serves variant 2.
 	for _i in range(90):
 		sim.step()
 	sim.set_local_player_weapon_input(false, true, false)
@@ -1333,7 +1334,7 @@ func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 		if state.anim_key == "anim_wpn_reload" 				and state.play_serial != first_reload_serial:
 			reload_variant = state.anim_variant
 			break
-	assert_eq(reload_variant, 0, "the second reload wraps the ring back to variant 0")
+	assert_eq(reload_variant, 2, "the second reload wraps the ring back to variant 2")
 
 
 func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
@@ -1346,6 +1347,9 @@ func test_weapon_event_batch_preserves_three_undrained_ticks() -> void:
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var def := WeaponDef.new()
 	def.name = "WPN_EVENT_BATCH"
+	# The clip lengths below stand in for this ANIMADM's rings; a def with no
+	# ANIMADM loads no anim table and plays no clip (net-re §5.62).
+	def.animadm = "batch.adm"
 	def.set_actions([
 		WeaponActionRow.make("idle", 0, 0, "anim_wpn_idle"),
 		WeaponActionRow.make("fire", 0, 0, "anim_wpn_fire", "FIRE_BEGIN", "FIRE_END"),
