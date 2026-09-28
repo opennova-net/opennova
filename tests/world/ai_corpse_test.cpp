@@ -260,7 +260,7 @@ int main() {
 	const int timer0 = c0->corpse_timer;
 	std::printf("corpse: t=%ds alive=%d hidden=%d anim=%d (%s) corpse_timer=%d deathtime=%d\n", seconds,
 			int(c0->alive), int(c0->hidden), anim0,
-			(anim0 >= 0 && anim0 < w::kInfantryAnimStateCount) ? w::kInfantryAnimNames[anim0] : "?",
+			(anim0 >= 0 && anim0 < w::kInfantryAnimStateCount) ? opennova::anim::kAnimSlotNames[anim0] : "?",
 			timer0, c0->deathtime_ticks);
 	expect(!c0->hidden, "the corpse is not hidden immediately after the kill");
 	expect(anim0 >= kDeathStateMin, "the dead NPC's anim is a death state");

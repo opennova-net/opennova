@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -50,9 +51,7 @@ bool write_clip(const fs::path &path, uint32_t fps, uint32_t frames, bool loop) 
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!bad::bad_build_mint(clip, nullptr, bytes, &error)) return false;
-	std::ofstream f(path, std::ios::binary);
-	f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(f);
+	return test_io::write_file(path.string(), bytes);
 }
 
 } // namespace

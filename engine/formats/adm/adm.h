@@ -32,8 +32,11 @@ inline bool adm_key_names_slot(std::string_view key, std::string_view slot) {
 
 // The key the engine looks the slot up by, lower case: "anim_" and the slot
 // name, the spelling every lookup uses (world::infantry_anim_key,
-// world::body_anim_adm_key); empty for a key that names no slot. Two rows
-// whose keys differ only before their sixth character name one slot.
+// world::body_anim_adm_key); empty only for a key of five characters or
+// fewer (adm_slot_name). Whether the name is one of the 252 slots is
+// anim::adm_slot_index's question, which answers -1 for a key that names
+// none. Two rows whose keys differ only before their sixth character name
+// one slot.
 inline std::string adm_slot_key(std::string_view key) {
     const std::string_view name = adm_slot_name(key);
     return name.empty() ? std::string() : "anim_" + strutil::to_lower(name);

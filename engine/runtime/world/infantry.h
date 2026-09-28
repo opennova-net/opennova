@@ -7,16 +7,19 @@
 #include <string>
 #include <unordered_map>
 
+#include <runtime/anim/anim_slot_names.h>
+#include <runtime/anim/clip_timeline.h>
 #include <runtime/world/body_anim.h>
 #include <runtime/world/parachute.h>
 #include <runtime/world/entity.h> // EntityHandle (the combat-pass target/focus fields)
 
 namespace opennova::world {
 
-// 252 entries: 0..239 body states (180..239 = the 15-group bullet death matrix),
-// 240..251 the wpn_* FP viewmodel states. [orig: AnimMap_FindSlotByName @0x40cfa0
-// scans exactly 252 entries of g_AnimStateNameTable @0x8135F0]
-inline constexpr int kInfantryAnimStateCount = 252;
+// The body's state ids ARE the 252 anim slots (anim::kAnimSlotNames): 0..239
+// body states (180..239 = the 15-group bullet death matrix), 240..251 the
+// wpn_* FP viewmodel states. [orig: AnimMap_FindSlotByName @0x40cfa0 scans
+// exactly 252 entries of g_AnimStateNameTable @0x8135F0]
+inline constexpr int kInfantryAnimStateCount = anim::kAnimSlotCount;
 
 // Foot-above-floor hysteresis shared by the simulated player motor and the
 // authority's reconstruction of a wire-owned remote player's vertical state.
@@ -24,8 +27,14 @@ inline constexpr int kInfantryAnimStateCount = 252;
 // resolver return against 0xF000]
 inline constexpr int32_t kInfantryAirborneGap = 0xF000;
 
-// State id -> .adm key without the "anim_" prefix. [orig: g_AnimStateNameTable @0x8135F0]
-extern const char *const kInfantryAnimNames[kInfantryAnimStateCount];
+// An end-notify armed on a one-shot that already stopped: the arm lands on the
+// channel, but a stopped channel's advance body is skipped whole, so the end
+// flag never latches and the deferred state never promotes until a re-init
+// resets the flag word. [orig: AnimChannel_AdvancePlayback's 0x10000 gate over
+//  the whole advance @0x40B14D; AnimMap_UpdateEntity re-arms 0x40000 each tick
+//  @0x40B7B3 / @0x40B7E1 and promotes only on 0x20000 @0x40B793 / @0x40B7C1]
+inline constexpr int32_t kEndNotifyNeverLatches = 0x7FFFFFFF;
+
 // The .adm clip key for a state ("anim_" + the retail state name); empty for
 // an out-of-range or unnamed state. The ONE builder every consumer (the
 // kernel, the inspect records, the root-motion and collision-pose caches,
@@ -434,6 +443,23 @@ struct InfantryState {
 
 	int anim_state = anim_state::kIdle;   // entity[175]
     int anim_pending = 0;                 // entity[174]
+    // The channel's end-notify, the 0x40000 flag a pending state arms: the tick
+    // the armed channel parks on (its clip's next loop wrap after the arm, or
+    // the one-shot end; kEndNotifyNeverLatches on a one-shot that already
+    // stopped), -1 unarmed. Armed once when the pending state is first seen
+    // and cleared by the promotion or a channel re-init (which resets the flag
+    // word to the clip's own), never by the pending value moving or clearing:
+    // the arm lives on the channel, so a pending cleared while armed leaves the
+    // loop parking on its boundary every tick (frozen on its last frame, no
+    // ring serve) until a re-init, and a pending set again then promotes at
+    // once off the latched end. A loop therefore promotes at its next wrap
+    // AFTER the arm, not at once when the playhead is past its first cycle.
+    // [orig: AnimMap_UpdateEntity: the arm @0x40B7B3 / @0x40B7E1, the
+    //  promotion on 0x20000 @0x40B793..0x40B7A8 / @0x40B7C1..0x40B7D6;
+    //  AnimChannel_AdvancePlayback latches 0x20000 only when the armed channel
+    //  wraps @0x40B19E..0x40B1B1 or ends @0x40B188..0x40B18F, and re-parks
+    //  the armed loop on every later wrap through the same path]
+    int32_t anim_pending_boundary = -1;
     int anim_prev = anim_state::kIdle;    // entity[178]
     // The request is entity+0x2BC; the playing id is AnimMap slot+0x3C.
     // Body selection only writes the request. The next motor-head update
@@ -489,6 +515,7 @@ struct InfantryState {
         }
         anim_variant = variant;
         anim_pending = 0;
+        anim_pending_boundary = -1; // the re-init resets the flag word
         clip_phase = 0;
         anim_blend_weight = 0.0f;
         // The blend duration is picked from the REQUESTED state's flags before
@@ -517,7 +544,7 @@ struct InfantryState {
         anim_variant = served;
         clip_phase = 0;
         anim_blend_weight = 0.0f;
-        anim_blend_step = 0.125f;
+        anim_blend_step = anim::kWrapFadeStep;
     }
 
     // A raw animStateId store leaves both the playing channel and the
@@ -531,6 +558,7 @@ struct InfantryState {
         anim_state = state;
         anim_playing_state = state;
         anim_pending = 0;
+        anim_pending_boundary = -1;
         anim_prev = state;
         clip_phase = 0;
         anim_prev_clip_phase = 0;
@@ -598,6 +626,10 @@ struct InfantryState {
     // [orig: AnimMap_UpdateDualChannels @ 0x40b8c0; witness world-wac-ai-re.md §14.8]
     int wpn_state = anim_state::kIdle;    // entity+0x2C8
     int wpn_deferred = 0;                 // entity+0x2C4
+    // The secondary channel's end-notify, as anim_pending_boundary: the tick
+    // the deferred state's arm parks on, -1 unarmed. [orig: the shared
+    //  AnimMap_UpdateEntity body reached for the secondary @0x40B908]
+    int32_t wpn_deferred_boundary = -1;
     int wpn_playing_state = -1;        // secondary AnimMap slot+0x3C
     int32_t wpn_clip_phase = 0;
     // The secondary channel cross-fades its state changes exactly as the primary
@@ -641,6 +673,7 @@ struct InfantryState {
             wpn_prev_variant = wpn_variant;
         }
         wpn_clip_phase = 0;
+        wpn_deferred_boundary = -1; // the re-init resets the flag word
         wpn_blend_weight = 0.0f;
         wpn_blend_step =
                 (infantry_anim_flags(target_state) & 0x400u) != 0
@@ -660,13 +693,14 @@ struct InfantryState {
         wpn_variant = served;
         wpn_clip_phase = 0;
         wpn_blend_weight = 0.0f;
-        wpn_blend_step = 0.125f;
+        wpn_blend_step = anim::kWrapFadeStep;
     }
 
     void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {
         wpn_state = state;
         wpn_playing_state = state;
         wpn_deferred = 0;
+        wpn_deferred_boundary = -1;
         wpn_prev = state;
         wpn_clip_phase = 0;
         wpn_prev_clip_phase = 0;

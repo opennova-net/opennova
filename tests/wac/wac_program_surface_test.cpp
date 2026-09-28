@@ -49,7 +49,6 @@ static void test_compile_good_source() {
     CompileEnv env;
     const Program p = compile_source("if never() then set(v1,1) endif\n", env);
     CHECK(p.ok());
-    CHECK(p.error_count() == 0);
     CHECK(p.event_count == 1);
     CHECK(!p.code.empty());
 }
@@ -61,7 +60,6 @@ static void test_lenient_compile_surfaces_warnings() {
     CompileEnv env;
     const Program p = compile_source("if never() then bogus_command_xyz(1) endif\n", env);
     CHECK(p.ok());
-    CHECK(p.error_count() == 0);
     CHECK(!p.diagnostics.empty());
     if (!p.diagnostics.empty()) {
         CHECK(p.diagnostics[0].line > 0);

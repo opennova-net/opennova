@@ -11,7 +11,7 @@
 #include <net/novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
 
 // P7 Part 2 — the NovaWorld lobby HTTP orchestration, moved out of the Godot binding so the binding
-// becomes a pure HTTPRequest pump (ADR 0010 / .agents/network.md: protocol/framing/sequencing in libs,
+// becomes a pure HTTPRequest pump (ADR 0010 / .agents/README.md: protocol/framing/sequencing in libs,
 // sockets + HTTP transport + signals in Godot). This owns the EPASK login chain, the GSB server-browser
 // fetch, and the NWJoin handshake — the URL builders, the cookie jar, and the LoginStep / JoinStep state
 // machines — reusing the existing byte helpers (epask, build_login_post_body, the GSB/joi parsers).

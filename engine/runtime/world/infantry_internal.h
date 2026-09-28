@@ -59,6 +59,15 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
 bool reset_capsule_bottom_state(int state);
+// The end-notify arm both channels share: the tick the armed channel parks on,
+// where AnimChannel_AdvancePlayback latches the end flag: a loop's next wrap
+// after `phase`, a one-shot's end, kEndNotifyNeverLatches for a one-shot that
+// already stopped (its advance body is skipped, so the flag never latches);
+// -1 without a clip. [orig: AnimMap_UpdateEntity @0x40B7B3 / @0x40B7E1;
+//  AnimChannel_AdvancePlayback @0x40B14D (the stop gate), @0x40B188..0x40B18F,
+//  @0x40B19E..0x40B1B1]
+int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, int variant,
+                       int32_t phase);
 // The primary channel's motor-head update; a re-init serves its ring entry from
 // `rings` (AnimVariantRings).
 bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,

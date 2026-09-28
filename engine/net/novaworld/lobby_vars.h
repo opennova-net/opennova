@@ -10,7 +10,7 @@
 #include <net/novaworld/lobby_update.h> // LobbyStatusBlob (the POST status heartbeat)
 
 // P7 Part 2 (B2) — the NovaWorld lobby var-builders + identity set, moved out of the Godot bindings
-// so they become pure pumps (ADR 0010 / .agents/network.md: lobby payloads belong in engine/net/novaworld,
+// so they become pure pumps (ADR 0010 / .agents/README.md: lobby payloads belong in engine/net/novaworld,
 // sockets + signals in Godot). The host registration var-lists (the GSB row), the NW-S5 client
 // identity "Cookie" set (used for BOTH the UDP verify var-list and the HTTP login cookies), and the
 // UDPNOVAWORLD "host:port" split. Godot-free. The bindings pass their GDScript-set config in.

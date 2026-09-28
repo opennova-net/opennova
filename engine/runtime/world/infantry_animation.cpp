@@ -36,33 +36,57 @@ void blend_root_frame(const RootMotionFrame &previous, const RootMotionFrame &cu
     out.events = current.events;
 }
 
-// The channel's arm for this tick's advance: none, a pending request's, or
-// released by this tick's promotion off the end the arm parked it on.
+// The channel's arm for this tick's advance: none, the end-notify's (a pending
+// state armed it, and it stays on the channel until a promotion or a re-init),
+// or released by this tick's promotion off the end the arm parked it on.
 enum class ChannelArm { kUnarmed, kArmed, kReleased };
 } // namespace
 
+int32_t arm_end_notify(const IRootMotionSource &source, int adm_id, int state, int variant,
+                       int32_t phase) {
+    const int32_t length = source.clip_length_ticks(adm_id, state, variant);
+    if (length < 0) return -1;
+    // A one-shot past its end carries 0x10000: the arm lands, the advance body
+    // is skipped whole, the end flag never latches [orig:
+    // AnimChannel_AdvancePlayback @0x40B14D].
+    if (!source.clip_loops(adm_id, state) && phase >= length) return kEndNotifyNeverLatches;
+    return source.clip_boundary_after(adm_id, state, phase, variant);
+}
+
 // Reconcile the requested id before checking the OLD channel's end flag.
 // Promoting a pending request does not re-enter initialization in this call.
-// A pending request arms the channel for this tick's advance. The promotion
-// resets the channel's flag word to the clip's own, so the old channel
-// advances unarmed: a loop parked on its end by the arm wraps and serves.
+// A pending request arms the channel for this tick's advance: the arm lands
+// once, on the tick the pending state is first seen, and the channel parks on
+// its clip's next wrap after that tick (a one-shot on its end), which is when
+// the end flag latches; the promotion follows on the next tick and resets the
+// flag word to the clip's own, so the old channel advances unarmed and a loop
+// parked on its end wraps and serves. A loop past its first cycle therefore
+// waits for its next wrap rather than promoting at once. The arm lives on the
+// channel, not on the request: a pending cleared while armed leaves the loop
+// parked, and a pending set again promotes at once off the latched end.
 // [orig: AnimMap_UpdateEntity @0x40B630..0x40B7C9, the arm @0x40B7B3, the
-//  promotion's flag reset @0x40B7A8]
+//  promotion on 0x20000 @0x40B793, its flag reset @0x40B7A8;
+//  AnimChannel_AdvancePlayback latches 0x20000 on the armed wrap
+//  @0x40B19E..0x40B1B1 and the armed one-shot end @0x40B188..0x40B18F]
 static ChannelArm prepare_primary_channel(InfantryState &inf, const IRootMotionSource *source,
                                           AnimVariantRings *rings) {
     if (inf.anim_playing_state < 0) inf.anim_playing_state = inf.anim_state;
     if (inf.anim_state != inf.body_clip_state())
         begin_body_transition_with_insert(inf, inf.anim_state, source, rings);
     if (inf.anim_pending != 0 && source != nullptr) {
-        const int32_t length = source->clip_length_ticks(
-                inf.adm_id, inf.body_clip_state(), inf.anim_variant);
-        if (length >= 0 && inf.clip_phase >= length) {
+        const int state = inf.body_clip_state();
+        if (inf.anim_pending_boundary < 0)
+            inf.anim_pending_boundary =
+                    arm_end_notify(*source, inf.adm_id, state, inf.anim_variant, inf.clip_phase);
+        const int32_t boundary = inf.anim_pending_boundary;
+        if (boundary >= 0 && inf.clip_phase >= boundary) {
             inf.anim_state = inf.anim_pending;
             inf.anim_pending = 0;
-            return inf.clip_phase == length ? ChannelArm::kReleased : ChannelArm::kUnarmed;
+            inf.anim_pending_boundary = -1;
+            return inf.clip_phase == boundary ? ChannelArm::kReleased : ChannelArm::kUnarmed;
         }
     }
-    return inf.anim_pending != 0 ? ChannelArm::kArmed : ChannelArm::kUnarmed;
+    return inf.anim_pending_boundary >= 0 ? ChannelArm::kArmed : ChannelArm::kUnarmed;
 }
 
 bool reset_capsule_bottom_state(int state) {
@@ -76,16 +100,22 @@ bool advance_primary_channel(InfantryState &inf, IRootMotionSource &source,
 
     if (!primary_blend_active(inf)) {
         // A queued state arms the channel's end-notify: the promotion tick (the
-        // clip's first end, clip_length_ticks -- the step-3b clock) samples the
-        // parked clip end, not the wrapped start
+        // wrap the arm parks on, anim_pending_boundary) samples the parked clip
+        // end, not the wrapped start
         // [orig: AnimChannel_AdvancePlayback @0x40B193..0x40B1B1].
         const int state = inf.body_clip_state();
         const int32_t variant = inf.anim_variant;
-        const int32_t armed_boundary = inf.anim_pending != 0
-                ? source.clip_length_ticks(inf.adm_id, state, variant)
-                : -1;
-        const bool have = source.advance_armed(inf.adm_id, state, variant,
-                                               inf.clip_phase, armed_boundary, out);
+        const bool armed = arm == ChannelArm::kArmed;
+        const int32_t boundary = inf.anim_pending_boundary;
+        // An armed loop already parked on its boundary (its pending cleared
+        // while armed) re-parks every tick: retail wraps it and parks it at
+        // 0.99999 again while 0x40000 holds, so the playhead never leaves the
+        // boundary tick and the ring never serves [orig:
+        // AnimChannel_AdvancePlayback @0x40B199..0x40B1B1, re-entered each tick].
+        if (armed && boundary != kEndNotifyNeverLatches && inf.clip_phase >= boundary)
+            inf.clip_phase = boundary - 1;
+        const bool have = source.advance_armed(inf.adm_id, state, variant, inf.clip_phase,
+                                               armed ? boundary : -1, out);
         // An unarmed loop that wraps serves its playing state's ring: another
         // entry fades in from its first frame over eight ticks, the same entry
         // plays on. An armed channel parks instead and never serves; the

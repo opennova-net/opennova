@@ -35,6 +35,12 @@ bool AdmRingTable::load(const assets::AssetStore *assets, const std::string &adm
 
 bool AdmRingTable::loaded(const std::string &adm_name) const { return table(adm_name) != nullptr; }
 
+AdmRingTable AdmRingTable::copy_of(const std::string &adm_name) const {
+	AdmRingTable copy;
+	if (const Table *t = table(adm_name)) copy.tables_.emplace(table_key(adm_name), *t);
+	return copy;
+}
+
 void AdmRingTable::adopt(const std::string &adm_name,
 		const std::unordered_map<std::string, std::vector<AdmClipFacts>> &clips) {
 	if (adm_name.empty()) return;

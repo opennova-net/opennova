@@ -34,7 +34,10 @@ struct WeaponActionRow {
 	// row to write back to, so an edit to them is live-only.
 	bool authored = false;
 	std::string authored_name;  // the ACTION "NAME" exactly as written
-	std::string function;       // read-only: the handler registry is unported (D-WPN-1)
+	// The FUNCTION value as written. Read-only in the window: the pump runs
+	// the handler it names (weapon_fsm.cpp run_handler), and rebinding a slot
+	// is a def edit.
+	std::string function;
 	// -1 == `auto`, which is NOT the same authoring as an explicit 0. The
 	// parser cannot tell an explicit 0 from an absent key, so those two look
 	// alike here; `auto` is always distinguishable.

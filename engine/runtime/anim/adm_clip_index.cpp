@@ -3,8 +3,8 @@
 #include <formats/adm/adm.h>
 #include <formats/bad/bad.h>
 #include <base/io/strutil.h>
+#include <runtime/anim/anim_slot_names.h>
 #include <runtime/assets/asset_store.h>
-#include <runtime/world/infantry.h>
 
 using namespace opennova::adm;
 using namespace opennova::bad;
@@ -16,8 +16,8 @@ int adm_slot_index(std::string_view key) {
 	//  252 names of g_AnimStateNameTable @0x8135F0]
 	const std::string_view name = adm_slot_name(key);
 	if (name.empty()) return -1;
-	for (int slot = 0; slot < world::kInfantryAnimStateCount; ++slot)
-		if (strutil::iequals(name, world::kInfantryAnimNames[slot])) return slot;
+	for (int slot = 0; slot < kAnimSlotCount; ++slot)
+		if (strutil::iequals(name, kAnimSlotNames[slot])) return slot;
 	return -1;
 }
 

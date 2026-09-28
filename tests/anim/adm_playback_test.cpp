@@ -166,10 +166,119 @@ int main() {
 		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 		TEST_EXPECT(inf.clip_phase == wrap);
 		TEST_EXPECT(local.events == 60 && local.capsule_bottom == parked.capsule_bottom);
-		inf.anim_pending = 0;
-		inf.clip_phase = wrap - 1;
-		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		// The unarmed contrast runs on a channel that never armed: clearing the
+		// pending above would leave the arm on the channel (nothing clears
+		// 0x40000 but the promotion's flag reset @0x40B7A8 and a re-init), the
+		// case the cleared-while-armed block below pins.
+		opennova::world::InfantryState unarmed;
+		unarmed.adm_id = id;
+		unarmed.anim_state = anim_state::kIdle;
+		unarmed.clip_phase = wrap - 1;
+		TEST_EXPECT(opennova::world::advance_primary_channel(unarmed, source, rings, local));
 		TEST_EXPECT(local.events == 1 && local.capsule_bottom == wrapped.capsule_bottom);
+	}
+	// A state queued behind a loop PAST its first cycle arms the end-notify on
+	// the tick it is first seen and promotes at the loop's next wrap after
+	// that, not at once: the flag latches only when the armed channel wraps
+	// [orig: AnimMap_UpdateEntity arm @0x40B7B3, promotion on 0x20000
+	//  @0x40B793; AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1].
+	{
+		opennova::world::InfantryState inf;
+		inf.adm_id = id;
+		inf.anim_state = anim_state::kIdle;
+		inf.anim_playing_state = anim_state::kIdle;
+		inf.clip_phase = wrap + 3;
+		inf.anim_pending = anim_state::kWalkForward;
+		const int32_t next_wrap = source.clip_boundary_after(id, anim_state::kIdle, wrap + 3, 0);
+		TEST_EXPECT(next_wrap > wrap + 3);
+		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		TEST_EXPECT(inf.anim_pending == anim_state::kWalkForward);
+		TEST_EXPECT(inf.anim_pending_boundary == next_wrap);
+		// The park lands on next_wrap; the promotion opens the tick after it,
+		// whose own advance steps the playhead once more.
+		int promoted_at = -1;
+		for (int guard = 0; guard < 4 * wrap && promoted_at < 0; ++guard) {
+			TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+			if (inf.anim_pending == 0) promoted_at = inf.clip_phase;
+		}
+		TEST_EXPECT(promoted_at == next_wrap + 1);
+		TEST_EXPECT(inf.anim_state == anim_state::kWalkForward);
+		TEST_EXPECT(inf.anim_pending_boundary == -1);
+	}
+	// A deferred CLEARED while the end-notify is armed leaves the arm on the
+	// channel: the loop parks on its boundary and re-parks every tick after
+	// (frozen on its last frame, no ring serve) until a re-init, and a deferred
+	// set again promotes at once off the latched end
+	// [orig: AnimMap_UpdateEntity arm @0x40B7B3, promotion on 0x20000 @0x40B793;
+	//  AnimChannel_AdvancePlayback re-parks the armed loop on every wrap
+	//  @0x40B199..0x40B1B1].
+	{
+		opennova::world::InfantryState inf;
+		inf.adm_id = id;
+		inf.anim_state = anim_state::kIdle;
+		inf.anim_playing_state = anim_state::kIdle;
+		inf.clip_phase = wrap - 1;
+		inf.anim_pending = anim_state::kWalkForward;
+		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		TEST_EXPECT(inf.clip_phase == wrap && local.events == 60);
+		inf.anim_pending = 0; // cleared while armed
+		for (int tick = 0; tick < 5; ++tick) {
+			TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+			TEST_EXPECT(inf.clip_phase == wrap);
+			TEST_EXPECT(local.events == 60 && local.capsule_bottom == parked.capsule_bottom);
+		}
+		TEST_EXPECT(inf.anim_pending_boundary == wrap);
+		inf.anim_pending = anim_state::kWalkForward; // set again: promotes at once
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		TEST_EXPECT(inf.anim_pending == 0 && inf.anim_state == anim_state::kWalkForward);
+		TEST_EXPECT(inf.anim_pending_boundary == -1);
+		// A re-init disarms.
+		inf.anim_pending = anim_state::kWalkForward;
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		inf.begin_body_transition(anim_state::kIdle);
+		TEST_EXPECT(inf.anim_pending == 0 && inf.anim_pending_boundary == -1);
+	}
+	// A deferred that arrives after a one-shot already stopped never promotes:
+	// the arm lands, but the stopped channel's advance body is skipped, so the
+	// end flag never latches until a re-init resets the flag word. Armed before
+	// the end, it latches at the end and promotes the tick after
+	// [orig: AnimChannel_AdvancePlayback's 0x10000 gate @0x40B14D, the armed
+	//  one-shot end @0x40B188..0x40B18F; AnimMap_UpdateEntity @0x40B7B3 / @0x40B793].
+	{
+		const int32_t once = source.clip_length_ticks(id, anim_state::kReset, 0);
+		TEST_EXPECT(once > 0);
+		opennova::world::InfantryState inf;
+		inf.adm_id = id;
+		inf.anim_state = anim_state::kReset;
+		inf.anim_playing_state = anim_state::kReset;
+		inf.clip_phase = once + 5; // stopped
+		inf.anim_pending = anim_state::kWalkForward;
+		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
+		for (int tick = 0; tick < 3 * once; ++tick)
+			TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		TEST_EXPECT(inf.anim_pending == anim_state::kWalkForward);
+		TEST_EXPECT(inf.anim_pending_boundary == opennova::world::kEndNotifyNeverLatches);
+		inf.begin_body_transition(anim_state::kIdle);
+		TEST_EXPECT(inf.anim_pending_boundary == -1);
+
+		opennova::world::InfantryState early;
+		early.adm_id = id;
+		early.anim_state = anim_state::kReset;
+		early.anim_playing_state = anim_state::kReset;
+		early.clip_phase = once - 2;
+		early.anim_pending = anim_state::kWalkForward;
+		int promoted_at = -1;
+		for (int tick = 0; tick < 2 * once && promoted_at < 0; ++tick) {
+			TEST_EXPECT(opennova::world::advance_primary_channel(early, source, rings, local));
+			if (early.anim_pending == 0) promoted_at = early.clip_phase;
+		}
+		TEST_EXPECT(promoted_at == once + 1);
+		TEST_EXPECT(early.anim_state == anim_state::kWalkForward);
 	}
 	// The replica channel: a deferral queued behind the looping idle arms its
 	// next wrap lazily; that tick samples the parked end (the row's
