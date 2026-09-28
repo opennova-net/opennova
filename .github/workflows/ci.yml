@@ -523,8 +523,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # The bundled assets/ are plain git blobs; nothing here needs LFS.
+          lfs: false   # scoped below: the package reads assets/ only
           submodules: recursive
+
+      # The models, clips and textures in assets/ ride LFS. Their objects are
+      # cached by the pointer set, so a run restores them instead of
+      # spending LFS bandwidth on every package.
+      - name: Key the bundled LFS assets
+        id: assets-lfs
+        shell: bash
+        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the bundled LFS assets
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs/objects
+          key: ${{ steps.assets-lfs.outputs.key }}
+
+      - name: Pull Git LFS assets (assets/ only)
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="assets/**"
 
       - name: Cache Godot binary
         uses: actions/cache@v4
