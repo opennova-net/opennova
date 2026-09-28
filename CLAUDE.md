@@ -44,9 +44,13 @@ easier to relay than to rediscover.
 - `scripts/` — the build/test/bootstrap/package entry points, `ci/` (suite selection and
   attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
   `oracles/`, `parity/` and `render/` helper scripts.
-- `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
+- `docs/` — the golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
-  (via the `re-doc` skill) — there is no scratch directory.
+  (via the `re-doc` skill) — there is no scratch directory. `docs/` is a submodule of
+  the private `opennova-net/docs`, skipped by default (`update = none` in `.gitmodules`,
+  so public clones and CI never try it); a maintainer clone opts in once with
+  `git config submodule.docs.update checkout`, which every worktree shares. Edits land
+  with `scripts/land_docs.sh` (Git, PRs, CI below).
 - `third_party/` — vendored submodules (godot-cpp and gut; never edit in
   place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
   and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and two
@@ -66,15 +70,17 @@ processes.
 scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
 scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
 scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ scripts (local, no CI job)
-python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv; ledger_check takes --check)
+python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv)
+python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (docs repo; --write regenerates)
 ```
 
 - Fresh worktree/clone: `git submodule update --init --recursive` first — `third_party/`
   ships empty and the build scripts self-init only GUT (`scripts/build.sh` and
   `scripts/test_godot.sh` both run `scripts/bootstrap_godot.sh`); godot-cpp still
-  needs the manual init. Then build the GDExtension (`godot/bin/` has no DLL in a
-  fresh worktree) and run `"$GODOT_BIN" --headless --path godot --import` once, or engine
-  classes appear missing.
+  needs the manual init. With the docs opt-in set, the same command clones `docs/` over
+  SSH; an empty `docs/` means the opt-in is missing, so never write into it. Then build
+  the GDExtension (`godot/bin/` has no DLL in a fresh worktree) and run
+  `"$GODOT_BIN" --headless --path godot --import` once, or engine classes appear missing.
 - `scripts/test_godot.sh` needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*` binary in
   `.godot-bin/` (the resolver, `scripts/godot_bin.sh`, walks parent directories, so a
   worktree borrows the main checkout's; export `GODOT_BIN` yourself for direct GUT runs).
@@ -152,6 +158,12 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
   current worktree.
 - Never post PR comments — context goes in the PR description and commit messages. Never
   merge PRs; the maintainer merges.
+- Docs changes go to the private docs repo, not into the PR: `scripts/land_docs.sh "<msg>"`
+  commits `docs/`, rebases it onto docs `master`, pushes straight to docs `master`, and
+  stages the new pointer, which rides the slice's commit. Never force-push docs `master`
+  (every pointer this repo recorded must stay reachable). Two PRs that both move the
+  pointer conflict on it; `scripts/land_docs.sh --sync` resolves that (docs `master` holds
+  both). `git grep` skips the submodule unless given `--recurse-submodules`.
 - PR CI builds only the `template_debug` GDExtension and packages debug-mode exports
   (`-ExportMode debug`); `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via

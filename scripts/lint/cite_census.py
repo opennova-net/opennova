@@ -23,7 +23,10 @@ a run compares the current map against it.
                    host_lint.py --frozen-audit): fails if the range touches a
                    wire/retail-frozen scope, drops a wire-frozen string, or
                    loses a docs/ citation or divergence id that no longer
-                   resolves anywhere under docs/. Local tool, not CI.
+                   resolves anywhere under docs/. docs/ is the private docs
+                   submodule: a range that moves its pointer is audited
+                   through the submodule's own diff, so it must be checked
+                   out. Local tool, not CI.
 
 Default mode reports and exits 0.
 """
@@ -160,10 +163,11 @@ def run_git(*args: str) -> str:
         capture_output=True, text=True, encoding="utf-8").stdout
 
 
-def diff_lines(diff_range: str, *paths: str):
-    """(sign, path, text) for every added/removed line in the range."""
-    diff = run_git("diff", "-U0", diff_range, "--", *paths) if paths \
-        else run_git("diff", "-U0", diff_range)
+def diff_lines(diff_range: str, *paths: str, submodule_diff: bool = False):
+    """(sign, path, text) for every added/removed line in the range; with
+    submodule_diff a submodule pointer move expands into the submodule's diff."""
+    args = ["diff", "-U0", *(["--submodule=diff"] if submodule_diff else []), diff_range]
+    diff = run_git(*args, "--", *paths) if paths else run_git(*args)
     path = ""
     for raw in diff.splitlines():
         if raw.startswith("+++ b/"):
@@ -195,9 +199,21 @@ def audit_range(diff_range: str) -> int:
         print(f"[cite-census][frozen] frozen scope touched: {path}")
         failures += 1
 
+    # docs/ is the private docs submodule: its pointer move expands into its own
+    # diff, so text moved into or within it is not read as lost. That expansion
+    # needs docs/ checked out holding both ends of the range.
+    moved = run_git("diff", "--name-only", diff_range, "--", "docs").strip()
+    if moved and (not (REPO / "docs" / ".git").exists()
+                  or "(commits not present)" in run_git("diff", "--submodule=log", diff_range, "--", "docs")):
+        print("[cite-census][frozen] the range moves the docs/ pointer but docs/ is not "
+              "checked out at both ends: `git submodule update --init docs` (or fetch in "
+              "docs/), then re-audit")
+        failures += 1
+    docs_lines = list(diff_lines(diff_range, "docs", submodule_diff=True))
+
     removed: Counter = Counter()
     added: Counter = Counter()
-    for sign, _path, text in diff_lines(diff_range):
+    for sign, _path, text in [*diff_lines(diff_range, ":(exclude)docs"), *docs_lines]:
         bucket = removed if sign == "-" else added
         for token in FROZEN_TOKENS:
             bucket[token] += text.count(token)
@@ -209,7 +225,7 @@ def audit_range(diff_range: str) -> int:
 
     doc_removed: Counter = Counter()
     doc_added: Counter = Counter()
-    for sign, _path, text in diff_lines(diff_range, "docs"):
+    for sign, _path, text in docs_lines:
         bucket = doc_removed if sign == "-" else doc_added
         for cite in CITATION.findall(text):
             bucket[cite] += 1

@@ -65,8 +65,8 @@ jobs:
       # since the Wave-2 boundary (STD-3): the ratchet fails on any counter
       # increase vs scripts/lint/maturity_baseline.json; the diff-scoped
       # dict-contract lint fails on new class-level Dictionary contracts
-      # (magic numbers stay advisory); the ledger check fails if the
-      # divergence scoreboard drifts from its tables (--write regenerates).
+      # (magic numbers stay advisory). The divergence-ledger scoreboard check
+      # lives with the ledger in the private docs repo (tools/ledger_check.py).
       # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
       # at this point in the job, so it walks the CMake files transitively;
       # local runs against build/ use `cmake --graphviz` ground truth.
@@ -81,7 +81,6 @@ jobs:
           # finding): a header included only by its test must carry the
           # STAGED, NOT WIRED paragraph or a reasoned allowlist row.
           python scripts/lint/orphan_header_check.py --enforce
-          python scripts/lint/ledger_check.py --check
           # Witness-address census (ADR 0043): the SET of `@0xADDR` addresses
           # cited under engine/, godot/, apps/ and tests/ never loses a member
           # silently; a structural slice leaves it identical, a deletion is

@@ -21,6 +21,10 @@ git lfs install --local && git lfs pull
 git submodule update --init --recursive
 ```
 
+`docs/` is a submodule of a private repository, so the recursive update skips it.
+Maintainers with access opt in once per clone with
+`git config submodule.docs.update checkout` before running it.
+
 The GUT test plugin is copied out of the `third_party/gut` submodule into
 `godot/addons/gut/` (gitignored) by `scripts/bootstrap_godot.sh`, which also
 downloads the pinned imgui-godot release into `godot/addons/imgui-godot/`

@@ -38,9 +38,12 @@ All commands are Git Bash, inside the current worktree only.
     for c in ratchet_counts maturity_lint link_graph_check include_graph_check \
              orphan_header_check cite_census fixture_lint env_lint conventions_lint; do
         python scripts/lint/$c.py --enforce; done   # the CI lint gates
-    python scripts/lint/ledger_check.py --check      # (ledger_check takes --check)
+    python docs/tools/ledger_check.py --check        # the ledger scoreboard (docs repo)
 
 Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
+A slice that moves the `docs/` pointer must name a commit already on docs `master`
+(`scripts/land_docs.sh` pushes it; `git -C docs branch -r --contains HEAD` lists
+`origin/master`).
 
 ## 4. Open the PR
 

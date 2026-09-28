@@ -32,8 +32,8 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 
 1. `docs/README.md` — add/refresh the "RE records by domain" row and status
    (landed / unlanded with PR reference / in flight).
-2. `docs/divergence-ledger.md` — close/open the D-rows in the same PR;
-   `python scripts/lint/ledger_check.py --write` regenerates the scoreboard.
+2. `docs/divergence-ledger.md` — close/open the D-rows in the same docs commit;
+   `python docs/tools/ledger_check.py --write` regenerates the scoreboard.
    A D-id born in the ledger must ALSO get its full row in the record's
    catalog — the ledger mirrors, the record owns.
 3. `docs/engine-primer.md` — the domain's subsystem row — and
@@ -60,7 +60,9 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
   without the original transcript.
 
 Done = doc landed in the format above, the cross-file updates applied, and the
-evidence tests pass. This skill is the landing half: the project `grill-ida`
+evidence tests pass. `docs/` is the private docs submodule: land with
+`scripts/land_docs.sh "<msg>"`, which pushes the docs commit to docs `master` and
+stages the pointer for the slice's commit (CLAUDE.md, Git, PRs, CI). This skill is the landing half: the project `grill-ida`
 skill produces verification evidence and inline source/IDA fixes,
 `engine-research` produces original-engine findings; `re-doc`
 defines what the committed record must contain. End grill sessions by invoking

@@ -4,3 +4,8 @@
 [submodule "third_party/gut"]
 	path = third_party/gut
 	url = https://github.com/bitwes/Gut.git
+[submodule "docs"]
+	path = docs
+	url = ../docs.git
+	update = none
+	branch = master
