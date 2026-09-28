@@ -21,12 +21,29 @@ namespace opennova::world {
 // @ 0x5b3bf0]. Face-only Poly Collision LOD models remain valid without semantic
 // volumes, and organic callers may explicitly retain COBJ sphere-only models for posed
 // person collision.
+// Retail's loader gates nothing: it copies every pool as authored and links
+// the COBJ runs by prefix sum, so a CFAC corner past its section's run reads
+// outside it [orig: Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0, the
+// corners copied as words @ 0x5B3EC7..0x5B3EEA, the runs @ 0x5B4326..0x5B43C4;
+// section 2.11 of the 3di record: Pinegr_L, broken in retail]. The face mesh
+// and the volumes are separate pools no walker crosses, so the runtime-safety
+// gate is per section: a face mesh the walkers cannot read safely loads as no
+// faces while the volumes stay live (and the other way round), as retail keeps
+// Pinegr_L's volumes; only a block with neither section is refused.
 bool collision_model_from_3di(const ThreediCollisionModel *col,
 	                             opennova::world::CollisionModel &out,
 	                             bool allow_sphere_only) {
-	if (col == nullptr || !threedi_3di3_collision_is_runtime_safe(col)) return false;
+	if (col == nullptr) return false;
+	const bool faces_ok = threedi_3di3_collision_faces_runtime_safe(col) != 0;
+	const bool volumes_ok = threedi_3di3_collision_volumes_runtime_safe(col) != 0;
+	if (!faces_ok && !volumes_ok) return false;
+	const size_t vertex_count = faces_ok ? col->vertex_count : 0;
+	const size_t normal_count = faces_ok ? col->normal_count : 0;
+	const size_t face_count = faces_ok ? col->face_count : 0;
+	const size_t volume_count = volumes_ok ? col->volume_count : 0;
+	const size_t plane_count = volumes_ok ? col->plane_count : 0;
 	const bool has_face_mesh =
-			col->face_count > 0 && col->faces != nullptr && col->vertex_count > 0 &&
+			face_count > 0 && col->faces != nullptr && vertex_count > 0 &&
 			col->vertices != nullptr && col->object_count > 0 && col->objects != nullptr;
 	bool has_person_spheres = false;
 	if (allow_sphere_only && col->objects != nullptr) {
@@ -37,20 +54,20 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 			}
 		}
 	}
-	if (col->volume_count == 0 && !has_face_mesh && !has_person_spheres)
+	if (volume_count == 0 && !has_face_mesh && !has_person_spheres)
 		return false;
 	auto fx = [](float v) { return static_cast<int32_t>(std::lround(v * io::kFp16OneD)); };
 
-	out.vertices.reserve(col->vertex_count);
-	for (size_t i = 0; i < col->vertex_count; ++i) {
+	out.vertices.reserve(vertex_count);
+	for (size_t i = 0; i < vertex_count; ++i) {
 		opennova::world::CollisionVertex v;
 		for (int k = 0; k < 3; ++k) v.p[k] = fx(col->vertices[i].position[k]);
 		out.vertices.push_back(v);
 	}
 	// The parser divided the authored signed Q14 CNRM words by 16384, so
 	// multiplying by that power of two is an exact recovery.
-	out.normals.reserve(col->normal_count);
-	for (size_t i = 0; i < col->normal_count; ++i) {
+	out.normals.reserve(normal_count);
+	for (size_t i = 0; i < normal_count; ++i) {
 		opennova::world::CollisionNormal n;
 		for (int k = 0; k < 3; ++k)
 			n.n[k] = static_cast<int16_t>(std::lround(col->normals[i].normal[k] * io::kFp14One));
@@ -60,8 +77,8 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	// The legacy projectile path consumes the same CVRT run requantized to its
 	// authored Q8 words. Parsed positions originated as Q8/256, so this
 	// round-trip is exact while the indexed path above retains its Q16 view.
-	out.face_vertices.reserve(col->vertex_count);
-	for (size_t i = 0; i < col->vertex_count; ++i) {
+	out.face_vertices.reserve(vertex_count);
+	for (size_t i = 0; i < vertex_count; ++i) {
 		opennova::world::CollisionFaceVertex v;
 		v.x = static_cast<int16_t>(std::lround(col->vertices[i].position[0] * 256.0f));
 		v.y = static_cast<int16_t>(std::lround(col->vertices[i].position[1] * 256.0f));
@@ -70,8 +87,8 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	}
 	// One shared face vector carries both query representations: exact indexed
 	// CVRT/CNRM fields and the embedded Q8/Q14 fields used by the older walker.
-	out.faces.reserve(col->face_count);
-	for (size_t i = 0; i < col->face_count; ++i) {
+	out.faces.reserve(face_count);
+	for (size_t i = 0; i < face_count; ++i) {
 		const ThreediCollisionFace &sf = col->faces[i];
 		opennova::world::CollisionFace f;
 		for (int k = 0; k < 3; ++k) {
@@ -121,8 +138,8 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 		}
 	}
 
-	out.planes.reserve(col->plane_count);
-	for (size_t i = 0; i < col->plane_count; ++i) {
+	out.planes.reserve(plane_count);
+	for (size_t i = 0; i < plane_count; ++i) {
 		const ThreediBoundingPlane &sp = col->planes[i];
 		opennova::world::CollisionPlane p;
 		p.flags = sp.flags;
@@ -135,9 +152,9 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 
 	// BPLN windows are consecutive across the BVOL pool; the running prefix is
 	// each volume's plane_start. Authored 16.16 bounds carry over verbatim.
-	out.volumes.reserve(col->volume_count);
+	out.volumes.reserve(volume_count);
 	int32_t plane_cursor = 0;
-	for (size_t i = 0; i < col->volume_count; ++i) {
+	for (size_t i = 0; i < volume_count; ++i) {
 		const ThreediBoundingVolume &sv = col->volumes[i];
 		opennova::world::CollisionVolume v;
 		v.type = sv.collidable_type;
@@ -157,10 +174,12 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	if (col->object_count == 0) {
 		// Legacy ungrouped convex-only block.
 		out.sections.assign(1, {});
-		out.sections[0].volume_count = static_cast<int32_t>(col->volume_count);
+		out.sections[0].volume_count = static_cast<int32_t>(volume_count);
 		return true;
 	}
 
+	// The COBJ runs, by prefix sum as retail links them [orig: @0x5B4326..0x5B43C4];
+	// a section the gate dropped contributes no run.
 	out.sections.assign(col->object_count, {});
 	int32_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
 	for (size_t s = 0; s < col->object_count; ++s) {
@@ -168,15 +187,15 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 		opennova::world::CollisionSection &sec = out.sections[s];
         sec.flags = static_cast<uint32_t>(object.unk0); // [orig: COBJ copy @0x5B3BF0]
 		sec.vertex_start = vertex_cursor;
-		sec.vertex_count = object.num_vertices;
+		sec.vertex_count = faces_ok ? object.num_vertices : 0;
 		sec.normal_start = normal_cursor;
-		sec.normal_count = object.num_normals;
+		sec.normal_count = faces_ok ? object.num_normals : 0;
 		sec.face_start = face_cursor;
-		sec.face_count = object.num_faces;
+		sec.face_count = faces_ok ? object.num_faces : 0;
 		sec.face_vertex_start = vertex_cursor;
-		sec.face_vertex_count = object.num_vertices;
+		sec.face_vertex_count = sec.vertex_count;
 		sec.volume_start = volume_cursor;
-		sec.volume_count = object.num_bounding_volumes;
+		sec.volume_count = volumes_ok ? object.num_bounding_volumes : 0;
 		for (int k = 0; k < 3; ++k) {
 			sec.offset[k] = object.offset[k];
 			sec.center[k] = object.med[k];

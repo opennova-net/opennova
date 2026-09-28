@@ -38,7 +38,9 @@ struct PreparedMeshSurface {
     // the one its first index byte names, nearest first (-1 past the table's
     // start). The lit skinned effects light a vertex through its first
     // palette entry's inverse; when that matrix has none, retail's fill keeps
-    // the inverse of the nearest earlier entry that had one.
+    // the inverse of the nearest earlier entry that had one. Four entries is
+    // the port's cap (retail walks the whole table); past four collapsed
+    // entries the shader lights through the identity.
     std::vector<std::array<int32_t, 4>> light_fallback_bones;
     std::vector<int32_t> indices;
 };

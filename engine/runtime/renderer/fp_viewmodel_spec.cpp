@@ -51,7 +51,7 @@ int fp_arms_part_reach(const threedi::Threedi3di3 &arms) {
 				reach = std::max(reach, static_cast<int>(part) + 1);
 				continue;
 			}
-			const int32_t bones = std::min<int32_t>(strip.bone_table_length, 16);
+			const int32_t bones = std::min<int32_t>(strip.bone_table_length, threedi::kThreediStripBoneTableMax);
 			for (int32_t b = 0; b < bones; ++b)
 				reach = std::max(reach, static_cast<int>(strip.bone_table[b]) + 1);
 		}

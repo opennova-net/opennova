@@ -69,9 +69,15 @@ void append_vertex(PreparedMeshSurface &out, const ThreediVertex &v,
         // [orig: CRenderBatchQueue_FlushBatches @ 0x5DA4F6..0x5DA5CE (the
         // directional fill, its inverse @ 0x5DA54B), @ 0x5DA950..0x5DA9A1 (the
         // point fill, its inverse @ 0x5DA967)]
+        // The port records at most FOUR earlier entries per vertex (the
+        // CUSTOM0 channel carries four) where retail's fill walks the whole
+        // table: a vertex whose four nearest earlier entries all collapse
+        // lights through the identity here, retail through an earlier entry
+        // still; no shipped model collapses four consecutive entries
+        // (docs/threedi/3di-gp-format-re.md, the skinning section).
         std::array<int32_t, 4> fallbacks{-1, -1, -1, -1};
         const int32_t first = v.bone_indices[0];
-        if (first < strip.bone_table_length && first < 16) {
+        if (first < strip.bone_table_length && first < kThreediStripBoneTableMax) {
             for (int32_t n = 0; n < 4 && first - 1 - n >= 0; ++n)
                 fallbacks[static_cast<size_t>(n)] = strip.bone_table[first - 1 - n];
         }
