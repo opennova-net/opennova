@@ -21,6 +21,9 @@ onimport.spec
 opennova_tools.egg-info/
 third_party/modsuperoed/
 
+# Blender
+*.blend1
+
 # Build artifacts
 build/
 # Keep a Godot ignore sentinel in the in-project GDExtension build tree. MSVC

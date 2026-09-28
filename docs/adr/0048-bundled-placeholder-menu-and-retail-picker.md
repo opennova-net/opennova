@@ -22,12 +22,16 @@ to redirect one hostname.
 
 ## Decision
 
-1. **`assets/` is OpenNova's own game data**, authored from scratch (no retail
-   byte), committed as plain git blobs and shipped beside `opennova.exe` in the
-   game zip. Today it holds only a placeholder main menu (`main.mnu`, one
-   `STARTUP` screen with literal text) and its one font (`opennova.fnt`, minted
-   by `tests/fixtures/minimal_fnt_builder.h` and byte-guarded by the
-   `minimal_fnt_gen` ctest). It grows into the real game as that data arrives.
+1. **`assets/` is OpenNova's own game data** (no retail byte): hand-written,
+   minted by our tools, or exported by the Blender add-on from a scene under
+   `art/`, and shipped beside `opennova.exe` in the game zip. Small files are
+   plain git blobs; models, clips and textures ride Git LFS, which the package
+   jobs pull. It holds a placeholder main menu (`main.mnu`, one `STARTUP`
+   screen with literal text), its one font (`opennova.fnt`, minted by
+   `tests/fixtures/minimal_fnt_builder.h` and byte-guarded by the
+   `minimal_fnt_gen` ctest) and a first-person carbine and arms (`on_ar15`,
+   `on_arms`, from `art/on_ar15/`). It grows into the real game as that data
+   arrives.
 2. **No `--resource-dir` boots the bundled menu.** The shell mounts
    `<exe dir>/assets` (a source run uses the repo's `assets/`) as a plain loose
    root, without the retail boot-manifest report. `--resource-dir <path>`,
