@@ -94,7 +94,13 @@ void obj_skin_light_candidate(uint entry, inout bool found,
 // nearest earlier table entry's that inverted (`light_fallbacks`, the parts
 // before the first entry, nearest first; prepare_model_mesh). Before the
 // table's first entry the buffer holds stale stack, read here as the
-// identity. The Gouraud hemisphere reads the first entry's own normal,
+// identity. Retail's fill walks the whole table; the mesh records at most
+// the four nearest earlier entries per vertex (the CUSTOM0 bytes), so a
+// first entry whose four nearest predecessors all collapse reads the
+// identity here too, where retail would light through the next earlier
+// entry that inverted (the port's stated choice,
+// docs/threedi/3di-gp-format-re.md). The Gouraud hemisphere reads the
+// first entry's own normal,
 // which a collapsed entry zeroes: a level hemisphere. Retail's in-shader
 // transpose of a collapsed entry zeroes the phong light, eye and bumped
 // hemisphere vectors too, and normalizes them to no defined value; the

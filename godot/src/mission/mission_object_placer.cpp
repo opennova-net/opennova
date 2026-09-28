@@ -1567,7 +1567,7 @@ Ref<SkeletalAnim> MissionObjectPlacer::_skeletal_from_adm(
 	// AnimMap_FindByName; engine anim/adm_fallback.h). A present-but-broken
 	// file still fails below, as retail's parse error path does.
 	const String adm_name = opennova::to_gd(
-			opennova::anim::adm_name_or_default(p_adm_name.utf8().get_data(),
+			opennova::anim::adm_name_or_default(opennova::to_std(p_adm_name),
 					resource_root_.is_valid() && resource_root_->has_file(p_adm_name)));
 	const String cache_key = adm_name + String("#") +
 			String::num_int64(Variant(p_bone_origins).hash()) + String("#") +

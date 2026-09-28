@@ -242,11 +242,12 @@ private:
 	uint32_t last_weapon_trace_tick_ = 0;
 	bool weapon_trace_primed_ = false;
 	// The definition is rebuilt only when something moved it: an applied
-	// request, a different weapon, or the clip rings resolving.
+	// request, a different weapon, or a different ring table (the map the
+	// mount binds).
 	bool weapon_def_dirty_ = true;
 	uint64_t weapon_def_serial_ = 0;
 	std::string weapon_def_name_;
-	size_t weapon_def_rings_ = 0;
+	std::string weapon_def_anim_map_;
 	bool weapon_records_live_ = false;
 	int64_t last_environment_push_ms_ = -1;
 	int64_t last_ai_push_ms_ = -1;

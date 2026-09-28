@@ -399,7 +399,7 @@ String HudPos::loading_msg_label_fallback() { return opennova::hud::kLoadingServ
 
 String HudPos::loading_sidecar_image_name(const String &p_mission_file) {
 	return opennova::to_gd(opennova::hud::loading_sidecar_image_name(
-			p_mission_file.utf8().get_data()));
+			opennova::to_std(p_mission_file)));
 }
 
 bool HudPos::loading_present_due(int p_elapsed_ms, bool p_reported_changed) {

@@ -82,6 +82,14 @@ opennova::env::SceneFogValues inset_scene_fog(const MissionEnvironment &p_env, f
 // them around inmatch::Session::advance() (the session row). The leg bodies
 // below carry the witness citations; the row comments carry the ordering
 // rationale the old pipeline kept beside each call.
+//
+// One device write stays outside the table on purpose (ADR 0043 d9,
+// recorded 2026-09-28): ObjectModel::publish_skin_palette
+// (object/object_model_skin_palette.cpp) republishes a model's bone palette
+// from its Skeleton3D's skeleton_updated signal, the deferred skeleton
+// update in which Godot uploads the skeleton's own skins once every pose
+// writer of the frame has run. A row here would publish before that update
+// settles the pose, so the palette keeps Godot's own skin-upload timing.
 const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// The per-frame camera/timing latch (panm clock sample, probe-skip latches).
 	{ "begin", kNoSlot, &GameWorld::leg_begin, kLegNone },

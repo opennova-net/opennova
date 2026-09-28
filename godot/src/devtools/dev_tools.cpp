@@ -850,8 +850,8 @@ void DevTools::apply_weapon_requests() {
 }
 
 // Push the Weapon window's records while it shows: the definition only when
-// something moved it (an applied request, a different weapon, the clip rings
-// resolving), the live state EVERY frame — the trace pane is a scope on a
+// something moved it (an applied request, a different weapon, a different
+// ring table), the live state EVERY frame — the trace pane is a scope on a
 // 62.5 Hz signal, so the Entities window's 0.5 s cadence would alias it away.
 // The trace itself is drained incrementally from the pump's ring.
 void DevTools::push_weapon_records() {
@@ -886,12 +886,15 @@ void DevTools::push_weapon_records() {
 	weapon_records_live_ = true;
 
 	// --- the definition, on change ---
-	const std::vector<std::string> clip_keys = simulation_->native_equipped_weapon_clip_keys();
-	const size_t rings = clip_keys.size();
-	if (weapon_def_dirty_ || weapon_def_name_ != weapon->def_name || weapon_def_rings_ != rings) {
+	// The ring table a mount binds holds its slots from its load
+	// (anim::AdmRingTable), so the keys move only with the weapon, its map,
+	// or an applied request: the names decide, and the keys are fetched
+	// (built and sorted) only for a rebuild.
+	if (weapon_def_dirty_ || weapon_def_name_ != weapon->def_name ||
+			weapon_def_anim_map_ != weapon->anim_map) {
 		weapon_def_dirty_ = false;
 		weapon_def_name_ = weapon->def_name;
-		weapon_def_rings_ = rings;
+		weapon_def_anim_map_ = weapon->anim_map;
 		opennova::devtools::WeaponDefinitionSnapshot def;
 		def.valid = true;
 		def.serial = ++weapon_def_serial_;
@@ -900,7 +903,7 @@ void DevTools::push_weapon_records() {
 		def.clip_capacity = weapon->def.clip_capacity;
 		def.auto_fire = weapon->def.auto_fire;
 		def.burst3 = weapon->def.burst3;
-		def.clip_keys = clip_keys;
+		def.clip_keys = simulation_->native_equipped_weapon_clip_keys();
 		const opennova::anim::AdmRingTable *weapon_rings = simulation_->native_weapon_rings();
 		const DefWeaponDef *row = simulation_->native_equipped_weapon_row();
 		for (int id = 0; id < opennova::world::weapon_action::kCount; ++id) {

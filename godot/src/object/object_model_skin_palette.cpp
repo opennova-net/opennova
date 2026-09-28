@@ -95,17 +95,17 @@ void ObjectModel::build_skin_palette() {
 				continue;
 			}
 			any = true;
-			const Array bones = surface.bone_bounds.keys();
-			for (int64_t i = 0; i < bones.size(); ++i) {
-				const int bone = bones[i];
-				if (bone < 0) {
+			for (const opennova::renderer::BoneBindBox &bind : surface.bone_bounds) {
+				if (bind.bone < 0) {
 					continue;
 				}
-				const AABB box = surface.bone_bounds[bones[i]];
-				// A key past the skeleton draws through its last bone, where
+				const Vector3 min(bind.min[0], bind.min[1], bind.min[2]);
+				const AABB box(min, Vector3(bind.max[0], bind.max[1], bind.max[2]) - min);
+				// A bone past the skeleton draws through its last bone, where
 				// the palette fetch clamps its row (skin.gdshaderinc
 				// obj_skin_rows).
-				const std::size_t row = static_cast<std::size_t>(std::min(bone, bone_count - 1));
+				const std::size_t row = static_cast<std::size_t>(
+						std::min(static_cast<int>(bind.bone), bone_count - 1));
 				skin_bone_bounds_[row] = skin_bone_has_bounds_[row]
 						? skin_bone_bounds_[row].merge(box)
 						: box;

@@ -3,6 +3,7 @@
 #include <runtime/anim/remote_body_state.h>
 #include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/model_controls.h>
+#include <runtime/renderer/model_mesh_prepare.h>
 
 // ObjectModel — the retained visual for one NovaLogic object graphic,
 // NATIVE (the 2026-08-09 de-scripting of the former GDScript implementation).
@@ -280,9 +281,9 @@ private:
 		// program: the object shaders pose it from the model's bone palette
 		// (object_model_skin_palette.cpp), Godot's skinning never touches it.
 		bool skin_palette = false;
-		// Its bind-space box per bone (bone -> AABB), the posed culling box's
-		// source.
-		Dictionary bone_bounds;
+		// Its bind-space box per bone (the mesh's retained
+		// renderer::BoneBindBox rows), the posed culling box's source.
+		std::vector<opennova::renderer::BoneBindBox> bone_bounds;
 		// The level's collector admits a Q3 copy (never a per-vertex skinned
 		// level: renderer::q3_object_source_admitted).
 		bool q3_admitted = false;

@@ -819,7 +819,7 @@ private:
 	// listen server (the host role's NapiNPServerCtx + its own loopback client, driven by
 	// the inmatch owner loop = Server_TickUpdate + tick_connections + handle_server_datagram);
 	// the joiner is a non-authority inmatch::ClientRuntime. The Godot net bindings stay PURE socket
-	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/network.md).
+	// pumps — all protocol/crypto/framing lives in libs (ADR 0009-0012, .agents/README.md).
 	// The SP/LAN listen session's net state (inmatch::ListenHostState) lives on the host
 	// role: the loopback + the np host owner the ONE listen frame (inmatch::HostRole::run_tick)
 	// drives — ctx + per-peer transports + now_tick + serve_and_play, shared with
