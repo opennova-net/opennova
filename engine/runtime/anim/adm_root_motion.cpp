@@ -360,11 +360,12 @@ bool AdmRootMotion::clip_wraps_at(int adm_id, int state_id, int variant,
 	return track != nullptr && track->clock.wrapped_at(phase_ticks);
 }
 
-bool AdmRootMotion::clip_loops(int adm_id, int state_id) const {
-	// The clip data's own loop bit, the same flag word the retail channel wraps
-	// on [orig: AnimChannel_InitFromData @0x410577 -> AnimChannel_AdvancePlayback
-	// @0x40b16a].
-	const Track *track = resolve_track(adm_id, state_id);
+bool AdmRootMotion::clip_loops(int adm_id, int state_id, int variant) const {
+	// The served clip's own loop bit, the flag word the retail channel copies
+	// from that clip at init and wraps on [orig: AnimChannel_InitFromData
+	// @0x410577 (the 0x1000 test), @0x410579 / @0x410586 ->
+	// AnimChannel_AdvancePlayback @0x40b16a].
+	const Track *track = resolve_track(adm_id, state_id, variant);
 	return track != nullptr && track->loop;
 }
 

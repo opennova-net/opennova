@@ -614,6 +614,7 @@ private:
 	bool bounds_dirty_ = true;
 	bool body_phase_stamp_valid_ = false;
 	int body_phase_ticks_applied_ = 0;
+	bool body_phase_parked_applied_ = false; // the applied tick was a parked one
 	String body_blend_source_key_;
 	double body_blend_source_time_ = 0.0;
 	float body_blend_weight_ = 1.0f;
@@ -643,6 +644,7 @@ private:
 	// (the sim's wpn_variant / wpn_prev_variant — the +68 play latch).
 	int wpn_variant_ = 0;
 	int wpn_prev_variant_ = 0;
+	bool wpn_parked_ = false; // the weapon channel holds its last frame this tick
 
 	// Per-frame work skips.
 	bool has_live_panm_ = false;
@@ -737,7 +739,8 @@ private:
 			int p_source_variant = 0, int p_target_variant = 0);
 	void set_body_playhead(double p_seconds);
 	String resolve_body_clip_key(const String &p_key) const;
-	double clip_phase_seconds(const String &p_key, int p_phase_ticks, int p_variant = 0) const;
+	double clip_phase_seconds(const String &p_key, int p_phase_ticks, int p_variant = 0,
+			bool p_parked = false) const;
 	void clear_body_blend();
 	void reset_body_pose();
 	bool advance_part_anims(double p_delta);
@@ -1216,8 +1219,11 @@ public:
 	void play_body_clip_variant_at_tick(const String &p_key, int p_variant, int p_ticks);
 	void play_body_clip_variant_at_time(const String &p_key, int p_variant,
 			double p_seconds);
-	// p_variant / p_source_variant: each channel's served ring entry.
-	void play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant = 0);
+	// p_variant / p_source_variant: each channel's served ring entry. p_parked:
+	// the armed end-notify holds the channel on its boundary this tick, so the
+	// clip samples its last frame (PF_ANIM_PHASE_PARKED).
+	void play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant = 0,
+			bool p_parked = false);
 	void play_body_blend_at(const String &p_source_key, int p_source_phase_ticks,
 			const String &p_target_key, int p_target_phase_ticks, double p_weight,
 			int p_source_variant = 0, int p_variant = 0);
@@ -1231,7 +1237,7 @@ public:
 	String get_active_body_clip() const { return anim_key_; }
 	int get_active_body_variant() const { return anim_variant_; }
 	void play_body_anim(int p_slot);
-	void play_body_anim_at(int p_slot, int p_phase_ticks);
+	void play_body_anim_at(int p_slot, int p_phase_ticks, bool p_parked = false);
 	int64_t get_animation_time_ms() const { return anim_time_ms_; }
 	void set_animation_time(double p_seconds);
 	double get_animation_time() const;
@@ -1245,7 +1251,8 @@ public:
 	PackedStringArray get_active_part_anim_registers() const;
 	void set_weapon_channel(const String &p_key, int p_phase_ticks,
 			const String &p_prev_key = String(), int p_prev_phase_ticks = 0,
-			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0);
+			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0,
+			bool p_parked = false);
 	// The applied weapon-channel pose — presentation-state read-back: whether
 	// a channel is held, its clip key and its phase (-1 = not replicated).
 	bool has_weapon_channel() const;

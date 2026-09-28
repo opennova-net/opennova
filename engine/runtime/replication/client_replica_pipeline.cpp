@@ -650,7 +650,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			const int32_t len = src.clip_length_ticks(es.rm_adm_id, es.rm_state, 0);
 			if (len <= 0) {
 				es.net_anim_pending_boundary = es.rm_phase;
-			} else if (src.clip_loops(es.rm_adm_id, es.rm_state)) {
+			} else if (src.clip_loops(es.rm_adm_id, es.rm_state, 0)) { // the replica plays entry 0 (D-NET-196)
 				es.net_anim_pending_boundary = src.clip_boundary_after(
 						es.rm_adm_id, es.rm_state, es.rm_phase);
 			} else {

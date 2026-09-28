@@ -83,7 +83,7 @@ struct BodySource final : public opennova::world::IRootMotionSource {
 		if (state == as::kRun2Crouch || state == as::kRun2Prone) return 6;
 		return 62;
 	}
-	bool clip_loops(int, int state) const override {
+	bool clip_loops(int, int state, int /*variant*/) const override {
 		// Gaits and idles loop; rolls and the transition inserts are one-shots.
 		return state != as::kRollLeft && state != as::kRun2Crouch &&
 		       state != as::kRun2Prone;

@@ -293,6 +293,14 @@ enum PresentField : int {
 	PF_SLOT_MARCH_OFFSET_X,
 	PF_SLOT_MARCH_OFFSET_Y,
 	PF_SLOT_MARCH_OFFSET_Z,
+	// The armed end-notify's park, per channel: 1 on a tick the channel's armed
+	// end-notify holds it on its boundary, so its clip samples t = 0.99999 (the
+	// last frame) at the published phase rather than the wrapped start; 0 (the
+	// zero-filled default) otherwise. A sampler passes the phase as the armed
+	// boundary on such a tick (anim::ClipTimeline::seconds_at(ticks, boundary)).
+	// [orig: AnimChannel_AdvancePlayback's armed wrap @0x40B19E..0x40B1B1]
+	PF_ANIM_PHASE_PARKED,
+	PF_WPN_PHASE_PARKED,
 	PF_STRIDE
 };
 

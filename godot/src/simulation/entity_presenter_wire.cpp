@@ -959,15 +959,19 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		const int32_t wpn_variant = wfield_i(p, base, Simulation::PF_WPN_VARIANT);
 		const int32_t wpn_src_variant =
 				wfield_i(p, base, Simulation::PF_WPN_SOURCE_VARIANT);
+		// The armed end-notify's park (PF_WPN_PHASE_PARKED): the channel holds
+		// its last frame on this tick.
+		const bool wpn_parked = wfield_i(p, base, Simulation::PF_WPN_PHASE_PARKED) != 0;
 		if (wpn_state != row.wpn_state || wpn_phase != row.wpn_phase ||
 				wpn_src_state != row.wpn_src_state || wpn_src_phase != row.wpn_src_phase ||
 				wpn_weight != row.wpn_weight || wpn_variant != row.wpn_variant ||
-				wpn_src_variant != row.wpn_src_variant) {
+				wpn_src_variant != row.wpn_src_variant || wpn_parked != row.wpn_parked) {
 			model->set_weapon_channel(
 					wpn_state >= 0 ? infantry_key(wpn_state) : String(),
 					wpn_phase,
 					wpn_src_state >= 0 ? infantry_key(wpn_src_state) : String(),
-					wpn_src_phase, wpn_weight, wpn_variant, wpn_src_variant);
+					wpn_src_phase, wpn_weight, wpn_variant, wpn_src_variant, wpn_parked);
+			row.wpn_parked = wpn_parked;
 			row.wpn_state = wpn_state;
 			row.wpn_phase = wpn_phase;
 			row.wpn_src_state = wpn_src_state;
@@ -1213,7 +1217,8 @@ void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 							wfield_i(p, base, Simulation::PF_ANIM_SOURCE_VARIANT),
 							variant);
 				} else {
-					model->play_body_clip_at(key, anim_phase, variant);
+					model->play_body_clip_at(key, anim_phase, variant,
+							wfield_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0);
 				}
 				return;
 			}
@@ -1241,7 +1246,8 @@ void EntityPresenter::apply_wire_body_anim(WireRow &row, ObjectModel *model,
 		return;
 	}
 	if (anim_phase >= 0) {
-		model->play_body_anim_at(body_anim_slot, anim_phase);
+		model->play_body_anim_at(body_anim_slot, anim_phase,
+				wfield_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0);
 		return;
 	}
 	model->play_body_anim(body_anim_slot);

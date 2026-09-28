@@ -337,9 +337,10 @@ float SkeletalClips::clip_length(const std::string &key, int variant) const {
 }
 
 double SkeletalClips::clip_seconds_at_tick(const std::string &key,
-                                               int32_t ticks, int variant) const {
+                                               int32_t ticks, int variant,
+                                               int32_t armed_boundary) const {
 	const LoadedClip *clip = find_clip_variant(key, variant);
-	return clip ? clip->clip.playback().seconds_at(ticks) : 0.0;
+	return clip ? clip->clip.playback().seconds_at(ticks, armed_boundary) : 0.0;
 }
 
 float SkeletalClips::clip_fps(const std::string &key, int variant) const {

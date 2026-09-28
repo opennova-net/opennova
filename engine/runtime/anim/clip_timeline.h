@@ -42,6 +42,10 @@ public:
 	bool wrapped_at(int32_t ticks) const;
 	double frame_at(int32_t ticks) const;
 	double seconds_at(int32_t ticks) const;
+	// seconds_at with the armed-wrap park: on the armed boundary tick a loop
+	// samples 0.99999 (its last frame) [orig: AnimChannel_AdvancePlayback
+	// @0x40B1A2..0x40B1B1]; -1 = unarmed.
+	double seconds_at(int32_t ticks, int32_t armed_boundary) const;
 	bool stopped_at(int32_t ticks) const;
 	int32_t length_ticks() const;
 	int32_t boundary_after(int32_t ticks) const;

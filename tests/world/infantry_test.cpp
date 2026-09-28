@@ -2405,7 +2405,7 @@ struct WrapRingSource : IRootMotionSource {
         if (id == anim_state::kIdle) return variant == 0 ? 4 : 6;
         return 5;
     }
-    bool clip_loops(int, int) const override { return true; }
+    bool clip_loops(int, int, int) const override { return true; }
     bool advance(int adm, int id, int32_t &phase, RootMotionFrame &out) override {
         return advance_variant(adm, id, 0, phase, out);
     }

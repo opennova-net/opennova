@@ -72,6 +72,10 @@ int main() {
 	{
 		std::ofstream adm(dir / "clock.adm", std::ios::binary);
 		adm << "anim_reset \"once\"\r\nanim_idle \"slow\"\r\nanim_walk_forward \"frozen\"\r\n";
+		// A ring whose entries differ in their loop bit: entry 0 loops, entry 1
+		// is a one-shot.
+		std::ofstream ring(dir / "ring.adm", std::ios::binary);
+		ring << "anim_reset \"once\"\r\nanim_idle \"slow\" \"once\"\r\n";
 	}
 	opennova::ResourceIndex index;
 	opennova::assets::AssetStore index_assets{&index};
@@ -151,9 +155,21 @@ int main() {
 	TEST_EXPECT(source.advance(id, anim_state::kReset, promoted, first));
 	TEST_EXPECT(promoted == 0 && first.events == 1);
 
+	// The pose samplers take the same park: on the armed boundary tick a loop
+	// samples t = 0.99999, its last frame, where the unarmed clock has wrapped
+	// to the start [orig: AnimChannel_AdvancePlayback @0x40B1A2..0x40B1B1].
+	{
+		const opennova::anim::ClipTimeline slow_clock(24, 60, true);
+		TEST_EXPECT(slow_clock.seconds_at(wrap, wrap) ==
+		            double(opennova::anim::ClipTimeline::kPark) * 60.0 / 24.0);
+		TEST_EXPECT(slow_clock.seconds_at(wrap, -1) < 0.5);
+		TEST_EXPECT(slow_clock.seconds_at(wrap, -1) == slow_clock.seconds_at(wrap));
+	}
+
 	// The consumers. The local primary channel: a queued state arms the
-	// first-end tick (its step-3b promotion clock, clip_length_ticks), which
-	// then samples the clip end; unarmed, that same tick wraps to the start.
+	// end-notify on the tick it is first seen, at the clip's next wrap after
+	// that tick (arm_end_notify), which then samples the clip end; unarmed,
+	// that same tick wraps to the start.
 	{
 		opennova::world::InfantryState inf;
 		inf.adm_id = id;
@@ -225,22 +241,105 @@ int main() {
 		opennova::world::AnimVariantRings rings;
 		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 		TEST_EXPECT(inf.clip_phase == wrap && local.events == 60);
+		TEST_EXPECT(inf.body_phase_parked()); // the pose samples the park too
 		inf.anim_pending = 0; // cleared while armed
 		for (int tick = 0; tick < 5; ++tick) {
 			TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 			TEST_EXPECT(inf.clip_phase == wrap);
 			TEST_EXPECT(local.events == 60 && local.capsule_bottom == parked.capsule_bottom);
+			TEST_EXPECT(inf.body_phase_parked());
 		}
 		TEST_EXPECT(inf.anim_pending_boundary == wrap);
 		inf.anim_pending = anim_state::kWalkForward; // set again: promotes at once
 		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
 		TEST_EXPECT(inf.anim_pending == 0 && inf.anim_state == anim_state::kWalkForward);
 		TEST_EXPECT(inf.anim_pending_boundary == -1);
-		// A re-init disarms.
+		TEST_EXPECT(!inf.body_phase_parked());
+	}
+	// A re-init disarms: arm on a clip with a length (the looping idle), then
+	// re-init the channel onto another state, which resets the flag word
+	// [orig: AnimMap_UpdateEntity's re-init @0x40B761 on a target change
+	//  @0x40B645].
+	{
+		opennova::world::InfantryState inf;
+		inf.adm_id = id;
+		inf.anim_state = anim_state::kIdle;
+		inf.anim_playing_state = anim_state::kIdle;
+		inf.clip_phase = 3;
 		inf.anim_pending = anim_state::kWalkForward;
+		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
 		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
-		inf.begin_body_transition(anim_state::kIdle);
+		TEST_EXPECT(inf.anim_pending_boundary == wrap);
+		inf.begin_body_transition(anim_state::kReset);
 		TEST_EXPECT(inf.anim_pending == 0 && inf.anim_pending_boundary == -1);
+	}
+	// The loop bit is the SERVED entry's own: a ring whose entry 1 is a
+	// one-shot arms that entry as a one-shot, so a deferral that reaches it
+	// after it stopped never latches [orig: AnimChannel_InitFromData, the
+	// clip's flag word @0x410579 stored @0x410586; AnimChannel_AdvancePlayback
+	// @0x40B14D].
+	{
+		const int ring = source.register_adm(&index_assets, "ring.adm");
+		TEST_EXPECT(ring >= 0);
+		TEST_EXPECT(source.clip_loops(ring, anim_state::kIdle, 0));
+		TEST_EXPECT(!source.clip_loops(ring, anim_state::kIdle, 1));
+		const int32_t once_len = source.clip_length_ticks(ring, anim_state::kIdle, 1);
+		TEST_EXPECT(once_len > 0);
+		opennova::world::InfantryState inf;
+		inf.adm_id = ring;
+		inf.anim_state = anim_state::kIdle;
+		inf.anim_playing_state = anim_state::kIdle;
+		inf.anim_variant = 1;
+		inf.clip_phase = once_len + 5;
+		inf.anim_pending = anim_state::kWalkForward;
+		RootMotionFrame local{};
+		opennova::world::AnimVariantRings rings;
+		TEST_EXPECT(opennova::world::advance_primary_channel(inf, source, rings, local));
+		TEST_EXPECT(inf.anim_pending == anim_state::kWalkForward);
+		TEST_EXPECT(inf.anim_pending_boundary == opennova::world::kEndNotifyNeverLatches);
+	}
+	// The secondary (weapon) channel runs the same end-notify through the shared
+	// body: the arm parks the loop on its wrap, a deferred cleared while armed
+	// re-parks it every tick, one set again promotes at once, a stopped
+	// one-shot never latches, and a re-init disarms [orig: AnimMap_UpdateDualChannels
+	// @0x40B908 -> AnimMap_UpdateEntity, the arm @0x40B7E1, the promotion
+	// @0x40B7C1; AnimChannel_AdvancePlayback @0x40B14D / @0x40B19E..0x40B1B1].
+	{
+		opennova::world::AiSystem ai;
+		ai.root_motion = &source;
+		opennova::world::AiEntity e;
+		e.inf.adm_id = id;
+		e.inf.wpn_state = anim_state::kIdle;
+		e.inf.wpn_playing_state = anim_state::kIdle;
+		e.inf.wpn_clip_phase = wrap - 1;
+		e.inf.wpn_deferred = anim_state::kWalkForward;
+		ai.infantry_weapon_channel_advance(e);
+		TEST_EXPECT(e.inf.wpn_deferred_boundary == wrap);
+		TEST_EXPECT(e.inf.wpn_clip_phase == wrap && e.inf.weapon_phase_parked());
+		e.inf.wpn_deferred = 0; // cleared while armed
+		for (int tick = 0; tick < 5; ++tick) {
+			ai.infantry_weapon_channel_advance(e);
+			TEST_EXPECT(e.inf.wpn_clip_phase == wrap && e.inf.weapon_phase_parked());
+		}
+		TEST_EXPECT(e.inf.wpn_deferred_boundary == wrap);
+		e.inf.wpn_deferred = anim_state::kWalkForward; // set again: promotes at once
+		ai.infantry_weapon_channel_advance(e);
+		TEST_EXPECT(e.inf.wpn_deferred == 0 && e.inf.wpn_state == anim_state::kWalkForward);
+		TEST_EXPECT(e.inf.wpn_deferred_boundary == -1);
+
+		const int32_t once = source.clip_length_ticks(id, anim_state::kReset, 0);
+		opennova::world::AiEntity w;
+		w.inf.adm_id = id;
+		w.inf.wpn_state = anim_state::kReset;
+		w.inf.wpn_playing_state = anim_state::kReset;
+		w.inf.wpn_clip_phase = once + 5; // stopped
+		w.inf.wpn_deferred = anim_state::kIdle;
+		for (int tick = 0; tick < 3 * once; ++tick) ai.infantry_weapon_channel_advance(w);
+		TEST_EXPECT(w.inf.wpn_deferred == anim_state::kIdle);
+		TEST_EXPECT(w.inf.wpn_deferred_boundary == opennova::world::kEndNotifyNeverLatches);
+		w.inf.begin_weapon_transition(anim_state::kIdle);
+		TEST_EXPECT(w.inf.wpn_deferred_boundary == -1);
 	}
 	// A deferred that arrives after a one-shot already stopped never promotes:
 	// the arm lands, but the stopped channel's advance body is skipped, so the
@@ -308,6 +407,7 @@ int main() {
 		            es->net_anim_current == anim_state::kWalkForward);
 	}
 	std::filesystem::remove(dir / "clock.adm");
+	std::filesystem::remove(dir / "ring.adm");
 	std::filesystem::remove(dir / "once.bad");
 	std::filesystem::remove(dir / "slow.bad");
 	std::filesystem::remove(dir / "frozen.bad");

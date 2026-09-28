@@ -1548,6 +1548,9 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			// PF_ANIM_SOURCE_VARIANT).
 			int32_t body_variant = 0;
 			int32_t body_source_variant = 0;
+			// The armed end-notify's park (PF_ANIM_PHASE_PARKED): only an
+			// unblended target channel parks, so only the clip/slot paths read it.
+			bool body_parked = false;
 			String body_clip_key;
 			String body_source_clip_key;
 			{
@@ -1578,6 +1581,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 								p, base, Simulation::PF_ANIM_SOURCE_VARIANT);
 					} else {
 						body_mode = BODY_CLIP_AT;
+						body_parked = field_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0;
 					}
 				} else if (source_state >= 0 && !source_key.is_empty()) {
 					body_mode = BODY_CLIP_AT;
@@ -1598,6 +1602,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					body_selector = body_anim_slot;
 					body_phase = field_i(
 							p, base, Simulation::PF_ANIM_PHASE_TICKS);
+					body_parked = field_i(p, base, Simulation::PF_ANIM_PHASE_PARKED) != 0;
 				}
 			}
 			const bool body_stamp_changed =
@@ -1608,7 +1613,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 					row.body_source_phase != body_source_phase ||
 					row.body_blend_weight != body_blend_weight ||
 					row.body_variant != body_variant ||
-					row.body_source_variant != body_source_variant;
+					row.body_source_variant != body_source_variant ||
+					row.body_parked != body_parked;
 			const bool force_external_pose =
 					body_dependency_changed &&
 					(body_mode == BODY_CLIP_AT ||
@@ -1617,7 +1623,8 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			if (body_stamp_changed || force_external_pose) {
 				switch (body_mode) {
 					case BODY_CLIP_AT:
-						model->play_body_clip_at(body_clip_key, body_phase, body_variant);
+						model->play_body_clip_at(body_clip_key, body_phase, body_variant,
+								body_parked);
 						++stat_body_dispatches_;
 						break;
 					case BODY_BLEND_AT:
@@ -1627,7 +1634,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_AT:
-						model->play_body_anim_at(body_selector, body_phase);
+						model->play_body_anim_at(body_selector, body_phase, body_parked);
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_PLAY:
@@ -1641,6 +1648,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 				row.body_source_phase = body_source_phase;
 				row.body_blend_weight = body_blend_weight;
 				row.body_variant = body_variant;
+				row.body_parked = body_parked;
 				row.body_source_variant = body_source_variant;
 				row.body_stamp_valid = true;
 			}

@@ -579,11 +579,14 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 	const std::string primary_key =
 			resolve_primary_key(opennova::world::infantry_anim_key(r_ai->inf.body_clip_state()));
 	if (primary_key.empty()) return false;
-	// Each primary channel samples its served ring entry, as root motion does.
-	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778]
+	// Each primary channel samples its served ring entry, as root motion does,
+	// and a tick the armed end-notify parks it on samples the parked last frame.
+	// [orig: AnimMap_UpdateEntity @0x40B737..0x40B778; AnimChannel_AdvancePlayback
+	//  @0x40B19E..0x40B1B1]
 	const int primary_variant = r_ai->inf.anim_variant;
-	const double primary_seconds =
-			rig->clip_seconds_at_tick(primary_key, r_ai->inf.clip_phase, primary_variant);
+	const double primary_seconds = rig->clip_seconds_at_tick(
+			primary_key, r_ai->inf.clip_phase, primary_variant,
+			r_ai->inf.body_phase_parked() ? r_ai->inf.clip_phase : -1);
 	std::string source_key;
 	double source_seconds = 0.0;
 	int source_variant = 0;
@@ -620,7 +623,8 @@ bool EntityPoseProvider::eval_entity_pose(world::World &world,
 		weapon_key = opennova::world::infantry_anim_key(r_ai->inf.weapon_clip_state());
 		weapon_variant = r_ai->inf.wpn_variant;
 		weapon_seconds = rig->clip_seconds_at_tick(
-				weapon_key, r_ai->inf.wpn_clip_phase, weapon_variant);
+				weapon_key, r_ai->inf.wpn_clip_phase, weapon_variant,
+				r_ai->inf.weapon_phase_parked() ? r_ai->inf.wpn_clip_phase : -1);
 		// The secondary channel's own cross-fade rides into the authoritative pose
 		// exactly as it does into presentation, so hitboxes and the drawn body
 		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].

@@ -159,9 +159,10 @@ void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 // AnimMap phase counts simulation ticks; clip timelines retain retail rounding.
 // p_variant is the ring entry the channel's re-init served (the simulation's
 // InfantryState::anim_variant): every clip read runs on it.
-void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant) {
+void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks, int p_variant,
+		bool p_parked) {
 	for (ObjectModel *linked : live_presentation_links()) {
-		linked->play_body_clip_at(p_key, p_phase_ticks, p_variant);
+		linked->play_body_clip_at(p_key, p_phase_ticks, p_variant, p_parked);
 	}
 	wake_runtime_frame();
 	const String key = resolve_body_clip_key(p_key);
@@ -173,14 +174,14 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks, int 
 	// what posed the skeleton last and nothing else dirtied the pose.
 	if (body_phase_stamp_valid_ && anim_external_phase_ && !body_pose_dirty_ &&
 			p_phase_ticks == body_phase_ticks_applied_ && key == anim_key_ &&
-			p_variant == anim_variant_) {
+			p_variant == anim_variant_ && p_parked == body_phase_parked_applied_) {
 		return;
 	}
 	const String previous_key = anim_key_;
 	const int previous_variant = anim_variant_;
 	const double previous_time = anim_time_;
 	const bool previous_external = anim_external_phase_;
-	const double seconds = clip_phase_seconds(key, p_phase_ticks, p_variant);
+	const double seconds = clip_phase_seconds(key, p_phase_ticks, p_variant, p_parked);
 	const bool same_external = previous_external && key == previous_key &&
 			p_variant == previous_variant &&
 			Math::is_equal_approx(previous_time, seconds);
@@ -191,6 +192,7 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks, int 
 	anim_external_phase_ = true;
 	body_phase_stamp_valid_ = true;
 	body_phase_ticks_applied_ = p_phase_ticks;
+	body_phase_parked_applied_ = p_parked;
 	if (same_external && !body_pose_dirty_) {
 		return;
 	}
@@ -442,7 +444,7 @@ void ObjectModel::play_body_anim(int p_slot) {
 }
 
 // Pose a main-body animation slot at the authoritative infantry motor playhead.
-void ObjectModel::play_body_anim_at(int p_slot, int p_phase_ticks) {
+void ObjectModel::play_body_anim_at(int p_slot, int p_phase_ticks, bool p_parked) {
 	wake_runtime_frame();
 	if (skeletal_.is_null() || p_slot < 0) {
 		return;
@@ -454,7 +456,7 @@ void ObjectModel::play_body_anim_at(int p_slot, int p_phase_ticks) {
 	if (last_slot_key_.is_empty()) {
 		return;
 	}
-	play_body_clip_at(last_slot_key_, p_phase_ticks);
+	play_body_clip_at(last_slot_key_, p_phase_ticks, 0, p_parked);
 }
 
 // Scrub the active body clip's playhead and pose IMMEDIATELY, even while
@@ -500,8 +502,11 @@ String ObjectModel::resolve_body_clip_key(const String &p_key) const {
 }
 
 double ObjectModel::clip_phase_seconds(const String &p_key, int p_phase_ticks,
-		int p_variant) const {
-	return skeletal_->get_clip_phase_seconds(p_key, p_phase_ticks, p_variant);
+		int p_variant, bool p_parked) const {
+	// A parked tick samples the clip's last frame at its boundary
+	// (anim::ClipTimeline::seconds_at(ticks, armed_boundary)).
+	return skeletal_->get_clip_phase_seconds(p_key, p_phase_ticks, p_variant,
+			p_parked ? p_phase_ticks : -1);
 }
 
 void ObjectModel::clear_body_blend() {
@@ -611,18 +616,19 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 
 void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks,
 		const String &p_prev_key, int p_prev_phase_ticks, float p_blend_weight,
-		int p_variant, int p_prev_variant) {
+		int p_variant, int p_prev_variant, bool p_parked) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->set_weapon_channel(p_key, p_phase_ticks, p_prev_key,
-				p_prev_phase_ticks, p_blend_weight, p_variant, p_prev_variant);
+				p_prev_phase_ticks, p_blend_weight, p_variant, p_prev_variant, p_parked);
 	}
 	wake_runtime_frame();
 	if (p_key == wpn_key_ && p_phase_ticks == wpn_phase_ticks_ &&
 			p_prev_key == wpn_prev_key_ && p_prev_phase_ticks == wpn_prev_phase_ticks_ &&
 			p_blend_weight == wpn_blend_weight_ && p_variant == wpn_variant_ &&
-			p_prev_variant == wpn_prev_variant_) {
+			p_prev_variant == wpn_prev_variant_ && p_parked == wpn_parked_) {
 		return;
 	}
+	wpn_parked_ = p_parked;
 	wpn_key_ = p_key;
 	wpn_phase_ticks_ = p_phase_ticks;
 	wpn_prev_key_ = p_prev_key;
@@ -756,7 +762,8 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 	double wpn_time = 0.0;
 	double wpn_prev_time = 0.0;
 	if (use_overlay && !wpn_key_.is_empty()) {
-		wpn_time = skeletal_->get_clip_phase_seconds(wpn_key_, wpn_phase_ticks_, wpn_variant_);
+		wpn_time = skeletal_->get_clip_phase_seconds(wpn_key_, wpn_phase_ticks_, wpn_variant_,
+				wpn_parked_ ? wpn_phase_ticks_ : -1);
 		if (!wpn_prev_key_.is_empty())
 			wpn_prev_time = skeletal_->get_clip_phase_seconds(
 					wpn_prev_key_, wpn_prev_phase_ticks_, wpn_prev_variant_);
