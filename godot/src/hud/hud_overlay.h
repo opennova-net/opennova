@@ -340,6 +340,7 @@ private:
 	opennova::fnt::fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
 	bool label_font_impact38_valid_ = false;
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
+	int label_width_ = 0;  // the width the pushed label scales were computed for
 	// The hudpos FONTHUD1_LO / _HI names (engine hudpos_font_for_width picks one
 	// per width); loaded into font_ by ensure_label_fonts_.
 	std::string hudpos_font_lo_;
@@ -403,6 +404,7 @@ private:
 	// (Re)load the Arial label pair when the surface width crosses a retail
 	// breakpoint, and hand the compiler the pair + the witnessed slot scale.
 	void ensure_label_fonts_(float p_surface_w);
+	void push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_choice);
 	void ensure_additive_item_();
 	void ensure_minimap_water_material_();
 	void ensure_map_items_();

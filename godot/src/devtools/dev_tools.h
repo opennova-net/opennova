@@ -248,6 +248,7 @@ private:
 	uint64_t weapon_def_serial_ = 0;
 	std::string weapon_def_name_;
 	std::string weapon_def_anim_map_;
+	bool weapon_def_rings_loaded_ = false;
 	bool weapon_records_live_ = false;
 	int64_t last_environment_push_ms_ = -1;
 	int64_t last_ai_push_ms_ = -1;

@@ -342,6 +342,13 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 	const opennova::hud::HudLabelFontChoice choice =
 			opennova::hud::hud_label_font_choice(w);
 	if (choice.tier == label_tier_) {
+		// Same files, new width: retail recomputes the slot scales on every
+		// resolution change (the witness rides hud_label_font_choice), and the
+		// HUD slot's bold copy follows them.
+		if (w != label_width_) {
+			label_width_ = w;
+			push_label_fonts_(choice);
+		}
 		return;
 	}
 	if (label_font_valid_) {
@@ -376,16 +383,12 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 			load_fnt_(String(choice.impact38_fnt), label_font_impact38_,
 					opennova::hud::kHudFontSlotImpact38);
 	label_tier_ = choice.tier;
-	compiler_.configure_label_fonts(
-			label_font_valid_ ? &label_font_ : nullptr,
-			label_font_bold_valid_ ? &label_font_bold_ : nullptr,
-			label_font_large_valid_ ? &label_font_large_ : nullptr,
-			choice.scale, choice.large_scale,
-			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
+	label_width_ = w;
+	push_label_fonts_(choice);
 
 	// The hudpos HUD font for this width, after the label fonts so an empty
-	// name or a failed load falls back to the bold slot just loaded
-	// [orig: HUD_InitAllFonts @0x51EFAB -> HUD_SelectHudposFont @0x591890].
+	// name or a failed load falls back to the bold slot just loaded (the
+	// witness rides hudpos_font_for_width and HudFrameCompiler::set_hudpos_font).
 	if (font_valid_) {
 		fnt_free(&font_);
 		font_ = {};
@@ -397,6 +400,15 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 	font_valid_ = load_fnt_(opennova::to_gd(opennova::hud::hudpos_font_for_width(names, w)),
 			font_, opennova::hud::kHudFontSlotHud);
 	compiler_.set_hudpos_font(font_valid_ ? &font_ : nullptr);
+}
+
+void HudOverlay::push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_choice) {
+	compiler_.configure_label_fonts(
+			label_font_valid_ ? &label_font_ : nullptr,
+			label_font_bold_valid_ ? &label_font_bold_ : nullptr,
+			label_font_large_valid_ ? &label_font_large_ : nullptr,
+			p_choice.scale, p_choice.large_scale,
+			label_font_impact38_valid_ ? &label_font_impact38_ : nullptr);
 }
 
 Ref<Texture2D> HudOverlay::double_saturate_texture_(

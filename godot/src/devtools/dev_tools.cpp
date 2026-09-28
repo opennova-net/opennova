@@ -888,13 +888,17 @@ void DevTools::push_weapon_records() {
 	// --- the definition, on change ---
 	// The ring table a mount binds holds its slots from its load
 	// (anim::AdmRingTable), so the keys move only with the weapon, its map,
-	// or an applied request: the names decide, and the keys are fetched
-	// (built and sorted) only for a rebuild.
+	// an applied request, or the map's table arriving after the mount (a
+	// definition-object mount whose clips are baked later): those decide, and
+	// the keys are fetched (built and sorted) only for a rebuild.
+	const opennova::anim::AdmRingTable *rings = simulation_->native_weapon_rings();
+	const bool rings_loaded = rings != nullptr && rings->loaded(weapon->anim_map);
 	if (weapon_def_dirty_ || weapon_def_name_ != weapon->def_name ||
-			weapon_def_anim_map_ != weapon->anim_map) {
+			weapon_def_anim_map_ != weapon->anim_map || weapon_def_rings_loaded_ != rings_loaded) {
 		weapon_def_dirty_ = false;
 		weapon_def_name_ = weapon->def_name;
 		weapon_def_anim_map_ = weapon->anim_map;
+		weapon_def_rings_loaded_ = rings_loaded;
 		opennova::devtools::WeaponDefinitionSnapshot def;
 		def.valid = true;
 		def.serial = ++weapon_def_serial_;
@@ -904,7 +908,7 @@ void DevTools::push_weapon_records() {
 		def.auto_fire = weapon->def.auto_fire;
 		def.burst3 = weapon->def.burst3;
 		def.clip_keys = simulation_->native_equipped_weapon_clip_keys();
-		const opennova::anim::AdmRingTable *weapon_rings = simulation_->native_weapon_rings();
+		const opennova::anim::AdmRingTable *weapon_rings = rings;
 		const DefWeaponDef *row = simulation_->native_equipped_weapon_row();
 		for (int id = 0; id < opennova::world::weapon_action::kCount; ++id) {
 			const opennova::world::WeaponFsmAction &baked = weapon->def.actions[id];

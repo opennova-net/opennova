@@ -1446,6 +1446,29 @@ void test_compiler_hud_font_falls_back_to_bold(const fnt_font_t *font) {
 			"the fallback slot carries the bold slot's scale; the hudpos font draws at 1.0");
 }
 
+// The waypoint name and distance draw in the BOLD label slot even when hudpos
+// names a HUD font [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 passes
+// &g_HUDLabelFont[1] (0xB4C394) to every measure and draw].
+void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.wpd_info = {512, 60, 1, 0, true};
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.5f, 1.5f);
+	HudFrameState state;
+	state.waypoint.present = true;
+	state.waypoint.name = "Alpha";
+	state.waypoint.distance_m = 120;
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	size_t bold = 0;
+	size_t hud = 0;
+	for (const opennova::hud::GameFontQuad &g : list.glyphs) {
+		if (g.page == static_cast<uint32_t>(opennova::hud::kHudFontSlotLabelBold) * FNT_MAX_PAGES) ++bold;
+		if (g.page == static_cast<uint32_t>(opennova::hud::kHudFontSlotHud) * FNT_MAX_PAGES) ++hud;
+	}
+	CHECK(bold == 8 && hud == 0, "the waypoint's 5 name + 3 distance glyphs ride the bold slot");
+}
+
 } // namespace
 
 // The stdbox panel geometry: pieces and the fill inset scale with the surface,
@@ -2617,6 +2640,7 @@ int main() {
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
 	test_compiler_hud_font_falls_back_to_bold(&font);
+	test_compiler_waypoint_uses_bold_slot(&font);
 	test_static_frame_pick();
 	test_sights_card_element(&font);
 	test_vehicle_panel_element(&font);
