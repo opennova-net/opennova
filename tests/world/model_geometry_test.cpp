@@ -159,6 +159,70 @@ int main() {
         threedi_3di3_free(&model);
     }
 
+    // --- the per-section runtime-safety gate ------------------------------
+    // Retail's loader copies every pool as authored and links the COBJ runs
+    // with no check, so a CFAC corner past its section's run reads outside it
+    // (Pinegr_L, broken in retail) while the model's volumes stay live
+    // [orig: Threedi_BuildCollisionModelFromChunks @ 0x5B3BF0, the corners
+    //  copied as words @ 0x5B3EC7..0x5B3EEA, the runs @ 0x5B4326..0x5B43C4].
+    // The port gates each pool section on its own: a face mesh the walkers
+    // cannot read safely loads as no faces with the volumes kept, a volume
+    // pool they cannot read loads as no volumes with the faces kept, and only
+    // a block with neither is refused.
+    {
+        ThreediCollisionVertex vertices[3] = {};
+        ThreediCollisionFace face = {};
+        face.vert_index[0] = 0;
+        face.vert_index[1] = 1;
+        face.vert_index[2] = -1; // a signed-negative corner: read outside the run in retail
+        face.normal_index = -1;
+        ThreediBoundingPlane planes[2] = {};
+        ThreediBoundingVolume volume = {};
+        volume.plane_count = 2;
+        ThreediCollisionObject object = {};
+        object.num_vertices = 3;
+        object.num_faces = 1;
+        object.num_bounding_volumes = 1;
+        ThreediCollisionModel col = {};
+        col.vertices = vertices;
+        col.vertex_count = 3;
+        col.faces = &face;
+        col.face_count = 1;
+        col.planes = planes;
+        col.plane_count = 2;
+        col.volumes = &volume;
+        col.volume_count = 1;
+        col.objects = &object;
+        col.object_count = 1;
+        TEST_EXPECT(threedi_3di3_collision_is_runtime_safe(&col) == 0);
+        TEST_EXPECT(threedi_3di3_collision_faces_runtime_safe(&col) == 0);
+        TEST_EXPECT(threedi_3di3_collision_volumes_runtime_safe(&col) == 1);
+        opennova::world::CollisionModel cm;
+        TEST_EXPECT(collision_model_from_3di(&col, cm));
+        TEST_EXPECT(cm.faces.empty() && cm.vertices.empty());
+        TEST_EXPECT(cm.volumes.size() == 1 && cm.planes.size() == 2);
+        TEST_EXPECT(cm.sections.size() == 1);
+        TEST_EXPECT(cm.sections[0].face_count == 0 && cm.sections[0].vertex_count == 0);
+        TEST_EXPECT(cm.sections[0].volume_count == 1);
+
+        // The other way round: a good face mesh over an overrunning BPLN window.
+        face.vert_index[2] = 2;
+        volume.plane_count = 3;
+        TEST_EXPECT(threedi_3di3_collision_faces_runtime_safe(&col) == 1);
+        TEST_EXPECT(threedi_3di3_collision_volumes_runtime_safe(&col) == 0);
+        opennova::world::CollisionModel faces_only;
+        TEST_EXPECT(collision_model_from_3di(&col, faces_only));
+        TEST_EXPECT(faces_only.faces.size() == 1 && faces_only.vertices.size() == 3);
+        TEST_EXPECT(faces_only.volumes.empty() && faces_only.planes.empty());
+        TEST_EXPECT(faces_only.sections.size() == 1 && faces_only.sections[0].volume_count == 0);
+        TEST_EXPECT(faces_only.sections[0].face_count == 1);
+
+        // Neither section walkable: refused.
+        face.vert_index[2] = -1;
+        opennova::world::CollisionModel none;
+        TEST_EXPECT(!collision_model_from_3di(&col, none));
+    }
+
     // --- house: volume-carrying building + occlusion presence report ------
     {
         Threedi3di3 model{};

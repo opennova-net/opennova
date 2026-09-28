@@ -105,6 +105,10 @@ typedef struct ThreediIndexBuffer {
     uint16_t *indices;
 } ThreediIndexBuffer;
 
+// A strip's STRP bone table holds at most 16 slots: the palette the strip
+// uploads, one matrix per entry, which every skinned vertex shader indexes.
+inline constexpr int32_t kThreediStripBoneTableMax = 16;
+
 typedef struct ThreediTriangleStrip {
     int32_t material_index;
     int32_t index_offset;
@@ -115,7 +119,7 @@ typedef struct ThreediTriangleStrip {
     int32_t num_vertices;
     float min[3];
     float max[3];
-    uint8_t bone_table[16];
+    uint8_t bone_table[kThreediStripBoneTableMax];
     int32_t bone_table_length; // 0 if absent.
 } ThreediTriangleStrip;
 
@@ -153,7 +157,7 @@ static inline void threedi_skin_influences(const ThreediVertex *v, const uint8_t
     for (int k = 0; k < 4; ++k) {
         const int32_t slot = v->bone_indices[k];
         out[k].slot = slot;
-        out[k].part = slot < bone_table_length && slot < 16 ? bone_table[slot] : -1;
+        out[k].part = slot < bone_table_length && slot < kThreediStripBoneTableMax ? bone_table[slot] : -1;
         out[k].weight = k < 3 ? v->bone_weights[k] : 1.0f - sum;
     }
 }
@@ -440,37 +444,42 @@ static inline int threedi_collision_object_runs(const ThreediCollisionModel *col
     return 1;
 }
 
-// Return 1 when every collision slice is safe for runtime queries: backing
-// arrays exist, COBJ-owned vertex/normal/face/volume runs are contiguous and
-// in range, local CFAC indices stay within their object, and every BVOL owns a
-// non-empty BPLN window (windows are consecutive across the whole BVOL pool).
-// Object-less legacy convex blocks remain supported. Header-local so
-// validation does not expand the stable shared-library ABI.
-static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionModel *col) {
+/* The runtime-safety gates over the raw collision block, one per pool section.
+   Retail's loader copies every pool as authored and links the COBJ runs by
+   prefix sum with no check of its own [orig: Threedi_BuildCollisionModelFromChunks
+   @ 0x5B3BF0: the CFAC corners and normal copied as words @ 0x5B3EC7..0x5B3EEA,
+   the per-COBJ vertex/face/normal/volume runs @ 0x5B4326..0x5B43C4, the BPLN
+   windows @ 0x5B43FA], so a corner past its section's run reads outside it
+   (docs/threedi/3di-gp-format-re.md section 2.11: Pinegr_L, broken in retail).
+   The face mesh (CVRT/CNRM/CFAC through the COBJ runs) and the volumes
+   (BVOL/BPLN through the COBJ runs) are separate pools that no walker crosses,
+   so each is gated on its own: a consumer keeps the section it can walk
+   safely. Header-local so validation does not expand the stable ABI. */
+
+// Return 1 when the face mesh is safe for runtime queries: backing arrays
+// exist, COBJ-owned vertex/normal/face runs are contiguous and exactly
+// partition their pools, and local CFAC indices stay within their object.
+// Object-less legacy convex blocks (no faces) remain supported.
+static inline int threedi_3di3_collision_faces_runtime_safe(const ThreediCollisionModel *col) {
     if (!col) return 0;
     if (col->vertex_count != 0 && !col->vertices) return 0;
     if (col->normal_count != 0 && !col->normals) return 0;
     if (col->face_count != 0 && !col->faces) return 0;
-    if (col->volume_count != 0 && !col->volumes) return 0;
-    if (col->plane_count != 0 && !col->planes) return 0;
     if (col->object_count != 0 && !col->objects) return 0;
 
     if (col->object_count == 0 &&
         (col->vertex_count != 0 || col->normal_count != 0 || col->face_count != 0)) return 0;
 
-    size_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0, volume_cursor = 0;
+    size_t vertex_cursor = 0, normal_cursor = 0, face_cursor = 0;
     for (size_t oi = 0; oi < col->object_count; ++oi) {
         const ThreediCollisionObject *object = &col->objects[oi];
-        if (object->num_vertices < 0 || object->num_faces < 0 || object->num_normals < 0 ||
-            object->num_bounding_volumes < 0) return 0;
+        if (object->num_vertices < 0 || object->num_faces < 0 || object->num_normals < 0) return 0;
         const size_t nv = (size_t)object->num_vertices;
         const size_t nn = (size_t)object->num_normals;
         const size_t nf = (size_t)object->num_faces;
-        const size_t nb = (size_t)object->num_bounding_volumes;
         if (nv > col->vertex_count - vertex_cursor ||
             nn > col->normal_count - normal_cursor ||
-            nf > col->face_count - face_cursor ||
-            nb > col->volume_count - volume_cursor) return 0;
+            nf > col->face_count - face_cursor) return 0;
         for (size_t fi = 0; fi < nf; ++fi) {
             const ThreediCollisionFace *face = &col->faces[face_cursor + fi];
             /* A negative CNRM index is authorable; the runtime CFAC walker
@@ -484,18 +493,39 @@ static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionM
         vertex_cursor += nv;
         normal_cursor += nn;
         face_cursor += nf;
+    }
+    /* The vertex/normal/face runs must exactly partition their pools. */
+    if (col->object_count != 0 &&
+        (vertex_cursor != col->vertex_count || normal_cursor != col->normal_count ||
+         face_cursor != col->face_count))
+        return 0;
+    return 1;
+}
+
+// Return 1 when the volumes are safe for runtime queries: backing arrays
+// exist, COBJ-owned volume runs are contiguous and in range, and every BVOL
+// owns a non-empty BPLN window (windows are consecutive across the whole
+// BVOL pool).
+static inline int threedi_3di3_collision_volumes_runtime_safe(const ThreediCollisionModel *col) {
+    if (!col) return 0;
+    if (col->volume_count != 0 && !col->volumes) return 0;
+    if (col->plane_count != 0 && !col->planes) return 0;
+    if (col->object_count != 0 && !col->objects) return 0;
+
+    size_t volume_cursor = 0;
+    for (size_t oi = 0; oi < col->object_count; ++oi) {
+        const ThreediCollisionObject *object = &col->objects[oi];
+        if (object->num_bounding_volumes < 0) return 0;
+        const size_t nb = (size_t)object->num_bounding_volumes;
+        if (nb > col->volume_count - volume_cursor) return 0;
         volume_cursor += nb;
     }
-    /* The vertex/normal/face runs must exactly partition their pools, but
-       retail models legitimately author TRAILING BVOLs owned by no COBJ:
+    /* Retail models legitimately author TRAILING BVOLs owned by no COBJ:
        Zodiacs, mounted-weapon items, and large buildings in the JO corpus all
        carry them. Retail never reaches them - every walker consumes volumes
        only through per-COBJ runs - so an unowned tail is dead data, not an
        unsafe model. */
-    if (col->object_count != 0 &&
-        (vertex_cursor != col->vertex_count || normal_cursor != col->normal_count ||
-         face_cursor != col->face_count || volume_cursor > col->volume_count))
-        return 0;
+    if (col->object_count != 0 && volume_cursor > col->volume_count) return 0;
 
     size_t plane_cursor = 0;
     for (size_t i = 0; i < col->volume_count; ++i) {
@@ -505,6 +535,13 @@ static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionM
         plane_cursor += (size_t)volume->plane_count;
     }
     return 1;
+}
+
+// Return 1 when every collision slice is safe for runtime queries: both
+// sections above.
+static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionModel *col) {
+    return threedi_3di3_collision_faces_runtime_safe(col) &&
+           threedi_3di3_collision_volumes_runtime_safe(col);
 }
 
 /* The two vehicle platform-solve probe boxes retail derives at collision-model
