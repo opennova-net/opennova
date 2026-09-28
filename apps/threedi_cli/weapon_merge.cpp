@@ -48,46 +48,27 @@ struct Line {
 	std::string key; // token 0, lower case; empty for a line the parser skips
 };
 
-// Lines as File_ParseASCIIFile cuts them: at a CR LF pair and nowhere else,
-// a tail line with no pair losing its final byte to the terminator. Tokens as
-// its callback receives them: the line is skipped when it has none or its
-// first starts with '/'. The comment cut writes no terminator, so a token it
-// cuts runs on to the line's end; `cut` is where the value really stops.
-// [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5, @ 0x53D90D..0x53D91E;
-//  Terrain_TokenizeConfigLine @ 0x53CB60, the cut @ 0x53CC16..0x53CC31;
-//  io/ascii_config.h]
+// Lines as File_ParseASCIIFile cuts them and tokens as its callback receives
+// them, located in the file by the engine's span walk (every line counted, so
+// the indices are the ones the parser records on its entries); the line is
+// skipped when it has no token or its first starts with '/'. A token the
+// comment cut left unterminated runs on to the line's end; `cut` is where
+// the value really stops. [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5,
+//  @ 0x53D90D..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the cut
+//  @ 0x53CC16..0x53CC31; io/ascii_config.h for_each_config_line_span]
 std::vector<Line> split_lines(const std::string &def) {
 	std::vector<Line> lines;
-	size_t at = 0;
-	while (at < def.size()) {
-		const size_t pair = def.find("\r\n", at);
-		Line line;
-		line.begin = at;
-		line.end = pair == std::string::npos ? def.size() - 1 : pair;
-		const std::string text = def.substr(line.begin, line.end - line.begin);
-		size_t skip = 0;
-		while (skip < text.size() && (text[skip] == ' ' || text[skip] == '\t')) ++skip;
-		line.cut = line.end;
-		bool quoted = false;
-		for (size_t i = skip; i < text.size() && i < skip + opennova::io::kConfigMaxLineChars; ++i) {
-			const char c = text[i];
-			if (!quoted && ((c == '/' && i + 1 < text.size() && text[i + 1] == '/') || c == ';')) {
-				line.cut = line.begin + i;
-				break;
-			}
-			if (c == '"') quoted = !quoted;
-		}
-		opennova::io::ConfigTokens tokens;
-		opennova::io::tokenize_config_line(text.c_str(), tokens);
-		for (int i = 0; i < tokens.count; ++i) {
-			const size_t offset = static_cast<size_t>(tokens.tokens[i] - tokens.buffer) + skip;
-			const size_t length = std::strlen(tokens.tokens[i]);
-			line.tokens.push_back({line.begin + offset, line.begin + offset + length});
-		}
-		if (!line.tokens.empty() && tokens.tokens[0][0] != '/') line.key = strutil::to_lower(tokens.tokens[0]);
-		lines.push_back(line);
-		at = pair == std::string::npos ? def.size() : pair + 2;
-	}
+	opennova::io::for_each_config_line_span(def.data(), def.size(),
+			[&](const opennova::io::ConfigTokens &tokens, const opennova::io::ConfigLineSpan &span) {
+				Line line;
+				line.begin = span.begin;
+				line.end = span.end;
+				line.cut = span.cut;
+				for (int i = 0; i < tokens.count; ++i)
+					line.tokens.push_back({span.token_begin[i], span.token_end[i]});
+				if (tokens.count > 0 && tokens.tokens[0][0] != '/') line.key = strutil::to_lower(tokens.tokens[0]);
+				lines.push_back(line);
+			});
 	return lines;
 }
 
@@ -107,51 +88,48 @@ struct Entry {
 	std::string name;
 	size_t weapon_line = 0;
 	size_t end_line = 0;
-	bool ended = false;
 	std::vector<size_t> view_lines; // pos and tpos lines
-	std::vector<Block> blocks;
+	std::vector<Block> blocks;      // in line order
 };
 
-// The def's structure as the parser walks it: `weapon <name>` ... `end`, with
-// `action <name>` ... `end` blocks inside; a nested `action` while a block is
-// open is no new block, and `ammoclass_max_carry` is a table row wherever it
-// stands. [orig: WeaponDefs_ParseLineCallback @ 0x543680; ActionDef_ParseScriptLine
-// @ 0x4023c0, the nested refusal @ 0x402409; formats/def/def_weapons.cpp]
-std::vector<Entry> walk(const std::string &def, const std::vector<Line> &lines) {
+// The def's structure as the engine's parser read it: each entry's `weapon`
+// and `end` lines and each live ACTION block's `action` and `end` lines are
+// the parser's own records (an entry the text never closes is not parsed;
+// of repeated blocks only the last is a row, the earlier ones dead data the
+// merge leaves as it is). The key lines of a block and the pos/tpos lines of
+// an entry are the lines between them the parser reads a key from;
+// `ammoclass_max_carry` is a table row wherever it stands.
+// [orig: WeaponDefs_ParseLineCallback @ 0x543680; ActionDef_ParseScriptLine
+// @ 0x4023c0; formats/def/def_weapons.cpp]
+std::vector<Entry> entries_of(const opennova::def::DefWeaponsFile &parsed, const std::vector<Line> &lines) {
 	std::vector<Entry> entries;
-	enum { kTop, kWeapon, kAction } state = kTop;
-	for (size_t i = 0; i < lines.size(); ++i) {
-		const std::string &key = lines[i].key;
-		if (key.empty() || key == "ammoclass_max_carry") continue;
-		if (state == kTop) {
-			if (key != "weapon") continue;
-			entries.push_back(Entry{});
-			entries.back().name = token_text(def, lines[i], 1);
-			entries.back().weapon_line = i;
-			state = kWeapon;
-		} else if (state == kWeapon) {
-			Entry &entry = entries.back();
-			if (key == "action") {
-				entry.blocks.push_back(Block{});
-				entry.blocks.back().name = token_text(def, lines[i], 1);
-				entry.blocks.back().action_line = i;
-				state = kAction;
-			} else if (key == "end") {
-				entry.end_line = i;
-				entry.ended = true;
-				state = kTop;
-			} else if (key == "pos" || key == "tpos") {
-				entry.view_lines.push_back(i);
-			}
-		} else {
-			Block &block = entries.back().blocks.back();
-			if (key == "end") {
-				block.end_line = i;
-				state = kWeapon;
-			} else {
-				block.keys.push_back(i);
-			}
+	for (size_t e = 0; e < parsed.count; ++e) {
+		const opennova::def::DefWeaponDef &def = parsed.entries[e];
+		Entry entry;
+		entry.name = def.weapon_name;
+		entry.weapon_line = def.open_line;
+		entry.end_line = def.end_line;
+		for (size_t a = 0; a < def.actions_count; ++a) {
+			const opennova::def::DefWeaponAction &row = def.actions[a];
+			Block block;
+			block.name = row.name;
+			block.action_line = row.open_line;
+			block.end_line = row.end_line;
+			for (size_t l = block.action_line + 1; l < block.end_line; ++l)
+				if (!lines[l].key.empty() && lines[l].key != "ammoclass_max_carry") block.keys.push_back(l);
+			entry.blocks.push_back(block);
 		}
+		std::sort(entry.blocks.begin(), entry.blocks.end(),
+		          [](const Block &a, const Block &b) { return a.action_line < b.action_line; });
+		for (size_t l = entry.weapon_line + 1; l < entry.end_line; ++l) {
+			const std::string &key = lines[l].key;
+			if (key != "pos" && key != "tpos") continue;
+			bool inside = false;
+			for (const Block &block : entry.blocks)
+				if (l > block.action_line && l < block.end_line) inside = true;
+			if (!inside) entry.view_lines.push_back(l);
+		}
+		entries.push_back(entry);
 	}
 	return entries;
 }
@@ -280,7 +258,7 @@ bool parse_weapon_edits(const std::string &text, std::vector<WeaponEditEntry> &o
 			edit.action = weapon_action_named(suffix);
 			if (edit.action < 0) return fail(error, where + "'" + suffix + "' is no weapon action suffix");
 			if (edit.key == "anim") {
-				if (!weapon_plain_name(edit.value, 63))
+				if (!weapon_plain_name(edit.value, kWeaponActionAnimMax))
 					return fail(error, where + "an ANIM is 1 to 63 letters, digits, _, - or .");
 			} else if (edit.key == "delaystart" || edit.key == "delayend") {
 				char *end = nullptr;
@@ -322,7 +300,7 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 	if (opennova::def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(def.data()), def.size(), &before) != 0)
 		return fail(error, "the weapon.def does not parse");
 	const std::vector<Line> lines = split_lines(def);
-	const std::vector<Entry> entries = walk(def, lines);
+	const std::vector<Entry> entries = entries_of(before, lines);
 	const std::string eol = "\r\n";
 
 	std::vector<Patch> patches;
@@ -332,10 +310,6 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 		for (const Entry &entry : entries) {
 			if (!strutil::iequals(entry.name, edit.name)) continue;
 			found = true;
-			if (!entry.ended) {
-				ok = fail(error, edit.name + " has no `end` in the weapon.def");
-				break;
-			}
 			// The entry's FLAGS decide how the FSM fires; the timing was
 			// measured in the edits' mode, so they must agree.
 			bool read = false;

@@ -24,6 +24,12 @@ namespace threedi_cli {
 // A weapon.def entry name's field: 31 characters and its terminator
 // [orig: WeaponDefs_ParseLineCallback, strncpy 32 into entry+0x14 @ 0x543737].
 inline constexpr size_t kWeaponEntryNameMax = 31;
+// An ACTION block's ANIM field: 63 characters and its terminator. The retail
+// parser copies the token into ActionDef+58 with no bound, and the next field
+// is the block's name at +122, so the field holds 64 bytes
+// [orig: ActionDef_ParseScriptLine, the copy @ 0x402873; the name store at
+//  +122 @ 0x4024DF].
+inline constexpr size_t kWeaponActionAnimMax = 63;
 // A plain name: 1 to `max_chars` letters, digits, `_`, `-` or `.`.
 bool weapon_plain_name(const std::string &s, size_t max_chars);
 // The weapon action a suffix names (any case), or -1.

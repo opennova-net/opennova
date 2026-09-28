@@ -25,17 +25,34 @@ namespace opennova::def {
 /* Weapons Parsing                                                           */
 /* ========================================================================= */
 
-/* A `weapon` or `action` line's name: the line's second token as the retail
-   tokenizer cuts it, so quotes are optional (the AT4 and RPG entries open
-   their scopeup rows with a bare `ACTION SCOPEUP`).
-   [orig: WeaponDefs_ParseLineCallback @0x543680 over File_ParseASCIIFile
-   @0x53D810's tokens, Terrain_TokenizeConfigLine @0x53CB60] */
-static void token_name(const char *line, size_t len, char *dst, size_t dst_size) {
-    const std::string copy(line, len);
-    io::ConfigTokens tokens;
-    io::tokenize_config_line(copy.c_str(), tokens);
-    const char *name = tokens.token(1);
-    safe_copy(dst, dst_size, name, strlen(name));
+/* Every line reaches the parser as the retail tokenizer cuts it, and every
+   key is the WHOLE first token compared without case: `END // x` closes a
+   block, `KEY,value` binds, a `weapon` or `action` name needs no quotes (the
+   AT4 and RPG entries open their scopeup rows with a bare `ACTION SCOPEUP`),
+   and a scalar key reads its first value token only.
+   [orig: File_ParseASCIIFile @0x53D810 hands Terrain_TokenizeConfigLine
+   @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
+   token or whose first starts with '/' (@0x53D915 / @0x53D91E);
+   WeaponDefs_ParseLineCallback @0x543680 (stricmp on token 0: "weapon"
+   @0x54369D, "end" @0x54374C, "ammoclass_max_carry" @0x5437F2, "action"
+   @0x5438CF, the scalar reads of tokens[2] throughout);
+   ActionDef_ParseScriptLine @0x4023C0 ("action" @0x4023F3, "end" @0x40251B)]
+   The line split itself stays def_scan's LF-tolerant one: retail cuts at CR
+   LF alone (io::for_each_config_line), and every shipped def is CR LF. */
+static bool key_is(const char *key, const char *name) {
+    return strutil::iequals(key, name);
+}
+
+/* The value tokens (token 1 on) as the scanner's spans, for the handlers that
+   read several. */
+static int value_tokens(const io::ConfigTokens &tokens, Token *out, int max_tok) {
+    int n = 0;
+    for (int i = 1; i < tokens.count && n < max_tok; ++i) {
+        out[n].s = tokens.tokens[i];
+        out[n].len = strlen(tokens.tokens[i]);
+        ++n;
+    }
+    return n;
 }
 
 /* CRT atof on a token span: the double the retail parse multiplies before its
@@ -56,13 +73,19 @@ static double parse_double_n(const char *s, size_t len) {
 // [orig: WeaponDefs_ParseLineCallback @0x543680: the pos gate @0x5445EE..0x544613
 //  and tpos gate @0x544735..0x54475A -> WeaponDefs_ParseWarning; the
 //  Math_ParseFixedPoint16 calls @0x544662 / @0x5447A9]
-static void parse_view_pose(const char *s, size_t len, float position[3], int32_t rotation[3]) {
+static void parse_view_pose(const io::ConfigTokens &tokens, float position[3], int32_t rotation[3]) {
     Token values[6];
-    if (split_values(s, len, values, 6) < 6) return;
+    if (value_tokens(tokens, values, 6) < 6) return;
     for (int i = 0; i < 3; ++i)
         position[i] = parse_float_n(values[i].s, values[i].len);
     for (int i = 0; i < 3; ++i)
         rotation[i] = parse_fixed16_digits_n(values[i + 3].s, values[i + 3].len);
+}
+
+/* `auto` or a tick count: -1 marks the automatic delay [orig:
+   ActionDef_ParseScriptLine, the "auto" compare @0x40272B / @0x402B41]. */
+static int parse_delay(const char *v, size_t vl) {
+    return strutil::iequals(std::string_view(v, vl), "auto") ? -1 : parse_int_n(v, vl);
 }
 
 /* Shared buffer parser for weapon.def, used by both the path and memory entry points. */
@@ -78,24 +101,27 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
-    char lower[1024];
+    size_t line_index = (size_t)-1; // every line counts, as the retail walk numbers them
+    io::ConfigTokens tokens;
 
     while (next_line(&it, &line, &line_len)) {
-        size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
-        if (tlen == 0) continue;
+        ++line_index;
+        const std::string copy(line, line_len);
+        io::tokenize_config_line(copy.c_str(), tokens);
+        if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
+        const char *key = tokens.tokens[0];
+        const char *v = tokens.token(1); // the first value token, "" when none
+        const size_t vl = strlen(v);
 
-        size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
-        to_lower_buf(lower, trimmed, ll);
-
-        /* Top-level ammoclass_max_carry */
-        if (lower_starts_with(lower, ll, "ammoclass_max_carry", 19)) {
+        /* Top-level ammoclass_max_carry: a table row wherever it stands, read
+           before the in-ACTION forward and the current-weapon gate. */
+        if (key_is(key, "ammoclass_max_carry")) {
             DA_PUSH_RAW(out->ammo_class_lines, out->ammo_class_lines_count, acl_cap, line, line_len);
             continue;
         }
 
         if (state == ST_TOP) {
-            if (lower_starts_with(lower, ll, "weapon", 6)) {
+            if (key_is(key, "weapon")) {
                 memset(&cw, 0, sizeof(cw));
                 cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
                 /* [orig: AdmDef_InitEntryDefaults @ 0x53ff31 seeds renderfov = 80.0] */
@@ -105,22 +131,25 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                 cw.scope_min_mag = 2;
                 /* [orig: AdmDef_InitEntryDefaults @ 0x53FF61/0x53FF67/0x53FF6D] */
                 for (int &stability : cw.stability_fp16) stability = 0x10000;
-                token_name(trimmed, tlen, cw.weapon_name, sizeof(cw.weapon_name));
+                safe_copy(cw.weapon_name, sizeof(cw.weapon_name), v, vl);
+                cw.open_line = line_index;
                 state = ST_WEAPON;
             }
             continue;
         }
 
         if (state == ST_WEAPON) {
-            if (lower_starts_with(lower, ll, "action", 6)) {
+            if (key_is(key, "action")) {
                 memset(&ca, 0, sizeof(ca));
                 ca_raw_cap = 0;
-                token_name(trimmed, tlen, ca.name, sizeof(ca.name));
+                safe_copy(ca.name, sizeof(ca.name), v, vl);
+                ca.open_line = line_index;
                 state = ST_ACTION;
                 continue;
             }
 
-            if (ll == 3 && memcmp(lower, "end", 3) == 0) {
+            if (key_is(key, "end")) {
+                cw.end_line = line_index;
                 DA_PUSH(out->entries, out->count, entries_cap, cw);
                 memset(&cw, 0, sizeof(cw));
                 cw_raw_cap = 0; cw_act_cap = 0; cw_sight_cap = 0;
@@ -129,45 +158,37 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             }
 
             int parsed = 0;
-            if (lower_match_key(lower, ll, "category", 8)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            if (key_is(key, "category")) {
                 cw.category = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "rank", 4)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
+            } else if (key_is(key, "rank")) {
                 cw.rank = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "clipsize", 8)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
+            } else if (key_is(key, "clipsize")) {
                 cw.clipsize = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "startrounds", 11)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
+            } else if (key_is(key, "startrounds")) {
                 cw.startrounds = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "targetyawrange", 14)) {
+            } else if (key_is(key, "targetyawrange")) {
                 /* Emplaced turret azimuth half-arc, degrees (the "180 tripod"
                    authors 90). Seeds the itemDef turret-limit fallback
                    [orig: Entity_GetWeaponTurretLimits @0x540e35]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
                 cw.targetyawrange = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "targetpitchmax", 14)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            } else if (key_is(key, "targetpitchmax")) {
                 cw.targetpitchmax = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "targetpitchmin", 14)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            } else if (key_is(key, "targetpitchmin")) {
                 cw.targetpitchmin = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "classrounds", 11)) {
+            } else if (key_is(key, "classrounds")) {
                 /* classrounds <class> <n> — the class token resolves through the
                    char-class VALUE table (medic=1 sniper=2 gunner=3 rifleman=5
                    engineer=6, must be <= 6) and stores at the value's index
                    [orig: handler @ 0x543ab0 -> AdmDef+0x60+value*4, table @ 0x830EE8]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 if (n >= 2) {
                     char cb[16]; size_t cbl = tok[0].len < 15 ? tok[0].len : 15;
                     to_lower_buf(cb, tok[0].s, cbl);
@@ -181,179 +202,157 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                         cw.classrounds[value] = parse_int_n(tok[1].s, tok[1].len);
                 }
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "switchcategory", 14)) {
+            } else if (key_is(key, "switchcategory")) {
                 /* switchcategory <N> — post-recoil auto-switch target category
                    [orig: handler @ 0x5445a8 -> +0x168 flag, +0x164 category]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
                 cw.has_switchcategory = 1;
                 cw.switchcategory = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "statid", 6)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            } else if (key_is(key, "statid")) {
                 cw.statid = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "maxclips", 8)) {
+            } else if (key_is(key, "maxclips")) {
                 /* [orig: parse @0x5440A9 -> AdmDef[83]+0x14C] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
                 cw.maxclips = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "ammobucket", 10)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            } else if (key_is(key, "ammobucket")) {
                 cw.ammobucket = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "ammoclass", 9)) {
+            } else if (key_is(key, "ammoclass")) {
                 /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 if (n >= 1) safe_copy(cw.ammo_class, sizeof(cw.ammo_class), tok[0].s, tok[0].len);
                 if (n >= 2) cw.ammo_class_count = parse_int_n(tok[1].s, tok[1].len);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "attachtextid", 12)) {
+            } else if (key_is(key, "attachtextid")) {
                 /* The attach-label text key; the original resolves it against the
                    Gametext "Overlays" section at parse and stores the char* at
                    AdmDef+0x3A0 [orig: @ 0x544d6c]. We keep the key for the HUD. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
                 safe_copy(cw.attach_text_id, sizeof(cw.attach_text_id), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "loadout_selectable", 18)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
+            } else if (key_is(key, "loadout_selectable")) {
                 cw.loadout_selectable = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "loadout_subclasses", 18)) {
+            } else if (key_is(key, "loadout_subclasses")) {
                 /* [orig: parse @0x544E43 -> AdmDef[235]+0x3AC] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 18, &vl);
                 cw.loadout_subclasses = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "weapon_class", 12)) {
+            } else if (key_is(key, "weapon_class")) {
                 /* Dual representation: the raw file token, plus the loadout slot the
                    original producer routes by (0=accessory 1=primary 2=secondary
                    3=grenade) [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-                Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
-                if (n >= 1) safe_copy(cw.weapon_class, sizeof(cw.weapon_class), tok[0].s, tok[0].len);
-                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
-                if (vbl == 9 && memcmp(vb, "accessory", 9) == 0) cw.weapon_class_slot = 0;
-                else if (vbl == 7 && memcmp(vb, "primary", 7) == 0) cw.weapon_class_slot = 1;
-                else if (vbl == 9 && memcmp(vb, "secondary", 9) == 0) cw.weapon_class_slot = 2;
-                else if (vbl == 7 && memcmp(vb, "grenade", 7) == 0) cw.weapon_class_slot = 3;
+                safe_copy(cw.weapon_class, sizeof(cw.weapon_class), v, vl);
+                if (strutil::iequals(v, "accessory")) cw.weapon_class_slot = 0;
+                else if (strutil::iequals(v, "primary")) cw.weapon_class_slot = 1;
+                else if (strutil::iequals(v, "secondary")) cw.weapon_class_slot = 2;
+                else if (strutil::iequals(v, "grenade")) cw.weapon_class_slot = 3;
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "charfilter", 10)) {
-                /* Repeatable, one soldier-type token per line [orig: parse @0x543F6E].
+            } else if (key_is(key, "charfilter")) {
+                /* Repeatable, one soldier-type token per line: the mask bit comes
+                   from the first value token [orig: parse @0x543F6E reads tokens[2]].
                    Also packs the original producer's class-mask bit
                    [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 for (int ti = 0; ti < n; ++ti) {
                     if (cw.charfilter_count >= 8) break;
                     safe_copy(cw.charfilter[cw.charfilter_count], sizeof(cw.charfilter[0]),
                               tok[ti].s, tok[ti].len);
                     ++cw.charfilter_count;
                 }
-                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
-                if (vbl == 5 && memcmp(vb, "medic", 5) == 0) cw.charfilter_mask |= 1;
-                else if (vbl == 6 && memcmp(vb, "sniper", 6) == 0) cw.charfilter_mask |= 2;
-                else if (vbl == 6 && memcmp(vb, "gunner", 6) == 0) cw.charfilter_mask |= 4;
-                else if (vbl == 8 && memcmp(vb, "rifleman", 8) == 0) cw.charfilter_mask |= 8;
-                else if (vbl == 8 && memcmp(vb, "engineer", 8) == 0) cw.charfilter_mask |= 16;
+                if (strutil::iequals(v, "medic")) cw.charfilter_mask |= 1;
+                else if (strutil::iequals(v, "sniper")) cw.charfilter_mask |= 2;
+                else if (strutil::iequals(v, "gunner")) cw.charfilter_mask |= 4;
+                else if (strutil::iequals(v, "rifleman")) cw.charfilter_mask |= 8;
+                else if (strutil::iequals(v, "engineer")) cw.charfilter_mask |= 16;
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "teamfilter", 10)) {
-                /* Repeatable, one team token per line [orig: parse @0x543FE3].
-                   Also packs the original producer's team-mask bit
+            } else if (key_is(key, "teamfilter")) {
+                /* Repeatable, one team token per line [orig: parse @0x543FE3 reads
+                   tokens[2]]. Also packs the original producer's team-mask bit
                    [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 for (int ti = 0; ti < n; ++ti) {
                     if (cw.teamfilter_count >= 4) break;
                     safe_copy(cw.teamfilter[cw.teamfilter_count], sizeof(cw.teamfilter[0]),
                               tok[ti].s, tok[ti].len);
                     ++cw.teamfilter_count;
                 }
-                char vb[16]; size_t vbl = vl < 15 ? vl : 15; to_lower_buf(vb, v, vbl);
-                if ((vbl == 4 && memcmp(vb, "blue", 4) == 0) || (vbl == 6 && memcmp(vb, "yellow", 6) == 0))
+                if (strutil::iequals(v, "blue") || strutil::iequals(v, "yellow"))
                     cw.teamfilter_mask |= 2;
-                else if ((vbl == 3 && memcmp(vb, "red", 3) == 0) || (vbl == 6 && memcmp(vb, "violet", 6) == 0))
+                else if (strutil::iequals(v, "red") || strutil::iequals(v, "violet"))
                     cw.teamfilter_mask |= 1;
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "round_type", 10)) {
-                consume_value_str(trimmed, tlen, 10, cw.round_type, sizeof(cw.round_type));
+            } else if (key_is(key, "round_type")) {
+                safe_copy(cw.round_type, sizeof(cw.round_type), v, vl);
                 parsed = 1;
             /* PLAYER_INFO loadout tokens [orig: WeaponDef_ParseProperty @ 0x54d730]. */
-            } else if (lower_match_key(lower, ll, "weaponweight", 12)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            } else if (key_is(key, "weaponweight")) {
                 cw.weaponweight = parse_float_n(v, vl);
                 /* [orig: WeaponDefs_ParseLineCallback store @ 0x54410D;
                    Math_ParseFixedPoint16 @ 0x6131F0] */
                 cw.weaponweight_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "clipweight", 10)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            } else if (key_is(key, "clipweight")) {
                 cw.clipweight = parse_float_n(v, vl);
                 /* [orig: WeaponDefs_ParseLineCallback store @ 0x5440DB;
                    Math_ParseFixedPoint16 @ 0x6131F0] */
                 cw.clipweight_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "loadout_menu_textid", 19)) {
-                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_textid, sizeof(cw.loadout_menu_textid));
+            } else if (key_is(key, "loadout_menu_textid")) {
+                safe_copy(cw.loadout_menu_textid, sizeof(cw.loadout_menu_textid), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "loadout_menu_ttdesc", 19)) {
-                consume_value_str(trimmed, tlen, 19, cw.loadout_menu_ttdesc, sizeof(cw.loadout_menu_ttdesc));
+            } else if (key_is(key, "loadout_menu_ttdesc")) {
+                safe_copy(cw.loadout_menu_ttdesc, sizeof(cw.loadout_menu_ttdesc), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "loadout_menu_icon", 17)) {
-                consume_value_str(trimmed, tlen, 17, cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon));
+            } else if (key_is(key, "loadout_menu_icon")) {
+                safe_copy(cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "animadm", 7)) {
-                consume_value_str(trimmed, tlen, 7, cw.animadm, sizeof(cw.animadm));
+            } else if (key_is(key, "animadm")) {
+                safe_copy(cw.animadm, sizeof(cw.animadm), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "launchuserpoint", 15)) {
-                consume_value_str(trimmed, tlen, 15, cw.launch_user_point, sizeof(cw.launch_user_point));
+            } else if (key_is(key, "launchuserpoint")) {
+                safe_copy(cw.launch_user_point, sizeof(cw.launch_user_point), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "crosshair", 9)) {
-				Token tok[2];
-				int n = tokenize(trimmed + 9, tlen - 9, tok, 2);
-				if (n > 0)
-					safe_copy(cw.crosshair, sizeof(cw.crosshair), tok[0].s, tok[0].len);
-				if (n > 1)
-					safe_copy(cw.crosshair_secondary, sizeof(cw.crosshair_secondary), tok[1].s,
-							tok[1].len);
-				parsed = 1;
-			} else if (lower_match_key(lower, ll, "commandersx", 11)) {
-				consume_value_str(trimmed, tlen, 11, cw.commanders_x, sizeof(cw.commanders_x));
-				parsed = 1;
-			} else if (lower_match_key(lower, ll, "hud_loadout_select", 18)) {
-				consume_value_str(
-						trimmed, tlen, 18, cw.hud_loadout_select, sizeof(cw.hud_loadout_select));
-				parsed = 1;
-			} else if (lower_match_key(lower, ll, "splash", 6)) {
-				size_t vl;
-				const char *v = consume_value_span(trimmed, tlen, 6, &vl);
-				cw.splash = parse_int_n(v, vl);
+            } else if (key_is(key, "crosshair")) {
+                Token tok[2];
+                int n = value_tokens(tokens, tok, 2);
+                if (n > 0)
+                    safe_copy(cw.crosshair, sizeof(cw.crosshair), tok[0].s, tok[0].len);
+                if (n > 1)
+                    safe_copy(cw.crosshair_secondary, sizeof(cw.crosshair_secondary), tok[1].s,
+                            tok[1].len);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "hudicon", 7)) {
-                consume_value_str(trimmed, tlen, 7, cw.hudicon, sizeof(cw.hudicon));
+            } else if (key_is(key, "commandersx")) {
+                safe_copy(cw.commanders_x, sizeof(cw.commanders_x), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "hudclipgfx", 10)) {
+            } else if (key_is(key, "hud_loadout_select")) {
+                safe_copy(cw.hud_loadout_select, sizeof(cw.hud_loadout_select), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "splash")) {
+                cw.splash = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (key_is(key, "hudicon")) {
+                safe_copy(cw.hudicon, sizeof(cw.hudicon), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "hudclipgfx")) {
                 /* HUDCLIPGFX: offset x/y + texture [orig: WeaponDefs_ParseLineCallback
                    @0x54427f]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 if (n >= 3) {
                     cw.hudclipgfx_offset[0] = parse_int_n(tok[0].s, tok[0].len);
                     cw.hudclipgfx_offset[1] = parse_int_n(tok[1].s, tok[1].len);
                     safe_copy(cw.hudclipgfx_texture, sizeof(cw.hudclipgfx_texture), tok[2].s, tok[2].len);
                 }
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "hudrndgfx", 9)) {
+            } else if (key_is(key, "hudrndgfx")) {
                 /* HUDRNDGFX: start x/y, step x/y, rounds-per-icon divisor, texture
                    [orig: WeaponDefs_ParseLineCallback @0x5442fc -> weapon
                    +644/+648/+652/+656/+727]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 if (n >= 6) {
                     cw.hudrndgfx_offset[0] = parse_int_n(tok[0].s, tok[0].len);
                     cw.hudrndgfx_offset[1] = parse_int_n(tok[1].s, tok[1].len);
@@ -363,20 +362,19 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     safe_copy(cw.hudrndgfx_texture, sizeof(cw.hudrndgfx_texture), tok[5].s, tok[5].len);
                 }
                 parsed = 1;
-            } else if (lower_starts_with(lower, ll, "gfx1a", 5)) {
-                consume_value_str(trimmed, tlen, 5, cw.gfx1a, sizeof(cw.gfx1a));
+            } else if (key_is(key, "gfx1a")) {
+                safe_copy(cw.gfx1a, sizeof(cw.gfx1a), v, vl);
                 parsed = 1;
-            } else if (lower_starts_with(lower, ll, "gfx1b", 5)) {
-                consume_value_str(trimmed, tlen, 5, cw.gfx1b, sizeof(cw.gfx1b));
+            } else if (key_is(key, "gfx1b")) {
+                safe_copy(cw.gfx1b, sizeof(cw.gfx1b), v, vl);
                 parsed = 1;
-            } else if (lower_starts_with(lower, ll, "gfx1", 4) && (ll == 4 || isspace((unsigned char)lower[4]))) {
-                consume_value_str(trimmed, tlen, 4, cw.gfx1, sizeof(cw.gfx1));
+            } else if (key_is(key, "gfx1")) {
+                safe_copy(cw.gfx1, sizeof(cw.gfx1), v, vl);
                 parsed = 1;
-            } else if (lower_starts_with(lower, ll, "gfx3", 4)) {
-                consume_value_str(trimmed, tlen, 4, cw.gfx3, sizeof(cw.gfx3));
+            } else if (key_is(key, "gfx3")) {
+                safe_copy(cw.gfx3, sizeof(cw.gfx3), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "flags", 5)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            } else if (key_is(key, "flags")) {
                 char flag_lower[64];
                 size_t fl = vl < sizeof(flag_lower) - 1 ? vl : sizeof(flag_lower) - 1;
                 to_lower_buf(flag_lower, v, fl);
@@ -387,91 +385,83 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                     parsed = 1;
                 }
                 /* Unknown flags fall through to raw_lines */
-            } else if (lower_match_key(lower, ll, "stability", 9)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
+            } else if (key_is(key, "stability")) {
                 Token values[3];
-                int count = split_values(v, vl, values, 3);
+                int count = value_tokens(tokens, values, 3);
                 /* [orig: WeaponDefs_ParseLineCallback @ 0x544118..0x544169;
                    Math_ParseFixedPoint16 @ 0x6131F0] */
                 for (int i = 0; i < count; ++i)
                     cw.stability_fp16[i] = parse_fixed16_digits_n(values[i].s, values[i].len);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "error", 5)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
+            } else if (key_is(key, "error")) {
                 /* Six independent 16.16 parses, stored consecutively at
                    AdmDef+0xB0..+0xC4. Keep the float view for existing callers.
                    [orig: WeaponDefs_ParseLineCallback @ 0x543B21-0x543BB5;
                    Math_ParseFixedPoint16 @ 0x6131F0] */
                 Token values[6];
-                int count = split_values(v, vl, values, 6);
+                int count = value_tokens(tokens, values, 6);
                 for (int i = 0; i < count; ++i) {
                     cw.error[i] = parse_float_n(values[i].s, values[i].len);
                     cw.error_fp16[i] = parse_fixed16_digits_n(values[i].s, values[i].len);
                 }
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "error_hiptheta", 14)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            } else if (key_is(key, "error_hiptheta")) {
                 /* [orig: WeaponDefs_ParseLineCallback @ 0x543BC0, store +0xCC
                    @ 0x543BE7; Math_ParseFixedPoint16 @ 0x6131F0] */
                 cw.error_hip_theta_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "error_uptheta", 13)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
+            } else if (key_is(key, "error_uptheta")) {
                 /* [orig: WeaponDefs_ParseLineCallback @ 0x543BF2, store +0xD0
                    @ 0x543C19; Math_ParseFixedPoint16 @ 0x6131F0] */
                 cw.error_up_theta_fp16 = parse_fixed16_digits_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "renderfov", 9)) {
+            } else if (key_is(key, "renderfov")) {
                 /* [orig: weapon.def parser key 'renderfov' @ 0x54482a] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
                 cw.renderfov = parse_float_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "scope_max_mag", 13)) {
+            } else if (key_is(key, "scope_max_mag")) {
                 /* ADS zoom magnification; the scoped FOV = 80 / clamped zoom
                    [orig: Player_ToggleWeaponScope @ 0x4df401]. Two atol'd values:
                    the max -> +0x90 and the slot's initial zoom -> +0x94, which
                    stays 0 when the row carries one value (atol of the empty
                    second token) [orig: WeaponDefs_ParseLineCallback @ 0x544f1e
                    / @ 0x544f29 and @ 0x544f33 / @ 0x544f44]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 Token values[2];
-                const int count = split_values(v, vl, values, 2);
+                const int count = value_tokens(tokens, values, 2);
                 cw.scope_max_mag = count >= 1
                         ? (float)parse_int_n(values[0].s, values[0].len) : 0.0f;
                 cw.scope_max_mag_arg2 = count >= 2
                         ? parse_int_n(values[1].s, values[1].len) : 0;
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "scope_min_mag", 13)) {
+            } else if (key_is(key, "scope_min_mag")) {
                 /* The scope zoom floor -> +0x98, atol [orig: WeaponDefs_ParseLineCallback
                    @ 0x544f4f..0x544f7a]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
                 cw.scope_min_mag = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "soundfireloop", 13)) {
-                consume_value_str(trimmed, tlen, 13, cw.soundfireloop, sizeof(cw.soundfireloop));
+            } else if (key_is(key, "soundfireloop")) {
+                safe_copy(cw.soundfireloop, sizeof(cw.soundfireloop), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "soundtrailoff", 13)) {
-                consume_value_str(trimmed, tlen, 13, cw.soundtrailoff, sizeof(cw.soundtrailoff));
+            } else if (key_is(key, "soundtrailoff")) {
+                safe_copy(cw.soundtrailoff, sizeof(cw.soundtrailoff), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "vmacrotoken", 11)) {
-                consume_value_str(trimmed, tlen, 11, cw.vmacrotoken, sizeof(cw.vmacrotoken));
+            } else if (key_is(key, "vmacrotoken")) {
+                safe_copy(cw.vmacrotoken, sizeof(cw.vmacrotoken), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "soundhead", 9)) {
-                consume_value_str(trimmed, tlen, 9, cw.soundhead, sizeof(cw.soundhead));
+            } else if (key_is(key, "soundhead")) {
+                safe_copy(cw.soundhead, sizeof(cw.soundhead), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "soundlockedtone", 15)) {
-                consume_value_str(trimmed, tlen, 15, cw.soundlockedtone, sizeof(cw.soundlockedtone));
+            } else if (key_is(key, "soundlockedtone")) {
+                safe_copy(cw.soundlockedtone, sizeof(cw.soundlockedtone), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "scope_paralax_distance", 22)) {
+            } else if (key_is(key, "scope_paralax_distance")) {
                 /* The sight's parallax height: atof * 65535.0 (dbl_7D0958), ftol
                    -> +0x8C, the zero-yaw atan2's numerator; see def.h.
                    [orig: WeaponDefs_ParseLineCallback @ 0x544e4e..0x544e80 — atof
                     @ 0x544e64, the multiply @ 0x544e69, ftol @ 0x544e72, the store
                     @ 0x544e80] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 22, &vl);
                 cw.scope_paralax_distance_fp16 = (int)(parse_double_n(v, vl) * 65535.0);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "scope_max_zero", 14)) {
+            } else if (key_is(key, "scope_max_zero")) {
                 /* The scope-zero table: atol x3 in order -> +0x84 / +0x9C / +0xA0,
                    plus an optional fourth value -> +0x88, stored only when the line
                    carries four (the token count the gate compares includes the key:
@@ -481,71 +471,58 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                    [orig: WeaponDefs_ParseLineCallback @ 0x544e8b..0x544efd — the
                     stores @ 0x544eac / @ 0x544ec1 / @ 0x544ed9, the count gate
                     @ 0x544edf, the fourth store @ 0x544efd] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
                 Token zv[MAX_TOKENS];
-                int zn = split_values(v, vl, zv, MAX_TOKENS);
+                int zn = value_tokens(tokens, zv, MAX_TOKENS);
                 if (zn >= 1) cw.scope_max_zero_steps = parse_int_n(zv[0].s, zv[0].len);
                 if (zn >= 2) cw.scope_zero_step = parse_int_n(zv[1].s, zv[1].len);
                 if (zn >= 3) cw.scope_zero_default = parse_int_n(zv[2].s, zv[2].len);
                 if (zn >= 4) cw.scope_zero_extra = parse_int_n(zv[3].s, zv[3].len);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "heat_values", 11)) {
+            } else if (key_is(key, "heat_values")) {
                 /* percent-per-shot / percent-per-second, each through the engine's
                    digit parser then integer-divided by 100 and by 100*62 (the logic
                    rate) — the two truncating divides are load-bearing, see def.h.
                    [orig: @ 0x543eb7 -> +0x36C / +0x370] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 Token hv[MAX_TOKENS];
-                int hn = split_values(v, vl, hv, MAX_TOKENS);
+                int hn = value_tokens(tokens, hv, MAX_TOKENS);
                 if (hn >= 1) cw.heat_per_shot = parse_fixed16_digits_n(hv[0].s, hv[0].len) / 100;
                 if (hn >= 2) cw.heat_decay_per_tick = parse_fixed16_digits_n(hv[1].s, hv[1].len) / 6200;
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "heat_effect", 11)) {
+            } else if (key_is(key, "heat_effect")) {
                 /* Effect name + the 16.16 glow threshold; any further values on the
                    line are unread in retail too. [orig: @ 0x543e36 -> +0x358 / +0x374] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 Token hv[MAX_TOKENS];
-                int hn = split_values(v, vl, hv, MAX_TOKENS);
+                int hn = value_tokens(tokens, hv, MAX_TOKENS);
                 if (hn >= 1) safe_copy(cw.heat_effect, sizeof(cw.heat_effect), hv[0].s, hv[0].len);
                 if (hn >= 2) cw.heat_glow_threshold = parse_fixed16_digits_n(hv[1].s, hv[1].len);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "emplacedstance", 14)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            } else if (key_is(key, "emplacedstance")) {
                 cw.emplacedstance = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "special_hold", 12)) {
+            } else if (key_is(key, "special_hold")) {
                 /* 3P hold-pose kind, atol [orig: weapon.def key 'special_hold' ->
                    record+0xA4 @ 0x543cb7/0x543cd8]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
                 cw.special_hold = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "attack_anim", 11)) {
+            } else if (key_is(key, "attack_anim")) {
                 /* 3P fire attack-stamp kind, atol [orig: weapon.def key 'attack_anim' ->
                    record+0xA8 @ 0x543ce9/0x543d0a]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
                 cw.attack_anim = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "run_anim", 8)) {
+            } else if (key_is(key, "run_anim")) {
                 /* Run-gait class, atol [orig: weapon.def key 'run_anim' ->
                    record+0xAC @ 0x543d15/0x543d3c]. */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
                 cw.run_anim = parse_int_n(v, vl);
                 parsed = 1;
-            } else if (ll > 3 && lower_starts_with(lower, ll, "pos", 3) &&
-                       (lower[3] == ' ' || lower[3] == '\t')) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 3, &vl);
-                parse_view_pose(v, vl, cw.pos, cw.pos_rotation_deg_q16);
+            } else if (key_is(key, "pos")) {
+                parse_view_pose(tokens, cw.pos, cw.pos_rotation_deg_q16);
                 parsed = 1;
-            } else if (ll > 4 && lower_starts_with(lower, ll, "tpos", 4) &&
-                       (lower[4] == ' ' || lower[4] == '\t')) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-                parse_view_pose(v, vl, cw.tpos, cw.tpos_rotation_deg_q16);
+            } else if (key_is(key, "tpos")) {
+                parse_view_pose(tokens, cw.tpos, cw.tpos_rotation_deg_q16);
                 parsed = 1;
-            } else if (ll > 6 && lower_starts_with(lower, ll, "sights", 6) &&
-                       (lower[6] == ' ' || lower[6] == '\t')) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
+            } else if (key_is(key, "sights")) {
                 Token tok[MAX_TOKENS];
-                int n = tokenize(v, vl, tok, MAX_TOKENS);
+                int n = value_tokens(tokens, tok, MAX_TOKENS);
                 if (n >= 5) {
                     DefSightEntry se;
                     memset(&se, 0, sizeof(se));
@@ -586,13 +563,14 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
         }
 
         if (state == ST_ACTION) {
-            if (ll == 3 && memcmp(lower, "end", 3) == 0) {
+            if (key_is(key, "end")) {
                 /* One row per suffix: a later block of the same name finds the
                    row and re-runs ActionDef_InitDefaults on it, so it replaces
                    the earlier block wholesale and nothing of that one survives.
                    [orig: ActionDef_ParseScriptLine @0x4023C0 — the name lookup
                    ActionDef_FindByNameInTable @0x402360, found @0x4024A1, both
                    paths into InitDefaults @0x4024DA] */
+                ca.end_line = line_index;
                 size_t row = cw.actions_count;
                 for (size_t i = 0; i < cw.actions_count; ++i)
                     if (strutil::iequals(cw.actions[i].name, ca.name)) row = i;
@@ -621,62 +599,42 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
                this path. */
 
             int parsed = 0;
-            if (lower_starts_with(lower, ll, "anim", 4) &&
-                (ll == 4 || isspace((unsigned char)lower[4]))) {
-                consume_value_str(trimmed, tlen, 4, ca.anim, sizeof(ca.anim));
+            if (key_is(key, "anim")) {
+                /* [orig: the strcpy of tokens[2] into ActionDef+58 @0x402873] */
+                safe_copy(ca.anim, sizeof(ca.anim), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "function", 8)) {
-                consume_value_str(trimmed, tlen, 8, ca.function, sizeof(ca.function));
+            } else if (key_is(key, "function")) {
+                safe_copy(ca.function, sizeof(ca.function), v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "delaystart", 10)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
-                char vlow[16];
-                size_t vll = vl < 15 ? vl : 15;
-                to_lower_buf(vlow, v, vll);
-                ca.delaystart = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
+            } else if (key_is(key, "delaystart")) {
+                ca.delaystart = parse_delay(v, vl);
                 parsed = 1;
-            } else if (lower_match_key(lower, ll, "delayend", 8)) {
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
-                char vlow[16];
-                size_t vll = vl < 15 ? vl : 15;
-                to_lower_buf(vlow, v, vll);
-                ca.delayend = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
-                parsed = 1;
-            } else if (lower_match_key(lower, ll, "delay", 5)) {
+            } else if (key_is(key, "delayend") || key_is(key, "delay")) {
                 /* bare `delay` is an alias of delayend — both write +40
                    [orig: ActionDef_ParseScriptLine @ 0x40279a / @ 0x402b2c] */
-                size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-                char vlow[16];
-                size_t vll = vl < 15 ? vl : 15;
-                to_lower_buf(vlow, v, vll);
-                ca.delayend = (vll == 4 && memcmp(vlow, "auto", 4) == 0) ? -1 : parse_int_n(v, vl);
+                ca.delayend = parse_delay(v, vl);
                 parsed = 1;
-			} else if (lower_match_key(lower, ll, "action_value", 12)) {
-				size_t vl;
-				const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-				ca.action_value = parse_int_n(v, vl);
-				parsed = 1;
-			} else if (lower_starts_with(lower, ll, "soundsetend", 11)) {
-				consume_value_str(trimmed, tlen, 11, ca.soundsetend, sizeof(ca.soundsetend));
-				parsed = 1;
-			} else if (lower_starts_with(lower, ll, "soundset", 8) &&
-					(ll == 8 || isspace((unsigned char)lower[8]))) {
-				consume_value_str(trimmed, tlen, 8, ca.soundset, sizeof(ca.soundset));
-				parsed = 1;
-			} else if (lower_starts_with(lower, ll, "particleuserpoint", 17)) {
-				consume_value_str(
-						trimmed, tlen, 17, ca.particleuserpoint, sizeof(ca.particleuserpoint));
-				parsed = 1;
-			} else if (lower_starts_with(lower, ll, "particle", 8) &&
-					(ll == 8 || isspace((unsigned char)lower[8]))) {
-				consume_value_str(trimmed, tlen, 8, ca.particle, sizeof(ca.particle));
-				parsed = 1;
-			}
+            } else if (key_is(key, "action_value")) {
+                ca.action_value = parse_int_n(v, vl);
+                parsed = 1;
+            } else if (key_is(key, "soundsetend")) {
+                safe_copy(ca.soundsetend, sizeof(ca.soundsetend), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "soundset")) {
+                safe_copy(ca.soundset, sizeof(ca.soundset), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "particleuserpoint")) {
+                safe_copy(ca.particleuserpoint, sizeof(ca.particleuserpoint), v, vl);
+                parsed = 1;
+            } else if (key_is(key, "particle")) {
+                safe_copy(ca.particle, sizeof(ca.particle), v, vl);
+                parsed = 1;
+            }
 
-			if (!parsed) {
-				DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
-			}
-		}
+            if (!parsed) {
+                DA_PUSH_RAW(ca.raw_lines, ca.raw_lines_count, ca_raw_cap, line, line_len);
+            }
+        }
     }
 
     return 0;
