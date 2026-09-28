@@ -185,16 +185,14 @@ world::WeaponTable build_weapon_table(
 		return static_cast<int>(table.ammo_class_names.size()) - 1;
 	};
 
-	// Top-level `ammoclass_max_carry <class> <n>` -> the per-class carry caps
-	// [orig: parse @0x543873 -> the cap table @0x24E7DE0; clamp use @0x540b26].
-	for (size_t i = 0; i < weapons.ammo_class_lines_count; ++i) {
-		const char *line = weapons.ammo_class_lines[i];
-		char cls[64] = {};
-		int cap = 0;
-		if (std::sscanf(line, "%*s %63s %d", cls, &cap) == 2) {
-			int id = ammo_class_register(cls);
-			table.ammo_class_caps[static_cast<size_t>(id)] = cap;
-		}
+	// Top-level `ammoclass_max_carry <class> <n>` -> the per-class carry caps,
+	// as the parser read them from the tokens (the class, abs(atol) of the value)
+	// [orig: parse @0x5437FE..0x543873 -> the cap table @0x24E7DE0; clamp use
+	// @0x540b26].
+	for (size_t i = 0; i < weapons.ammo_class_carries_count; ++i) {
+		const DefAmmoClassCarry &carry = weapons.ammo_class_carries[i];
+		const int id = ammo_class_register(carry.name);
+		table.ammo_class_caps[static_cast<size_t>(id)] = carry.cap;
 	}
 
 	// Entry 0: the engine-created "null" def — AnimDef_InitAll wipes the 255-entry table and

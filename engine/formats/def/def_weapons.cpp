@@ -93,7 +93,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
     enum { ST_TOP, ST_WEAPON, ST_ACTION };
     int state = ST_TOP;
 
-    size_t entries_cap = 0, acl_cap = 0;
+    size_t entries_cap = 0, carry_cap = 0;
     DefWeaponDef cw; memset(&cw, 0, sizeof(cw));
     DefWeaponAction ca; memset(&ca, 0, sizeof(ca));
     size_t cw_raw_cap = 0, cw_act_cap = 0, cw_sight_cap = 0;
@@ -101,7 +101,9 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
 
     LineIter it = {buf, file_len, 0};
     const char *line; size_t line_len;
-    size_t line_index = (size_t)-1; // every line counts, as the retail walk numbers them
+    // Every line counts: split at LF, a CR before it dropped, which for CR LF
+    // text is the retail walk's numbering [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5].
+    size_t line_index = (size_t)-1;
     io::ConfigTokens tokens;
 
     while (next_line(&it, &line, &line_len)) {
@@ -114,9 +116,19 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
         const size_t vl = strlen(v);
 
         /* Top-level ammoclass_max_carry: a table row wherever it stands, read
-           before the in-ACTION forward and the current-weapon gate. */
+           before the in-ACTION forward and the current-weapon gate, from the
+           tokens: the class and abs(atol) of the value.
+           [orig: WeaponDefs_ParseLineCallback, the key @0x5437F2, tokens[2]
+           @0x5437FE, abs(atol(tokens[3])) @0x543862..0x543873] */
         if (key_is(key, "ammoclass_max_carry")) {
-            DA_PUSH_RAW(out->ammo_class_lines, out->ammo_class_lines_count, acl_cap, line, line_len);
+            DefAmmoClassCarry carry;
+            memset(&carry, 0, sizeof(carry));
+            safe_copy(carry.name, sizeof(carry.name), v, vl);
+            const char *cap = tokens.token(2);
+            const long value = strtol(cap, NULL, 10);
+            const uint32_t bits = static_cast<uint32_t>(value);
+            carry.cap = static_cast<int>(value < 0 ? 0u - bits : bits); // abs32
+            DA_PUSH(out->ammo_class_carries, out->ammo_class_carries_count, carry_cap, carry);
             continue;
         }
 
@@ -667,7 +679,7 @@ void def_free_weapons(DefWeaponsFile *f) {
         free(f->entries[i].raw_lines);
     }
     free(f->entries);
-    free(f->ammo_class_lines);
+    free(f->ammo_class_carries);
     memset(f, 0, sizeof(*f));
 }
 

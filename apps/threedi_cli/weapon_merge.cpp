@@ -86,52 +86,89 @@ struct Block {
 
 struct Entry {
 	std::string name;
+	const opennova::def::DefWeaponDef *parsed = nullptr; // the parser's record of it
 	size_t weapon_line = 0;
 	size_t end_line = 0;
+	size_t first_action_line = 0;   // the entry's first `action` line, else end_line
+	bool closed = true;             // the game reads the recorded `end` lines as `end`
 	std::vector<size_t> view_lines; // pos and tpos lines
-	std::vector<Block> blocks;      // in line order
+	std::vector<Block> blocks;      // the live blocks, in line order
 };
+
+// Whether line `l` of the retail walk is an `end`: the recorded line exists
+// and its first token is `end` in any case.
+bool reads_end(const std::vector<Line> &lines, size_t l) {
+	return l < lines.size() && lines[l].key == "end";
+}
 
 // The def's structure as the engine's parser read it: each entry's `weapon`
 // and `end` lines and each live ACTION block's `action` and `end` lines are
 // the parser's own records (an entry the text never closes is not parsed;
 // of repeated blocks only the last is a row, the earlier ones dead data the
 // merge leaves as it is). The key lines of a block and the pos/tpos lines of
-// an entry are the lines between them the parser reads a key from;
+// an entry are the lines between them the parser reads a key from: a pos or
+// tpos line inside ANY action ... end span, a dead block's too, is forwarded to
+// the action parser, which reads no such key, so it is no view line;
 // `ammoclass_max_carry` is a table row wherever it stands.
-// [orig: WeaponDefs_ParseLineCallback @ 0x543680; ActionDef_ParseScriptLine
-// @ 0x4023c0; formats/def/def_weapons.cpp]
+// The parser keeps an unterminated tail line whole, where the game drops its
+// last byte (a final `end` with no CR LF reads `en` and closes nothing), so
+// every recorded `end` line is checked against the game's own reading of it
+// (the retail walk): an entry whose `end` the game does not read is not closed.
+// [orig: WeaponDefs_ParseLineCallback @ 0x543680, the in-block forward
+//  @ 0x54388D, the block flag set @ 0x54393B and cleared at `end` @ 0x543790;
+//  ActionDef_ParseScriptLine @ 0x4023c0; File_ParseASCIIFile's tail leg
+//  @ 0x53D8E9 / @ 0x53D8EC; formats/def/def_weapons.cpp]
 std::vector<Entry> entries_of(const opennova::def::DefWeaponsFile &parsed, const std::vector<Line> &lines) {
 	std::vector<Entry> entries;
 	for (size_t e = 0; e < parsed.count; ++e) {
 		const opennova::def::DefWeaponDef &def = parsed.entries[e];
 		Entry entry;
 		entry.name = def.weapon_name;
+		entry.parsed = &def;
 		entry.weapon_line = def.open_line;
 		entry.end_line = def.end_line;
+		entry.first_action_line = def.end_line;
+		entry.closed = reads_end(lines, def.end_line);
 		for (size_t a = 0; a < def.actions_count; ++a) {
 			const opennova::def::DefWeaponAction &row = def.actions[a];
 			Block block;
 			block.name = row.name;
 			block.action_line = row.open_line;
 			block.end_line = row.end_line;
-			for (size_t l = block.action_line + 1; l < block.end_line; ++l)
+			if (!reads_end(lines, block.end_line)) entry.closed = false;
+			for (size_t l = block.action_line + 1; l < block.end_line && l < lines.size(); ++l)
 				if (!lines[l].key.empty() && lines[l].key != "ammoclass_max_carry") block.keys.push_back(l);
 			entry.blocks.push_back(block);
 		}
 		std::sort(entry.blocks.begin(), entry.blocks.end(),
 		          [](const Block &a, const Block &b) { return a.action_line < b.action_line; });
-		for (size_t l = entry.weapon_line + 1; l < entry.end_line; ++l) {
+		// The view lines: pos/tpos outside every action ... end span, as the
+		// parser tracks its block state between the entry's own lines.
+		bool in_block = false;
+		for (size_t l = entry.weapon_line + 1; l < entry.end_line && l < lines.size(); ++l) {
 			const std::string &key = lines[l].key;
-			if (key != "pos" && key != "tpos") continue;
-			bool inside = false;
-			for (const Block &block : entry.blocks)
-				if (l > block.action_line && l < block.end_line) inside = true;
-			if (!inside) entry.view_lines.push_back(l);
+			if (key == "ammoclass_max_carry") continue;
+			if (!in_block && key == "action") {
+				in_block = true;
+				if (entry.first_action_line == entry.end_line) entry.first_action_line = l;
+			} else if (in_block && key == "end") {
+				in_block = false;
+			} else if (!in_block && (key == "pos" || key == "tpos")) {
+				entry.view_lines.push_back(l);
+			}
 		}
 		entries.push_back(entry);
 	}
 	return entries;
+}
+
+// Whether the retail walk holds a `weapon <name>` line: the game allocates the
+// entry's slot at that line, whether or not an `end` ever closes it
+// [orig: WeaponDefs_ParseLineCallback @ 0x5436D3..0x543737].
+bool opens_entry(const std::string &def, const std::vector<Line> &lines, const std::string &name) {
+	for (const Line &line : lines)
+		if (line.key == "weapon" && strutil::iequals(token_text(def, line, 1), name)) return true;
+	return false;
 }
 
 // A change to the def: `remove` bytes at `at` replaced by `insert`.
@@ -310,13 +347,15 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 		for (const Entry &entry : entries) {
 			if (!strutil::iequals(entry.name, edit.name)) continue;
 			found = true;
+			if (!entry.closed) {
+				ok = fail(error, edit.name + " has no `end` in the weapon.def (the game reads a final line with no "
+				                 "CR LF one byte short)");
+				break;
+			}
 			// The entry's FLAGS decide how the FSM fires; the timing was
 			// measured in the edits' mode, so they must agree.
-			bool read = false;
-			for (size_t p = 0; p < before.count; ++p) {
-				const auto &parsed = before.entries[p];
-				if (!strutil::iequals(parsed.weapon_name, edit.name)) continue;
-				read = true;
+			{
+				const opennova::def::DefWeaponDef &parsed = *entry.parsed;
 				const std::string mode = def_mode(parsed.flags);
 				if (mode == "auto and burst")
 					ok = fail(error, edit.name + " fires auto and burst in the weapon.def (its FLAGS), and weapon "
@@ -352,11 +391,6 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 					}
 				}
 			}
-			// The engine's parser is what reads the merge back; an entry it
-			// does not read could not be checked.
-			if (ok && !read)
-				ok = fail(error, "the engine's weapon.def parser does not read " + edit.name +
-				                 ", so the merge could not be checked");
 			if (!ok) break;
 			const std::string key_indent = entry_indent(def, lines, entry);
 			// pos / tpos: the first three values, the rotation columns kept; a
@@ -375,7 +409,7 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 						if (v <= 3 || v >= lines[l].tokens.size()) set_token(lines[l], v, v <= 3 ? values[v - 1] : "0", patches);
 				}
 				if (!set) {
-					const size_t at = entry.blocks.empty() ? entry.end_line : entry.blocks.front().action_line;
+					const size_t at = entry.first_action_line;
 					patches.push_back({lines[at].begin, 0, key_indent + which + "\t" + values[0] + "\t" + values[1] + "\t" +
 					                                              values[2] + "\t0\t0\t0" + eol});
 				}
@@ -433,7 +467,12 @@ bool merge_weapon_def(const std::string &def, const std::vector<WeaponEditEntry>
 		}
 		if (!ok) break;
 		if (!found) {
-			ok = fail(error, "the weapon.def holds no entry " + edit.name);
+			// The game allocates an entry at its `weapon` line; one the text
+			// never closes is an entry with no `end`, not a missing one.
+			// [orig: WeaponDefs_ParseLineCallback @ 0x5436D3..0x543737]
+			ok = fail(error, opens_entry(def, lines, edit.name)
+			                         ? edit.name + " has no `end` in the weapon.def"
+			                         : "the weapon.def holds no entry " + edit.name);
 			break;
 		}
 	}

@@ -86,11 +86,11 @@ and `;` end a line) [orig: `File_ParseASCIIFile @ 0x53D810`,
 with `action <name>` ... `end` blocks inside.
 
 - An entry is found by name in any case. `merge` refuses an entry the def
-  does not hold, an entry whose FLAGS fire in another mode than the edits
-  were measured in (or fire both auto and burst), an entry the engine's
-  parser does not read (so the merge could not be checked), a def that ends
-  a line with LF alone (the game reads that LF as a byte of the line), and an
-  encrypted (`SCR`) def.
+  does not hold, an entry with no `end` the game reads (a final line with no
+  CR LF loses its last byte, so a closing `end` there reads `en`), an entry
+  whose FLAGS fire in another mode than the edits were measured in (or fire
+  both auto and burst), a def that ends a line with LF alone (the game reads
+  that LF as a byte of the line), and an encrypted (`SCR`) def.
 - `pos`/`tpos`: the first three values of each such line are rewritten and its
   rotation columns (the cant) kept; a line short of six values, which the game
   reads as none, gets zeros there; an entry with no such line gets one before
