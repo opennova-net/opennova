@@ -69,18 +69,6 @@ Array pack_mesh_arrays(const opennova::renderer::PreparedMeshSurface &surface) {
 	return arrays;
 }
 
-// The per-bone bind boxes (renderer::prepared_surface_bone_boxes) as AABBs
-// keyed by bone, for ObjectModel::publish_skin_palette.
-Dictionary pack_bone_bounds(const opennova::renderer::PreparedMeshSurface &surface) {
-	Dictionary out;
-	for (const opennova::renderer::BoneBindBox &box :
-			opennova::renderer::prepared_surface_bone_boxes(surface)) {
-		const Vector3 min(box.min[0], box.min[1], box.min[2]);
-		out[box.bone] = AABB(min, Vector3(box.max[0], box.max[1], box.max[2]) - min);
-	}
-	return out;
-}
-
 } // namespace
 
 int ObjectData::get_light_count() const {
@@ -303,7 +291,11 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		// packers read its retained arrays instead of reading the surface back.
 		Ref<RetainedArrayMesh> mesh;
 		mesh.instantiate();
-		mesh->add_retained_surface(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface));
+		// A skinned surface retains its per-bone bind boxes beside the arrays
+		// (ObjectModel::build_skin_palette reads them natively); a rigid one
+		// retains none.
+		mesh->add_retained_surface(Mesh::PRIMITIVE_TRIANGLES, pack_mesh_arrays(surface),
+				opennova::renderer::prepared_surface_bone_boxes(surface));
 		mesh->surface_set_name(0, vformat("material_%d", surface.material_array_index));
 
 		Dictionary entry;
@@ -317,9 +309,6 @@ Array ObjectData::build_lod_submeshes(int p_lod_index, bool p_skeletal, int p_bo
 		entry["parent_index"] = surface.parent_index;
 		entry["primitive_index"] = static_cast<int64_t>(surface.primitive_index);
 		entry["is_skinned"] = !surface.bones.empty();
-		if (!surface.bones.empty()) {
-			entry["bone_bounds"] = pack_bone_bounds(surface);
-		}
 		result.push_back(entry);
 	}
 	// Keep the pristine copy; the caller gets its own entry dictionaries. The

@@ -7,6 +7,7 @@
 
 #include "object/object_model.h"
 #include "render/frame_fx.h"
+#include "render/retained_array_mesh.h"
 
 #include <runtime/renderer/authored_occluder.h>
 #include <runtime/world/model_geometry.h>
@@ -166,7 +167,11 @@ void ObjectModel::rebuild_scene() {
 			surface.skin_palette = surface.is_skinned &&
 					material_runs_skin_program(surface.material_index);
 			if (surface.skin_palette) {
-				surface.bone_bounds = submesh.get("bone_bounds", Dictionary());
+				// One retained surface per submesh (ObjectData::build_lod_submeshes).
+				if (const RetainedArrayMesh *retained =
+								Object::cast_to<RetainedArrayMesh>(mesh.ptr())) {
+					surface.bone_bounds = retained->retained_surface_bone_boxes(0);
+				}
 			}
 			// Retail multi-pass effects retain one logical material but submit the
 			// same strip geometry again. Pair the cached proxy by material index

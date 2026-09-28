@@ -1051,7 +1051,7 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 
 void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 	if (runtime_) runtime_->state().kill_announcement.record(
-			text.utf8().get_data(), static_cast<uint32_t>(tick));
+			opennova::to_std(text), static_cast<uint32_t>(tick));
 }
 String Simulation::get_kill_announcement_text() const {
 	return runtime_ ? opennova::to_gd(runtime_->state().kill_announcement.text) : String();
@@ -1067,15 +1067,15 @@ String Simulation::format_feed_line(const String &p_template, const String &p_at
 		const String &p_victim, const String &p_extra,
 		const String &p_bonus_template) const {
 	return opennova::to_gd(opennova::hud::feed_format_line(
-			p_template.utf8().get_data(), p_attacker.utf8().get_data(),
-			p_victim.utf8().get_data(), p_extra.utf8().get_data(),
-			p_bonus_template.utf8().get_data()));
+			opennova::to_std(p_template), opennova::to_std(p_attacker),
+			opennova::to_std(p_victim), opennova::to_std(p_extra),
+			opennova::to_std(p_bonus_template)));
 }
 
 String Simulation::format_feed_camp_line(const String &p_template,
 		const String &p_wpname) const {
 	return opennova::to_gd(opennova::hud::feed_format_camp_line(
-			p_template.utf8().get_data(), p_wpname.utf8().get_data()));
+			opennova::to_std(p_template), opennova::to_std(p_wpname)));
 }
 
 

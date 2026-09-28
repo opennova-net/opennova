@@ -72,7 +72,7 @@ void vertex() {
 	#endif
 	#ifdef OBJ_NORMAL_FIRST_BONE_AXES
 	// An object-space map resolves against the light entry's axes
-	// (normal/object_uv1_skinned.gdshaderinc).
+	// (normal/object_uv1.gdshaderinc under OBJ_NORMAL_FIRST_BONE_AXES).
 	mat3 light_axes = mat3(MODEL_MATRIX) * skin.light_frame;
 	v_world_tangent = light_axes[0];
 	v_world_binormal = light_axes[1];

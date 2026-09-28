@@ -2,6 +2,8 @@
 
 #include <vector>
 
+#include <runtime/renderer/model_mesh_prepare.h>
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/variant/array.hpp>
 
@@ -22,13 +24,26 @@ protected:
 	static void _bind_methods() {}
 
 public:
-	// add_surface_from_arrays, keeping the arrays for surface_arrays().
-	void add_retained_surface(Mesh::PrimitiveType p_primitive, const Array &p_arrays);
+	// add_surface_from_arrays, keeping the arrays for surface_arrays() and,
+	// for a skinned surface, its per-bone bind boxes
+	// (renderer::prepared_surface_bone_boxes) for retained_surface_bone_boxes().
+	void add_retained_surface(Mesh::PrimitiveType p_primitive, const Array &p_arrays,
+			std::vector<opennova::renderer::BoneBindBox> p_bone_boxes = {});
 	// The retained arrays of one surface (empty when none were retained).
 	Array retained_surface_arrays(int p_surface) const;
+	// The retained per-bone bind boxes of one surface (empty for a rigid
+	// surface): the source of the posed culling box of a strip the object
+	// shaders pose from the model's bone palette
+	// (ObjectModel::build_skin_palette).
+	const std::vector<opennova::renderer::BoneBindBox> &retained_surface_bone_boxes(
+			int p_surface) const;
 
 private:
-	std::vector<Array> surfaces_;
+	struct RetainedSurface {
+		Array arrays;
+		std::vector<opennova::renderer::BoneBindBox> bone_boxes;
+	};
+	std::vector<RetainedSurface> surfaces_;
 };
 
 // A surface's CPU arrays: the retained copy of a RetainedArrayMesh, else the

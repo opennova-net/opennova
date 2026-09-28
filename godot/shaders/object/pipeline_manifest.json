@@ -4,6 +4,7 @@
   "auxiliary_resource_count": 4,
   "total_resource_count": 140,
   "description": "Reachable object shader techniques and static render policies. Runtime selection must fail closed outside this table.",
+  "naming": "engine_enum: a Skinned suffix marks the skinned twin of a technique that also runs rigid (Fixed/FixedSkinned, PhongTangentDiffuse/PhongTangentDiffuseSkinned, PhongTangentSpecular/PhongTangentSpecularSkinned, PhongObjectDiffuse/PhongObjectDiffuseSkinned, Dot3Tangent/Dot3TangentSkinned, Dot3TangentDetail/Dot3TangentDetailSkinned, GlassFixed/GlassSkinned); a skinned-only technique keeps its bare name (Dot3Object, Dot3ObjectDetail, PhongObjectSpecularPhongMap).",
   "auxiliary_resources": [
     {
       "path": "postmultiply/environment_textured.gdshader",
