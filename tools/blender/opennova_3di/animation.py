@@ -101,6 +101,7 @@ import re
 import bpy
 from mathutils import Vector
 
+from .export import unevaluated
 from .rig import bind_frame, clean_name, is_root_bone, model_of, model_roots, parent_part, part_bones, rig_of
 from .o3dtext import (ExportError, ModelSpace, Notes, at_world_origin, cli_notes, export_text, fmt, playing,
                       quoted)
@@ -665,6 +666,14 @@ class AnimExporter(Notes):
         if data.use_tweak_mode:
             raise ExportError(f"{model.name}: {self.arm.name} is in NLA tweak mode; leave it (Tab in the NLA "
                               "editor) before exporting its clips")
+        # A model or rig Blender does not evaluate keeps the place and pose it
+        # last evaluated, so every clip would sample that pose, not its
+        # Action's (the model export refuses it the same way).
+        blind = unevaluated(self.context.evaluated_depsgraph_get(), model)
+        if blind is not None:
+            raise ExportError(f"{blind.name}: Blender does not evaluate it (it or its collection is disabled in "
+                              "viewports, or its collection is excluded), so its place and its rig's poses are not "
+                              f"the scene's: enable it to export {model.name}'s clips")
         table, clips, bind = self.plan(stem)
         self.check_clips(clips)
         self.context.view_layer.update()

@@ -15,8 +15,9 @@ A test does `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))`,
 `import addon_harness`, then `addon, cli = addon_harness.load()`: the add-on
 package (its modules as attributes: addon.export, addon.materials, ...)
 registered, the scene emptied, and the path of the CLI it runs; and writes
-its files under `addon_harness.scratch(prefix)`. Its name keeps it out of the
-*_test.py set that runs as tests.
+its files under `addon_harness.scratch(prefix)`. A case with a retail leg
+asks `addon_harness.retail_asset(name)` for the reference file and returns
+without it. Its name keeps it out of the *_test.py set that runs as tests.
 """
 import atexit
 import importlib
@@ -37,6 +38,31 @@ def scratch(prefix):
 
 INSTALLED = "bl_ext.user_default.opennova_3di"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def retail_asset(name):
+    """`<OPENNOVA_JO_ASSETS>/<name>`, the retail file a test's retail leg reads
+    (looked up without case at the top of the extracted tree, as
+    tests/common/retail_paths.h asset_file finds it), else None. The leg is
+    selected only by the `--retail` argument the mixed ctest row's `_retail`
+    entry passes (tests/CMakeLists.txt opennova_add_mixed_test); without it
+    the leg is not selected and passes silently, as a mixed ctest's
+    nonselected retail leg does. Selected with the root unset or the file
+    absent, the leg prints `SKIP-LEG: needs <name> in OPENNOVA_JO_ASSETS`,
+    which the retail suite rejects and `all` reports, so a mount missing it
+    never passes unseen (docs/asset-gated-tests.md)."""
+    if "--retail" not in arguments():
+        return None
+    root = os.environ.get("OPENNOVA_JO_ASSETS", "")
+    wanted = name.lower()
+    if os.path.isdir(root):
+        for entry in os.listdir(root):
+            path = os.path.join(root, entry)
+            if entry.lower() == wanted and os.path.isfile(path):
+                return path
+    print(f"SKIP-LEG: needs {name} in OPENNOVA_JO_ASSETS")
+    sys.stdout.flush()
+    return None
 
 
 def arguments():

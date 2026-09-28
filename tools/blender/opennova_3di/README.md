@@ -315,8 +315,10 @@ Culling, the Math node, the render method and Emission.
   LOD's 0) and type (`gnrc`, `bldg`, `door`, `veh0`). On a `PN##` part: part
   animation tracks (rotation about the part's up, side or forward axis, scale,
   or translation, driven by an engine register such as `HELO_ROTOR` or by a
-  spin or wave), and in a closed "Stored as" panel its raw PANM flags word and
-  stored Parent. On any other object of a model: the part it sits on, and on a
+  spin or wave), and in a closed "Stored as" panel its stored Parent and a
+  PANM flags word to write instead of the one the tracks imply (import never
+  sets it: a stored word the tracks do not imply is reported and dropped). On
+  any other object of a model: the part it sits on, and on a
   user point, light, occlusion mesh or attach helper its export order.
 - **Bone properties** on a `BN##` bone: its part number, Hit sphere (a skinned
   model's) and part animation, as on a `PN##` part, plus the track frame, and

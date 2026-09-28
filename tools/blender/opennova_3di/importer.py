@@ -613,7 +613,7 @@ class Builder(Notes):
             parts.append(ob)
             objs.append(ob)
             if row is not None:
-                self.tracks(ob.o3d, row)
+                self.tracks(ob.o3d, row, f"LOD {li} part {pi + 1:02d}")
         for pi, part in enumerate(lod["parts"]):
             parent = top_parent(lod["parts"], pi)
             if parent is not None and parent > pi:
@@ -679,7 +679,7 @@ class Builder(Notes):
                 continue
             p = self.rig.data.bones[f"BN{pi + 1:02d}"].o3d
             p.frame = self.frame_rotation(row["matrix"])
-            self.tracks(p, row)
+            self.tracks(p, row, f"part {pi + 1:02d}")
 
     def rig_lod(self, lod, mats):
         """A first-person gun's LOD 0 as a rig: a bone per part, the parts'
@@ -728,14 +728,18 @@ class Builder(Notes):
         objs.append(ob)
         return objs
 
-    def tracks(self, p, row):
-        """A PANM row's flags and tracks onto a part's animation (an empty's
-        or a bone's o3d)."""
+    def tracks(self, p, row, what):
+        """A PANM row's tracks onto a part's animation (an empty's or a bone's
+        o3d). The row's flags word is not carried: export writes the one the
+        tracks imply, and a stored word that is not that one is what the scene
+        cannot express, reported and dropped (ADR 0047: import stashes nothing
+        for a round trip)."""
         axis_default = (row["flags"] or 0) >> 24 & 0xFF
         derived = export.derived_panm_flags([(t[0], t[1], (t[6] or axis_default or 3) if t[0] == "trans" else 0)
                                              for t in row["tracks"]])
         if row["flags"] is not None and row["flags"] != derived:
-            p.panm_flags = row["flags"]
+            self.note(f"{what}: its PANM flags word 0x{row['flags']:08x} is not the one its tracks imply "
+                      f"(0x{derived:08x}); export writes what the tracks imply")
         for target, style, reg, rate, start, end, axis in row["tracks"]:
             t = p.tracks.add()
             t.target = target
