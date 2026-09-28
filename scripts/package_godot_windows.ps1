@@ -289,7 +289,9 @@ function Test-GodotAppBoot {
 }
 
 # Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
-# may hold untracked local data there that must never ship).
+# may hold untracked local data there that must never ship). The models, clips
+# and textures ride LFS, so a checkout without them pulled holds pointer files,
+# which must never ship either.
 function Copy-BundledAssets {
     param([string]$AssetsStageDir)
 
@@ -298,10 +300,17 @@ function Copy-BundledAssets {
     if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
     $names = @($tracked -split "`0" | Where-Object { $_ })
     if ($names.Count -eq 0) { throw "No tracked files found under assets/" }
+    $pointerHead = "version https://git-lfs.github.com/spec/v1"
 
     foreach ($name in $names) {
         $src = Join-Path $ROOT ($name -replace "/", "\")
         if (-not (Test-Path -LiteralPath $src)) { throw "Tracked asset missing from the working tree: $name" }
+        $head = New-Object byte[] $pointerHead.Length
+        $stream = [IO.File]::OpenRead($src)
+        try { $read = $stream.Read($head, 0, $head.Length) } finally { $stream.Dispose() }
+        if ([Text.Encoding]::ASCII.GetString($head, 0, $read) -eq $pointerHead) {
+            throw "Tracked asset is an unpulled LFS pointer: $name (run git lfs pull --include=`"assets/**`")"
+        }
         $rel = $name -replace "^assets/", "" -replace "/", "\"
         $dst = Join-Path $AssetsStageDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null

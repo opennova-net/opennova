@@ -26,10 +26,12 @@ easier to relay than to rediscover.
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
   data and deployment stack (DEPLOY.md).
-- `assets/` — the game's own bundled data (authored from scratch, no retail bytes), shipped
-  beside `opennova.exe` and mounted when no `--resource-dir` is given: today only the
-  placeholder main menu whose PLAY RETAIL picks and remembers a retail install (ADR 0048;
-  `assets/README.md`).
+- `assets/` — the game's own bundled data (no retail bytes), shipped beside `opennova.exe`
+  and mounted when no `--resource-dir` is given: the placeholder main menu whose PLAY
+  RETAIL picks and remembers a retail install, plus the add-on's exports of `art/`
+  (ADR 0048; `assets/README.md`). Models, clips and textures ride LFS.
+- `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
+  land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
 - `tests/blender/` — the Blender add-on's Python tests, run under Blender 5.x against the
   packaged add-on (`tools/blender/opennova_3di/README.md`); a third runner, neither ctest nor GUT.
