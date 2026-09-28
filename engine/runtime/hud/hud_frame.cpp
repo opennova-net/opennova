@@ -345,7 +345,7 @@ void HudFrameCompiler::emit_slot_text(const GameFont &slot, float slot_scale, co
 	if (text == nullptr || text[0] == 0 || font.font() == nullptr) {
 		return;
 	}
-	const float scale = have_slot ? slot_scale : 1.0f;
+	const float scale = have_slot ? slot_scale : hud_font_scale_;
 	const GameFontRun run = font.layout(text, surface_x, surface_y, scale, scale, flags, argb);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
 	draw_list_.underlines.insert(draw_list_.underlines.end(), run.underlines.begin(),
@@ -1155,7 +1155,15 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 	if (!state.declutter_visible[kDeclutterWaypoint]) {
 		return;
 	}
-	if (!state.waypoint.present || font_.font() == nullptr) {
+	// Every measure and draw here goes through the BOLD label slot
+	// [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 passes &g_HUDLabelFont[1]
+	// (0xB4C394) to GameFont_MeasureTextWidth @0x580A50, HUD_MeasureTextWH
+	// @0x580AB0 and every HUD_DrawText* call]; an absent bold file falls back to
+	// the HUD slot, as emit_slot_text does.
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &wf = have_bold ? label_font_bold_ : font_;
+	const float ws = have_bold ? label_scale_ : hud_font_scale_;
+	if (!state.waypoint.present || wf.font() == nullptr) {
 		return;
 	}
 	const HudPosRecord &gp = layout_.wpd_info;
@@ -1169,35 +1177,40 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 	const uint32_t color = active_color(state);
 	const float ax = static_cast<float>(gp.x);
 	const float ay = static_cast<float>(gp.y);
-	// Measures in font pixels, folded to design via the surface ratio — the
-	// same conversion the ported shell used.
-	const float dist_w = measure_text_w(dist) * kDesignW / std::max(w, 1.0f);
-	const float text_h = text_line_h() * kDesignH / std::max(h, 1.0f);
+	// Measures in font pixels, folded to design via the surface ratio.
+	auto measure_design_w = [&](const char *text) {
+		int mw = 0;
+		int mh = 0;
+		wf.measure(text, ws, ws, &mw, &mh);
+		return static_cast<float>(mw) * kDesignW / std::max(w, 1.0f);
+	};
+	auto draw = [&](const char *text, float design_x, uint32_t flags) {
+		emit_slot_text(label_font_bold_, label_scale_, text, sx(design_x, w), sy(ay, h), color,
+				flags);
+	};
+	const float dist_w = measure_design_w(dist);
+	const float text_h = wf.line_height(ws) * kDesignH / std::max(h, 1.0f);
 	float dist_x = ax;
 	float box_left = ax;
 	float box_right = ax + dist_w + 4.0f;
 	if (!state.waypoint.name.empty()) {
 		switch (gp.align) {
 			case 1: {
-				emit_text(state.waypoint.name.c_str(), ax, ay, w, h, color,
-						kFontAlignRight);
-				const float name_w = measure_text_w(
-						state.waypoint.name.c_str()) * kDesignW /
-						std::max(w, 1.0f);
+				draw(state.waypoint.name.c_str(), ax, kFontAlignRight);
+				const float name_w = measure_design_w(state.waypoint.name.c_str());
 				dist_x = ax - 4.0f - name_w;
 				box_left = dist_x - dist_w;
 				box_right = dist_x + 4.0f;
 				break;
 			}
 			case 2:
-				emit_text(state.waypoint.name.c_str(), ax, ay, w, h, color, 0u);
+				draw(state.waypoint.name.c_str(), ax, 0u);
 				dist_x = ax - 4.0f;
 				box_left = dist_x - dist_w;
 				box_right = dist_x + 4.0f;
 				break;
 			default:
-				emit_text(state.waypoint.name.c_str(), ax + dist_w + 4.0f, ay,
-						w, h, color, 0u);
+				draw(state.waypoint.name.c_str(), ax + dist_w + 4.0f, 0u);
 				break;
 		}
 	}
@@ -1205,7 +1218,7 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 		emit_wire_rect(sx(box_left, w), sy(ay - 2.0f, h), sx(box_right, w),
 				sy(ay + text_h - 1.0f, h), color);
 	}
-	emit_text(dist, dist_x, ay, w, h, color, kFontAlignRight);
+	draw(dist, dist_x, kFontAlignRight);
 	++draw_list_.elements_drawn;
 }
 
@@ -1364,7 +1377,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 	// and rides the unported death screen].
 	const bool have_label = label_font_.font() != nullptr;
 	const GameFont &lf = have_label ? label_font_ : font_;
-	const float ls = have_label ? label_scale_ : 1.0f;
+	const float ls = have_label ? label_scale_ : hud_font_scale_;
 	if (state.friendly_tag_mode == 0 || state.friendly_tags.empty() ||
 			lf.font() == nullptr) {
 		return;
@@ -1564,7 +1577,7 @@ void HudFrameCompiler::element_kill_announcement(const HudFrameState &state, flo
 	const bool large = label_font_large_.font() != nullptr;
 	const GameFont &font = large ? label_font_large_ : font_;
 	if (font.font() == nullptr) return;
-	const float scale = large ? label_large_scale_ : 1.0f;
+	const float scale = large ? label_large_scale_ : hud_font_scale_;
 	const auto run = font.layout(state.kill_announcement.text.c_str(), sx(512.0f, w),
 			sy(30.0f, h), scale, scale, kFontAlignCenter, 0xFFFFFFFFu);
 	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());

@@ -789,8 +789,8 @@ public:
 	// {font, scale_x, scale_y} @ 0x580453..0x580468]. Friendly tags draw
 	// with the normal face [orig: @ 0x5a3a0c], attach labels with the bold
 	// face [orig: @ 0x5a3680/@ 0x5a38a1], the big-map grid labels with the
-	// large face. Null fonts fall back to the hudpos font at scale 1
-	// (layout-only embedders keep drawing).
+	// large face. Null fonts fall back to the HUD slot (the hudpos font at
+	// scale 1, or the bold copy at its scale) so layout-only embedders keep drawing.
 	void configure_label_fonts(const opennova::fnt::fnt_font_t *normal, const opennova::fnt::fnt_font_t *bold,
 			const opennova::fnt::fnt_font_t *large, float scale, float large_scale,
 			const opennova::fnt::fnt_font_t *impact38 = nullptr);
@@ -891,7 +891,7 @@ private:
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);
 	// One run in an overlay font SLOT at a surface anchor: the slot's scale
 	// pair rides into the draw. A slot whose file is absent falls back to the
-	// hudpos font at scale 1, like every other label element.
+	// HUD slot (font_) at its own scale, like every other label element.
 	// [orig: HUD_DrawTextLeft_HalfBright @0x5804C0 -- slot scales @0x58052B /
 	//  @0x580539; HUD_DrawTextCentered_HalfBright @0x580680]
 	void emit_slot_text(const GameFont &slot, float slot_scale, const char *text,

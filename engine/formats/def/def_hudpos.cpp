@@ -195,9 +195,11 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             if (nvals >= 1) safe_copy(hud->font_lo, sizeof(hud->font_lo), vals[0].s, vals[0].len);
             parsed = 1;
         }
-        /* No bare `fonthud1` key exists: JO, DFX and DFX2 all match only the two
-           suffixed keys with _stricmp [orig: HUD_ParseHudposToken @0x59F370], so
-           such a line falls through as an unknown token, as it does in retail. */
+        /* No bare `fonthud1` key exists: JO and DFX2 match only the two suffixed
+           keys with _stricmp [orig: HUD_ParseHudposToken @0x59F370], and DFX's
+           binary carries only those two strings, so such a line falls through as
+           an unknown token, as it does in retail; the HUD slot then takes the
+           bold label font (HUD_SelectHudposFont @0x591890, hud_frame.cpp). */
         /* Rects */
         else if (lower_starts_with(lower, ll, "mrclippynormal", 14)) {
             for (int i = 0; i < 4 && i < nvals; ++i)
