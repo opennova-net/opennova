@@ -2,6 +2,7 @@
 // imported metadata. The timing is measured by the engine's weapon FSM; the
 // merge sets only the keys an edits file names, in a def the parser reads.
 #include "../../apps/threedi_cli/weapon_timing.h"
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 
 #include <formats/def/def.h>
@@ -14,7 +15,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -35,10 +35,7 @@ WeaponTimingAction action(int id, double active = 0, double recovery = 0) {
 
 WeaponTimingEntry entry(const char *name, const char *mode, double cycle) { return {name, mode, cycle}; }
 
-std::string read(const std::filesystem::path &p) {
-	std::ifstream f(p, std::ios::binary);
-	return std::string(std::istreambuf_iterator<char>(f), {});
-}
+std::string read(const std::filesystem::path &p) { return test_io::read_file_text(p.string()); }
 
 bool contains(const std::string &s, const char *what) { return s.find(what) != std::string::npos; }
 
@@ -272,7 +269,11 @@ int main(int argc, char **argv) {
 	// file carries. WPN_AUTHORED quotes its blocks and keys in upper case,
 	// names a FUNCTION the edits never touch, writes delayend as `delay`,
 	// lacks a DELAYSTART and a RECOIL block; WPN_AUTHORED_SEMI opens a bare
-	// `action reload` in lower case and carries no pos at all.
+	// `action reload` in lower case and carries no pos at all. WPN_OTHER's
+	// RELOAD block writes its key with a comma and closes on `END // x`: the
+	// retail tokenizer cuts both, so the parser binds the value and closes the
+	// block [orig: Terrain_TokenizeConfigLine @ 0x53CB60; the whole-token
+	// stricmp on "end" in ActionDef_ParseScriptLine @ 0x40251B].
 	const std::string def =
 		"// merge fixture\r\n"
 		"weapon \"WPN_OTHER\"\r\n"
@@ -280,6 +281,9 @@ int main(int argc, char **argv) {
 		"\tACTION\t\"FIRE\"\r\n"
 		"\tDELAYEND\t9\r\n"
 		"\tEND\r\n"
+		"\tACTION\t\"RELOAD\"\r\n"
+		"\tDELAYEND,7\r\n"
+		"\tEND // reload\r\n"
 		"end\r\n"
 		"\r\n"
 		"weapon \"WPN_AUTHORED\"\r\n"
@@ -331,6 +335,9 @@ int main(int argc, char **argv) {
 		"\tACTION\t\"FIRE\"\r\n"
 		"\tDELAYEND\t9\r\n"
 		"\tEND\r\n"
+		"\tACTION\t\"RELOAD\"\r\n"
+		"\tDELAYEND,7\r\n"
+		"\tEND // reload\r\n"
 		"end\r\n"
 		"\r\n"
 		"weapon \"WPN_AUTHORED\"\r\n"
@@ -405,6 +412,9 @@ int main(int argc, char **argv) {
 			const auto &authored = parsed.entries[1];
 			const auto &semi = parsed.entries[2];
 			CHECK(def_action(other, "FIRE") && def_action(other, "FIRE")->delayend == 9);
+			// `DELAYEND,7` binds and `END // reload` closes the block.
+			CHECK(def_action(other, "RELOAD") && def_action(other, "RELOAD")->delayend == 7);
+			CHECK(other.actions_count == 2);
 			const auto *fire = def_action(authored, "FIRE");
 			CHECK(fire && fire->delaystart == 0 && fire->delayend == 2 && std::strcmp(fire->anim, "anim_wpn_fire") == 0);
 			CHECK(fire && std::strcmp(fire->function, "WPN_STD_FIRE") == 0 && std::strcmp(fire->soundsetend, "GS_AK47") == 0 &&
@@ -466,11 +476,14 @@ int main(int argc, char **argv) {
 		for (char c : cut)
 			if (c != '\r') lf += c;
 		CHECK(!merge_weapon_def(lf, cut_edits, merged, notes, error) && contains(error, "CR LF"));
-		// An entry the engine's parser does not read (its END carries a
-		// comment) could not be checked, so it is refused.
-		std::string unread = cut;
-		unread.replace(unread.rfind("end\r\n"), 5, "end // WPN_CUT\r\n");
-		CHECK(!merge_weapon_def(unread, cut_edits, merged, notes, error) && contains(error, "does not read WPN_CUT"));
+		// An END that carries a comment still closes the entry (the retail
+		// tokenizer cuts the comment before the key compare), so the merge
+		// reads it back and keeps the comment on its line.
+		std::string commented_end = cut;
+		commented_end.replace(commented_end.rfind("end\r\n"), 5, "end // WPN_CUT\r\n");
+		CHECK(merge_weapon_def(commented_end, cut_edits, merged, notes, error));
+		CHECK(merged == "weapon \"WPN_CUT\"\r\n\tFLAGS\tAUTO\r\n\tpos 1 2 3\t0\t0\t0// hip\r\n"
+		                "\tACTION\t\"FIRE\"\r\n\tDELAYEND\t3// recoil\r\n\tEND\r\nend // WPN_CUT\r\n");
 	}
 	// Refusals: an entry the def lacks, a mode its FLAGS contradict, an
 	// encrypted def, and edits that do not read.

@@ -34,6 +34,12 @@ struct ConfigTokens {
 	int count = 0;
 	const char *tokens[kConfigMaxTokens] = {};
 	char buffer[kConfigMaxLineChars + 1] = {};
+	// Where the walk started in the line (the leading spaces and tabs it
+	// skipped) and where it stopped in `buffer`: the "//" or ';' that cut the
+	// line, else the clamped length. The cut writes no terminator, so a token
+	// in progress there runs on past it; `cut` bounds that token's value.
+	size_t skip = 0;
+	size_t cut = 0;
 
 	// A token past the count reads as the empty string.
 	const char *token(int index) const {
@@ -43,18 +49,27 @@ struct ConfigTokens {
 
 inline void tokenize_config_line(const char *line, ConfigTokens &out) {
 	out.count = 0;
+	out.skip = 0;
+	out.cut = 0;
 	if (line == nullptr) return;
-	while (*line == ' ' || *line == '\t') ++line;
+	while (*line == ' ' || *line == '\t') {
+		++line;
+		++out.skip;
+	}
 	size_t length = std::strlen(line);
 	if (length > kConfigMaxLineChars) length = kConfigMaxLineChars;
 	std::memcpy(out.buffer, line, length);
 	out.buffer[length] = 0;
+	out.cut = length;
 	char *text = out.buffer;
 	bool quoted = false;
 	bool starts_token = true;
 	for (size_t i = 0; i < length; ++i) {
 		const char c = text[i];
-		if (!quoted && ((c == '/' && text[i + 1] == '/') || c == ';')) break;
+		if (!quoted && ((c == '/' && text[i + 1] == '/') || c == ';')) {
+			out.cut = i;
+			break;
+		}
 		if (!quoted && (c == ' ' || c == ',' || c == '\t')) {
 			text[i] = 0;
 			starts_token = true;
@@ -70,18 +85,36 @@ inline void tokenize_config_line(const char *line, ConfigTokens &out) {
 	}
 }
 
-// Calls `apply(const ConfigTokens &)` for every line the retail walk hands
-// its callback.
+// One line as the retail walk cuts it, located in the text it came from: the
+// content's byte span (its CR LF excluded; a tail line with no pair loses its
+// final byte), where a comment cuts it (else `end`), and each token's span.
+// A token the comment cut, or the line's end, left unterminated runs on to
+// `end`; `cut` is where its value really stops.
+struct ConfigLineSpan {
+	size_t begin = 0;
+	size_t end = 0;
+	size_t cut = 0;
+	size_t token_begin[kConfigMaxTokens] = {};
+	size_t token_end[kConfigMaxTokens] = {};
+};
+
+// Calls `apply(const ConfigTokens &, const ConfigLineSpan &)` for EVERY line
+// the retail walk cuts, the ones its callback never sees included (a line
+// with no token, or whose first token starts with '/'), so a consumer that
+// indexes lines counts them as the walk numbers them. The ONE CR LF split;
+// for_each_config_line below is this walk with the callback gate applied.
 template <typename Apply>
-void for_each_config_line(const char *text, size_t size, Apply &&apply) {
+void for_each_config_line_span(const char *text, size_t size, Apply &&apply) {
 	if (text == nullptr) return;
 	// The pair test reads the two bytes past the end before the tail leg.
 	std::string data(text, size);
 	data.push_back('\0');
 	data.push_back('\0');
-	char *const end = data.data() + size;
+	char *const base = data.data();
+	char *const end = base + size;
 	ConfigTokens tokens;
-	for (char *line = data.data(); line < end;) {
+	ConfigLineSpan span;
+	for (char *line = base; line < end;) {
 		char *cut = line;
 		while (!(cut[0] == '\r' && cut[1] == '\n')) {
 			if (cut >= end) {
@@ -92,10 +125,28 @@ void for_each_config_line(const char *text, size_t size, Apply &&apply) {
 		}
 		*cut = 0;
 		tokenize_config_line(line, tokens);
+		span.begin = static_cast<size_t>(line - base);
+		span.end = static_cast<size_t>(cut - base);
+		span.cut = span.begin + tokens.skip + tokens.cut;
+		if (span.cut > span.end) span.cut = span.end;
+		for (int i = 0; i < tokens.count; ++i) {
+			span.token_begin[i] = span.begin + tokens.skip +
+					static_cast<size_t>(tokens.tokens[i] - tokens.buffer);
+			span.token_end[i] = span.token_begin[i] + std::strlen(tokens.tokens[i]);
+		}
 		line = cut + 2;
-		if (tokens.count == 0 || tokens.tokens[0][0] == '/') continue;
-		apply(static_cast<const ConfigTokens &>(tokens));
+		apply(static_cast<const ConfigTokens &>(tokens), static_cast<const ConfigLineSpan &>(span));
 	}
+}
+
+// Calls `apply(const ConfigTokens &)` for every line the retail walk hands
+// its callback.
+template <typename Apply>
+void for_each_config_line(const char *text, size_t size, Apply &&apply) {
+	for_each_config_line_span(text, size, [&](const ConfigTokens &tokens, const ConfigLineSpan &) {
+		if (tokens.count == 0 || tokens.tokens[0][0] == '/') return;
+		apply(tokens);
+	});
 }
 
 } // namespace opennova::io

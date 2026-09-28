@@ -210,6 +210,13 @@ typedef struct DefWeaponAction {
 	int action_value; /* ActionDef+52: mounted tank recoil amplitude [orig: @0x40270F] */
 	char (*raw_lines)[512];
 	size_t raw_lines_count;
+	/* Where the row's live block stands in the parsed text: the 0-based index,
+	   in the file's line list as the retail walk numbers it, of the `action`
+	   line that opened it and of the `end` that closed it. A later block of the
+	   same name replaces the row, lines included. A tool that rewrites the file
+	   in place (opennova-3di weapon merge) maps them back onto the text. */
+	size_t open_line;
+	size_t end_line;
 } DefWeaponAction;
 
 /* DefWeaponDef.flags bits — the weapon.def `flags <name>` OR-mask (dword 1 of the
@@ -498,6 +505,12 @@ typedef struct DefWeaponDef {
     /* Mounted HUD stance selector; zero uses the carrier/default icon.
        [orig: emplacedstance @0x544174..0x54419B, HUD @0x4B8539..0x4B8549] */
     int emplacedstance;
+    /* Where the entry stands in the parsed text: the 0-based index, in the
+       file's line list as the retail walk numbers it, of its `weapon` line and
+       of the `end` that closed it (an entry the text never closes is not
+       parsed). See DefWeaponAction::open_line. */
+    size_t open_line;
+    size_t end_line;
 } DefWeaponDef;
 
 typedef struct DefWeaponsFile {
