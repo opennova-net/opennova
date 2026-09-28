@@ -914,6 +914,63 @@ int main(int argc, char **argv) {
         printf("nested-action refusal + delay alias OK\n");
     }
 
+    /* A block's name is the line's second token, quotes optional: the shipped
+       AT4 and RPG entries open their scopeup rows with a bare `ACTION SCOPEUP`
+       [orig: WeaponDefs_ParseLineCallback @0x543680 over the tokens
+       Terrain_TokenizeConfigLine @0x53CB60 cuts]. */
+    {
+        static const char bare[] =
+            "weapon WPN_BARE // a comment\r\n"
+            "\tACTION\tSCOPEUP\r\n"
+            "\tDELAYSTART\t1\r\n"
+            "\tEND\r\n"
+            "\tACTION\t\"SCOPEDOWN\"\r\n"
+            "\tDELAYSTART\t2\r\n"
+            "\tEND\r\n"
+            "end\r\n";
+        DefWeaponsFile wb;
+        const int ok = def_parse_weapons_memory((const uint8_t *)bare, sizeof(bare) - 1, &wb) == 0 &&
+                wb.count == 1 && strcmp(wb.entries[0].weapon_name, "WPN_BARE") == 0 &&
+                wb.entries[0].actions_count == 2 &&
+                strcmp(wb.entries[0].actions[0].name, "SCOPEUP") == 0 &&
+                wb.entries[0].actions[0].delaystart == 1 &&
+                strcmp(wb.entries[0].actions[1].name, "SCOPEDOWN") == 0;
+        def_free_weapons(&wb);
+        if (!ok) {
+            fprintf(stderr, "FAIL: bare weapon/action names\n");
+            return 1;
+        }
+    }
+
+    /* A second block of a suffix finds the same row and re-initializes it, so
+       it replaces the first wholesale: its own keys over the defaults, nothing
+       of the first kept (not a key merge), whatever the name's case.
+       [orig: ActionDef_ParseScriptLine @0x4024A1 -> ActionDef_InitDefaults
+       @0x4024DA] */
+    {
+        static const char twice[] =
+            "weapon \"WPN_TWICE\"\n"
+            "\tACTION \"FIRE\"\n\t\tANIM anim_wpn_fire\n\t\tDELAYSTART 4\n\t\tDELAYEND 6\n"
+            "\t\tSOUNDSETEND GS_ONE\n\tEND\n"
+            "\tACTION \"RELOAD\"\n\t\tDELAYEND 9\n\tEND\n"
+            "\taction \"fire\"\n\t\tdelayend 2\n\tend\n"
+            "end\n";
+        DefWeaponsFile wt;
+        int ok = def_parse_weapons_memory((const uint8_t *)twice, sizeof(twice) - 1, &wt) == 0 &&
+                wt.count == 1 && wt.entries[0].actions_count == 2;
+        if (ok) {
+            const DefWeaponAction &fire = wt.entries[0].actions[0];
+            ok = strcmp(fire.name, "fire") == 0 && fire.anim[0] == '\0' && fire.delaystart == 0 &&
+                 fire.delayend == 2 && fire.soundsetend[0] == '\0' &&
+                 wt.entries[0].actions[1].delayend == 9;
+        }
+        def_free_weapons(&wt);
+        if (!ok) {
+            fprintf(stderr, "FAIL: a repeated ACTION block replaces the row\n");
+            return 1;
+        }
+    }
+
 
     {
         const char text[] =

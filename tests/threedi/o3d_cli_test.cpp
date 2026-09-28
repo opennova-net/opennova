@@ -56,8 +56,17 @@ static int check_skinned(const char *path) {
 	CHECK(lod.render_objects[0].num_strips == 1 && lod.render_objects[2].num_strips == 0);
 	CHECK(lod.render_objects[0].bounding_radius == 0.0f && lod.render_objects[2].bounding_radius > 0.0f);
 	CHECK(lod.strips[0].bone_table_length == 2 && lod.strips[0].bone_table[0] == 0 && lod.strips[0].bone_table[1] == 1);
-	CHECK(lod.vertices.count == 4 && lod.vertices.items[1].bone_indices[1] == 1 &&
-			near(lod.vertices.items[1].bone_weights[0], 0.5f) && near(lod.vertices.items[1].bone_weights[1], 0.5f));
+	// The second vertex rides part 1 through its fourth slot, which takes the
+	// rest of the weight (threedi_skin_influences).
+	CHECK(lod.vertices.count == 4 && lod.vertices.items[1].bone_indices[3] == 1 &&
+			near(lod.vertices.items[1].bone_weights[0], 0.5f) && lod.vertices.items[1].bone_weights[1] == 0.0f);
+	if (lod.vertices.count == 4) {
+		ThreediSkinInfluence influences[4];
+		threedi_skin_influences(&lod.vertices.items[1], lod.strips[0].bone_table, lod.strips[0].bone_table_length,
+				influences);
+		CHECK(influences[0].part == 0 && influences[0].weight == 0.5f && influences[3].part == 1 &&
+				influences[3].weight == 0.5f);
+	}
 	for (int t = 0; t < lod.strips[0].num_triangles; ++t) CHECK(facing(lod, lod.strips[0], t) > 0.0f);
 	CHECK(m.collision != nullptr);
 	if (m.collision != nullptr) {

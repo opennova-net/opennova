@@ -3,8 +3,9 @@
 // it. One implementation for the portable terrain static-shadow geometry
 // (engine/runtime/terrain) and the CPU model mesh preparation
 // (engine/runtime/renderer) — previously two verbatim copies.
-// [orig: STRP runtime decode — basic loop @ 0x474CAF, skinned @ 0x474B60;
-//  record fields in docs/threedi/3di-gp-format-re.md STRP/ROBJ].
+// [orig: the STRP decode as the OED reader walks it, basic loop @ 0x474CAF,
+//  skinned @ 0x474B60 (ModSuperOed.exe); record fields in
+//  docs/threedi/3di-gp-format-re.md STRP/ROBJ].
 #pragma once
 
 #include <formats/threedi/threedi_3di3.h>

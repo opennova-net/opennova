@@ -13,6 +13,7 @@
 
 #include <formats/def/def.h> // the weapon.def flag mirrors pinned below
 
+#include <algorithm>
 #include <cstdio>
 
 using namespace sim_internal;
@@ -205,11 +206,11 @@ opennova::world::WeaponInstallData Simulation::install_data_from_def(
 }
 
 // The production mount (S6b): the kernel finds the row in ITS retained
-// weapon.def parse, bakes the FSM def and seeds the clip rings from the rig's
-// own .adm through the installed asset index — one step at ACCEPT time, no
-// shell dictionary and no render dependency [orig: the ACCEPT chain —
+// weapon.def parse and mounts the descriptors the weapon table baked as it
+// loaded; the channel plays from the table's shared ANIMADM rings, no shell
+// dictionary and no render dependency [orig: the ACCEPT chain —
 // WeaponSlotTable_LoadAllFromDefs @ 0x5414e0 + Player_MountWeaponSlot
-// @ 0x4dfa40; Anim_InitActions @ 0x541fa0 bakes the delays].
+// @ 0x4dfa40; Anim_InitActions @ 0x541fa0 baked the delays at the def's END].
 bool Simulation::install_local_player_weapon_by_name(
 		const String &p_weapon_name, bool p_preserve_slot_state) {
 	return kernel_->install_weapon(
@@ -348,14 +349,17 @@ const char *Simulation::native_weapon_input_block() const {
 			opennova::world::local_weapon_input_block(kernel_->world, kernel_->local.weapon));
 }
 
+// The slot keys the equipped weapon's ANIMADM table authors, sorted.
 std::vector<std::string> Simulation::native_equipped_weapon_clip_keys() const {
 	std::vector<std::string> out;
 	if (!kernel_) return out;
-	out.reserve(kernel_->local.weapon.clip_rings.size());
-	for (const auto &entry : kernel_->local.weapon.clip_rings) {
-		out.push_back(entry.first);
-	}
+	out = kernel_->world.tables.weapons.rings.keys(kernel_->local.weapon.anim_map);
+	std::sort(out.begin(), out.end());
 	return out;
+}
+
+const opennova::anim::AdmRingTable *Simulation::native_weapon_rings() const {
+	return kernel_ ? &kernel_->world.tables.weapons.rings : nullptr;
 }
 
 bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_start,
@@ -384,11 +388,13 @@ bool Simulation::debug_weapon_set_action_delays(int p_action_id, int p_delay_sta
 	opennova::world::WeaponFsmAction &baked = weapon.def.actions[p_action_id];
 	if (p_delay_start >= 0) baked.delay_start = p_delay_start;
 	if (p_delay_end >= 0) baked.delay_end = p_delay_end;
-	if (p_rebake) {
-		return row != nullptr &&
-				kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
-						/*allow_same_weapon_rebake=*/true);
+	if (p_rebake &&
+			!(row != nullptr &&
+					kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
+							/*allow_same_weapon_rebake=*/true))) {
+		return false;
 	}
+	kernel_->keep_weapon_action_edit(p_action_id);
 	return true;
 }
 
@@ -416,28 +422,33 @@ bool Simulation::debug_weapon_set_action_text(int p_action_id, int p_field,
 		case 0:  // Anim — re-resolves the clip, so any `auto` delay re-derives.
 			if (row == nullptr) return false;
 			std::snprintf(row->anim, sizeof(row->anim), "%s", value);
-			return kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
-					/*allow_same_weapon_rebake=*/true);
+			if (!kernel_->install_weapon(weapon.def_name, /*preserve_slot_state=*/true,
+						/*allow_same_weapon_rebake=*/true)) {
+				return false;
+			}
+			break;
 		case 1:
 			write(baked.soundset, sizeof(baked.soundset), row ? row->soundset : nullptr,
 					row ? sizeof(row->soundset) : 0);
-			return true;
+			break;
 		case 2:
 			write(baked.soundsetend, sizeof(baked.soundsetend), row ? row->soundsetend : nullptr,
 					row ? sizeof(row->soundsetend) : 0);
-			return true;
+			break;
 		case 3:
 			write(baked.particle, sizeof(baked.particle), row ? row->particle : nullptr,
 					row ? sizeof(row->particle) : 0);
-			return true;
+			break;
 		case 4:
 			write(baked.particle_userpoint, sizeof(baked.particle_userpoint),
 					row ? row->particleuserpoint : nullptr,
 					row ? sizeof(row->particleuserpoint) : 0);
-			return true;
+			break;
 		default:
 			return false;
 	}
+	kernel_->keep_weapon_action_edit(p_action_id);
+	return true;
 }
 
 bool Simulation::debug_weapon_trigger(int p_trigger) {

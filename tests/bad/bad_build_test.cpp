@@ -258,7 +258,69 @@ int main(int argc, char **argv) {
         TEST_EXPECT(bad_build_assemble(huge, nullptr, built, &error));
         std::vector<uint8_t> huge_bytes;
         TEST_EXPECT(!bad_build_mint(huge, nullptr, huge_bytes, &error));
+
+        // The game's bone arrays hold 64 [orig: BoneSystem_Init @0x410170].
+        BadBuildClip wide_rig = clip;
+        while (wide_rig.bones.size() < kBadMaxBones) {
+            BadBuildBone extra = clip.bones[1];
+            extra.name = "BN" + std::to_string(wide_rig.bones.size() + 1);
+            wide_rig.bones.push_back(extra);
+        }
+        TEST_EXPECT(bad_build_assemble(wide_rig, nullptr, built, &error));
+        wide_rig.bones.push_back(clip.bones[1]);
+        TEST_EXPECT(!bad_build_assemble(wide_rig, nullptr, built, &error) &&
+                    error.find("65 bones") != std::string::npos);
+
+        // A loop stepping a whole cycle a tick (fps >= 62 * frames) never
+        // plays; a one-shot at that rate just ends [orig: AnimChannel_InitFromData
+        // @0x4105BA; AnimChannel_AdvancePlayback @0x40B199].
+        BadBuildClip fast = clip;
+        fast.fps = 62 * fast.frame_count - 1;
+        fast.flags = BAD_FLAG_LOOP;
+        TEST_EXPECT(bad_build_assemble(fast, nullptr, built, &error));
+        fast.fps = 62 * fast.frame_count;
+        TEST_EXPECT(!bad_build_assemble(fast, nullptr, built, &error) &&
+                    error.find("whole cycle") != std::string::npos);
+        fast.flags = 0;
+        TEST_EXPECT(bad_build_assemble(fast, nullptr, built, &error));
         std::printf("validation: every malformed clip is refused by name\n");
+    }
+
+    // The set: every clip file packs (15 bytes at most, the extension
+    // included, ASCII), and a clip carries translations only over a translated
+    // reset clip [orig: PFF_FindEntry @0x7685D0; AnimChannel_ComputeBoneMatrices
+    // @0x410DE7].
+    {
+        TEST_EXPECT(bad_build_packable_name("avenger_025.bad") && !bad_build_packable_name("avenger_0255.bad"));
+        TEST_EXPECT(!bad_build_packable_name("") && !bad_build_packable_name("w\xC3\xA4lk.bad"));
+        BadBuildSet set;
+        set.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
+        set.rows.push_back(BadBuildRow{"anim_walk_forward", {"walk"}});
+        BadBuildClip reset = two_bone_clip(0);
+        reset.name = "rst";
+        BadBuildClip walk = two_bone_clip(BAD_FLAG_TRANSLATION);
+        walk.name = "walk";
+        set.clips = {reset, walk};
+        std::vector<std::string> problems;
+        TEST_EXPECT(!bad_build_check_set(set, problems) && problems.size() == 1 &&
+                    problems[0].find("clip 'walk' carries translations") != std::string::npos);
+        // The other way round moves nothing either, and retail ships it (3 clips).
+        problems.clear();
+        set.clips[0] = two_bone_clip(BAD_FLAG_TRANSLATION);
+        set.clips[0].name = "rst";
+        set.clips[1] = two_bone_clip(0);
+        set.clips[1].name = "walk";
+        TEST_EXPECT(bad_build_check_set(set, problems) && problems.empty());
+        set.clips[1].name = "walk_forward1";
+        set.rows[1].variants[0] = "walk_forward1";
+        TEST_EXPECT(!bad_build_check_set(set, problems) && problems.size() == 1 &&
+                    problems[0].find("17 bytes") != std::string::npos);
+        // A lone clip is named by its output.
+        BadBuildSet lone;
+        lone.clips = {set.clips[1]};
+        problems.clear();
+        TEST_EXPECT(bad_build_check_set(lone, problems));
+        std::printf("set: long clip names and translations over an untranslated reset refused\n");
     }
 
     // The table: the canonical row shape, and the rows the parser could not

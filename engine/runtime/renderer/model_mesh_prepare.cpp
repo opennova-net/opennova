@@ -3,6 +3,7 @@
 #include <formats/threedi/threedi_strip_decode.h>
 
 #include <algorithm>
+#include <map>
 #include <utility>
 
 namespace opennova::renderer {
@@ -36,23 +37,45 @@ void append_vertex(PreparedMeshSurface &out, const ThreediVertex &v,
         const float dot = cross[0] * bitangent[0] + cross[1] * bitangent[1] + cross[2] * bitangent[2];
         out.tangents.push_back({tangent[0], tangent[1], tangent[2], dot < 0.0f ? -1.0f : 1.0f});
     }
-    // [orig: the runtime skins via the .bad skeleton; bone_table is the
-    // per-strip local-to-skeleton remap, skinned strip walk @0x474B60.]
+    // Retail's blend (threedi_skin_influences): the three stored weights as
+    // they are and the fourth, 1 - (w0 + w1 + w2), on index byte 3, never
+    // renormalized, each byte naming a part through the strip's bone table
+    // (the palette entry it indexes). A byte past the table, a matrix the
+    // palette does not hold in retail, rides bone 0.
+    // [orig: ThreediGp_ConvertVerticesToGPUFormat @ 0x5B4C90 (the weights
+    // copied verbatim @ 0x5B4E2C); D3DDevice_CreateVertexDeclarations
+    // @ 0x5B0A00 (byte k is IndexArray[k]); CRenderBatchQueue_FlushBatches
+    // @ 0x5DA170 (palette entry k is bone-table entry k); _BaseInc.fx
+    // CalcSkinWorldPosAndNormal (NumBones 4: lastweight on IndexArray[3])]
     if (strip.bone_table_length > 0) {
+        ThreediSkinInfluence influences[4];
+        threedi_skin_influences(&v, strip.bone_table, strip.bone_table_length, influences);
         std::array<int32_t, 4> bones{};
+        std::array<float, 4> weights{};
         for (size_t k = 0; k < bones.size(); ++k) {
-            const int local = static_cast<int>(v.bone_indices[k]);
-            bones[k] = local < strip.bone_table_length ? strip.bone_table[local] : 0;
+            bones[k] = influences[k].part >= 0 ? influences[k].part : 0;
+            weights[k] = influences[k].weight;
         }
         out.bones.push_back(bones);
-        float w0 = v.bone_weights[0], w1 = v.bone_weights[1], w2 = v.bone_weights[2], w3 = 0.0f;
-        float sum = w0 + w1 + w2 + w3;
-        if (sum <= 1e-6f) {
-            w0 = 1.0f;
-            w1 = w2 = w3 = 0.0f;
-            sum = 1.0f;
+        out.weights.push_back(weights);
+        // SkinModelLightArray entry k is the light taken through the inverse
+        // of palette entry k, filled in table order through one inverse
+        // buffer that a singular matrix leaves as it was (D3DXMatrixInverse
+        // writes nothing when the determinant is zero), so the entry keeps
+        // the last inverse made. The lit effects read the entry of the
+        // vertex's first index byte: a vertex whose first entry collapses is
+        // lit through the nearest earlier entry that inverts, and before the
+        // table's first entry the buffer holds stale stack.
+        // [orig: CRenderBatchQueue_FlushBatches @ 0x5DA4F6..0x5DA5CE (the
+        // directional fill, its inverse @ 0x5DA54B), @ 0x5DA950..0x5DA9A1 (the
+        // point fill, its inverse @ 0x5DA967)]
+        std::array<int32_t, 4> fallbacks{-1, -1, -1, -1};
+        const int32_t first = v.bone_indices[0];
+        if (first < strip.bone_table_length && first < 16) {
+            for (int32_t n = 0; n < 4 && first - 1 - n >= 0; ++n)
+                fallbacks[static_cast<size_t>(n)] = strip.bone_table[first - 1 - n];
         }
-        out.weights.push_back({w0 / sum, w1 / sum, w2 / sum, w3 / sum});
+        out.light_fallback_bones.push_back(fallbacks);
     }
     out.indices.push_back(static_cast<int32_t>(out.vertices.size() - 1));
 }
@@ -75,14 +98,16 @@ void finish_surface(PreparedMeshSurface &surface, MeshPreparationOptions options
                 : std::max(surface.part_index, 0);
         surface.bones.assign(surface.vertices.size(), {bone, 0, 0, 0});
         surface.weights.assign(surface.vertices.size(), {1.0f, 0.0f, 0.0f, 0.0f});
+        surface.light_fallback_bones.assign(surface.vertices.size(), {-1, -1, -1, -1});
     }
 }
 
 } // namespace
 
 // Strips are sequential per render object: opaque first, then alpha.
-// [orig: the RMDL/ROBJ walk every renderer pass performs; STRP runtime
-// decode, basic loop @0x474CAF / skinned @0x474B60.]
+// [orig: the RMDL/ROBJ walk every renderer pass performs; the STRP decode as
+// the OED reader walks it, basic loop @0x474CAF / skinned @0x474B60
+// (ModSuperOed.exe)]
 std::vector<PreparedMeshSurface> prepare_model_mesh(
         const threedi::Threedi3di3 &model, int lod_index, MeshPreparationOptions options) {
     std::vector<PreparedMeshSurface> result;
@@ -124,6 +149,32 @@ std::vector<PreparedMeshSurface> prepare_model_mesh(
         }
     }
     return result;
+}
+
+std::vector<BoneBindBox> prepared_surface_bone_boxes(const PreparedMeshSurface &surface) {
+    std::map<int32_t, BoneBindBox> boxes;
+    const size_t count = std::min(surface.vertices.size(),
+            std::min(surface.bones.size(), surface.weights.size()));
+    for (size_t i = 0; i < count; ++i) {
+        const std::array<float, 3> &point = surface.vertices[i];
+        for (size_t k = 0; k < 4; ++k) {
+            if (surface.weights[i][k] == 0.0f) continue;
+            const int32_t bone = surface.bones[i][k];
+            const auto found = boxes.find(bone);
+            if (found == boxes.end()) {
+                boxes.emplace(bone, BoneBindBox{bone, point, point});
+                continue;
+            }
+            for (size_t axis = 0; axis < 3; ++axis) {
+                found->second.min[axis] = std::min(found->second.min[axis], point[axis]);
+                found->second.max[axis] = std::max(found->second.max[axis], point[axis]);
+            }
+        }
+    }
+    std::vector<BoneBindBox> out;
+    out.reserve(boxes.size());
+    for (const auto &box : boxes) out.push_back(box.second);
+    return out;
 }
 
 } // namespace opennova::renderer

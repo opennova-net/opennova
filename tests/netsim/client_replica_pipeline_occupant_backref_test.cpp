@@ -56,9 +56,15 @@ int main() {
 		return std::nullopt;
 	});
 
+	// Both rows exist before either is held: upsert appends to the state's
+	// row vector, so a reference taken before the second upsert dangles once
+	// that append reallocates.
+	view.state().upsert(kGunHandle);
+	view.state().upsert(kGunnerHandle);
+
 	// The gun row, exactly as the witnessed 0x0D fold leaves it: static spawn
 	// pose, occupant back-reference in parent_handle, no compacts ever.
-	ns::ClientEntityState &gun = view.state().upsert(kGunHandle);
+	ns::ClientEntityState &gun = *view.state().find(kGunHandle);
 	gun.type_id = kGunType;
 	gun.cls = EntityClass::NoNetworkCallback;
 	gun.x = fixed_of(312.6);
@@ -74,7 +80,7 @@ int main() {
 	// The gunner row as the infantry-compact fold leaves it: seat-mounted on
 	// the gun (carrier + seat-local sample), live aim pitch — the exact live
 	// card values from the reproduction session.
-	ns::ClientEntityState &gunner = view.state().upsert(kGunnerHandle);
+	ns::ClientEntityState &gunner = *view.state().find(kGunnerHandle);
 	gunner.type_id = kGunnerType;
 	gunner.cls = EntityClass::Infantry;
 	gunner.net_has_compact = true;
@@ -99,26 +105,33 @@ int main() {
 			gunner_z0 = gunner.z;
 	for (int tick = 0; tick < 312; ++tick)
 		view.tick_remote_motion(/*self_handle=*/0xFFFF);
+	// The rows as the pipeline left them.
+	const ns::ClientEntityState *gun_after = view.state().find(kGunHandle);
+	const ns::ClientEntityState *gunner_after = view.state().find(kGunnerHandle);
+	if (gun_after == nullptr || gunner_after == nullptr) {
+		std::fprintf(stderr, "FAIL: the mover loop dropped a row\n");
+		return 1;
+	}
 
 	bool ok = true;
 	const double gun_drift = std::sqrt(
-			std::pow((gun.x - gun_x0) / 65536.0, 2) +
-			std::pow((gun.y - gun_y0) / 65536.0, 2) +
-			std::pow((gun.z - gun_z0) / 65536.0, 2));
+			std::pow((gun_after->x - gun_x0) / 65536.0, 2) +
+			std::pow((gun_after->y - gun_y0) / 65536.0, 2) +
+			std::pow((gun_after->z - gun_z0) / 65536.0, 2));
 	const double gunner_drift = std::sqrt(
-			std::pow((gunner.x - gunner_x0) / 65536.0, 2) +
-			std::pow((gunner.y - gunner_y0) / 65536.0, 2) +
-			std::pow((gunner.z - gunner_z0) / 65536.0, 2));
+			std::pow((gunner_after->x - gunner_x0) / 65536.0, 2) +
+			std::pow((gunner_after->y - gunner_y0) / 65536.0, 2) +
+			std::pow((gunner_after->z - gunner_z0) / 65536.0, 2));
 	std::printf("[backref] gun drift %.4f u, heading delta %d BAM; "
 	            "gunner drift %.4f u over 312 ticks\n",
-	            gun_drift, gun.heading_bam - gun_heading0, gunner_drift);
-	ok &= expect(gun.x == gun_x0 && gun.y == gun_y0 && gun.z == gun_z0,
+	            gun_drift, gun_after->heading_bam - gun_heading0, gunner_drift);
+	ok &= expect(gun_after->x == gun_x0 && gun_after->y == gun_y0 && gun_after->z == gun_z0,
 	             "the occupied mount holds its 0x0D spawn position bit-for-bit");
-	ok &= expect(gun.heading_bam == gun_heading0,
+	ok &= expect(gun_after->heading_bam == gun_heading0,
 	             "the occupied mount holds its spawn heading (no occupant glue)");
 	ok &= expect(gunner_drift < 0.01,
 	             "the seated gunner keeps riding the static mount (no ratchet)");
-	ok &= expect(gunner.net_seat_valid,
+	ok &= expect(gunner_after->net_seat_valid,
 	             "the seat sample survives the mover loop");
 	return ok ? 0 : 1;
 }

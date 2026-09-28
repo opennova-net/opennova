@@ -73,6 +73,13 @@ public:
 	void consume_pending(const Ref<PlayerWeaponView> &p_view);
 	void consume(const Ref<PlayerWeaponView> &p_view, const TypedArray<PlayerWeaponEvent> &p_events);
 
+	// Mount a weapon.def entry (the def, its FSM and the viewmodel rebuilt for
+	// it), or drop the equipped one: the path a committed switch or clear takes,
+	// which the dev tools' viewmodel controls take too. The switch answers
+	// whether the named weapon is mounted afterwards.
+	bool apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state);
+	void apply_weapon_clear();
+
 	// The live anchor for an owner-bound weapon-effect group: the spawning
 	// action's userpoint through the CURRENT viewmodel pose, or null once the
 	// viewmodel is gone (the effect world then unpins the group at its last
@@ -100,8 +107,6 @@ private:
 	EffectWorld *effect_world() const;
 	MissionAudio *mission_audio() const;
 	Ref<ItemEffectDirector> effect_anchors() const;
-	void apply_weapon_switch(const String &p_weapon_name, bool p_preserve_slot_state);
-	void apply_weapon_clear();
 	void unregister_effect_anchors();
 	static Transform3D weapon_effect_transform(const Vector3 &p_position, const Vector3 &p_forward);
 	void fire_action_effects(const Ref<PlayerWeaponEvent> &p_event);
@@ -114,6 +119,7 @@ private:
 	void fire_action_end_sound(const Ref<PlayerWeaponEvent> &p_event);
 	void play_switch_deny_sound();
 	void play_viewmodel_clip(const String &p_key, int p_variant, int p_advance_ticks);
+	void pose_viewmodel_channel(const Ref<PlayerWeaponView> &p_view);
 
 	ObjectID world_id_;
 	ObjectID presenter_id_;

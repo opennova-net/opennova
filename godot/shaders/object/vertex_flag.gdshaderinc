@@ -23,11 +23,9 @@ void vertex() {
 	v_geom_normal = animated_world_normal;
 	v_world_tangent = normalize((MODEL_MATRIX * vec4(TANGENT, 0.0)).xyz);
 	v_world_binormal = normalize((MODEL_MATRIX * vec4(BINORMAL, 0.0)).xyz);
-	// Flag.fx has only its hemisphere + directional pass; EffectWorld point
-	// lights do not participate in this effect.
-	v_point_light_diffuse = vec3(0.0);
 	// vsFlag's Out.Diff: hemisphere + directional at vertex rate, saturated
-	// by the colour output. Flag.fx has no CLIP technique.
+	// by the colour output. Flag.fx has only that pass: EffectWorld point
+	// lights do not participate in this effect, and it has no CLIP technique.
 	v_ff_diffuse = obj_ff_vertex_diffuse(v_world_normal, vec3(0.0));
 	v_ff_clip_diffuse = vec3(0.0);
 	v_dir_self_shadow = 1.0;

@@ -36,7 +36,7 @@ it was authored on and to any rig that matches it.
 - Pivots, translations and event velocities are **mission axes**: x forward,
   y left, z up, metres. A rotation is a quaternion `x y z w` in the same axes.
   The seam converts to the clip's own frame (x side, y up, z forward), which is
-  the model frame mirrored on x — the frame the runtime's skeleton is built in.
+  the model frame mirrored on x, the frame the runtime's skeleton is built in.
 - A clip's `frames` is its INTERVAL count: every key list holds one more, and
   the event list and the translation rows likewise. The runtime reads
   translation row `trunc(frames * t)` and lerps it with the next one, so the
@@ -50,8 +50,11 @@ it was authored on and to any rig that matches it.
   against its own first key. A table with no reset row does not load in the
   game (`build` refuses one)
   [orig: `AnimChannel_ComputeBoneMatrices @ 0x410da0`;
-  `AnimMap_RegisterEntity @ 0x40bb60`]. The reset clip's first key is the pose
-  the rig's rest stands in, and every key of every clip turns from there.
+  `AnimMap_RegisterEntity @ 0x40bb60`]. The reset clip's first key is each
+  bone's bind, and every key of every clip turns from there: a front end
+  shows a key as the turn `key * bind^-1` makes, about the bone's own rest,
+  however that bone points (the Blender add-on keeps a bind that is not a
+  bone's rest turn as the bone's bind frame).
 
 ## Records
 
@@ -99,10 +102,22 @@ that never closes or runs into the next field, a `"` inside a bare field, an
 empty row variant, an event without its `bottom` and `top`, a
 set with no clip, a table with no reset row (a key naming slot 0: retail
 cannot load one [orig: `AnimMap_LoadAdmFile @ 0x40cc40`, the unchecked read of
-slot 0's head `@0x40CE11..0x40CE16`]), a row key of five characters or fewer
-(it names no slot) or a row naming a clip the set lacks, two clips under one name, a clip name or
+slot 0's head `@0x40CE11..0x40CE16`]), a row key that names no anim slot (five
+characters or fewer, or a tail that is none of the 252 slot names: the game
+registers nothing under it [orig: `AnimMap_ParseConfigLine @ 0x40CB60`, the
+dropped row `@0x40CBA4`]) or a row naming a clip the set lacks, two clips under one name, a clip name or
 row variant that is not a bare file name (`/ \ : | * ? < > "`, a control character, `.` or `..`: `build`
-writes each clip beside the table), a bone whose parent is not a lower index, a
+writes each clip beside the table), a file the game could not pack (a clip's
+`<name>.bad`, or the `-o` name, over 15 bytes with its extension or not ASCII:
+an archive entry's name field is 16 bytes with its NUL
+[orig: `PFF_FindEntry @ 0x7685D0`]), a clip carrying translations (flag `0x2`) in a table whose reset
+clip does not (a bone moves only when the playing clip and the bind both carry
+them [orig: `AnimChannel_ComputeBoneMatrices @ 0x410DA0`, the bind's flag
+`@0x410DE7`]), a clip over 64 bones (the game's bone arrays [orig:
+`BoneSystem_Init @ 0x410170`]), a looping clip whose fps is 62 times its frame
+count or more (it steps a whole cycle a tick, which never plays [orig:
+`AnimChannel_InitFromData @ 0x410560`, the step `@0x4105BA`;
+`AnimChannel_AdvancePlayback @ 0x40B140`, `t -= 1` once `@0x40B199`]), a bone whose parent is not a lower index, a
 key list that is neither `frames + 1` long nor accompanied by durations (a
 bone states a duration on every key or on none), a key
 that is not a unit quaternion, a zero duration, a translation block a flag
@@ -119,7 +134,12 @@ path.
 
 ## What `scene` cannot carry
 
-`scene` comments these (`# note: ...`) and lists them on stderr: a variant
+`scene` comments these (`# dropped: ...`) and lists them on stderr as
+`opennova-3di: note: scene drops ...`, the `.o3d` scene's marker, so a front
+end surfaces both scenes' notes the same way: a row whose key names no anim
+slot, which the game drops (`DEFAULT.ADM`'s `anim_for_menus_*` rows; `info`
+lists such rows as dropped and `compare` reads only the rows the game
+registers), a variant
 whose clip is absent or does not parse, which is dropped from its rows (a row
 left with none is dropped whole, and a table left with no reset row is noted,
 since `build` refuses it), and a clip `build` could not mint again from

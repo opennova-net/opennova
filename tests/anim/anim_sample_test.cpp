@@ -404,6 +404,8 @@ int main(int argc, char **argv) {
         TEST_EXPECT(table("no_reset.adm", "anim_idle \"two\"\r\nanim_walk_forward \"walk\"\r\n"));
         TEST_EXPECT(table("upper_keys.adm", "ANIM_RESET \"three\"\r\nANIM_WALK_FORWARD \"walk\"\r\n"));
         TEST_EXPECT(table("other_prefix.adm", "xxxx_reset \"three\"\r\nxxxx_walk_forward \"walk\"\r\n"));
+        TEST_EXPECT(table("no_slot.adm", "anim_reset \"three\"\r\nanim_notaslot \"walk\"\r\n"
+                "anim_wpn_fire_x \"walk\"\r\n"));
 
         opennova::ResourceIndex index;
         TEST_EXPECT(index.scan(dir.string()));
@@ -451,6 +453,13 @@ int main(int argc, char **argv) {
             TEST_EXPECT(rig.find_clip("anim_walk_forward") != nullptr);
             TEST_EXPECT(rig.find_clip("anim_reset") != nullptr);
         }
+        // A row whose key names none of the 252 slots registers nothing: it
+        // never plays [orig: AnimMap_FindSlotByName @0x40cfa0, the -1 miss
+        // @0x40cfce; AnimMap_ParseConfigLine's found-slot gate @0x40cba4].
+        TEST_EXPECT(rig.load_from_adm(&assets, "no_slot", {}, {}));
+        TEST_EXPECT(rig.find_clip("anim_notaslot") == nullptr);
+        TEST_EXPECT(rig.find_clip("anim_wpn_fire_x") == nullptr);
+        TEST_EXPECT(rig.clips().size() == 1);
         // A table with no reset row never binds, so the rig does not load.
         // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16;
         //  AnimMap_RegisterEntity @0x40bb60, @0x40bbc4]
@@ -666,6 +675,31 @@ int main(int argc, char **argv) {
         const Clip mbp = sample_clip(tbad, pivots, /*model_bind=*/true, &tbad, parents);
         TEST_EXPECT(quat_approx(mbp.frames[0][2].world_rotation,
                 mbp.frames[0][0].world_rotation, 1e-3f));
+
+        // A parent numbered AFTER its child is read raw, the way the in-place FK meets it:
+        // its rotation at the model origin, without its own place, turning the child's
+        // model-space pivot. Row 1 hangs off the padded row 2 (Rz90, placed at (0,0,2)
+        // under the root): row 1's pivot is (1,0,2), so row 1 = Rz90 . (1,0,2) = (0,1,2).
+        // Its local transform still re-derives that place under row 2's finished matrix.
+        // [orig: BoneAnim_BuildWorldMatrices @0x40C400 -- the read @0x40C674 of the raw
+        // entry @0x40C53F..0x40C553, the pivot at the row's +36 @0x40C5F2, matrix 0's
+        // copy @0x40C5B6]
+        const std::vector<int> late_parents = {0, 2, 0};
+        const std::vector<Vec3> late_pivots = {
+                {0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 2.0f}};
+        const Clip lc = sample_clip(tbad, late_pivots, /*model_bind=*/false, nullptr, late_parents);
+        TEST_EXPECT(lc.bones[1].parent_index == 2);
+        const auto &lf = lc.frames[0];
+        TEST_EXPECT(approx(lf[2].world_position.x, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.y, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.z, 2.0f, 1e-3f));
+        TEST_EXPECT(approx(lf[1].world_position.x, 0.0f, 1e-3f) &&
+                approx(lf[1].world_position.y, 1.0f, 1e-3f) &&
+                approx(lf[1].world_position.z, 2.0f, 1e-3f));
+        const Vec3 local = opennova::anim::quat_rotate(lf[2].world_rotation, lf[1].local_position);
+        TEST_EXPECT(approx(lf[2].world_position.x + local.x, 0.0f, 1e-3f) &&
+                approx(lf[2].world_position.y + local.y, 1.0f, 1e-3f) &&
+                approx(lf[2].world_position.z + local.z, 2.0f, 1e-3f));
     }
 
     // --- positions_from_model: reconstruct BadBone.position from the model table + the ---

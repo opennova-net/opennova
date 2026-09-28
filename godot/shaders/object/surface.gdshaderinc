@@ -28,7 +28,7 @@ void obj_prepare_surface(
 	float coverage_alpha = obj_surface_coverage(base);
 	obj_apply_coverage(coverage_alpha);
 	view_dir = normalize(camera_position_world - v_world_pos);
-	geom_normal = normalize(v_geom_normal);
+	geom_normal = obj_unit_or_zero(v_geom_normal);
 	surface_normal = obj_resolve_surface_normal(model_matrix, geom_normal);
 }
 
@@ -70,8 +70,8 @@ void obj_evaluate_ffp_clip_surface(vec3 camera_position_world,
 // One P1 pass: its own framebuffer add, so each light clamps on its own.
 vec3 obj_dot3_clip_point(vec3 normal, int light, float attenuation) {
 	vec4 posr = obj_point_light_posr(light);
-	float ndotl = clamp(dot(normal, normalize(posr.xyz - v_world_pos)) * attenuation,
-			0.0, 1.0);
+	vec3 light_dir = normalize(posr.xyz - obj_point_light_origin());
+	float ndotl = clamp(dot(normal, light_dir) * attenuation, 0.0, 1.0);
 	return ndotl * clamp(obj_point_light_color(light).rgb, vec3(0.0), vec3(1.0));
 }
 

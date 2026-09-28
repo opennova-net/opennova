@@ -175,8 +175,7 @@ func clip_mode(out_dir: String, prefix: String) -> void:
 				captures["inactive"], captures["reflection"], top_rect)
 		var beauty_delta := RenderSwatchSupport.lighting_mean_delta(
 				captures["inactive"], captures["beauty"], bottom_rect)
-		var clip_expected: bool = str(entry["clip_class"]) in ["explicit",
-				"explicit_unskinned_or_submit_skip_skinned"]
+		var clip_expected: bool = str(entry["clip_class"]) == "explicit"
 		reports.append({
 			"technique": entry["name"],
 			"clip_class": entry["clip_class"],

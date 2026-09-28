@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <runtime/anim/adm_ring_table.h>
 #include <runtime/world/weapon_fsm.h>
 
 namespace opennova::threedi {
@@ -146,11 +147,15 @@ struct WeaponTableEntry {
     // occupy 0..10 and weapon.def registrations begin at 11. They are wire-visible
     // when S2C 0x0F copies the authority player's 128 score-slot values.
     int16_t ammo_class_id = -1;
-    // Runtime action descriptors baked from this weapon.def block's ACTION rows.
-    // Auto clip durations remain zero until a host with the ADM duration ring rebakes
-    // them; explicit authored timings and all state transitions are retained.
-    // [orig: Anim_InitActions @0x541fa0]
+    // Runtime action descriptors baked from this weapon.def block's ACTION rows,
+    // once, as the table loads: their automatic delays read the entry's ANIMADM
+    // rings in weapon.def order (WeaponTable::rings). A mount runs these
+    // descriptors; it bakes nothing. [orig: Anim_InitActions @0x541fa0 at the
+    // weapon's END @0x5437D0]
     WeaponFsmDef action_fsm;
+    // The ANIMADM table this entry's first-person channel plays from (empty =
+    // none, and then no clip resolves). [orig: Def+0x174 / +372]
+    std::string animadm;
     // AdmDef+1104: FIRE delayEnd + RECOIL delayStart + RECOIL delayEnd.
     // Derive from the baked actions so a later ADM rebind cannot stale the floor.
     // [orig: AdmDefs_PostParseRecompute @0x53FEA0]
@@ -180,6 +185,13 @@ struct WeaponTable {
     // [orig: cap table @0x24E7DE0, parse @0x543873; clamp @0x540b26].
     std::vector<std::string> ammo_class_names;
     std::vector<int32_t> ammo_class_caps;
+    // The first-person tables' ring heads, one per ANIMADM shared by every entry
+    // naming it, as the load left them: every entry's bake reads, one idle play
+    // at each entry's END and one more per entry after the file. Plays in the
+    // match serve and advance them. [orig: AnimMap_LoadAdmFile @0x40CC40;
+    // Anim_InitActions @0x541FA0 (the idle play @0x54225A);
+    // WeaponDefs_PlayIdleAnimAll @0x53FC10 (@0x53FC2C)]
+    anim::AdmRingTable rings;
 
     bool empty() const { return entries.empty(); }
 

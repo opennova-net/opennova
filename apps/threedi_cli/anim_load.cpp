@@ -11,6 +11,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/adm/adm.h>
+#include <runtime/anim/adm_clip_index.h>
 
 using namespace opennova::bad;
 
@@ -98,7 +99,14 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 		BadBuildRow row;
 		row.key = entry.key;
 		for (size_t v = 0; v < entry.variant_count; ++v) row.variants.push_back(entry.variants[v]);
-		out.rows.push_back(row);
+		// The game registers a row only under the slot its key names past the
+		// first five characters. [orig: AnimMap_ParseConfigLine @0x40CB60 —
+		// AnimMap_FindSlotByName @0x40CFA0 returns -1 @0x40CFCE, and the row
+		// registers nothing @0x40CBA4]
+		if (opennova::anim::adm_slot_index(row.key) < 0)
+			out.dropped_rows.push_back(row);
+		else
+			out.rows.push_back(row);
 	}
 	opennova::adm::adm_free(&table);
 

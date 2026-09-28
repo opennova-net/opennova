@@ -604,7 +604,11 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 		if (!surface.is_skinned && !inset_section_part_visible(p_mask, surface.robj_index)) {
 			continue;
 		}
-		if (surface.is_skinned && skeleton_ != nullptr && view_twin_skin_.is_null() &&
+		// Godot skins the twin of a strip it skins on the node; a palette
+		// strip's twin reads the same material palette and takes its posed
+		// box (object_model_skin_palette.cpp).
+		const bool godot_skinned = surface.is_skinned && !surface.skin_palette;
+		if (godot_skinned && skeleton_ != nullptr && view_twin_skin_.is_null() &&
 				skeleton_skin_.is_valid()) {
 			view_twin_skin_ = skeleton_->register_skin(skeleton_skin_);
 		}
@@ -626,8 +630,10 @@ void ObjectModel::build_view_twins(int p_level, int64_t p_mask) {
 			if (material.is_valid()) {
 				rs->instance_geometry_set_material_override(twin.instance, material->get_rid());
 			}
-			if (surface.is_skinned && view_twin_skin_.is_valid()) {
+			if (godot_skinned && view_twin_skin_.is_valid()) {
 				rs->instance_attach_skeleton(twin.instance, view_twin_skin_->get_skeleton());
+			} else if (surface.skin_palette) {
+				rs->instance_set_custom_aabb(twin.instance, skin_posed_bounds_);
 			}
 			view_twins_.push_back(twin);
 			++live_geometry_instance_count_;

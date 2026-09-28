@@ -10,6 +10,8 @@
 #pragma once
 
 #include <formats/def/def.h>
+#include <runtime/anim/adm_ring_table.h>
+#include <runtime/anim/clip_timeline.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/round_ring.h>
 #include <runtime/world/vehicle_mount.h>
@@ -65,15 +67,6 @@ struct WeaponPresentationEvent {
     bool switch_denied = false;
 };
 
-// A per-key clip-variant ring: playback serves the head then advances — the
-// authored duplication is the rotation weighting. Keys are stored lowercased.
-// [orig: the animState slot heads (+72) built by AnimMap_RegisterBoneNode
-//  @ 0x40c2d0; Anim_GetDurationTicks @ 0x53ee10]
-struct WeaponClipRing {
-    std::vector<float> lengths;
-    int head = 0;
-};
-
 // The UseGun borrow staging phases. [orig: Entity_AttachToUseGunSlot
 // @ 0x546b80; the action-handler commit seams @ 0x543475 / @ 0x543539]
 enum class LocalUseGunSwitch : uint8_t { kNone, kAttach, kSwap, kDetach };
@@ -124,7 +117,6 @@ struct LocalPlayerWeapon {
     WeaponFsmDef def{};
     std::string def_name;
     WeaponSlotState slot{};
-    std::vector<std::pair<std::string, WeaponClipRing>> clip_rings;
 
     LocalUseGunSwitch usegun_switch = LocalUseGunSwitch::kNone;
     bool usegun_slot_active = false;
@@ -144,13 +136,38 @@ struct LocalPlayerWeapon {
     uint8_t pending_throw_charge = 0;
 
     uint32_t play_serial = 0;
-    std::string anim_key;
-    // The FP animadm channel position in 62 Hz ticks: the count of gated
-    // advances since the play (WeaponFsmEvents::advance_anim), NOT the play's
-    // wall-clock age — ticks outside the counter window do not move the clip.
+    // The FP animadm channel (WeaponDef+0x174), in retail's two halves. The
+    // primary half is the clip on show: its key (the one it registered under:
+    // `anim_reset` when the table fills the played slot with its reset clip),
+    // its served ring variant, and its position in 62 Hz ticks, the count of
+    // gated advances since it started (WeaponFsmEvents::advance_anim), NOT the
+    // play's wall-clock age: ticks outside the counter window do not move it.
     // [orig: the channel t maintained by AnimChannel_AdvancePlayback @ 0x40b140]
+    std::string anim_key;
     uint32_t anim_advance_ticks = 0;
     int32_t anim_variant = 0;
+    // The latch: the slot the last play named, whose ring a loop wrap serves,
+    // and the ring entry it holds (the entry's key and variant).
+    // [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 latches S+0x3C / +0x40 / +0x44]
+    std::string anim_slot_key;
+    std::string anim_latched_key;
+    int32_t anim_latched_variant = -1;
+    // The blend half: at a loop wrap the slot's next ring entry fades in from
+    // its start over eight gated advances while the outgoing clip runs on,
+    // then replaces it. A play restarts only the primary half, so a fade in
+    // flight still promotes its clip over the played one.
+    // [orig: AnimMap_AdvanceToNextAnim @ 0x40BDF0 -> AnimChannel_InitFromParams
+    //  @ 0x410640 (8, 0.125f); AnimChannel_AdvanceBlendedPlayback @ 0x40B1E0;
+    //  PlayAnimBySlot re-inits only the primary half @ 0x40BDD1]
+    bool anim_blending = false;
+    std::string anim_blend_key;
+    int32_t anim_blend_variant = 0;
+    uint32_t anim_blend_ticks = 0;
+    int32_t anim_fade_countdown = 0;
+    float anim_blend_weight = 0.0f;
+    // The primary half's clock, rebuilt when its clip changes: the loop wrap
+    // is its step past 1 (0 fps = a channel that never steps).
+    anim::ClipTimeline anim_clock;
     uint32_t fired_serial = 0;
     uint16_t round_sequence = 0;
     uint32_t dry_serial = 0;
@@ -227,7 +244,14 @@ struct WeaponInstallData {
     int32_t clipsize = 0;
     int32_t startrounds = 0;
     std::vector<WeaponFsmActionRow> rows;
-    // Per-key clip-variant lengths in seconds (keys any case; stored lowered).
+    // A mount by name: the weapon table's entry of that name carries the
+    // descriptors its load baked, and the mount runs those, baking nothing.
+    // Otherwise the install bakes `rows` itself (the seam a definition object
+    // takes) against the table's shared rings.
+    bool table_baked = false;
+    // A definition object's own per-key clip-variant lengths in seconds (keys
+    // any case), which stand in for its ANIMADM's rings when no table of that
+    // name loaded.
     std::vector<std::pair<std::string, std::vector<float>>> clip_rings;
 };
 
@@ -348,12 +372,14 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
                                   const WeaponSwitchOutcome &out, PlayerViewState &view);
 
-// Ring reads: serve the head then advance (the consuming duration read the
-// bake performs, and the play latch the anim events record).
-WeaponClipRing *weapon_ring_for(LocalPlayerWeapon &w,
-                                const std::string &key_lower);
-float weapon_ring_take_length(LocalPlayerWeapon &w, const char *key);
-int weapon_ring_take_variant(LocalPlayerWeapon &w, const std::string &key);
+
+// The FP channel's two legs, run by the pump on the FSM's events against the
+// weapon table's shared rings: a play of `key` (false for slot 0, whose play
+// does nothing) and one gated advance. [orig: AnimMap_PlayAnimBySlot
+// @ 0x40bda0; AnimChannel_AdvanceDispatch @ 0x40b960 ->
+// AnimChannel_AdvancePlayback @ 0x40b140 / AdvanceBlendedPlayback @ 0x40B1E0]
+bool fp_channel_play(anim::AdmRingTable &rings, LocalPlayerWeapon &w, const std::string &key);
+void fp_channel_advance(anim::AdmRingTable &rings, LocalPlayerWeapon &w);
 
 // Install/rebake, clear, and the latching input writer.
 void local_weapon_install(World &world, LocalPlayerWeapon &w,
@@ -450,6 +476,14 @@ struct LocalPlayerWeaponView {
     std::string anim_key;
     int32_t anim_variant = 0;
     int32_t anim_advance_ticks = 0;
+    // The channel's blend half while a loop wrap fades the next ring entry
+    // in: the pose is the primary clip slerped toward it by the weight.
+    // [orig: AnimChannel_BlendTwoChannels @ 0x410DBD]
+    bool anim_blending = false;
+    std::string anim_blend_key;
+    int32_t anim_blend_variant = 0;
+    int32_t anim_blend_ticks = 0;
+    float anim_blend_weight = 0.0f;
     int32_t play_serial = 0;
     int32_t action_serial = 0;
     int32_t action_started = -1;

@@ -450,7 +450,7 @@ then 0°/180°; and a four-tap 45° final average at
 radius `0.0027621093`, alpha 0.5, blended SRCALPHA/ONE over the beauty target.
 The terminal gamma decode follows that composite. Particle compositor assembly
 always places this terminal effect last, and built-in Godot glow is disabled.
-The `glow` probe pins all 24 technique contracts plus the native backend
+The `glow` probe pins all 26 technique contracts plus the native backend
 report (typed submitted/rejected/drawn counters, resolved-depth facts, and
 exact constants). `Q3FrameCompiler` owns back-to-front Q3 order. D-RORD-3 closed with one
 priority-bearing material instance per retained rigid strip, transformed

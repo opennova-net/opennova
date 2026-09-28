@@ -8757,10 +8757,11 @@ borrowers and pump unoccupied hot pool-1 slots once per tick; mounted authority
 slots already participate in the post-entity action phase.
 
 D-WPN-26 is closed (2026-08-15). The production builder now accepts the mounted
-`ResourceIndex`, resolves each weapon ADM, and builds a definition-local `AdmClipIndex`
-whose variant rings are consumed by the bake callbacks. Each authored automatic start/end
-field therefore consumes one matching clip and resolves its 62.5 Hz duration, matching the
-two independent retail reads in `Anim_InitActions`; assetless callers retain the explicit
+`ResourceIndex`, resolves each weapon ADM, and bakes each def once, in weapon.def order,
+against the table's shared ANIMADM rings (`anim::AdmRingTable`, one per file, so an
+earlier def's reads move a later def's heads; net-re §5.62). Each authored automatic
+start/end field therefore consumes one matching clip and resolves its 62.5 Hz duration,
+matching the two independent retail reads in `Anim_InitActions`; assetless callers retain the explicit
 zero-duration fallback. `npruntime_weapon_table_test` pins committed `soldier`
 `anim_idle` data at 18 ticks and separately pins that fallback.
 
@@ -13205,10 +13206,11 @@ the ground death's child kill) route the same way.
   entry. `Entity_ResetToSpawnState @ 0x4B9610` writes both requests (@ 0x4B9708 /
   @ 0x4B9714, @ 0x4B972A) and runs the update (@ 0x4B973D). Port:
   `AiSystem::anim_rings` (`AnimVariantRings`) serves both channels in that order.
-  Carried: joiner replica rows keep entry 0 (the wire carries no variant), and the
-  first-person weapon clip ring and the weapon table's `auto` duration ring still
-  serve first to last although the viewmodel `.adm` registers through the same
-  inserter.
+  A looping channel's wrap serves its playing state's ring again and fades another
+  entry in over eight ticks (`AnimMap_AdvanceToNextAnim @ 0x40BDF0`, both channels,
+  anim/adm-bad-format-re.md). The first-person rings serve the same way from one
+  table per ANIMADM (net-re §5.62). Carried: joiner replica rows keep entry 0 (the
+  wire carries no variant).
 
 ### 38.4 Org1 think: perception, combat legs, guard family, walks, selector
 

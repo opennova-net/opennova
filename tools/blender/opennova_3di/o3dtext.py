@@ -15,6 +15,7 @@
 import contextlib
 import math
 import os
+import re
 import subprocess
 import tempfile
 
@@ -128,27 +129,26 @@ def num(text):
 
 
 # --- the axes ---------------------------------------------------------------
+#
+# A model faces its root's -Y, Blender's front view: mission forward (x) is
+# the root's -Y, mission left (y) its +X, up its +Z. Turning the model root
+# turns the whole model with it, so a model built facing another way exports
+# the same once its root is turned to match.
 
-def axis_basis(forward):
+def axis_basis():
     """Mission -> Blender as a column matrix B (b = B m); a proper rotation."""
-    if forward == "-Y":
-        return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
-    return Matrix.Identity(3)
+    return Matrix(((0, 1, 0), (-1, 0, 0), (0, 0, 1)))
 
 
-def axis_map(forward):
+def axis_map():
     """Blender -> mission for a vector, B^T as a swizzle."""
-    if forward == "-Y":
-        return lambda v: (-v.y, v.x, v.z)
-    return lambda v: (v.x, v.y, v.z)
+    return lambda v: (-v.y, v.x, v.z)
 
 
-def blender_axes(forward):
+def blender_axes():
     """Mission -> Blender for a vector, B as a swizzle (a not-finite component
     stays in its own place)."""
-    if forward == "-Y":
-        return lambda m: Vector((m[1], -m[0], m[2]))
-    return lambda m: Vector((m[0], m[1], m[2]))
+    return lambda m: Vector((m[1], -m[0], m[2]))
 
 
 # A root's own transform channels and what they hold at the origin.
@@ -160,33 +160,45 @@ ORIGIN_CHANNELS = (("location", (0.0, 0.0, 0.0)), ("rotation_euler", (0.0, 0.0, 
 
 
 @contextlib.contextmanager
-def at_world_origin(context, model):
-    """The model root at the world origin while an export reads it, then back
-    where it stood. Blender holds matrices in single precision, so an object
+def at_world_origin(context, *models):
+    """The models at the world origin while an export reads them, then back
+    where they stood. Blender holds matrices in single precision, so an object
     read back through a placed root comes back a float step off, and a step
     below a 16.16 word (a retail CXLT row sits on that grid) truncates a whole
     step down: at the origin every export reads the very matrices of a model
-    that was never moved. An unparented root stands there with its own
-    constraints (a mount) muted; a parented one is read through its root's
-    frame (ModelSpace)."""
-    if model.parent is not None or model.matrix_world == Matrix.Identity(4):
-        yield
-        return
-    held = [(name, tuple(getattr(model, name))) for name, _ in ORIGIN_CHANNELS]
-    muted = [(c, c.mute) for c in model.constraints]
-    for c, _ in muted:
-        c.mute = True
-    for name, value in ORIGIN_CHANNELS:
-        setattr(model, name, value)
-    context.view_layer.update()
+    that was never moved. Each model stands there through its outermost
+    ancestor (itself when unparented; the gun's root for arms parented to it),
+    with that ancestor's own constraints (a mount) muted; a model offset from
+    that ancestor is read through its root's frame (ModelSpace). A None model
+    is skipped."""
+    tops = []
+    for model in models:
+        if model is None:
+            continue
+        top = model
+        while top.parent is not None:
+            top = top.parent
+        if top not in tops and top.matrix_world != Matrix.Identity(4):
+            tops.append(top)
+    held = [(top, [(name, tuple(getattr(top, name))) for name, _ in ORIGIN_CHANNELS],
+             [(c, c.mute) for c in top.constraints]) for top in tops]
+    for top, _, muted in held:
+        for c, _ in muted:
+            c.mute = True
+        for name, value in ORIGIN_CHANNELS:
+            setattr(top, name, value)
+    if held:
+        context.view_layer.update()
     try:
         yield
     finally:
-        for name, value in held:
-            setattr(model, name, value)
-        for c, mute in muted:
-            c.mute = mute
-        context.view_layer.update()
+        for top, channels, muted in held:
+            for name, value in channels:
+                setattr(top, name, value)
+            for c, mute in muted:
+                c.mute = mute
+        if held:
+            context.view_layer.update()
 
 
 class ModelSpace:
@@ -198,14 +210,18 @@ class ModelSpace:
     carries. Made after the view layer is updated, so the root's matrix is
     current."""
 
-    def __init__(self, model, forward):
-        self.basis = axis_basis(forward)
-        self.to_mission = axis_map(forward)
+    def __init__(self, model):
+        self.basis = axis_basis()
+        self.to_mission = axis_map()
         root = model.matrix_world
         self.into_root = None if root == Matrix.Identity(4) else root.inverted_safe()
 
     def world(self, ob):
-        return ob.matrix_world if self.into_root is None else self.into_root @ ob.matrix_world
+        return self.local(ob.matrix_world)
+
+    def local(self, matrix):
+        """A world matrix in the model root's frame."""
+        return matrix if self.into_root is None else self.into_root @ matrix
 
     def mission(self, v):
         return self.to_mission(v)
@@ -221,20 +237,19 @@ class ModelSpace:
 @contextlib.contextmanager
 def playing(data, action, slot=None):
     """`action` played on its own through `data` (a rig's animation data)
-    while the block runs: the NLA off and, on Blender 4.4 and up, through
-    `slot` when one is given (else the slot assigning the Action picks). The
-    rig's own Action, slot and NLA come back after."""
-    slotted = hasattr(data, "action_slot")
-    held = (data.action, data.use_nla, data.action_slot if slotted else None)
+    while the block runs: the NLA off and through `slot` when one is given
+    (else the slot assigning the Action picks). The rig's own Action, slot and
+    NLA come back after."""
+    held = (data.action, data.use_nla, data.action_slot)
     try:
         data.use_nla = False
         data.action = action
-        if slotted and slot is not None:
+        if slot is not None:
             data.action_slot = slot
         yield
     finally:
         data.action, data.use_nla = held[0], held[1]
-        if slotted and held[0] is not None and held[2] is not None:
+        if held[0] is not None and held[2] is not None:
             data.action_slot = held[2]
 
 
@@ -245,11 +260,11 @@ def bundled_cli_path():
 
 
 def cli_path(context=None):
-    scene = (context or bpy.context).scene
-    custom = scene.o3d.cli_path if scene is not None else ""
-    if custom:
-        return bpy.path.abspath(custom)
-    return bundled_cli_path()
+    """The opennova-3di the add-on runs: the one its preferences name, else
+    the one bundled with it."""
+    entry = (context or bpy.context).preferences.addons.get(__package__)
+    custom = entry.preferences.cli_path if entry is not None and entry.preferences is not None else ""
+    return bpy.path.abspath(custom) if custom else bundled_cli_path()
 
 
 def scratch():
@@ -262,10 +277,10 @@ def scratch():
 def run_cli(context, args, failure, timeout=None, hide=()):
     """Run `opennova-3di <args>` and return what it printed. Raises `failure`
     when the executable is missing, cannot start or fails, with what it said
-    (its errors first) or its exit code; `hide` pairs a path in that message
-    (a scratch file) with the words shown instead. The CLI prints paths, which
-    may hold any character: its output reads as UTF-8 whatever this Python's
-    locale is."""
+    (its errors first) or its exit code; `hide` pairs a path in what it says,
+    failing or not (a scratch file), with the words shown instead. The CLI
+    prints paths, which may hold any character: its output reads as UTF-8
+    whatever this Python's locale is."""
     cli = cli_path(context)
     if not os.path.isfile(cli):
         raise failure(f"opennova-3di not found at {cli}")
@@ -274,18 +289,29 @@ def run_cli(context, args, failure, timeout=None, hide=()):
                                 timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:
         raise failure(str(e)) from e
+    for path, shown in hide:
+        result.stdout, result.stderr = result.stdout.replace(path, shown), result.stderr.replace(path, shown)
     if result.returncode != 0:
         said = result.stderr + result.stdout
-        for path, shown in hide:
-            said = said.replace(path, shown)
         raise failure(said.strip()[:2000] or f"opennova-3di {args[0]} failed (exit {result.returncode})")
     return result
 
 
+# The place a note of the CLI names in the text it read: `<file>:<line>: `.
+NOTE_AT = re.compile(r"^(.*:\d+): $")
+
+
 def cli_notes(result, marker):
     """The CLI's notes after `marker` (`note: `, `scene drops `), one per
-    line of its error stream."""
-    return [line.split(marker, 1)[1] for line in result.stderr.splitlines() if marker in line]
+    line of its error stream; a note on a line of the text the CLI read keeps
+    that place in front (`scene text:12: ...`, the file as `hide` shows it)."""
+    out = []
+    for line in result.stderr.splitlines():
+        if marker in line:
+            head, note = line.split(marker, 1)
+            at = NOTE_AT.match(head)
+            out.append(f"{at.group(1)}: {note}" if at else note)
+    return out
 
 
 def import_text(context, command, path, name, reader):

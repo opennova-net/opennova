@@ -26,6 +26,10 @@ public:
 	// regardless. [orig: AnimChannel_AdvancePlayback @0x40B193 (0x40000 test),
 	// wrap @0x40B199, re-park @0x40B1A2..0x40B1B1 (0x20000 | flt_7C327C)]
 	float normalized_at(int32_t ticks, int32_t armed_boundary) const;
+	// Whether a looping channel wrapped on the step into `ticks`: its t crossed 1
+	// and took one away, which is where the slot's ring serves its next variant.
+	// [orig: AnimChannel_AdvancePlayback @0x40B165 (t >= 1), @0x40B199 (t -= 1)]
+	bool wrapped_at(int32_t ticks) const;
 	double frame_at(int32_t ticks) const;
 	double seconds_at(int32_t ticks) const;
 	bool stopped_at(int32_t ticks) const;

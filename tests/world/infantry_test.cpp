@@ -2388,6 +2388,151 @@ void test_primary_channel_runs_on_its_served_ring_entry() {
     CHECK(inf.anim_prev_variant == 1);
 }
 
+// A looping two-entry idle (entry 0 wraps every 4 ticks, entry 1 every 6), a
+// three-token reset row the unauthored states fall back to, and a one-entry
+// walk loop. Each sample names its entry and its phase within the clip.
+struct WrapRingSource : IRootMotionSource {
+    bool has_clip(int, int id) const override {
+        return id == anim_state::kIdle || id == anim_state::kReset ||
+               id == anim_state::kWalkForward;
+    }
+    int variant_count(int, int id) const override {
+        if (id == anim_state::kIdle) return 2;
+        if (id == anim_state::kWalkForward) return 1;
+        return 3; // the reset row, which every unauthored state binds
+    }
+    int32_t clip_length_ticks(int, int id, int variant) const override {
+        if (id == anim_state::kIdle) return variant == 0 ? 4 : 6;
+        return 5;
+    }
+    bool clip_loops(int, int) const override { return true; }
+    bool advance(int adm, int id, int32_t &phase, RootMotionFrame &out) override {
+        return advance_variant(adm, id, 0, phase, out);
+    }
+    bool advance_variant(int adm, int id, int variant, int32_t &phase,
+                         RootMotionFrame &out) override {
+        ++phase;
+        out = RootMotionFrame{};
+        out.dx = 100 * (variant + 1);
+        out.events = static_cast<uint32_t>(((variant + 1) << 8) |
+                                           (phase % clip_length_ticks(adm, id, variant)));
+        return true;
+    }
+};
+
+// Every loop wrap of an unarmed, unblended channel serves its playing state's
+// ring: another entry fades in from its first frame over eight ticks (weight
+// 0 on the wrap tick, then 1/8 a tick) while the wrapped one plays on; the
+// wrap tick reads the wrapped entry's motion but the incoming entry's trigger
+// at t = 0. No wrap serves while the fade runs, an armed channel parks without
+// serving, a one-entry loop plays on, and slot 0 and an unauthored state are
+// no rings. [orig: AnimChannel_AdvancePlayback @0x40B140 (the park @0x40B19E,
+// the gate @0x40B1B5..0x40B1C1, the callback @0x40B1C8);
+// AnimMap_AdvanceToNextAnim @0x40BDF0 (@0x40BE02..0x40BE24);
+// AnimChannel_AdvanceBlendedPlayback @0x40B1E0; AnimChannel_BlendKeyframes
+// @0x40B340 (trigger @0x40B38D); AnimMap_RegisterBoneNode @0x40C38B, @0x40C39A]
+void test_primary_loop_wrap_serves_the_ring_and_fades() {
+    WrapRingSource src;
+    AnimVariantRings rings;
+    InfantryState inf;
+    inf.active = true;
+    inf.adm_id = 3;
+    inf.reset_body_animation(anim_state::kIdle);
+    RootMotionFrame frame;
+    for (int t = 1; t <= 3; ++t) advance_primary_channel(inf, src, rings, frame);
+    CHECK(!inf.body_blend_active() && inf.anim_variant == 0 && inf.clip_phase == 3);
+    advance_primary_channel(inf, src, rings, frame); // entry 0 wraps: the ring serves 1
+    CHECK(inf.body_blend_active());
+    CHECK(inf.anim_blend_weight == 0.0f && inf.anim_blend_step == 0.125f);
+    CHECK(inf.anim_prev == anim_state::kIdle && inf.anim_prev_variant == 0);
+    CHECK(inf.anim_prev_clip_phase == 4);
+    CHECK(inf.anim_variant == 1 && inf.clip_phase == 0);
+    CHECK(inf.body_clip_state() == anim_state::kIdle && inf.anim_state == anim_state::kIdle);
+    CHECK(frame.dx == 100);          // the wrapped entry's motion...
+    CHECK(frame.events == (2u << 8)); // ...the incoming entry's trigger at t = 0
+    for (int k = 1; k <= 7; ++k) {
+        advance_primary_channel(inf, src, rings, frame);
+        CHECK(inf.body_blend_active());
+        CHECK(inf.anim_blend_weight == 0.125f * static_cast<float>(k));
+        CHECK(inf.clip_phase == k && inf.anim_prev_clip_phase == 4 + k);
+    }
+    // Entry 1 wrapped at its sixth tick inside the fade and served nothing.
+    advance_primary_channel(inf, src, rings, frame); // the eighth: the fade ends
+    CHECK(!inf.body_blend_active() && inf.anim_variant == 1 && inf.clip_phase == 8);
+    CHECK(frame.dx == 200);
+    for (int t = 9; t <= 11; ++t) advance_primary_channel(inf, src, rings, frame);
+    CHECK(!inf.body_blend_active());
+    advance_primary_channel(inf, src, rings, frame); // entry 1 wraps at 12: serves 0
+    CHECK(inf.body_blend_active() && inf.anim_variant == 0 && inf.anim_prev_variant == 1);
+    for (int k = 0; k < 8; ++k) advance_primary_channel(inf, src, rings, frame);
+    CHECK(!inf.body_blend_active() && inf.anim_variant == 0 && inf.clip_phase == 8);
+
+    // Armed by a pending request, the wrap parks and serves nothing. The
+    // promotion resets the channel's flags, so on the promotion tick the loop
+    // parked on its end wraps unarmed and serves.
+    inf.reset_body_animation(anim_state::kIdle);
+    inf.anim_pending = anim_state::kWalkForward;
+    for (int t = 1; t <= 4; ++t) {
+        advance_primary_channel(inf, src, rings, frame);
+        CHECK(!inf.body_blend_active());
+    }
+    CHECK(inf.anim_pending == anim_state::kWalkForward && inf.clip_phase == 4);
+    advance_primary_channel(inf, src, rings, frame); // the promotion tick
+    CHECK(inf.anim_pending == 0 && inf.anim_state == anim_state::kWalkForward);
+    CHECK(inf.body_blend_active() && inf.anim_variant == 1 && inf.anim_prev_variant == 0);
+    CHECK(frame.events == (2u << 8)); // the incoming entry's trigger at t = 0
+    CHECK(rings.serve(&src, inf.adm_id, anim_state::kIdle) == 0); // the head moved once
+
+    // A one-entry loop wraps onto itself: nothing fades.
+    inf.reset_body_animation(anim_state::kWalkForward);
+    for (int t = 1; t <= 12; ++t) {
+        advance_primary_channel(inf, src, rings, frame);
+        CHECK(!inf.body_blend_active());
+    }
+
+    // Slot 0 holds the last reset token and an unauthored state the first;
+    // neither is a ring.
+    for (int n = 0; n < 4; ++n) {
+        CHECK(rings.serve(&src, inf.adm_id, anim_state::kReset) == 2);
+        CHECK(rings.serve(&src, inf.adm_id, anim_state::kSwimIdle) == 0);
+    }
+}
+
+// The secondary wraps through the same code, serving from the heads it shares
+// with the primary, and serves first: on a tick both channels wrap, the
+// secondary takes the ring's next entry and the primary the one after.
+// [orig: AnimMap_UpdateDualChannels @0x40B8C0 — the secondary @0x40B908
+//  before the primary @0x40B94E; AnimMap_AdvanceToNextAnim @0x40BDF0]
+void test_secondary_loop_wrap_shares_the_ring_heads() {
+    AiSystem ai;
+    WrapRingSource src;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.adm_id = 3;
+    e->inf.reset_body_animation(anim_state::kIdle);
+    e->inf.reset_weapon_animation(anim_state::kIdle);
+    RootMotionFrame frame;
+    const auto dual = [&] {
+        ai.infantry_weapon_channel_advance(*e);
+        advance_primary_channel(e->inf, src, ai.anim_rings, frame);
+    };
+    for (int t = 1; t <= 3; ++t) dual();
+    CHECK(!e->inf.weapon_blend_active() && !e->inf.body_blend_active());
+    dual(); // both wrap: the secondary serves 1, then the primary serves 0
+    CHECK(e->inf.weapon_blend_active() && e->inf.wpn_variant == 1);
+    CHECK(e->inf.wpn_prev == anim_state::kIdle && e->inf.wpn_prev_variant == 0);
+    CHECK(e->inf.wpn_prev_clip_phase == 4 && e->inf.wpn_clip_phase == 0);
+    CHECK(e->inf.wpn_blend_step == 0.125f);
+    CHECK(!e->inf.body_blend_active() && e->inf.anim_variant == 0);
+    for (int t = 5; t <= 7; ++t) dual();
+    dual(); // the primary's next wrap serves 1 while the secondary still fades
+    CHECK(e->inf.body_blend_active() && e->inf.anim_variant == 1);
+    CHECK(e->inf.weapon_blend_active());
+    for (int t = 9; t <= 12; ++t) dual();
+    CHECK(!e->inf.weapon_blend_active() && e->inf.wpn_variant == 1);
+    CHECK(e->inf.wpn_clip_phase == 8);
+}
+
 // The hold-pose kind ladder (special_hold 1-8 -> states 50-61, the scoped +1 variants),
 // the scoped rifle default (49 idle_3), and the override order — binoculars 64 beats the
 // holds, the reload window beats binoculars, and the pistol kind selects 66 reload2.
@@ -6302,6 +6447,8 @@ int main(int argc, char **argv) {
     test_player_weapon_channel_variant_ring();
     test_npc_channels_share_the_adm_variant_ring_heads();
     test_primary_channel_runs_on_its_served_ring_entry();
+    test_primary_loop_wrap_serves_the_ring_and_fades();
+    test_secondary_loop_wrap_shares_the_ring_heads();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
     test_player_arms_dip();

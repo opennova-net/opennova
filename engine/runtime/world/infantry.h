@@ -325,6 +325,17 @@ public:
         return length > 0 && clip_loops(adm_id, state_id)
                 ? (phase_ticks / length + 1) * length : length;
     }
+    // Whether the channel's step INTO `phase_ticks` wrapped the served entry's
+    // looping clip: its t crossed 1 and took one away, the tick an unarmed,
+    // unblended channel serves its slot's ring again. The default reads the
+    // loop bit and the next boundary; a provider with the retail clock answers
+    // per entry. [orig: AnimChannel_AdvancePlayback @0x40B165 (t >= 1), the
+    // loop bit @0x40B167, t -= 1 @0x40B199]
+    virtual bool clip_wraps_at(int adm_id, int state_id, int variant,
+                               int32_t phase_ticks) const {
+        return phase_ticks > 0 && clip_loops(adm_id, state_id) &&
+               clip_boundary_after(adm_id, state_id, phase_ticks - 1, variant) == phase_ticks;
+    }
 
 };
 
@@ -336,8 +347,11 @@ public:
 // ahead of the head and points the table at it, so the table starts on the
 // row's LAST token and the ring runs backwards through the file order:
 // successive plays of S, by any channel of any body sharing the .adm, serve the
-// row's entries last to first, then wrap to the last again (an unauthored
-// state serves the reset row). A single-clip row always serves its one entry.
+// row's entries last to first, then wrap to the last again. A single-clip row
+// always serves its one entry. Slot 0 is no ring (each reset token replaced its
+// head, so it holds the last one) and a state the .adm does not author holds
+// the first reset token; neither moves. A looping channel's wrap serves its
+// playing state's ring too (advance_primary_channel, the secondary's advance).
 // Entry indices are file order (the variant index every clip source uses).
 // [orig: AnimMap_LoadAdmFile @0x40CC40 reuses the entry by name (the
 //  AnimMap_FindByName call @0x40CD2F, the template slot @0x40CD4F);
@@ -345,15 +359,21 @@ public:
 //  AnimMap_LinkEntity @0x40BA10 (slot+0x48 = &entry+0x44 @0x40BA77); the ring
 //  insert AnimMap_RegisterBoneNode @0x40C2D0 (node->next = head @0x40C37F,
 //  tail->next = node @0x40C382, table = node @0x40C385; a first token or the
-//  reset slot self-rings @0x40C38B..0x40C38F); the re-init AnimMap_UpdateEntity
-//  @0x40B737..0x40B778]
+//  reset slot self-rings @0x40C38B..0x40C38F, the first one backfills every
+//  empty slot @0x40C39A..0x40C3E2); the re-init AnimMap_UpdateEntity
+//  @0x40B737..0x40B778; the wrap AnimMap_AdvanceToNextAnim @0x40BDF0]
 class AnimVariantRings {
 public:
-    // The ring entry a re-init of `state` plays, advancing that state's head.
-    // Call only when the channel actually re-inits.
+    // The ring entry a re-init or a loop wrap of `state` plays, advancing that
+    // state's head. Call only when the channel actually re-inits or wraps.
     int32_t serve(const IRootMotionSource *source, int adm_id, int state) {
         const int count = source != nullptr ? source->variant_count(adm_id, state) : 1;
         if (count <= 1) return 0;
+        // Only an authored row is a ring: slot 0 holds the last reset token, an
+        // unauthored state the first. [orig: AnimMap_RegisterBoneNode — the
+        // slot-0 store @0x40C38B..0x40C38F, the backfill @0x40C39A..0x40C3E2]
+        if (state == anim_state::kReset) return count - 1;
+        if (!source->has_clip(adm_id, state)) return 0;
         // Plays of this state so far, modulo the ring: play p serves the entry
         // p steps back from the last.
         int32_t &plays = heads_[(static_cast<int64_t>(adm_id) << 32) |
@@ -484,6 +504,22 @@ struct InfantryState {
                         : 0.1f;
     }
 
+    // A loop wrap served another entry of the playing state's ring: the wrapped
+    // entry plays on as the outgoing half from `wrapped_phase` and the served
+    // one fades in from its first frame over eight ticks. The state and its
+    // request stay. [orig: AnimMap_AdvanceToNextAnim @0x40BDF0 ->
+    // AnimChannel_InitFromParams(ch, clip, 8, 0, 0x1000) @0x40BE24: the blend
+    // half at t = 0 @0x41068A, weight 0 @0x410690, step 1/8 @0x410695]
+    void begin_body_wrap_fade(int32_t served, int32_t wrapped_phase) {
+        anim_prev = body_clip_state();
+        anim_prev_variant = anim_variant;
+        anim_prev_clip_phase = wrapped_phase;
+        anim_variant = served;
+        clip_phase = 0;
+        anim_blend_weight = 0.0f;
+        anim_blend_step = 0.125f;
+    }
+
     // A raw animStateId store leaves both the playing channel and the
     // independent pending state intact. Script and ladder stores
     // use this form. [orig: WacCmd_SsnAnim @0x4F7630; WacCmd_Anim @0x4ED5B0]
@@ -611,6 +647,20 @@ struct InfantryState {
                         ? (1.0f / 15.0f)
                         : 0.1f;
         wpn_variant = variant;
+    }
+
+    // The secondary's loop wrap onto another ring entry, as begin_body_wrap_fade.
+    // [orig: AnimMap_AdvanceToNextAnim @0x40BDF0 via the shared
+    //  AnimMap_UpdateEntity advance @0x40B7FE, reached for the secondary
+    //  @0x40B908]
+    void begin_weapon_wrap_fade(int32_t served, int32_t wrapped_phase) {
+        wpn_prev = weapon_clip_state();
+        wpn_prev_variant = wpn_variant;
+        wpn_prev_clip_phase = wrapped_phase;
+        wpn_variant = served;
+        wpn_clip_phase = 0;
+        wpn_blend_weight = 0.0f;
+        wpn_blend_step = 0.125f;
     }
 
     void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {

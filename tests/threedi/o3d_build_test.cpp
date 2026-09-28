@@ -1,9 +1,10 @@
 // opennova-3di `build` and `scene` over small scenes: what the scene text
 // carries through build -> scene -> build byte for byte, and the malformed
 // records build refuses (docs/threedi/o3d-scene-format.md "Validation").
-// Drives the command handlers the CLI dispatches (opennova_3di_commands).
+// Drives the command handlers the CLI dispatches (opennova_3di_commands), and
+// the executable itself where a refusal must say why.
 //
-//   o3d_build_test <scratch dir>
+//   o3d_build_test <scratch dir> <opennova-3di>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -16,6 +17,7 @@
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
 
+#include "common/run_command.h"
 #include "threedi_cli.h"
 #include "../common/file_io.h"
 
@@ -62,11 +64,41 @@ void round_trip(const std::string &name, const std::string &text) {
 // Build must refuse `text` (one field changed from an accepted scene).
 void refuses(const std::string &name, const std::string &text) { check(!build(name, text), name + ": refused"); }
 
+std::string cli; // the opennova-3di executable
+
+// Run the CLI's `build` over `text`: its exit status, and what it said on
+// stderr in `said`.
+int build_with_cli(const std::string &name, const std::string &text, std::string &said) {
+	std::ofstream(path_of(name, ".o3d"), std::ios::binary) << text;
+	const std::string said_path = path_of(name, ".err");
+	const int status = test_cmd::run(test_cmd::quoted(cli) + " build " + test_cmd::quoted(path_of(name, ".o3d")) + " -o " +
+			test_cmd::quoted(path_of(name, ".3di")) + " 2> " + test_cmd::quoted(said_path));
+	said = read_file_text(said_path);
+	return status;
+}
+
+// The CLI must refuse `text` and say `words` on stderr: the message an author
+// reads is part of the contract.
+void refuses_saying(const std::string &name, const std::string &text, const std::string &words) {
+	std::string said;
+	check(build_with_cli(name, text, said) != 0, name + ": refused");
+	check(said.find(words) != std::string::npos, name + ": says \"" + words + "\" (it said: " + said.substr(0, 400) + ")");
+}
+
+// The CLI must build `text`, and say `words` on stderr (a note), or say
+// nothing of `words` when `says` is false.
+void builds_saying(const std::string &name, const std::string &text, const std::string &words, bool says = true) {
+	std::string said;
+	check(build_with_cli(name, text, said) == 0, name + ": built (it said: " + said.substr(0, 400) + ")");
+	check((said.find(words) != std::string::npos) == says,
+			name + (says ? ": says \"" : ": does not say \"") + words + "\" (it said: " + said.substr(0, 400) + ")");
+}
+
 const std::string kSkinned =
 		"o3d 1\nmodel SKIN\nskinned 1\nmaterial VS_SKBASIC\ntexture skin.tga\nlod 128 gnrc\n"
 		"part 0 0 0 0\npart 0 0 0 1\npart 0 0 0 -1\nstrip 0 0\nbones 0 1\n"
-		"v 1 1 0 0 0 1 0 0 0 1 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 1 0 0.5 0.5 0\n"
-		"v -1 -1 1 0 0 1 1 1 1 0 0 1 0 0\nv 1 -1 1 0 0 1 1 0 1 0 0 0.75 0.25 0\nt 0 1 2\nt 0 2 3\n"
+		"v 1 1 0 0 0 1 0 0 0 1 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 1 0 0 0.5 0.5 0\n"
+		"v -1 -1 1 0 0 1 1 1 1 0 0 0 1 0 0\nv 1 -1 1 0 0 1 1 0 1 0 0 0 0.75 0.25 0\nt 0 1 2\nt 0 2 3\n"
 		"panm 0 0\npanm 1 0\npanm 2 0\n"
 		"cobj 0 0 0 0\ncsphere 0 0 0 0.5\ncobj 0 0 0 1\ncsphere 0 0 1 0.25\n"
 		"cobj 0 0 0 -1\ncv 1 1 0\ncv -1 1 0\ncv -1 -1 1\ncf 0 1 2 1\n";
@@ -74,11 +106,12 @@ const std::string kSkinned =
 } // namespace
 
 int main(int argc, char **argv) {
-	if (argc != 2) {
-		std::fprintf(stderr, "usage: o3d_build_test <scratch dir>\n");
+	if (argc != 3) {
+		std::fprintf(stderr, "usage: o3d_build_test <scratch dir> <opennova-3di>\n");
 		return 2;
 	}
 	dir = std::filesystem::path(argv[1]) / "o3d-build";
+	cli = argv[2];
 	std::filesystem::create_directories(dir);
 
 	// A skinned model's LOD with no parts (retail ships empty LODs) scenes and
@@ -211,10 +244,51 @@ int main(int argc, char **argv) {
 	// comes back on that bone, so the bone keeps its bounds.
 	round_trip("skinned-on-bones",
 			"o3d 1\nmodel BONES\nskinned 1\nmaterial VS_SKBASIC\nlod 0\npart 0 0 0 0\n"
-			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 1 0 0\nv -1 -1 1 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"strip 0\nbones 0\nv 1 1 0 0 0 1 0 0 0 0 0 0 1 0 0\nv -1 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
+			"v -1 -1 1 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
 			"part 0 3 0 0\n"
-			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 1 0 0\nv 3 0 2 0 0 1 1 1 0 0 0 1 0 0\nt 0 1 2\n"
+			"strip 0\nbones 1\nv 4 0 0 0 0 1 0 0 0 0 0 0 1 0 0\nv 3 1 0 0 0 1 0 1 0 0 0 0 1 0 0\n"
+			"v 3 0 2 0 0 1 1 1 0 0 0 0 1 0 0\nt 0 1 2\n"
 			"panm 0 0\npanm 1 0\n");
+
+	// A skinned vertex carries four bone-table slots and three weights; slot 3
+	// takes the rest, 1 - (w0 + w1 + w2), as retail's vertex shader blends.
+	// The fourth slot comes back from `scene`, and build refuses a weight that
+	// is no finite number from 0 to 1 and weights summing past 1 (retail's
+	// four-decimal weights reach 1.0001 in float, ArmGlovD, which builds).
+	{
+		const std::string head = "o3d 1\nmodel FOUR\nskinned 1\nmaterial VS_SKBASIC\nlod 0 gnrc\n"
+				"part 0 0 0 0\npart 0 0 0 1\npart 1 0 0 2\nstrip 0\nbones 0 1 2\n";
+		const std::string tail = "v 1 0 0 0 0 1 1 0 0 1 2 2 0.25 0.25 0.25\nv 0 1 0 0 0 1 0 1 0 1 1 2 0.5 0.5 0\n"
+				"t 0 1 2\npanm 0 0\npanm 1 0\npanm 2 1\n";
+		round_trip("fourth-slot", head + "v 0 0 0 0 0 1 0 0 2 1 0 1 0.5 0.25 0\n" + tail);
+		Threedi3di3 m{};
+		if (threedi_3di3_read(path_of("fourth-slot", ".3di").c_str(), &m) == 0) {
+			const ThreediVertex &v = m.lods[0].vertices.items[0];
+			const ThreediTriangleStrip &st = m.lods[0].strips[0];
+			check(v.bone_indices[0] == 2 && v.bone_indices[1] == 1 && v.bone_indices[2] == 0 && v.bone_indices[3] == 1 &&
+							v.bone_weights[0] == 0.5f && v.bone_weights[1] == 0.25f && v.bone_weights[2] == 0.0f,
+					"fourth-slot: the four slots and three weights are stored as given");
+			ThreediSkinInfluence influences[4];
+			threedi_skin_influences(&v, st.bone_table, st.bone_table_length, influences);
+			check(influences[0].part == 2 && influences[3].slot == 1 && influences[3].part == 1 &&
+							influences[3].weight == 0.25f,
+					"fourth-slot: slot 3's part takes the rest");
+			threedi_3di3_free(&m);
+		} else {
+			check(false, "fourth-slot: read back");
+		}
+		check(read_file_text(path_of("fourth-slot", ".rt.o3d")).find(" 2 1 0 1 0.5 0.25 0\n") != std::string::npos,
+				"fourth-slot: scene writes the four slots");
+		check(build("weights-retail-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.4487 0.3871 0.1643\n" + tail),
+				"weights-retail-sum: retail's 1.0001 builds");
+		refuses("weights-sum", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 0.5 0.5 0.01\n" + tail);
+		refuses("weights-negative", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.25 -0.25 0\n" + tail);
+		refuses("weights-above-one", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 1.5 0 0\n" + tail);
+		refuses("weights-nan", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 nan 0 0\n" + tail);
+		refuses("weights-infinite", head + "v 0 0 0 0 0 1 0 0 0 1 2 0 inf 0 0\n" + tail);
+		refuses("weights-three-slots", head + "v 0 0 0 0 0 1 0 0 0 1 2 0.5 0.25 0.25\n" + tail);
+	}
 
 	// A strip with vertices and no triangle is carried as it is.
 	round_trip("empty-strip", "o3d 1\nmodel E\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0 0\nv 0 0 0 0 0 1 0 0\n");
@@ -387,7 +461,36 @@ int main(int argc, char **argv) {
 		refuses("strict-quote-in-name", base + "userpoint ab\"c 0 0 0 0 0 1 0\n");
 		refuses("strict-track-axis", base + "track trans 50 - 0 0 256 9\n");
 		refuses("strict-cv-range", swap(base, "cv 1 0 0", "cv 128 0 0"));
-		refuses("strict-texture-name", swap(base, "texture skin.tga", "texture seventeen_chars.tga"));
+		// Retail reads a bullet face's corners as signed 16-bit indices: a
+		// section holds at most 32,768 vertices, and the refusal says so once.
+		std::string full = head + "cobj 0\n";
+		full.reserve(full.size() + 32770 * 9);
+		for (int i = 0; i < 32770; ++i) full += "cv 0 0 0\n";
+		refuses_saying("strict-cv-count", full,
+				"collision section 0 exceeds 32,768 vertices: retail reads a bullet face's corners as signed 16-bit indices");
+		const std::string said = read_file_text(path_of("strict-cv-count", ".err"));
+		check(said.find("exceeds 32,768") == said.rfind("exceeds 32,768"), "strict-cv-count: said once");
+		// A strip's triangles index its vertices with u16 words, said once too.
+		std::string long_strip = "o3d 1\nmodel STRIP\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nstrip 0\n";
+		long_strip.reserve(long_strip.size() + 65537 * 18);
+		for (int i = 0; i < 65537; ++i) long_strip += "v 0 0 0 0 0 1 0 0\n";
+		refuses_saying("strict-strip-count", long_strip, "strip exceeds 65,535 vertices: its triangles index them with u16 words");
+		const std::string strip_said = read_file_text(path_of("strict-strip-count", ".err"));
+		check(strip_said.find("exceeds 65,535") == strip_said.rfind("exceeds 65,535"), "strict-strip-count: said once");
+		// A texture name is the MTRL row's 16-byte field, counted in bytes,
+		// printable ASCII and a file name alone; retail fills all 16 bytes
+		// (bo105blur.dds.tg), and the loader's name cut decides what loads.
+		refuses_saying("strict-texture-bytes", swap(base, "texture skin.tga", "texture seventeen_chars.tga"),
+				"texture name 'seventeen_chars.tga' is 19 bytes: the MTRL field holds 16");
+		refuses_saying("strict-texture-utf8", swap(base, "texture skin.tga", "texture \xD1\x81\xD1\x82\xD0\xB2\xD0\xBE\xD0\xBB_c.tga"),
+				"holds the byte 0xD1: a texture name is printable ASCII");
+		refuses_saying("strict-texture-folder", swap(base, "texture skin.tga", "texture tex/skin.tga"),
+				"texture name 'tex/skin.tga' names a folder");
+		builds_saying("texture-sixteen-bytes", swap(base, "texture skin.tga", "texture bo105blur.dds.tg"), "note: texture", false);
+		builds_saying("texture-png", swap(base, "texture skin.tga", "texture skin.png"),
+				"note: texture 'skin.png' loads only as 'skin.dds'");
+		builds_saying("texture-cut", swap(base, "texture skin.tga", "texture a.bmp.tga"),
+				"note: texture 'a.bmp.tga' loads only as 'a.dds': the game opens 'a.bmp'");
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
 		refuses("strict-occ-planes", planes);
@@ -451,6 +554,56 @@ int main(int argc, char **argv) {
 				check(false, "shared-window: read the rebuilt model");
 			}
 		}
+	}
+
+	// A bullet face names its normal by a signed 16-bit index: a section with
+	// more distinct face normals is refused, naming its part and what to
+	// change (a rough 130 x 130 height field: 33,282 faces, nearly every one
+	// facing its own way).
+	{
+		std::string rough = "o3d 1\nmodel ROUGH\nlod 0\npart 0 0 0 0\ncobj 0\n";
+		uint32_t seed = 12345;
+		for (int j = 0; j < 130; ++j)
+			for (int i = 0; i < 130; ++i) {
+				seed = seed * 1664525u + 1013904223u;
+				rough += "cv " + std::to_string(i * 0.25) + " " + std::to_string(j * 0.25) + " " +
+						std::to_string(static_cast<double>((seed >> 8) % 2048) / 256.0) + "\n";
+			}
+		for (int j = 0; j < 129; ++j)
+			for (int i = 0; i < 129; ++i) {
+				const int a = j * 130 + i, b = a + 1, c = a + 130, d = c + 1;
+				rough += "cf " + std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c) + "\n";
+				rough += "cf " + std::to_string(b) + " " + std::to_string(d) + " " + std::to_string(c) + "\n";
+			}
+		std::string said;
+		check(build_with_cli("collision-normals", rough, said) != 0, "collision-normals: refused");
+		check(said.find("collision section 0 (part 0) has ") != std::string::npos &&
+						said.find(" distinct bullet-face normals, past the 32,768 a face's signed 16-bit normal index "
+								  "reaches") != std::string::npos,
+				"collision-normals: names the part and the limit (it said: " + said.substr(0, 400) + ")");
+	}
+
+	// A 3DI3 chunk says its payload length in 24 bits: the writer refuses a
+	// model one of whose chunks outgrows that and says which chunk, and how
+	// large, so the CLI can tell the author (a 262,200-vertex LOD with
+	// tangents holds 16,780,812 bytes of VERT).
+	{
+		ThreediBuildModel m;
+		m.name = "BIG";
+		m.tangents = true; // 64-byte vertices
+		const int lod = m.add_lod();
+		const int part = m.add_part(lod, 0, ThreediBuildVec3{});
+		m.add_material("FF_ST_OP", "big.tga");
+		ThreediBuildStrip strip;
+		strip.vertices.resize(262200);
+		m.lods[lod].parts[part].strips.push_back(std::move(strip));
+		m.add_panm(lod, part, 0);
+		std::vector<uint8_t> bytes;
+		ThreediChunkOverflow overflow{};
+		check(!threedi_build_mint(m, bytes, &overflow), "overflow: refused");
+		check(std::string(overflow.chunk) == "ROOT/RDTA/RLOD/VERT" && overflow.bytes == 12u + 262200u * 64u,
+				std::string("overflow: names the VERT chunk and its size (") + overflow.chunk + ", " +
+						std::to_string(overflow.bytes) + ")");
 	}
 
 	std::printf("o3d_build_test: %d failures\n", failures);

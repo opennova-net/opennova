@@ -10,6 +10,7 @@
 // hold, or a token past the record's fields fails the build naming the line,
 // so nothing an exporter writes is silently wrapped or dropped.
 
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -27,8 +28,9 @@
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
-// Header-only (the shader table): opennova-3di links opennova_base alone.
+// The shader table, and the texture-name cut the loader applies.
 #include <runtime/renderer/material_descriptor.h>
+#include <runtime/renderer/material_texture.h>
 
 #include "scene_text.h"
 #include "threedi_cli.h"
@@ -61,6 +63,16 @@ constexpr size_t kNameChars = 15;
 
 bool fits_s16(long long v) { return v >= SHRT_MIN && v <= SHRT_MAX; }
 
+// A count with thousands separators, for messages: 16,777,215.
+std::string grouped(size_t n) {
+	std::string digits = std::to_string(n), out;
+	for (size_t i = 0; i < digits.size(); ++i) {
+		if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+		out += digits[i];
+	}
+	return out;
+}
+
 ThreediVertex render_vertex(const double *p, const double *n, const double *uv, const double *uv1) {
 	const ThreediBuildVec3 pm = threedi_build_to_model(ThreediBuildVec3{p[0], p[1], p[2]});
 	const ThreediBuildVec3 nm = threedi_build_to_model(ThreediBuildVec3{n[0], n[1], n[2]});
@@ -83,6 +95,8 @@ struct PendingOcc {
 	bool open = false;
 	int line = 0;
 	int type = 0, section_a = 0, section_b = 0;
+	bool sphere_given = false;
+	ThreediBuildOccSphere sphere;
 	std::vector<ThreediBuildVec3> verts;
 	std::vector<std::array<double, 4>> planes;
 	std::vector<std::array<int, 4>> faces;
@@ -101,6 +115,8 @@ struct PendingVolume {
 bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 	std::string raw;
 	int lod = -1, part = -1, material = -1, cobj = -1, volume_open = -1;
+	int full_section = -1; // the last section told it holds too many vertices
+	bool strip_full = false; // the open strip was told it holds too many vertices
 	bool uv1 = false;
 	ThreediBuildStrip *strip = nullptr;
 	int strip_lod = -1, strip_part = -1;
@@ -134,7 +150,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			}
 		}
 		if (!model.add_occ_record(static_cast<uint8_t>(done.type), done.section_a, done.section_b, done.verts, done.faces,
-					done.planes))
+					done.planes, done.sphere_given ? &done.sphere : nullptr))
 			ps.error_at(done.line, "occ: the record needs more than 32 planes");
 	};
 	const auto flush_volume = [&]() {
@@ -294,28 +310,53 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 					second[1] = uv[1];
 				}
 				if (strip->vertices.size() >= 65535) {
-					ps.error("strip exceeds 65535 vertices (u16 indices)");
+					// Said once per strip.
+					if (!strip_full)
+						ps.error("strip exceeds 65,535 vertices: its triangles index them with u16 words (split the "
+								"strip's mesh, or use fewer vertices)");
+					strip_full = true;
 					continue;
 				}
 				ThreediVertex vert = render_vertex(p, n, uv, second);
 				if (model.skinned) {
-					// Three influences: local indices into the strip's bone
-					// table and their weights (the fourth index stays 0).
-					long long bi[3];
+					// Four local indices into the strip's bone table and three
+					// weights: slot i3 takes the rest, 1 - (w0 + w1 + w2), as
+					// retail's vertex shader blends (threedi_skin_influences).
+					long long bi[4];
 					double w[3];
 					if (!in.integer(bi[0], 0, 255) || !in.integer(bi[1], 0, 255) || !in.integer(bi[2], 0, 255) ||
-							!in.numbers(w, 3)) {
-						ps.error("a skinned v needs bone slots i0 i1 i2 (bytes) and weights w0 w1 w2 after the uv");
+							!in.integer(bi[3], 0, 255) || !in.numbers(w, 3)) {
+						ps.error("a skinned v needs bone slots i0 i1 i2 i3 (bytes) and weights w0 w1 w2 after the uv");
 						continue;
 					}
-					for (int k = 0; k < 3; ++k) {
-						// Retail ships weighted slots past the strip's table
-						// (FSldr03: slot 255 at weight 0.21), so only a scene
-						// that authors one is told.
-						if (w[k] != 0.0 && bi[k] >= static_cast<long long>(strip->bone_table.size())) ++ps.stray_bones;
-						vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
-						vert.bone_weights[k] = static_cast<float>(w[k]);
+					for (int k = 0; k < 3 && ok; ++k)
+						if (!(w[k] >= 0.0 && w[k] <= 1.0)) {
+							ps.error("skinned v weight w" + std::to_string(k) + " is " + f9(w[k]) +
+									": a weight is a finite number from 0 to 1");
+							ok = false;
+						}
+					if (!ok) continue;
+					for (int k = 0; k < 4; ++k) vert.bone_indices[k] = static_cast<uint8_t>(bi[k]);
+					for (int k = 0; k < 3; ++k) vert.bone_weights[k] = static_cast<float>(w[k]);
+					// The sum as the shader adds it, in float: retail's
+					// four-decimal weights reach 1.0001 (ArmGlovD), giving slot
+					// i3 a hair of negative weight; past that, the vertex is
+					// not what its author weighted.
+					float sum = 0.0f;
+					for (const float weight : vert.bone_weights) sum += weight;
+					if (sum > 1.0001f) {
+						ps.error("skinned v weights w0 + w1 + w2 sum to " + f9(sum) +
+								": they sum to at most 1 (slot i3 takes the rest, 1 - (w0 + w1 + w2))");
+						continue;
 					}
+					// Retail ships weighted slots past the strip's table
+					// (FSldr03: slot 255 at weight 0.21), so only a scene that
+					// authors one is told.
+					ThreediSkinInfluence influences[4];
+					threedi_skin_influences(&vert, strip->bone_table.data(), static_cast<int32_t>(strip->bone_table.size()),
+							influences);
+					for (const ThreediSkinInfluence &influence : influences)
+						if (influence.weight != 0.0f && influence.part < 0) ++ps.stray_bones;
 					vert.is_skinned = 1;
 				}
 				strip->vertices.push_back(vert);
@@ -353,8 +394,14 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("a collision vertex lies 128 or more from the origin (8.8 in an int16)");
 				continue;
 			}
+			// Retail reads a bullet face's corners as signed 16-bit indices, so
+			// a section addresses at most 32,768 vertices (ThreediCollisionFace).
+			// Said once per section.
 			if (model.collision[cobj].vertices.size() > SHRT_MAX) {
-				ps.error("a collision section exceeds " + std::to_string(SHRT_MAX + 1) + " vertices (signed int16 face indices)");
+				if (full_section != cobj)
+					ps.error("collision section " + std::to_string(cobj) + " exceeds 32,768 vertices: retail reads a bullet "
+							"face's corners as signed 16-bit indices (simplify its collision mesh, or split it over more parts)");
+				full_section = cobj;
 				continue;
 			}
 			model.add_collision_vertex(cobj, ThreediBuildVec3{p[0], p[1], p[2]});
@@ -480,8 +527,26 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("texture needs an open material and a file name");
 				continue;
 			}
+			// The name is the MTRL row's 16-byte field, which retail fills with
+			// no NUL (124 names such as `bo105blur.dds.tg`), and the loader looks
+			// its file up by that string: printable ASCII, a file name alone.
 			if (name.size() > 16) {
-				ps.error("texture name '" + name + "' exceeds 16 characters");
+				ps.error("texture name '" + name + "' is " + std::to_string(name.size()) +
+						" bytes: the MTRL field holds 16");
+				continue;
+			}
+			const auto unprintable = std::find_if(name.begin(), name.end(), [](char c) {
+				return static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) > 0x7E;
+			});
+			if (unprintable != name.end()) {
+				char byte[8];
+				std::snprintf(byte, sizeof(byte), "0x%02X", static_cast<unsigned char>(*unprintable));
+				ps.error("texture name '" + name + "' holds the byte " + byte +
+						": a texture name is printable ASCII, as the game's file names are");
+				continue;
+			}
+			if (name.find_first_of("/\\") != std::string::npos) {
+				ps.error("texture name '" + name + "' names a folder: the game finds a texture by its file name alone");
 				continue;
 			}
 			long long *optional[] = {&slot, &type, &flags, &frame};
@@ -502,6 +567,22 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			t.type = static_cast<uint8_t>(type);
 			t.flags = static_cast<uint8_t>(flags);
 			t.frame = static_cast<uint8_t>(frame);
+			// The loader opens the name cut three characters past its first
+			// '.' and decodes a .tga, .mdt or .pcx file itself; any other name
+			// loads only as the .dds of its stem, when one lies beside it
+			// [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA,
+			// @ 0x58B53C..0x58B598, @ 0x58B66F..0x58B6E6] (material_texture.h).
+			// An empty name is a row with no file (retail ships 65).
+			const std::string query = opennova::renderer::material_texture_query(name);
+			const std::string dds = opennova::renderer::material_dds_sibling(query);
+			if (!name.empty() &&
+					opennova::renderer::plain_material_image_source(query).decoder ==
+							opennova::renderer::MaterialImageDecoder::None &&
+					!opennova::strutil::iequals(dds, query))
+				std::fprintf(stderr,
+						"%s:%d: note: texture '%s' loads only as '%s': the game opens '%s' (the name cut three "
+						"characters past its first '.') and decodes .tga, .mdt and .pcx files itself\n",
+						ps.path.c_str(), ps.line, name.c_str(), dds.c_str(), query.c_str());
 		} else if (key == "texanim") {
 			long long frames = 0, type = 0, time = 0;
 			if (material < 0 || !in.integer(frames) || !in.integer(type) || !in.integer(time)) {
@@ -652,6 +733,7 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 			pending.alpha = alpha != 0;
 			have_pending = true;
 			strip = &pending;
+			strip_full = false;
 			strip_lod = lod;
 			strip_part = part;
 		} else if (key == "panm") {
@@ -827,11 +909,21 @@ bool parse_scene(Parser &ps, std::istream &file, ThreediBuildModel &model) {
 				ps.error("occ needs type section connecting (bytes)");
 				continue;
 			}
+			// The record's sphere as stored, when it is not the one build
+			// derives from the vertices (206 retail models mirror its centre).
+			const bool sphere = in.more();
+			double s[4] = {0.0, 0.0, 0.0, 0.0};
+			if (sphere && !in.numbers(s, 4)) {
+				ps.error("occ's sphere is cx cy cz r");
+				continue;
+			}
 			occ.open = true;
 			occ.line = ps.line;
 			occ.type = static_cast<int>(type);
 			occ.section_a = static_cast<int>(a);
 			occ.section_b = static_cast<int>(b);
+			occ.sphere_given = sphere;
+			occ.sphere = ThreediBuildOccSphere{ThreediBuildVec3{s[0], s[1], s[2]}, s[3]};
 		} else if (key == "cxlt") {
 			// A CXLT row (mission axes, the frame of the section offsets), in
 			// order; a bare `cxlt` declares the table empty. Any cxlt record
@@ -964,9 +1056,15 @@ void validate(Parser &ps, const ThreediBuildModel &m) {
 		}
 	}
 	for (size_t o = 0; o < m.collision.size(); ++o) {
+		// A bullet face names its normal by a signed 16-bit index too
+		// [orig: Physics_RaycastAgainstBoneCollision @ 0x4E5079]; section o
+		// pairs with part o of the collision LOD.
 		if (m.collision[o].normals.size() > static_cast<size_t>(SHRT_MAX) + 1)
-			ps.model_error("cobj " + std::to_string(o) + " exceeds " + std::to_string(SHRT_MAX + 1) +
-					" collision normals (signed int16 indices)");
+			ps.model_error("collision section " + std::to_string(o) + " (part " + std::to_string(o) + ") has " +
+					grouped(m.collision[o].normals.size()) +
+					" distinct bullet-face normals, past the 32,768 a face's signed 16-bit normal index reaches: "
+					"simplify its bullet faces (faces in one plane share a normal), split them over more parts, or "
+					"give the part none");
 		for (const ThreediBoundingVolume &v : m.collision[o].volumes)
 			if (v.plane_count < 4) ps.model_error("cobj " + std::to_string(o) + " has a volume with fewer than 4 planes");
 	}
@@ -1009,8 +1107,16 @@ int cmd_build(const char *scene_path, const char *out_path) {
 		return 1;
 	}
 	std::vector<uint8_t> bytes;
-	if (!threedi_build_mint(model, bytes)) {
-		std::fprintf(stderr, "opennova-3di: the writer refused the model\n");
+	ThreediChunkOverflow overflow{};
+	if (!threedi_build_mint(model, bytes, &overflow)) {
+		if (overflow.chunk[0] != '\0')
+			std::fprintf(stderr,
+					"opennova-3di: the model is too large to write: its %s chunk holds %s bytes, past the %s a 3DI3 "
+					"chunk's 24-bit length can say (ROOT holds the whole model and each RLOD one LOD: use fewer "
+					"vertices, triangles, LODs or collision faces)\n",
+					overflow.chunk, grouped(overflow.bytes).c_str(), grouped(THREEDI_3DI3_LENGTH_MASK).c_str());
+		else
+			std::fprintf(stderr, "opennova-3di: the writer refused the model\n");
 		return 1;
 	}
 	// Read the bytes back through the retail-shape reader before shipping them.

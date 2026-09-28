@@ -150,9 +150,11 @@ const char *technique_name(opennova::renderer::ObjectShaderTechnique technique) 
 		case opennova::renderer::ObjectShaderTechnique::Tracer: return "tracer";
 		case opennova::renderer::ObjectShaderTechnique::Flag: return "flag";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuse: return "phong-tangent-diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongTangentDiffuseSkinned: return "phong-tangent-diffuse-skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecular: return "phong-tangent-specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongTangentSpecularSkinned: return "phong-tangent-specular-skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuse: return "phong-object-diffuse";
+		case opennova::renderer::ObjectShaderTechnique::PhongObjectDiffuseSkinned: return "phong-object-diffuse-skinned";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecular: return "phong-object-specular";
 		case opennova::renderer::ObjectShaderTechnique::PhongObjectSpecularPhongMap: return "phong-object-specular-phong-map";
 		case opennova::renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3-tangent";
@@ -256,13 +258,14 @@ std::string generate() {
 		const opennova::renderer::ObjectShaderPipelineDescriptor pipeline =
 			opennova::renderer::describe_object_shader_pipeline(key);
 		std::snprintf(line, sizeof(line),
-		              "key=%08x fam=%s technique=%s blend=%s depth=%s cull=%s alpha=%d "
+		              "key=%08x fam=%s technique=%s skinnormal=%s blend=%s depth=%s cull=%s alpha=%d "
 		              "atest=%d atinv=%d two=%d emis=%d lum=%d nmap=%d "
 		              "nuv2=%d nspace=%s detail=%d spec=%d skin=%d envtex=%d glass=%d vfade=%d "
 		              "envsrc=%s specsrc=%s\n",
 		              key,
 		              object_shader_family_name(pipeline.family),
 		              technique_name(pipeline.technique),
+		              opennova::renderer::object_skin_normal_name(pipeline.skin_normal),
 		              blend_name(pipeline.blend),
 		              depth_policy_name(pipeline.depth),
 		              cull_policy_name(pipeline.cull),

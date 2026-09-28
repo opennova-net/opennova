@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <unordered_map>
 
 using namespace opennova::def;
 
@@ -425,34 +426,108 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 	}
 }
 
-WeaponClipRing *weapon_ring_for(LocalPlayerWeapon &w,
-		const std::string &key_lower) {
-	for (std::pair<std::string, WeaponClipRing> &kv : w.clip_rings) {
-		if (kv.first == key_lower) return &kv.second;
+namespace {
+
+// The bake's view of the mounted weapon's ANIMADM rings: the existence probe
+// never advances; each automatic field serves and advances the shared ring; a
+// read of slot 0 is zero ticks. [orig: AnimMap_FindSlotByName @ 0x40cfa0
+// checked @ 0x5421ae; Anim_GetDurationTicks @ 0x53ee10]
+struct InstallRingContext {
+	anim::AdmRingTable *rings = nullptr;
+	std::string adm;
+};
+
+// Restart the FP channel's primary half on a served clip: its clock follows
+// the clip. [orig: AnimChannel_InitFromData @ 0x410560 via
+// AnimMap_PlayAnimBySlot @ 0x40BDD1 (t = 0)]
+void fp_start_primary(const anim::AdmRingTable &rings, LocalPlayerWeapon &w, const std::string &key,
+		int32_t variant, uint32_t ticks) {
+	w.anim_key = key;
+	w.anim_variant = variant;
+	w.anim_advance_ticks = ticks;
+	const anim::AdmClipFacts *clip = rings.clip(w.anim_map, key, variant);
+	w.anim_clock = clip != nullptr ? anim::ClipTimeline(clip->fps, clip->frames, clip->loop)
+	                               : anim::ClipTimeline();
+}
+
+// The FP channel back to nothing playing (a mount, a clear).
+void fp_channel_reset(LocalPlayerWeapon &w) {
+	w.anim_key.clear();
+	w.anim_variant = 0;
+	w.anim_advance_ticks = 0;
+	w.anim_slot_key.clear();
+	w.anim_latched_key.clear();
+	w.anim_latched_variant = -1;
+	w.anim_blending = false;
+	w.anim_blend_key.clear();
+	w.anim_blend_variant = 0;
+	w.anim_blend_ticks = 0;
+	w.anim_fade_countdown = 0;
+	w.anim_blend_weight = 0.0f;
+	w.anim_clock = anim::ClipTimeline();
+}
+
+} // namespace
+
+bool fp_channel_play(anim::AdmRingTable &rings, LocalPlayerWeapon &w, const std::string &key) {
+	// A play of slot 0 does nothing: the reset slot is no ring.
+	// [orig: AnimMap_PlayAnimBySlot @ 0x40BDA7]
+	if (anim::adm_slot_index(key) == 0) return false;
+	// The play serves the slot's shared ring (a slot the table does not author
+	// holds its reset clip) and latches the served entry. It restarts the
+	// primary half at t = 0 and only that half, so a wrap fade in flight runs on
+	// and still promotes its clip. [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 — the
+	// serve @0x40BDB4..0x40BDC1, the primary re-init @0x40BDD1, the latch
+	// S+0x3C / +0x40 / +0x44]
+	const anim::AdmServed served = rings.serve(w.anim_map, key);
+	const std::string clip_key = served.valid() ? served.key : key;
+	const int32_t variant = served.valid() ? served.variant : 0;
+	fp_start_primary(rings, w, clip_key, variant, 0);
+	w.anim_slot_key = key;
+	w.anim_latched_key = clip_key;
+	w.anim_latched_variant = variant;
+	return true;
+}
+
+void fp_channel_advance(anim::AdmRingTable &rings, LocalPlayerWeapon &w) {
+	// One gated tick of channel time [orig: AnimChannel_AdvanceDispatch
+	// @ 0x40b960, from the action shims].
+	if (w.anim_blending) {
+		// A wrap fade runs: the incoming half steps, then the outgoing, which
+		// wraps on with no ring serve; after eight steps the incoming replaces
+		// it. [orig: AnimChannel_AdvanceBlendedPlayback @ 0x40B1E0 — the halves
+		//  @0x40B1EB / @0x40B1F2, the countdown and weight, the promotion
+		//  @0x40B20E..0x40B224]
+		++w.anim_blend_ticks;
+		++w.anim_advance_ticks;
+		--w.anim_fade_countdown;
+		w.anim_blend_weight += 0.125f;
+		if (w.anim_fade_countdown <= 0) {
+			fp_start_primary(rings, w, w.anim_blend_key, w.anim_blend_variant, w.anim_blend_ticks);
+			w.anim_blending = false;
+		}
+		return;
 	}
-	return nullptr;
-}
-
-float weapon_ring_take_length(LocalPlayerWeapon &w, const char *key) {
-	// Serve the ring head's duration, then advance the head — the consuming read
-	// [orig: Anim_GetDurationTicks @ 0x53ee10: currentEntry = *slot;
-	//  *slot = *(currentEntry + 36); duration from currentEntry's data].
-	WeaponClipRing *ring = weapon_ring_for(w, strutil::to_lower(key != nullptr ? key : ""));
-	if (ring == nullptr || ring->lengths.empty()) return -1.0f;
-	const float served = ring->lengths[static_cast<size_t>(ring->head)];
-	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
-	return served;
-}
-
-int weapon_ring_take_variant(LocalPlayerWeapon &w, const std::string &key) {
-	// Serve the head as the PLAYED variant and advance — the play latch: playback
-	// follows the served entry while the ring moves on [orig: AnimMap_PlayAnimBySlot
-	// @ 0x40bda0: animEntry = slot[i]; slot[i] = next; animState+68 = animEntry].
-	WeaponClipRing *ring = weapon_ring_for(w, strutil::to_lower(key));
-	if (ring == nullptr || ring->lengths.empty()) return 0;
-	const int served = ring->head;
-	ring->head = (ring->head + 1) % static_cast<int>(ring->lengths.size());
-	return served;
+	++w.anim_advance_ticks;
+	// A looping clip's wrap serves the latched slot's ring: another entry fades
+	// in from its start, the same one simply runs on.
+	// [orig: AnimChannel_AdvancePlayback @ 0x40B140 — the wrap @0x40B199, the
+	//  callback @0x40B1C8 -> AnimMap_AdvanceToNextAnim @ 0x40BDF0: the serve
+	//  @0x40BE02..0x40BE07, the latch compare @0x40BE09,
+	//  AnimChannel_InitFromParams(ch, clip, 8, 0, 0x1000) @0x40BE24, the latch
+	//  @0x40BE29 / @0x40BE33]
+	if (!w.anim_clock.wrapped_at(static_cast<int32_t>(w.anim_advance_ticks))) return;
+	const anim::AdmServed next = rings.serve(w.anim_map, w.anim_slot_key);
+	if (!next.valid() || (next.key == w.anim_latched_key && next.variant == w.anim_latched_variant))
+		return;
+	w.anim_blending = true;
+	w.anim_blend_key = next.key;
+	w.anim_blend_variant = next.variant;
+	w.anim_blend_ticks = 0;
+	w.anim_fade_countdown = 8;
+	w.anim_blend_weight = 0.0f;
+	w.anim_latched_key = next.key;
+	w.anim_latched_variant = next.variant;
 }
 
 void local_weapon_install(World &world, LocalPlayerWeapon &w,
@@ -481,33 +556,56 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// The same-weapon rebake is NOT an epoch — undrained records (including a
 	// racing switch commit or deny) must survive it.
 	if (!same_weapon_rebake) w.events.clear();
-	// Clip lengths come from the loaded viewmodel's .adm (seconds) as per-key VARIANT
-	// arrays; they seed the slot rings the bake and the play events consume
-	// serve-then-advance [orig: the animState slot heads (+72) built by
-	// AnimMap_RegisterBoneNode @ 0x40c2d0; Anim_GetDurationTicks @ 0x53ee10].
-	w.clip_rings.clear();
-	w.anim_variant = 0;
-	for (const std::pair<std::string, std::vector<float>> &kv : data.clip_rings) {
-		if (kv.second.empty()) continue;
-		WeaponClipRing ring;
-		ring.lengths = kv.second;
-		w.clip_rings.emplace_back(strutil::to_lower(kv.first), std::move(ring));
+	// The channel plays from the weapon's ANIMADM rings, one table per file
+	// shared by every weapon naming it, held by the weapon table.
+	// [orig: AnimMap_LoadAdmFile @ 0x40cc40, the cached entry @ 0x40CD45..0x40CD5C]
+	anim::AdmRingTable &rings = world.tables.weapons.rings;
+	const int installed = world.tables.weapons.index_of(data.name.c_str());
+	if (data.table_baked && installed >= 0) {
+		// A mount runs the descriptors the def's END baked as the table loaded;
+		// it reads no ring. [orig: Anim_InitActions @ 0x541fa0, run once per
+		// def @ 0x5437D0; Player_MountWeaponSlot @ 0x4dfa40 binds that table]
+		w.def = world.tables.weapons.entries[static_cast<size_t>(installed)].action_fsm;
+	} else {
+		// A definition object bakes itself against the same rings. Its own clip
+		// lengths stand in for its ANIMADM when no table of that name loaded.
+		std::unordered_map<std::string, std::vector<anim::AdmClipFacts>> own;
+		for (const std::pair<std::string, std::vector<float>> &kv : data.clip_rings) {
+			std::vector<anim::AdmClipFacts> &clips = own[kv.first];
+			for (float seconds : kv.second) {
+				anim::AdmClipFacts clip;
+				clip.seconds = seconds;
+				clips.push_back(clip);
+			}
+		}
+		// A table this install adopts is the object's own load, so its bake
+		// consumes the heads as the load's would; a table already loaded holds
+		// the match's heads, which only the load's bake and the plays move, so
+		// a bake against it (a same-weapon re-bake, a def object on a loaded
+		// ANIMADM) reads a copy.
+		const bool adopts = !rings.loaded(data.animadm);
+		rings.adopt(data.animadm, own);
+		anim::AdmRingTable copy;
+		if (!adopts) copy = rings;
+		anim::AdmRingTable &bake_rings = adopts ? rings : copy;
+		// The bake probes existence as a pure lookup and reads durations
+		// ring-wise, one consuming read per 'auto' field [orig: Anim_InitActions
+		// @ 0x541fa0; the lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
+		const auto resolve_fn = [](void *p_ctx, const char *key) -> int {
+			const InstallRingContext &ctx = *static_cast<InstallRingContext *>(p_ctx);
+			return ctx.rings->resolves(ctx.adm, key != nullptr ? key : "") ? 1 : 0;
+		};
+		const auto clip_fn = [](void *p_ctx, const char *key) -> float {
+			InstallRingContext &ctx = *static_cast<InstallRingContext *>(p_ctx);
+			const std::string slot_key = key != nullptr ? key : "";
+			const anim::AdmServed served = ctx.rings->serve(ctx.adm, slot_key);
+			if (!served.valid() || anim::adm_slot_index(slot_key) == 0) return -1.0f;
+			return served.clip->seconds;
+		};
+		InstallRingContext ctx{&bake_rings, data.animadm};
+		w.def = WeaponFsmDef{};
+		weapon_fsm_bake(data.rows.data(), data.rows.size(), resolve_fn, clip_fn, &ctx, w.def);
 	}
-	// The bake probes existence as a pure lookup and reads durations ring-wise —
-	// one consuming read per 'auto' field [orig: Anim_InitActions @ 0x541fa0;
-	// the lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
-	const auto resolve_fn = [](void *p_ctx, const char *key) -> int {
-		LocalPlayerWeapon *self = static_cast<LocalPlayerWeapon *>(p_ctx);
-		return weapon_ring_for(*self,
-				strutil::to_lower(key != nullptr ? key : "")) != nullptr ? 1 : 0;
-	};
-	const auto clip_fn = [](void *p_ctx, const char *key) -> float {
-		return weapon_ring_take_length(
-				*static_cast<LocalPlayerWeapon *>(p_ctx), key);
-	};
-	w.def = WeaponFsmDef{};
-	weapon_fsm_bake(data.rows.data(), data.rows.size(), resolve_fn, clip_fn,
-			&w, w.def);
 	const int32_t flags = data.flags;
 	w.def.auto_fire = (flags & weapon_flag::kAuto) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]
 	w.def.burst3 = (flags & weapon_flag::kBurst) != 0;   // [orig: WeaponAction_Fire @ 0x542c8a]
@@ -540,7 +638,6 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
     view.weapon_hip_pose = data.view_hip_pose;
     view.weapon_ads_pose = data.view_ads_pose;
     w.def.scope_zero = data.scope_zero;
-    const int installed = world.tables.weapons.index_of(data.name.c_str());
     if (installed >= 0)
         w.def.scope_zero = world.tables.weapons.entries[installed].action_fsm.scope_zero;
 	// The 3P fire attack-stamp kind [orig: weapon.def attack_anim -> the g_AdmDefs record
@@ -558,8 +655,13 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// resolved map identity, not the weapon name: two weapon records sharing one
 	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
 	// [orig: previous/current g_AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
-	if (!w.active || !strutil::iequals(data.animadm, w.anim_map)) {
-		w.anim_map = data.animadm;
+	// A mount binds the table the weapon's load resolved (default.adm for a
+	// missing file). [orig: Anim_InitActions @0x541FEF -> AnimMap_LoadAdmFile]
+	const std::string &anim_map = data.table_baked && installed >= 0
+			? world.tables.weapons.entries[static_cast<size_t>(installed)].animadm
+			: data.animadm;
+	if (!w.active || !strutil::iequals(anim_map, w.anim_map)) {
+		w.anim_map = anim_map;
 		++w.anim_map_serial;
 		if (w.anim_map_serial == 0) ++w.anim_map_serial; // reserve 0 = none
 	}
@@ -638,9 +740,13 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.power_throw_start_tick = 0;
 	w.pending_throw_charge = 0;
 	w.play_serial = 0;
-	w.anim_key.clear();
-	w.anim_variant = 0;
-	w.anim_advance_ticks = 0;
+	// Retail's channel halves and latch live in the per-.adm cached record,
+	// which a mount never touches, so a fade in flight runs on across a mount
+	// onto the same table. Ours is the player's own channel and a mount starts
+	// it over: the per-def singleton residual D-NET-184 declares.
+	// [orig: AnimMap_LoadAdmFile @0x40CD45..0x40CD5C; Player_MountWeaponSlot
+	//  @0x4DFA40]
+	fp_channel_reset(w);
 	w.fired_serial = w.dry_serial = w.reload_serial = 0;
 	w.reload_applied_serial = 0;
 	w.reload_received_serial = 0;
@@ -690,9 +796,7 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.fire_held = false;
 	w.fire_pressed = false;
 	w.reload_pressed = false;
-	w.clip_rings.clear();
-	w.anim_variant = 0;
-	w.anim_advance_ticks = 0;
+	fp_channel_reset(w);
 	player_view_scope_reset(view);
 	w.attack_kind = 0;
 	w.run_anim = 0;
@@ -1009,24 +1113,13 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	WeaponPresentationEvent pending;
 	pending.tick = world.logic_tick;
 	bool has_presentation_event = false;
-	if (ev.play_anim) {
+	if (ev.play_anim && fp_channel_play(world.tables.weapons.rings, w, ev.anim_key)) {
 		++w.play_serial;
-		w.anim_key = ev.anim_key;
-		w.anim_advance_ticks = 0; // a play restarts the channel at t = 0
-		// The play consumes the slot ring and latches the served variant — the shell
-		// plays exactly this variant on every viewmodel part
-		// [orig: AnimMap_PlayAnimBySlot @ 0x40bda0 advances the head and latches
-		//  the served entry at animState+68].
-		w.anim_variant = weapon_ring_take_variant(w, w.anim_key);
 		pending.anim_key = w.anim_key;
 		pending.anim_variant = w.anim_variant;
 		has_presentation_event = true;
 	}
-	if (ev.advance_anim) {
-		// One gated tick of channel time
-		// [orig: AnimChannel_AdvancePlayback @ 0x40b140].
-		++w.anim_advance_ticks;
-	}
+	if (ev.advance_anim) fp_channel_advance(world.tables.weapons.rings, w);
 	if (ev.action_started >= 0) {
 		// Copy the begin leg while this def is mounted; a later weapon switch cannot
 		// change the queued sound/effect payload.

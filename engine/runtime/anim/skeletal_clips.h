@@ -41,8 +41,9 @@ public:
 	// Load the whole rig through the shared native asset store: bind it to the
 	// table's reset clip, retail's slot-0 head (the last variant that loads of
 	// the last row whose key past its first five characters is "reset", any
-	// case; a table with none does not load), sample every clip variant in file
-	// order (continue-on-failure on missing .bads) against that bind, and build
+	// case; a table with none does not load), sample every clip variant of a
+	// row naming one of the 252 slots in file order (a row naming none
+	// registers nothing; continue-on-failure on missing .bads) against that bind, and build
 	// the skeleton from the model bone table (origins = parent-relative pivots,
 	// parents paired) with one loader for simulation and presentation. Returns
 	// loaded().

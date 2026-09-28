@@ -886,7 +886,8 @@ void DevTools::push_weapon_records() {
 	weapon_records_live_ = true;
 
 	// --- the definition, on change ---
-	const size_t rings = weapon->clip_rings.size();
+	const std::vector<std::string> clip_keys = simulation_->native_equipped_weapon_clip_keys();
+	const size_t rings = clip_keys.size();
 	if (weapon_def_dirty_ || weapon_def_name_ != weapon->def_name || weapon_def_rings_ != rings) {
 		weapon_def_dirty_ = false;
 		weapon_def_name_ = weapon->def_name;
@@ -899,7 +900,8 @@ void DevTools::push_weapon_records() {
 		def.clip_capacity = weapon->def.clip_capacity;
 		def.auto_fire = weapon->def.auto_fire;
 		def.burst3 = weapon->def.burst3;
-		def.clip_keys = simulation_->native_equipped_weapon_clip_keys();
+		def.clip_keys = clip_keys;
+		const opennova::anim::AdmRingTable *weapon_rings = simulation_->native_weapon_rings();
 		const DefWeaponDef *row = simulation_->native_equipped_weapon_row();
 		for (int id = 0; id < opennova::world::weapon_action::kCount; ++id) {
 			const opennova::world::WeaponFsmAction &baked = weapon->def.actions[id];
@@ -926,20 +928,14 @@ void DevTools::push_weapon_records() {
 					break;
 				}
 			}
-			// The clip this row resolves to, in ticks — what an `auto` delay
-			// bakes from. Read WITHOUT advancing the ring: the bake's own reads
-			// are consuming, and a push must not rotate the variant order.
-			if (baked.anim_key[0] != '\0') {
-				std::string key = baked.anim_key;
-				for (char &c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-				for (const auto &ring : weapon->clip_rings) {
-					if (ring.first != key || ring.second.lengths.empty()) continue;
-					const size_t head = static_cast<size_t>(ring.second.head) %
-							ring.second.lengths.size();
+			// The clip this row's slot serves next, in ticks — what an `auto`
+			// delay bakes from. Read WITHOUT advancing the ring: the bake's own
+			// reads are consuming, and a push must not rotate the variant order.
+			if (baked.anim_key[0] != '\0' && weapon_rings != nullptr) {
+				const opennova::anim::AdmServed next = weapon_rings->peek(weapon->anim_map, baked.anim_key);
+				if (next.valid())
 					out.clip_ticks = opennova::world::weapon_anim_ticks_from_ms(
-							static_cast<int32_t>(ring.second.lengths[head] * 1000.0f));
-					break;
-				}
+							static_cast<int32_t>(next.clip->seconds * 1000.0f));
 			}
 		}
 		tools_->set_weapon_definition(std::move(def));
