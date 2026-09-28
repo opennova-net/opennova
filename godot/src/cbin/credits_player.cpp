@@ -192,7 +192,8 @@ void CreditsPlayer::_process_scroll(double p_delta) {
 	// The SCROLL_RATE value itself is witnessed (parsed per-frame pixels,
 	// [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0, see docs/credits/cbin-re.md]), but the frame CADENCE
 	// this 60.0f converts it with is NOT — CMarqueeWnd's update rate is
-	// unwitnessed (R5 in docs/oned/workspace-maturity-program.md; the engine
+	// unwitnessed (the R5 credits audit; see git history of
+	// docs/oned/workspace-maturity-program.md, removed 2026-09-28; the engine
 	// tick elsewhere is 62 Hz). Do not cite or change without a grill.
 	float scroll_rate = credits_resource_->get_scroll_rate() * speed_scale_ * 60.0f;
 	scroll_offset_ += scroll_rate * p_delta;

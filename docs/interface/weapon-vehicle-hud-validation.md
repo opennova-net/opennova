@@ -74,7 +74,9 @@ builds before integration with the runtime-only base branch:
   and no pending cases. The headless run passes 39 tests / 558 assertions;
   only the GPU pixel-readback test is pending there.
 - Windows **debug export and boot smoke checks pass** for both Mod Tools
-  and Runtime; ONED packs the game and both distribution ZIPs are produced.
+  and Runtime; ONED packs the game and both distribution ZIPs are produced
+  (as of 2026-09-19; ADR 0045 has since removed ONED and the Mod Tools preset,
+  leaving the one `OpenNova Runtime` preset).
 - Ratchet, maturity, include/link graph, orphan-header, environment,
   citation, conventions, fixture, retail-gate and ledger checks pass.
   No baselines change.

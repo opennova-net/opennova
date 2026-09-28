@@ -37,10 +37,13 @@ eventually, the GLB/GLTF editor may produce those files; OpenNova consumes and v
 them without requiring a proprietary project database.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-Users supply their own game-data directory on the command line. OpenNova ships
-the runtime and format libraries; it does not distribute a game-data set or an
-integrated run/packaging utility. Test-only synthetic fixtures remain separate
-from the product (ADR 0045).
+OpenNova ships the runtime and format libraries plus its own small bundled
+`assets/` (authored from scratch: today the placeholder main menu whose PLAY
+RETAIL picks and remembers a retail install, ADR 0048); it never distributes
+retail game data or an integrated run/packaging utility. Users point it at their
+own game-data directory, on the command line (`--resource-dir`, ADR 0045) or
+through that picker. Test-only synthetic fixtures remain separate from the
+product.
 
 ## Target games
 
@@ -49,7 +52,7 @@ NovaLogic titles are conceptually the same engine with different data formats an
 networking; at a high level each game is a skin of the previous one with upgraded
 engine features. We do not aim to reimplement every older title, but we do intend to
 support the parts modders care about most: their models and animations (`.3di` and
-friends) and their missions, promoted into the newer formats so they load in
+friends) and their missions, migrated into the newer formats so they load in
 OpenNova.
 
 ## NovaWorld and multiplayer

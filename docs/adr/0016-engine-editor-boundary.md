@@ -49,7 +49,8 @@ math living in `godot/engine/environment/*.gd` instead of `libs/env`.
   heuristics over known engine constants) runs at every program wave
   boundary; each finding is closed or carries a tracked exception. The
   done-right patterns to copy are catalogued in
-  [docs/oned/editor-runtime-parity.md](../oned/editor-runtime-parity.md).
+  `docs/oned/editor-runtime-parity.md` (record removed 2026-09-28 with the
+  retired ONED product; see git history, commits `287585ee2` to `bb7f632c0`).
 - **Exceptions are tracked or they are bugs.** Anything that must diverge
   (editor-only affordances like live-edited-surface sampling before a bake)
   gets a written rationale at the call site and an entry on the checklist —

@@ -33,6 +33,14 @@ easier to relay than to rediscover.
 - `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
   land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).
+- `tests/blender/` — the Blender add-on's Python tests, run under Blender 5.x against the
+  packaged add-on (`tools/blender/opennova_3di/README.md`); a third runner, neither ctest nor GUT.
+- `fixtures/` — test inputs, each minted (by a `tests/fixtures/minimal_*_gen.cpp` generator
+  through our own writer), authored, or keep (the small retail-interop set); LFS-tracked and
+  classified by `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
+- `scripts/` — the build/test/bootstrap/package entry points, `ci/` (suite selection and
+  attestation, `test_suites.py`), `lint/` (the CI gates), and the `ida/`, `mcp/`, `net/`,
+  `oracles/`, `parity/` and `render/` helper scripts.
 - `docs/` — tracked golden docs (ADRs, RE records), kept pristine: they represent the
   best current understanding of the original engine. RE findings land there directly
   (via the `re-doc` skill) — there is no scratch directory.
@@ -156,10 +164,11 @@ python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Pytho
 - [docs/maturity-program.md](docs/maturity-program.md) — the maturity program
   (pre-reimplementation rearchitecture), CLOSED 2026-07-12 with the freeze lifted:
   the dashboard, close-out dispositions, and the permanent enforcement instruments
-  live there. ADRs 0015–0018 and 0022–0024 carry the standing rules every slice
-  still builds under (serve mode, with ADR 0045 retiring the ONED product; engine
-  layering, typed records, public-API testability, divergence burn-down, render
-  parity, family topology).
+  live there. ADRs 0015, 0017, 0018, 0022 and 0023 carry the standing rules every
+  slice still builds under (serve mode, with ADR 0045 retiring the ONED product and
+  ADR 0048 the launcher; typed records, public-API testability, divergence burn-down,
+  render parity); 0016 and 0024 are historical (docs/README.md), their surviving
+  rules carried by ADR 0042's boundary rule and ADR 0029's group targets.
 - [.agents/README.md](.agents/README.md) — agent runbooks for networking work:
   architecture guardrails, retail interop, IDA witness rules, debugging, and task templates.
 - [docs/README.md](docs/README.md) — documentation index: ADRs, RE records by domain.

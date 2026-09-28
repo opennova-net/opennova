@@ -2,8 +2,9 @@
 
 These runbooks cover retail-compatible OpenNova networking. The goal is not
 to invent a new multiplayer architecture. The goal is to make retail clients,
-retail hosts, OpenNova clients, OpenNova listen hosts, and future dedicated
-hosts speak the same in-match protocol.
+retail hosts, OpenNova clients, OpenNova listen hosts, and OpenNova Serve Only
+hosts (the game's retail dedicated server type, ADR 0042 d8) speak the same
+in-match protocol.
 
 Orient from these for any networking task — consult what the task needs rather than
 reading end to end (the net RE record is grep-navigated: §5 index at its top,
@@ -16,16 +17,17 @@ divergences in its §8 catalog):
 - `docs/adr/0011-single-player-in-process-listen-server.md`
 - `docs/adr/0012-player-is-host-side-server-entity.md`
 - `docs/net/novaworld-net-re.md`
-- `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`
-  (`.agents/network.md` is now a redirect to the current architecture owners:
-  `engine/runtime/inmatch/ROADMAP.md`, ADR 0013, ADR 0019)
+- `.agents/interop.md`, `.agents/ida.md`, and `.agents/debug.md`; the
+  architecture owners are `engine/runtime/inmatch/ROADMAP.md` (module map,
+  frame order), ADR 0013 (the matchmaking/in-match split) and ADR 0019
+  (`engine/net/npwire`)
 - `docs/divergence-ledger.md` — the `PAR-NET` slice is the live open-work list for
   in-match networking; `engine/runtime/inmatch/ROADMAP.md` is the completed build record
   behind it, not current status
-- `.agents/porting-0a-emit.md` — runbook for porting the per-frame S2C 0x0A emit
-  from the witnessed retail chain (phase counter + sub-blocks + priority/budget
-  entity loop), with the verify loop (`scripts/net/diff_0a.py` + the golden) and
-  the current ported-vs-not state.
+- `.agents/porting-0a-emit.md` — runbook for the per-frame S2C 0x0A emit: the
+  witnessed retail chain (phase counter + sub-blocks + priority/budget entity
+  loop) and the verify loop (`scripts/net/diff_0a.py` + the golden). Ported-vs-not
+  state lives in the ledger's D-NET table and net-re §8, not there.
 - `.agents/retail-lan-parity.md` — onHook-first four-topology retail/OpenNova LAN
   probing without the retired generated Python parity matrix. onHook is an
   external `opennova-int` executable passed as `-OnHookMcpPath`, never a
@@ -39,7 +41,7 @@ divergences in its §8 catalog):
 - Retail wire compatibility is the target. Original binary witnesses, retail
   captures, and tracked RE docs outrank guesses.
 - Do not create a second gameplay network path. LAN, NovaWorld-routed joins,
-  and future dedicated hosting must converge on the same in-match seam.
+  and Serve Only hosting all run the same in-match seam.
 - Unknown packets and mismatches are tracked, not silently ignored.
 - Do not commit raw decompiled code, raw retail captures, secrets, account data,
   local install paths, or machine-specific IP addresses.

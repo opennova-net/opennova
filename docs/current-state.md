@@ -9,7 +9,7 @@ instrument wins and this page is stale.
 
 | Period | What it was | State |
 |---|---|---|
-| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing rules (ADRs 0015–0018, 0022–0024, 0028's engine/shell split, 0037's ONED hard cut, and [ADR 0038](adr/0038-native-runtime-assets-glb-editor.md)'s native-runtime-assets hard cut, as [ADR 0047](adr/0047-blender-3di-exporter.md) restates it) and the enforcement instruments survive it |
+| through 2026-07-12 | **The maturity program** — the pre-reimplementation rearchitecture: seven tracks, five waves, the boundary-conformance checklist, the enforcement ratchets | **CLOSED** 2026-07-12, freeze lifted ([maturity-program.md](maturity-program.md)). The standing rules (ADRs 0015, 0017, 0018, 0022 and 0023; 0016 and 0024 are historical, their surviving rules carried by [ADR 0042](adr/0042-godot-permanent-shell-one-mission-kernel.md)'s boundary rule and [ADR 0029](adr/0029-engine-group-targets.md)'s group targets; 0028's engine/shell split; [ADR 0045](adr/0045-cli-game-data-runtime-only.md)'s CLI game data and runtime-only distribution, which superseded 0037's ONED hard cut and which [ADR 0048](adr/0048-bundled-placeholder-menu-and-retail-picker.md) amends; and [ADR 0038](adr/0038-native-runtime-assets-glb-editor.md)'s native-runtime-assets hard cut, as [ADR 0047](adr/0047-blender-3di-exporter.md) restates it) and the enforcement instruments survive it |
 | since 2026-07-12 | **Retail-fidelity slices** — one system at a time, witnessed in IDA and ported | **current**. There is no separate program doc: the [divergence ledger](divergence-ledger.md) *is* the plan, and each slice's witness lands in its RE record |
 
 The distinction matters for scoping a task. The maturity program was
@@ -26,12 +26,14 @@ supersedes (ADRs 0031 to 0033, 0035 and 0036) and
 permanent sole shell, one mission kernel) carry their own round histories;
 [ADR 0044](adr/0044-shared-native-assets.md) (shared native assets) and
 [ADR 0047](adr/0047-blender-3di-exporter.md) (the Blender `.3di` add-on and
-`opennova-3di`) follow it. The remaining structural queue is the push-down
-campaign in [ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder, its
-only home: witnessed behavior still living Godot-side moves into `engine/`, one
-commit per slice, gauged by the `godot_orig_cites` ratchet (read the count from
-the baseline, not here); the campaign is finished when that count holds only
-documented seam contracts.
+`opennova-3di`) follow it. The push-down campaign in
+[ADR 0040](adr/0040-the-engine-is-one-namespace.md)'s ladder is closed
+(2026-09-21, PR #663): every queued row landed or was explicitly closed by the
+accessor/native-home audit, and the Godot code that remains implements the
+device contracts the rows name. There is no structural queue left; the
+`godot_orig_cites` ratchet (read the count from the baseline, not here) now
+holds only those documented seam contracts and may fall when a cite moves to
+its engine home or dies, never rise.
 
 ## The standing loop for a fidelity slice
 
@@ -74,16 +76,15 @@ Each domain's next step is named in its own record, not centrally:
 | Environment | none open (the ledger's closure lines) | [env/env-tod-re.md](env/env-tod-re.md) (its "Open after the 2026-09-24 pass" list: the two water-mirror measurements), [env/env-honored-matrix.md](env/env-honored-matrix.md) |
 | Formats (`.mis`, `.ptl`, LW `.3di`, CBIN, fonts, VFS) | ledger, per format | the matching record in [README.md](README.md); the particle record's open list follows its [rendering parity section](particles/ptl-format-re.md#rendering-parity-pass-2026-09-24) |
 | Mission savegames | ledger § Mission savegames | [mission/savegame-re.md](mission/savegame-re.md): the schema, runtime state restoration and slot lifecycle (D-SAVE-1) |
-| Performance | not a divergence (the [`TODO.md`](../TODO.md) perf rows) | [perf/03tr-frame-costs.md](perf/03tr-frame-costs.md), [perf/mission-load-baseline.md](perf/mission-load-baseline.md), [perf/reground-baseline.md](perf/reground-baseline.md) |
+| Performance | not a divergence (the [`TODO.md`](../TODO.md) perf rows) | [perf/03tr-frame-costs.md](perf/03tr-frame-costs.md) and the `TODO.md` perf rows |
 
 Work that is **not** a parity divergence — project health, code hardening — lives in [`TODO.md`](../TODO.md) at the repo root instead; it is
 the ONE non-parity backlog. Completed-effort records are not plans:
-`engine/runtime/inmatch/ROADMAP.md`,
-[oned/editor-layer-program.md](oned/editor-layer-program.md),
-[oned/editor-runtime-parity.md](oned/editor-runtime-parity.md),
-[oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), and
+`engine/runtime/inmatch/ROADMAP.md` and
 [maturity-program.md](maturity-program.md)'s historical body (its two log
-appendices stay live).
+appendices stay live). The retired ONED product's own records (the editor-layer
+program, the workspace maturity track, the editor/runtime parity patterns) were
+removed 2026-09-28 and live only in git history under `docs/oned/`.
 
 ## The research queue
 

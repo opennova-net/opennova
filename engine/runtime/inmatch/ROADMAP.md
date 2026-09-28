@@ -59,7 +59,8 @@ rebuilds the *runtime* on top of those codecs as one faithful, maintainable core
    layouts do NOT reproduce padding.
 3. **Tests:** byte-exact comparison, **fully local** — pcap tests env-gate on the local goldens
    and **skip cleanly when absent** (no committed derived oracle), mirroring
-   `tests/novaworld/nw_pool_groundtruth_test.cpp`.
+   `tests/novaworld/nw_pool_groundtruth_test.cpp` (since retired with the capture-gated
+   ctests; the committed `fixtures/novaworld/` wire gates are the surviving pattern).
 
 ## Reuse vs rewrite
 
@@ -296,7 +297,7 @@ protocol layer (the runtime already emits/parses fully-framed NWU/CRC/SCRK datag
 (since retired) driving `apps/common/net_sockets` against those entry points at a fixed 62 Hz cadence. `UdpSessionTransport`
 stays an identity byte-conduit; the framing/crypto stays in `engine/net/novaworld` (the owner reframes a
 popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43` through
-`handle_server_datagram`) — the `.agents/network.md` guardrail, satisfied without changing the transport.
+`handle_server_datagram`) — the `.agents/README.md` Working Rules guardrail (protocol/crypto/framing in Godot-free libs), satisfied without changing the transport.
 
 - **`engine/runtime/inmatch/host_session.{h,cpp}`** (shared by the game's host, the NovaWorld
   listener, and the socket tests — one wire owner loop). The per-tick body is the §5.44 recv-before-send order: recv-drain → `tick_connections`
@@ -327,8 +328,9 @@ dedicated host's owner loop, each on its own bound loopback UDP socket, run a fu
 loop over real `sendto`/`recvfrom` (single-thread poll-pump): the joiner reaches InMatch+deployed, the
 peer SNAPs to its C2S `0x0C` over the wire, no synthetic host player exists, and the S2C `0x0A` folds
 into `ClientState`. It also asserts the host's emitted §5.2a S2C tag order and (env-gated
-`NW_GOLDEN_LAN_JOIN`, skip-clean) cross-checks it against `retail-lan-host-join.pcapng` — **passes against
-the local golden**. `npruntime|netsim|
+`NW_GOLDEN_LAN_JOIN`, skip-clean; that variable and the golden cross-check were retired
+with the capture-gated ctests, `docs/dev-env-vars.md`) cross-checked it against
+`retail-lan-host-join.pcapng` — **passed against the local golden**. `npruntime|netsim|
 novaworld` ctest green (the 16 affected + the 41 net scope). The `0x10`/`0x0D`/`0x1A` and the unwitnessed
 §5.2a serializers stayed deferred at P6 (structural P3) — **now closed by D-NET Wave 1 (P8.2 below)**.
 The retail `0x57` RTT pong and field-3 send holdoff are **also now LANDED**: the server bounces C2S
@@ -466,8 +468,10 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
   `stream_pcap_udp_file` (then `apps/common/pcap_reader`, today `engine/base/pcapio/pcap_reader`) → `engine/net/npwire/wire_capture`
   (`CaptureDecoder::push`) → ordered `(direction, tag, decoded-fields, raw-payload, ts, port)`
   events, partitioned host vs joiner by port. Env-gate on the golden path with a `DEFAULT_*_PCAP`
-  fallback; skip if absent. New env vars: `NW_GOLDEN_LAN_JOIN`, `NW_GOLDEN_LAN_JOIN_SESSION`,
-  `NW_GOLDEN_GAMEPLAY` (wire in `tests/CMakeLists.txt`).
+  fallback; skip if absent. New env vars at the time: `NW_GOLDEN_LAN_JOIN`,
+  `NW_GOLDEN_LAN_JOIN_SESSION`, `NW_GOLDEN_GAMEPLAY` (wired in `tests/CMakeLists.txt`;
+  all three retired with the capture-gated ctests, and `docs/dev-env-vars.md` lists no
+  golden variables today).
 - **Level 1 (unit, per tag):** decode golden payload → re-encode → assert byte-identical + fields.
 - **Level 2 (server e2e):** replay client-origin datagrams in → assert emitted S2C == server-origin.
 - **Level 3 (client e2e):** replay server-origin datagrams in → assert emitted C2S == client-origin
@@ -490,11 +494,10 @@ bank table lives in `scripts/net/README.md` "Reference captures". Decode best wi
   §6.3–6.5 (structs). ADRs 0009–0012.
 - Runbooks: `.agents/README.md` (the standing working rules and task routing),
   `.agents/interop.md` (capture, packet-diff, live-repro triage), `.agents/ida.md`,
-  `.agents/debug.md`. (`.agents/network.md` is a redirect that points back here — this file
-  is the architecture-guardrails / module-ownership / frame-order owner; do not chase the
-  redirect in a circle.)
+  `.agents/debug.md`. (This file is the architecture-guardrails / module-ownership /
+  frame-order owner; the former `.agents/network.md` redirect to it was removed 2026-09-28.)
 - Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
   deleted at P8.1, recorded above): `engine/net/novaworld/{host_session_accept.h,joiner_session.h}`.
 - Seam: `engine/runtime/replication/{connection_fan.h,connection.h,session_transport.h,udp_session_transport.h}`.
-- Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
-  `tests/novaworld/nw_pcap_stream_test.cpp`.
+- Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp` (since retired),
+  `tests/netsim/*`, `tests/novaworld/nw_pcap_stream_test.cpp`.

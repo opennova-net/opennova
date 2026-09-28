@@ -12,7 +12,9 @@
 
 Before further reimplementation: rearchitect where it pays, refactor the
 rest, and institutionalize the codebase design. Started 2026-07-04, after
-the editor-layer program (docs/oned/editor-layer-program.md, complete) and
+the editor-layer program (its record, `docs/oned/editor-layer-program.md`, lived
+from `66ae43616` to `a3a69b57e` and was removed 2026-09-28 with the ONED product;
+git history keeps it) and
 grounded in a three-way exploration of the tree (net/libs topology, the
 ONED/engine boundary, products/standards) whose findings are folded into the
 track descriptions below.
@@ -41,7 +43,7 @@ MODE of the game (ADR 0015). OpenNova Launcher is outside that taxonomy.
 | Final wave reached | 2 — portability + standards adoption. At close: ENG-2/3/4 done (#206, #209, trunk 2), ENG-5 sweeps #1 (boundary) + #2 (close-out) run, ENG-6 done (R8 + the trunk-2 manifest); LIBS-2/3 done (ADR 0024); STD-3 flip done (boundary), STD-2 seeds converted 7/8 (the tail; the object-material-defs contract deferred with cause); ONED-W1 six slices landed (the tail), ONED-MUS-D design landed (acceptance = the open maintainer gate); the full REN track closed. Not executed: ONED-RSP, ONED-TST refits, the ONED-W1 remainder — dispositioned below |
 | Boundary gates (Wave 1→2) | full ctest: 246/248 green; the two reds are pre-existing, tracked, and not Wave-1 regressions — `npruntime_golden_gameplay` (D-NET-159 wire adjudication, asset-gated so CI never sees it) and `opennova_python_pytest` (diagnosed at this boundary: the two DCC-parity tests build a zero-write request the jobs validation rejects, then their in-parent `import bpy` poisons the 13 spawn-context worker tests — all 13 pass in isolation). *(Both since closed — golden_gameplay green since #417, pytest green; their TODO.md rows were pruned on completion per the completed-entries convention)*. FULL GUT attested in the boundary PR |
 | Freeze | **LIFTED at close (2026-07-12)** — new reimplementation work no longer waits on foundation phases. What survives is the standing rule set, not the gate: ADRs 0015–0018 (products/serve mode, engine–editor boundary, typed records, public-API testability), 0019–0021, [0022](adr/0022-divergence-burn-down.md) (the PAR zero-OPEN target — burn-down continues as standing policy), [0023](adr/0023-render-visual-parity.md) (the REN rules), [0024](adr/0024-lib-family-topology.md) (family topology), and every instrument in the enforcement table (all hard-fail-forever by design) |
-| Detail docs | Historical ONED track: [docs/oned/workspace-maturity-program.md](oned/workspace-maturity-program.md), retired by ADR 0037 |
+| Detail docs | Historical ONED track: `docs/oned/workspace-maturity-program.md`, retired by ADR 0037; the record itself (commits `98ad88c45` through `f497afa7e`) was removed 2026-09-28 and survives in git history |
 | Decision ADRs | [0015](adr/0015-two-products-serve-mode.md) products/serve-mode, [0016](adr/0016-engine-editor-boundary.md) engine/editor boundary, [0017](adr/0017-typed-records-named-constants.md) records/constants, [0018](adr/0018-public-api-testability.md) testability, [0022](adr/0022-divergence-burn-down.md) divergence burn-down, [0024](adr/0024-lib-family-topology.md) lib family topology + consumption models; boundary ADRs (npwire, world seam, responsive shell) minted in their tracks at decision time |
 
 ## Close-out (2026-07-12)

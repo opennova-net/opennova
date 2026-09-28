@@ -88,9 +88,13 @@ FFI wrapper. One thing still matters:
   `opennova_add_gated_test` so ctest reports Skipped, never Passed. A test whose
   synthetic legs ran reports its missing retail leg with `retail::skip_leg` and
   exits 0. Never read the environment directly (`scripts/lint/env_lint.py`
-  hard-fails it) and never exit 0 on missing data. Add the new gate to the
-  matrix in `docs/asset-gated-tests.md` and to the expectation tables in
-  `scripts/ci/retail_gates_ran.py` in the same commit.
+  hard-fails it) and never exit 0 on missing data. Register it in
+  `tests/CMakeLists.txt` with `opennova_add_gated_test` (label `retail`, exit 77 =
+  Skipped) or, for one binary with synthetic legs plus a `--retail` leg,
+  `opennova_add_mixed_test` (which adds the labelled `<name>_retail` entry);
+  `scripts/ci/test_suites.py` attests the core/retail selection against the
+  reports, so there is no expectation table to edit. `docs/asset-gated-tests.md`
+  describes the suites.
 - Record where each committed sample came from in the test header comment.
 
 ## 4. Tests (`tests/<name>/`)
@@ -116,8 +120,9 @@ Run loop:
   `godot/src/register_types.cpp` (`godot/src` already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test
-  `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via
-  the `gut` skill.
+  `godot/tests/<name>_data_test.gd` over the committed fixture (a core script
+  never reads retail data); a script that needs retail data lives under
+  `godot/tests/retail/` instead. Run it via the `gut` skill.
 - Format libraries remain independent of authoring workspaces, inspectors,
   project surfaces, and import flows; see ADR 0045.
 
