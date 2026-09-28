@@ -28,7 +28,13 @@ jobs:
   # PDB flags, so every object is cacheable as-is. First run after a cache miss
   # is cold; after that only changed sources recompile.
   test:
-    runs-on: windows-latest
+    # One-entry matrix on purpose: branch protection requires the check named
+    # "test (windows-latest)", which the matrix produces.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
@@ -421,7 +427,13 @@ jobs:
           path: godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
 
   godot-tests:
-    runs-on: windows-latest
+    # One-entry matrix on purpose: branch protection requires the check named
+    # "godot-tests (windows-latest)", which the matrix produces.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
     needs: [build-gdextension-windows]
     env:
       GODOT_VERSION: 4.6.1-stable
@@ -657,7 +669,11 @@ jobs:
   test-retail:
     needs: [retail-availability]
     if: needs.retail-availability.outputs.available == 'true'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_GENERATOR: Ninja
@@ -724,7 +740,11 @@ jobs:
 
   godot-tests-retail:
     if: needs.retail-availability.outputs.available == 'true'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
     needs: [build-gdextension-windows, retail-availability]
     env:
       GODOT_VERSION: 4.6.1-stable

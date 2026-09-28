@@ -51,7 +51,8 @@ the run's isolated `user://` for inspection), `--suite core|retail|all` (default
 `all`; `core` unsets the retail roots, `retail` requires both and rejects every
 skip) and `--windowed` (with any suite: only the graphics scripts,
 `tests/windowed/` for core and `tests/retail/windowed/` for retail, Forward+; a
-windowed run fails on any pending test). For one file, invoke GUT directly:
+windowed run fails on any pending test except, under `all`, a missing-data
+skip). For one file, invoke GUT directly:
 
     "$GODOT_BIN" --headless --path godot -s addons/gut/gut_cmdln.gd \
       -gtest=res://tests/<file>_test.gd -gexit
@@ -87,9 +88,11 @@ are collected). Repo fixtures are reached one level above `res://`:
 that needs retail data lives under `godot/tests/retail/` and may `pending` only
 there: `--suite retail` rejects any skip, and `--suite core` fails a core script
 that reads `RetailData` or reports a root-gated skip (`godot/tests/CLAUDE.md`,
-`scripts/ci/test_suites.py`). A script that needs a RenderingDevice lives under
-`godot/tests/windowed/` (core) or `godot/tests/retail/windowed/` and runs only
-with `--windowed`; headless it is never selected. A green `--suite all` count does not prove
+`scripts/ci/test_suites.py`). A script whose every test needs a RenderingDevice
+lives under `godot/tests/windowed/` (core) or `godot/tests/retail/windowed/` and
+runs only with `--windowed`; headless it is never selected. A headless script that
+mixes in RD-gated methods keeps them `pending` until they are split into a
+windowed sibling. A green `--suite all` count does not prove
 coverage; check for pending/skipped lines when you expected assets present.
 Retail data comes from the two roots through `RetailData`
 (`godot/tests/support/retail_data.gd`), never a bespoke env var.

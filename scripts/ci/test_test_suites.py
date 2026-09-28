@@ -54,6 +54,19 @@ class SuiteChecks(unittest.TestCase):
         self.assertEqual(suites.check_log(log, "core"), [])
         self.assertEqual(len(suites.check_log(log, "core", windowed=True)), 1)
 
+    def test_windowed_all_keeps_missing_data_skips(self):
+        root_skip = ('<testcase classname="tests/retail/windowed/pixel_test.gd" name="test_pixel">'
+            '<skipped>needs OPENNOVA_JO_DIR</skipped></testcase>')
+        report = self.report(root_skip)
+        scripts = ["res://tests/retail/windowed/pixel_test.gd"]
+        self.assertEqual(suites.check_report(report, scripts, godot=True, suite="all", windowed=True), [])
+        self.assertIn("retail test skipped: tests/retail/windowed/pixel_test.gd:test_pixel",
+            suites.check_report(report, scripts, godot=True, suite="retail", windowed=True))
+        log = self.write("gut.log", "res://tests/retail/windowed/pixel_test.gd\n"
+            "- [Pending]: needs OPENNOVA_JO_DIR\n"
+            "- [Pending]: RenderingDevice unavailable under this Godot renderer\n")
+        self.assertEqual(len(suites.check_log(log, "all", windowed=True)), 1)
+
     def test_core_layout_covers_windowed_core_scripts(self):
         self.write("godot/tests/windowed/raster_test.gd", "func test_one():\n\tRetailData.assets()\n")
         self.assertEqual(suites.layout_errors(self.root),

@@ -5,8 +5,10 @@ docs/dev-env-vars.md is the registry. After the 2026-08 cut the whole set is:
 
   the two machine roots   OPENNOVA_JO_DIR, OPENNOVA_JO_ASSETS - read ONLY
                           by the three resolvers (tests/common/retail_paths.h,
-                          godot/tests/support/retail_data.gd, scripts/net/lib.ps1)
-                          and the scripts/mcp/game_mcp.py launch default;
+                          godot/tests/support/retail_data.gd, scripts/net/lib.ps1),
+                          the Blender tests' tests/blender/addon_harness.py
+                          (OPENNOVA_JO_ASSETS) and the scripts/mcp/game_mcp.py
+                          launch default;
                           scripts/ci/test_suites.py validates root availability
   GODOT_BIN               the scripts' Godot binary
   the deployed service    ONNET_*, DATABASE_PATH, ADMIN_*, ... under

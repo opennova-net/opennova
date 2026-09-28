@@ -31,7 +31,8 @@ scripts/test_godot.sh --suite retail --windowed   # godot/tests/retail/windowed/
 A green `all` run with missing data proves only the tests that executed. Windowed
 graphics tests (`godot/tests/windowed/`, `godot/tests/retail/windowed/`) are excluded
 from all headless selections, and a windowed run rejects every pending test: a
-missing RenderingDevice is a failure, never a skip.
+missing RenderingDevice is a failure, never a skip (under `all`, an explicit
+missing-data skip stays allowed, as it does headless).
 
 CTest's `retail` label is the native source of truth. List it with:
 
