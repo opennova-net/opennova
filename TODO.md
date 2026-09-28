@@ -86,11 +86,12 @@ health. Divergences from the original engine belong in
       Each returns as a VALUE slot fed by the shell sampler that owns the
       source (the draws/objects/primitives/nodes and the live effect counts
       are the Render and Particles windows' now).
-- [ ] The `route_frame_times` frame-timing probe from the PR #679 hitch work is unlanded:
-      it lives on the render-parity worktree's `fix/frame-hitches-2026-09-25` branch as a
-      safekeeping commit, not on master. Land it as a registered `game_probe` tool
-      (`ProbeDef.definitions()`, `godot/probes/`, ADR 0041) with its catalog contract
-      under `godot/tests/probes/`, or drop it deliberately and delete the branch.
+- [ ] The `route_frame_times` frame-timing probe from the PR #679 hitch work (per-frame
+      wall time and slot breakdown while the local player runs a route) was never
+      committed; it survives only in the maintainer's local 2026-09-28 archive (the probe
+      script plus its `ProbeDef` registration row). Land it as a registered `game_probe`
+      tool (`ProbeDef.definitions()`, `godot/probes/`, ADR 0041) with its catalog
+      contract under `godot/tests/probes/`, or drop this row deliberately.
 
 ## Project health follow-ups
 
