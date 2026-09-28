@@ -2622,8 +2622,14 @@ void test_player_weapon_attack_stamp() {
     src.clips.insert(anim_state::kHoldGrenade);
     src.clips.insert(anim_state::kKnifeAttack);
     src.clips.insert(anim_state::kGrenadeAttack);
-    src.lengths[anim_state::kKnifeAttack] = 24;
-    src.lengths[anim_state::kGrenadeAttack] = 24;
+    // One-shots that outlast the 16-tick selection gate, as retail's locked
+    // one-shots do (ATT_GND 39 ticks, IDL_RLD 89; ATT_KNF itself loops): a
+    // deferral that reached a one-shot AFTER it stopped would never promote,
+    // since the stopped channel skips its advance body and the end flag never
+    // latches [orig: AnimChannel_AdvancePlayback @0x40B14D], the case
+    // tests/anim/adm_playback_test pins.
+    src.lengths[anim_state::kKnifeAttack] = 48;
+    src.lengths[anim_state::kGrenadeAttack] = 48;
     ai.root_motion = &src;
     AiEntity *e = soldier(ai);
     e->inf.is_local_player = true;
@@ -2640,7 +2646,7 @@ void test_player_weapon_attack_stamp() {
     CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
 
     // The knife stamp lands immediately [orig: @0x542bcb]; the hold desire then defers
-    // behind the locked attack until its 24-tick clip end.
+    // behind the locked attack until its 48-tick clip end.
     const int32_t before_attack = e->inf.wpn_clip_phase;
     infantry_weapon_attack_stamp(e->inf, 1);
     CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
@@ -2658,7 +2664,14 @@ void test_player_weapon_attack_stamp() {
     CHECK(e->inf.wpn_clip_phase == mid_phase);
     CHECK(e->inf.wpn_deferred == 0);
 
-    // Clip end -> promotion back to the hold pose [orig: @0x40b77b].
+    // The repeat stamp cleared the queued exit before any update armed it; the
+    // next selection pass queues it again while the clip still plays, that arms
+    // the end-notify, and the clip end promotes it back to the hold pose on the
+    // tick after [orig: the arm @0x40B7E1, the promotion on 0x20000 @0x40B7C1
+    // via @0x40b77b; the armed one-shot end @0x40B188..0x40B18F].
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+    CHECK(e->inf.wpn_deferred == anim_state::kHoldKnife);
     run_ticks(ai, w, t, t + 40);
     CHECK(e->inf.wpn_state == anim_state::kHoldKnife);
 
@@ -4267,12 +4280,12 @@ static void test_retail_weapon_channel_holds() {
     // Pistol: special_hold -> the pistol hold; its reload is reload2.
     const int pistol = retail_hold_state(rig, "WPN_colt45", 40);
     std::printf("weapon_channel: WPN_colt45 hold state %d (%s) hold_kind %d\n", pistol,
-            pistol >= 0 ? kInfantryAnimNames[pistol] : "?", pa->inf.wpn_hold_kind);
+            pistol >= 0 ? opennova::anim::kAnimSlotNames[pistol] : "?", pa->inf.wpn_hold_kind);
     CHECK(pistol == anim_state::kHoldPistol);
     int saw_rifle_reload = 0;
     const int pistol_reload = retail_fire_then_reload(rig, pistol, 40, &saw_rifle_reload, anim_state::kReload);
     std::printf("weapon_channel: pistol reload state %d (%s)\n", pistol_reload,
-            pistol_reload >= 0 ? kInfantryAnimNames[pistol_reload] : "?");
+            pistol_reload >= 0 ? opennova::anim::kAnimSlotNames[pistol_reload] : "?");
     CHECK(pistol_reload == anim_state::kReload2); // pistol reload plays reload2
     CHECK(saw_rifle_reload == 0);                  // NOT the rifle reload
     wait_slot_idle(rig, 600);
@@ -4282,7 +4295,7 @@ static void test_retail_weapon_channel_holds() {
     // Knife: the knife hold; the click stamps knife_attack, which then settles.
     const int knife = retail_hold_state(rig, "WPN_KNIFE", 40);
     std::printf("weapon_channel: WPN_KNIFE hold state %d (%s) hold_kind %d\n", knife,
-            knife >= 0 ? kInfantryAnimNames[knife] : "?", pa->inf.wpn_hold_kind);
+            knife >= 0 ? opennova::anim::kAnimSlotNames[knife] : "?", pa->inf.wpn_hold_kind);
     CHECK(knife == anim_state::kHoldKnife);
     rig.local.set_weapon_input(true, true, false);
     rig.tick();
@@ -4313,12 +4326,12 @@ static void test_retail_weapon_channel_holds() {
     // advancing playhead while the slot FSM is in RELOAD, then mirrors again.
     const int rifle = retail_hold_state(rig, "WPN_M4AUTO", 40);
     std::printf("weapon_channel: WPN_M4AUTO hold state %d (%s) primary %d\n", rifle,
-            rifle >= 0 ? kInfantryAnimNames[rifle] : "?", pa->inf.anim_state);
+            rifle >= 0 ? opennova::anim::kAnimSlotNames[rifle] : "?", pa->inf.anim_state);
     CHECK(rifle == pa->inf.anim_state || rifle == anim_state::kIdle);
     int unused = 0;
     const int rifle_reload = retail_fire_then_reload(rig, rifle, 40, &unused, -1);
     std::printf("weapon_channel: rifle reload state %d (%s) slot action %d\n", rifle_reload,
-            rifle_reload >= 0 ? kInfantryAnimNames[rifle_reload] : "?", rig.local.weapon.slot.current);
+            rifle_reload >= 0 ? opennova::anim::kAnimSlotNames[rifle_reload] : "?", rig.local.weapon.slot.current);
     CHECK(rifle_reload == anim_state::kReload);
     CHECK(rig.local.weapon.slot.current == weapon_action::kReload); // mid-reload: FSM in RELOAD
     rig.tick(); // initialize the requested reload at the next motor head

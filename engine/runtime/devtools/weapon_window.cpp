@@ -1,6 +1,7 @@
 #include <runtime/devtools/weapon_window.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
+#include <runtime/world/weapon_fsm.h>
 
 #include <imgui.h>
 
@@ -1186,10 +1187,17 @@ void WeaponWindow::draw_properties() {
 
 	ImGui::TextDisabled("FUNCTION %s", row.function.empty() ? "-" : row.function.c_str());
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+		// The pump runs the handler the row names, or the suffix's own when it
+		// names none the registry knows (weapon_fsm.cpp run_handler).
+		const int8_t named = opennova::world::weapon_handler_named(row.function.c_str());
+		const int8_t bound = named == opennova::world::weapon_handler::kPlaceholder
+				? opennova::world::weapon_action_default_handler(id)
+				: named;
 		ImGui::SetTooltip(
-				"Read-only: the handler registry is not ported (divergence D-WPN-1).\n"
-				"Every shipped row names the standard handler for its own suffix, so\n"
-				"the per-state behaviour is fixed and editing this would change nothing.");
+				"Read-only: this slot runs %s, the handler its FUNCTION names\n"
+				"(the suffix's own when it names none the registry knows).\n"
+				"Rebinding it is a def edit, not a live one.",
+				opennova::world::kWeaponHandlerNames[bound]);
 	}
 	if (row.clip_ticks > 0) {
 		ImGui::SameLine();

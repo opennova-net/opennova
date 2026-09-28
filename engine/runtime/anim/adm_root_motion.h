@@ -22,7 +22,7 @@ namespace opennova::anim {
 // [orig: AnimMap_UpdateEntity @0x40b5f0 per entity;
 // docs/world/world-wac-ai-re.md D-INF-6].
 //
-// Resolution chain per set: anim state id -> kInfantryAnimNames[id] ->
+// Resolution chain per set: anim state id -> anim::kAnimSlotNames[id] ->
 // "anim_<name>" .adm entry -> .bad (through the mounted resource index),
 // keeping only the .bad "events" records — the engine's per-frame root data
 // [orig: AnimMap_UpdateEntity @0x40b5f0 out-transform; semantics pinned in

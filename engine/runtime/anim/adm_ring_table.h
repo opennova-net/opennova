@@ -66,6 +66,10 @@ public:
 	// The clock of one registered variant, without serving.
 	const AdmClipFacts *clip(const std::string &adm_name, const std::string &key,
 			int32_t variant) const;
+	// A table holding only `adm_name`'s rings and heads, as they stand: what a
+	// bake that must not move the loaded heads reads (empty when the table is
+	// not loaded).
+	AdmRingTable copy_of(const std::string &adm_name) const;
 	void clear();
 
 private:

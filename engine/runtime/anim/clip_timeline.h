@@ -5,6 +5,16 @@
 
 namespace opennova::anim {
 
+// A loop wrap that serves another entry of the slot's ring fades the served
+// entry in over eight ticks from weight 0, a step of 1/8 a tick: the re-init
+// the wrap callback makes. The body channels, the secondary and the FP
+// channel all fade this way.
+// [orig: AnimMap_AdvanceToNextAnim @0x40BDF0 -> AnimChannel_InitFromParams(ch,
+//  clip, 8, 0, 0x1000) @0x40BE24: the blend half at t = 0 @0x41068A, weight 0
+//  @0x410690, step 1/8 @0x410695]
+inline constexpr int32_t kWrapFadeTicks = 8;
+inline constexpr float kWrapFadeStep = 1.0f / kWrapFadeTicks; // 0.125 exactly
+
 // Retail's float channel clock, addressed by elapsed simulation ticks.
 // Sparse checkpoints let shared clips answer independent entity playheads and
 // seeks without replacing repeated float addition with a different rounding law.

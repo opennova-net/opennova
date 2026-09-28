@@ -7,6 +7,7 @@
 #include <base/io/bam.h>
 
 #include <runtime/world/ai.h>
+#include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
 
 namespace opennova::world {
@@ -93,22 +94,35 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
     // End notification promotes the REQUEST only. The old channel advances
     // once more here; the next update initializes the promoted channel.
     // [orig: shared AnimMap_UpdateEntity @0x40B77B..0x40B7FE]
-    // A deferred state arms the channel. The promotion resets the channel's
-    // flag word to the clip's own, so the old channel advances unarmed, and a
-    // loop the arm parked on its end wraps on the promotion tick [orig: the arm
-    // @0x40B7B3 / @0x40B7E1; the promotion's flag reset @0x40B7A8 / @0x40B7D6].
-    bool armed = inf.wpn_deferred != 0;
+    // A deferred state arms the channel once, when first seen, and the channel
+    // parks on its clip's next wrap after the arm (a one-shot on its end),
+    // where the end flag latches; the promotion follows on the next tick and
+    // resets the channel's flag word to the clip's own, so the old channel
+    // advances unarmed, and a loop the arm parked on its end wraps on the
+    // promotion tick. A loop past its first cycle waits for its next wrap. The
+    // arm lives on the channel: a deferred cleared while armed leaves the loop
+    // parked (re-parked every tick) until a re-init, a deferred set again
+    // promotes at once off the latched end, and a one-shot that already
+    // stopped never latches (arm_end_notify).
+    // [orig: the arm @0x40B7B3 / @0x40B7E1; the promotion on 0x20000
+    //  @0x40B793 / @0x40B7C1, its flag reset @0x40B7A8 / @0x40B7D6;
+    //  AnimChannel_AdvancePlayback's stop gate @0x40B14D and armed wrap
+    //  @0x40B19E..0x40B1B1]
     bool released = false;
     if (inf.wpn_deferred != 0 && root_motion != nullptr) {
-        const int32_t length = root_motion->clip_length_ticks(
-                inf.adm_id, inf.weapon_clip_state(), inf.wpn_variant);
-        if (length >= 0 && inf.wpn_clip_phase >= length) {
+        if (inf.wpn_deferred_boundary < 0)
+            inf.wpn_deferred_boundary = arm_end_notify(*root_motion, inf.adm_id,
+                                                       inf.weapon_clip_state(), inf.wpn_variant,
+                                                       inf.wpn_clip_phase);
+        const int32_t boundary = inf.wpn_deferred_boundary;
+        if (boundary >= 0 && inf.wpn_clip_phase >= boundary) {
             inf.wpn_state = inf.wpn_deferred;
             inf.wpn_deferred = 0;
-            armed = false;
-            released = inf.wpn_clip_phase == length;
+            inf.wpn_deferred_boundary = -1;
+            released = inf.wpn_clip_phase == boundary;
         }
     }
+    const bool armed = inf.wpn_deferred_boundary >= 0;
 
     // Advance the secondary playhead every tick; root motion is DISCARDED — the weapon
     // layer never feeds the parent transform [orig: parentEntity=0 @0x40b8f3].
@@ -134,8 +148,15 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
         } else {
             const int state = inf.weapon_clip_state();
             const int32_t variant = inf.wpn_variant;
-            const bool have = root_motion->advance_variant(inf.adm_id, state, variant,
-                                                           inf.wpn_clip_phase, discard);
+            // The armed park, and the re-park of an armed loop already on its
+            // boundary, as the primary [orig: the shared AnimChannel_AdvancePlayback
+            //  @0x40B199..0x40B1B1].
+            const int32_t boundary = inf.wpn_deferred_boundary;
+            if (armed && boundary != kEndNotifyNeverLatches && inf.wpn_clip_phase >= boundary)
+                inf.wpn_clip_phase = boundary - 1;
+            const bool have = root_motion->advance_armed(inf.adm_id, state, variant,
+                                                         inf.wpn_clip_phase,
+                                                         armed ? boundary : -1, discard);
             // The secondary's unarmed loop wrap serves its playing state's ring
             // from the heads it shares with the primary, exactly as the primary
             // does; only its pose changes. [orig: AnimMap_UpdateEntity(0, S, entity)

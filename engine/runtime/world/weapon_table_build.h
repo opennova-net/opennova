@@ -15,6 +15,21 @@ namespace assets { class AssetStore; }
 
 namespace opennova::world {
 
+// The bake's view of one weapon's ANIMADM rings, the two callbacks
+// weapon_fsm_bake reads through (the table build and the local install bake
+// against the same rings). The existence probe is the slot lookup and never
+// advances; each automatic field serves and advances the SHARED ring, so an
+// earlier weapon's reads move a later one's heads. A read of slot 0 is zero
+// ticks. [orig: AnimMap_FindSlotByName @0x40cfa0, checked by Anim_InitActions
+// @0x5421ae; Anim_GetDurationTicks @0x53ee10, the serve @0x53EE20..0x53EE26
+// and its zero for slot 0]
+struct WeaponTableRingContext {
+	anim::AdmRingTable *rings = nullptr;
+	std::string adm;
+};
+int table_clip_resolves(void *opaque, const char *key);
+float table_clip_seconds(void *opaque, const char *key);
+
 // charfilter token -> bit: medic=1 sniper=2 gunner=4 rifleman=8 engineer=0x10
 // [orig: token table @0x830EB0, OR-ed @0x543F6E]. 0 = unrecognized (the original warns + skips).
 uint8_t charfilter_bit(const char *token);

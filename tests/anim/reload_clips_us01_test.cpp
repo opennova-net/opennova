@@ -89,9 +89,9 @@ int main() {
 		return retail::skip("a parseable items.def");
 
 	// --- 65/66 are the reload keys.
-	expect(std::strcmp(world::kInfantryAnimNames[world::anim_state::kReload], "reload") == 0,
+	expect(std::strcmp(anim::kAnimSlotNames[world::anim_state::kReload], "reload") == 0,
 			"infantry anim key 65 is reload");
-	expect(std::strcmp(world::kInfantryAnimNames[world::anim_state::kReload2], "reload2") == 0,
+	expect(std::strcmp(anim::kAnimSlotNames[world::anim_state::kReload2], "reload2") == 0,
 			"infantry anim key 66 is reload2");
 
 	// --- 0x14B9 -> the US01 visual item.

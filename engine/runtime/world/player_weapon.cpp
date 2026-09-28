@@ -15,6 +15,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
+#include <runtime/world/weapon_table_build.h>
 #include <runtime/world/world.h>
 
 #include <base/io/bam.h>
@@ -428,15 +429,6 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 
 namespace {
 
-// The bake's view of the mounted weapon's ANIMADM rings: the existence probe
-// never advances; each automatic field serves and advances the shared ring; a
-// read of slot 0 is zero ticks. [orig: AnimMap_FindSlotByName @ 0x40cfa0
-// checked @ 0x5421ae; Anim_GetDurationTicks @ 0x53ee10]
-struct InstallRingContext {
-	anim::AdmRingTable *rings = nullptr;
-	std::string adm;
-};
-
 // Restart the FP channel's primary half on a served clip: its clock follows
 // the clip. [orig: AnimChannel_InitFromData @ 0x410560 via
 // AnimMap_PlayAnimBySlot @ 0x40BDD1 (t = 0)]
@@ -501,7 +493,7 @@ void fp_channel_advance(anim::AdmRingTable &rings, LocalPlayerWeapon &w) {
 		++w.anim_blend_ticks;
 		++w.anim_advance_ticks;
 		--w.anim_fade_countdown;
-		w.anim_blend_weight += 0.125f;
+		w.anim_blend_weight += anim::kWrapFadeStep;
 		if (w.anim_fade_countdown <= 0) {
 			fp_start_primary(rings, w, w.anim_blend_key, w.anim_blend_variant, w.anim_blend_ticks);
 			w.anim_blending = false;
@@ -524,7 +516,7 @@ void fp_channel_advance(anim::AdmRingTable &rings, LocalPlayerWeapon &w) {
 	w.anim_blend_key = next.key;
 	w.anim_blend_variant = next.variant;
 	w.anim_blend_ticks = 0;
-	w.anim_fade_countdown = 8;
+	w.anim_fade_countdown = anim::kWrapFadeTicks;
 	w.anim_blend_weight = 0.0f;
 	w.anim_latched_key = next.key;
 	w.anim_latched_variant = next.variant;
@@ -586,25 +578,16 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 		const bool adopts = !rings.loaded(data.animadm);
 		rings.adopt(data.animadm, own);
 		anim::AdmRingTable copy;
-		if (!adopts) copy = rings;
+		if (!adopts) copy = rings.copy_of(data.animadm);
 		anim::AdmRingTable &bake_rings = adopts ? rings : copy;
 		// The bake probes existence as a pure lookup and reads durations
-		// ring-wise, one consuming read per 'auto' field [orig: Anim_InitActions
-		// @ 0x541fa0; the lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
-		const auto resolve_fn = [](void *p_ctx, const char *key) -> int {
-			const InstallRingContext &ctx = *static_cast<InstallRingContext *>(p_ctx);
-			return ctx.rings->resolves(ctx.adm, key != nullptr ? key : "") ? 1 : 0;
-		};
-		const auto clip_fn = [](void *p_ctx, const char *key) -> float {
-			InstallRingContext &ctx = *static_cast<InstallRingContext *>(p_ctx);
-			const std::string slot_key = key != nullptr ? key : "";
-			const anim::AdmServed served = ctx.rings->serve(ctx.adm, slot_key);
-			if (!served.valid() || anim::adm_slot_index(slot_key) == 0) return -1.0f;
-			return served.clip->seconds;
-		};
-		InstallRingContext ctx{&bake_rings, data.animadm};
+		// ring-wise, one consuming read per 'auto' field, through the table
+		// build's own ring callbacks [orig: Anim_InitActions @ 0x541fa0; the
+		// lookup @ 0x5421ae, the reads @ 0x5421c5 / @ 0x5421d8].
+		WeaponTableRingContext ctx{&bake_rings, data.animadm};
 		w.def = WeaponFsmDef{};
-		weapon_fsm_bake(data.rows.data(), data.rows.size(), resolve_fn, clip_fn, &ctx, w.def);
+		weapon_fsm_bake(data.rows.data(), data.rows.size(), table_clip_resolves, table_clip_seconds,
+				&ctx, w.def);
 	}
 	const int32_t flags = data.flags;
 	w.def.auto_fire = (flags & weapon_flag::kAuto) != 0; // [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0]

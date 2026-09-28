@@ -17,7 +17,9 @@ namespace opennova::wac {
 // console compile (WacScript_ExecuteConsoleCommand @0x4F6D3F), shows it only
 // on the script debug overlay (Debug_DrawScriptState @0x4F652A) and never
 // refuses the program. `error` marks the lookups that miss in OUR catalogs
-// (FX, SOUNDSET, AMMO), which a strict host treats as unsafe to run.
+// (FX, SOUNDSET, AMMO); Program::ok() answers whether any did, which the
+// embedder's WAC wrapper reports, while the program installs and runs as
+// retail's does.
 struct Diagnostic {
     int line = 0;
     int col = 0;
@@ -76,13 +78,6 @@ struct Program {
             if (d.error) return false;
         }
         return true;
-    }
-    int error_count() const {
-        int n = 0;
-        for (const Diagnostic &d : diagnostics) {
-            if (d.error) ++n;
-        }
-        return n;
     }
     // The text retail's debug overlay would show: the first diagnostic as
     // "file (line) message". [orig: Script_SetCompileError @0x4EE7C0]

@@ -83,9 +83,9 @@ int main() {
 	const int adm = root_motion.register_adm(&store, "US01.adm");
 	if (adm < 0) return retail::skip("US01.adm under OPENNOVA_JO_ASSETS");
 
-	expect(std::strcmp(world::kInfantryAnimNames[as::kRollLeft], "roll_left") == 0,
+	expect(std::strcmp(anim::kAnimSlotNames[as::kRollLeft], "roll_left") == 0,
 			"state 41 maps to roll_left");
-	expect(std::strcmp(world::kInfantryAnimNames[as::kRollRight], "roll_right") == 0,
+	expect(std::strcmp(anim::kAnimSlotNames[as::kRollRight], "roll_right") == 0,
 			"state 42 maps to roll_right");
 	expect(root_motion.has_clip(adm, as::kIdleProne), "US01 carries anim_idle_prone");
 	expect(root_motion.has_clip(adm, as::kRollLeft), "US01 carries anim_roll_left");

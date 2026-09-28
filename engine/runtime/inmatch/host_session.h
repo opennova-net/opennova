@@ -7,7 +7,7 @@
 //
 // Socket-free: the loop holds NO socket — the owner supplies a opennova::IDatagramSocket and this
 // pumps it (godot/src wraps UdpPump; apps/ wrap net::Socket via
-// apps/common/net_datagram_socket.h). ALL protocol/crypto/framing stay in the libs (.agents/network.md). The loop
+// apps/common/net_datagram_socket.h). ALL protocol/crypto/framing stay in the libs (.agents/README.md). The loop
 // speaks PeerAddr; the recv timeout (0 = non-blocking busy loop; ~30 ms for a single-threaded
 // poll-pump test) is a property of the embedder, not this loop.
 

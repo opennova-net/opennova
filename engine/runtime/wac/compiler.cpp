@@ -1,5 +1,6 @@
 #include <runtime/wac/compiler.h>
 #include <base/io/crt_ftol.h>
+#include <runtime/anim/adm_clip_index.h>
 #include <runtime/particle/effect_catalog_names.h>
 #include <runtime/audio/oneshot_play.h>
 
@@ -1212,16 +1213,10 @@ private:
 		}
 		if (const size_t p = prefix("ANIM_"); p || expected == int(ParamType::Anim)) {
 			// Every token in an Anim slot, a number too, is looked up as
-			// "anim_" + name, compared past its first five bytes.
+			// "anim_" + name through the slot lookup (anim::adm_slot_index:
+			// the same compare past the key's first five bytes).
 			// [orig: @0x4F2EF2..0x4F2F91 -> AnimMap_FindSlotByName @0x40CFA0]
-			const std::string_view anim = name.substr(p);
-			int index = -1;
-			for (int state = 0; state < world::kInfantryAnimStateCount; ++state) {
-				if (ieq(anim, world::kInfantryAnimNames[state])) {
-					index = state;
-					break;
-				}
-			}
+			int index = anim::adm_slot_index("anim_" + std::string(name.substr(p)));
 			if (index < 0) {
 				error(f, f.line, "Unknown ANIM");
 				index = 0;

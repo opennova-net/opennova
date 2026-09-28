@@ -109,7 +109,10 @@ first one fills every slot the table does not author; neither moves.
 Residuals: the joiner's replica person rows keep entry 0 because the wire
 carries no variant (D-NET-196), and registration starts both channels on
 entry 0 rather than the reset row's current head (identical for every retail
-`.adm`).
+`.adm`). A table authoring two or more reset tokens is a third: retail's
+registration rings the first reset node into the rows registered after it,
+while the port keeps a fixed self-ring for slot 0 and the unauthored slots;
+no shipped table carries more than one reset token, so nothing exercises it.
 
 **The first-person rings (witnessed 2026-09-27).** The viewmodel `.adm`
 registers through the same code, so its rows serve last to first too, and its
