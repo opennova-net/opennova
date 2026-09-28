@@ -11,11 +11,8 @@ extends GutTest
 # cases feed it the same triple over real components: real ObjectModel nodes
 # over the minted models, a real EntityIndex / wire registry, a real
 # MissionObjectPlacer and PF-layout rows through the public present_snapshot.
-# The installed cases drive the whole path (GameWorld frame legs -> Simulation
-# -> LocalPlayerPresenter -> EntityPresenter) over the retail M1A1; they pend
-# without OPENNOVA_JO_DIR.
-
-const MountLook := preload("res://tests/support/mount_look.gd")
+# The installed cases over the retail M1A1 live in the retail half
+# (tests/retail/virtual_display_present_test.gd).
 
 const HULL_3DI := "res://../fixtures/threedi/synth/tank.3di"
 # The stand-in cockpit: like the retail driver displays, `mount` authors a
@@ -26,16 +23,6 @@ const DISPLAY_KEY := "tankdrvr"
 const OTHER_DISPLAY_KEY := "t80_drvr"
 const HULL_BMS_ID := 41
 const HULL_HANDLE := 0x1005 # pool 1, slot 5
-const M1A1_ITEM := 100164
-const TRAINING_MISSION := "07TR.bms"
-
-var _installed_presenter: LocalPlayerPresenter
-
-
-func after_each() -> void:
-	if is_instance_valid(_installed_presenter):
-		_installed_presenter.teardown()
-	_installed_presenter = null
 
 
 # --- real-component fixtures --------------------------------------------------

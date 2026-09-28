@@ -35,7 +35,7 @@ func test_not_loaded_is_safe() -> void:
 func test_vehicle_hud_block() -> void:
 	var hud := _load()
 	var block := hud.get_vehicle_hud("test_vehicle")
-	assert_not_null(block, "The buggy's VEHICLE_HUD block resolves by sid.")
+	assert_not_null(block, "The fixture vehicle's VEHICLE_HUD block resolves by sid.")
 	if block != null:
 		assert_eq(block.interface_texture, "fixture_panel.tga")
 	assert_null(hud.get_vehicle_hud("no_such_sid"), "An unknown sid resolves to no block.")

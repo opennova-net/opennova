@@ -30,9 +30,6 @@ const RED_CLASS := 6
 # 1-based ADM space; staged through RetailData.def_root()).
 const BLUE_PAGE := ["WPN_KNIFE", "WPN_M4AUTO", "WPN_colt45"]
 const RED_PAGE := ["WPN_KNIFE2", "WPN_DRAGUNOV", "WPN_357"]
-# Deliberately absent from both pages: if it shows up in the local pool, the pool was
-# built from something other than the profile page.
-const OFF_PAGE := "WPN_M9Beretta"
 
 var _sav_path := ""
 

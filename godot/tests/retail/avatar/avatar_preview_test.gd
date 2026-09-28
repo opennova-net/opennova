@@ -7,7 +7,6 @@ extends GutTest
 # retail-root tests compose the shipped table's parts (the reference fixture
 # set's Avatars.def over the install's PFFs).
 const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
-const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 const RETAIL_AVATARS_REL := "avatars/Avatars.def"
 
 var _preview: AvatarPreview

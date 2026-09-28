@@ -18,27 +18,10 @@ extends GutTest
 # joiner's wire present carries the host player (type 0x14B9) while self-filtering its own echo H.
 
 
-# A tiny world covering every pool the host streams: two Generic Soldier
-# Persons (pool 0, type 0x14BF),
-# one static building (pool 2, type 0x0123) and one marker (pool 3, type 0x1773). The AI carry a
-# RESOLVABLE non-zero type id so they survive the present's `type_id != 0` filter — with the old
-# item_id 0 they were invisible by construction, which is why the joiner only ever saw the host
-# player. The witnessed initial-state burst streams EVERY entity pool to the joiner at world-load
-# [orig: Server_SendInitialGameStateToPlayer @0x51bba0]: pool-2 statics (0x10), pool-1 (0x0D, omitted
-# by our host — D-NET-97), pool-0 dynamics (0x0C), pool-3 markers (0x20). Terrain/environment/tile
-# resources are resolved from the exact 0x0B header and optional 0x45 overlay; every allocated
-# entity-pool row is streamed rather than reconstructed from a local BMS body.
-const AI_TYPE := 0x14BF       # Generic Soldier (items.def id 105311, org1 Person)
-const BUILDING_TYPE := 0x0123 # a static structure
-const MARKER_TYPE := 0x1773   # a start marker
-const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
 # Objective Co-op's no-pick primary. Retail indexes the authored 6094 rows by
 # player slot; it does not fall through to DM's 6002 family.
 # [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
 const OBJECTIVE_COOP_START_TYPE := 6094
-# The USE scan admits a seat only inside the player's view cone (just under
-# 90 deg standing, 5 deg seated); a peer that presses USE looks at the seat first.
-const MountLook := preload("res://tests/support/mount_look.gd")
 
 # S16 native seat tables: the Dictionary install seam is gone. Tests compose a
 # flat asset dir under the gitignored res://.godot (ResourceRoot rejects

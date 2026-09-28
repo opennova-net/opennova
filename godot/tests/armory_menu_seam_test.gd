@@ -101,20 +101,7 @@ func _make_weapon_driver(with_frame := false) -> MenuDriver:
 
 
 func _write_solid_tga(path: String) -> void:
-	var bytes := PackedByteArray()
-	bytes.resize(18 + 2 * 2 * 4)
-	bytes[2] = 2
-	bytes[12] = 2
-	bytes[14] = 2
-	bytes[16] = 32
-	bytes[17] = 0x28
-	for i in range(18, bytes.size()):
-		bytes[i] = 0xff
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file, "the temporary weapon icon opens for writing")
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
+	TestFs.write_bytes(self, path, TestFs.tga_bytes(Vector2i(2, 2)))
 
 
 func _items(driver: MenuDriver, name: String) -> Array:

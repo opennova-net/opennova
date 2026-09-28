@@ -9,14 +9,7 @@ static var _directory := ""
 
 static func weapon_row(name: String, category: int, rank: int, slot: String,
 		clip: int, team := "", selectable := 1, subclasses := 0) -> String:
-	var text := """weapon "%s"
- category %d
- rank %d
- clipsize %d
- maxclips 7
- startrounds 210
- ammoclass FIXTURE_AMMO 1
- weapon_class %s
+	var text := DefFixture.weapon_header(name, category, rank, clip, "FIXTURE_AMMO") + """ weapon_class %s
  loadout_selectable %d
  loadout_subclasses %d
  charfilter rifleman
@@ -25,7 +18,7 @@ static func weapon_row(name: String, category: int, rank: int, slot: String,
  clipweight 1.5
  round_type FIXTURE_ROUND
 end
-""" % [name, category, rank, clip, slot, selectable, subclasses]
+""" % [slot, selectable, subclasses]
 	var filters := " teamfilter blue\n teamfilter red\n" if team.is_empty() else " teamfilter %s\n" % team
 	if name == "WPN_M4AUTO":
 		filters += " loadout_menu_textid WEAP_SHORT_M4\n loadout_menu_icon M_4.tga\n"
@@ -68,7 +61,8 @@ static func directory() -> String:
 	if not _directory.is_empty():
 		return _directory
 	_directory = ProjectSettings.globalize_path("res://../.godot-test-fixtures/armory")
-	assert(DirAccess.make_dir_recursive_absolute(_directory) == OK)
+	var made := DirAccess.make_dir_recursive_absolute(_directory)
+	assert(made == OK, "the armory fixture directory is creatable")
 	WorldFixture.write_file(_directory.path_join("weapon.def"), weapon_text())
 	WorldFixture.write_file(_directory.path_join("weapon.mnu"), menu_text())
 	var game := RtxtStringFile.new()
@@ -86,9 +80,10 @@ static func directory() -> String:
 	return _directory
 
 
-static func stage(test: GutTest, res_dir: String, staged: Dictionary) -> void:
+## Copy each of the authored files named in `targets` into `res_dir`.
+static func stage(test: GutTest, res_dir: String, targets: PackedStringArray) -> void:
 	var dir := ProjectSettings.globalize_path(res_dir)
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
-	for name in staged.values():
+	for name in targets:
 		test.assert_eq(DirAccess.copy_absolute(
 				directory().path_join(name), dir.path_join(name)), OK)

@@ -26,16 +26,9 @@ func after_each() -> void:
 
 
 func _native_fixture_dir() -> String:
-	var dir := OS.get_cache_dir().path_join("listen_native_%d_%d" % [
-			Time.get_ticks_usec(), _native_fixture_dirs.size()])
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var dir := TestFs.cache_dir(self, "listen_native")
 	_native_fixture_dirs.append(dir)
 	return dir
-
-
-func _fixture_items_text() -> String:
-	return FileAccess.get_file_as_bytes(
-			"res://../fixtures/def/items.def").get_string_from_ascii()
 
 
 # Compose <dir>/items.def from the fixture superset text, load it, wire the dir
@@ -101,7 +94,7 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		model_file.store_buffer(FileAccess.get_file_as_bytes(
 				"res://../fixtures/threedi/synth/mount.3di"))
 		model_file.close()
-		_install_native_seats(sim, dir, _fixture_items_text().replace(
+		_install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
 				"id 101294",
 				"id 101294\n  graphic mount\n  phrase_set %d" % config_value),
 				PackedInt32Array([1294]))

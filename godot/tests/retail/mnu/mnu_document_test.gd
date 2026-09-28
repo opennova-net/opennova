@@ -3,9 +3,8 @@ extends GutTest
 # M2 gate: load a fixture .mnu into MnuDocument, assert the parsed tree, and
 # verify a serialize round-trip plus the core mutation surface.
 
-const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
-# The shipped menus and style sheet come from the reference fixture set; the
-# legs that read them pend without it.
+# The shipped style sheet comes from the reference fixture set; the legs that
+# read it pend without it.
 const MNS_REL := "mns/menu_style.mns"
 
 

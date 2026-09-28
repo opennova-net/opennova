@@ -38,8 +38,7 @@ func _entity_runtime(parent: Node) -> MissionRoot:
 	return runtime
 
 
-var _saved_config := PackedByteArray()
-var _had_config := false
+var _config: TestFs.Snapshot
 var _temp_dir := ""
 var _shell: Node = null
 
@@ -132,9 +131,7 @@ func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> voi
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
-			if _had_config else PackedByteArray()
+	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
@@ -168,13 +165,7 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
-	if _had_config:
-		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
-		if file != null:
-			file.store_buffer(_saved_config)
-			file.close()
-	elif FileAccess.file_exists(STATE_CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	_config.restore()
 
 
 func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() -> void:

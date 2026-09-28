@@ -354,14 +354,11 @@ func _load_root_assets() -> void:
 	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
 	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
 	# -> the menu resource @0x25510F8]).
-	if _text != null:
-		Strings.register_table(Strings.TABLE_MENUTXT, _text)
-	var gametext := _load_text(game_text_file)
-	if gametext != null:
-		Strings.register_table(Strings.TABLE_GAMETEXT, gametext)
-	var gameui := _load_text(menu_ui_text_file)
-	if gameui != null:
-		Strings.register_table(Strings.TABLE_GAMEUI, gameui)
+	# Registered unconditionally: a root without one of the tables unregisters
+	# the previous root's (null clears) instead of keeping its strings alive.
+	Strings.register_table(Strings.TABLE_MENUTXT, _text)
+	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
+	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 	_audio.set_resource_root(_root)

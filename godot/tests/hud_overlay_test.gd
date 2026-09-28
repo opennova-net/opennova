@@ -8,7 +8,6 @@ extends GutTest
 
 const FONT_FIXTURE := "res://../fixtures/fnt/synth_1page.fnt"  # staged as Gunpl22b.fnt
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
-const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 
 var _temp_dirs: Array[String] = []
 
@@ -19,46 +18,34 @@ func after_each() -> void:
 	_temp_dirs.clear()
 
 
+# A scratch root carrying a synthetic hudpos.def and solid white textures.
+class TempLayout:
+	extends RefCounted
+	var layout: HudPos
+	var root: ResourceRoot
+	var dir: String
+
+
 func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
-		texture_sizes: Dictionary = {}) -> Dictionary:
-	var dir_path := OS.get_temp_dir().path_join("hud_overlay_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
-	_temp_dirs.append(dir_path)
+		texture_sizes: Dictionary = {}) -> TempLayout:
+	var fixture := TempLayout.new()
+	fixture.dir = TestFs.cache_dir(self, "hud_overlay")
+	_temp_dirs.append(fixture.dir)
 	for texture_name in textures:
 		# Minimal uncompressed BGRA TGA, loaded through the overlay's real VFS path.
 		var texture_size: Vector2i = texture_sizes.get(texture_name, Vector2i(2, 2))
-		var bytes := PackedByteArray()
-		bytes.resize(18 + texture_size.x * texture_size.y * 4)
-		bytes[2] = 2
-		bytes[12] = texture_size.x & 0xff
-		bytes[13] = (texture_size.x >> 8) & 0xff
-		bytes[14] = texture_size.y & 0xff
-		bytes[15] = (texture_size.y >> 8) & 0xff
-		bytes[16] = 32
-		bytes[17] = 0x28
-		for i in range(18, bytes.size()):
-			bytes[i] = 0xff
-		var texture_file := FileAccess.open(dir_path.path_join(texture_name), FileAccess.WRITE)
-		assert_not_null(texture_file)
-		texture_file.store_buffer(bytes)
-		texture_file.close()
-	var def_file := FileAccess.open(dir_path.path_join("hudpos.def"), FileAccess.WRITE)
-	assert_not_null(def_file)
-	def_file.store_string("\n".join(lines))
-	def_file.close()
-	var layout := HudPos.new()
-	assert_eq(layout.load(dir_path.path_join("hudpos.def")), OK)
-	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(dir_path), OK)
-	return {"layout": layout, "root": root, "dir": dir_path}
+		TestFs.write_bytes(self, fixture.dir.path_join(texture_name),
+				TestFs.tga_bytes(texture_size))
+	TestFs.write_text(self, fixture.dir.path_join("hudpos.def"), "\n".join(lines))
+	fixture.layout = HudPos.new()
+	assert_eq(fixture.layout.load(fixture.dir.path_join("hudpos.def")), OK)
+	fixture.root = ResourceRoot.new()
+	assert_eq(fixture.root.set_root_dir(fixture.dir), OK)
+	return fixture
 
 
 func _copy_font_into(dir_path: String) -> void:
-	var fnt_bytes := FileAccess.get_file_as_bytes(FONT_FIXTURE)
-	assert_true(fnt_bytes.size() > 0, "font fixture present")
-	var fnt := FileAccess.open(dir_path.path_join("Gunpl22b.fnt"), FileAccess.WRITE)
-	fnt.store_buffer(fnt_bytes)
-	fnt.close()
+	TestFs.copy(self, FONT_FIXTURE, dir_path.path_join("Gunpl22b.fnt"))
 
 
 func _make_overlay() -> HudOverlay:
@@ -78,7 +65,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 		"TSDicon.tga": Vector2i(64, 1920),
 	})
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 
 	var terrain := TerrainData.new()
 	terrain.set_sector_count(16)
@@ -248,7 +235,7 @@ func test_stance_assets_use_explicit_ids_for_slots() -> void:
 		"stance_3.tga", "stance_4.tga", "stance_5.tga", "stance_6.tga",
 	]))
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	hud.set_player_state(100, 1.0, 2, 80.0)
 	var stats := hud.get_draw_list_stats()
 	assert_eq(stats.quads, 1, "one stance frame quad (no ghost at elapsed 0)")
@@ -273,7 +260,7 @@ func test_stance_index_bounds_safe() -> void:
 		"HUDSTANCE 5 50 51 s6.tga PARACHUTE",
 	]), PackedStringArray(["s1.tga", "s2.tga", "s3.tga", "s4.tga", "s5.tga", "s6.tga"]))
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	# Out-of-range stance must not crash the compile (including the cross-fade ghost).
 	hud.set_player_state(10, 0.9, 99, 80.0)
 	var stats := hud.get_draw_list_stats()
@@ -293,7 +280,7 @@ func test_crosshair_requires_active_weapon() -> void:
 		"cross01.tga": Vector2i(8, 8),
 	})
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	hud.set_weapon_state(false, -1, -1, 0, 0, false, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().tris, 0,
 		"No weapon produces no retail crosshair draw commands.")
@@ -307,7 +294,7 @@ func test_crosshair_missing_texture_draws_nothing() -> void:
 		"ALPHAFADE 30 50 3",
 	]), PackedStringArray())
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().tris, 0,
 		"A missing crosshair texture produces no invented replacement reticle.")
@@ -323,7 +310,7 @@ func test_binocular_view_hides_weapon_crosshair() -> void:
 		"cross01.tga": Vector2i(8, 8),
 	})
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	hud.set_view_state(true, Vector2.INF)
 	assert_eq(hud.get_draw_list_stats().tris, 0,
@@ -342,7 +329,7 @@ func test_crosshair_style_clamps_and_reloads_live() -> void:
 	})
 	var hud := _make_overlay()
 	hud.set_crosshair_style(99)
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	assert_eq(hud.get_crosshair_style(), HudOverlay.MAX_CROSSHAIR_STYLE)
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	await get_tree().process_frame
@@ -368,7 +355,7 @@ func test_crosshair_color_and_spread_survive_configure() -> void:
 	# Set before configure(): both are picked up like the style.
 	hud.set_crosshair_color(0x123456)
 	hud.set_crosshair_spread_enabled(false)
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	assert_eq(hud.get_crosshair_color(), 0x123456,
 			"the pre-configure colour survives the layout rebuild")
 	assert_false(hud.is_crosshair_spread_enabled(),
@@ -384,11 +371,11 @@ func test_message_feed_draws_and_expires() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",
 	]), PackedStringArray())
-	_copy_font_into(fixture["dir"])
+	_copy_font_into(fixture.dir)
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
+	hud.configure(fixture.layout, root)
 	hud.set_player_state(50, 1.0, 0, 80.0)
 	hud.push_message("Move to the extraction point")
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
@@ -421,11 +408,11 @@ func test_end_round_overlay_draws_the_ladder() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",
 	]), PackedStringArray())
-	_copy_font_into(fixture["dir"])
+	_copy_font_into(fixture.dir)
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
+	hud.configure(fixture.layout, root)
 	var before := hud.get_draw_list_stats()
 	hud.set_end_round_overlay(true, 0, 768,
 			PackedStringArray(["Mission Completed", "Blue Team : 12", "Game time : 0:01:05"]),
@@ -452,7 +439,7 @@ func test_heat_bar_draws_at_nonzero_heat() -> void:
 		"stancecolor_bad 200,175,009,009",
 	]), PackedStringArray())
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], fixture["root"])
+	hud.configure(fixture.layout, fixture.root)
 	hud.set_weapon_state(true, -1, -1, 0, 0, false, false, false, 0)
 	assert_eq(hud.get_draw_list_stats().quads, 0, "zero heat hides the bar")
 	await get_tree().process_frame
@@ -476,11 +463,11 @@ func test_waypoint_label_draws_each_alignment() -> void:
 			"fonthud1_hi Gunpl22b.fnt",
 			"HUDWPDINFO 1013,448,0,%s" % align,
 		]), PackedStringArray())
-		_copy_font_into(fixture["dir"])
+		_copy_font_into(fixture.dir)
 		var root := ResourceRoot.new()
-		assert_eq(root.set_root_dir(fixture["dir"]), OK)
+		assert_eq(root.set_root_dir(fixture.dir), OK)
 		var hud := _make_overlay()
-		hud.configure(fixture["layout"], root)
+		hud.configure(fixture.layout, root)
 		hud.set_player_state(0, 1.0, 0, 80.0)
 		# No waypoint entry: the label hides.
 		assert_eq(hud.get_draw_list_stats().glyphs, 0,
@@ -532,7 +519,7 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	var effects := PlayerViewEffectsScript.new()
 	effects.size = Vector2(1024, 768)
 	add_child_autofree(effects)
-	effects.set_resource_root(fixture["root"])
+	effects.set_resource_root(fixture.root)
 	effects.update_view(true, 1000, true, 4)
 	await get_tree().process_frame
 	RenderingServer.canvas_item_set_custom_rect(effects.get_canvas_item(), false)
@@ -636,8 +623,8 @@ func test_vehicle_panel_draws_the_block_silhouette() -> void:
 	]), PackedStringArray(["h_buggya.tga", "stance_1.tga"]),
 			{"h_buggya.tga": Vector2i(40, 30)})
 	var hud := _make_overlay()
-	var layout: HudPos = fixture["layout"]
-	hud.configure(layout, fixture["root"])
+	var layout: HudPos = fixture.layout
+	hud.configure(layout, fixture.root)
 	var block := layout.get_vehicle_hud("dbuggy1")
 	assert_not_null(block, "The fixture's VEHICLE_HUD block resolves by sid.")
 	if block == null:
@@ -667,11 +654,11 @@ func test_message_log_lists_expired_lines() -> void:
 		"fonthud1_hi Gunpl22b.fnt",
 		"HUDCHATTEXT 142 , 711",
 	]), PackedStringArray())
-	_copy_font_into(fixture["dir"])
+	_copy_font_into(fixture.dir)
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
+	hud.configure(fixture.layout, root)
 	hud.set_player_state(50, 1.0, 0, 80.0)
 	hud.push_chat_line("Taylor: moving to bravo", -1)
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
@@ -705,11 +692,11 @@ func test_lfp_panel_device_seam() -> void:
 			{"JO_LFP.tga": Vector2i(64, 256), "R_LFP.tga": Vector2i(64, 256),
 			 "N_LFP.tga": Vector2i(64, 256), "lfp_alf.tga": Vector2i(36, 36),
 			 "lfp_dlf.tga": Vector2i(36, 36)})
-	_copy_font_into(fixture["dir"])
+	_copy_font_into(fixture.dir)
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(fixture["dir"]), OK)
+	assert_eq(root.set_root_dir(fixture.dir), OK)
 	var hud := _make_overlay()
-	hud.configure(fixture["layout"], root)
+	hud.configure(fixture.layout, root)
 	var before := hud.get_draw_list_stats()
 	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0,
 			{"under_attack": "!Under\nAttack!!", "ready": "!Ready for\nTakeover!"}, null)

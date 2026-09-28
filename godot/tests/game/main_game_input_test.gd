@@ -15,21 +15,15 @@ const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 # around every case so a cycled level never leaks into the user's settings.
 const HUD_CONFIG_PATH := GameHudPresenter.HUD_COLOR_CONFIG_PATH
 
-var _saved_config := PackedByteArray()
-var _had_config := false
-var _saved_hud_config := PackedByteArray()
-var _had_hud_config := false
+var _config: TestFs.Snapshot
+var _hud_config: TestFs.Snapshot
 var _temp_dir := ""
 var _shell: MainGame = null
 
 
 func before_each() -> void:
-	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
-			if _had_config else PackedByteArray()
-	_had_hud_config = FileAccess.file_exists(HUD_CONFIG_PATH)
-	_saved_hud_config = FileAccess.get_file_as_bytes(HUD_CONFIG_PATH) \
-			if _had_hud_config else PackedByteArray()
+	_config = TestFs.snapshot(STATE_CONFIG_PATH)
+	_hud_config = TestFs.snapshot(HUD_CONFIG_PATH)
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
@@ -43,8 +37,8 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
-	TestFs.restore_file(STATE_CONFIG_PATH, _had_config, _saved_config)
-	TestFs.restore_file(HUD_CONFIG_PATH, _had_hud_config, _saved_hud_config)
+	_config.restore()
+	_hud_config.restore()
 
 
 # The shell in the minimal mission with gameplay input live (null when the

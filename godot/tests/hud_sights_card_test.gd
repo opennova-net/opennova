@@ -85,26 +85,10 @@ func _make_sight_root() -> ResourceRoot:
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir_path), OK)
 	_temp_dirs.append(dir_path)
 	# Two uncompressed BGRA texels: opaque neutral gray, then transparent black.
-	var bytes := PackedByteArray()
-	bytes.resize(18 + 2 * 4)
-	bytes[2] = 2
-	bytes[12] = 2
-	bytes[14] = 1
-	bytes[16] = 32
-	bytes[17] = 0x28
-	bytes[18] = 128
-	bytes[19] = 128
-	bytes[20] = 128
-	bytes[21] = 255
-	bytes[22] = 0
-	bytes[23] = 0
-	bytes[24] = 0
-	bytes[25] = 0
-	var texture_file := FileAccess.open(
-			dir_path.path_join("multiplyat.tga"), FileAccess.WRITE)
-	assert_not_null(texture_file)
-	texture_file.store_buffer(bytes)
-	texture_file.close()
+	var bytes := TestFs.tga_bytes(Vector2i(2, 1), Color8(128, 128, 128, 255))
+	for i in range(22, 26):
+		bytes[i] = 0
+	TestFs.write_bytes(self, dir_path.path_join("multiplyat.tga"), bytes)
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir_path), OK)
 	return root

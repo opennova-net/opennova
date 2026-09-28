@@ -4,8 +4,9 @@ extends GutTest
 # caller SHARED ArrayMesh refs (one mesh set per (lod, skeletal, bones) key per
 # data instance), with fresh entry dictionaries so callers can't taint the
 # cache. The mission placer shares one ObjectData per graphic, so N
-# animated entities stop paying N mesh builds - the recorded baseline's
-# dominant cost (docs/perf/mission-load-baseline.md).
+# animated entities stop paying N mesh builds - the dominant cost the
+# 2026-06-11 mission-load baseline recorded (docs/perf/mission-load-baseline.md,
+# an ONED-era measurement removed 2026-09-28; see git history).
 
 const SHED := "res://../fixtures/threedi/synth/shed.3di"
 const PERSON := "res://../fixtures/threedi/synth/person.3di"

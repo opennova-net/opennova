@@ -16,11 +16,7 @@ const DeployPresenter := preload("res://game/world/deploy_screen_presenter.gd")
 const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
 # DeployMenuFixture authors the death-screen controls and string tables.
-const STAGED_FIXTURES := {
-	"mnu/jo_death.mnu": "death.mnu",
-	"rtxt/menutxt.bin": "menutxt.BIN",
-	"rtxt/gametext.bin": "gametext.bin",
-}
+const STAGED_FIXTURES: Array[String] = ["death.mnu", "menutxt.BIN", "gametext.bin"]
 
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)

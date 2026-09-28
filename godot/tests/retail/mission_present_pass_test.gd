@@ -14,10 +14,6 @@ extends GutTest
 # can never alias EWEAP registers; the register-independence case pins the
 # real layout.
 
-const RIGGED_3DI := "res://../fixtures/threedi/synth/shed.3di"
-const MUZZLE_3DI := "res://../fixtures/threedi/synth/gun.3di"
-const SECTIONED_3DI := "res://../fixtures/threedi/synth/pump.3di"
-
 
 # Builds the flat PF-layout snapshot Simulation.get_present_snapshot()
 # emits. Each entity is a Dictionary of overrides; unset fields default sanely

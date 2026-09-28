@@ -40,26 +40,18 @@ const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)
 const SPAWN_ZONE_TYPE := 1359  # pool-1 fixture; ItemDef supplies SpawnPoint
 const ZONE_ITEMS_FILE := "host_punt_spawn_zone_items.def"
 
-# The retail death.mnu and the string tables it resolves come from the
-# reference fixture set (docs/asset-gated-tests.md); the whole script skips
-# without it.
-const STAGED_FIXTURES := {
-	"mnu/jo_death.mnu": "death.mnu",
-	"rtxt/menutxt.bin": "menutxt.BIN",
-	"rtxt/gametext.bin": "gametext.bin",
-}
+# DeployMenuFixture authors the death-screen controls and the string tables
+# the punt surfacing resolves.
+const STAGED_FIXTURES: Array[String] = ["death.mnu", "menutxt.BIN", "gametext.bin"]
 
-var _saved_config := PackedByteArray()
-var _had_config := false
+var _config: TestFs.Snapshot
 var _temp_dir := ""
 var _shell: Node = null
 
 
 func before_each() -> void:
 	Strings.clear()
-	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
-			if _had_config else PackedByteArray()
+	_config = TestFs.snapshot(STATE_CONFIG_PATH)
 	# A shell booted here must see no launch flags: the GUT process carries none,
 	# and the override guards against a sibling test leaving one behind.
 	LaunchFlags.set_args_override(PackedStringArray([]))
@@ -88,7 +80,7 @@ func after_each() -> void:
 		TestFs.remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
-	TestFs.restore_file(STATE_CONFIG_PATH, _had_config, _saved_config)
+	_config.restore()
 
 
 func after_all() -> void:

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Select and attest the core and retail test suites without private data in core.
 
-CTest labels and the Godot retail directory are the source of truth. Reports
-must contain every selected test; an empty or incomplete run never passes.
+CTest labels and the Godot test directory layout are the source of truth:
+tests/retail/ holds the retail scripts, and a windowed/ directory at either
+level (tests/windowed/, tests/retail/windowed/) holds the graphics scripts
+that need a live RenderingDevice and run only with --windowed. Reports must
+contain every selected test; an empty or incomplete run never passes.
 """
 from __future__ import annotations
 
@@ -23,10 +26,11 @@ def godot_scripts(repo: Path, suite: str, *, windowed: bool = False) -> list[str
     scripts = []
     for path in sorted((repo / "godot/tests").rglob("*_test.gd")):
         rel = path.relative_to(repo / "godot")
-        is_windowed = rel.parts[1:3] == ("retail", "windowed")
+        dirs = list(rel.parts[1:-1])
+        retail = dirs[:1] == ["retail"]
+        is_windowed = dirs[1 if retail else 0:][:1] == ["windowed"]
         if is_windowed != windowed:
             continue
-        retail = rel.parts[1] == "retail"
         if suite == "all" or retail == (suite == "retail"):
             scripts.append("res://" + rel.as_posix())
     return scripts
@@ -40,11 +44,26 @@ def godot_methods(repo: Path, scripts: list[str]) -> dict[str, list[str]]:
 
 def layout_errors(repo: Path) -> list[str]:
     errors = []
-    for script in godot_scripts(repo, "core"):
+    for script in godot_scripts(repo, "core") + godot_scripts(repo, "core", windowed=True):
         source = (repo / "godot" / script.removeprefix("res://")).read_text(encoding="utf-8")
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
-        if "RetailData." in code or "PresenterFixture.stage(" in code:
+        if "RetailData." in code or "PresenterFixture.stage(" in code or "InstalledCombatHud." in code:
             errors.append(f"core script reads retail data: {script}")
+    # The native migration record (docs/asset-gated-tests.md): every mixed
+    # entry stays registered through opennova_add_mixed_test and every source
+    # file it names still exists.
+    record = repo / "scripts/ci/native_migration.json"
+    if record.is_file():
+        data = json.loads(record.read_text(encoding="utf-8"))
+        cmake = repo / "tests/CMakeLists.txt"
+        forms = re.findall(r"opennova_add_mixed_test\(\s*([\w${}]+)",
+                           cmake.read_text(encoding="utf-8") if cmake.is_file() else "")
+        registered = [re.compile("^" + re.sub(r"\\\$\\\{\w+\\\}", r"\\w+", re.escape(form)) + "$")
+                      for form in forms]
+        errors += [f"native migration entry is not a mixed ctest: {name}"
+                   for name in data["mixed_entries"] if not any(p.match(name) for p in registered)]
+        errors += [f"native migration source missing: {source}"
+                   for source in data["sources"] if not (repo / source).is_file()]
     # Historical assertion homes are reviewable without becoming the selector.
     manifest = repo / "scripts/ci/retail_migration.json"
     if manifest.is_file():
@@ -78,7 +97,8 @@ def check_roots() -> list[str]:
 
 def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
                  methods: dict[str, list[str]] | None = None,
-                 allowed_skipped_scripts: set[str] | None = None) -> list[str]:
+                 allowed_skipped_scripts: set[str] | None = None,
+                 windowed: bool = False) -> list[str]:
     cases = list(ET.parse(report).getroot().iter("testcase"))
     errors = []
     if not expected:
@@ -117,6 +137,10 @@ def check_report(report: Path, expected: list[str], *, godot: bool, suite: str,
         skip_text = "" if skipped is None else ET.tostring(skipped, encoding="unicode")
         if suite == "retail" and skipped is not None:
             errors.append(f"retail test skipped: {name}")
+        elif windowed and skipped is not None:
+            # A windowed script exists to draw: a pending there (no
+            # RenderingDevice, the wrong renderer) is missing coverage.
+            errors.append(f"windowed test skipped: {name}")
         if suite != "all" and ("SKIP-LEG:" in output or any(root in skip_text for root in ROOTS)):
             errors.append(f"retail coverage not exercised: {name}")
         if suite == "core" and "SKIP: needs" in output:
@@ -137,14 +161,17 @@ def skipped_retail_scripts(log: Path) -> set[str]:
     return skipped
 
 
-def check_log(path: Path, suite: str) -> list[str]:
+def check_log(path: Path, suite: str, *, windowed: bool = False) -> list[str]:
     errors = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = re.sub(r"\x1b\[[0-9;]*m", "", line)
         if "SCRIPT ERROR:" in line or ("Ignoring script" in line and "does not extend GutTest" in line):
             errors.append(line.strip())
+        pending = "[Pending]" in line or "[Script skipped]" in line
         if suite != "all" and ("SKIP-LEG:" in line or (
-                ("[Pending]" in line or "[Script skipped]" in line) and any(root in line for root in ROOTS))):
+                pending and any(root in line for root in ROOTS))):
+            errors.append(line.strip())
+        elif windowed and pending:
             errors.append(line.strip())
     return errors
 
@@ -160,10 +187,9 @@ def main() -> int:
     ap.add_argument("--require-roots", action="store_true")
     ap.add_argument("--check-layout", action="store_true")
     ap.add_argument("--windowed", action="store_true",
-                    help="select the separate retail graphics scripts")
+                    help="select only the suite's graphics scripts (tests/windowed/ for core, "
+                         "tests/retail/windowed/ for retail); a pending test then fails")
     args = ap.parse_args()
-    if args.windowed and args.suite != "retail":
-        ap.error("--windowed requires --suite retail")
     errors = check_roots() if args.require_roots else []
     if args.check_layout:
         errors += layout_errors(REPO)
@@ -198,9 +224,10 @@ def main() -> int:
             errors.append(f"missing report: {args.report}")
         else:
             errors += check_report(args.report, expected, godot=args.gut_log is not None,
-                                   suite=args.suite, methods=methods, allowed_skipped_scripts=allowed)
+                                   suite=args.suite, methods=methods, allowed_skipped_scripts=allowed,
+                                   windowed=args.windowed)
     if args.gut_log:
-        errors += check_log(args.gut_log, args.suite)
+        errors += check_log(args.gut_log, args.suite, windowed=args.windowed)
     for error in errors:
         print(f"[test-suites] {error}")
     return 1 if errors else 0

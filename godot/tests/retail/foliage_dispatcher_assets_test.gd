@@ -5,9 +5,6 @@ extends GutTest
 # LOD0 mesh aggregate, the :fd texture bake, the network-challenge foliage
 # mark, and the per-root+instance cache keys.
 
-const SOURCE_OBJECT := "res://../fixtures/threedi/synth/bird.3di"
-const OVERRIDE_OBJECT := "res://../fixtures/threedi/synth/house.3di"
-
 var _dispatcher: FoliageDispatcher = null
 
 

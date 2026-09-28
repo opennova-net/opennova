@@ -7,8 +7,8 @@ extends GutTest
 # below the water, whatever the camera mode [orig:
 # Terrain_RenderWorldScene @ 0x5c96c5..0x5c96f5; the tail order and
 # its witnesses live in engine/runtime/renderer/scene_overlay.h]. The draw
-# checks need the real rendering device and are pending under the headless
-# dummy renderer.
+# checks need the real rendering device: a tests/windowed/ script, run by
+# `scripts/test_godot.sh --suite core --windowed` (a headless run pends it).
 
 const STAGE_TEST_ROOT := "scene_overlay_stage_test"
 const SLOT_LIGHT_CORONAS := 2

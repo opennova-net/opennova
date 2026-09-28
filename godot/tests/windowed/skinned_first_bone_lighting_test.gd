@@ -1,8 +1,9 @@
 extends GutTest
 
 # Raster pins for the skinned effects' vertex program (skin.gdshaderinc),
-# drawn through the production wrappers on a real RenderingDevice (pending
-# under the headless dummy renderer). Every retail skinned vertex shader
+# drawn through the production wrappers on a real RenderingDevice: a
+# tests/windowed/ script, run by `scripts/test_godot.sh --suite core
+# --windowed` (a headless run pends it). Every retail skinned vertex shader
 # blends the position over four palette entries, but only SkBasic and SkGlass
 # blend the normal (skinnormal = true); the lit bump effects light the
 # UNDEFORMED normal in the vertex's FIRST entry's frame and measure their

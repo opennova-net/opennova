@@ -39,31 +39,25 @@ class _MissingBankMusicRoot extends RefCounted:
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
-var _saved_state_config := PackedByteArray()
-var _had_state_config := false
-var _saved_controls_cfg := PackedByteArray()
-var _had_controls_cfg := false
+var _state_config: TestFs.Snapshot
+var _controls_cfg: TestFs.Snapshot
 
 
 func before_each() -> void:
-	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
-	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
-	if _had_state_config:
+	_state_config = TestFs.snapshot(STATE_CONFIG_PATH)
+	if _state_config.existed:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	_had_controls_cfg = FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
-	_saved_controls_cfg = FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
-			if _had_controls_cfg else PackedByteArray()
+	_controls_cfg = TestFs.snapshot(ControlsBindings.CONFIG_PATH)
 
 
 func after_each() -> void:
 	# The music service is an autoload; leave no context behind for the next test.
 	MusicService.stop_context()
-	TestFs.restore_file(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
+	_state_config.restore()
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults and the on-disk cfg even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
-	TestFs.restore_file(ControlsBindings.CONFIG_PATH, _had_controls_cfg,
-			_saved_controls_cfg)
+	_controls_cfg.restore()
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -83,22 +77,15 @@ func _make_shell(dir: String, options: PlayerOptions = null):
 
 
 func _make_dir() -> String:
-	var dir := OS.get_temp_dir().path_join("menu_shell_%d" % Time.get_ticks_usec())
-	DirAccess.make_dir_recursive_absolute(dir)
+	var dir := TestFs.cache_dir(self, "menu_shell")
 	_copy(MAIN_FIXTURE, dir.path_join("main.mnu"))
 	_copy(SP_FIXTURE, dir.path_join("sp.mnu"))
-	var f := FileAccess.open(dir.path_join("test.bms"), FileAccess.WRITE)
-	if f != null:
-		f.store_buffer(PackedByteArray([0]))
-		f.close()
+	TestFs.write_bytes(self, dir.path_join("test.bms"), PackedByteArray([0]))
 	return dir
 
 
 func _copy(source: String, dst: String) -> void:
-	var f := FileAccess.open(dst, FileAccess.WRITE)
-	if f != null:
-		f.store_buffer(_fixture_bytes(source))
-		f.close()
+	TestFs.write_bytes(self, dst, _fixture_bytes(source))
 
 
 # The bytes of a fixture: a res:// path reads directly (the synthetic SBF bank);

@@ -1,40 +1,20 @@
 extends GutTest
 
-# Throwable weapon-switch + PowerThrow lifecycle against the committed JO defs,
-# driven the way the game shells drive Simulation (loadout -> switch walk ->
-# commit events -> def installs, including the FP model resolve's delayed
-# same-weapon re-install). Pins the PR #282 field bugs:
-#  - a same-name install landing during a SWITCHFROM must not destroy the
-#    switch chain (it desynced weapon_def_ from equipped_adm_index — the
-#    "rifle fires the last-thrown ammo" bug),
-#  - a PowerThrow press during the draw-in must not leak a latched charge
-#    onto a later shot,
-#  - the thrown grenade flies as its TrcrID item and dies by fuse, never by
-#    ground contact.
+# The production smoke grenade against the shipped weapon/ammo/items tables
+# (the reference fixture set RetailData.def_root stages): its arm-age event and
+# the base-JO fuse, driven the way the game shells drive Simulation. The
+# authored switch/PowerThrow regressions live in the core half
+# (tests/throwable_repro_test.gd).
 
 var _sim: Simulation = null
-var _db: WeaponDatabase = null
 var _root: ResourceRoot = null
-var _reinstall_pending := ""
-var _reinstall_ticks := 0
-
-
-# The synthetic Tmap terrain (fixtures/terrain/tmap) staged over the minimal
-# assets it names; one root per test file (TestFs.staged_tmap), removed at the end.
-const TMAP_STAGE := "throwable"
 
 
 func should_skip_script():
 	return RetailData.def_root_skip()
 
 
-func after_all() -> void:
-	TestFs.release_staged_tmap(TMAP_STAGE)
-
-
 func before_each() -> void:
-	_reinstall_pending = ""
-	_reinstall_ticks = 0
 	var def_root := RetailData.def_root()
 	assert_true(DirAccess.dir_exists_absolute(def_root), "the shipped def tables are staged")
 	var md := MissionData.new()
@@ -46,13 +26,10 @@ func before_each() -> void:
 	assert_eq(_root.set_root_dir(def_root), OK)
 	assert_eq(_sim.load_weapon_table(_root, "weapon.def"), OK)
 	assert_eq(_sim.load_ammo_table(_root, "ammo.def"), OK)
-	_db = WeaponDatabase.new()
-	assert_eq(_db.load_from_resource_root(_root, "weapon.def"), OK)
 
 
 func after_each() -> void:
 	_sim = null
-	_db = null
 	_root = null
 
 
@@ -71,22 +48,6 @@ func _visual_move_effect(item_id: int) -> String:
 	return ""
 
 
-var KIT_M4_GRENADE: Array[WeaponKitEntry] = [
-	WeaponKitEntry.make("WPN_M4AUTO"),
-	WeaponKitEntry.make("WPN_GRENADEHE"),
-]
-var KIT_M4_CLAYMORE: Array[WeaponKitEntry] = [
-	WeaponKitEntry.make("WPN_M4AUTO"),
-	WeaponKitEntry.make("WPN_CLAYMORE"),
-]
-var KIT_SATCHEL: Array[WeaponKitEntry] = [
-	WeaponKitEntry.make("WPN_SATCHEL_CHARGE"),
-]
-
-
-# The core regression: a same-name install (the FP model resolve) landing while
-# the outgoing SWITCHFROM holsters must leave the switch chain intact — the
-# commit still fires and equipped_adm_index moves to the new weapon.
 func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
@@ -143,8 +104,3 @@ func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
 			"the smoke grenade expires on base JO's 30-second (1860-tick) fuse")
 	assert_eq(fuse_sounds, 0,
 			"without a kill-zone class the expiry presents no second obj-row event")
-
-
-# The windup exposure the HUD charge bar reads [orig: g_FireChargeStartTick ->
-# HUD_DrawPowerThrowChargeBar @0x599830]: active only while held with ammo on a
-# PowerThrow weapon, with the held tick count.

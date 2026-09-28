@@ -27,15 +27,51 @@ class SuiteChecks(unittest.TestCase):
         return self.write("result.xml", "<testsuites><testsuite>" + body + "</testsuite></testsuites>")
 
     def test_core_and_retail_are_disjoint_and_exclude_windowed(self):
-        for name in ["plain", "retail/compat", "retail/windowed/pixel"]:
+        for name in ["plain", "windowed/raster", "retail/compat", "retail/windowed/pixel"]:
             self.write("godot/tests/" + name + "_test.gd", "extends GutTest\nfunc test_works():\n\tpass\n")
         core = suites.godot_scripts(self.root, "core")
         retail = suites.godot_scripts(self.root, "retail")
         self.assertEqual(core, ["res://tests/plain_test.gd"])
         self.assertEqual(retail, ["res://tests/retail/compat_test.gd"])
         self.assertEqual(suites.godot_scripts(self.root, "all"), core + retail)
+        self.assertEqual(suites.godot_scripts(self.root, "core", windowed=True),
+                         ["res://tests/windowed/raster_test.gd"])
         self.assertEqual(suites.godot_scripts(self.root, "retail", windowed=True),
                          ["res://tests/retail/windowed/pixel_test.gd"])
+        self.assertEqual(suites.godot_scripts(self.root, "all", windowed=True),
+                         ["res://tests/retail/windowed/pixel_test.gd", "res://tests/windowed/raster_test.gd"])
+
+    def test_windowed_run_fails_on_a_pending_test(self):
+        report = self.report('<testcase classname="tests/windowed/raster_test.gd" name="test_pixel">'
+            '<skipped>RenderingDevice unavailable</skipped></testcase>')
+        self.assertEqual(suites.check_report(report, ["res://tests/windowed/raster_test.gd"],
+            godot=True, suite="core"), [])
+        self.assertEqual(suites.check_report(report, ["res://tests/windowed/raster_test.gd"],
+            godot=True, suite="core", windowed=True),
+            ["windowed test skipped: tests/windowed/raster_test.gd:test_pixel"])
+        log = self.write("gut.log", "res://tests/windowed/raster_test.gd\n"
+            "- [Pending]: RenderingDevice unavailable under this Godot renderer\n")
+        self.assertEqual(suites.check_log(log, "core"), [])
+        self.assertEqual(len(suites.check_log(log, "core", windowed=True)), 1)
+
+    def test_core_layout_covers_windowed_core_scripts(self):
+        self.write("godot/tests/windowed/raster_test.gd", "func test_one():\n\tRetailData.assets()\n")
+        self.assertEqual(suites.layout_errors(self.root),
+                         ["core script reads retail data: res://tests/windowed/raster_test.gd"])
+
+    def test_native_migration_record_is_validated(self):
+        self.write("scripts/ci/native_migration.json", json.dumps({
+            "mixed_entries": ["one", "two_x"], "sources": ["tests/one_test.cpp"]}))
+        self.write("tests/CMakeLists.txt", "opennova_add_mixed_test(one COMMAND one_test)\n"
+            "foreach(t x)\n    opennova_add_mixed_test(two_${t} COMMAND two_${t}_test)\nendforeach()\n")
+        self.assertEqual(suites.layout_errors(self.root),
+                         ["native migration source missing: tests/one_test.cpp"])
+        self.write("tests/one_test.cpp", "")
+        self.assertEqual(suites.layout_errors(self.root), [])
+        self.write("scripts/ci/native_migration.json", json.dumps({
+            "mixed_entries": ["one", "three"], "sources": ["tests/one_test.cpp"]}))
+        self.assertEqual(suites.layout_errors(self.root),
+                         ["native migration entry is not a mixed ctest: three"])
 
     def test_missing_native_test_and_unexpected_test_fail(self):
         report = self.report('<testcase name="unexpected"/>')

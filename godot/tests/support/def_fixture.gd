@@ -25,16 +25,23 @@ const WEAPON_FIELDS := """
  tpos 4 5 6 0 0 0
 """
 
-static func weapon_row(name: String, category: int, rank: int, clip: int,
-		flags := "", ammo := "AM_556MM") -> String:
-	var text := """weapon "%s"
+## The lines every authored weapon row opens with (ArmoryFixture's rows share
+## them): the name, category and rank, the clip and carry counts, the ammo class.
+static func weapon_header(name: String, category: int, rank: int, clip: int,
+		ammo_class: String) -> String:
+	return """weapon "%s"
  category %d
  rank %d
  clipsize %d
  maxclips 7
  startrounds 210
- ammoclass CLASS_556MM 1
- round_type %s
+ ammoclass %s 1
+""" % [name, category, rank, clip, ammo_class]
+
+
+static func weapon_row(name: String, category: int, rank: int, clip: int,
+		flags := "", ammo := "AM_556MM") -> String:
+	var text := weapon_header(name, category, rank, clip, "CLASS_556MM") + """ round_type %s
  loadout_selectable 1
  charfilter rifleman
  charfilter engineer
@@ -43,7 +50,7 @@ static func weapon_row(name: String, category: int, rank: int, clip: int,
  targetyawrange 180
  targetpitchmin -80
  targetpitchmax 80
-""" % [name, category, rank, clip, ammo]
+""" % [ammo]
 	if not flags.is_empty():
 		text += " flags %s\n" % flags
 	if name == "WPN_M4AUTO":
@@ -94,15 +101,17 @@ static func directory() -> String:
 	if not _directory.is_empty():
 		return _directory
 	_directory = ProjectSettings.globalize_path("res://../.godot-test-fixtures/defs")
-	assert(DirAccess.make_dir_recursive_absolute(_directory) == OK)
+	var made := DirAccess.make_dir_recursive_absolute(_directory)
+	assert(made == OK, "the def fixture directory is creatable")
 	WorldFixture.write_file(_directory.path_join("weapon.def"), weapon_text())
 	WorldFixture.write_file(_directory.path_join("hud_weapon.def"), weapon_text().replace(
 			"error 0 0 0 0", "error 1 2 3 4\n sights fixture_sight.tga 7 8 9 10 blend"))
 	WorldFixture.write_file(_directory.path_join("ammo.def"), ammo_text())
 	WorldFixture.write_file(_directory.path_join("hudpos.def"), HUD)
-	assert(DirAccess.copy_absolute(
+	var copied := DirAccess.copy_absolute(
 			ProjectSettings.globalize_path(ItemDbFixture.FIXTURE_ITEMS),
-			_directory.path_join("items.def")) == OK)
+			_directory.path_join("items.def"))
+	assert(copied == OK, "the committed items table copies beside the authored defs")
 	return _directory
 
 

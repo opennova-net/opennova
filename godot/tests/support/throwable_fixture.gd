@@ -11,8 +11,9 @@ static func directory() -> String:
 	if not _directory.is_empty():
 		return _directory
 	_directory = ProjectSettings.globalize_path("res://../.godot-test-fixtures/throwable")
-	assert(DirAccess.make_dir_recursive_absolute(_directory) == OK)
-	var weapon := "ammoclass_max_carry CLASS_556MM 1000\n"
+	var made := DirAccess.make_dir_recursive_absolute(_directory)
+	assert(made == OK, "the throwable fixture directory is creatable")
+	var weapon :="ammoclass_max_carry CLASS_556MM 1000\n"
 	weapon += DefFixture.weapon_row("WPN_M4AUTO", 3, 0, 30, "auto").replace(
 			" loadout_subclasses 1\n", "")
 	var grenade := DefFixture.weapon_row("WPN_GRENADEHE", 5, 0, 1, "powerthrow", "grenadehe")
@@ -30,8 +31,9 @@ static func directory() -> String:
 	weapon += DefFixture.weapon_row("WPN_SATCHEL_DETONATOR", 8, 0, 1, "", "AMMO_DETONATOR")
 	WorldFixture.write_file(_directory.path_join("weapon.def"), weapon)
 	WorldFixture.write_file(_directory.path_join("ammo.def"), DefFixture.ammo_text() + AMMO)
-	assert(DirAccess.copy_absolute(ProjectSettings.globalize_path(ItemDbFixture.FIXTURE_ITEMS),
-			_directory.path_join("items.def")) == OK)
+	var copied := DirAccess.copy_absolute(ProjectSettings.globalize_path(ItemDbFixture.FIXTURE_ITEMS),
+			_directory.path_join("items.def"))
+	assert(copied == OK, "the committed items table copies beside the authored defs")
 	return _directory
 
 

@@ -1,7 +1,7 @@
 extends GutTest
 
-# Throwable weapon-switch + PowerThrow lifecycle against the committed JO defs,
-# driven the way the game shells drive Simulation (loadout -> switch walk ->
+# Throwable weapon-switch + PowerThrow lifecycle against the authored throwable
+# tables (ThrowableFixture), driven the way the game shells drive Simulation (loadout -> switch walk ->
 # commit events -> def installs, including the FP model resolve's delayed
 # same-weapon re-install). Pins the PR #282 field bugs:
 #  - a same-name install landing during a SWITCHFROM must not destroy the
