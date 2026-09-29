@@ -332,6 +332,8 @@ foreach(test items weapons ammo powerup item_attrib item_part_bytes item_type)
     endif()
 endforeach()
 opennova_add_gated_test(def_parse_hudpos COMMAND def_parse_hudpos_test)
+# The powerup retail leg reads powerup.def off the packed install through the Vfs.
+target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
 # PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
