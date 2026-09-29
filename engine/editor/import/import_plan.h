@@ -129,8 +129,9 @@ struct ImportPlanRow {
 };
 
 // What the walk does not follow, once per kind: references of a kind that names no file (a
-// symbol, a def's sound), with how many the planned files hold; or the planned files of a kind
-// whose references the graph does not read. `first` is the file where it was met first.
+// symbol, a def's sound), with how many the planned files hold; or the planned files whose
+// references the graph does not read (of a kind it does not read, or a mission's .mis:
+// graph_reads_file). `first` is the file where it was met first.
 struct ImportNotFollowed {
 	ReferenceKind reference = ReferenceKind::None; // the reference kind; None when `kind` is a file kind
 	AssetKind kind = AssetKind::Unknown;

@@ -179,12 +179,7 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	return true;
 }
 
-// A mission's references, from the binary form the game loads. A .mis is a mission too, the
-// mission editors' text form (docs/mission/mis-format-re.md), which no BMS parse reads: the
-// mission document will read it, so it gives nothing here, never graph.unreadable.
 bool extract_mission(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	if (!strutil::ends_with_icase(name, ".bms"))
-		return true;
 	bms::File file;
 	std::string message;
 	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {
@@ -258,8 +253,18 @@ void extract_from_document(const Document &document, Extracted &out) {
 
 bool graph_reads_kind(AssetKind kind) { return is_editable_kind(kind) || native_extractor(kind) != nullptr; }
 
+bool graph_reads_file(AssetKind kind, const std::string &name) {
+	// A .mis is a mission too, the mission editors' text form (docs/mission/mis-format-re.md),
+	// which no BMS parse reads.
+	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms"))
+		return false;
+	return graph_reads_kind(kind);
+}
+
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error) {
+	if (!graph_reads_file(kind, name))
+		return true;
 	if (const DocumentType *type = document_type_for(kind)) {
 		std::unique_ptr<Document> document = type->make();
 		if (!document->load_bytes(bytes, name, kind, game, error)) return false;

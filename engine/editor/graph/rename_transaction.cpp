@@ -14,6 +14,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/archive_routing.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -144,6 +145,15 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		                                ": rename the source instead.", asset->relative_path));
 	} else if (!check_project_file_name(paths.root, dir, new_name, asset->kind, problem, message)) {
 		plan.refusals.push_back(refusal(("rename." + problem).c_str(), message, asset->relative_path));
+	} else if (route_asset(asset->kind) != ArchiveSlot::Loose &&
+			!logical_name_fits_archive(new_name)) {
+		// check_project_file_name takes Unknown for a kind not decided yet (an import before its
+		// bytes are read); this file's is decided, none the game knows, and the build packs it all
+		// the same (route_asset), so the archives' name limit binds it as any packed kind's.
+		plan.refusals.push_back(refusal("rename.name",
+				"'" + new_name +
+						"' does not fit the game's archives: names are up to 16 characters.",
+				asset->relative_path));
 	} else if (extension_of(new_name) != extension_of(asset->logical_name)) {
 		plan.refusals.push_back(refusal("rename.kind", "Keep the extension: a file's kind comes from it.", asset->relative_path));
 	} else if (const AssetEntry *taken = scan.find(new_name); taken && taken != asset) {

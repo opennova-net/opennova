@@ -495,6 +495,14 @@ static int test_native_extractors() {
 	TEST_EXPECT(missing >= 4); // sky_b, sun, puff.tga, island
 	TEST_EXPECT(count_code(session.view().diagnostics, "reference.missing") == missing);
 	TEST_EXPECT(count_code(session.view().diagnostics, "graph.unreadable") == 0);
+	// The .mis is skipped, never extracted (graph_reads_file): a changed one is read by nothing.
+	TEST_EXPECT(!graph_reads_file(AssetKind::Mission, "test.mis") &&
+			graph_reads_file(AssetKind::Mission, "TEST.BMS"));
+	TEST_EXPECT(editor_test::write_text(root + "/test.mis", "; changed\n"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
+	TEST_EXPECT(graph.references_of("test.mis").empty() &&
+			count_code(session.view().diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
 	// while the file is unchanged; a document type's file that does not load is its

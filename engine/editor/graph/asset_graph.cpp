@@ -84,7 +84,7 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 	stats_ = GraphStats();
 	std::map<std::string, Extraction> next;
 	for (const AssetEntry &asset : scan.entries) {
-		if (!graph_reads_kind(asset.kind)) continue;
+		if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
 		const Document *document = nullptr;
 		for (const auto &candidate : open)
 			if (candidate && candidate->path() == asset.relative_path) document = candidate.get();
