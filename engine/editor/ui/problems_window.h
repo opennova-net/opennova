@@ -51,8 +51,9 @@ public:
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
-	// How many findings the window has asked the fixes of at the view's revision (fixes_for,
-	// each planned once): the lines it drew, the selected one and More's, never every one.
+	// How many findings the window has asked the fixes of while what they read stands
+	// (fixes_for, each planned once): the lines it drew, the selected one and More's, never
+	// every one.
 	size_t fixes_asked() const { return fixes_.size(); }
 
 private:
@@ -110,11 +111,11 @@ private:
 	char text_[128]{}; // the filter box, query_.text
 	ProblemQueryCache answers_;
 	ProblemFixCache fixes_;
-	// What refresh() makes of the view, kept while its revision, the query and the folded
-	// groups stand: each finding's key and the finding a key names, the lines of the list,
+	// What refresh() makes of the view, kept while what it reads (cache_key), the query and the
+	// folded groups stand: each finding's key and the finding a key names, the lines of the list,
 	// each group's Fix all and the summary's (the missing required files').
 	const SessionView *view_ = nullptr;
-	uint64_t revision_ = 0;
+	RevisionKey key_;
 	ProblemQuery refreshed_;
 	bool stale_ = true;
 	std::vector<std::string> keys_;
@@ -138,7 +139,7 @@ private:
 	Confirmation confirm_;
 	Proposal shown_;
 	const SessionView *shown_view_ = nullptr;
-	uint64_t shown_revision_ = 0;
+	RevisionKey shown_key_;
 	uint64_t shown_version_ = 0;
 	uint64_t apply_pressed_ = 0;
 	bool shown_changed_ = false;

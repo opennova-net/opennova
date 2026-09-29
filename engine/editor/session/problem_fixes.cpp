@@ -165,11 +165,9 @@ const AssetEntry *defining_file(const Diagnostic &d, const SessionView &view) {
 		return scoped.empty() ? nullptr : view.scan.find(scoped);
 	}
 	if (view.graph)
-		for (const GraphSymbol &symbol : view.graph->symbols()) {
-			if (symbol.kind != d.reference || symbol.inert) continue;
-			for (const AssetEntry &entry : view.scan.entries)
-				if (entry.relative_path == symbol.file) return &entry;
-		}
+		for (const GraphSymbol *symbol : view.graph->symbols_of_kind(d.reference))
+			if (!symbol->inert)
+				if (const AssetEntry *entry = view.scan.at_path(symbol->file)) return entry;
 	return usual_table(d.reference, view);
 }
 
@@ -331,9 +329,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		if (!d.role.empty()) wrong_kind_fixes(d, view, out);
 	} else if (d.code == "asset.name.too_long" || d.code == "asset.name.duplicate" || d.code == "build.name_unstorable") {
 		// A name the archives cannot take, or another file has: Files' Rename....
-		if (std::any_of(view.scan.entries.begin(), view.scan.entries.end(),
-		                [&d](const AssetEntry &entry) { return entry.relative_path == d.asset; }))
-			out.push_back(rename_fix(d.asset));
+		if (view.scan.at_path(d.asset)) out.push_back(rename_fix(d.asset));
 	} else if (d.code == "animation_map.no_reset" && !d.asset.empty()) {
 		out.push_back(reset_row_fix(d.asset));
 	} else if (d.code == "reference.missing") {
@@ -425,11 +421,18 @@ std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes) {
 	return requests;
 }
 
+RevisionKey problem_fix_key(const SessionView &view) {
+	return revision_key(view.revisions,
+			{ViewConcern::Project, ViewConcern::Files, ViewConcern::Findings, ViewConcern::Graph,
+					ViewConcern::Documents, ViewConcern::Preferences});
+}
+
 const ProblemFixIndex &ProblemFixCache::follow(const SessionView &view) {
-	if (view_ != &view || revision_ != view.revision || !index_) {
+	const RevisionKey key = problem_fix_key(view);
+	if (view_ != &view || key_ != key || !index_) {
 		fixes_.clear();
 		view_ = &view;
-		revision_ = view.revision;
+		key_ = key;
 		index_ = std::make_unique<ProblemFixIndex>(view);
 	}
 	return *index_;

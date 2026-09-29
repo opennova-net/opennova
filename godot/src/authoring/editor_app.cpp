@@ -892,7 +892,8 @@ String EditorApp::request_json(const String &p_json) {
 				served ? session_->outcome() : opennova::editor::ActionOutcome()));
 	}
 	answer.set("status", opennova::io::JsonValue::make_string(session_->view().status));
-	answer.set("revision", opennova::io::JsonValue::make_number(double(session_->view().revision)));
+	const double revision = double(session_->view().revisions.any());
+	answer.set("revision", opennova::io::JsonValue::make_number(revision));
 	return json_text(answer);
 }
 

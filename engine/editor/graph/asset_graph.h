@@ -122,12 +122,19 @@ struct Extracted {
 
 class AssetGraph {
 public:
-	// Rebuild over the scan; the open documents stand in for their files.
+	// Rebuild over the scan; the open documents stand in for their files. An update that finds
+	// the files as they were (their rows in the scan's order, and what each file the graph reads
+	// references and defines) changes nothing: the edges and symbols stay where they were.
 	void update(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
 	            const std::vector<std::shared_ptr<const Document>> &open);
+	// Moves each time an update changes what the graph holds, and only then: while it stands,
+	// every edge and symbol the graph handed out is where it was (a cache may keep them).
+	uint64_t generation() const { return generation_; }
 
 	const std::vector<GraphEdge> &edges() const { return edges_; }
 	const std::vector<GraphSymbol> &symbols() const { return symbols_; }
+	// Every symbol of `kind`, inert ones too, in the order the files define them.
+	std::vector<const GraphSymbol *> symbols_of_kind(ReferenceKind kind) const;
 	const GraphStats &stats() const { return stats_; }
 
 	// The edges out of a file, by project-relative path or logical name.
@@ -223,6 +230,7 @@ private:
 	};
 	void assemble(const AssetScan &scan);
 	std::string resolved_target(const GraphEdge &edge) const;
+	bool same_files(const AssetScan &scan) const;
 
 	std::map<std::string, Extraction> cache_; // by project-relative path
 	std::vector<GraphEdge> edges_;
@@ -235,6 +243,9 @@ private:
 	std::set<std::pair<std::string, std::string>> inert_style_values_;
 	struct FileRow { std::string path; std::string logical_name; AssetKind kind = AssetKind::Unknown; };
 	std::map<std::string, FileRow> files_; // normalized logical name -> the file
+	// The scan's files in its order, as the graph was last assembled over them.
+	std::vector<FileRow> scanned_;
+	uint64_t generation_ = 0;
 	std::multimap<std::string, size_t> symbol_index_; // kind token + '\n' + name -> symbols_ index
 	std::map<std::pair<std::string, std::string>, std::vector<size_t>> record_symbols_; // (file, record) -> symbols_ indexes
 	std::map<std::string, std::vector<size_t>> file_symbols_; // file -> symbols_ indexes

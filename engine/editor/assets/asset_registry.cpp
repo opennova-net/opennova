@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <numeric>
 #include <system_error>
 
 #include <base/io/file_time.h>
@@ -43,10 +44,31 @@ bool logical_name_fits_archive(std::string_view name) {
 
 const AssetEntry *AssetScan::find(std::string_view logical_name) const {
 	const std::string key = normalized_logical_name(logical_name);
-	for (const AssetEntry &entry : entries) {
-		if (normalized_logical_name(entry.logical_name) == key) return &entry;
-	}
-	return nullptr;
+	const auto found = std::lower_bound(entries.begin(), entries.end(), key,
+			[](const AssetEntry &entry, const std::string &wanted) { return entry.key < wanted; });
+	return found != entries.end() && found->key == key ? &*found : nullptr;
+}
+
+const AssetEntry *AssetScan::at_path(std::string_view relative_path) const {
+	const auto found = std::lower_bound(by_path_.begin(), by_path_.end(), relative_path,
+			[this](size_t index, std::string_view wanted) {
+				return std::string_view(entries[index].relative_path) < wanted;
+			});
+	if (found == by_path_.end() || entries[*found].relative_path != relative_path) return nullptr;
+	return &entries[*found];
+}
+
+void AssetScan::index() {
+	for (AssetEntry &entry : entries) entry.key = normalized_logical_name(entry.logical_name);
+	std::sort(entries.begin(), entries.end(), [](const AssetEntry &a, const AssetEntry &b) {
+		if (a.key != b.key) return a.key < b.key;
+		return a.relative_path < b.relative_path;
+	});
+	by_path_.resize(entries.size());
+	std::iota(by_path_.begin(), by_path_.end(), size_t(0));
+	std::sort(by_path_.begin(), by_path_.end(), [this](size_t a, size_t b) {
+		return entries[a].relative_path < entries[b].relative_path;
+	});
 }
 
 AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &doc) {
@@ -158,12 +180,7 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 		scan.entries.push_back(std::move(asset));
 	}
 
-	std::sort(scan.entries.begin(), scan.entries.end(), [](const AssetEntry &a, const AssetEntry &b) {
-		const std::string ka = normalized_logical_name(a.logical_name);
-		const std::string kb = normalized_logical_name(b.logical_name);
-		if (ka != kb) return ka < kb;
-		return a.relative_path < b.relative_path;
-	});
+	scan.index();
 
 	for (size_t i = 0; i < scan.entries.size(); ++i) {
 		const AssetEntry &asset = scan.entries[i];
@@ -174,13 +191,12 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 			                std::to_string(pff::PFF_NAME_SIZE) +
 			                " characters; the game cannot store it in an archive.",
 			        asset.relative_path));
-		} else if (normalized_logical_name(asset.logical_name).empty()) {
+		} else if (asset.key.empty()) {
 			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
 			                                           "The file name is blank once normalized.",
 			                                           asset.relative_path));
 		}
-		if (i > 0 && normalized_logical_name(scan.entries[i - 1].logical_name) ==
-		                     normalized_logical_name(asset.logical_name)) {
+		if (i > 0 && scan.entries[i - 1].key == asset.key) {
 			scan.diagnostics.push_back(make_diagnostic(
 			        DiagnosticSeverity::Error, "asset.name.duplicate",
 			        "Two files share the name " + asset.logical_name + " (" +

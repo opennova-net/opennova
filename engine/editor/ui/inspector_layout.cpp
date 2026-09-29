@@ -20,9 +20,7 @@ std::string field_title(const Document &document, NodeKind kind, const std::stri
 }
 
 std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
-	const AssetEntry *source = nullptr;
-	for (const AssetEntry &entry : view.scan.entries)
-		if (entry.relative_path == edge.source) source = &entry;
+	const AssetEntry *source = view.scan.at_path(edge.source);
 	const DocumentType *type = source ? document_type_for(source->kind) : nullptr;
 	if (!type) return edge.field;
 	// A type's schema never depends on a file's content: a blank document of it, made once

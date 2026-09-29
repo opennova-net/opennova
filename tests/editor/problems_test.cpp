@@ -115,7 +115,6 @@ static int test_query() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_query");
 	SessionView view;
 	view.project_open = true;
-	view.revision = 1;
 	const auto a = menu_document(dir, "a.mnu", "menus/a.mnu");
 	const auto b = menu_document(dir, "b.mnu", "menus/b.mnu");
 	TEST_EXPECT(a && b);
@@ -196,7 +195,7 @@ static int test_query() {
 	TEST_EXPECT(files.rows == std::vector<size_t>({1, 3, 4, 2, 0, 5}));
 	// By kind: the code's family, titled in plain words (a family the table lacks, its own name).
 	view.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "rename.exists", "The project already has x.tga."));
-	++view.revision;
+	view.revisions.touch(ViewConcern::Findings);
 	query.grouping = ProblemGrouping::Kind;
 	const ProblemAnswer kinds = answer_problems(query, view);
 	std::vector<std::string> titles;
@@ -218,7 +217,7 @@ static int test_query() {
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
 	view.diagnostics.pop_back();
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
-	++view.revision;
+	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6);
 	TEST_EXPECT(cache.answer(query, view).rows.size() == 3);
 	return 0;
@@ -453,7 +452,6 @@ static int test_fixes() {
 static int test_rewrite_unserializable() {
 	SessionView view;
 	view.project_open = true;
-	view.revision = 1;
 	view.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/weapon.def"),
 	                    finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/weapon.def"),
 	                    finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/ammo.def"),
@@ -478,7 +476,6 @@ static int test_rewrite_unserializable() {
 static int test_fix_cache() {
 	SessionView view;
 	view.project_open = true;
-	view.revision = 3;
 	view.diagnostics = {finding(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/menu_style.mns"),
 	                    finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows.", "menus/a.mnu")};
 	ProblemFixCache cache;
@@ -488,7 +485,7 @@ static int test_fix_cache() {
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
 	view.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
 	TEST_EXPECT(cache.fixes(view, 0).size() == 1);
-	++view.revision;
+	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.fixes(view, 0).empty());
 	return 0;
 }
@@ -551,6 +548,7 @@ static int test_location() {
 	};
 	view.scan.entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImageSource),
 	                     entry("Arial14b.fnt", "fonts/Arial14b.fnt", AssetKind::Font)};
+	view.scan.index();
 	Diagnostic required = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");
 	required.role = "main_menu";
 	required.target = "main.mnu";
@@ -595,7 +593,6 @@ static int test_location() {
 static int test_use_required_only() {
 	SessionView view;
 	view.project_open = true;
-	view.revision = 1;
 	const auto row = [](const char *role, const char *name, bool required) {
 		RequirementRow out;
 		out.role = role;
@@ -613,6 +610,7 @@ static int test_use_required_only() {
 		entry.kind = AssetKind::Texture;
 		view.scan.entries.push_back(entry);
 	}
+	view.scan.index();
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file screen.pcx.");
 	required.role = "test_screen";
 	required.target = "screen.pcx";
@@ -632,7 +630,6 @@ static int test_use_required_only() {
 static int test_fix_index() {
 	SessionView view;
 	view.project_open = true;
-	view.revision = 1;
 	for (size_t i = 0; i < 3000; ++i) {
 		const std::string file = "defs/f" + std::to_string(i % 30) + ".def";
 		view.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "An unknown key.", file.c_str()));
@@ -797,7 +794,6 @@ static int test_placeholders() {
 static int test_optional_group() {
 	SessionView view;
 	view.project_open = true;
-	view.revision = 1;
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	Diagnostic optional = finding(DiagnosticSeverity::Info, "requirement.optional_missing", "Optional file brand.mns.");
 	Diagnostic wrong = finding(DiagnosticSeverity::Error, "requirement.wrong_kind", "main.mnu is not a menu.", "menus/main.mnu");

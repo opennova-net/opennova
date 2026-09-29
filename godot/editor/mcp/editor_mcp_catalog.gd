@@ -83,7 +83,10 @@ const MENU_PREVIEW_HANDLES: Array[String] = ["move", "left", "right", "top", "bo
 static func definitions() -> Array[McpToolDef]:
 	return [
 		McpToolDef.make("editor_state",
-			"Read the editor's state: the project (root, title, features, files: a page of the "
+			"Read the editor's state: revision (moves with any change) and revisions (a counter "
+			+ "per concern, each moving only with what it covers: project, files, findings, graph, "
+			+ "documents, selection, output, operation, run, dialogs, preferences), the project "
+			+ "(root, title, features, files: a page of the "
 			+ "files the scan lists from files_offset, files_limit of them (file_count says how "
 			+ "many there are), each with its path, name, kind and editable: whether the editor "
 			+ "opens it), "

@@ -18,9 +18,8 @@ namespace {
 
 // Whether the editor opens a project file's kind.
 bool editable_file(const std::string &path, const SessionView &view) {
-	for (const AssetEntry &entry : view.scan.entries)
-		if (entry.relative_path == path) return is_editable_kind(entry.kind);
-	return false;
+	const AssetEntry *entry = view.scan.at_path(path);
+	return entry && is_editable_kind(entry->kind);
 }
 
 } // namespace

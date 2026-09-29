@@ -182,7 +182,7 @@ struct Sweep {
 		view = session.view();
 		view.diagnostics.push_back(long_finding("defs/items.def", "catalog.test"));
 		view.diagnostics.push_back(long_finding("", "project.test"));
-		++view.revision;
+		view.revisions.touch(ViewConcern::Findings);
 		ui.windows.set_view(&view);
 		for (int i = 0; i < 4; ++i) {
 			model.held.follow(view);
@@ -311,7 +311,7 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 	sweep.view.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false},
 	                                     {"C:/assets/data.pff", "a_member_whose_name_runs_long_enough_to_be_cut.mnu", false, false}};
 	sweep.view.import_preview.changed = true;
-	++sweep.view.revision;
+	sweep.view.revisions.touch(ViewConcern::Dialogs);
 	sweep.ui.frames(4);
 	CHECK(ImGui::FindWindowByName("Import files") && ImGui::FindWindowByName("Import files")->Active,
 	      (layout + ": the import dialog open").c_str());
@@ -325,7 +325,7 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 		ImGui::SetWindowSize("Import files", size);
 	}
 	sweep.view.import_preview = SessionView::ImportPreview();
-	++sweep.view.revision;
+	sweep.view.revisions.touch(ViewConcern::Dialogs);
 	sweep.ui.frames(3);
 	// The project settings.
 	choose(sweep.ui, "File", {"Project settings..."});

@@ -139,11 +139,11 @@ std::shared_ptr<MnuDocument> edited(std::shared_ptr<MnuDocument> document) {
 
 SessionView seeded_view() {
 	SessionView v;
-	v.revision = 7;
 	v.project_open = true;
 	v.project_root = "C:/mods/My Game";
 	v.document.title = "My Game";
 	v.scan.entries.push_back(file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu));
+	v.scan.index();
 	RequirementRow row;
 	row.role = "main_menu";
 	row.name = "main.mnu";
@@ -246,6 +246,7 @@ void test_workspace_layout() {
 	CHECK(catalog->load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error), "catalog loads");
 	CHECK(!catalog->blocked() && catalog->ignored_lines() == 1, "an ignored line does not block");
 	v.scan.entries.push_back(file_entry("items.def", "items.def", AssetKind::ItemDefs));
+	v.scan.index();
 	v.documents.push_back(catalog);
 	v.active_document = catalog->path();
 	v.selection = {catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item), 0};
@@ -256,7 +257,7 @@ void test_workspace_layout() {
 	CHECK(in_order(text, {"items.def", "Reload", "line(s) the game ignores", "Marker"}), "the catalog's tab: its toolbar, notice and records");
 	CHECK(windows.pending_requests() == 0, "drawing raises no request by itself");
 	v.import_preview = planned_import("C:/assets");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	for (uint64_t i = 16; i < 19; ++i) frame(windows, i);
 	CHECK(modal_open("Import files"), "the import dialog draws from the workspace");
 	CHECK(windows.pending_requests() == 0, "previewing an import writes nothing");
@@ -275,6 +276,7 @@ void test_document_tabs() {
 	SessionView v = menu_view(a);
 	v.scan.entries = {file_entry("a.mnu", a->path(), AssetKind::Menu), file_entry("b.mnu", b->path(), AssetKind::Menu),
 	                  file_entry("c.mnu", c->path(), AssetKind::Menu)};
+	v.scan.index();
 	v.documents = {a, b, c};
 	v.active_document = a->path();
 	Ui ui;
@@ -301,13 +303,13 @@ void test_document_tabs() {
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == c->path(), "a click on a tab opens its document");
 	CHECK(logged_frame(ui).find("OPTIONS") == std::string::npos, "its view waits until it is the active document");
 	v.active_document = c->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(ui.drain().empty() && bar->SelectedTabId == document_tab_id(c->path()), "made active, its tab stays, nothing more");
 	// The active document changed elsewhere (a Problems row, the editor MCP): its tab is
 	// selected, and no request goes back.
 	v.active_document = b->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(ui.drain().empty() && bar->SelectedTabId == document_tab_id(b->path()), "the tab follows the active document");
 
@@ -324,7 +326,8 @@ void test_document_tabs() {
 	// Closed by the session: its tab goes, the new active document's shows.
 	v.documents = {a, c};
 	v.active_document = c->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(bar->Tabs.Size == 2 && !tab(b) && bar->SelectedTabId == document_tab_id(c->path()), "the tab went with its document");
 	CHECK(ui.drain().empty(), "nothing else");
@@ -354,14 +357,14 @@ void test_document_tab_choices() {
 	const ImVec2 at_c = tab_rect(*bar, c->path()).GetCenter();
 	ui.mouse(at_c.x, at_c.y);
 	v.active_document = b->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.button(true);
 	ui.button(false);
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == c->path(),
 	      "the click in the frame b became active: c opens");
 	v.active_document = c->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(ui.drain().empty() && bar->SelectedTabId == document_tab_id(c->path()), "c shown and active, nothing more");
 	ui.away();
@@ -370,7 +373,7 @@ void test_document_tab_choices() {
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == a->path(), "the next click opens a");
 	v.active_document = a->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.drain();
 
@@ -379,7 +382,8 @@ void test_document_tab_choices() {
 	const auto x2 = menu_at(dir, "x2.mnu", "b/x.mnu");
 	v.documents = {a, c, x1, x2};
 	v.active_document = x1->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Selection);
 	ui.away();
 	ui.frames(3);
 	ImGuiTabItem *first = ImGui::TabBarFindTabByID(bar, document_tab_id(x1->path()));
@@ -397,7 +401,7 @@ void test_document_tab_choices() {
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == x2->path(), "b/x.mnu reachable");
 	v.active_document = x2->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.away();
 	ui.click(tab_rect(*bar, x1->path()).GetCenter());
@@ -405,7 +409,7 @@ void test_document_tab_choices() {
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == x1->path(), "and a/x.mnu");
 	v.active_document = x1->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.away();
 	ui.drain();
@@ -417,7 +421,7 @@ void test_document_tab_choices() {
 	CHECK(one(requests, EditorRequestKind::CloseDocument) && requests[0].path == c->path(), "an inactive tab closes");
 	CHECK(bar->SelectedTabId == document_tab_id(x1->path()), "without being shown");
 	v.documents = {a, x1, x2};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.away();
 	ui.frames(3);
 	CHECK(ui.drain().empty() && !ImGui::TabBarFindTabByID(bar, document_tab_id(c->path())) &&
@@ -464,7 +468,7 @@ void test_view_prompt_outlives_its_tab() {
 	};
 	CHECK(ask(a), "Remove screen... asks first");
 	v.active_document = b->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(document_tabs() && document_tabs()->SelectedTabId == document_tab_id(b->path()) && modal_open("Remove screen?"),
 	      "its tab hidden, it still asks");
@@ -490,7 +494,8 @@ void test_view_prompt_outlives_its_tab() {
 	v.documents = {b};
 	v.active_document = b->path();
 	v.select_only({});
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(!modal_open("Remove screen?") && ui.drain().empty(), "its menu closed: the prompt closes");
 }
@@ -500,7 +505,6 @@ void test_view_prompt_outlives_its_tab() {
 void test_thirty_tabs() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_thirty_tabs");
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Thirty";
 	v.document.title = "Thirty";
@@ -512,6 +516,7 @@ void test_thirty_tabs() {
 		v.scan.entries.push_back(file_entry(file, menus.back()->path(), AssetKind::Menu));
 		v.documents.push_back(menus.back());
 	}
+	v.scan.index();
 	v.active_document = menus.front()->path();
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -542,7 +547,6 @@ void test_thirty_tabs() {
 // project... shows the same form in a modal; File > Open recent opens one.
 void test_welcome_view() {
 	SessionView v;
-	v.revision = 1;
 	v.recent_projects = {"C:/mods/Armory", "C:/mods/Other"};
 	v.status = "No project open.";
 	Ui ui;
@@ -769,13 +773,13 @@ void test_menus() {
 	r = raised("Build", {"Show build folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.last_build.build_dir, "Build > Show build folder");
 	v.play_state = PlayState::Running;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Run);
 	ui.frames(2);
 	r = raised("Build", {"Stop"}, EditorRequestKind::StopPlay);
 	CHECK(r.kind == EditorRequestKind::StopPlay, "Build > Stop while the game runs");
 	CHECK(choose(ui, "Build", {"Play"}).empty(), "no Play while it runs");
 	v.retail_directory.clear();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Preferences);
 	CHECK(choose(ui, "File", {"Import from the game data..."}).empty(), "no game install: nothing to import from");
 }
 
@@ -827,12 +831,12 @@ void test_menu_bar_status() {
 	// A long line is cut to the room it has, whole in its tooltip.
 	v.status = "Opened A Project With A Very Long Name (C:/Users/someone/Documents/OpenNova projects/A Project With A "
 	           "Very Long Name That Goes On)";
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	text = logged_frame(ui);
 	CHECK(text.find("Opened A Project") != std::string::npos && text.find("That Goes On)") == std::string::npos,
 	      "a long line cut");
 	v.status = "menus/a.mnu has no changes to save.";
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	const ImGuiID bar = menu_bar_id();
 	const ImGuiID unsaved = item_id(bar, {"status", "unsaved"});
 	ui.activate(item_id(bar, {"status", "##unsaved"}));
@@ -854,7 +858,8 @@ void test_menu_bar_status() {
 	v.build_running = false;
 	v.play_state = PlayState::Running;
 	v.play_pid = 4242;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Operation);
+	v.revisions.touch(ViewConcern::Run);
 	ui.frames(2);
 	CHECK(in_order(logged_frame(ui), {"2 unsaved", "Game running", "Build", "Play", "Stop"}), "the game running");
 	ui.activate(item_id(bar, {"status", "Play"}));
@@ -865,7 +870,8 @@ void test_menu_bar_status() {
 	v.play_state = PlayState::Stopped;
 	v.has_build = true;
 	v.last_build.ok = true;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Run);
+	v.revisions.touch(ViewConcern::Operation);
 	ui.frames(2);
 	CHECK(in_order(logged_frame(ui), {"2 unsaved", "Built", "Build", "Play", "Stop"}), "built");
 	ui.activate(item_id(bar, {"status", "Build"}));
@@ -924,7 +930,6 @@ void test_files_window() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_files_test");
 	const auto main_menu = edited(menu_at(dir, "main.mnu", "menus/main.mnu"));
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Files";
 	v.document.title = "Files";
@@ -936,6 +941,7 @@ void test_files_window() {
 	                  file_entry("readme.txt", "readme.txt", AssetKind::Text)};
 	v.scan.entries[4].imported_from = "art/logo.png";
 	v.scan.entries[0].size_bytes = 3 * 1024;
+	v.scan.index();
 	v.documents = {main_menu};
 	v.active_document = main_menu->path();
 	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Error, "catalog.a", "One.", "defs/items.def"),
@@ -957,8 +963,10 @@ void test_files_window() {
 		return text.substr(0, text.find("Reload"));
 	};
 	std::string text = files_text();
-	CHECK(in_order(text, {"Refresh", "6 files", "Name", "Size", "art", "logo.png", "logo.pcx", "defs", "items.def", "2", "1",
-	                      "3.0 KB", "menus", "sub", "options.mnu", "main.mnu", "readme.txt"}),
+	// A folder's files in the scan's order, by name (logo.pcx before logo.png).
+	CHECK(in_order(text, {"Refresh", "6 files", "Name", "Size", "art", "logo.pcx", "logo.png",
+			"defs", "items.def", "2", "1", "3.0 KB", "menus", "sub", "options.mnu", "main.mnu",
+			"readme.txt"}),
 	      "the file count; the folders sorted, each over its files; an import beside its source; the counts after a name");
 	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
 	ImGuiTable *files_table = ImGui::TableFindByID(table);
@@ -1093,13 +1101,13 @@ void test_files_window() {
 	CHECK(files_text().find("options.mnu") == std::string::npos, "the filter hides options.mnu");
 	v.reveal_file = "menus/sub/options.mnu";
 	++v.reveal_file_serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(window->selected() == "menus/sub/options.mnu" && files_text().find("options.mnu") != std::string::npos,
 	      "the file asked for selected, the filter that hid it cleared");
 	v.reveal_file_rename = true;
 	++v.reveal_file_serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Rename options.mnu to") != std::string::npos, "Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
@@ -1184,7 +1192,7 @@ void test_import_dialog() {
 	// An archive's members to choose from: a choice checked plans the chosen files again.
 	v.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false}, {"C:/assets/data.pff", "stat.mnu", false, false}};
 	++v.import_preview.serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	ui.away();
 	text = logged_frame(ui);
@@ -1205,7 +1213,7 @@ void test_import_dialog() {
 	v.import_preview.choices.clear();
 	v.import_preview.changed = true;
 	++v.import_preview.serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	ui.away();
 	CHECK(logged_frame(ui).find("The files changed since the preview") != std::string::npos, "a changed plan says so");
@@ -1214,7 +1222,7 @@ void test_import_dialog() {
 	// way to it, and comes back as it was, Replace existing files still checked.
 	editor_test::TempProjectDir dir("opennova_editor_ui_import_dirty");
 	v.documents.push_back(edited(menu_at(dir, "a.mnu", "menus/a.mnu")));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(2);
 	ui.drain();
 	ui.activate(item_id(dialog, {"Replace existing files"}));
@@ -1226,13 +1234,13 @@ void test_import_dialog() {
 	v.unsaved_prompt.action = EditorRequestKind::ImportFiles;
 	v.unsaved_prompt.files = {"menus/a.mnu"};
 	v.unsaved_prompt.can_discard = false;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	CHECK(modal_open("Unsaved changes") && !modal_open("Import files") &&
 	              logged_frame(ui).find("Save all and import") != std::string::npos,
 	      "the unsaved prompt, and not the dialog, while it is open");
 	v.unsaved_prompt = SessionView::UnsavedPrompt();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	ui.drain();
 	CHECK(modal_open("Import files") && !modal_open("Unsaved changes"), "the dialog back once the prompt is answered");
@@ -1241,7 +1249,7 @@ void test_import_dialog() {
 	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].flag, "Replace existing files kept");
 	// The session closed the preview: the dialog closes.
 	v.import_preview = SessionView::ImportPreview();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	CHECK(!modal_open("Import files"), "the dialog closed");
 }
@@ -1557,7 +1565,50 @@ void test_window_title() {
 
 } // namespace
 
+// S13 D1: Files makes its tree and each file's counts again only when what they read moves (the
+// files, the findings): a line of Output, the status line and every step of a build leave them
+// as they were, and a file the scan finds anew makes them again.
+void test_files_tree_kept() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_files_kept");
+	NoProcess platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Kept"));
+	editor_test::create_missing_files(session);
+	Ui ui;
+	ui.windows.set_view(&session.view());
+	ui.frames(6);
+	const auto *window = dynamic_cast<const FilesWindow *>(find_window(ui.windows.pass(), "Files"));
+	CHECK(window != nullptr, "the Files window");
+	if (!window) return;
+	const size_t made = window->rebuilds();
+	CHECK(made >= 1, "the tree made");
+	session.handle(make_request(EditorRequestKind::ClearOutput));
+	// Nothing to save: the status line alone.
+	session.handle(make_request(EditorRequestKind::SaveAll));
+	ui.frames(3);
+	CHECK(window->rebuilds() == made, "Output and the status line: the tree kept");
+	session.handle(make_request(EditorRequestKind::Build)); // its refresh reads the files again
+	ui.frames(2);
+	const size_t building = window->rebuilds();
+	size_t steps = 0;
+	while (session.build_running() && steps < 100) {
+		session.poll();
+		ui.frames(1);
+		if (!session.build_running()) break;
+		++steps;
+		CHECK(window->rebuilds() == building, "a build's step: the tree kept");
+	}
+	CHECK(steps > 1 && session.view().has_build, "the build stepped");
+	const std::string readme = session.view().project_root + "/notes/readme.txt";
+	CHECK(editor_test::write_text(readme, "x"), "a file written");
+	session.handle(make_request(EditorRequestKind::Rescan));
+	ui.frames(2);
+	CHECK(window->rebuilds() > building && logged_frame(ui).find("readme.txt") != std::string::npos,
+	      "a file found anew: the tree made again");
+}
+
 void run_workspace_tests() {
+	test_files_tree_kept();
 	test_workspace_layout();
 	test_document_tabs();
 	test_document_tab_choices();

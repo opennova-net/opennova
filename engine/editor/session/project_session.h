@@ -132,9 +132,12 @@ private:
 	void set_import_dependencies(bool flag);
 	void import_files(const EditorRequest &request);
 	void refresh_retail_files();
-	void touch() {
+	// A change of `concern` in the view: its counter and `any` move (session_revisions.h), and
+	// the previews follow the active document and the selection. The only way the session moves
+	// a counter.
+	void touch(ViewConcern concern) {
 		view_.update_previews();
-		++view_.revision;
+		view_.revisions.touch(concern);
 	}
 
 	ProcessPlatform &platform_;

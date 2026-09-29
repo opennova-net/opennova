@@ -731,7 +731,11 @@ JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
 
 JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions &options) {
 	JsonValue out = JsonValue::make_object();
-	out.set("revision", num(double(view.revision)));
+	out.set("revision", num(double(view.revisions.any())));
+	JsonValue revisions = JsonValue::make_object();
+	for (const ViewConcernRow &row : kViewConcernRows)
+		revisions.set(row.token, num(double(view.revisions.of(row.concern))));
+	out.set("revisions", std::move(revisions));
 	out.set("status", str(view.status));
 	// What waits on the unsaved-changes prompt, and the files its Save writes.
 	JsonValue prompt = JsonValue::make_object();

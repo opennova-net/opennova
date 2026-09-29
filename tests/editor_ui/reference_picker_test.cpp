@@ -236,12 +236,69 @@ void test_missing_value_fixes() {
 	ui.frames(2);
 }
 
+// S13 D1: a popup's list (the graph's choices, a missing value's finding and its fixes) is made
+// when it opens and kept while what it reads stands: a line of Output and the status line leave
+// it; an edit of its document, or a file the graph gains, make it again. A picker of the test's
+// own, on the item's model field, in a window of its own.
+void test_list_kept() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(2);
+	FieldSchema graphic;
+	for (const FieldSchema &field : project.items->fields(project.item.kind))
+		if (field.id == "graphic") graphic = project.items->field_on(project.item, field);
+	CHECK(graphic.reference == ReferenceKind::Model, "the model field");
+	ReferencePicker picker;
+	const auto draw = [&](bool open) {
+		Value value;
+		project.items->get(project.item, "graphic", value);
+		std::string picked;
+		ImGui::NewFrame();
+		ImGui::Begin("Picker test");
+		if (open) ImGui::OpenPopup("references");
+		picker.draw(ui.windows, *project.items, project.item, graphic, value, false, picked);
+		ImGui::End();
+		ImGui::Render();
+	};
+	draw(true);
+	draw(false);
+	CHECK(GImGui->OpenPopupStack.Size == 1 && picker.lists_made() == 1,
+			"its list made as it opens");
+	project.session.handle(make_request(EditorRequestKind::ClearOutput));
+	// Nothing to save: the status line alone.
+	project.session.handle(make_request(EditorRequestKind::SaveAll));
+	draw(false);
+	draw(false);
+	CHECK(picker.lists_made() == 1, "Output and the status line: the list kept");
+	EditorRequest set = make_request(EditorRequestKind::EditRecord, project.items->path());
+	set.edit.address = project.item;
+	set.edit.field = "hp";
+	set.edit.value = int64_t(33);
+	project.session.handle(set);
+	draw(false);
+	CHECK(picker.lists_made() == 2, "its document edited: the list made again");
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(project.session.view().project_root + "/models/delta.3di",
+	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
+	      "another model");
+	project.session.handle(make_request(EditorRequestKind::Rescan));
+	draw(false);
+	draw(false);
+	CHECK(picker.lists_made() == 3, "a model the graph gains: the list made again");
+	ImGui::ClosePopupsExceptModals();
+	draw(false);
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
 	test_filters_apart();
 	test_drop_on_value();
 	test_missing_value_fixes();
+	test_list_kept();
 }
 
 } // namespace editor_ui_test

@@ -608,7 +608,7 @@ void test_inspector_ui() {
 	const NodeAddress title = named(*document, "TITLE");
 	v.selection = back;
 	v.selected = {back, title};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.drain();
 	const std::string text = logged_frame(ui);
@@ -701,13 +701,16 @@ void test_actions_after_edits() {
 	other_entry.relative_path = other->path();
 	other_entry.kind = AssetKind::Menu;
 	v.scan.entries.push_back(other_entry);
+	v.scan.index();
 	// A required file the project lacks names no file of it: its row (showing the file it is
 	// about) opens nothing.
 	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	lacking.role = "gametext";
 	lacking.target = "gametext.bin";
 	v.diagnostics = {lacking};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	problems_grouping(ui, "None");
@@ -720,9 +723,11 @@ void test_actions_after_edits() {
 	font_entry.relative_path = "fonts/Arial14b.fnt";
 	font_entry.kind = AssetKind::Font;
 	v.scan.entries.push_back(font_entry);
+	v.scan.index();
 	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
 	                                 font_entry.relative_path)};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	ui.drain();
@@ -735,7 +740,7 @@ void test_actions_after_edits() {
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
 	v.diagnostics = {finding};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	ui.drain();
@@ -761,7 +766,7 @@ void test_actions_after_edits() {
 	v.unsaved_prompt.open = true;
 	v.unsaved_prompt.action = EditorRequestKind::Quit;
 	v.unsaved_prompt.files = {document->path()};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
 	CHECK(chord({ImGuiMod_Ctrl, ImGuiKey_Z}).empty() && chord({ImGuiMod_Ctrl, ImGuiKey_S}).empty() &&
@@ -772,7 +777,7 @@ void test_actions_after_edits() {
 	              prompt.find("Save all") != std::string::npos && prompt.find("Discard") != std::string::npos,
 	      "the prompt names what waits, its file and its answers");
 	v.unsaved_prompt = SessionView::UnsavedPrompt();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
 }
@@ -1057,7 +1062,8 @@ void test_preview_gestures_end() {
 		                 : std::vector<std::shared_ptr<const Document>>{document};
 		v.model_preview.path = on ? model->path() : std::string();
 		v.active_document = on ? model->path() : document->path();
-		++v.revision;
+		v.revisions.touch(ViewConcern::Documents);
+		v.revisions.touch(ViewConcern::Selection);
 		ui.frames(2);
 	};
 	// Exactly one request, the menu's gesture's end.
@@ -1204,7 +1210,7 @@ void test_preview_several_windows_ui() {
 	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
 	v.selection = other;
 	v.selected = {box, other};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
@@ -1263,14 +1269,14 @@ void test_preview_several_windows_ui() {
 	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
 	// window's list row) the preview raises none of them, as the menu view does not.
 	v.selected = {screen_address, box, other};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) && !only(chord(ImGuiKey_X), EditorRequestKind::Cut) &&
 	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
 	      "the screen selected with the windows: no Copy, Cut or Duplicate");
 	v.selected = {box, other};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 
@@ -1296,7 +1302,7 @@ void test_preview_several_windows_ui() {
 	// inside it), and MAIN becomes the primary with OTHER still selected.
 	v.selection = other;
 	v.selected = {main, other};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 	requests = drag(at(200.0f, 150.0f), 16.0f, 8.0f);
@@ -1384,12 +1390,12 @@ constexpr const char *kMainMenu = "Missing required file main.mnu";
 // error on a record's field, a warning in the active menu and a note in the other open one.
 SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shared_ptr<MnuDocument> &b) {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Problems";
 	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs), file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
 	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
 	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
+	v.scan.index();
 	v.requirements.rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
 	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
 	v.requirements.required_total = 2;
@@ -1595,7 +1601,8 @@ void test_problems_window_ui() {
 	v.requirements.required_missing = 3;
 	v.retail_files = {"cmap.mnu", "gametext.bin"};
 	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(in_order(logged_frame(ui), {"The game cannot start: 3 required files are missing.", "Create 2",
@@ -1622,7 +1629,7 @@ void test_problems_window_ui() {
 	optional.role = "brand_style";
 	optional.target = "brand.mns";
 	v.diagnostics.push_back(optional);
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	// Errors (the three required files and the catalog's), the warning, then the notes.
@@ -1654,13 +1661,13 @@ void test_problems_auto_fold() {
 	// A warning joins the stylesheets: the group folded for its notes opens.
 	v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.line_ending",
 	                                        "Delta: its line ends changed.", "menus/b.mns"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(shows("Delta:") && shows("Charlie:"), "a warning opens the group folded for its notes");
 	// The warning gone: its notes stay in sight.
 	v.diagnostics.pop_back();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(shows("Stylesheets (1 info)") && shows("Charlie:"), "notes alone again: it stays open");
@@ -1672,7 +1679,7 @@ void test_problems_auto_fold() {
 	CHECK(shows("Menus (1 warning)") && !shows("Bravo:"), "the user folded the menus' group");
 	v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "menu.test", "Echo: another warning.",
 	                                        "menus/a.mnu"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(shows("Menus (2 warnings)") && !shows("Bravo:") && !shows("Echo:"), "a group the user folded stays folded");
@@ -1721,7 +1728,7 @@ void test_problems_presses() {
 	ui.mouse(press.x, press.y);
 	ui.button(true);
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.button(false);
 	ui.frames();
@@ -1734,7 +1741,7 @@ void test_problems_presses() {
 	// The font's Create pressed; the game data gains the font (its first fix becomes Import);
 	// released: nothing is applied, and a new click takes the Import.
 	v.diagnostics = findings;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(in_order(logged_frame(ui), {"Kilo:", "Create Custom.fnt"}), "the font's Create");
@@ -1743,7 +1750,7 @@ void test_problems_presses() {
 	ui.mouse(create.x, create.y);
 	ui.button(true);
 	v.retail_files = {"Custom.fnt", "gametext.bin"};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
 	ui.frames(2);
 	ui.button(false);
 	ui.frames();
@@ -1762,7 +1769,7 @@ void test_problems_presses() {
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].edit.address.row == 11, "the second one's record");
 	v.diagnostics = findings;
 	v.diagnostics.erase(v.diagnostics.begin() + 3);
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	const std::string text = logged_frame(ui);
@@ -1797,11 +1804,11 @@ void test_problems_confirmation_follows() {
 	CHECK(confirmation() != nullptr, "the Fix all asks");
 	const std::string root = v.project_root;
 	v.project_root = "C:/mods/Another";
-	++v.revision;
+	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation(), "another project closes it");
 	v.project_root = root;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation() && ui.drain().empty(), "and nothing it held is raised");
 
@@ -1818,7 +1825,8 @@ void test_problems_confirmation_follows() {
 	v.diagnostics.erase(v.diagnostics.begin() + 1);
 	v.requirements.rows[1].state = RequirementState::Present;
 	v.requirements.required_missing = 1;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
+	v.revisions.touch(ViewConcern::Files);
 	ui.frames(2);
 	ui.button(false);
 	ui.frames();
@@ -1834,8 +1842,8 @@ void test_problems_confirmation_follows() {
 	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}), "then the new list alone");
 
 	// More's list follows its finding: main.mnu's again, gametext's gone before it.
-	v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	v.revision = 100;
+	replace_view(v, problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"),
+			menu_at(dir, "b.mnu", "menus/b.mnu")));
 	ui.activate(item_id(window, {"Group"}));
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"None"}));
 	ui.frames(2);
@@ -1843,13 +1851,13 @@ void test_problems_confirmation_follows() {
 	ui.away();
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") != std::string::npos, "More lists main.mnu's fixes");
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	text = logged_frame(ui);
 	CHECK(text.find("Use a.mnu as main.mnu") != std::string::npos && text.find("Use spare.bin") == std::string::npos,
 	      "still main.mnu's when a finding before it goes");
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") == std::string::npos, "closed when its finding goes");
 	CHECK(ui.windows.pending_requests() == 0, "nothing else");
@@ -1910,7 +1918,6 @@ void test_problems_narrow() {
 // (its own finding says so, and the Save would be refused); Only fixable lists what has a fix.
 void test_problems_rewrite_hidden() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Rewrite";
 	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
@@ -1941,7 +1948,6 @@ void test_problems_rewrite_hidden() {
 // raises a CreateFile for each, in the order the findings show.
 void test_problems_placeholders() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Placeholders";
 	Diagnostic skin = make_diagnostic(DiagnosticSeverity::Error, "reference.missing", "Golf: the texture 'skin.tga'.",
@@ -1982,7 +1988,6 @@ void test_problems_placeholders() {
 // a click in the middle opens the finding under it too.
 void test_problems_many() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
@@ -1998,6 +2003,7 @@ void test_problems_many() {
 		d.line = i + 1;
 		v.diagnostics.push_back(d);
 	}
+	v.scan.index();
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -2082,7 +2088,6 @@ void test_styles_window_ui() {
 	CHECK(document->load(dir.file("menu_style.mns"), "menu_style.mns", AssetKind::MenuStyle, "jo", error),
 	      "the stylesheet loads");
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = dir.root();
 	AssetEntry entry;
@@ -2090,6 +2095,7 @@ void test_styles_window_ui() {
 	entry.relative_path = "menu_style.mns";
 	entry.kind = AssetKind::MenuStyle;
 	v.scan.entries.push_back(entry);
+	v.scan.index();
 	v.documents.push_back(document);
 	v.active_document = document->path();
 	const Node &fg = *document->rows()[1];

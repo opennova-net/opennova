@@ -42,8 +42,25 @@ public:
 	// `picked` its logical name. While a row is dragged over an item that does not fit, nothing
 	// is highlighted and nothing happens on release.
 	static bool accept_file(const SessionView &view, const FieldSchema &field, std::string &picked);
+	// How many times a popup's list was made (the graph's choices, the missing value's finding and
+	// its fixes): once per opening while what it reads stands (ListKey), never for a change of
+	// anything else (a line of Output, a build's step).
+	size_t lists_made() const { return lists_made_; }
 
 private:
+	// What a popup's list reads: of the view, the graph (the choices, the finding), the files, the
+	// project and the editor's settings (the fixes); the document as it is now (the field's value
+	// and scope: its instance and revision).
+	struct ListKey {
+		RevisionKey view;
+		uint64_t document = 0;
+		uint64_t revision = 0;
+		bool operator==(const ListKey &other) const {
+			return view == other.view && document == other.document && revision == other.revision;
+		}
+		bool operator!=(const ListKey &other) const { return !(*this == other); }
+	};
+	static ListKey cache_key(const SessionView &view, const Document &document);
 	// Whose a popup's state is: the document (its instance), the record, the popup's id.
 	struct Key {
 		uint64_t document = 0;
@@ -62,22 +79,23 @@ private:
 		bool unreachable = false;  // the inert names shown
 		size_t cursor = 0;         // the highlighted row among those shown
 		bool moved = false;        // the cursor moved this frame: its row scrolled to
-		// What the popup lists, kept while the view's revision stands.
+		// What the popup lists, kept while what it reads stands (cache_key).
 		const SessionView *view = nullptr;
-		uint64_t revision = 0;
+		ListKey key;
 		std::vector<ReferenceChoice> choices;
 		bool missing = false;
 		std::vector<ProblemFix> fixes;
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
-	             const FieldSchema &field, const Value &value, bool others) const;
+	             const FieldSchema &field, const Value &value, bool others);
 	bool draw_popup(EditorHost &host, Popup &popup, std::string &picked);
-	// The popups of documents no longer open forgotten, once per view revision.
+	// The popups of documents no longer open forgotten, once per change of the open documents.
 	void prune(const SessionView &view);
 
 	std::map<Key, Popup> popups_;
 	const SessionView *pruned_view_ = nullptr;
-	uint64_t pruned_revision_ = 0;
+	RevisionKey pruned_key_;
+	size_t lists_made_ = 0;
 };
 
 } // namespace opennova::editor

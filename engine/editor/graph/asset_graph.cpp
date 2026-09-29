@@ -35,6 +35,28 @@ std::string symbol_key(ReferenceKind kind, const std::string &name) {
 
 std::string basename_of(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
+bool same_edge(const GraphEdge &a, const GraphEdge &b) {
+	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
+			a.address == b.address && a.field == b.field && a.kind == b.kind &&
+			a.value == b.value && a.target == b.target && a.scope == b.scope &&
+			a.rewritable == b.rewritable && a.through == b.through &&
+			a.material_type == b.material_type;
+}
+
+bool same_symbol(const GraphSymbol &a, const GraphSymbol &b) {
+	return a.kind == b.kind && a.name == b.name && a.display == b.display && a.value == b.value &&
+			a.file == b.file && a.record == b.record && a.locator == b.locator &&
+			a.address == b.address && a.field == b.field && a.scope == b.scope &&
+			a.inert == b.inert && a.inert_reason == b.inert_reason;
+}
+
+// What one file references and defines, read again, is what it was.
+bool same_extracted(const Extracted &a, const Extracted &b) {
+	return a.edges.size() == b.edges.size() && a.symbols.size() == b.symbols.size() &&
+			std::equal(a.edges.begin(), a.edges.end(), b.edges.begin(), same_edge) &&
+			std::equal(a.symbols.begin(), a.symbols.end(), b.symbols.begin(), same_symbol);
+}
+
 } // namespace
 
 std::string menu_text_scope(const std::string &table) {
@@ -85,6 +107,15 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
                         const std::vector<std::shared_ptr<const Document>> &open) {
 	stats_ = GraphStats();
 	std::map<std::string, Extraction> next;
+	// Whether what the files reference and define moved: a file read again whose edges, symbols
+	// or failure differ, a file the graph did not read before, or one it no longer reads.
+	bool moved = false;
+	using Cached = std::map<std::string, Extraction>::const_iterator;
+	const auto read_again = [&moved, this](Cached cached, const Extraction &entry) {
+		moved = moved || cached == cache_.end() || cached->second.ok != entry.ok ||
+				cached->second.failure != entry.failure ||
+				!same_extracted(cached->second.content, entry.content);
+	};
 	for (const AssetEntry &asset : scan.entries) {
 		if (!graph_reads_kind(asset.kind)) continue;
 		const Document *document = nullptr;
@@ -103,6 +134,7 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 				entry.revision = document->revision();
 				extract_from_document(*document, entry.content);
 				++stats_.files_extracted;
+				read_again(cached, entry);
 			}
 		} else if (cached != cache_.end() && !cached->second.open && cached->second.size == asset.size_bytes &&
 		           cached->second.modified == asset.modified_ticks) {
@@ -119,20 +151,40 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 				if (!is_editable_kind(asset.kind)) entry.failure = unreadable(asset, error);
 			}
 			++stats_.files_extracted;
+			read_again(cached, entry);
 		}
 		next[asset.relative_path] = std::move(entry);
 	}
+	moved = moved || next.size() != cache_.size();
 	cache_ = std::move(next);
+	// Everything the graph holds is made from the files' rows and what each one read: when
+	// neither moved it stays as it is, every edge and symbol where it was.
+	if (!moved && same_files(scan)) return;
 	assemble(scan);
+	++generation_;
+}
+
+bool AssetGraph::same_files(const AssetScan &scan) const {
+	if (scan.entries.size() != scanned_.size()) return false;
+	for (size_t i = 0; i < scanned_.size(); ++i) {
+		const AssetEntry &asset = scan.entries[i];
+		const FileRow &row = scanned_[i];
+		if (asset.relative_path != row.path || asset.logical_name != row.logical_name ||
+				asset.kind != row.kind)
+			return false;
+	}
+	return true;
 }
 
 void AssetGraph::assemble(const AssetScan &scan) {
 	files_.clear();
+	scanned_.clear();
 	for (const AssetEntry &asset : scan.entries) {
 		FileRow row;
 		row.path = asset.relative_path;
 		row.logical_name = asset.logical_name;
 		row.kind = asset.kind;
+		scanned_.push_back(row);
 		files_.emplace(key(asset.logical_name), std::move(row));
 	}
 	edges_.clear();
@@ -432,6 +484,21 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 		hits.push_back(std::move(hit));
 	}
 	return hits;
+}
+
+std::vector<const GraphSymbol *> AssetGraph::symbols_of_kind(ReferenceKind kind) const {
+	// The index's keys of a kind start with its token and a newline; its symbols listed in the
+	// order the files define them (the index's order is the name's).
+	const std::string prefix = symbol_key(kind, std::string());
+	std::vector<size_t> indexes;
+	for (auto it = symbol_index_.lower_bound(prefix);
+			it != symbol_index_.end() && it->first.compare(0, prefix.size(), prefix) == 0; ++it)
+		indexes.push_back(it->second);
+	std::sort(indexes.begin(), indexes.end());
+	std::vector<const GraphSymbol *> out;
+	out.reserve(indexes.size());
+	for (const size_t index : indexes) out.push_back(&symbols_[index]);
+	return out;
 }
 
 std::vector<const GraphSymbol *> AssetGraph::symbols_named(ReferenceKind kind, const std::string &name) const {

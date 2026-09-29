@@ -31,11 +31,20 @@ std::string choice_tip(const ReferenceChoice &choice) {
 
 } // namespace
 
+ReferencePicker::ListKey ReferencePicker::cache_key(const SessionView &view,
+		const Document &document) {
+	const RevisionKey reads = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files,
+			ViewConcern::Project, ViewConcern::Preferences});
+	return {reads, document.identity(), document.revision()};
+}
+
 void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
-                              const FieldSchema &field, const Value &value, bool others) const {
-	if (popup.view == &view && popup.revision == view.revision) return;
+                              const FieldSchema &field, const Value &value, bool others) {
+	const ListKey key = cache_key(view, document);
+	if (popup.view == &view && popup.key == key) return;
 	popup.view = &view;
-	popup.revision = view.revision;
+	popup.key = key;
+	++lists_made_;
 	popup.choices = document.reference_choices(field, view);
 	if (!others)
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
@@ -50,9 +59,10 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 }
 
 void ReferencePicker::prune(const SessionView &view) {
-	if (pruned_view_ == &view && pruned_revision_ == view.revision) return;
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Documents});
+	if (pruned_view_ == &view && pruned_key_ == key) return;
 	pruned_view_ = &view;
-	pruned_revision_ = view.revision;
+	pruned_key_ = key;
 	std::set<uint64_t> open;
 	for (const auto &document : view.documents)
 		if (document) open.insert(document->identity());
