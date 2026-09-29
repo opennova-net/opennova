@@ -272,9 +272,9 @@ void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
     inf.wpn_deferred = 0;
 }
 
-void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial) {
-    if (anim_map_serial == 0 || inf.wpn_anim_map_serial == anim_map_serial) return;
-    inf.wpn_anim_map_serial = anim_map_serial;
+void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial) {
+    if (category_serial == 0 || inf.wpn_category_serial == category_serial) return;
+    inf.wpn_category_serial = category_serial;
     inf.arms_dip_ticks = 20;
 }
 

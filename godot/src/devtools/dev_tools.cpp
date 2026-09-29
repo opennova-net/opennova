@@ -9,12 +9,9 @@
 #include <base/io/strutil.h> // iequals: binding an ACTION row to its slot by suffix
 
 #if OPENNOVA_DEVTOOLS
-#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/time.hpp>
-#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/core/object.hpp>
-#include <godot_cpp/variant/utility_functions.hpp>
 #include <runtime/devtools/ai_debug_snapshot.h>
 #include <runtime/devtools/ai_window.h>
 #include <runtime/devtools/control_board.h>
@@ -26,7 +23,6 @@
 #include <runtime/devtools/entity_directory_snapshot.h>
 #include <runtime/devtools/environment_snapshot.h>
 #include <runtime/devtools/environment_window.h>
-#include <runtime/devtools/imgui_abi.h>
 #include <runtime/devtools/overlay_canvas.h>
 #include <runtime/devtools/physics_request.h>
 #include <runtime/devtools/physics_snapshot.h>
@@ -40,7 +36,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <climits>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -52,11 +47,6 @@ using namespace opennova::def;
 namespace godot {
 
 void DevTools::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("is_available"), &DevTools::is_available);
-	ClassDB::bind_method(D_METHOD("set_platform_windows_allowed", "allowed"),
-			&DevTools::set_platform_windows_allowed);
-	ClassDB::bind_method(D_METHOD("are_platform_windows_allowed"),
-			&DevTools::are_platform_windows_allowed);
 	ClassDB::bind_method(D_METHOD("is_open"), &DevTools::is_open);
 	ClassDB::bind_method(D_METHOD("set_open", "open"), &DevTools::set_open);
 	ClassDB::bind_method(D_METHOD("toggle"), &DevTools::toggle);
@@ -131,24 +121,6 @@ void DevTools::set_debug_control_table(const Ref<DebugControlTable> &p_table) {
 #endif
 }
 
-bool DevTools::is_available() const {
-#if OPENNOVA_DEVTOOLS
-	return tools_->pass().is_attached();
-#else
-	return false;
-#endif
-}
-
-void DevTools::set_platform_windows_allowed(bool p_allowed) {
-	platform_windows_allowed_ = p_allowed;
-#if OPENNOVA_DEVTOOLS
-	if (is_available()) {
-		tools_->pass().set_platform_windows_enabled(
-				platform_windows_allowed_ && window_allows_platform_windows());
-	}
-#endif
-}
-
 #if OPENNOVA_DEVTOOLS
 
 DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>()) {
@@ -159,79 +131,8 @@ DevTools::DevTools() : tools_(std::make_unique<opennova::devtools::GameDevTools>
 
 DevTools::~DevTools() = default;
 
-bool DevTools::attach_imgui() {
-	Engine *engine = Engine::get_singleton();
-	if (engine->is_editor_hint()) {
-		return false;
-	}
-	DisplayServer *display = DisplayServer::get_singleton();
-	if (display == nullptr || display->get_name() == "headless") {
-		return false;
-	}
-	if (!engine->has_singleton("ImGuiGD")) {
-		UtilityFunctions::push_warning(
-				"DevTools: the imgui-godot addon is not loaded (run scripts/bootstrap_imgui_godot.sh, or scripts/bootstrap_godot.sh for a dev checkout); ImGui surfaces unavailable");
-		return false;
-	}
-	Object *imgui = engine->get_singleton("ImGuiGD");
-	const opennova::devtools::ImGuiAbi abi = opennova::devtools::imgui_abi();
-	const Variant pointers = imgui->call("GetImGuiPtrs", String::utf8(abi.version), abi.io_size,
-			abi.vert_size, abi.idx_size, abi.wchar_size);
-	if (pointers.get_type() != Variant::PACKED_INT64_ARRAY) {
-		UtilityFunctions::push_warning("DevTools: ImGuiGD.GetImGuiPtrs returned no pointer table; ImGui surfaces unavailable");
-		return false;
-	}
-	const PackedInt64Array table = pointers;
-	if (table.size() != 3 || table[0] == 0) {
-		// The addon printed the version/size mismatch itself.
-		UtilityFunctions::push_warning(vformat(
-				"DevTools: the imgui-godot addon rejected the engine's ImGui %s (context hand-off refused); ImGui surfaces unavailable",
-				abi.version));
-		return false;
-	}
-	return tools_->pass().attach_imgui(reinterpret_cast<void *>(static_cast<intptr_t>(table[0])),
-			reinterpret_cast<opennova::devtools::ImGuiAllocFn>(static_cast<intptr_t>(table[1])),
-			reinterpret_cast<opennova::devtools::ImGuiFreeFn>(static_cast<intptr_t>(table[2])), nullptr);
-}
-
-bool DevTools::window_allows_platform_windows() const {
-	const Window *window = get_window();
-	if (window == nullptr) {
-		return true;
-	}
-	const Window::Mode mode = window->get_mode();
-	return mode != Window::MODE_FULLSCREEN && mode != Window::MODE_EXCLUSIVE_FULLSCREEN;
-}
-
-void DevTools::set_layer_visible(bool p_visible) {
-	Engine *engine = Engine::get_singleton();
-	if (engine->has_singleton("ImGuiGD")) {
-		engine->get_singleton("ImGuiGD")->call("SetVisible", p_visible);
-	}
-}
-
-void DevTools::sync_layer_visible() {
-	const bool visible = is_available() && tools_->pass().is_open();
-	if (visible != layer_visible_) {
-		layer_visible_ = visible;
-		set_layer_visible(visible);
-	}
-}
-
-void DevTools::_ready() {
-	if (!attach_imgui()) {
-		set_process(false);
-		return;
-	}
-	// Clear multi-viewport before the first NewFrame of a fullscreen launch.
-	tools_->pass().set_platform_windows_enabled(
-			platform_windows_allowed_ && window_allows_platform_windows());
-	// Layout follows the addon's NewFrame and all game callbacks, immediately
-	// before the addon's render pass at the highest process priority.
-	set_process_priority(INT_MAX - 1);
-	set_process_mode(PROCESS_MODE_ALWAYS);
-	set_process(true);
-	sync_layer_visible();
+opennova::devtools::ImGuiPass *DevTools::engine_pass() {
+	return &tools_->pass();
 }
 
 void DevTools::_exit_tree() {
@@ -252,32 +153,25 @@ void DevTools::_exit_tree() {
 	if (frame_stats_.is_valid()) {
 		frame_stats_->sync_capture_signal();
 	}
-	if (layer_visible_) {
-		layer_visible_ = false;
-		set_layer_visible(false);
-	}
-	tools_->pass().detach_imgui();
-	set_process(false);
+	ImGuiPassNode::_exit_tree();
 }
 
-void DevTools::_process(double p_delta) {
-	if (!is_available()) {
-		return;
-	}
+void DevTools::before_layout(double p_delta) {
 	// The display frame the status readout averages (every frame, so the
 	// first push after an open reads the real interval).
 	frame_ms_sum_ += p_delta * 1000.0;
 	frame_ms_peak_ = std::max(frame_ms_peak_, p_delta * 1000.0);
 	++frame_ms_count_;
-	auto &pass = tools_->pass();
-	pass.set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
-	const uint64_t frame = Engine::get_singleton()->get_process_frames();
 	// The F3 row times the tools' whole cost: the overlay feed, the layout
 	// pass, the request drains and the record pushes. The overlay records go
 	// in first so a layer draws the tick the image shows.
-	const int64_t start = Time::get_singleton()->get_ticks_usec();
+	tools_start_us_ = Time::get_singleton()->get_ticks_usec();
 	push_overlay_frame();
-	const bool drew = pass.draw_frame(frame);
+}
+
+void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layout_us) {
+	(void)p_frame_index;
+	(void)p_layout_us;
 	apply_game_requests();
 	sync_game_spectator_state();
 	apply_control_requests();
@@ -293,8 +187,8 @@ void DevTools::_process(double p_delta) {
 	push_rays_snapshot();
 	push_physics_snapshot();
 	push_domain_records();
-	const int64_t tools_us = Time::get_singleton()->get_ticks_usec() - start;
-	if (drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
+	const int64_t tools_us = Time::get_singleton()->get_ticks_usec() - tools_start_us_;
+	if (p_drew && frame_stats_.is_valid() && frame_stats_->is_capture_active()) {
 		frame_stats_->add(FrameStats::FRAME_DEBUG_REFRESH, tools_us);
 	}
 	if (open_ && !tools_->pass().is_open()) {
@@ -307,7 +201,6 @@ void DevTools::_process(double p_delta) {
 	if (frame_stats_.is_valid()) {
 		frame_stats_->sync_capture_signal();
 	}
-	sync_layer_visible();
 }
 
 bool DevTools::is_open() const {
@@ -1280,17 +1173,23 @@ DevTools::DevTools() = default;
 
 DevTools::~DevTools() = default;
 
-void DevTools::_ready() {
-	set_process(false);
+opennova::devtools::ImGuiPass *DevTools::engine_pass() {
+	return nullptr;
 }
 
 void DevTools::_exit_tree() {
 	control_table_.unref();
-	set_process(false);
+	ImGuiPassNode::_exit_tree();
 }
 
-void DevTools::_process(double p_delta) {
+void DevTools::before_layout(double p_delta) {
 	(void)p_delta;
+}
+
+void DevTools::after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layout_us) {
+	(void)p_frame_index;
+	(void)p_drew;
+	(void)p_layout_us;
 }
 
 bool DevTools::is_open() const {

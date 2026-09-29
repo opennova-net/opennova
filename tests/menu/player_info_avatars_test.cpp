@@ -15,13 +15,15 @@ mnu::Document document(std::initializer_list<const char *> names) {
 	mnu::Document doc;
 	mnu::Screen screen;
 	screen.name = "PLAYER_INFO";
-	screen.root_window.name = "ROOT";
+	mnu::Window root;
+	root.name = "ROOT";
 	for (const char *name : names) {
 		mnu::Window w;
 		w.name = name;
 		w.type = mnu::WindowType::Combo;
-		screen.root_window.children.push_back(w);
+		root.children.push_back(w);
 	}
+	screen.roots.push_back(root);
 	doc.screens.push_back(screen);
 	return doc;
 }

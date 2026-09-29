@@ -210,27 +210,17 @@ func _populate(sim: Simulation) -> void:
 	_fill_table(sim, list_id, 0)
 
 
-# One table fill: the resolved header row, then the rows the engine's tab
-# filter admits (0 all, 1 team 2, 2 team 1), the local player's row selected.
+# One table fill: the engine's column set (the RESULTLIST authors no HEADER, so
+# its columns are the ones the fill installs), then the rows the engine's tab
+# filter admits (0 all, 1 team 2, 2 team 1) with their team colours and the
+# local player's row selected, sorted as the fill sorts (MenuDriver
+# fill_stat_results carries the witness).
 func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
-	var rect := _driver.widget_frame_rect(list_id)
+	# The design-space width the fill splits (CWnd_GetRect's rect, not the scaled one).
+	var rect := _frame.widget_rect(_driver.frame_index(list_id))
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
-	_driver.table_clear_rows(list_id)
-	var headers := PackedStringArray()
-	for column: EndRoundColumn in sim.get_end_round_columns(table_width, _gametext()):
-		headers.append(column.header)
-	_driver.table_add_row(list_id, headers)
-	var row_index := 1
-	var selected_row := -1
-	for row: EndRoundRow in sim.get_end_round_rows(tab):
-		var cells := PackedStringArray([row.name, row.squad])
-		cells.append_array(row.cells)
-		_driver.table_add_row(list_id, cells)
-		if row.selected:
-			selected_row = row_index
-		row_index += 1
-	if selected_row >= 0:
-		_driver.table_select_row(list_id, selected_row)
+	_driver.fill_stat_results(list_id, sim.get_end_round_columns(table_width, _gametext()),
+			sim.get_end_round_rows(tab))
 
 
 func close() -> void:

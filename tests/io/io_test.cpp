@@ -1,5 +1,6 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
-// cursors, LSB-first bit streams, and the ASCII string helpers.
+// cursors, LSB-first bit streams, the ASCII string helpers, the 64-bit
+// FNV-1a hash with its hex spelling, and the checked cp1252 encoder.
 
 #include <atomic>
 #include <cstdint>
@@ -13,9 +14,11 @@
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
 #include <base/io/bam.h>
+#include <base/io/cp1252.h>
 #include <base/io/log.h>
 #include <base/io/log_ring.h>
 #include <base/io/fixed.h>
+#include <base/io/hash.h>
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 
@@ -438,9 +441,42 @@ static int test_byte_reader_truncation_latch()
     return 0;
 }
 
+// The FNV reference vectors: the offset basis is the hash of no bytes.
+static int test_fnv1a64()
+{
+    TEST_EXPECT(io::kFnv1a64Offset == UINT64_C(0xcbf29ce484222325));
+    TEST_EXPECT(io::fnv1a64_bytes(io::kFnv1a64Offset, "", 0) == UINT64_C(0xcbf29ce484222325));
+    TEST_EXPECT(io::fnv1a64_bytes(io::kFnv1a64Offset, "a", 1) == UINT64_C(0xaf63dc4c8601ec8c));
+    TEST_EXPECT(io::fnv1a64_bytes(io::kFnv1a64Offset, "foobar", 6) == UINT64_C(0x85944171f73967e8));
+    TEST_EXPECT(io::hex64(UINT64_C(0x85944171f73967e8)) == "85944171f73967e8");
+    uint64_t parsed = 0;
+    TEST_EXPECT(io::parse_hex64("85944171F73967E8", parsed) && parsed == UINT64_C(0x85944171f73967e8));
+    return 0;
+}
+
+// The checked cp1252 encoder: every character with a byte encodes (the 0x80..0x9F
+// specials and a raw undefined C1 position included); one without leaves `out` as it was
+// and is named, each once, in the order met; a text that is not UTF-8 names U+FFFD.
+static int test_cp1252_checked()
+{
+    std::string out = "kept";
+    TEST_EXPECT(utf8_to_cp1252("Caf\xC3\xA9 \xE2\x82\xAC \xC2\x81", out) && out == "Caf\xE9 \x80 \x81");
+    std::u32string unstorable;
+    out = "kept";
+    TEST_EXPECT(!utf8_to_cp1252("\xE2\x9C\x93 a \xE4\xB8\xAD \xE2\x9C\x93", out, &unstorable));
+    TEST_EXPECT(out == "kept" && unstorable == std::u32string({0x2713, 0x4E2D}));
+    TEST_EXPECT(!utf8_to_cp1252("\xE2\x9C\x93", out));
+    unstorable.clear();
+    TEST_EXPECT(!utf8_to_cp1252("bad \xC3", out, &unstorable) && unstorable == std::u32string({0xFFFD}));
+    TEST_EXPECT(cp1252_to_utf8("Caf\xE9") == "Caf\xC3\xA9");
+    return 0;
+}
+
 int main()
 {
     if (test_le_primitives()) return 1;
+    if (test_cp1252_checked()) return 1;
+    if (test_fnv1a64()) return 1;
     if (test_bam_wrap_arithmetic()) return 1;
     if (test_fixed_point()) return 1;
     if (test_byte_reader_bounds()) return 1;

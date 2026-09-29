@@ -306,12 +306,10 @@ bool MenuFrameCompiler::scroll_row_span_(int index, const MenuFrameState &state,
 				return false;
 			}
 			*rows = ws != nullptr ? static_cast<int>(ws->table_rows.size()) : 0;
-			*visible = std::max(
-					(rect.bottom - rect.top - header_h) / row_h, 1);
+			*visible = table_visible_rows_(node, rect, table_columns_(node, ws));
 			return true;
 		}
 		case mnu::WindowType::List:
-		case mnu::WindowType::Multi:
 		case mnu::WindowType::LanList: {
 			*rows = item_count(index, state);
 			*visible = std::max(list_visible_rows(index, state), 1);
@@ -571,16 +569,17 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 	if (!press_edge) {
 		return false;
 	}
-	// A popup-exclusive pump restricts owner resolution to the open combo
-	// [orig: UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd — while a
-	// popup is open only the popup window sees the event].
+	// A popup-exclusive pump restricts owner resolution to the open combo, and
+	// an open MODAL popup to its subtree [orig: UI_DispatchMouseEvent @ 0x63ab00
+	// g_UIOpenPopupWnd — while a popup is open only the popup window sees the
+	// event].
 	const int index = restrict_index >= 0
 			? (scroll_hit_at(restrict_index, io_state, mouse_x, mouse_y,
 					   scale_x, scale_y) != kScrollHitNone
 							  ? restrict_index
 							  : -1)
 			: scroll_owner_at(io_state, mouse_x, mouse_y, scale_x, scale_y);
-	if (index < 0) {
+	if (index < 0 || (restrict_index < 0 && !in_subtree_(index, io_state.popup_root))) {
 		return false;
 	}
 	claim->hovered = index;
@@ -694,12 +693,12 @@ bool MenuFrameCompiler::pump_mouse_wheel(MenuFrameState &io_state,
 	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
 	for (int i = static_cast<int>(nodes_.size()) - 1; i >= 0; --i) {
 		const mnu::Window *w = nodes_[static_cast<size_t>(i)].window;
-		if (w == nullptr || !widget_shown_(i, io_state)) {
+		if (w == nullptr || !widget_shown_(i, io_state) ||
+				!in_subtree_(i, io_state.popup_root)) {
 			continue;
 		}
 		switch (w->type) {
 			case mnu::WindowType::List:
-			case mnu::WindowType::Multi:
 			case mnu::WindowType::LanList:
 			case mnu::WindowType::Table:
 				break;
@@ -738,7 +737,7 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
 			index >= static_cast<int>(nodes_.size())) {
 		return claim;
 	}
-	claim.cursor = screen_cursor_;
+	claim.cursor = first_root_cursor_();
 	scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
 			scale_y, &claim, index);
 	return claim;
@@ -758,7 +757,7 @@ std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 	}
 	const mnu::Window &w = *node.window;
 	const std::vector<WidgetNode::ItemVisual> &rows =
-			w.list_box.items.present ? node.popup_items : node.items;
+			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
 	if (selected < 0 || selected >= static_cast<int>(rows.size())) {
 		return std::string();
 	}
@@ -773,14 +772,14 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s,
 		const MenuWidgetState *ws) {
 	const mnu::Window &w = *node.window;
-	if (!w.list_box.present) {
+	if (!w.list_box) {
 		return;
 	}
 	const mnu::RectEdges local = mnu::position_rect(
-			w.list_box.position.has_left, w.list_box.position.left,
-			w.list_box.position.has_top, w.list_box.position.top,
-			w.list_box.position.has_right, w.list_box.position.right,
-			w.list_box.position.has_bottom, w.list_box.position.bottom, 0, 0);
+			w.list_box->position.has_left, w.list_box->position.left,
+			w.list_box->position.has_top, w.list_box->position.top,
+			w.list_box->position.has_right, w.list_box->position.right,
+			w.list_box->position.has_bottom, w.list_box->position.bottom, 0, 0);
 	const mnu::RectEdges popup = offset_rect(local, rect.left, rect.top);
 	// Popup background appearances (default state).
 	emit_state_pass(popup, s, node.popup_states[kStateDefault]);
@@ -789,7 +788,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 	// model).
 	const bool runtime_rows = ws != nullptr && ws->has_items;
 	const std::vector<WidgetNode::ItemVisual> &rows =
-			w.list_box.items.present ? node.popup_items : node.items;
+			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
 	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
 									   : static_cast<int>(rows.size());
 	const int row_h = row_height_(node);
@@ -799,7 +798,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 	const int selected = ws != nullptr ? ws->selected_item : -1;
 	const int hovered = ws != nullptr ? ws->hover_item : -1;
 	const int edge =
-			w.list_box.string_data.has_edge ? w.list_box.string_data.edge : 0;
+			w.list_box->string_data.has_edge ? w.list_box->string_data.edge : 0;
 	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
 	const int visible_rows = std::max((popup.bottom - popup.top) / row_h, 0);
 	mnu::RectEdges scrollbar_rect;
@@ -826,7 +825,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 		// A conditional whose operands are arrays decays both to pointers, so the
 		// result cannot bind to a StatePass(&)[4]; the pointer form is the same
 		// object and indexes identically.
-		const StatePass *row_states = w.list_box.items.present
+		const StatePass *row_states = (w.list_box && w.list_box->items.present)
 				? node.popup_items_states
 				: node.items_states;
 		if (style >= 0 && row_states[style].present) {

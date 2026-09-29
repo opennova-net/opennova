@@ -14,8 +14,6 @@
 
 #include <formats/pff/pff.h>
 
-#include "pff_internal.h"
-
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

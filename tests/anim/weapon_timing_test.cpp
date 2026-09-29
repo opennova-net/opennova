@@ -538,12 +538,12 @@ int main(int argc, char **argv) {
 		opennova::def::DefWeaponsFile parsed{};
 		CHECK(opennova::def::def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(carry.data()), carry.size(),
 		                                              &parsed) == 0);
-		CHECK(parsed.ammo_class_carries_count == 2);
-		if (parsed.ammo_class_carries_count == 2) {
-			CHECK(std::strcmp(parsed.ammo_class_carries[0].name, "CLASS_TESTX") == 0);
-			CHECK(parsed.ammo_class_carries[0].cap == 300);
-			CHECK(std::strcmp(parsed.ammo_class_carries[1].name, "CLASS_TESTY") == 0);
-			CHECK(parsed.ammo_class_carries[1].cap == 40);
+		CHECK(parsed.ammo_classes_count == 2);
+		if (parsed.ammo_classes_count == 2) {
+			CHECK(std::strcmp(parsed.ammo_classes[0].name, "CLASS_TESTX") == 0);
+			CHECK(parsed.ammo_classes[0].max_carry == 300);
+			CHECK(std::strcmp(parsed.ammo_classes[1].name, "CLASS_TESTY") == 0);
+			CHECK(parsed.ammo_classes[1].max_carry == 40);
 		}
 		const opennova::world::WeaponTable table = opennova::world::build_weapon_table(parsed);
 		const int x = table.ammo_class_id_of("CLASS_TESTX");

@@ -1,0 +1,52 @@
+#pragma once
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include <editor/ui/editor_host.h>
+#include <editor/ui/record_tree.h>
+
+namespace opennova::editor {
+
+class MnuDocument;
+
+// A menu in its Document tab (ADR 0046 S6c, S9h2, S11d, S11e): Reload / Undo / Redo, its
+// screens (add, duplicate, remove after a prompt, never the last one, reorder), and the
+// selected screen's windows as a tree that scrolls sideways when deep: a click selects one
+// (Ctrl+click joins or leaves the selection, Shift+click selects the rows from the last one
+// clicked), a drag drops a window before, after or inside another (one Move each), and the
+// toolbars (rows that wrap) add a window of a chosen type, duplicate and remove the selected
+// windows, reorder, indent and outdent the primary one, and copy, cut, paste and duplicate
+// windows (Ctrl+C / X / V / D). Each screen and window is marked when it was added or
+// changed since the last save; a window's tooltip names its type and how the file writes
+// it. A window's fields and lists are the inspector's; the picture is the preview window's.
+class MenuView {
+public:
+	void draw(EditorHost &host, const MnuDocument &document);
+	// The prompt Remove screen... asks, drawn by the workspace every frame (a tab not shown
+	// draws nothing, and a modal no frame draws would hold the input).
+	void draw_remove_prompt(EditorHost &host);
+
+private:
+	const Node *draw_screens(EditorHost &host, const MnuDocument &document);
+	void draw_windows(EditorHost &host, const MnuDocument &document, const Node &screen);
+	void draw_window_node(EditorHost &host, const MnuDocument &document, size_t index);
+	void click_window(EditorHost &host, const MnuDocument &document, size_t index);
+	// The tree and each window's line, rebuilt only when the document or the screen changes.
+	void refresh_tree(const MnuDocument &document, const Node &screen);
+
+	std::string add_type_ = "static"; // the type a new window takes
+	RecordTree tree_;
+	std::vector<std::string> lines_; // per tree entry: the name and the type's name, after the change dot's room
+	std::vector<std::string> tips_;  // per tree entry: the type's name and how the file writes it
+	uint64_t tree_document_ = 0, tree_revision_ = 0;
+	NodeAddress revealed_;       // the selection the tree last opened its owners for
+	std::vector<NodeId> reveal_; // the windows to open this frame
+	NodeId scroll_to_ = 0;       // the window to scroll into view this frame
+	uint64_t removing_document_ = 0; // the menu the removal prompt asks about (its identity), and its screen
+	NodeId removing_screen_ = 0;
+	bool ask_remove_ = false;    // the prompt opens on its next draw
+	NodeId anchor_ = 0;          // the window a Shift+click selects from (the last one clicked)
+};
+
+} // namespace opennova::editor

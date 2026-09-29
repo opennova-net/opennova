@@ -1,0 +1,190 @@
+#pragma once
+
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <optional>
+#include <set>
+#include <string>
+#include <vector>
+
+#include <editor/documents/validation_cache.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/import/import_run.h>
+#include <editor/preview/menu_render_check.h>
+#include <editor/project/local_settings.h>
+#include <editor/project/project_document.h>
+#include <editor/project_build/build_session.h>
+#include <editor/run/launch_plan.h>
+#include <editor/run/play_session.h>
+#include <editor/run/process_platform.h>
+#include <editor/session/editor_request.h>
+#include <editor/session/editor_settings.h>
+#include <editor/session/session_view.h>
+
+namespace opennova::editor {
+
+// The one open project and everything the editor does to it (ADR 0046 d10): open and
+// create, scan and evaluate, create-missing, build, play. Portable: the shell hands it
+// the process seam and the settings path and drains its view; a test drives it the
+// same way. Requests come in typed (EditorRequest), the view goes out (SessionView).
+// The build advances one step per poll so the window that hosts the session keeps
+// drawing while a project packs. An edit (a Set, an Add, an Undo) leaves the project's
+// validation due rather than running it: a request from outside returns validated, and
+// a pump that holds validation (hold_validation) validates once, at its poll, however
+// many edits its requests made; Save, Build, Rescan and the other project requests
+// validate at once.
+class ProjectSession {
+public:
+	ProjectSession(ProcessPlatform &platform, std::string editor_settings_path);
+	~ProjectSession();
+
+	const SessionView &view() const { return view_; }
+	const PlayLauncher &launcher() const { return launcher_; }
+	void set_launcher(PlayLauncher launcher);
+
+	// True when the request was served here; false for the shell-only kinds. The view is
+	// validated when it returns, unless a pump holds validation.
+	bool handle(const EditorRequest &request);
+	// A pump starts (the shell: the requests its windows raised this frame): the requests
+	// handled until the next poll() leave their validation to that poll, so a burst of
+	// edits (typing, a drag) validates once.
+	void hold_validation() { validation_held_ = true; }
+	// What the last request handled from outside came to (reset by the next one).
+	const ActionOutcome &outcome() const { return outcome_; }
+	// True when the last EditRecord, Copy, Cut, Paste or Duplicate went through (a Move that left
+	// a record where it is included: it changed nothing, and nothing was wrong).
+	bool last_edit_ok() const { return last_edit_ok_; }
+	// Once per frame: the validation the frame's edits left due, one build step, the
+	// finished build (and the Play waiting on it), the child's state, the game's log tail.
+	void poll();
+	// Run a build in progress to its end (a test, a command line).
+	void finish_build();
+
+	Document *document_for(const std::string &path = {});
+	bool documents_dirty() const;
+	bool project_open() const { return view_.project_open; }
+	bool build_running() const { return build_ != nullptr; }
+	// What the last validation read: the closed files it loaded and reused.
+	const ValidationStats &validation_stats() const { return validation_cache_.stats(); }
+	// The directory the running game uses ("" when none): the build never prunes it.
+	std::string running_build_dir() const { return play_.running_build_dir(); }
+
+private:
+	bool dispatch(const EditorRequest &request);
+	bool handle_document(const EditorRequest &request);
+	bool unsaved_files(const EditorRequest &request, std::vector<std::string> &files);
+	void rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files);
+	bool guard_unsaved(const EditorRequest &request);
+	void resolve_unsaved(UnsavedChoice choice);
+	void close_unsaved_prompt();
+	bool apply_edits(Document &document, const std::vector<Edit> &edits);
+	void copy_records(Document &document, bool cut);
+	void paste_records(Document &document, const Edit &target);
+	void duplicate_records(Document &document);
+	bool save_documents(const std::vector<std::string> &paths, bool rewrite);
+	std::vector<std::string> dirty_files() const;
+	void end_edit_groups();
+	void activate(const std::string &path);
+	void update_document_view();
+	void validate_documents();
+	void validate_later();
+	void validate_pending();
+	std::shared_ptr<Document> load_document(const std::string &relative, AssetKind kind, Diagnostic &error) const;
+	void reload_changed_documents();
+	std::vector<Diagnostic> open_document_findings() const;
+	void forget_file_state(const std::string &path);
+	bool new_project(const std::string &dir, const std::string &title);
+	bool open_project(const std::string &dir);
+	void close_project();
+	ImportRunResult refresh(bool force_import = false, const std::string &only = std::string());
+	void apply_project_settings(const ProjectSettingsChange &change);
+	void select_first_screen();
+	void create_missing(const std::vector<std::string> &roles);
+	void rewrite_file(const std::string &path);
+	void start_build(bool then_play);
+	void absorb_build();
+	void start_play();
+	void stop_play();
+	std::string resolve_runtime_executable() const;
+	std::string game_install() const;
+	void note(std::string line);
+	void report(const Diagnostic &d);
+	void record_outcome(const Diagnostic &d);
+	void refuse_now(const char *code, const std::string &message, const std::string &asset = std::string());
+	void tail_game_log();
+	void absorb_boot_report(const std::string &line);
+	void absorb_play_exit();
+	void save_editor_settings();
+	void rename_asset(const std::string &file, const std::string &new_name);
+	// A name's rename everywhere planned from a PreviewRename's or a RenameSymbol's fields (the
+	// definition found by its file, locator and field in the graph, current first).
+	SymbolRenamePlan plan_symbol(const EditorRequest &request);
+	bool saved_file_uses(const std::string &path, const SymbolRenamePlan &plan) const;
+	void preview_rename(const EditorRequest &request);
+	void rename_symbol(const EditorRequest &request);
+	const RequirementRow *requirement_row(const std::string &role) const;
+	const AssetEntry *project_file(const std::string &file) const;
+	void assign_requirement(const std::string &role, const std::string &file);
+	void reimport(const std::string &source, bool force);
+	void preview_import(std::vector<ImportSource> choices, std::vector<ImportSource> roots, bool with_dependencies);
+	void plan_preview();
+	void set_import_dependencies(bool flag);
+	void import_files(const EditorRequest &request);
+	void refresh_retail_files();
+	void touch() {
+		view_.update_previews();
+		++view_.revision;
+	}
+
+	ProcessPlatform &platform_;
+	std::string settings_path_;
+	EditorSettings settings_;
+	ProjectPaths paths_;
+	LocalSettings local_;
+	PlaySession play_;
+	PlayLauncher launcher_;
+	std::unique_ptr<BuildRun> build_;
+	bool play_after_build_ = false;
+	std::string game_log_file_;
+	uint64_t game_log_offset_ = 0;
+	std::string game_log_partial_;
+	std::string boot_project_; // the project the game was started in: its boot report is that project's
+	std::vector<Diagnostic> play_findings_; // the last Play's own (a nonzero exit), that project's too
+	std::vector<std::shared_ptr<Document>> documents_;
+	// The selection each open document had when another became active (activate), by path.
+	struct Selection {
+		NodeAddress primary;
+		std::vector<NodeAddress> selected;
+	};
+	std::map<std::string, Selection> remembered_;
+	// The open documents whose file changed outside the editor and was not read again, by
+	// path: a clean one whose file no longer reads (the reason; it stays open as it was), and
+	// one with unsaved edits (reload_changed_documents, or a Save refused as a conflict).
+	// Each is a Problems row until the file is read again, saved over or matches again, or
+	// the document closes.
+	std::map<std::string, Diagnostic> stale_;
+	std::set<std::string> conflicts_;
+	std::optional<EditorRequest> pending_request_; // what the unsaved prompt holds
+	std::shared_ptr<AssetGraph> graph_ = std::make_shared<AssetGraph>();
+	std::shared_ptr<ProjectAssetSource> assets_ = std::make_shared<ProjectAssetSource>();
+	std::shared_ptr<MenuRenderCheck> render_check_ = std::make_shared<MenuRenderCheck>();
+	ValidationCache validation_cache_;
+	std::vector<Diagnostic> document_findings_; // the last validation's, which the build plan gates on
+	                                            // (the render check's notes are not: they never block a build)
+	// The Problems rows a running build was gated on (start_build), and the last build's own
+	// findings (those its report adds to them: the plan's own, a step that failed), Problems
+	// rows until the next build starts or the project closes.
+	std::vector<Diagnostic> build_gate_;
+	std::vector<Diagnostic> build_findings_;
+	bool validation_due_ = false;               // an edit since the last validation
+	bool validation_held_ = false;              // a pump holds validation until its poll
+	bool gesture_validation_due_ = false;       // a gesture's edits wait for it to end
+	bool last_edit_ok_ = false;
+	uint64_t import_serial_ = 0; // the import plans made: each preview's plan takes the next
+	SessionView view_;
+	ActionOutcome outcome_;
+	int handling_ = 0; // handle() depth: the outermost call owns the outcome
+};
+
+} // namespace opennova::editor

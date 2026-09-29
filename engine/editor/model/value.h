@@ -1,0 +1,152 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace opennova::editor {
+
+// The editing core's vocabulary (ADR 0046 d9): toolkit- and format-neutral. A document
+// type maps its native records onto these; the session, the windows and the shell
+// never name a format type.
+
+using Value = std::variant<int64_t, double, std::string>;
+using NodeId = uint64_t; // the session-local identity of a row or a nested record
+using NodeKind = int;    // a document type's own record-kind vocabulary
+
+// A row, or a nested record inside a row (`child` set, `kind` the nested kind). `child`
+// names a record at any depth: the document type owns its tree (a menu window inside a
+// window inside a screen), identities are unique within a document, and
+// Document::placement gives a nested record's owner and its index there.
+struct NodeAddress {
+	NodeId row = 0;
+	NodeKind kind = 0;
+	NodeId child = 0;
+};
+inline bool operator==(const NodeAddress &a, const NodeAddress &b) {
+	return a.row == b.row && a.kind == b.kind && a.child == b.child;
+}
+inline bool operator!=(const NodeAddress &a, const NodeAddress &b) { return !(a == b); }
+
+enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
+
+// What a field names outside its own record. A document type resolves each kind
+// against the project (Document::reference_status). What each kind is to the graph (its
+// token, words, where it resolves, how names compare, what a missing one means) is its row
+// in graph/reference_kinds: a new kind is one value here and one row there, UserPoint staying
+// the last.
+enum class ReferenceKind {
+	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
+	OtherText, // a text key the editor does not resolve yet
+	Font,      // a .fnt by name, possibly through a %VAR% of the stylesheet
+	Menu,      // a .mnu file
+	TextTable, // a string table (.bin)
+	TextId,    // a key of the project's string tables, in the table and section the scope names ("GAMETEXT.BIN/WepDes")
+	StyleVar,  // a %NAME% the menu stylesheet defines (a literal value is not a reference)
+	Terrain,     // a .trn by base name (a mission's terrain)
+	Environment, // a .env by base name (a mission's environment)
+	MenuTexture, // a menu's texture: the file retail's menu loader picks by the name's extension
+	WaveBank,    // a .lwf sound bank by its file name (a menu SOUND's file)
+	Credits,     // a .kda credits file by its file name (a marquee's DATASOURCE)
+	MenuScreen,  // a menu screen by NAME, in the menu file the scope names (an ACTION SCREEN's target)
+	MenuWindow,  // a menu window by NAME, on the screen the scope names (an ACTION WINDOW's target)
+	Animation,   // a .bad clip by file name, its extension optional (an animation map row's variant)
+	UserPoint,   // a model's user point by name, on the model file the scope names (an item's particle slot)
+};
+
+// Whether the game reads a field on a particular record (Document::field_on). Ignored is
+// used only where the original's readers are witnessed in full; anything else not
+// witnessed is Unverified.
+enum class Applicability { Reads, Ignored, Unverified };
+
+// A choice holds its own strings, so Document::field_on can make a record's own (a model's
+// parts, its registers).
+struct FieldChoice {
+	std::string name; // the value as the file writes it (a token, or the number's name)
+	int64_t value = 0;
+	std::string label; // what the editor shows ("" = the name)
+};
+
+// How a field holds a colour, when it does: a text the menu parse reads as a hex AARRGGBB
+// word (mnu::color_value; a %VAR% the stylesheet resolves is a text like any other), an
+// integer packed 0xRRGGBB, or one channel (0..255) of a red / green / blue group of three
+// fields (`group`), drawn with one swatch.
+enum class FieldColor { None, HexArgb, PackedRgb, Channel };
+
+// One editable field of a record kind: what the generic inspector renders.
+struct FieldSchema {
+	std::string id;
+	FieldType type = FieldType::Integer;
+	size_t width = 0; // text capacity in bytes, including the terminator
+	ReferenceKind reference = ReferenceKind::None;
+	std::vector<FieldChoice> choices;
+	bool flags = false;        // the choices are bits of one integer
+	bool open_choices = false; // the choices are the values known; the file takes any other typed
+	bool read_only = false;    // derived from other fields
+	// The format may leave the field out (ADR 0002): Clear unsets it and keeps the latent
+	// value, which `get` still reads; Document::present says whether it is written.
+	bool optional = false;
+	Applicability applies = Applicability::Reads; // refined per record by Document::field_on
+	// The namespace the field's name lives in, the one it references or the one it defines
+	// (a string table's section, a menu's screen); refined per record by Document::field_on
+	// ("" = any).
+	std::string scope;
+	// The symbol the field's value names its record as, which other records reference it
+	// by (a menu screen's or window's NAME); refined per record by Document::field_on.
+	ReferenceKind defines = ReferenceKind::None;
+	// A model texture row's type, by which its loader picks the file the name loads
+	// (reference_file_candidates); refined per record by Document::field_on. -1 for any
+	// other field.
+	int material_type = -1;
+	// What the editor shows: the field's readable name ("" = the id); the heading of the
+	// group its id's first step names ("Position" for position.left, carried too by a
+	// block's own switch, which is named as its group; "" = the step itself), which a field
+	// of one step naming no group is shown under with the others sharing it (a def's
+	// "Physics"); and whether the text may run over several lines.
+	std::string label;
+	std::string section;
+	bool multiline = false;
+	// What the format table says of the field, where it says it (nothing is made up here: an
+	// unwitnessed unit or range stays unset): the unit its number is in, shown after the
+	// value; the table's note, the field's tooltip; how the file spells its key where that
+	// differs from the id ("" = the id); the range a number keeps to (`ranged`), and the
+	// step a drag moves it by (0 = the control's own).
+	std::string unit;
+	std::string description;
+	std::string token;
+	bool ranged = false;
+	double min = 0.0, max = 0.0, step = 0.0;
+	FieldColor color = FieldColor::None;
+	// The fields drawn on one row, named by it (a position's x / y / z, a colour's red / green
+	// / blue, a matrix row): neighbours in the kind's fields sharing it ("" = a row alone).
+	std::string group;
+};
+
+// A finding about the source text. A blocking one names input the typed model cannot
+// carry: editing and saving wait for the source to be corrected. A non-blocking one
+// names input the game ignores: reported, dropped on save.
+struct SourceIssue {
+	bool blocks = true;
+	size_t line = 0;
+	std::string record;
+	std::string field;
+	std::string message;
+	std::string locator; // the record's Document::locator, when the type knows it ("" = the file)
+};
+
+struct SerializeResult {
+	std::string text;
+	std::vector<SourceIssue> issues;
+	bool ok() const { return issues.empty(); }
+};
+
+enum class ReferenceStatus {
+	NotAReference, // the field is not a reference, or it is empty / NONE / NULL
+	Present,
+	Missing,
+	Unverified, // no symbol table for this kind yet
+};
+
+} // namespace opennova::editor

@@ -3,6 +3,7 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <base/crt/crt_rng.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
+#include <formats/threedi/threedi_panm.h>
 
 #include <algorithm>
 #include <array>
@@ -67,8 +68,8 @@ uint8_t phase_or_register_byte(
         float phase,
         int32_t reg,
         const std::vector<std::string>& ctrl_names) {
-    return style <= 112 ? quantize_byte(phase, 256.0f)
-                        : local_ctrl_ordinal(reg, ctrl_names);
+    return !threedi_generator_names_register(style) ? quantize_byte(phase, 256.0f)
+                                                    : local_ctrl_ordinal(reg, ctrl_names);
 }
 
 UvAnimChannel raw_uv_channel(
@@ -86,7 +87,8 @@ UvAnimChannel raw_uv_channel(
 
 bool uv_channel_uses_noise(const UvAnimChannel& channel) {
     const uint8_t mode = channel.type & 0xF0;
-    return channel.type <= 0x70 && (channel.type & 0x0F) == 6 &&
+    return !threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_UV, channel.type) &&
+           (channel.type & 0x0F) == 6 &&
            mode != 0 && mode != 0x10 && mode != 0x20;
 }
 
@@ -149,7 +151,7 @@ void eval_rgb_gen(uint8_t style,
     const int32_t fraction =
             style == 24
                     ? 0
-                    : ((style == 113 || style == 114)
+                    : (threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_RGB, style)
                                ? ctrl_value
                                : waveform_fraction(style, phase_byte, rate_word, time_ms));
     *out_r = static_cast<float>(
@@ -323,7 +325,7 @@ MaterialRuntime evaluate(const ThreediMaterial& mat,
         const int32_t fraction =
                 alpha_style == 24
                         ? 0
-                        : (alpha_style == 113
+                        : (threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_ALPHA, alpha_style)
                                    ? reg_value(mat.alpha_gen.reg, ctrl_names, ctrl_bus)
                                    : waveform_fraction(
                                              alpha_style,

@@ -47,6 +47,13 @@ device fact, written as typed Godot code beside its owner.
 A mounted collection of files, with one lookup policy deciding which loose or
 archived file supplies a name.
 
+**File source**:
+Whole files by flat logical name with a stamp that moves whenever a read may answer
+differently (`engine/base/vfs/file_source.h`): the game's mounted root, or the editor's
+project files with its open documents standing in. A menu's inputs are loaded through
+one and kept by name and stamp.
+_Avoid_: mount (a resource source's layering), cache key (the stamp is the source's)
+
 **Asset**:
 Reusable model or animation content shared by the entities that use it.
 An entity's position, animation playhead and damage belong to that entity,
@@ -69,6 +76,39 @@ _Avoid_: page, view (when you mean the whole canvas)
 Any node in a screen's widget tree, container or leaf (the format element is `<WINDOW>`). A Window is either a grouping container or an interactive widget.
 _Avoid_: panel, control (when you mean the tree node)
 
+**Root window**:
+A Window directly under a screen. A screen holds any number of them, in document order:
+retail draws them in that order, hit-tests the last first, and takes the screen's text
+table and default cursor from them (a SCREEN itself reads only its NAME, MUSICVAR and
+windows).
+_Avoid_: screen window, main window (`MAIN` is only the usual name)
+
+**Part**:
+A Window an owner parses from one of its own elements with an embedded widget: a
+combo's LIST_BOX, a spin list's SPINUP and SPINDOWN, a list's, table's or multi-line
+edit's SCROLLBAR. An owner holds one of each at most; the owner's field of the same name
+leaves it out of the file or writes it again, its content kept. Retail attaches a part to
+its owner as a child but names it itself when it creates it (`LISTBOX_WND`,
+`SPINLISTWND_UP` / `_DOWN`, `LISTWND_SCROLL`, `TABLEWND_SCROLL`, `MEDITWND_SCROLL`), so a
+lookup by the part's authored NAME never reaches it; the windows a part holds keep theirs.
+_Avoid_: sub-window, child (a part is not in the children list)
+
+**Element path**:
+The name a menu field or list goes by in the format's property table
+(`formats/mnu/mnu_schema`), the editor, the MCP and the findings: the format's element
+and attribute names from the record down, lower-cased and dotted (`position.left`,
+`string.value`, `font.default_fg`, `items.item`, `column.header`).
+_Avoid_: field alias (the flat `image_default`, `action_file`, `text` names are gone)
+
+**Parse note**:
+What the menu reader leaves out because retail's reader does not read it (an attribute
+retail ignores, a window retail never creates), with its line and path. The editor
+lists it as a warning; a save writes the menu without it, which retail reads the same.
+A fatal parse note names input retail crashes or hangs on (an empty value it
+tokenizes, the text ending inside a tag): the editor blocks that menu and the build
+until the file is corrected.
+_Avoid_: parse error (the file still loads)
+
 **Widget**:
 A Window of a specific interactive/visual type (button, combobox, table, spinlist...). Use Widget for the typed sense, Window for the raw tree node.
 _Avoid_: control, element
@@ -85,8 +125,22 @@ _Avoid_: command, event, handler
 Behavior supplied by the Menu Shell by matching a widget's **name**, rather than
 written as an `<ACTION>` (start a mission, apply video settings, quit, commit a
 loadout). An Action may also delegate work to the shell; the distinction is whether
-the behavior is authored in the Menu or bound externally by name.
+the behavior is authored in the Menu or bound externally by name. A widget's Actions
+run before its Commands, as retail runs its callbacks after the ACTION rows.
 _Avoid_: action (reserve that strictly for the `<ACTION>` element)
+
+**Hotkey**:
+A key a screen's table binds to a Window: an authored `<HOTKEY>` (`VK_RETURN`,
+`VK_ESCAPE`, `VK_SPACE`, or a character) or a label's `{hot}` letter. Pressing it
+clicks the first Window of the table bound to it that is visible and enabled, unless
+some Window has the keyboard focus.
+_Avoid_: shortcut, accelerator (except when quoting retail names)
+
+**Popup**:
+The one shown MODAL Window that has the input: while it is open only it and its
+descendants take the mouse and the hotkeys. A combo's open list is a dropdown, not a
+popup.
+_Avoid_: dialog (for the input sense), modal (the attribute)
 
 **Menu Shell**:
 The runtime front-end that loads a menu set, drives a live interactive menu, plays its audio, and supplies Commands by control name. The menu counterpart to the world runtime.
@@ -95,6 +149,10 @@ _Avoid_: menu host (retired 2026-07), menu manager, controller
 **Tab**:
 A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
 _Avoid_: page, panel (when you mean the toggling mechanism)
+
+**Stylesheet / Style variable**:
+A `.mns` file of `NAME value` lines whose names the menus use as `%NAME%` (a font, a colour, an image). The game reads two, the **shell's stylesheets**: `menu_style.mns`, then `brand.mns` onto the same list, a later definition winning; a `.mns` by any other name is never read. A **style variable** is one name in that list; the one the game reads is the last definition of the last sheet that has it.
+_Avoid_: style file, theme, macro (except when quoting the shipped header)
 
 ## World & NovaWorld
 
@@ -157,7 +215,17 @@ The `opennova-game` Model Context Protocol server the game runtime embeds
 (`--mcp-port`), through which scripts, runbooks and agents read state, drive the
 debug catalog and menu, capture frames and run probes. Retail is driven separately
 through `onhook-mcp` (`opennova-int`).
-_Avoid_: editor MCP
+_Avoid_: editor MCP (the editor's own server, below)
+
+**Editor MCP**:
+The `opennova-editor` Model Context Protocol server the OpenNova Editor embeds
+(`--mcp-port`, 8977 in `.mcp.json`; `scripts/mcp/editor_mcp.py`), through which an
+agent drives the editor's typed request seam: the state, requests, documents,
+problems, the asset graph, the menu preview, the menu tools (`editor_menu`: a menu's
+tree, a batch by label, a list replaced, a menu's findings), Build and Play (ADR 0046
+S6d, S9m, `docs/mcp.md`). The game a Play starts is then driven through its own runtime
+MCP.
+_Avoid_: runtime MCP (the game's), game MCP (when the editor is meant)
 
 **In-match / Matchmaking**:
 The two network protocol domains. **In-match** is the 62 Hz game session between a host
@@ -346,10 +414,21 @@ _Avoid_: plugin, DCC pipeline (the Python/DCC authoring layer ADR 0038 retired)
 ## Products & modes
 
 **Godot product**:
-The OpenNova game runtime built with Godot (ADR 0045, ADR 0048). Backend
+One of the two applications exported from the `godot/` project: the OpenNova game
+runtime (`opennova.exe`, ADR 0045 and ADR 0048; its Play export adds the runtime MCP
+for the editor) and the OpenNova Editor (`opennova-editor.exe`, ADR 0046). Backend
 services and development tools are outside this taxonomy (ADR 0015).
 _Avoid_: product (when the Godot boundary matters), app (ambiguous), the runtime
 (as a product name)
+
+**OpenNova Editor**:
+The project-based data editor, the second Godot product (ADR 0046): it owns a Project,
+enforces the engine's Required resources as a checklist, edits assets through the
+engine's own format libraries, and packs a Build for Play or Export. Its portable core
+is `engine/editor/` (`opennova_editor`), its bindings `godot/src/authoring/`, its
+panels Dear ImGui windows (ADR 0039). "The editor" in prose means this product; the
+Godot editor is always "the Godot editor".
+_Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **Bundled assets**:
 The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
@@ -384,6 +463,159 @@ Reserved for `mission::promote_mission` — spawning a parsed mission into the l
 normalization, fixture curation, code relocation) should be phrased as *migrate*,
 *normalize*, *whitelist*, and *move* respectively.
 _Avoid_: promote (for anything but the mission→world spawn)
+
+## Authoring (the OpenNova Editor)
+
+The vocabulary of ADR 0046's project model.
+
+**Project**:
+A directory the editor owns: `project.opennova` (versioned JSON: title, target game,
+feature toggles, export settings), the loose source files anywhere beneath it, and a
+disposable `.opennova/` cache. The project IS the source tree; nothing lives in a
+database.
+_Avoid_: workspace (the editor's windows, not the data), mod (an expansion-type project is a
+project kind), game directory (the runtime's mounted root)
+
+**Logical name**:
+The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
+`items.def`), at most 16 bytes as a PFF entry. A project asset's identity; its path in
+the tree is organization only. Uniqueness and length are checked on output names.
+_Avoid_: path (when the engine-facing identity is meant), resource name
+
+**Import / sidecar**:
+Bringing a non-native source (an image, a GLB scene, a wave) into the project the Godot
+way: a committed `<file>.import` sidecar records the importer, its version, options,
+output logical names and the source's content hash, and nothing a checkout changes; the
+outputs are regenerated into `.opennova/imported/`, in a directory named by a hash of the
+source's path, and packed like native assets. The **import cache**
+(`.opennova/import_cache.json`, machine-local), keyed by the source's project-relative
+path, keeps each source's size and last-write time and the record its outputs were made
+from, so only a real change imports again. A file is an import source only while its
+record is there: importing it writes the record, and a `.png` with none is a texture the
+build packs as it is.
+_Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route)
+
+**Requirement**:
+One row of the editor's checklist: a file the engine demands by name (a Required
+resources manifest row with its witnessed severity and failure text, keyed by a stable
+role token) or a project feature's own need, Present, Missing or Wrong kind. One the
+project lacks is a Problems row whose fixes Create it, Import it from the game data or,
+for a required one, Use another file of its kind as it (Assign, a rename). The engine's
+names stay fixed; the checklist enforces them.
+_Avoid_: dependency (that is a reference between assets), contract (the deferred
+runtime-read deployment contract)
+
+**Free-form file**:
+A new project file of a kind that no requirement names (New > Menu... or String table...
+in Files): it comes from that kind's one free-form blank factory, never from a
+requirement's (a new menu is one screen named after the file, not a copy of STARTUP).
+_Avoid_: template (the blanks are authored from scratch, not copied)
+
+**Request outcome**:
+What one editor request came to: done, or not (refused, did not finish, or waiting on
+the unsaved-changes prompt), with the findings it reported. The editor MCP reads it;
+the request's `ok` only says it parsed.
+_Avoid_: status (the one-line text the editor shows), result
+
+**Record / owner**:
+A row of a document or anything nested in one, at any depth; the record that holds a
+record is its owner (a menu window's owner is its parent window, a root window's is
+the screen). A record's **locator** is its place (the row's index, then each
+collection's kind token and index, `0/window:0/window:2`), which a reload of the same
+file finds it again by; its path is every name from the row down
+(`STARTUP/MAIN/EXIT`), which is what findings and graph edges show.
+_Avoid_: node (the core's type for a row), child (an identity field, not a relation)
+
+**Menu preview**:
+The Preview window's menu pane: the editor's render of the previewed screen (the last
+menu screen selected) through the runtime's own menu frame, reading the project's files
+the way the game reads its mounted files, the open documents standing in, so it shows
+what the game would draw were the menu saved now; when it cannot, its status says why
+(no project, no menu, no screen, a menu the game could not read, a screen missing from
+it). Headless, it answers as JSON.
+Its primary window carries eight drawn handles: a drag moves or resizes the window (one
+gesture), writing the fewest POSITION edges that make the game's own layout land it where
+it was dropped; a drag of any selected window moves every selected one.
+_Avoid_: play (a running game), render check (the headless validator's notes)
+
+**Model preview**:
+The Preview window's model pane: the editor's render of the previewed model (the last
+model, clip or animation table document made active) through the runtime's own object
+renderer: a model document as it would save, a clip or a table played on its rig's model
+(the graphic an item pairs with the table, or one the author picks) at the preview's
+clip clock. It draws the level the
+game would pick at the camera's distance (Auto) or one held, holds CTRL registers at a
+value, and marks what the model's records place (user points, lights, part pivots) where
+the game puts them on the posed model; a click selects a marker's record and a drag of
+the selected one moves it or turns its axis. Headless, it answers as JSON.
+_Avoid_: viewer (it edits), avatar preview (the game's player-info portrait)
+
+**Rig**:
+What an animation plays on: an animation table (its reset clip the bind) or a lone clip
+(its own bind) over a model's bone table (its parts' pivots and parents), loaded through
+the game's own loader.
+_Avoid_: skeleton (the rig's bones alone), armature (Blender's)
+
+**Selection / primary**:
+The records selected in the active document, all inside one row. The primary is the last
+one selected: the inspector's form, the preview's handles and the place a new or pasted
+record goes follow it, and an arrange aligns the others to it. Several records of one kind
+share one form in the inspector, where a change sets every one of them in one undo step.
+_Avoid_: focus (the keyboard's), active (the active document, not a record)
+
+**Arrange**:
+The selected menu windows aligned by an edge or their centres to the primary's, spread
+with equal gaps between them, or moved in the drawing order among their siblings (the game
+draws a window's children in the file's order, a later one over an earlier one), one
+undo step, the moves written by the same rules as a drag.
+_Avoid_: layout (the runtime's POSITION solve), z-index (the format has none: the order is
+the file's)
+
+**Compiler note**:
+What the menu frame compiler makes of a screen where the picture may not be what the
+author meant (a colour that reads transparent, a label cut short, a window with no area,
+a row the game ignores, a file that did not load), as a code on the window, list record
+and field that cause it, with its basis: witnessed (the game does this), port policy
+(OpenNova's own choice), deferred (a known gap, a divergence-ledger row). The engine
+keeps codes; the editor words them. Notes observe: the picture is the same with or
+without them.
+_Avoid_: warning (a Problems severity; a note is one only through the render check),
+parse note (what the reader leaves out of a file)
+
+**Render check**:
+The editor's headless render of every menu screen of the project with each validation,
+the way the game draws it: its compiler notes that are a consequence the author may not
+mean become Problems rows on their records, never a build's gate and never a finding
+the asset graph already makes (a name the project lacks is the graph's).
+_Avoid_: preview (the one screen shown), validation (the document types' own checks)
+
+**Gesture**:
+The edits one continuous action makes (a drag of a handle): they carry one token and fold
+into one undo step on their row until it ends, and the Problems wait for that end.
+_Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
+
+**Batch**:
+Several edits on one row applied as one undo step, each against the row as the ones before
+it left it, nothing committed when any is refused; a later edit may name a record an
+earlier one made (in the editor MCP, by the label its edit gave it), so one step adds a
+window and fills it in.
+_Avoid_: transaction (the rename's), gesture (edits folding one after another until an end)
+
+**Build**:
+The one operation behind Play and Export: validate the project, route every asset into
+the canonical archives (`language.pff`, `localres.pff`, `resource.pff`) and the
+mandatory loose files, write through the streamed PFF writer, verify through the VFS,
+and publish an immutable `.opennova/build/play/<build-id>/` directory. Incremental by
+per-archive input hash.
+_Avoid_: pack (a step inside a build), export (a build copied to a chosen directory),
+stage (the retired retail-staging vocabulary)
+
+**Play**:
+Build, then launch the game runtime (`opennova.exe -- --resource-dir <build>
+--mcp-port <n>`) as the editor's one managed child through a `PlaySession`; Stop ends
+it. The editor tails the session log until the runtime MCP answers, then drives it there.
+_Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
+"see in game"
 
 ## Runtime presentation
 

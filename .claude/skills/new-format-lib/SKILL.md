@@ -86,16 +86,15 @@ FFI wrapper. One thing still matters:
   of the two machine roots through `tests/common/retail_paths.h`
   (`retail::install()` / `retail::assets()` / `retail::reference_fixture(rel)`, with `RETAIL_REQUIRE_OR_SKIP` or `retail::skip`):
   absent data returns exit 77, and the test is registered with
-  `opennova_add_gated_test` so ctest reports Skipped, never Passed. A test whose
-  synthetic legs ran reports its missing retail leg with `retail::skip_leg` and
-  exits 0. Never read the environment directly (`scripts/lint/env_lint.py`
-  hard-fails it) and never exit 0 on missing data. Register it in
-  `tests/CMakeLists.txt` with `opennova_add_gated_test` (label `retail`, exit 77 =
-  Skipped) or, for one binary with synthetic legs plus a `--retail` leg,
-  `opennova_add_mixed_test` (which adds the labelled `<name>_retail` entry);
-  `scripts/ci/test_suites.py` attests the core/retail selection against the
-  reports, so there is no expectation table to edit. `docs/asset-gated-tests.md`
-  describes the suites.
+  `opennova_add_gated_test` (CTest's `retail` label) so ctest reports Skipped,
+  never Passed. A test with synthetic legs too calls `retail::configure_mixed`
+  and is registered with `opennova_add_mixed_test`: the plain entry runs the
+  synthetic legs alone, the labelled `<name>_retail` entry adds the retail ones
+  (a missing retail leg prints `retail::skip_leg` and exits 0, which the retail
+  suite refuses). Never read the environment directly (`scripts/lint/env_lint.py`
+  hard-fails it) and never exit 0 on missing data. The label is the record:
+  `scripts/ci/test_suites.py` takes each suite's inventory from it
+  (`docs/asset-gated-tests.md`), so there is no expectation table to update.
 - Record where each committed sample came from in the test header comment.
 
 ## 4. Tests (`tests/<name>/`)

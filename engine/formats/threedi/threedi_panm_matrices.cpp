@@ -422,16 +422,17 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
 
         // File byte +6 becomes runtime PANM +8 SIGN-EXTENDED (movsx); the
         // disk dword +8 is not the selector. Only a positive selector reads
-        // the table: zero bypasses MTRX even if row 0 exists, and a byte of
-        // 0x80..0xFF (386 nodes of the shipped corpus carry 0xFF) is negative
-        // and bypasses it too rather than indexing row 128+.
+        // the table (threedi_panm_frame_row): zero bypasses MTRX even if row 0
+        // exists, and a byte of 0x80..0xFF (386 nodes of the shipped corpus
+        // carry 0xFF) is negative and bypasses it too rather than indexing
+        // row 128+.
         // [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx) / @ 0x5B569C (store);
         // frame gate `<= 0` and inverse Model_TransformBoneMatrices
         // @ 0x58E3FE..0x58E44F]
         const ThreediMatrix4x4 *frame = nullptr;
         ThreediMatrix4x4 frame_inverse;
-        const int frame_selector = static_cast<int8_t>(n->matrix_index);
-        if ((rot_type == 1 || rot_type == 2) && frame_selector > 0) {
+        const int frame_selector = threedi_panm_frame_row(*n);
+        if (frame_selector > 0) {
             if (!animation_frames || !animation_frames->matrices ||
                     frame_selector >= animation_frames->count)
                 return -1;

@@ -1,0 +1,297 @@
+extends GutTest
+
+## The model preview headless (ADR 0046 S10p3): the editor boots with no ImGui context and
+## its preview still renders the open model through the runtime's ObjectModel, read as
+## JSON. The open model is drawn as it would save; the device draws the level the portable
+## half picks (Auto, and a level held); a user point projects to the pixel the device's
+## Camera3D puts it on; a user point's edit builds nothing, a light's builds the scene
+## again; the options hold a CTRL register on the model; the camera backs away and Auto
+## walks to a coarser level; unknown options are refused. S10p4: a part the model's PANM
+## turns carries its marker exactly where the device's part node carries the point, at the
+## clock the two share; a click's hit names the marker's record. S10p5: a drag of the
+## marker lands it on the pixel the drag let go at, one undo step. S10p6: a table plays on
+## the model an item pairs with it; the selected row's clip poses the device's skeleton at
+## the clip clock's tick.
+
+const EDITOR_SCENE := "res://editor/editor_root.tscn"
+const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
+const ROCKING := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
+const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
+const SKIN_CLIPS := """o3a 1
+adm SKIN.adm
+row anim_reset "reset"
+row anim_walk_forward "walk"
+clip reset
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip walk
+fps 30
+flags 0x1
+frames 4
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0.3826834 0.9238795
+ k 0 0 0.7071068 0.7071068
+ k 0 0 0.3826834 0.9238795
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x1 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x2 0.9 1.7
+event 0 0 0 0x2 0.9 1.7
+"""
+
+var _dirs: Array[String] = []
+var _app: Node = null
+
+
+func before_each() -> void:
+	var packed := load(EDITOR_SCENE) as PackedScene
+	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
+	if packed == null:
+		return
+	_app = packed.instantiate()
+	var settings_dir := OS.get_cache_dir().path_join("opennova editor model preview %d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
+	_dirs.append(settings_dir)
+	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
+	add_child_autofree(_app)
+
+
+func after_each() -> void:
+	_app = null
+	for dir in _dirs:
+		TestFs.remove_dir_recursive(dir)
+	_dirs.clear()
+
+
+func _preview() -> Dictionary:
+	var parsed: Variant = JSON.parse_string(String(_app.get_model_preview_json()))
+	return parsed if parsed is Dictionary else {}
+
+
+func _vector(values: Variant) -> Vector3:
+	var list: Array = values if values is Array else [0, 0, 0]
+	return Vector3(float(list[0]), float(list[1]), float(list[2]))
+
+
+func _new_project_with(model: String, name: String) -> bool:
+	var dir := OS.get_cache_dir().path_join("opennova editor model preview project %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	if not _app.new_project(dir, "Model Preview Game"):
+		return false
+	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(model))
+	if bytes.is_empty() or DirAccess.make_dir_recursive_absolute(dir.path_join("models")) != OK:
+		return false
+	var out := FileAccess.open(dir.path_join("models").path_join(name), FileAccess.WRITE)
+	out.store_buffer(bytes)
+	out.close()
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	return true
+
+
+func _write(path: String, text: String) -> void:
+	assert_eq(DirAccess.make_dir_recursive_absolute(path.get_base_dir()), OK)
+	var out := FileAccess.open(path, FileAccess.WRITE)
+	out.store_string(text)
+	out.close()
+
+
+func _overlays(preview: Dictionary, kind: String) -> Array:
+	var rows: Array = []
+	for row: Variant in preview.get("overlays", []):
+		if row is Dictionary and String(row.get("kind", "")) == kind:
+			rows.append(row)
+	return rows
+
+
+func _first_child(kind: String) -> int:
+	var row: int = _app.get_row_id(0)
+	var ids: PackedInt64Array = _app.get_child_records(row, kind)
+	return ids[0] if ids.size() > 0 else 0
+
+
+func test_preview_draws_the_open_model() -> void:
+	if _app == null:
+		return
+	assert_false(_app.is_available(), "headless: no ImGui context")
+	assert_eq(String(_preview().get("status", "")), "no_project")
+
+	assert_true(_new_project_with(ARMORY, "armory.3di"))
+	assert_eq(String(_preview().get("status", "")), "no_model")
+	assert_true(_app.open_document("models/armory.3di"))
+
+	# The open model as it would save, at the level the portable half picks.
+	var preview := _preview()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	assert_true(bool(preview.get("current", false)))
+	assert_eq(int(preview.get("builds", 0)), 1)
+	var model: ObjectModel = _app.get_model_preview_model()
+	var camera: Camera3D = _app.get_model_preview_camera()
+	assert_not_null(model)
+	assert_not_null(camera)
+	assert_not_null(model.get_object_data(), "the device holds the model")
+	assert_eq(model.get_active_lod(), int(preview.get("lod", {}).get("shown", -2)))
+
+	# A user point on the pixel the device's camera projects it to.
+	var points: Array = _overlays(preview, "user_point")
+	assert_gt(points.size(), 0)
+	for point: Variant in points:
+		var screen: Variant = point.get("screen")
+		if screen == null:
+			continue
+		var at := camera.unproject_position(_vector(point.get("position")))
+		assert_almost_eq(at.x, float(screen[0]), 0.5, "user point %s x" % point.get("name"))
+		assert_almost_eq(at.y, float(screen[1]), 0.5, "user point %s y" % point.get("name"))
+
+	# A user point's edit builds nothing; a light's builds the scene again.
+	var serial: int = model.get_scene_build_serial()
+	var user_point := _first_child("user_point")
+	assert_gt(user_point, 0)
+	assert_true(_app.set_field(user_point, "position.x", float(_app.get_field(user_point, "position.x")) + 1.0))
+	preview = _preview()
+	assert_true(bool(preview.get("current", false)))
+	assert_eq(int(preview.get("builds", 0)), 1, "a user point is the overlays' alone")
+	assert_eq(model.get_scene_build_serial(), serial, "the scene is not built again")
+	var light := _first_child("light")
+	assert_gt(light, 0)
+	assert_true(_app.set_field(light, "start.r", 12))
+	preview = _preview()
+	assert_eq(int(preview.get("builds", 0)), 2)
+	assert_ne(model.get_scene_build_serial(), serial, "a light's edit builds the scene again")
+
+	# The options: a level held and one of the model's registers (armory's FLICKER) on it.
+	var registers: Array = preview.get("registers", [])
+	assert_gt(registers.size(), 0, "the fixture declares a CTRL register")
+	var register := String(registers[0].get("name", "")) if registers.size() > 0 else "FLICKER"
+	assert_true(_app.set_model_preview_options({"lod": 0, "ctrl": {register: 3}}))
+	preview = _preview()
+	assert_eq(int(preview.get("options", {}).get("lod", -1)), 0)
+	assert_eq(int(preview.get("registers", [{}])[0].get("value", 0)), 3)
+	assert_eq(model.get_active_lod(), 0)
+	assert_eq(int(model.get_ctrl_values().get(register, 0)), 3, str(model.get_ctrl_values()))
+	assert_true(_app.set_model_preview_options({"lod": "auto", "ctrl": {}}))
+	assert_false(model.get_ctrl_values().has(register), "a register let go reads 0 again")
+	assert_false(_app.set_model_preview_options({"bogus": 1}))
+	assert_false(_app.set_model_preview_camera({"distance": -1.0}))
+
+	# The camera backs away: the device draws whatever Auto picks there.
+	assert_true(_app.set_model_preview_camera({"distance": 5000.0}))
+	preview = _preview()
+	assert_eq(model.get_active_lod(), int(preview.get("lod", {}).get("shown", -2)))
+	assert_eq(int(preview.get("lod", {}).get("shown", -2)), int(preview.get("lod", {}).get("auto", -3)))
+	assert_true(_app.set_model_preview_camera({"frame": true}))
+	assert_lt(float(_preview().get("camera", {}).get("distance", 5000.0)), 5000.0, "framed again")
+
+
+func test_markers_ride_the_parts_the_device_draws() -> void:
+	if _app == null:
+		return
+	assert_true(_new_project_with(ROCKING, "house.3di"))
+	assert_true(_app.open_document("models/house.3di"))
+	# The ground point moved off the axis the part turns about.
+	var point := _first_child("user_point")
+	assert_gt(point, 0)
+	assert_true(_app.set_field(point, "position.x", 2.0))
+	# The clock held at a quarter second: the device's part node and the overlay pose alike.
+	assert_true(_app.set_model_preview_options({"playing": false, "time_ms": 250}))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var preview := _preview()
+	assert_eq(int(preview.get("clock", {}).get("time_ms", -1)), 250)
+	var marker: Dictionary = _overlays(preview, "user_point")[0]
+	var model: ObjectModel = _app.get_model_preview_model()
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_true(parts.has(0), str(parts.keys()))
+	var node: Node3D = parts.get(0)
+	# The point as authored, in the preview's space (the model's axes, x mirrored): x 2.0 in
+	# the .o3d's axes is the model's z.
+	var rest := Vector3(0.0, 0.0, 2.0)
+	var carried: Vector3 = model.global_transform.affine_inverse() * (node.global_transform * rest)
+	var at := _vector(marker.get("position"))
+	assert_almost_eq(carried.x, at.x, 0.001, "x")
+	assert_almost_eq(carried.y, at.y, 0.001, "y")
+	assert_almost_eq(carried.z, at.z, 0.001, "z")
+	assert_gt(absf(at.x), 0.01, "the part has turned the point off its rest")
+	# A hit at the marker's pixel names its record.
+	var screen: Array = marker.get("screen", [0, 0])
+	var hit: Variant = JSON.parse_string(String(_app.model_preview_hit_json(float(screen[0]), float(screen[1]))))
+	assert_true(hit is Dictionary)
+	assert_eq(String(hit.get("kind", "")), "user_point")
+	assert_eq(int(hit.get("id", 0)), point)
+	# Dragged 30 pixels right: the marker is drawn there, the part still carrying it.
+	var target := Vector2(float(screen[0]) + 30.0, float(screen[1]))
+	assert_true(_app.model_preview_drag(point, "place", target.x, target.y, 0.0))
+	var dragged: Dictionary = _overlays(_preview(), "user_point")[0]
+	var now: Array = dragged.get("screen", [0, 0])
+	assert_almost_eq(float(now[0]), target.x, 0.5)
+	assert_almost_eq(float(now[1]), target.y, 0.5)
+	assert_false(_app.model_preview_drag(point, "twist", target.x, target.y, 0.0), "an unknown handle")
+	# One undo step takes it back.
+	_app.undo()
+	var undone: Array = _overlays(_preview(), "user_point")[0].get("screen", [0, 0])
+	assert_almost_eq(float(undone[0]), float(screen[0]), 0.5)
+
+
+func test_a_table_plays_on_its_rig() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor model preview rig %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_app.new_project(dir.path_join("project"), "Rig Game"))
+	var source := dir.path_join("source")
+	_write(source.path_join("skinned.o3d"), FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)))
+	_write(source.path_join("skin.o3a"), SKIN_CLIPS)
+	_app.request_json(JSON.stringify({"kind": "import_files", "imports": [
+		{"path": source.path_join("skinned.o3d")}, {"path": source.path_join("skin.o3a")}]}))
+	_write(dir.path_join("project/defs/items.def"),
+			"begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n")
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_app.open_document("anims/SKIN.adm"))
+	var walk: int = _app.find_record("anim_walk_forward")
+	assert_gt(walk, 0)
+	assert_true(_app.select_record(walk))
+	assert_true(_app.set_model_preview_options({"playing": false, "clip_ticks": 0}))
+	var preview := _preview()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var animation: Dictionary = preview.get("animation", {})
+	assert_eq(String(animation.get("model", "")).to_lower(), "skinned.3di")
+	assert_true(bool(animation.get("rig", false)))
+	assert_eq(String(animation.get("key", "")), "anim_walk_forward")
+	assert_eq(animation.get("events", []).size(), 2)
+	await get_tree().process_frame
+	var model: ObjectModel = _app.get_model_preview_model()
+	assert_true(model.has_skeleton(), "the rig is bound to the skinned model")
+	assert_eq(model.get_active_body_clip(), "anim_walk_forward")
+	var skeleton := model.get_skeleton()
+	var at_rest := skeleton.get_bone_pose_rotation(0)
+	# A quarter of the way in, the root has turned.
+	assert_true(_app.set_model_preview_options({"clip_ticks": 8}))
+	await get_tree().process_frame
+	var turned := skeleton.get_bone_pose_rotation(0)
+	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")
+	assert_eq(int(_preview().get("animation", {}).get("ticks", -1)), 8)

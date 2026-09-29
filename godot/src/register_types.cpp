@@ -71,6 +71,7 @@
 #include "object/object_shader_cache.h"
 #include "object/item_database.h"
 #include "object/weapon_database.h"
+#include "object/ammo_database.h"
 #include "object/weapon_def.h"
 #include "object/avatar_database.h"
 #include "object/model_light.h"
@@ -108,6 +109,10 @@
 #include "hud/end_round_transition.h"
 #include "hud/hud_inset_scope.h"
 #include "devtools/dev_tools.h"
+#include "devtools/imgui_pass_node.h"
+#if OPENNOVA_EDITOR
+#include "authoring/editor_app.h"
+#endif
 #include "devtools/debug_arg_spec.h"
 #include "devtools/debug_control_records.h"
 #include "devtools/debug_control_table.h"
@@ -249,6 +254,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponDef);
 	GDREGISTER_CLASS(ArmoryClassRow);
 	GDREGISTER_CLASS(WeaponDatabase);
+	GDREGISTER_CLASS(AmmoDatabase);
 	GDREGISTER_CLASS(AvatarPartRow);
 	GDREGISTER_CLASS(AvatarComboRow);
 	GDREGISTER_CLASS(AvatarNationalityRow);
@@ -454,7 +460,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	// parse; the release DLL's DevTools is inert.
 	GDREGISTER_CLASS(FrameStatsWindow);
 	GDREGISTER_CLASS(FrameStats);
+	GDREGISTER_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
+#if OPENNOVA_EDITOR
+	// The OpenNova Editor's shell (ADR 0046 d4): the editor-enabled variant only, so
+	// nothing the game ships depends on the editor.
+	GDREGISTER_CLASS(EditorApp);
+#endif
 	// The debug-control table F3 and MCP share (ADR 0043 d12), in every
 	// flavour: only the ImGui windows are debug-only.
 	GDREGISTER_CLASS(DebugArgSpec);

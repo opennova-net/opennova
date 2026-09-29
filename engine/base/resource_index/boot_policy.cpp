@@ -2,7 +2,9 @@
 
 #include <base/resource_index/boot_policy.h>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -18,11 +20,16 @@ bool has_flag(const std::vector<std::string> &args, const char *flag) {
     return false;
 }
 
-// The token following `flag`, stripped, or "" when absent/empty.
+// The token following `flag`, stripped, or "" when absent/empty; a flag given
+// twice takes its last value, as the game's one walk over its command line
+// copies each `/exp` value over the one before
+// [orig: Game_ParseCommandLineAndInit @ 0x4a7310, "/exp" @ 0x4a76a6, the next
+//  token @ 0x4a76b8..0x4a76c3 copied to g_ExpansionName @ 0x4a76cf].
 std::string value_after(const std::vector<std::string> &args, const char *flag) {
+    std::string value;
     for (std::size_t i = 0; i + 1 < args.size(); ++i)
-        if (strutil::iequals(args[i], flag)) return strutil::trim(args[i + 1]);
-    return std::string();
+        if (strutil::iequals(args[i], flag)) value = strutil::trim(args[i + 1]);
+    return value;
 }
 
 // A whole decimal or 0x-prefixed integer, or `fallback` for an empty,
@@ -48,26 +55,26 @@ int int_after(const std::vector<std::string> &args, const char *flag, long lo, l
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     LaunchFlags f;
-    f.loose_override = has_flag(args, "/d");
-    f.expansion = value_after(args, "/exp");
-    f.game = strutil::to_lower(value_after(args, "/game"));
-    f.resource_dir = value_after(args, "--resource-dir");
-    f.resource_dir_given = has_flag(args, "--resource-dir");
-    f.loose_mission = value_after(args, "--loose-mission");
-    f.loose_root = has_flag(args, "--loose-root");
-    f.mission = value_after(args, "--mission");
-    f.lan_host = value_after(args, "--lan-host");
-    f.lan_join = value_after(args, "--lan-join");
-    f.lan_port = int_after(args, "--lan-port", 1, 65535, 0);
-    f.lan_gametype = int_after(args, "--lan-gametype", 0, 0x7fffffffL, -1);
-    f.lan_mode = int_after(args, "--lan-mode", 1, 4, 0);
-    f.lan_max_players = int_after(args, "--lan-max-players", 1, 64, 0);
-    f.spectator = has_flag(args, "--spectator");
-    f.spectator_password = value_after(args, "--spectator-password");
-    f.callsign = value_after(args, "--callsign");
-    f.integrity_profile = value_after(args, "--integrity-profile");
-    f.capture_pcap = value_after(args, "--capture-pcap");
-    f.mcp_port = int_after(args, "--mcp-port", 1, 65535, 0);
+    f.loose_override = has_flag(args, kLaunchFlagLooseOverride);
+    f.expansion = value_after(args, kLaunchFlagExpansion);
+    f.game = strutil::to_lower(value_after(args, kLaunchFlagGame));
+    f.resource_dir = value_after(args, kLaunchFlagResourceDir);
+    f.resource_dir_given = has_flag(args, kLaunchFlagResourceDir);
+    f.loose_mission = value_after(args, kLaunchFlagLooseMission);
+    f.loose_root = has_flag(args, kLaunchFlagLooseRoot);
+    f.mission = value_after(args, kLaunchFlagMission);
+    f.lan_host = value_after(args, kLaunchFlagLanHost);
+    f.lan_join = value_after(args, kLaunchFlagLanJoin);
+    f.lan_port = int_after(args, kLaunchFlagLanPort, 1, 65535, 0);
+    f.lan_gametype = int_after(args, kLaunchFlagLanGametype, 0, 0x7fffffffL, -1);
+    f.lan_mode = int_after(args, kLaunchFlagLanMode, 1, 4, 0);
+    f.lan_max_players = int_after(args, kLaunchFlagLanMaxPlayers, 1, 64, 0);
+    f.spectator = has_flag(args, kLaunchFlagSpectator);
+    f.spectator_password = value_after(args, kLaunchFlagSpectatorPassword);
+    f.callsign = value_after(args, kLaunchFlagCallsign);
+    f.integrity_profile = value_after(args, kLaunchFlagIntegrityProfile);
+    f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
+    f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
     return f;
 }
 
@@ -114,6 +121,14 @@ std::string boot_path_join(const std::string &dir, const std::string &name) {
     const char last = dir.back();
     if (last == '/' || last == '\\') return dir + name;
     return dir + "/" + name;
+}
+
+bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags) {
+    vfs.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(launch_game(flags, std::string()).c_str()));
+    const VfsMountMode mode =
+            flags.loose_override ? VfsMountMode::PackedWithLooseOverride : VfsMountMode::Packed;
+    return vfs.mount_game(root, flags.expansion, mode, VfsArchiveDiscovery::RetailTable) &&
+           vfs.has_mounted_archive();
 }
 
 } // namespace opennova

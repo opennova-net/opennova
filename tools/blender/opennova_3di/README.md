@@ -335,7 +335,8 @@ Culling, the Math node, the render method and Emission.
   and flags (both sides, bullets pass, front only: a bullet from behind
   passes), the other flag bits, the reflection colour, the texture rows the
   nodes cannot give, and the RGB / alpha / UV generators and texture
-  flipbook. A register-driven flipbook selects its register by name.
+  flipbook. A flipbook with frames on anim type 1 reads a register, which it
+  selects by name; any other keeps its frame time.
 
 ## Animations
 

@@ -39,8 +39,8 @@ String MnuActionRow::get_type() const { return opennova::to_gd(value_.type); }
 String MnuActionRow::get_target() const { return opennova::to_gd(value_.target); }
 String MnuActionRow::get_state() const { return opennova::to_gd(value_.state); }
 String MnuActionRow::get_file() const { return opennova::to_gd(value_.file); }
-String MnuActionRow::get_source() const { return opennova::to_gd(value_.source); }
 String MnuActionRow::get_field() const { return opennova::to_gd(value_.field); }
+String MnuActionRow::get_field_attr() const { return opennova::to_gd(value_.field_attr); }
 String MnuActionRow::get_test() const { return opennova::to_gd(value_.test); }
 
 void MnuActionRow::_bind_methods() {
@@ -50,8 +50,8 @@ void MnuActionRow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_target"), &MnuActionRow::get_target);
 	ClassDB::bind_method(D_METHOD("get_state"), &MnuActionRow::get_state);
 	ClassDB::bind_method(D_METHOD("get_file"), &MnuActionRow::get_file);
-	ClassDB::bind_method(D_METHOD("get_source"), &MnuActionRow::get_source);
 	ClassDB::bind_method(D_METHOD("get_field"), &MnuActionRow::get_field);
+	ClassDB::bind_method(D_METHOD("get_field_attr"), &MnuActionRow::get_field_attr);
 	ClassDB::bind_method(D_METHOD("get_test"), &MnuActionRow::get_test);
 	ClassDB::bind_method(D_METHOD("get_target_form"), &MnuActionRow::get_target_form);
 	ClassDB::bind_method(D_METHOD("is_toggle"), &MnuActionRow::is_toggle);
@@ -65,8 +65,8 @@ void MnuActionRow::_bind_methods() {
 	prop("target", Variant::STRING, "get_target");
 	prop("state", Variant::STRING, "get_state");
 	prop("file", Variant::STRING, "get_file");
-	prop("source", Variant::STRING, "get_source");
 	prop("field", Variant::STRING, "get_field");
+	prop("field_attr", Variant::STRING, "get_field_attr");
 	prop("test", Variant::STRING, "get_test");
 	prop("target_form", Variant::INT, "get_target_form");
 	prop("toggle", Variant::BOOL, "is_toggle");

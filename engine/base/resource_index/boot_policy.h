@@ -41,7 +41,8 @@
 //                               port (1..65535); absent = no endpoint.
 //
 // Flags match case-insensitively; a flag's value is the following token,
-// stripped. Integers read decimal or 0x-prefixed; an absent, empty or
+// stripped, and a flag given twice takes its last value, as the game's own
+// command line does. Integers read decimal or 0x-prefixed; an absent, empty or
 // malformed value reads the field's "unset" sentinel. The embedder hands over
 // the whole token list (engine and user args alike) so packaged and source
 // launches share one parser.
@@ -50,6 +51,28 @@
 #include <vector>
 
 namespace opennova {
+
+// The flag names parse_launch_flags reads (the list above); a launcher that writes one
+// spells it with these.
+inline constexpr const char *kLaunchFlagLooseOverride = "/d";
+inline constexpr const char *kLaunchFlagExpansion = "/exp";
+inline constexpr const char *kLaunchFlagGame = "/game";
+inline constexpr const char *kLaunchFlagResourceDir = "--resource-dir";
+inline constexpr const char *kLaunchFlagLooseMission = "--loose-mission";
+inline constexpr const char *kLaunchFlagLooseRoot = "--loose-root";
+inline constexpr const char *kLaunchFlagMission = "--mission";
+inline constexpr const char *kLaunchFlagLanHost = "--lan-host";
+inline constexpr const char *kLaunchFlagLanJoin = "--lan-join";
+inline constexpr const char *kLaunchFlagLanPort = "--lan-port";
+inline constexpr const char *kLaunchFlagLanGametype = "--lan-gametype";
+inline constexpr const char *kLaunchFlagLanMode = "--lan-mode";
+inline constexpr const char *kLaunchFlagLanMaxPlayers = "--lan-max-players";
+inline constexpr const char *kLaunchFlagSpectator = "--spectator";
+inline constexpr const char *kLaunchFlagSpectatorPassword = "--spectator-password";
+inline constexpr const char *kLaunchFlagCallsign = "--callsign";
+inline constexpr const char *kLaunchFlagIntegrityProfile = "--integrity-profile";
+inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
+inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -98,5 +121,20 @@ std::string launch_game(const LaunchFlags &flags, const std::string &fallback);
 // `dir/name`, with an empty dir yielding the bare name and a trailing
 // separator not doubled.
 std::string boot_path_join(const std::string &dir, const std::string &name);
+
+class Vfs;
+
+// The game install at `root` mounted into `vfs` as a launch with `flags` mounts it:
+// the witnessed boot archive table with the /exp expansion layered over it
+// [orig: PFF_OpenAllArchives @ 0x4a4310; Expansion_LoadAssets @ 0x4a4730], its
+// payloads decoded with the /game code's key (launch_game), and its lookup the
+// archives alone while one is mounted unless /d puts the loose files first
+// [orig: FileSystem_OpenFile @ 0x75b1c0, the gate @ 0x75b1e5; /D
+// Game_ParseCommandLineAndInit @ 0x4a7667 -> Game_InitSubsystems @ 0x4a6fa3 ->
+// FileSystem_SetSearchLooseFirst @ 0x75a5a0]. False when the root does not mount
+// (vfs.game_root() stays empty, vfs.last_error() says why) or the root mounts but opens
+// none of the game's archives, which retail's boot refuses [orig: Game_InitSubsystems @
+// 0x4a6f44] (vfs.last_error() then names an archive that failed to open, when one did).
+bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags);
 
 } // namespace opennova

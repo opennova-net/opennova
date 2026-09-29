@@ -35,8 +35,8 @@
       <STRING>First line</STRING>
     </WINDOW>
 
-    <WINDOW type="goto" name="QuickExit">
-      <ACTION type="screen" target="TARGET"></ACTION>
+    <WINDOW type="button" name="QuickExit">
+      <ACTION type="screen" file="all_widgets.mnu">TARGET</ACTION>
       <HOTKEY>VK_ESCAPE</HOTKEY>
     </WINDOW>
 
@@ -55,14 +55,14 @@
       <MIN_ITEM_HEIGHT>16</MIN_ITEM_HEIGHT>
     </WINDOW>
 
-    <WINDOW type="multi" name="MapPicker">
+    <WINDOW type="list" name="MapPicker">
       <POSITION>
         <LEFT>230</LEFT>
         <TOP>130</TOP>
         <RIGHT>410</RIGHT>
         <BOTTOM>260</BOTTOM>
       </POSITION>
-      <ITEMS justify="LEFT">
+      <ITEMS justify="LEFT" MULTISELECT>
         <ITEM value="0">Desert</ITEM>
         <ITEM value="1">Jungle</ITEM>
         <ITEM value="2">Urban</ITEM>
@@ -101,7 +101,7 @@
       </SPINDOWN>
     </WINDOW>
 
-    <WINDOW type="combo" name="ServerList">
+    <WINDOW type="combobox" name="ServerList">
       <POSITION>
         <LEFT>230</LEFT>
         <TOP>270</TOP>
@@ -170,7 +170,7 @@
       </SCROLLBAR>
     </WINDOW>
 
-    <WINDOW type="map" name="TacMap">
+    <WINDOW type="static" name="TacMap">
       <POSITION>
         <LEFT>450</LEFT>
         <TOP>20</TOP>
@@ -180,7 +180,7 @@
       <APPEARANCE type="image" state="default">tacmap.tga</APPEARANCE>
     </WINDOW>
 
-    <WINDOW type="globe" name="CampaignGlobe">
+    <WINDOW type="static" name="CampaignGlobe">
       <POSITION>
         <LEFT>450</LEFT>
         <TOP>210</TOP>
@@ -190,7 +190,7 @@
       <APPEARANCE type="image" state="default">globe.tga</APPEARANCE>
     </WINDOW>
 
-    <WINDOW type="marquee" name="Credits">
+    <WINDOW type="marquee_wnd" name="Credits">
       <POSITION>
         <LEFT>20</LEFT>
         <TOP>450</TOP>

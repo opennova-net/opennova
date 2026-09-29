@@ -40,7 +40,7 @@
       <APPEARANCE type="image" state="default">btn_up.tga</APPEARANCE>
       <APPEARANCE type="image" state="mouseover">btn_over.tga</APPEARANCE>
       <STRING type="id" justify="CENTER">MM_Start</STRING>
-      <ACTION type="screen" target="OPTIONS"></ACTION>
+      <ACTION type="screen" file="widgets.mnu">OPTIONS</ACTION>
       <SOUND state="mousein" trigger="MOUSE_OVER">menu.lwf</SOUND>
     </WINDOW>
     <WINDOW type="checkbox" name="SoundChk" CHECKED>
@@ -65,7 +65,7 @@
         <ITEM type="ID" value="2">OPTION_HIGH</ITEM>
       </ITEMS>
     </WINDOW>
-    <WINDOW type="label" name="Version">
+    <WINDOW type="static" name="Version">
       <POSITION>
         <LEFT>10</LEFT>
         <TOP>460</TOP>

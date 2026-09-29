@@ -115,7 +115,7 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 					t.m10 = static_cast<float>(-s);
 					t.m20 = static_cast<float>(0.5 - (c - s) * 0.5);
 				}
-			} else if (ch.type <= 0x70) {
+			} else if (!threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_UV, ch.type)) {
 				// waveform value in [base, end], wave/65535
 				// [orig: @ 0x5b1ae6..0x5b1c1c]
 				const double w = static_cast<double>(
@@ -190,7 +190,7 @@ UvAnimTransform uv_anim_transform(const UvAnimChannel &u_channel,
 					t.m01 = static_cast<float>(s);
 					t.m21 = static_cast<float>(0.5 - (s + c) * 0.5);
 				}
-			} else if (ch.type <= 0x70) {
+			} else if (!threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_UV, ch.type)) {
 				// [orig: @ 0x5b1da6..0x5b1e4a]
 				const double w = static_cast<double>(
 						uv_anim_wave_lookup(ch.type, phase16, rand16_v)) *

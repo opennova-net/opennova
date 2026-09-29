@@ -744,6 +744,109 @@ void test_layout_reset_brings_windows_home() {
 	CHECK(stats->DockId != stats_node, "a one-shot: a later user undock is left alone");
 }
 
+namespace {
+
+// A window that only asks for a place in the default layout.
+struct PlacedWindow : opennova::devtools::Window {
+	PlacedWindow(const char *title, InitialDockPlacement placement) : name(title), where(placement) { open = true; }
+	const char *title() const override { return name; }
+	void draw(opennova::devtools::ImGuiPass &, uint64_t) override {}
+	InitialDockPlacement initial_dock_placement() const override { return where; }
+	const char *name;
+	InitialDockPlacement where;
+};
+
+bool near(float a, float b) { return a - b <= 4.0f && b - a <= 4.0f; }
+
+}  // namespace
+
+// The default docked layout is the host's say (DockLayout). The game's F3 workspace keeps
+// the defaults: its dockspace id, the right column 30% of the width, no bottom strip and
+// no left column (the Game view the whole height from the left edge), nothing brought
+// forward. A host's layout (the editor's shape over plain windows) keys its own dockspace,
+// splits the bottom strip across the whole width first, then the left and the right column
+// above it (each ratio of the node it splits), then the centre's right part; once the
+// windows docked, the first of its focus list has the focus and the others are their
+// node's selected tab, though another docked there after them.
+void test_dock_layout_defaults_and_a_host_layout() {
+	const opennova::devtools::DockLayout defaults;
+	CHECK(defaults.dockspace == "OpenNovaWorkspaceDockspace" && !defaults.bottom_full_width && defaults.right == 0.30f &&
+					defaults.left == 0.25f && defaults.bottom == 0.30f && defaults.focus.empty(),
+			"the defaults are the game's own");
+	NullBackend backend;
+	const auto draw = [](opennova::devtools::ImGuiPass &pass, uint64_t frames) {
+		for (uint64_t frame = 1; frame <= frames; ++frame) {
+			ImGui::NewFrame();
+			pass.draw_frame(frame);
+			ImGui::Render();
+		}
+	};
+	const ImGuiViewport *viewport = ImGui::GetMainViewport();
+	{
+		GameDevTools tools;
+		tools.pass().attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+		tools.pass().set_open(true);
+		draw(tools.pass(), 3);
+		ImGuiWindow *game = ImGui::FindWindowByName("Game");
+		ImGuiWindow *stats = ImGui::FindWindowByName("Stats");
+		CHECK(ImGui::DockBuilderGetNode(ImHashStr("OpenNovaWorkspaceDockspace")) != nullptr, "the game's dockspace id");
+		CHECK(game && stats && near(stats->Size.x, viewport->WorkSize.x * 0.30f), "the right column: 30% of the width");
+		CHECK(game && near(game->Pos.x, viewport->WorkPos.x) && near(game->Size.y, viewport->WorkSize.y),
+				"no left column and no bottom strip: the Game view from the left edge, the whole height");
+		tools.pass().detach_imgui();
+	}
+
+	ImGui::SetCurrentContext(backend.context);
+	opennova::devtools::ImGuiPass pass;
+	pass.register_window(std::make_unique<PlacedWindow>("Beside", InitialDockPlacement::CenterRight));
+	pass.register_window(std::make_unique<PlacedWindow>("Middle", InitialDockPlacement::Center));
+	pass.register_window(std::make_unique<PlacedWindow>("Side", InitialDockPlacement::Left));
+	pass.register_window(std::make_unique<PlacedWindow>("Under", InitialDockPlacement::Bottom));
+	pass.register_window(std::make_unique<PlacedWindow>("Also under", InitialDockPlacement::Bottom));
+	pass.register_window(std::make_unique<PlacedWindow>("Column", InitialDockPlacement::Right));
+	opennova::devtools::DockLayout layout;
+	layout.dockspace = "HostWorkspace.v1";
+	layout.bottom_full_width = true;
+	layout.bottom = 0.25f;
+	layout.left = 0.20f;
+	layout.right = 0.25f;
+	layout.center_right = 0.60f;
+	layout.focus = {"Middle", "Under"};
+	pass.set_dock_layout(layout);
+	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
+	pass.set_open(true);
+	draw(pass, 6);
+	ImGuiWindow *beside = ImGui::FindWindowByName("Beside");
+	ImGuiWindow *middle = ImGui::FindWindowByName("Middle");
+	ImGuiWindow *side = ImGui::FindWindowByName("Side");
+	ImGuiWindow *under = ImGui::FindWindowByName("Under");
+	ImGuiWindow *also = ImGui::FindWindowByName("Also under");
+	ImGuiWindow *column = ImGui::FindWindowByName("Column");
+	CHECK(beside && middle && side && under && also && column, "every window drew");
+	if (!beside || !middle || !side || !under || !also || !column) {
+		pass.detach_imgui();
+		return;
+	}
+	CHECK(ImGui::DockBuilderGetNode(ImHashStr("HostWorkspace.v1")) != nullptr, "the host's own dockspace id");
+	const ImVec2 at = viewport->WorkPos, size = viewport->WorkSize;
+	CHECK(near(under->Pos.x, at.x) && near(under->Size.x, size.x) && near(under->Size.y, size.y * 0.25f) &&
+					also->DockId == under->DockId,
+			"the bottom strip across the whole width, a quarter of the height");
+	CHECK(near(side->Pos.x, at.x) && near(side->Size.x, size.x * 0.20f) && side->Pos.y + side->Size.y <= under->Pos.y,
+			"the left column above it");
+	CHECK(near(column->Pos.x + column->Size.x, at.x + size.x) && near(column->Size.x, (size.x - side->Size.x) * 0.25f) &&
+					column->Pos.y + column->Size.y <= under->Pos.y,
+			"the right column above it, a quarter of what the left one leaves");
+	const float centre = column->Pos.x - (side->Pos.x + side->Size.x);
+	CHECK(near(middle->Size.x, centre * 0.40f) && beside->Pos.x >= middle->Pos.x + middle->Size.x &&
+					near(beside->Size.x, centre * 0.60f),
+			"the centre's right part");
+	CHECK(GImGui->NavWindow == middle, "the first of the focus list has the focus");
+	CHECK(under->DockNode && under->DockNode->TabBar && under->DockNode->TabBar->SelectedTabId == under->TabId,
+			"the next is its node's tab, though Also under docked there after it");
+	pass.detach_imgui();
+}
+
 // The Entities window (ADR 0042 d6): the pushed directory record formats into
 // the filtered table, the layout pass draws it, and an invalid snapshot (the
 // world unloaded) or a visibility close clears it.
@@ -1969,6 +2072,7 @@ int main() {
 	test_layout_pass_draws_the_stats_window_and_gates_capture();
 	test_external_feed_drives_the_window_without_draining();
 	test_layout_reset_brings_windows_home();
+	test_dock_layout_defaults_and_a_host_layout();
 	test_entities_window_formats_the_pushed_directory();
 	test_entities_control_request_queue_and_gating();
 	test_entities_window_selects_the_picked_handle();

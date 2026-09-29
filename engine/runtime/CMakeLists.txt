@@ -50,8 +50,19 @@ add_library(opennova_runtime STATIC
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
     # docs/mnu/menu-re.md "Widget render dispatch")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_marquee.cpp # the marquee credits roll
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_notes.cpp # the compiler notes (build, loader, layout)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_queries.cpp # the widget queries and hit geometry
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_wrap.cpp # the wrapped-text drawer and the multiline edit
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_style.cpp # the shell's stylesheets, menu_style.mns then brand.mns
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_credits.cpp # a marquee DATASOURCE's credits (the ConfigFile text read)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_text_tables.cpp # the menu string tables
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_screen_inputs.cpp # a screen's string tables and the shell's style, through a file source
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_assets.cpp # a screen's fonts and textures, kept by (file, stamp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
@@ -402,18 +413,29 @@ target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
 # Dear ImGui (ADR 0039) links PRIVATE so no ImGui header reaches a consumer: the
-# shell hands the context over as plain pointers (devtools/imgui_abi.h). The
-# game's dev-tool windows compile only when the including root leaves
-# OPENNOVA_DEVTOOLS on (every build but the release GDExtension flavour); the
-# define is PUBLIC so the shell gates its DevTools node on it.
-if(OPENNOVA_DEVTOOLS)
+# shell hands the context over as plain pointers (devtools/imgui_abi.h). The pass
+# itself compiles when either product wants ImGui (OPENNOVA_IMGUI: the game's dev
+# tools or the OpenNova Editor, ADR 0046 d11); the game's dev-tool windows compile
+# only when the including root leaves OPENNOVA_DEVTOOLS on (every build but the
+# release GDExtension flavour). Both defines are PUBLIC so the shell gates its
+# nodes on them.
+if(OPENNOVA_IMGUI)
     target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
+    # The pass owns the overlay registry and draws its layers, so the canvas
+    # builds with it (the editor-only release flavour has no dev-tool windows).
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+    )
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=1)
+else()
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=0)
+endif()
+if(OPENNOVA_DEVTOOLS)
+    target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/collision_overlay.cpp

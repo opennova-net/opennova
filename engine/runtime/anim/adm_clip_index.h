@@ -49,9 +49,9 @@ public:
 	// loop). Every quoted token on the row is a variant of the same slot,
 	// registered in file order [orig: AnimMap_ParseConfigLine @ 0x40cb60
 	// loops the tokens; AnimMap_RegisterBoneNode @ 0x40c2d0 links each into
-	// the slot ring]. A variant whose .bad is missing is SKIPPED
-	// (continue-on-failure, the registration behavior); a parsed-but-
-	// degenerate clip is 0 seconds long. nullptr when the key is unauthored
+	// the slot ring]. A variant whose .bad does not load registers
+	// failsafe.bad in its place, else it is skipped (adm_token_clip, the
+	// registration behavior); a parsed-but-degenerate clip is 0 seconds long. nullptr when the key is unauthored
 	// or fully unresolvable. The query names its slot as a row does, past its
 	// first five characters without case (`ANIM_WPN_FIRE` and `xxxx_wpn_fire`
 	// are anim_wpn_fire).

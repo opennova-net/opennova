@@ -1,9 +1,20 @@
-// Explicit CLI resource roots and the retail launch vocabulary.
+// Explicit CLI resource roots, the retail launch vocabulary, and an install mounted as a
+// launch with those flags mounts it.
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <base/resource_index/boot_policy.h>
+#include <base/resource_index/resource_index.h>
+#include <base/vfs/vfs.h>
+#include <formats/pff/pff.h>
+
+#include "common/test_paths.h"
 
 using namespace opennova;
 
@@ -115,11 +126,81 @@ void test_flags_win_over_fallbacks_and_jo_is_the_default_game() {
     CHECK(set.resource_dir == "E:/y");
 }
 
+// A flag given twice takes its last value, as the game's command line walk copies each
+// `/exp` value over the one before [orig: Game_ParseCommandLineAndInit @ 0x4a7310, "/exp"
+// @ 0x4a76a6 -> g_ExpansionName @ 0x4a76cf].
+void test_repeated_flags_take_the_last_value() {
+    const LaunchFlags f = parse_launch_flags(
+        {"/exp", "jox01", "/game", "jo", "--lan-port", "2000", "/EXP", "revx02", "/game", "JoDemo", "--lan-port", "3000"});
+    CHECK(f.expansion == "revx02");
+    CHECK(f.game == "jodemo");
+    CHECK(f.lan_port == 3000);
+}
+
 void test_path_join() {
     CHECK(boot_path_join("", "assets") == "assets");
     CHECK(boot_path_join("C:/exe", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:/exe/", "assets") == "C:/exe/assets");
     CHECK(boot_path_join("C:\\exe\\", "assets") == "C:\\exe\\assets");
+}
+
+// An install mounts as a launch with the flags mounts it: a stock launch reads the
+// archive's file where a loose one of the name sits beside it, /d the loose one
+// [orig: FileSystem_OpenFile @ 0x75b1c0, the gate @ 0x75b1e5; Game_InitSubsystems
+// @ 0x4a6fa3]; a folder with none of the table's archives, or none at all, does not mount.
+void test_mount_install() {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(test_paths_temp_dir()) /
+            ("opennova_boot_policy_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct TempRoot {
+        fs::path path;
+        ~TempRoot() {
+            std::error_code ignored;
+            fs::remove_all(path, ignored);
+        }
+    } const cleanup{root};
+    const fs::path install = root / "install", empty = root / "empty";
+    std::error_code ec;
+    fs::create_directories(install, ec);
+    fs::create_directories(empty, ec);
+    const uint8_t packed[] = {'p', 'a', 'c', 'k', 'e', 'd'};
+    const pff::PffWriteEntry entries[] = {{"note.txt", packed, sizeof(packed), 0, 0, 0}};
+    CHECK(pff::pff_write_archive((install / "resource.pff").string().c_str(), pff::PFF_FORMAT_PFF3, entries, 1) ==
+          pff::PFF_WRITE_OK);
+    std::ofstream((install / "note.txt").string(), std::ios::binary) << "loose";
+
+    std::vector<uint8_t> bytes;
+    Vfs stock;
+    CHECK(mount_install(stock, install.string(), parse_launch_flags({"game.exe"})));
+    CHECK(stock.read_file("note.txt", bytes) && std::string(bytes.begin(), bytes.end()) == "packed");
+    Vfs dev;
+    CHECK(mount_install(dev, install.string(), parse_launch_flags({"game.exe", "/d"})));
+    CHECK(dev.read_file("note.txt", bytes) && std::string(bytes.begin(), bytes.end()) == "loose");
+    Vfs none;
+    CHECK(!mount_install(none, empty.string(), parse_launch_flags({})) && none.last_error().empty());
+    CHECK(!mount_install(none, (root / "absent").string(), parse_launch_flags({})) && !none.last_error().empty());
+
+    // The index the game's ResourceRoot mounts through (scan_install) takes the same mount,
+    // and says which refusal it met: a root with no archive that opens (none at all, or a
+    // corrupt sole one beside usable loose files, which names it) is NoArchive, the boot's
+    // no-archives refusal; a root that does not mount is Unmounted.
+    using InstallScan = ResourceIndex::InstallScan;
+    ResourceIndex index;
+    CHECK(index.scan_install(install.string(), parse_launch_flags({"game.exe"})) == InstallScan::Mounted);
+    CHECK(index.has_mounted_archive() && index.read_file("note.txt", bytes) &&
+          std::string(bytes.begin(), bytes.end()) == "packed");
+    CHECK(index.scan_install(install.string(), parse_launch_flags({"game.exe", "/d"})) == InstallScan::Mounted);
+    CHECK(index.read_file("note.txt", bytes) && std::string(bytes.begin(), bytes.end()) == "loose");
+    CHECK(index.scan_install(empty.string(), parse_launch_flags({})) == InstallScan::NoArchive &&
+          index.last_error().empty());
+    const fs::path corrupt = root / "corrupt";
+    fs::create_directories(corrupt, ec);
+    std::ofstream((corrupt / "resource.pff").string(), std::ios::binary) << "not an archive";
+    std::ofstream((corrupt / "note.txt").string(), std::ios::binary) << "loose";
+    CHECK(index.scan_install(corrupt.string(), parse_launch_flags({"game.exe", "/d"})) == InstallScan::NoArchive &&
+          index.last_error().find("resource.pff") != std::string::npos && !index.has_mounted_archive());
+    CHECK(index.scan_install((root / "absent").string(), parse_launch_flags({})) == InstallScan::Unmounted &&
+          !index.last_error().empty());
 }
 
 } // namespace
@@ -129,7 +210,9 @@ int main() {
     test_runtime_launch_flags_parse();
     test_lan_fallbacks_and_join_endpoint();
     test_flags_win_over_fallbacks_and_jo_is_the_default_game();
+    test_repeated_flags_take_the_last_value();
     test_path_join();
+    test_mount_install();
     if (failures == 0) std::printf("boot_policy_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

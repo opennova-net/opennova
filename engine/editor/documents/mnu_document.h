@@ -1,0 +1,205 @@
+#pragma once
+
+#include <map>
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include <editor/assets/asset_registry.h>
+#include <editor/documents/mnu_ids.h>
+#include <editor/documents/validation_cache.h>
+#include <editor/model/document.h>
+#include <editor/project/project_document.h>
+#include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_schema.h>
+
+namespace opennova::editor {
+
+class AssetGraph;
+
+// A menu file (ADR 0046 S6c, S9h): `mnu::Document`'s screens as rows, every record the
+// format holds a record here at its own depth, through the format's property table
+// (formats/mnu/mnu_schema.h). A screen holds its root windows; a window holds its lists
+// in the order the file writes them (its attributes, hotkeys, actions, appearances, scroll
+// parts, data sources, sounds, ITEMS rows, parts, table rows, extra elements) and its child
+// windows last; a table row holds its cells, an extra element its attributes and elements.
+// The kinds are Screen, Window, and one kind per list, named by the list's element path
+// ("action", "items.item", "list_box", "column.header"). A field is named by its element
+// path ("position.left", "string.value", "font.default_fg"); which fields and lists a
+// window's type reads is the table's witnessed applicability. What retail's reader does
+// not read is a non-blocking source issue (the reader's notes); what the file cannot hold
+// is a blocking serialize issue on the record and field that cause it. Comments do not
+// survive: the parser drops them (D-MNU-22).
+
+enum class MenuKind : NodeKind { Screen = 0, Window = 1 };
+constexpr NodeKind node_kind(MenuKind kind) { return static_cast<NodeKind>(kind); }
+// The kind of a list's records by its element path ("action", "items.item"); -1 when none.
+NodeKind menu_kind(const std::string &token);
+
+struct MenuScreen : Node {
+	mnu::Screen screen;
+	// The identities of the root windows and everything they hold, beside the native roots.
+	std::vector<RecordIds> roots;
+	MenuScreen();
+	std::shared_ptr<Node> clone() const override;
+	std::string name() const override { return screen.name; }
+	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
+
+	// Where each identity sits: the root's index, then each list and index down to it.
+	// Built on first use, shared by a clone, and forgotten by every structural edit of the
+	// clone and by for_each_identity, which may give it new identities (a duplicated row);
+	// only a clone is ever changed, so a committed row's places never go stale.
+	struct Step {
+		size_t list = 0; // SIZE_MAX: the screen's roots
+		size_t index = 0;
+	};
+	using Places = std::unordered_map<NodeId, std::vector<Step>>;
+	const Places &places() const;
+	void forget_places() { places_.reset(); }
+
+private:
+	mutable std::shared_ptr<const Places> places_;
+};
+
+// A NAME retail's by-name lookups find a record by (docs/mnu/menu-re.md, "Names and the
+// lookups"). A screen: the loaded screens are searched newest first, so of two screens of one
+// name the later is found [orig: CUIScene_SelectNodeByName @ 0x63b6b0]. A window: on the
+// screen of its NAME (found the same way), its root windows in document order, each searched
+// pre-order, a window before its children and its children before the windows its parts hold
+// (a part attaches after the parse); a window with no NAME ends its branch, and a part is
+// never matched by its own NAME (retail names it when it makes it), so of two windows of one
+// name the earlier is found [orig: UI_FindScreenControl @ 0x63ae80; CWnd_FindChildByName @
+// 0x646850]. The menu runtime's find_control keeps the same first-match rule.
+struct MenuLookupName {
+	enum class Found {
+		Yes,
+		LaterScreen,    // a screen: a later screen of the file has its NAME
+		EarlierWindow,  // a window: an earlier one of its screen has its NAME
+		UnderNameless,  // a window: a window above it has no NAME, which ends the search
+		ShadowedScreen, // a window: on a screen a later screen of the file shadows
+	};
+	NodeAddress address;       // the screen row, or the window
+	std::string name;          // as authored
+	NodeId screen = 0;         // the screen row it is on
+	Found found = Found::Yes;
+	NodeAddress found_instead; // what the lookup returns for the NAME (LaterScreen, EarlierWindow)
+};
+
+struct MenuFileState : FileState {
+	mnu::SourceEncoding source_encoding = mnu::SourceEncoding::CodePage;
+	std::shared_ptr<FileState> clone() const override { return std::make_shared<MenuFileState>(*this); }
+};
+
+class MnuDocument : public Document {
+public:
+	const char *kind_label(NodeKind kind) const override;
+	NodeKind kind_from_name(const std::string &name) const override;
+	bool is_top_kind(NodeKind kind) const override { return kind == node_kind(MenuKind::Screen); }
+	std::vector<KindSpec> top_kinds() const override;
+	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
+	void walk_records(const Node &row, const RecordVisitor &visit) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	// Whether the record's window type reads the field (and an ACTION's verb, an extra
+	// element's tag), and what it references given the record's other fields.
+	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
+	// A screen or window no by-name lookup returns (lookup_names) is inert.
+	void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const override;
+	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they
+	// are, in document order, UTF-8 after a byte order mark (a window selected with a window
+	// that holds it comes with that one); "" when a record is not a window or the windows
+	// hold a value the format cannot carry back.
+	std::string copy(const std::vector<NodeAddress> &records) const override;
+	SerializeResult serialize() const override;
+
+	// The document as the runtime reads it, rebuilt from the rows.
+	mnu::Document native() const;
+	// The menu the game would read were the document saved now: serialize(), read back by
+	// the game's reader, once per revision (a revision names one state, undo included).
+	// Null when it cannot be written (`issues` gets serialize()'s) or does not read back.
+	std::shared_ptr<const mnu::Document> saved_image(std::vector<SourceIssue> *issues = nullptr) const;
+	// A screen row's position among the rows: the screen at that position of the saved
+	// image (screen names may repeat). SIZE_MAX for a row the document does not have.
+	size_t screen_position(NodeId row) const;
+	// The pre-order index of a window among its screen's windows, roots and children, not
+	// the parts or what they hold (-1 for anything else): what the frame compiler and the
+	// runtime index number widgets by.
+	int window_index(const NodeAddress &address) const;
+	// The window at a pre-order index of a screen (a preview hit), or 0.
+	NodeId window_at(const Node &screen, size_t preorder) const;
+	// The record at `index` of list `list` of the window at `preorder` (a compiler note's
+	// record), or an empty address.
+	NodeAddress record_at(const Node &screen, size_t preorder, size_t list, size_t index) const;
+	// Every row's identities have the shape of its native screen (the invariant every
+	// structural edit keeps).
+	bool identities_match() const;
+	// Every named screen, then every named window of each screen in its lookup's order, each
+	// with whether a by-name lookup returns it.
+	std::vector<MenuLookupName> lookup_names() const;
+
+protected:
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
+	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
+	           Diagnostic &error) override;
+	// A record located inside `row` (the screen) by the row's own places.
+	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	// A field: whether the file writes it. "": whether the record itself is written (not
+	// inside an absent ITEMS or a part left out).
+	bool read_present(const Node &row, const NodeAddress &address, const std::string &field) const override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
+	               std::string &error) override;
+	bool set_present(Node &row, const NodeAddress &address, const std::string &field, bool present,
+	                 std::string &error) override;
+	// Add: a new record of the list's kind inside the owner edit.parent (0 = the screen's
+	// roots) at position, a window named uniquely WINDOW<n> within its screen. Duplicate:
+	// the record with everything it holds, fresh identities, its windows' names made unique.
+	// Remove: the record with everything it holds (a screen keeps one root window). Move: to
+	// position in the same list of edit.parent (another window's: a reparent), with
+	// everything it holds; into a window, an attribute or an extra element only as the
+	// window keeps one.
+	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
+	                     std::string &error) override;
+	// The windows `copy` made, into the owner edit.parent (0 = the screen's roots) at
+	// position, fresh identities, names made unique within the screen.
+	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
+	                   std::string &error) override;
+	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
+	// A duplicated screen takes a name no other screen has (OPTIONS then OPTIONS2).
+	void prepare_duplicate(Node &copy) const override;
+	// A menu keeps at least one screen: removing its last one is refused.
+	bool accept_change(const Change &change, std::string &error) const override;
+
+private:
+	struct SavedImage {
+		bool made = false;
+		uint64_t revision = 0;
+		std::shared_ptr<const mnu::Document> image;
+		std::vector<SourceIssue> issues;
+	};
+	mutable SavedImage saved_;
+	// The screens and windows (their identities) no by-name lookup returns, and why, once per
+	// revision.
+	struct Lookups {
+		bool made = false;
+		uint64_t revision = 0;
+		std::unordered_map<NodeId, MenuLookupName::Found> unfound;
+	};
+	mutable Lookups lookups_;
+};
+
+bool is_menu_kind(AssetKind kind);
+
+// The menu document type's validator (document_types): every menu in the project loads,
+// open documents standing in for their files; two screens or two windows of a screen of
+// one NAME (menu.duplicate_screen / menu.duplicate_window: the lookups find one of them)
+// and an ACTION the game never runs or ignores (menu.action_inert: on a window with no
+// NAME, a TYPE none of the sixteen, a WINDOW row with no STATE it acts on) are warnings;
+// the references a menu makes (fonts and colors through the stylesheet, textures, sound
+// banks, other menus and their screens, windows, string tables and string ids) are the
+// asset graph's.
+std::vector<Diagnostic> validate_menus(const ValidationInput &input, const AssetGraph &graph);
+
+} // namespace opennova::editor

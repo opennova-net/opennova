@@ -1,13 +1,15 @@
-// Guard for the generated bitmap font (minimal_fnt_builder.h). Always-on:
-// build -> validate -> write -> parse -> re-write must be byte-stable, and the
-// label glyphs the authored menus use must have pixels.
+// Guard for the editor's generated bitmap font (engine/editor/blank/blank_font_art.h):
+// the font the blank factories emit under every hardcoded boot font name
+// [orig: HUD_InitAllFonts @ 0x51ee20] and the menu_style.mns DEF_FONTNAME_*
+// names. Always-on: build -> validate -> write -> parse -> re-write must be
+// byte-stable, and the label glyphs the authored menus use must have pixels.
 //
 // The same builder mints the bundled assets/opennova.fnt (the placeholder main
 // menu's one font, ADR 0048) and the committed FNT test fixtures fixtures/fnt/
 // synth_1page.fnt and synth_3page.fnt (one and three pages; the three-page
 // form spreads the glyph slots over its pages). They are byte-compared every
 // run; `--write` (re)writes them. No retail font is carried.
-#include "minimal_fnt_builder.h"
+#include <editor/blank/blank_font_art.h>
 
 #include "common/test_paths.h"
 #include <formats/fnt/fnt.h>
@@ -21,6 +23,7 @@
 #include "common/file_io.h"
 
 using namespace opennova::fnt;
+namespace minimal_fnt = opennova::editor::blank_font;
 
 namespace {
 

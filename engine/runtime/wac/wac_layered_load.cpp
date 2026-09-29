@@ -10,6 +10,7 @@
 #include <formats/particle/parser.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/audio/bank_chain.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/world/world.h>
 
 #include <cstdint>
@@ -139,7 +140,7 @@ WacLayeredLoadStatus wac_layered_load(WacSystem &system,
 			mission::resolve_mission_text(files, mission_basename, mission_text_bytes) !=
 					mission::MissionTextSource::kNone &&
 			rtxt::parse(mission_text_bytes.data(), mission_text_bytes.size(), mission_text, text_error);
-	const bool has_game_text = load_text("gametext.bin", game_text);
+	const bool has_game_text = load_text(hud::kGameTextTable, game_text);
 	const bool has_override = !files.expansion_name.empty() &&
 			load_text("expansion\\" + files.expansion_name + "\\" + files.expansion_name + ".bin",
 					override_text);

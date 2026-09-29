@@ -2,8 +2,9 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
-- Four groups (ADR 0028) — the directories, since ADR 0029 the CMake build targets,
-  and since ADR 0040 the first include-path segment too (never C++ namespaces):
+- Five groups (ADR 0028; the fifth, `editor/`, ADR 0046 d3) — the directories, since
+  ADR 0029 the CMake build targets, and since ADR 0040 the first include-path segment
+  too (never C++ namespaces):
   - `base/` — shared substrate and repo plumbing.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030). `formats/wac` is the bytecode/program model, the command
@@ -31,6 +32,38 @@
     orders its own presentation/device pipeline. `world::Match` owns gameplay
     rules, scoring, clocks, winner evaluation, and the frozen result; wire
     code only serializes that result.
+  - `editor/` — the fifth group (ADR 0046 d3): the OpenNova Editor's portable core
+    (`project`, `assets`, `requirements`, `blank` (the from-scratch factories),
+    `project_build` (the steppable build), `run` (the Play session over the process
+    seam), `session` (the one open project and everything the editor does to it:
+    typed requests in, a view out; its wire form, and the record batch the editor MCP
+    names records by), `model` (the neutral editing core, ADR 0046 d9:
+    `Document`, `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    type), `documents` (the document types over the engine's own records: the def
+    catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
+    over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
+    session and the windows reach a type through), `graph` (the asset graph: typed edges from the engine's own
+    parsed records, the one resolver behind the badges, the pickers and the Problems
+    rows, and the rename transaction), `import` (the importers: a PNG to the game's
+    PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
+    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
+    (the menu preview's portable half: what it shows, when to configure it again, its
+    JSON, the options it holds, what a drag of a window's handles or of several windows
+    writes, and what arranging several windows (align, distribute, drawing order) writes; the shell's
+    `MenuFrame` is its device; the model preview's portable half: its orbit camera and the
+    level the game draws, what it shows and when the device builds again, its JSON; the
+    shell's `ObjectModel` is its device; and the render check: every menu screen compiled headless,
+    its compiler notes as Problems rows; and a menu's tree and findings as the editor
+    MCP's `editor_menu` reads them, and the batch it sends, on the same menu), `ui`
+    (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
+    the only tree besides `runtime/devtools` that may include an ImGui header; the
+    inspector is generic, the per-type views in the Document window's tabs are not)).
+    STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
+    the engine's own load paths; nothing under the four groups below may include or link it
+    (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
+    child never carry it. Tooling, not a port: its sources sit in the citation
+    allowlist by the `editor/` prefix. No directory under it may start with `build`
+    (the lints skip such directories; the build lib is `project_build/`).
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
@@ -74,7 +107,10 @@
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
   `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
-  `opennova_io` stays header-only INTERFACE. PUBLIC chain (ADR 0043 d4): formats
+  `opennova_io` stays header-only INTERFACE. Since ADR 0046 a sixth STATIC group
+  target, `opennova_editor` (`editor/`), links `opennova_runtime` and is linked only
+  by the editor-enabled GDExtension variant, `apps/project` and the tests. PUBLIC
+  chain (ADR 0043 d4): formats
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1), net links base, runtime links net, the service links net;
   `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the

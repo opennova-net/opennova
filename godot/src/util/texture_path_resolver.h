@@ -29,12 +29,14 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 // follow one decode path without losing the editor-friendly image formats.
 godot::Ref<godot::Texture2D> load_texture_from_bytes(const godot::String &filename, const godot::PackedByteArray &bytes);
 
-// Decode one material row's selected file with the loader retail picked for
-// it (renderer::material_image_source): a DDS keeps its authored mip chain,
-// the TGA/MDT and PCX readers build theirs. None or undecodable bytes give
-// null.
+// Decode one material row's file with the reader its loader picked for it
+// (renderer::material_texture_source), never by the file's name: the DDS
+// reader takes what D3DX takes by content (renderer::dds_reader_format; a DDS
+// keeps its authored mip chain), the TGA reader (.tga and .mdt files) a TGA
+// alone and the PCX reader a PCX, each building its chain. None, Chunk (no
+// image) or bytes the reader cannot decode give null.
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(
-		renderer::MaterialImageDecoder decoder, const godot::PackedByteArray &bytes);
+		renderer::MaterialTextureReader reader, const godot::PackedByteArray &bytes);
 
 // The highest mip level retail's device samples for a texture bound to an
 // object stage: a DDS row keeps its file's chain (no ceiling), every texture
