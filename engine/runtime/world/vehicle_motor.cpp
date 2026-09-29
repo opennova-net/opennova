@@ -569,9 +569,11 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		}
 		// A live NON-player controller with no drive command holds the previous
         // steer/speed targets.
-        // Occupied: the driverless stuck count rests [orig: `moveTimer = 0` at
-        // the occupied entry split, the boat twin @0x48DFA8..0x48DFCD].
-        if (occ != nullptr) m.stuck_ticks = 0;
+        // Occupied and not parked: the driverless stuck count rests; a parked
+        // hull (Flags 0x10000002) keeps counting under its occupant [orig:
+        // `moveTimer = 0` after the parked test — cveh @0x48B98D, ctan @0x489566,
+        // cbik @0x484AB3; the boat twin @0x48DFA8..0x48DFCD].
+        if (occ != nullptr && (veh.flags & 0x10000002u) == 0) m.stuck_ticks = 0;
     }
     // The handbrake stop latch and the crashed stop sit OUTSIDE the attrib-0x40
     // authority/occupant block, so a DRIVING CLIENT runs them on its predicted
@@ -924,12 +926,17 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 		// applies it, quartered while the airborne/swimming flag is up
 		// [orig: @0x486681..0x486697 `Yaw += modelPtr0 >> 2` under Flags 0x2000].
 		if (traits.family == VehicleFamily::Bike) {
-            // The original's Flags 0x2000 is the suspension solver's current
-            // off-contact result. Our portable contact result is m.grounded;
-            // veh.flags is not maintained by this stand-in and can be stale.
-            const int32_t yaw_step = m.grounded
-                    ? m.wheel_rate_bam
-                    : io::bam_sar(m.wheel_rate_bam, 2);
+            // The quarter keys on the light solve's Flags 0x2000, not on the
+            // contact byte: that byte stays clear for the landing ticks before
+            // the rear-contact run passes 1, while Flags is already down. Only
+            // the boxless terrain-clamp stand-in, which keeps no flags, reads
+            // m.grounded. [orig: `test [esi+24h],2000h` @0x48667A..0x486697]
+            const bool in_air = solve_kind == ContactSolveKind::Light
+                    ? (veh.flags & kEntityFlagInAir) != 0
+                    : !m.grounded;
+            const int32_t yaw_step = in_air
+                    ? io::bam_sar(m.wheel_rate_bam, 2)
+                    : m.wheel_rate_bam;
             m.yaw_bam = io::bam_add(m.yaw_bam, yaw_step);
 		} else if (traits.family == VehicleFamily::Tank && m.settle_2f0 == 0) {
 			// Tank yaw is gated by the crash-settled latch and quartered in the

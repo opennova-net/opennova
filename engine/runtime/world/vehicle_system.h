@@ -281,6 +281,12 @@ public:
 			int32_t depth[4], const bool contact[4], int32_t corner_adj[4]);
 	void suspension_airborne_loop(Entity &veh, const VehicleTraits &traits, int wheels,
 			int32_t growth, int32_t corner_adj[4]);
+	// 3c. The bike's own airborne loop [orig: @0x47B401..0x47B4E6]: no settled or
+	//  crash gate; the corner droop (sink − 100) × −1.5 runs while fwd.z > −0x1000
+	//  or the flight is under 16 ticks, and the rear sink clears inside 500 of a
+	//  500+ front.
+	void suspension_bike_airborne_loop(Entity &veh, const VehicleTraits &traits,
+			int32_t fwd_z16, int32_t corner_adj[2]);
 	// 4. Arming — the seed all three families share [orig:
     //  Entity_ProcessWheeledVehicleSuspension @0x46b1a6..0x46b213; the tank twin
     //  @0x469933..0x46999e; the bike twin @0x468b00..0x468b3b which also EJECTS

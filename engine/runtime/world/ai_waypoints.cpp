@@ -452,9 +452,13 @@ void AiSystem::apply_min_ai_crew_clamp(World &world, Entity &veh,
 // See ai.h — the vehicle-physics AI/parked input staging, one staging for the
 // ground movers whose legs are instruction-equivalent: cveh [orig:
 // Entity_UpdateVehiclePhysics @0x48af00: parked @0x48c002-0x48c02d, AI-driver leg
-// @0x48bc12-0x48c034] and ctan [orig: Entity_UpdateTankVehiclePhysics @0x488AB0:
+// @0x48bc12-0x48c034], ctan [orig: Entity_UpdateTankVehiclePhysics @0x488AB0:
 // AI-driver leg @0x4897DB..0x489C00 (avoid brake @0x489958..0x489B33, boarder
-// hold @0x489B38..0x489BCC), parked @0x489BCE..0x489BF9].
+// hold @0x489B38..0x489BCC), parked @0x489BCE..0x489BF9] and cbik [orig:
+// Entity_UpdateLightVehiclePhysics @0x483FE0: AI-driver leg @0x484DB8..0x4851AC
+// (budget @0x484E40..0x484E7F, steer @0x484F25..0x484F2F, avoid brake
+// @0x484F37..0x485110, boarder hold @0x485115..0x4851AC), parked
+// @0x4851AE..0x4851D9].
 void AiSystem::vehicle_ai_drive(World &world, Entity &veh, const Entity *controller,
                                 const VehicleTraits &traits, VehicleDriveCmd &out) {
     AiEntity *ve = for_handle(veh.handle);
