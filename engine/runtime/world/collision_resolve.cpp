@@ -280,9 +280,17 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     (target_entity->item_attrib & kItemAttribMoveCallback) != 0;
                 if (pass == 0 && is_authority && move_callback)
                     record_movement_callback_contact(source, ch);
+                // A Powerup target takes its pickup callback for a player-class
+                // source on any peer (no authority gate precedes it); a source
+                // without the Player bit takes neither the callback nor the
+                // solid force. [orig: the attrib&2 test @0x4B2FB8, the source
+                //  Flags&0x100 test @0x4B2FBD (the miss @0x4B2FC4 skips the
+                //  fold), Entity_InvokeCollisionCallback @0x4B2FCC]
+                if (pass == 0 && powerup && is_player_class)
+                    record_powerup_contact(source, ch);
                 // Powerup and MoveCB ItemDefs bypass the ordinary solid-force
-                // fold. MoveCB publishes above; the distinct Powerup callback
-                // remains D-COL-8. A fresh CL entry below zeroes accumulated
+                // fold. Both publish above for their consumers (world::Match,
+                // world/powerup.h). A fresh CL entry below zeroes accumulated
                 // ordinary force; mostly-vertical negative force is standing
                 // pressure and is dropped.
                 // [orig: attrib branches @0x4B2F90..0x4B2FF5; force fold
@@ -1246,6 +1254,14 @@ void CollisionWorld::record_movement_callback_contact(EntityHandle source,
         if (contact.source == source && contact.target == target) return;
     }
     movement_callback_contacts_.push_back({source, target});
+}
+
+void CollisionWorld::record_powerup_contact(EntityHandle source, EntityHandle target) {
+    if (!source.valid() || !target.valid()) return;
+    for (const GameplayContact &contact : powerup_contacts_) {
+        if (contact.source == source && contact.target == target) return;
+    }
+    powerup_contacts_.push_back({source, target});
 }
 
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside

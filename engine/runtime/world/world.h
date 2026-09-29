@@ -58,6 +58,7 @@
 #include <runtime/world/round_sim.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/minefield.h>
+#include <runtime/world/powerup.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/waypoint_track.h>
 #include <runtime/world/weapon_table.h>
@@ -472,6 +473,10 @@ struct MissionTables {
     // Simulation::load_ammo_table, beside the weapon table). [orig: g_AmmoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
     AmmoTable ammo;
+    // The powerup.def rows (empty until the mission kernel feeds it; a missing
+    // file leaves `loaded` clear, retail's "Unable to load powerup.def" state).
+    // [orig: PowerUpDef_LoadFromFile @0x443350 from Game_StartMission @0x5256CD]
+    PowerupTable powerups;
     // items.def display names per item type (the def row's `name`), filled by
     // the item-traits sweep once per distinct id so the inspection records can
     // name an entity by its item, not only by its BMS label. Tooling only.
@@ -658,6 +663,9 @@ struct WorldOutbox {
     std::vector<EntityNetworkEvent> entity_events;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
+    // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);
+    // the host tick drains them.
+    std::vector<PowerupGrant> powerup_grants;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_RoundRing @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
