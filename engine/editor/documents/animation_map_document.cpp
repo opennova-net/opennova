@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <base/io/strutil.h>
+#include <editor/documents/source_issue_findings.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/anim_slot_names.h>
 
@@ -313,17 +314,8 @@ std::vector<Diagnostic> validate_animation_maps(const ValidationInput &input, co
 		// was read into, wherever that row is now (source_address; gone: the file): input the
 		// game ignores is dropped on save (a warning, Rewrite drops it); a row the table cannot
 		// hold blocks the file (an error).
-		for (const SourceIssue &issue : document->issues()) {
-			Diagnostic d = make_diagnostic(issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-			                               issue.blocks ? "animation_map.invalid_input" : "animation_map.ignored_input",
-			                               issue.message, document->path(), issue.field);
-			d.line = issue.line;
-			d.record = issue.record;
-			const NodeAddress address = issue.locator.empty() ? NodeAddress() : document->source_address(issue.locator);
-			d.row_id = address.row;
-			d.record_kind = address.row ? kRow : 0;
-			findings.push_back(std::move(d));
-		}
+		source_issue_findings(
+				*document, "animation_map.invalid_input", "animation_map.ignored_input", findings);
 		if (document->blocked()) continue;
 		if (!has_reset(document->rows())) {
 			// On the first row's key, where a row takes the name (its Add anim_reset row fix

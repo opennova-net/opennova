@@ -1,7 +1,7 @@
 // Pins the build (ADR 0046 d8): the routing into the three boot-table archives and the
 // loose set, the validation gate, the content-addressed immutable build directory the
-// engine's own VFS re-mounts, the incremental reuse of unchanged archives, and what a
-// failure leaves behind.
+// engine's own VFS re-mounts, the incremental reuse of unchanged archives, what a
+// failure leaves behind, and the archives' name limit binding only the files they take.
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -213,12 +213,46 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	return 0;
 }
 
+// The archives' 16-character name limit binds only a file the build packs (S13 PR0): a loose
+// one (a video) is copied beside the archives under any name, so a long one builds, and a
+// packed one (a texture) with a long name still blocks the build.
+static int test_long_names_bind_packed_files_only() {
+	Project p("opennova_editor_build_long_names_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const std::string video = "a_long_intro_movie_name.bik";
+	TEST_EXPECT(editor_test::write_text(p.root + "/video/" + video, "BIKi"));
+	const BuildPlan loose = p.plan();
+	if (!loose.ok)
+		for (const Diagnostic &d : loose.diagnostics)
+			std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	TEST_EXPECT(loose.ok);
+	bool listed = false;
+	for (const BuildEntry &entry : loose.loose)
+		listed = listed || entry.logical_name == video;
+	TEST_EXPECT(listed);
+	const BuildReport report = run_build(loose, p.output_root());
+	TEST_EXPECT(report.ok && fs::is_regular_file(fs::path(report.build_dir) / video));
+
+	const std::string texture = "art/a_long_texture_name.tga";
+	TEST_EXPECT(editor_test::write_text(p.root + "/" + texture, "x"));
+	const BuildPlan packed = p.plan();
+	TEST_EXPECT(!packed.ok);
+	std::vector<std::string> too_long;
+	for (const Diagnostic &d : packed.diagnostics)
+		if (d.code == "asset.name.too_long")
+			too_long.push_back(d.asset);
+	TEST_EXPECT(too_long == std::vector<std::string>{ texture });
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_routing();
 	failures += test_empty_project_is_blocked();
 	failures += test_filled_project_builds_and_mounts();
 	failures += test_protected_build_survives_and_archives_are_refused();
+	failures += test_long_names_bind_packed_files_only();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

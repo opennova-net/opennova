@@ -1,6 +1,7 @@
 // Pins the asset registry (ADR 0046 d6): classification (shared with the runtime
 // catalog, plus the editor-only kinds), the scan's exclusions, the import records (an
-// output that is not there, a record whose source is gone: S9c), and the flat-name rules.
+// output that is not there, a record whose source is gone: S9c), and the flat-name rules
+// (the archives' length limit binding only a kind the build packs: S13 PR0).
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -130,10 +131,14 @@ static int test_scan_exclusions_and_diagnostics() {
 	TEST_EXPECT(editor_test::write_text(paths.root + "/a/Same.tga", "x"));
 	TEST_EXPECT(editor_test::write_text(paths.root + "/b/same.TGA", "y"));                    // duplicate name
 	TEST_EXPECT(editor_test::write_text(paths.root + "/textures/a_much_too_long_name.tga", "x")); // too long
+	// A loose kind is copied beside the archives under any name: no finding.
+	TEST_EXPECT(editor_test::write_text(paths.root + "/video/a_much_too_long_intro.bik", "x"));
 	TEST_EXPECT(editor_test::write_text(paths.root + "/notes/readme.docx", "x"));                // unknown kind
 
 	const AssetScan scan = scan_project_assets(paths, doc);
-	TEST_EXPECT(scan.entries.size() == 9);
+	TEST_EXPECT(scan.entries.size() == 10);
+	TEST_EXPECT(scan.find("a_much_too_long_intro.bik") &&
+			scan.find("a_much_too_long_intro.bik")->kind == AssetKind::Video);
 	TEST_EXPECT(scan.find("MAIN.MNU") != nullptr && scan.find("main.mnu")->kind == AssetKind::Menu);
 	TEST_EXPECT(scan.find("main.mnu")->relative_path == "menus/main.mnu");
 	TEST_EXPECT(scan.find("main.mnu")->size_bytes == 7);
@@ -152,7 +157,8 @@ static int test_scan_exclusions_and_diagnostics() {
 	int duplicates = 0, too_long = 0, unknown = 0, output_missing = 0, orphan = 0, other = 0;
 	for (const Diagnostic &d : scan.diagnostics) {
 		if (d.code == "asset.name.duplicate") ++duplicates;
-		else if (d.code == "asset.name.too_long") ++too_long;
+		else if (d.code == "asset.name.too_long" && d.asset == "textures/a_much_too_long_name.tga")
+			++too_long;
 		else if (d.code == "asset.kind.unknown") ++unknown;
 		else if (d.code == "import.output_missing" && d.asset == "ui/logo.png" && d.severity == DiagnosticSeverity::Warning) ++output_missing;
 		else if (d.code == "import.orphan_record" && d.asset == "ui/gone.png.import" && d.severity == DiagnosticSeverity::Warning) ++orphan;

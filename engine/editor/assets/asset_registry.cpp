@@ -11,6 +11,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 
 namespace fs = std::filesystem;
@@ -167,14 +168,18 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 
 	for (size_t i = 0; i < scan.entries.size(); ++i) {
 		const AssetEntry &asset = scan.entries[i];
-		if (asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
+		// The archive's name rules bind only a file the build packs (check_file_name's rule): a
+		// loose kind (a video, a music bank, a config) is copied beside the archives under any
+		// name.
+		const bool packed = route_asset(asset.kind) != ArchiveSlot::Loose;
+		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
 			scan.diagnostics.push_back(make_diagnostic(
 			        DiagnosticSeverity::Error, "asset.name.too_long",
 			        "The file name " + asset.logical_name + " is longer than " +
 			                std::to_string(pff::PFF_NAME_SIZE) +
 			                " characters; the game cannot store it in an archive.",
 			        asset.relative_path));
-		} else if (normalized_logical_name(asset.logical_name).empty()) {
+		} else if (packed && normalized_logical_name(asset.logical_name).empty()) {
 			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
 			                                           "The file name is blank once normalized.",
 			                                           asset.relative_path));
