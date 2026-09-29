@@ -399,6 +399,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
 			consume_value_str(
 					trimmed, tlen, 13, current.disk_function, sizeof(current.disk_function));
 			parsed = 1;
+		} else if (lower_match_key(lower, ll, "powerupdef", 10)) {
+			/* The name lands in def+0x890 and the same arm raises the Powerup
+			   attrib bit [orig: ItemDef_ParseProperty @0x49F698 -- the copy
+			   @0x49F6C4..0x49F6D0, `or [edx+54h],2` @0x49F6D2]. */
+			consume_value_str(
+					trimmed, tlen, 10, current.powerup_def, sizeof(current.powerup_def));
+			current.attrib |= DEF_ITEM_ATTRIB_POWERUP;
+			parsed = 1;
 		} else if (lower_match_key(lower, ll, "input_function", 14)) {
 			consume_value_str(
 					trimmed, tlen, 14, current.input_function, sizeof(current.input_function));

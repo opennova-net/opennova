@@ -100,6 +100,11 @@ const CollisionWorld::Instance *CollisionWorld::live_instance(
     if (it->second.registry_spawn_id != 0 &&
         it->second.registry_spawn_id != entity->registry_spawn_id)
         return nullptr;
+    // A consumed powerup row has its model pointer zeroed until its respawn
+    // restores it, so no bone-collision, bound or trace consumer finds a model
+    // on it [orig: PowerupAction_Pickup `+0x30 = 0` @0x442AE7; PowerupAction_Respawn
+    //  `+0x30 = itemDef+0xF0` @0x442B6B; Entity_ComputeBoneCollisionForce reads +0x30]
+    if (entity->hidden && entity->powerup_def_index >= 0) return nullptr;
     return &it->second;
 }
 
@@ -669,6 +674,7 @@ void CollisionWorld::build_tick_tables(World &world) {
     // into a later tick.
     change_team_contacts_.clear();
     movement_callback_contacts_.clear();
+    powerup_contacts_.clear();
     build_tables(world, true);
 }
 
@@ -683,6 +689,12 @@ std::vector<CollisionWorld::GameplayContact>
 CollisionWorld::take_movement_callback_contacts() {
     std::vector<GameplayContact> contacts;
     contacts.swap(movement_callback_contacts_);
+    return contacts;
+}
+
+std::vector<CollisionWorld::GameplayContact> CollisionWorld::take_powerup_contacts() {
+    std::vector<GameplayContact> contacts;
+    contacts.swap(powerup_contacts_);
     return contacts;
 }
 
