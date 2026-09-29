@@ -431,7 +431,8 @@ void AiSystem::infantry_board_think(AiEntity &e, World &world, int32_t command,
 		//  goal = self @0x4BB2B1..0x4BB2C5 and @0x4BB2CE..0x4BB2E4, radius
 		//  0x7D0000 @0x4BB2D7]
 		bool killed = false;
-		if ((target->flags & kEntityFlagDead) != 0 || !target->alive || target->health <= 0) {
+		// The dead bit alone decides [orig: `test byte [edx+24h],2` @0x4BB211].
+		if (((target->flags | target->engine_flags) & kEntityFlagDead) != 0) {
 			const double dx = io::float_to_fp16_16(self->spawn_position.x) - int64_t(e.pos[0]);
 			const double dy = io::float_to_fp16_16(self->spawn_position.y) - int64_t(e.pos[1]);
 			const double dz =
