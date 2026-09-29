@@ -10,8 +10,9 @@
 // rename (S11c: the window's Fix all); a Fix all merged from them; where a finding takes
 // Problems (nowhere for a required file the project lacks, a catalog finding to its file and
 // record, Files for a file the editor does not open); a missing texture's placeholder, applied
-// over a real session (S11h); and (S12) the places and fixes the findings that named no record
-// or had no fix gained, applied over a real session.
+// over a real session (S11h); (S12) the places and fixes the findings that named no record
+// or had no fix gained, applied over a real session; and (S13 V1) the findings by file and
+// record (FindingsIndex), made again only when the view moves.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -26,6 +27,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/session/findings_index.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -35,21 +37,14 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
 
 namespace {
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 // a.mnu: a button that opens screen B of b.mnu (an ACTION naming that file); b.mnu: that screen.
 const char *const kMenuA =
@@ -1051,8 +1046,48 @@ static int test_locations_and_fixes() {
 	return 0;
 }
 
+// A view's findings by file and by record: a row's are its own and every record's it holds, a
+// nested record's its own; a file with none has none; made again when the revision moves (not
+// before), and for another view.
+static int test_findings_index() {
+	SessionView v;
+	v.revision = 1;
+	const auto on = [](const char *file, NodeId row, NodeId child, const char *code) {
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, code, code, file);
+		d.row_id = row;
+		d.child_id = child;
+		return d;
+	};
+	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "project"),
+	                 on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"),
+	                 on("b.mnu", 5, 0, "other file"), on("a.mnu", 0, 0, "the file"),
+	                 on("a.mnu", 6, 7, "another row")};
+	FindingsIndex index;
+	index.follow(v);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1, 2, 4, 5}));
+	TEST_EXPECT(index.of_file("b.mnu") == std::vector<size_t>({3}));
+	TEST_EXPECT(index.of_file("c.mnu").empty());
+	TEST_EXPECT(index.of_record("a.mnu", 5, 0) == std::vector<size_t>({1, 2}));
+	TEST_EXPECT(index.of_record("a.mnu", 5, 7) == std::vector<size_t>({2}));
+	TEST_EXPECT(index.of_record("a.mnu", 6, 0) == std::vector<size_t>({5}));
+	TEST_EXPECT(index.of_record("a.mnu", 9, 0).empty());
+	// Kept while the view stands; made again once its revision moves, or for another view.
+	v.diagnostics.push_back(on("c.mnu", 1, 0, "later"));
+	index.follow(v);
+	TEST_EXPECT(index.of_file("c.mnu").empty());
+	++v.revision;
+	index.follow(v);
+	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
+	SessionView other = v;
+	other.diagnostics.clear();
+	index.follow(other);
+	TEST_EXPECT(index.of_file("a.mnu").empty());
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_findings_index();
 	failures += test_locations_and_fixes();
 	failures += test_query();
 	failures += test_fixes();

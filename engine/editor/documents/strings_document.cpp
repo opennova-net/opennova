@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <filesystem>
 #include <set>
 
 namespace opennova::editor {
@@ -161,7 +160,7 @@ FieldSchema StringsDocument::field_on(const NodeAddress &address, const FieldSch
 	FieldSchema out = field;
 	const Node *section = row(address.row);
 	if (field.defines == ReferenceKind::TextId && section)
-		out.scope = strutil::to_upper(std::filesystem::path(path()).filename().generic_string()) + "/" + section->name();
+		out.scope = strutil::to_upper(basename_of(path())) + "/" + section->name();
 	return out;
 }
 

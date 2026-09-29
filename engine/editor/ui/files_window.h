@@ -76,7 +76,13 @@ private:
 		size_t warnings = 0;
 	};
 
+	// What the window keeps its caches by: the view's revision, which moves with the scan and
+	// the findings.
+	static uint64_t cache_key(const SessionView &view) { return view.revision; }
 	void refresh(const SessionView &view);
+	// The files the filter matches (their scan indices), found again only when the filter or the
+	// scan moved.
+	const std::vector<size_t> &matching(const SessionView &view);
 	void show_revealed(const SessionView &view);
 	void draw_toolbar(const SessionView &view);
 	void draw_folder(const SessionView &view, const Folder &folder);
@@ -91,11 +97,16 @@ private:
 	NewFilePrompt &new_file_;
 	char filter_[128]{};
 	std::string selected_;
-	// What refresh() makes of the view, kept while its revision stands.
+	// What refresh() makes of the view, kept while its cache key stands; each file's path as the
+	// filter compares it; the files the filter last matched and the filter they matched.
 	const SessionView *view_ = nullptr;
-	uint64_t revision_ = 0;
+	uint64_t key_ = 0;
 	std::vector<Folder> folders_; // [0]: the project's own folder
 	std::unordered_map<std::string, Counts> counts_;
+	std::vector<std::string> compared_;
+	std::string matched_;
+	bool matches_made_ = false;
+	std::vector<size_t> matches_;
 	// The file a menu asked to rename or to list the references of, and the name typed.
 	std::string renaming_;
 	std::string references_;

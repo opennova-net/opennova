@@ -13,13 +13,13 @@
 // the held state, the empty states; a drag or a nudge ends once when the pane stops drawing
 // (the model pane shown, Preview closed) and the hidden pane takes no key. S11a: a frame's
 // Save goes after the frame's edits, and the save
-// shortcuts work while a text field has the keyboard. S11c: the Problems window, pressed
-// with the mouse where a user presses (the filters, the grouping and folding, the fixes and
-// what asks before it acts, a press and its release on the same fix of the same finding, a
-// confirmation following its project and its findings, nothing past its cell in a narrow
-// dock, no Rewrite for a file that does not serialize, a thousand findings clipped, flat and
-// grouped) and the pieces it draws with (ui_kit). S12 D3: the Inspector's Go to (a menu of
-// the places a font through a style variable leads) and its clickable "Referenced by" rows.
+// shortcuts work while a text field has the keyboard. S11c: the Problems window's smoke test,
+// pressed with the mouse where a user presses (its rules are its model's, S13 V1:
+// tests/editor/problems_list_test.cpp), and the pieces it draws with (ui_kit). S12 D3: the
+// Inspector's Go to (a menu of the places a font through a style variable leads) and its
+// clickable "Referenced by" rows. S13 V1: a window a list's part holds is not copyable from the
+// tree (the one clipboard rule, tests/editor/mnu_clipboard_test.cpp). Each group of the
+// editor_ui ctest is a row of its own (main: the group named on the command line).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -495,6 +495,24 @@ void test_menu_window_ui() {
 	CHECK(!only(requests, EditorRequestKind::Paste), "nothing to paste while the clipboard is empty");
 	requests = chord(ImGuiKey_D);
 	CHECK(only(requests, EditorRequestKind::Duplicate) != nullptr, "Ctrl+D duplicates");
+	// INPART, a window the list's scrollbar part holds: not copyable (menu_clipboard's rule, the
+	// canvas's too).
+	NodeAddress in_part;
+	const auto find_in_part = [&](const NodeAddress &record, const Document::Placement &) {
+		if (record.kind == kWindow && menu_test::window_of(*document, record)->name == "INPART")
+			in_part = record;
+		return !in_part.child;
+	};
+	document->walk_records(*document->rows()[0], find_in_part);
+	select_in(v, in_part);
+	ui.frames(2);
+	ui.drain();
+	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) &&
+	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
+	      "a window a part holds: no Copy or Duplicate");
+	select_in(v, back);
+	ui.frames(2);
+	ui.drain();
 	v.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
 	ui.frames();
 	// Where a Paste goes is the window's to say: after the selected window among its siblings.
@@ -1422,16 +1440,15 @@ std::vector<std::string> listed(Ui &ui) {
 	return out;
 }
 
-// The Problems window over problems_view, driven by the mouse where a user presses and by
-// ids where the harness allows: grouped by kind at first, a group of notes alone folded
-// (S11e); the severity toggles, the text, the scope and the grouping change what it lists; a
-// group's header folds it away; a click on a required file's row opens nothing and shows
-// every fix (a second click folds it back), one on a catalog finding opens its record at the
-// field; a required file's Fix creates it, its More lists the others, a Use fix among them
-// waiting for Apply; the Required files group's Fix all asks (Cancel raises nothing, Apply
-// one Create naming every role); the summary's buttons ask and raise one request each; an
-// optional file's note has its fixes too.
-void test_problems_window_ui() {
+// The Problems window drawn from its model (ProblemsList; its rules are
+// tests/editor/problems_list_test.cpp's), driven by the mouse where a user presses: grouped by
+// kind at first, the stylesheets' notes folded, the counts and the summary; a click on a
+// catalog finding opens its record at the field; a required file's Fix raises its Create; the
+// Required files group's Fix all asks first and Apply raises one Create naming every role; a
+// Use fix from More waits for Apply too. Then a thousand findings in fifty catalogs: only the
+// lines that show are drawn and only their fixes asked; scrolled to the middle, a click opens
+// the finding under the mouse, and one expanded there leaves the line after it right under it.
+void test_problems_smoke() {
 	using List = std::vector<std::string>;
 	editor_test::TempProjectDir dir("opennova_editor_ui_problems_test");
 	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
@@ -1439,587 +1456,96 @@ void test_problems_window_ui() {
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.focus("Problems");
+	ui.away();
 	ui.drain();
 	CHECK(ui.windows.pending_requests() == 0, "drawing Problems raises nothing");
 	const ImGuiID window = Ui::window_id("Problems");
-	const auto pick = [&](const char *combo, const char *choice) {
-		ui.activate(item_id(window, {combo}));
-		ui.activate(item_id(ImHashStr("##Combo_00"), {choice}));
-	};
-
-	// First grouped by kind, the stylesheet's note alone in its group, folded away.
-	CHECK(in_order(logged_frame(ui), {"Required files (2 errors)", kGametext, kMainMenu, "Catalogs (1 error)", "Alpha:",
-	                                  "Menus (1 warning)", "Bravo:", "Stylesheets (1 info)"}) &&
-	              listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Bravo:"}),
-	      "grouped by kind, the group of notes alone folded");
-	pick("Group", "None");
-	CHECK(listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Bravo:", "Charlie:"}), "every finding, errors first");
 	std::string text = logged_frame(ui);
 	CHECK(in_order(text, {"Errors 3", "Warnings 1", "Info 1", "5 of 5"}), "the counts, every finding's");
 	CHECK(text.find("The game cannot start: 2 required files are missing.") != std::string::npos, "the summary");
-	CHECK(text.find("items.def:12 - Marker - type") != std::string::npos, "where a finding is");
-	CHECK(text.find("Create gametext.bin") != std::string::npos, "a required file's first fix");
+	CHECK(in_order(text, {"Required files (2 errors)", kGametext, kMainMenu, "Catalogs (1 error)",
+	                      "Alpha:", "Menus (1 warning)", "Bravo:", "Stylesheets (1 info)"}) &&
+	              listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Bravo:"}),
+	      "grouped by kind, the group of notes alone folded");
 
-	// Each severity hidden and shown again; the counts stay every finding's.
-	ui.activate(item_id(window, {"###errors"}));
-	CHECK(listed(ui) == List({"Bravo:", "Charlie:"}), "the errors hidden");
-	CHECK(in_order(logged_frame(ui), {"Errors 3", "2 of 5"}), "2 of 5");
-	ui.activate(item_id(window, {"###errors"}));
-	ui.activate(item_id(window, {"###warnings"}));
-	CHECK(listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Charlie:"}), "the warnings hidden");
-	ui.activate(item_id(window, {"###warnings"}));
-	ui.activate(item_id(window, {"###infos"}));
-	CHECK(listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Bravo:"}), "the info hidden");
-	ui.activate(item_id(window, {"###infos"}));
-
-	// The text, typed into the filter (without case, over the file too); cleared again.
-	ImGui::ActivateItemByID(item_id(window, {"##filter"}));
-	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
-	ui.frames(2);
-	CHECK(ImGui::GetIO().WantTextInput, "the filter has the keyboard");
-	ImGui::GetIO().AddInputCharactersUTF8("ITEMS.def");
-	ui.frames(2);
-	CHECK(listed(ui) == List({"Alpha:"}), "the text over the file, without case");
-	ui.key(ImGuiMod_Ctrl, true);
-	ui.key(ImGuiKey_A, true);
-	ui.key(ImGuiKey_A, false);
-	ui.key(ImGuiMod_Ctrl, false);
-	ui.key(ImGuiKey_Backspace, true);
-	ui.key(ImGuiKey_Backspace, false);
-	ImGui::ClearActiveID();
-	ui.frames(2);
-	CHECK(listed(ui).size() == 5, "the text cleared: every finding");
-
-	// The scope: the active menu's, the open menus', the project's.
-	pick("Scope", "Active file");
-	CHECK(listed(ui) == List({"Bravo:"}), "the active file's");
-	pick("Scope", "Open files");
-	CHECK(listed(ui) == List({"Bravo:", "Charlie:"}), "the open files'");
-	pick("Scope", "Project");
-	CHECK(listed(ui).size() == 5, "the project's");
-
-	// The grouping: a header per file (the project's own findings first), then per kind; a
-	// group of notes alone (b.mnu's, the stylesheets') starts folded. A click on a group's
-	// header folds it away, keeping the header; another opens it again.
-	pick("Group", "File");
-	CHECK(in_order(logged_frame(ui), {"Project (2 errors)", kGametext, kMainMenu, "defs/items.def (1 error)", "Alpha:",
-	                                  "menus/a.mnu (1 warning)", "Bravo:", "menus/b.mnu (1 info)"}) &&
-	              listed(ui).size() == 4,
-	      "grouped by file");
-	pick("Group", "Kind");
-	CHECK(in_order(logged_frame(ui), {"Required files (2 errors)", kGametext, kMainMenu, "Catalogs (1 error)", "Alpha:",
-	                                  "Menus (1 warning)", "Bravo:", "Stylesheets (1 info)"}),
-	      "grouped by kind");
-	ui.click(problems_lines().at(0, 2));
-	ui.away();
-	CHECK(logged_frame(ui).find("Required files (2 errors)") != std::string::npos &&
-	              listed(ui) == List({"Alpha:", "Bravo:"}),
-	      "a folded group hides its rows");
-	ui.click(problems_lines().at(0, 2));
-	ui.away();
-	CHECK(listed(ui).size() == 4, "unfolded again");
-	// The stylesheets' group unfolded (its header the eighth line): it stays open.
-	ui.click(problems_lines().at(7, 2));
-	ui.away();
-	CHECK(listed(ui).size() == 5, "a group of notes unfolded");
-
-	// The Required files group's Fix all (the header's line) asks first: Cancel raises nothing,
-	// Apply one Create naming every role. The other groups, a finding each with no fix, have
-	// none.
-	CHECK(ui.drain().empty(), "folding raises nothing");
+	// The catalog finding (the fifth line: after two headers and the required files) opens its
+	// record at the field.
+	ui.click(problems_lines().at(4, 2));
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *opened = one(requests, EditorRequestKind::OpenDocument);
+	CHECK(opened && opened->path == "defs/items.def" &&
+	              opened->edit.address == (NodeAddress{4, 2, 0}) && opened->edit.field == "type",
+	      "a catalog finding opens its record at the field");
+	// A required file's Fix creates it.
+	ui.click(problems_lines().fix(1));
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::CreateMissing) &&
+	              requests[0].names == List({"gametext"}),
+	      "a required file's Fix");
+	// The group's Fix all asks; Apply raises one Create naming every role.
 	ui.click(problems_lines().fix(0));
 	ui.frames(2);
 	CHECK(confirmation() && ui.drain().empty(), "Fix all asks first");
-	text = logged_frame(ui);
-	CHECK(text.find("Create 2 files: gametext.bin, main.mnu.") != std::string::npos &&
-	              text.find("cannot be undone with Undo") != std::string::npos,
+	ui.away();
+	CHECK(logged_frame(ui).find("Create 2 files: gametext.bin, main.mnu.") != std::string::npos,
 	      "saying what it will do");
-	CHECK(count_of(text, "Fix all") == 1, "the other groups have no Fix all");
-	ui.click(confirmation_button(true));
-	ui.frames(2);
-	CHECK(!confirmation() && ui.drain().empty(), "Cancel raises nothing");
-	ui.click(problems_lines().fix(0));
-	ui.frames(2);
 	ui.click(confirmation_button(false));
-	std::vector<EditorRequest> requests = ui.drain();
+	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext", "main_menu"}),
 	      "Apply: one Create naming every role");
 	ui.frames(2);
 	CHECK(!confirmation(), "and the confirmation closes");
-	pick("Group", "None");
-
-	// A click on a required file's row opens nothing: it is selected, every fix shown with
-	// what it does, and its code; a second click folds it back. One on the catalog finding
-	// opens its record at the field.
-	ui.click(problems_lines().at(0, 2));
-	CHECK(ui.drain().empty(), "a required file's row opens nothing");
-	ui.away();
-	text = logged_frame(ui);
-	CHECK(in_order(text, {kGametext, "Create gametext.bin", "Import gametext.bin from the game data...",
-	                      "Use spare.bin as gametext.bin", "Renames spare.bin to gametext.bin.", "requirement.missing"}),
-	      "the selected row: every fix with what it does, and its code");
-	ui.click(problems_lines().at(0, 2));
-	ui.away();
-	CHECK(logged_frame(ui).find("requirement.missing") == std::string::npos, "a second click folds it back");
-	ui.click(problems_lines().at(2, 2));
-	requests = ui.drain();
-	const EditorRequest *opened = one(requests, EditorRequestKind::OpenDocument);
-	CHECK(opened && opened->path == "defs/items.def" && opened->edit.address == (NodeAddress{4, 2, 0}) && opened->edit.field == "type",
-	      "a catalog finding opens its record at the field");
-	ui.click(problems_lines().at(2, 2));
-	ui.drain();
-
-	// A required file's Fix creates it; its More lists every fix; a Use fix waits for Apply.
-	ui.click(problems_lines().fix(0));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}),
-	      "a required file's Fix creates it");
-	ui.click(problems_lines().more(0, "Create gametext.bin"));
-	text = logged_frame(ui);
-	CHECK(text.find("Import gametext.bin from the game data...") != std::string::npos &&
-	              text.find("Use spare.bin as gametext.bin") != std::string::npos,
-	      "More lists Import and Use");
+	// More lists gametext's fixes; its Use fix waits for Apply, which renames spare.bin.
+	ui.click(problems_lines().more(1, "Create gametext.bin"));
 	ui.activate(popup_item(item_id(window, {"more"}), "Use spare.bin as gametext.bin"));
 	CHECK(confirmation() && ui.drain().empty(), "a Use fix waits for Apply");
-	ui.away();
-	CHECK(logged_frame(ui).find("Renames spare.bin to gametext.bin.") != std::string::npos, "saying what it renames");
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::AssignRequirement) && requests[0].path == "strings/spare.bin" &&
 	              requests[0].text == "gametext",
 	      "Apply renames it");
-
-	// The summary's Fix alls: one Create for what factories make, one import list for what
-	// only the game data has (cmap.mnu), each asking first.
-	v.requirements.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
-	v.requirements.required_missing = 3;
-	v.retail_files = {"cmap.mnu", "gametext.bin"};
-	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	CHECK(in_order(logged_frame(ui), {"The game cannot start: 3 required files are missing.", "Create 2",
-	                                  "Import 1 from the game data..."}),
-	      "the summary's Fix alls");
-	const ImGuiID summary = item_id(window, {v.project_root.c_str(), "required"});
-	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::CreateMissing)), {"###fix"}));
-	CHECK(confirmation() && ui.drain().empty(), "the summary's Create asks first");
-	ui.click(confirmation_button(false));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext", "main_menu"}),
-	      "one Create for every file a factory makes");
-	ui.frames(2);
-	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::PreviewRetailImport)), {"###fix"}));
-	ui.click(confirmation_button(false));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PreviewRetailImport) && requests[0].names == List({"cmap.mnu"}),
-	      "one import list for what the game data has");
-
-	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
-	v.requirements.rows.push_back(missing_row("brand_style", "brand.mns", AssetKind::MenuStyle, false));
-	Diagnostic optional = make_diagnostic(DiagnosticSeverity::Info, "requirement.optional_missing",
-	                                      "Optional file brand.mns is not in the project.");
-	optional.role = "brand_style";
-	optional.target = "brand.mns";
-	v.diagnostics.push_back(optional);
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	// Errors (the three required files and the catalog's), the warning, then the notes.
-	CHECK(in_order(logged_frame(ui), {"Charlie:", "Optional file brand.mns", "Create brand.mns"}), "the optional file's note");
-	ui.drain();
-	ui.click(problems_lines().fix(6));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"brand_style"}),
-	      "an optional file's Fix creates it");
 	CHECK(ui.windows.pending_requests() == 0, "nothing else");
-}
 
-// S11e: a group of notes alone starts folded (the stylesheets'); once a warning joins it (a
-// line-ending change made outside the editor, then Refresh) it opens again, and stays open
-// when it holds notes alone again. A group the user folded (the menus') stays folded when a
-// warning joins it.
-void test_problems_auto_fold() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_fold");
-	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	ui.away();
-	ui.drain();
-	const auto shows = [&](const char *words) { return logged_frame(ui).find(words) != std::string::npos; };
-	CHECK(shows("Stylesheets (1 info)") && !shows("Charlie:"), "the stylesheets' notes folded away");
-
-	// A warning joins the stylesheets: the group folded for its notes opens.
-	v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.line_ending",
-	                                        "Delta: its line ends changed.", "menus/b.mns"));
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	CHECK(shows("Delta:") && shows("Charlie:"), "a warning opens the group folded for its notes");
-	// The warning gone: its notes stay in sight.
-	v.diagnostics.pop_back();
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	CHECK(shows("Stylesheets (1 info)") && shows("Charlie:"), "notes alone again: it stays open");
-
-	// The menus' group (its header the sixth line) folded by the user: a warning joining it
-	// leaves it folded.
-	ui.click(problems_lines().at(5, 2));
-	ui.away();
-	CHECK(shows("Menus (1 warning)") && !shows("Bravo:"), "the user folded the menus' group");
-	v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "menu.test", "Echo: another warning.",
-	                                        "menus/a.mnu"));
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	CHECK(shows("Menus (2 warnings)") && !shows("Bravo:") && !shows("Echo:"), "a group the user folded stays folded");
-	CHECK(ui.drain().empty(), "folding raises nothing");
-}
-
-// A press and its release must be on the same fix of the same finding: a finding before it
-// that goes between them leaves another under the mouse, and its fix is not applied; a fix
-// that changes between them is not applied either. Findings alike but for their record are
-// kept apart: the one clicked stays the selected one when one before it goes.
-void test_problems_presses() {
-	using List = std::vector<std::string>;
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_presses");
-	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	// Three required files, each with a Create: lines 0, 1 and 2.
-	v.requirements.rows.push_back(missing_row("menu_style", "menu_style.mns", AssetKind::MenuStyle));
-	v.requirements.required_missing = 3;
-	Diagnostic font = make_diagnostic(DiagnosticSeverity::Error, "reference.missing", "Kilo: the font is missing.",
-	                                  "menus/a.mnu", "font.name");
-	font.reference = ReferenceKind::Font;
-	font.target = "Custom.fnt";
-	Diagnostic unnamed = make_diagnostic(DiagnosticSeverity::Error, "catalog.name_empty", "Lima: a record has no name.",
-	                                     "defs/items.def", "name");
-	unnamed.row_id = 10;
-	unnamed.record_kind = 2;
-	Diagnostic unnamed_too = unnamed;
-	unnamed_too.row_id = 11;
-	Diagnostic unnamed_three = unnamed;
-	unnamed_three.row_id = 12;
-	const std::vector<Diagnostic> findings = {missing_finding("gametext", "gametext.bin"), missing_finding("main_menu", "main.mnu"),
-	                                          missing_finding("menu_style", "menu_style.mns"), unnamed, unnamed_too,
-	                                          unnamed_three, font};
-	v.diagnostics = findings;
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	problems_grouping(ui, "None"); // the lines below are the flat list's
-	ui.away();
-	ui.drain();
-
-	// Pressed on main.mnu's Create (line 1); gametext's finding goes (menu_style.mns's slides
-	// under the mouse); released: nothing is applied.
-	ProblemsLines lines = problems_lines();
-	const ImVec2 press = lines.fix(1);
-	ui.mouse(press.x, press.y);
-	ui.button(true);
-	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
-	ui.frames(2);
-	ui.button(false);
-	ui.frames();
-	CHECK(ui.drain().empty(), "a release over another finding applies nothing");
-	// Released where it was pressed, the finding staying: its fix.
-	ui.click(problems_lines().fix(0));
-	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"main_menu"}), "a whole click applies");
-
-	// The font's Create pressed; the game data gains the font (its first fix becomes Import);
-	// released: nothing is applied, and a new click takes the Import.
-	v.diagnostics = findings;
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	CHECK(in_order(logged_frame(ui), {"Kilo:", "Create Custom.fnt"}), "the font's Create");
-	lines = problems_lines();
-	const ImVec2 create = lines.fix(6);
-	ui.mouse(create.x, create.y);
-	ui.button(true);
-	v.retail_files = {"Custom.fnt", "gametext.bin"};
-	++v.revision;
-	ui.frames(2);
-	ui.button(false);
-	ui.frames();
-	CHECK(ui.drain().empty(), "a release on a fix that changed since the press applies nothing");
-	ui.click(problems_lines().fix(6));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PreviewRetailImport) && requests[0].names == List({"Custom.fnt"}),
-	      "a new click applies the fix it shows");
-
-	// Three findings alike but for their record: the second one clicked opens its own record.
-	// Made again without the first, the one clicked is the selected (expanded) one: now the
-	// first of the two, its code before either one's place.
-	ui.away();
-	ui.click(problems_lines().at(4, 2));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].edit.address.row == 11, "the second one's record");
-	v.diagnostics = findings;
-	v.diagnostics.erase(v.diagnostics.begin() + 3);
-	++v.revision;
-	ui.frames(2);
-	ui.away();
-	const std::string text = logged_frame(ui);
-	const size_t code = text.find("catalog.name_empty");
-	CHECK(code != std::string::npos && code < text.find("items.def - name") && count_of(text, "catalog.name_empty") == 1,
-	      "the one clicked stays selected when one before it goes");
-	CHECK(ui.windows.pending_requests() == 0, "nothing else");
-}
-
-// A confirmation belongs to the project it was asked in and follows the findings it is for:
-// another project closes it; a finding gone while it is open changes what it says, a release
-// on Apply pressed before the change applies nothing, and Apply then raises the new list.
-// More's list follows its finding when others go, and closes when it goes.
-void test_problems_confirmation_follows() {
-	using List = std::vector<std::string>;
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_follow");
-	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	ui.away();
-	ui.drain();
-	const ImGuiID window = Ui::window_id("Problems");
-	ui.activate(item_id(window, {"Group"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"Kind"}));
-
-	// Another project while it is open: it closes, nothing it held is raised, and it stays
-	// closed when that project is the one open again.
-	ui.click(problems_lines().fix(0));
-	ui.frames(2);
-	CHECK(confirmation() != nullptr, "the Fix all asks");
-	const std::string root = v.project_root;
-	v.project_root = "C:/mods/Another";
-	++v.revision;
-	ui.frames(2);
-	CHECK(!confirmation(), "another project closes it");
-	v.project_root = root;
-	++v.revision;
-	ui.frames(2);
-	CHECK(!confirmation() && ui.drain().empty(), "and nothing it held is raised");
-
-	// A finding gone while it is open (main.mnu made elsewhere): the confirmation says the new
-	// list; Apply pressed before the change applies nothing on its release; pressed again, the
-	// new list alone.
-	ui.click(problems_lines().fix(0));
-	ui.frames(2);
-	ui.away();
-	CHECK(logged_frame(ui).find("Create 2 files: gametext.bin, main.mnu.") != std::string::npos, "both files");
-	const ImVec2 pressed = confirmation_button(false);
-	ui.mouse(pressed.x, pressed.y);
-	ui.button(true);
-	v.diagnostics.erase(v.diagnostics.begin() + 1);
-	v.requirements.rows[1].state = RequirementState::Present;
-	v.requirements.required_missing = 1;
-	++v.revision;
-	ui.frames(2);
-	ui.button(false);
-	ui.frames();
-	CHECK(ui.drain().empty(), "Apply pressed on the old list applies nothing");
-	ui.away();
-	std::string text = logged_frame(ui);
-	CHECK(text.find("Create gametext.bin. It starts as placeholder content") != std::string::npos &&
-	              text.find("gametext.bin, main.mnu") == std::string::npos &&
-	              text.find("Changed while open") != std::string::npos,
-	      "it says the new list, and that it changed");
-	ui.click(confirmation_button(false));
-	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}), "then the new list alone");
-
-	// More's list follows its finding: main.mnu's again, gametext's gone before it.
-	v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	v.revision = 100;
-	ui.activate(item_id(window, {"Group"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"None"}));
-	ui.frames(2);
-	ui.click(problems_lines().more(1, "Create main.mnu"));
-	ui.away();
-	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") != std::string::npos, "More lists main.mnu's fixes");
-	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
-	ui.frames(2);
-	text = logged_frame(ui);
-	CHECK(text.find("Use a.mnu as main.mnu") != std::string::npos && text.find("Use spare.bin") == std::string::npos,
-	      "still main.mnu's when a finding before it goes");
-	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
-	ui.frames(2);
-	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") == std::string::npos, "closed when its finding goes");
-	CHECK(ui.windows.pending_requests() == 0, "nothing else");
-}
-
-// In a narrow dock nothing runs past its cell: a Fix column too narrow for a fix and More
-// has one Fix... that lists every fix; an expanded finding's buttons, details and code stay
-// in the message's column; a group's Fix all stays in its cell. (Problems spans the bottom:
-// a window 480 wide makes it narrow.)
-void test_problems_narrow() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_problems_narrow");
-	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	Ui ui;
-	ImGui::GetIO().DisplaySize = ImVec2(480.0f, 700.0f);
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	problems_grouping(ui, "None"); // the lines below are the flat list's
-	ui.away();
-	ui.drain();
-	const auto within = [&](const char *what) {
-		const ImGuiTable *table = problems_lines().table;
-		CHECK(table != nullptr, what);
-		if (!table) return;
-		for (int column = 1; column < 4; ++column)
-			CHECK(table->Columns[column].ContentMaxXUnfrozen <= table->Columns[column].WorkMaxX + 0.5f, what);
-	};
-	std::string text = logged_frame(ui);
-	CHECK(text.find("Fix...") != std::string::npos && text.find("More") == std::string::npos, "one Fix... where both do not fit");
-	within("a line's controls stay in their cells");
-	ui.click(problems_lines().fix(0));
-	ui.away();
-	text = logged_frame(ui);
-	CHECK(text.find("Import gametext.bin from the game data...") != std::string::npos &&
-	              text.find("Use spare.bin as gametext.bin") != std::string::npos,
-	      "Fix... lists every fix");
-	// A click outside the list closes it, pressing nothing under it; the next one selects.
-	ui.click(problems_lines().at(0, 2));
-	ui.away();
-	text = logged_frame(ui);
-	CHECK(text.find("Import gametext.bin from the game data...") == std::string::npos &&
-	              text.find("requirement.missing") == std::string::npos && ui.drain().empty(),
-	      "a click outside closes the list");
-	ui.click(problems_lines().at(0, 2));
-	ui.away();
-	ui.frames(2);
-	CHECK(logged_frame(ui).find("requirement.missing") != std::string::npos, "the finding expanded");
-	within("the expanded finding stays in its cells");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Group"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"Kind"}));
-	ui.away();
-	ui.frames(2);
-	within("a group's Fix all stays in its cell");
-	CHECK(ui.drain().empty(), "nothing raised");
-}
-
-// A Rewrite is offered for input a rewrite drops, but not for a file that does not serialize
-// (its own finding says so, and the Save would be refused); Only fixable lists what has a fix.
-void test_problems_rewrite_hidden() {
-	SessionView v;
-	v.revision = 1;
-	v.project_open = true;
-	v.project_root = "C:/mods/Rewrite";
-	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
-	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
-	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Foxtrot: a key the game ignores.",
-	                                 "defs/ammo.def")};
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	ui.away();
-	std::string text = logged_frame(ui);
-	CHECK(in_order(text, {"Echo:", "Delta:", "Foxtrot:", "Rewrite ammo.def"}) && text.find("Rewrite weapon.def") == std::string::npos,
-	      "no Rewrite of a file that does not serialize");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Only fixable"}));
-	ui.away();
-	text = logged_frame(ui);
-	CHECK(text.find("Foxtrot:") != std::string::npos && text.find("Delta:") == std::string::npos &&
-	              text.find("Echo:") == std::string::npos && text.find("1 of 3") != std::string::npos,
-	      "Only fixable: the finding a fix is offered for");
-	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
-}
-
-// S11h: two textures the project lacks, a model's and a particle's, under one group: its Fix
-// all says their placeholders in one line (the game's missing-texture checkerboard) and Apply
-// raises a CreateFile for each, in the order the findings show.
-void test_problems_placeholders() {
-	SessionView v;
-	v.revision = 1;
-	v.project_open = true;
-	v.project_root = "C:/mods/Placeholders";
-	Diagnostic skin = make_diagnostic(DiagnosticSeverity::Error, "reference.missing", "Golf: the texture 'skin.tga'.",
-	                                  "models/tank.3di", "name");
-	skin.reference = ReferenceKind::Texture;
-	skin.target = "skin.tga";
-	skin.material_type = 0;
-	Diagnostic puff = make_diagnostic(DiagnosticSeverity::Error, "reference.missing", "Hotel: the texture 'puff.tga'.",
-	                                  "fx.ptl", "graphic1");
-	puff.reference = ReferenceKind::Texture;
-	puff.target = "puff.tga";
-	v.diagnostics = {skin, puff};
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	ui.away();
-	ui.drain();
-	ui.click(problems_lines().fix(0)); // the Missing references group's Fix all
-	ui.frames(2);
-	ui.away();
-	CHECK(confirmation() != nullptr &&
-	              logged_frame(ui).find("Create 2 placeholder textures: skin.tga, puff.tga. Each is the checkerboard the game "
-	                                    "draws for a missing texture") != std::string::npos,
-	      "the Fix all says the placeholders in one line");
-	ui.click(confirmation_button(false));
-	const std::vector<EditorRequest> requests = ui.drain();
-	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::CreateFile && requests[0].path == "skin.tga" &&
-	              requests[0].text == "texture" && requests[1].kind == EditorRequestKind::CreateFile &&
-	              requests[1].path == "puff.tga",
-	      "Apply: a CreateFile for each");
-}
-
-// A thousand findings in fifty catalogs: only the lines that show are drawn and only their
-// fixes asked (fixes_for is never run for a line not drawn). Scrolled to the middle, a click
-// opens the finding under the mouse; one expanded there, the lines after it sit right under
-// it and those before where they were. Grouped by file (a header before each fifty's twenty),
-// a click in the middle opens the finding under it too.
-void test_problems_many() {
-	SessionView v;
-	v.revision = 1;
-	v.project_open = true;
-	v.project_root = "C:/mods/Many";
+	// A thousand findings, one list.
+	SessionView many;
+	many.revision = 1;
+	many.project_open = true;
+	many.project_root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
 		const std::string name = "f" + std::to_string(file) + ".def";
-		v.scan.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+		many.scan.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
 		                               "Finding " + std::to_string(i) + ": a line the game ignores.",
-		                               v.scan.entries[i / 20].relative_path, "name");
+		                               many.scan.entries[i / 20].relative_path, "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
 		d.line = i + 1;
-		v.diagnostics.push_back(d);
+		many.diagnostics.push_back(d);
 	}
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.frames(6);
-	ui.focus("Problems");
-	problems_grouping(ui, "None"); // the lines below are the flat list's
+	ui.windows.set_view(&many);
+	ui.frames(3);
+	problems_grouping(ui, "None");
 	ui.away();
 	ui.drain();
-	const auto *window = dynamic_cast<const ProblemsWindow *>(find_window(ui.windows.pass(), "Problems"));
-	CHECK(window != nullptr, "the Problems window");
-	if (!window) return;
+	const auto *problems =
+	        dynamic_cast<const ProblemsWindow *>(find_window(ui.windows.pass(), "Problems"));
+	CHECK(problems != nullptr, "the Problems window");
+	if (!problems) return;
 	const auto rows_drawn = [] {
 		const ImGuiTable *table = problems_lines().table;
 		return table ? table->CurrentRow + 1 : -1;
 	};
-	const auto opened_row = [&](const std::vector<EditorRequest> &requests) -> NodeId {
-		const EditorRequest *open = one(requests, EditorRequestKind::OpenDocument);
+	const auto opened_row = [&](const std::vector<EditorRequest> &raised) -> NodeId {
+		const EditorRequest *open = one(raised, EditorRequestKind::OpenDocument);
 		return open ? open->edit.address.row : 0;
 	};
 	CHECK(rows_drawn() > 0 && rows_drawn() < 60, "a thousand findings: only the lines that show");
-	CHECK(window->fixes_asked() > 0 && window->fixes_asked() < 60, "and only their fixes asked");
-
-	// Scrolled to line 500: a click on the fourth line shown opens finding 503.
+	CHECK(problems->fixes_asked() > 0 && problems->fixes_asked() < 60,
+	      "and only their fixes asked");
+	// Scrolled to line 500: a click on line 503 opens finding 503; the line after the expanded
+	// one sits right under it.
 	ProblemsLines lines = problems_lines();
 	ImGui::SetScrollY(lines.table->InnerWindow, 500.0f * lines.line);
 	ui.frames(3);
@@ -2030,38 +1556,11 @@ void test_problems_many() {
 	ui.away();
 	ui.frames(3);
 	CHECK(rows_drawn() > 0 && rows_drawn() < 60, "the expanded one whole, the rest still clipped");
-	// Finding 503 expanded: the list grows by what it adds, and the line after it sits right
-	// under it.
 	lines = problems_lines();
 	const float extra = lines.table->InnerWindow->ContentSize.y - flat;
 	CHECK(extra > 0.0f, "the expanded line is taller");
 	ui.click(ImVec2(lines.at(504, 2).x, lines.y(504) + extra));
 	CHECK(opened_row(ui.drain()) == 505, "the line after the expanded one, right under it");
-	ui.away();
-	ui.frames(3);
-	lines = problems_lines();
-	ui.click(lines.at(502, 2));
-	CHECK(opened_row(ui.drain()) == 503, "a line before it, where it was");
-	ui.away();
-	ui.click(problems_lines().at(502, 2));
-	ui.drain(); // folded back
-
-	// Grouped by file: 21 lines a catalog (its header, its twenty findings).
-	ui.activate(item_id(Ui::window_id("Problems"), {"Group"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"File"}));
-	ui.away();
-	ui.frames(2);
-	lines = problems_lines();
-	ImGui::SetScrollY(lines.table->InnerWindow, 525.0f * lines.line);
-	ui.frames(3);
-	CHECK(rows_drawn() > 0 && rows_drawn() < 60, "grouped: only the lines that show");
-	lines = problems_lines();
-	ui.click(lines.at(527, 2)); // catalog 25's second finding: 25 * 20 + 1
-	CHECK(opened_row(ui.drain()) == 502, "grouped: the finding under the mouse");
-	ui.away();
-	CHECK(window->fixes_asked() < 120, "fixes asked only for the lines drawn");
-	const std::string text = logged_frame(ui);
-	CHECK(text.find("Finding 0:") != std::string::npos && text.find("Finding 999:") != std::string::npos, "a log lists every one");
 	ui.frames(2);
 	CHECK(ui.windows.pending_requests() == 0, "drawing them raises nothing");
 }
@@ -2372,36 +1871,73 @@ void test_numeric_go_to_ui() {
 	CHECK(logged_frame(ui).find("Pick") == std::string::npos, "no picker for a number");
 }
 
-int main() {
-	run_workspace_tests();
-	run_marker_tests();
-	run_bounds_tests();
-	run_field_widget_tests();
-	run_reference_picker_tests();
-	run_find_tests();
-	run_rename_tests();
+namespace {
+
+// The groups of the editor_ui ctest, each a row of its own (tests/CMakeLists.txt names them):
+// a failure names its group, and the rows run in parallel.
+struct Group {
+	const char *name;
+	void (*run)();
+};
+void run_menu_tests() {
 	test_requests_round_trip();
 	test_menu_tree_model();
-	test_inspector_plan();
 	test_menu_window_ui();
-	test_inspector_ui();
 	test_actions_after_edits();
+}
+void run_inspector_tests() {
+	test_inspector_plan();
+	test_inspector_ui();
+	test_go_to_ui();
+	test_numeric_go_to_ui();
+}
+void run_preview_tests() {
 	test_preview_window_ui();
 	test_preview_gestures_end();
 	test_preview_several_windows_ui();
+}
+void run_styles_tests() {
 	test_styles_window_ui();
 	test_styles_lines_listed();
-	test_go_to_ui();
-	test_numeric_go_to_ui();
+}
+void run_problems_tests() {
 	test_ui_kit();
-	test_problems_window_ui();
-	test_problems_auto_fold();
-	test_problems_presses();
-	test_problems_confirmation_follows();
-	test_problems_narrow();
-	test_problems_rewrite_hidden();
-	test_problems_placeholders();
-	test_problems_many();
-	if (editor_ui_test::g_failures == 0) std::printf("editor_ui: all tests passed\n");
+	test_problems_smoke();
+}
+constexpr Group kGroups[] = {
+	{"workspace", run_workspace_tests},   {"markers", run_marker_tests},
+	{"bounds", run_bounds_tests},         {"field_widgets", run_field_widget_tests},
+	{"reference_picker", run_reference_picker_tests}, {"find", run_find_tests},
+	{"rename", run_rename_tests},         {"menu", run_menu_tests},
+	{"inspector", run_inspector_tests},   {"preview", run_preview_tests},
+	{"styles", run_styles_tests},         {"problems", run_problems_tests},
+};
+
+} // namespace
+
+// `editor_ui_test <group>` runs one group; `--groups <names...>` checks the names are exactly
+// the groups (the ctest list and this table stay one list); no argument runs every group.
+int main(int argc, char **argv) {
+	if (argc >= 2 && std::strcmp(argv[1], "--groups") == 0) {
+		std::vector<std::string> named(argv + 2, argv + argc), known;
+		for (const Group &group : kGroups) known.push_back(group.name);
+		std::sort(named.begin(), named.end());
+		std::sort(known.begin(), known.end());
+		if (named == known) return 0;
+		std::printf("FAIL: the ctest rows and the groups differ\n");
+		return 1;
+	}
+	bool ran = false;
+	for (const Group &group : kGroups) {
+		if (argc >= 2 && std::strcmp(argv[1], group.name) != 0) continue;
+		group.run();
+		ran = true;
+	}
+	if (!ran) {
+		std::printf("FAIL: no group named %s\n", argv[1]);
+		return 1;
+	}
+	if (editor_ui_test::g_failures == 0)
+		std::printf("editor_ui %s: all tests passed\n", argc >= 2 ? argv[1] : "(every group)");
 	return editor_ui_test::g_failures == 0 ? 0 : 1;
 }

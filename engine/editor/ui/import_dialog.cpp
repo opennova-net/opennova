@@ -8,6 +8,8 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/model/field_text.h>
+#include <editor/project/project_files.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -28,8 +30,6 @@ std::string joined(const std::vector<std::string> &words) {
 	return out;
 }
 
-std::string counted(size_t n, const char *noun) { return std::to_string(n) + " " + noun + (n == 1 ? "" : "s"); }
-
 // What wanted a file: the file naming it, then the record and the field.
 std::string need_words(const ImportNeed &need) {
 	std::string out = need.file;
@@ -46,7 +46,7 @@ std::string origin_words(const ImportPlanRow &row, bool short_place) {
 	if (short_place && !row.source.retail && row.source.entry.empty() && !path.parent_path().filename().empty())
 		place = "the folder " + path.parent_path().filename().string();
 	else if (short_place && !row.source.retail && !row.source.entry.empty())
-		place = "the archive " + path.filename().string();
+		place = "the archive " + basename_of(row.source.path);
 	return row.made_from.empty() ? place : "made from " + row.made_from + ", " + place;
 }
 
@@ -143,8 +143,9 @@ void ImportDialog::draw(EditorHost &host) {
 	for (size_t i = 0; i < checked_.size(); ++i) {
 		if (!checked_[i]) continue;
 		++count;
-		const std::string why_not = blocked.empty() ? cannot_take(preview.plan, i) : std::string();
-		if (!why_not.empty()) blocked = preview.plan.rows[i].name + " cannot be imported: " + why_not + " Uncheck it to import the rest.";
+		if (blocked.empty() && i < why_not_.size() && !why_not_[i].empty())
+			blocked = preview.plan.rows[i].name + " cannot be imported: " + why_not_[i] +
+			          " Uncheck it to import the rest.";
 	}
 	// Unsaved edits hold nothing here: an import that would write over an edited file asks to
 	// save it first (the session's unsaved prompt), one that writes over none goes ahead.
@@ -179,10 +180,12 @@ void ImportDialog::draw(EditorHost &host) {
 void ImportDialog::take(const SessionView::ImportPreview &preview) {
 	serial_ = preview.serial;
 	const ImportPlan &plan = preview.plan;
+	why_not_.assign(plan.rows.size(), std::string());
+	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = cannot_take(plan, i);
 	checked_.assign(plan.rows.size(), false);
 	for (size_t i = 0; i < plan.rows.size(); ++i)
 		checked_[i] = plan.rows[i].selected &&
-		              (plan.rows[i].state == State::Selected || cannot_take(plan, i).empty());
+		              (plan.rows[i].state == State::Selected || why_not_[i].empty());
 	chosen_.assign(preview.choices.size(), false);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
 		chosen_[i] = std::find(preview.roots.begin(), preview.roots.end(), preview.choices[i]) != preview.roots.end();
@@ -204,8 +207,8 @@ void ImportDialog::choose(EditorHost &host, const SessionView::ImportPreview &pr
 // A listing's files to choose from, with a filter: each change plans the import again.
 void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPreview &preview) {
 	const ImportSource &first = preview.choices.front();
-	const std::string from = first.retail ? std::string("the game data")
-	                                      : "the archive " + std::filesystem::path(first.path).filename().string();
+	const std::string from =
+	        first.retail ? std::string("the game data") : "the archive " + basename_of(first.path);
 	ImGui::TextWrapped("Choose the files to import from %s:", from.c_str());
 	const float em = ImGui::GetFontSize();
 	ui_kit::WrapRow controls;
@@ -255,7 +258,7 @@ void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPrevi
 		}
 		ui_kit::tooltip(shown != name ? name : std::string());
 		ImGui::TableNextColumn();
-		ui_kit::clipped_text(source.retail ? "game data" : std::filesystem::path(source.path).filename().string(), source.path);
+		ui_kit::clipped_text(source.retail ? "game data" : basename_of(source.path), source.path);
 		ImGui::PopID();
 	}
 	ImGui::EndTable();
@@ -310,7 +313,7 @@ void ImportDialog::draw_plan(EditorHost &host, const SessionView::ImportPreview 
 		const ImportPlanRow &row = plan.rows[index];
 		// A dependency the project cannot take stays unchecked; a chosen one can only be
 		// unchecked (Import waits while it is checked).
-		const std::string why_not = cannot_take(plan, index);
+		const std::string &why_not = why_not_[index];
 		const bool can = why_not.empty() || (row.state == State::Selected && checked_[index]);
 		ImGui::PushID(static_cast<int>(index));
 		ImGui::TableNextRow();

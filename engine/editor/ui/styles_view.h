@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+
+#include <editor/session/findings_index.h>
 #include <editor/ui/editor_host.h>
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/reference_picker.h>
@@ -19,13 +22,19 @@ class MnsDocument;
 // scrolled into view. Comment and blank lines stay in the file, unlisted.
 // Adding goes after the selected line when the table lists it, else at the end of the file;
 // Up and Down to the place of the listed line before or after it; a locked line does not
-// move, duplicate or go.
+// move, duplicate or go. What a value is used as (a colour, a font, a texture) is the
+// document's (MnsDocument::style_value_use).
 class StylesView {
 public:
 	void draw(EditorHost &host, const MnsDocument &document);
 
 private:
+	// What the view keeps the document's answers by: the view's revision, which moves with the
+	// graph (the menus' uses) and the findings.
+	static uint64_t cache_key(const SessionView &view) { return view.revision; }
+
 	char filter_[128]{};
+	FindingsIndex findings_; // the stylesheet's Problems rows, for what the game makes of it
 	ReferencePicker picker_;
 	RecordReveal reveal_;
 };

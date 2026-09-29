@@ -11,6 +11,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/material_texture.h>
 
@@ -26,10 +27,6 @@ constexpr size_t kUseFilesMax = 8;
 
 // Every fix acts on the files, which the editor's Undo does not reach: its detail says so.
 constexpr const char *kNotUndoable = " It cannot be undone with Undo.";
-
-std::string file_name(const std::string &path) { return fs::path(path).filename().generic_string(); }
-
-std::string counted(size_t n, const char *noun) { return std::to_string(n) + " " + noun + (n == 1 ? "" : "s"); }
 
 // The game install's spelling of a file it has (view.retail_files is sorted by the
 // normalized name), or "" when it has none of that name.
@@ -115,7 +112,7 @@ void requirement_fixes(const Diagnostic &d, const SessionView &view, bool plan, 
 ProblemFix rename_fix(const std::string &path) {
 	EditorRequest request = make_request(EditorRequestKind::ShowInFiles, path);
 	request.flag = true;
-	return {"Rename " + file_name(path) + "...",
+	return {"Rename " + basename_of(path) + "...",
 	        "Shows " + path + " in Files and asks its new name; the rename rewrites every file that names it.", request,
 	        false};
 }
@@ -351,14 +348,14 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		const bool open = std::any_of(view.documents.begin(), view.documents.end(),
 		                              [&d](const auto &document) { return document && document->path() == d.asset; });
 		if (open)
-			out.push_back({"Reload " + file_name(d.asset),
+			out.push_back({"Reload " + basename_of(d.asset),
 			               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
 			               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
 			               make_request(EditorRequestKind::ReloadDocument, d.asset), false});
 	} else if (d.code == "import.output_missing" && !d.asset.empty()) {
 		EditorRequest again = make_request(EditorRequestKind::Reimport, d.asset);
 		again.flag = true;
-		out.push_back({"Import " + file_name(d.asset) + " again",
+		out.push_back({"Import " + basename_of(d.asset) + " again",
 		               "Runs the importer on " + d.asset + " again, which makes the files it lists." + kNotUndoable, again,
 		               true});
 	} else if (const char *does = rewrite_does(d.code); does && !d.asset.empty() && !index.unserializable.count(d.asset)) {
@@ -366,7 +363,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		for (const auto &document : view.documents)
 			if (document && document->path() == d.asset && document->dirty()) detail += " Its unsaved edits are saved with it.";
 		detail += kNotUndoable;
-		out.push_back({"Rewrite " + file_name(d.asset), detail, make_request(EditorRequestKind::Save, d.asset), true});
+		out.push_back({"Rewrite " + basename_of(d.asset), detail, make_request(EditorRequestKind::Save, d.asset), true});
 	}
 }
 

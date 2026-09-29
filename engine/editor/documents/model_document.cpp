@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cstring>
-#include <filesystem>
 
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>
 
@@ -342,7 +342,7 @@ FieldSchema ModelDocument::field_on(const NodeAddress &address, const FieldSchem
 		out.material_type = static_cast<const ThreediMaterialTexture *>(record.data)->type;
 	// A user point is looked up on the model an item names by its file (the item's graphic).
 	if (out.defines == ReferenceKind::UserPoint)
-		out.scope = strutil::to_upper(std::filesystem::path(path()).filename().generic_string());
+		out.scope = strutil::to_upper(basename_of(path()));
 	return out;
 }
 

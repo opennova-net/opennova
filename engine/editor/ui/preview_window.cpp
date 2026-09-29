@@ -1,9 +1,9 @@
 #include <editor/ui/preview_window.h>
 
-#include <filesystem>
 #include <string>
 
 #include <editor/model/document.h>
+#include <editor/project/project_files.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -17,8 +17,6 @@ const Document *open_document(const SessionView &view, const std::string &path) 
 		if (document && document->path() == path) return document.get();
 	return nullptr;
 }
-
-std::string file_name(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
 } // namespace
 
@@ -78,7 +76,7 @@ void PreviewWindow::end_frame() {
 void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
 	const std::string &path = family == PreviewFamily::Menu ? view.menu_preview.path : view.model_preview.path;
 	const Document *document = open_document(view, path);
-	std::string text = file_name(path);
+	std::string text = basename_of(path);
 	if (family == PreviewFamily::Menu) {
 		if (const Node *screen = document ? document->row(view.menu_preview.screen) : nullptr)
 			text += " - " + screen->name();

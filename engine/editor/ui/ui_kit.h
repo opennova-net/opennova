@@ -86,8 +86,15 @@ bool fitted_button(const std::string &label, const char *id, float width);
 // when one is given, else the whole text when it was cut.
 void clipped_text(const std::string &text, const std::string &tip = std::string());
 // The tooltip of the item just drawn (a disabled one too), wrapped: a finding's message and
-// a fix's detail run long. None for "".
+// a fix's detail run long. None for "". Every window's hover text goes through it.
 void tooltip(const std::string &text);
+// Whether the item just drawn shows its tooltip now: hovered, a disabled one too.
+bool tooltip_hovered();
+// The same tooltip, its text made only while it shows (`make()` returns it): a row's tip that
+// would cost a string a frame (a file's path, kind, size and counts).
+template <class Make> void tooltip_lazy(Make &&make) {
+	if (tooltip_hovered()) tooltip(make());
+}
 
 // The colours of a finding's severity (Problems' marks, Output's lines).
 ImVec4 severity_color(DiagnosticSeverity severity);

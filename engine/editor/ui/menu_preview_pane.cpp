@@ -241,7 +241,7 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 		if (ImGui::Selectable("Device size", zoom_ == Zoom::Device)) zoom_ = Zoom::Device;
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ctrl+wheel over the picture zooms about the mouse.");
+	ui_kit::tooltip("Ctrl+wheel over the picture zooms about the mouse.");
 	if (zoom_ == Zoom::Device) {
 		int size[2] = {options.width, options.height};
 		row.next(unit * 8.0f);
@@ -250,15 +250,15 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 			options.width = std::clamp(size[0], 1, kMaxDevice);
 			options.height = std::clamp(size[1], 1, kMaxDevice);
 		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("The screen size in pixels to draw at; each axis scales on its own, as in the game.");
+		ui_kit::tooltip("The screen size in pixels to draw at; each axis scales on its own, as in "
+		                "the game.");
 	}
 	row.next(ui_kit::checkbox_width("Snap"));
 	ImGui::Checkbox("Snap", &snap_);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Drags snap to a grid of 8 units. Hold Alt to place freely.");
+	ui_kit::tooltip("Drags snap to a grid of 8 units. Hold Alt to place freely.");
 	row.next(ui_kit::checkbox_width("Show hidden"));
 	ImGui::Checkbox("Show hidden", &options.show_hidden);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Draw every window, including those the screen starts hidden.");
+	ui_kit::tooltip("Draw every window, including those the screen starts hidden.");
 
 	// The selected window held in a state, as the game's mouse and keyboard would leave it.
 	ImGui::BeginDisabled(!selected.child);
@@ -277,13 +277,12 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 			}
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip("Show the selected window under the mouse, pressed or disabled.");
+	ui_kit::tooltip("Show the selected window under the mouse, pressed or disabled.");
 	const mnu::WindowType type = window_type(document, selected);
 	auto hold = [&](const char *label, bool &flag, const char *tip) {
 		row.next(ui_kit::checkbox_width(label));
 		if (ImGui::Checkbox(label, &flag)) options.force_window = selected.child;
-		if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
+		ui_kit::tooltip(tip);
 	};
 	if (checkable(type)) hold("Checked", options.checked, "Show the selected window checked.");
 	if (has_list(type)) hold("Open list", options.popup_open, "Show the selected combo box with its list open.");
@@ -295,9 +294,9 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 	ImGui::BeginDisabled(frame.windows.empty() || document.blocked());
 	if (ImGui::Button("Arrange")) ImGui::OpenPopup("arrange");
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip("Align the selected windows to the primary one (the last selected), spread them evenly, "
-		                  "or change their drawing order. Shift+click or drag a box to select several.");
+	ui_kit::tooltip("Align the selected windows to the primary one (the last selected), spread "
+	                "them evenly, or change their drawing order. Shift+click or drag a box to "
+	                "select several.");
 	if (ImGui::BeginPopup("arrange")) {
 		arrange_items_(frame);
 		ImGui::EndPopup();
@@ -308,7 +307,7 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 	ImGui::AlignTextToFramePadding();
 	if (mouse_on_picture_) ImGui::Text("x %d, y %d", mouse_design_x_, mouse_design_y_);
 	else ImGui::TextDisabled("x -, y -");
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Where the mouse is on the picture, in the menu's 800 x 600 units.");
+	ui_kit::tooltip("Where the mouse is on the picture, in the menu's 800 x 600 units.");
 	if (options != before) viewport_->set_options(options);
 }
 
@@ -351,15 +350,17 @@ void MenuPreviewPane::draw() {
 	frame.current = frame.compiler && frame.state && viewport_->shown_revision() == document.revision();
 	// The primary window of this screen (or the window that holds the primary record), and
 	// every selected one.
-	if (view.active_document == document.path()) {
+	const bool active = view.active_document == document.path();
+	if (active) {
 		frame.selected = window_holding(document, view.selection, screen.id);
 		frame.windows = selected_windows(document, view.selection, view.selected, screen.id);
-		// Copy, Cut and Duplicate take the session's selection as it is: only while it is
-		// windows of this screen (the menu view's rule), never a list row or the screen.
-		frame.only_windows = !view.selected.empty();
-		for (const NodeAddress &record : view.selected)
-			frame.only_windows = frame.only_windows && record.kind == kWindowKind && record.child && record.row == screen.id;
 	}
+	// The menu view's clipboard rule: Copy, Cut and Duplicate only while the selection is
+	// windows the tree lists (never a list row, the screen or a window a part holds), a Paste
+	// after the primary's window.
+	const std::vector<NodeAddress> none;
+	frame.clipboard = menu_clipboard(document, screen.id, active ? view.selection : NodeAddress(),
+	                                 active ? view.selected : none, !view.clipboard.empty());
 	follow_selection_(document, frame.selected);
 	toolbar_(frame);
 	// The compiler's notes on the screen as it stands (ADR 0046 S9j2): what configure
@@ -447,24 +448,17 @@ void MenuPreviewPane::keys_(const Frame &frame) {
 	}
 }
 
-// Copy, Cut and Duplicate take the selection while it is only windows of this screen; a
-// Paste goes after the primary window among its siblings (the menu view's rule), else at
-// the end of the screen's root windows.
+// Copy, Cut, Duplicate and Paste as the menu clipboard's rule says (menu_clipboard).
 void MenuPreviewPane::clipboard_(const Frame &frame, EditorRequestKind kind) {
 	const MnuDocument &document = *frame.document;
+	const MenuClipboard &board = frame.clipboard;
 	if (kind != EditorRequestKind::Paste) {
-		if (frame.only_windows) window_requests::clipboard(host_, document, kind);
+		if (board.copy) window_requests::clipboard(host_, document, kind);
 		return;
 	}
-	if (host_.view().clipboard.empty()) return;
-	NodeId parent = 0;
-	size_t position = SIZE_MAX;
-	Document::Placement at;
-	if (frame.selected.child && document.placement(frame.selected, at)) {
-		parent = at.owner.child;
-		position = at.index + 1;
-	}
-	window_requests::paste(host_, document, {frame.screen->id, kWindowKind, 0}, parent, position);
+	if (board.paste)
+		window_requests::paste(host_, document, board.paste_row, board.paste_parent,
+		                       board.paste_position);
 }
 
 void MenuPreviewPane::arrange_items_(const Frame &frame) {
@@ -473,8 +467,8 @@ void MenuPreviewPane::arrange_items_(const Frame &frame) {
 		if (op == ArrangeOp::DistributeHorizontally || op == ArrangeOp::BringToFront) ImGui::Separator();
 		const bool enabled = frame.current && count >= arrange_minimum(op) && !frame.document->blocked();
 		if (ImGui::MenuItem(arrange_op_label(op), nullptr, false, enabled)) arrange_(frame, op);
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !enabled)
-			ImGui::SetTooltip("Select %d windows or more.", int(arrange_minimum(op)));
+		if (!enabled)
+			ui_kit::tooltip("Select " + std::to_string(arrange_minimum(op)) + " windows or more.");
 	}
 }
 
@@ -751,10 +745,10 @@ void MenuPreviewPane::canvas_(const Frame &frame, float height) {
 	}
 	if (ImGui::BeginPopup("canvas_menu")) {
 		const bool editable_now = !document.blocked();
-		const bool copyable = frame.only_windows && editable_now;
+		const bool copyable = frame.clipboard.copy && editable_now;
 		if (ImGui::MenuItem("Cut", "Ctrl+X", false, copyable)) clipboard_(frame, EditorRequestKind::Cut);
 		if (ImGui::MenuItem("Copy", "Ctrl+C", false, copyable)) clipboard_(frame, EditorRequestKind::Copy);
-		if (ImGui::MenuItem("Paste", "Ctrl+V", false, editable_now && !host_.view().clipboard.empty()))
+		if (ImGui::MenuItem("Paste", "Ctrl+V", false, editable_now && frame.clipboard.paste))
 			clipboard_(frame, EditorRequestKind::Paste);
 		if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, copyable)) clipboard_(frame, EditorRequestKind::Duplicate);
 		ImGui::Separator();

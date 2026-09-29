@@ -187,4 +187,27 @@ bool field_mixed(const Document &document, const std::vector<NodeAddress> &recor
 	return false;
 }
 
+std::vector<Edit> flag_bit_edits(const Document &document, const std::vector<NodeAddress> &records,
+                                 const FieldSchema &field, int64_t bit, bool on) {
+	const auto bits_of = [&](const NodeAddress &record, int64_t fallback) {
+		Value own;
+		const int64_t *number =
+		        document.get(record, field.id, own) ? std::get_if<int64_t>(&own) : nullptr;
+		return number ? *number : fallback;
+	};
+	const int64_t first = records.empty() ? 0 : bits_of(records.front(), 0);
+	std::vector<Edit> out;
+	for (const NodeAddress &record : records) {
+		const int64_t was = bits_of(record, first);
+		int64_t result = on ? was | bit : was & ~bit;
+		if (field.type == FieldType::Integer) result = int32_t(uint32_t(result));
+		Edit change;
+		change.address = record;
+		change.field = field.id;
+		change.value = result;
+		out.push_back(std::move(change));
+	}
+	return out;
+}
+
 } // namespace opennova::editor

@@ -111,10 +111,14 @@ void NewFilePrompt::draw(EditorHost &host) {
 
 // The tree of the scan's folders and each file's findings, made again when the view moves.
 void FilesWindow::refresh(const SessionView &view) {
-	if (view_ == &view && revision_ == view.revision && !folders_.empty()) return;
+	if (view_ == &view && key_ == cache_key(view) && !folders_.empty()) return;
 	view_ = &view;
-	revision_ = view.revision;
+	key_ = cache_key(view);
 	folders_.assign(1, Folder());
+	compared_.clear();
+	for (const AssetEntry &entry : view.scan.entries)
+		compared_.push_back(normalized_logical_name(entry.relative_path));
+	matches_made_ = false;
 	std::map<std::string, size_t> index;
 	for (size_t i = 0; i < view.scan.entries.size(); ++i) {
 		const AssetEntry &entry = view.scan.entries[i];
@@ -146,6 +150,22 @@ void FilesWindow::refresh(const SessionView &view) {
 		else if (d.severity == DiagnosticSeverity::Warning) ++counts.warnings;
 	}
 	if (!entry_at(view, selected_)) selected_.clear();
+}
+
+const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
+	if (filter_[0] == '\0') {
+		matches_.clear();
+		matches_made_ = false;
+		return matches_;
+	}
+	if (matches_made_ && matched_ == filter_) return matches_;
+	matches_made_ = true;
+	matched_ = filter_;
+	matches_.clear();
+	const std::string wanted = normalized_logical_name(filter_);
+	for (size_t i = 0; i < view.scan.entries.size() && i < compared_.size(); ++i)
+		if (compared_[i].find(wanted) != std::string::npos) matches_.push_back(i);
+	return matches_;
 }
 
 void FilesWindow::follow_reveal(const SessionView &view) {
@@ -199,13 +219,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (!selected_.empty() && ImGui::Shortcut(ImGuiKey_F2))
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
 	// A filter lists the files it matches flat.
-	std::vector<size_t> matches;
-	if (filter_[0] != '\0') {
-		const std::string wanted = normalized_logical_name(filter_);
-		for (size_t i = 0; i < v.scan.entries.size(); ++i)
-			if (normalized_logical_name(v.scan.entries[i].relative_path).find(wanted) != std::string::npos)
-				matches.push_back(i);
-	}
+	const std::vector<size_t> &matches = matching(v);
 	if (v.scan.entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
 	} else if (filter_[0] != '\0' && matches.empty()) {
@@ -357,13 +371,19 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		open_to_.clear();
 	}
 	draw_file_menu(view, entry);
-	std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " + size_text(entry.size_bytes);
-	if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
-	if (dirty) tip += "\nUnsaved changes";
-	if (counts.errors || counts.warnings)
-		tip += "\n" + std::to_string(counts.errors) + (counts.errors == 1 ? " error, " : " errors, ") +
-		       std::to_string(counts.warnings) + (counts.warnings == 1 ? " warning" : " warnings") + ": see Problems";
-	ui_kit::tooltip(tip);
+	// Its path, kind and size, made only while its tooltip shows.
+	ui_kit::tooltip_lazy([&] {
+		std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " +
+		                  size_text(entry.size_bytes);
+		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
+		if (dirty) tip += "\nUnsaved changes";
+		if (counts.errors || counts.warnings)
+			tip += "\n" + std::to_string(counts.errors) +
+			       (counts.errors == 1 ? " error, " : " errors, ") +
+			       std::to_string(counts.warnings) +
+			       (counts.warnings == 1 ? " warning" : " warnings") + ": see Problems";
+		return tip;
+	});
 	ImGui::SameLine(0.0f, 0.0f);
 	if (in_tree) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetTreeNodeToLabelSpacing());
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;

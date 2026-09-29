@@ -1,10 +1,10 @@
 #include <editor/ui/editor_windows.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <memory>
 #include <utility>
 
+#include <editor/project/project_files.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/output_window.h>
@@ -72,7 +72,7 @@ bool names_the_active_document(EditorRequestKind kind) {
 
 // What waits on the unsaved prompt, in the words of the menu that asked for it.
 std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
-	const std::string file = std::filesystem::path(prompt.target).filename().generic_string();
+	const std::string file = basename_of(prompt.target);
 	switch (prompt.action) {
 	case EditorRequestKind::CloseDocument: return "Close " + file;
 	case EditorRequestKind::ReloadDocument: return "Reload " + file;

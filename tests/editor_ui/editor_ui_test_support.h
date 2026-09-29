@@ -27,6 +27,7 @@
 #include <editor/ui/model_preview_pane.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
+#include "../editor/test_platform.h"
 #include "common/file_io.h"
 #include "common/test_paths.h"
 
@@ -312,16 +313,7 @@ inline void select_in(SessionView &v, const NodeAddress &address) {
 	++v.revision;
 }
 
-// A process seam that starts nothing: a session the tests drive never plays.
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 // No file at all: a headless menu render with nothing mounted.
 struct NoFiles : opennova::FileSource {

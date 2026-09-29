@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include <base/io/strutil.h>
 #include <editor/documents/model_document.h>
 #include <editor/model/edit.h>
 #include <editor/session/project_session.h>
@@ -15,22 +16,16 @@ namespace opennova::editor {
 namespace {
 
 using io::JsonValue;
-
-JsonValue num(double value) { return JsonValue::make_number(value); }
-JsonValue str(const std::string &value) { return JsonValue::make_string(value); }
+using io::json_number;
+using io::json_string;
+using io::json_whole_in;
 
 JsonValue vec3(const PreviewVec3 &v) {
 	JsonValue out = JsonValue::make_array();
-	out.push(num(v.x));
-	out.push(num(v.y));
-	out.push(num(v.z));
+	out.push(json_number(v.x));
+	out.push(json_number(v.y));
+	out.push(json_number(v.z));
 	return out;
-}
-
-std::string fixed_name(const char *name, size_t size) {
-	size_t length = 0;
-	while (length < size && name[length]) ++length;
-	return std::string(name, length);
 }
 
 bool ready(const ModelPreviewSnapshot &snapshot) {
@@ -41,15 +36,6 @@ bool ready(const ModelPreviewSnapshot &snapshot) {
 bool current(const ModelPreviewSnapshot &snapshot) {
 	return ready(snapshot) && snapshot.document && snapshot.model->shown_path() == snapshot.document->path() &&
 	       snapshot.model->shown_revision() == snapshot.document->revision();
-}
-
-// A JSON number as a whole number in [lo, hi], its fraction dropped; false for anything else.
-bool whole_in(const JsonValue &json, double lo, double hi, int64_t &out) {
-	if (!json.is_number()) return false;
-	const double whole = std::trunc(json.number);
-	if (!(whole >= lo && whole <= hi)) return false;
-	out = int64_t(whole);
-	return true;
 }
 
 } // namespace
@@ -70,24 +56,26 @@ NodeAddress model_preview_record(const ModelPreviewSnapshot &snapshot, const Mod
 io::JsonValue model_preview_to_json(const ModelPreviewSnapshot &snapshot) {
 	JsonValue out = JsonValue::make_object();
 	const ModelPreviewModel &model = *snapshot.model;
-	out.set("status", str(model_preview_status_token(snapshot.status)));
-	out.set("message", str(model_preview_status_message(snapshot.status, model.detail())));
-	out.set("detail", str(model.detail()));
+	out.set("status", json_string(model_preview_status_token(snapshot.status)));
+	out.set("message", json_string(model_preview_status_message(snapshot.status, model.detail())));
+	out.set("detail", json_string(model.detail()));
 	// The model document, or the clip or table an animation preview follows.
-	out.set("path", str(snapshot.document ? snapshot.document->path() : model.animating() ? model.shown_path() : std::string()));
-	out.set("revision", num(snapshot.document ? double(snapshot.document->revision()) : 0.0));
-	out.set("shown_revision", num(double(model.shown_revision())));
+	out.set("path", json_string(snapshot.document ? snapshot.document->path() : model.animating() ? model.shown_path() : std::string()));
+	out.set("revision",
+	        json_number(snapshot.document ? double(snapshot.document->revision()) : 0.0));
+	out.set("shown_revision", json_number(double(model.shown_revision())));
 	out.set("current", JsonValue::make_bool(current(snapshot)));
-	out.set("builds", num(double(model.builds())));
+	out.set("builds", json_number(double(model.builds())));
 	JsonValue device = JsonValue::make_object();
-	device.set("width", num(model.device_width()));
-	device.set("height", num(model.device_height()));
+	device.set("width", json_number(model.device_width()));
+	device.set("height", json_number(model.device_height()));
 	out.set("device", device);
 	const ModelPreviewOptions &held = model.options();
 	JsonValue options = JsonValue::make_object();
-	options.set("lod", held.lod < 0 ? str("auto") : num(held.lod));
+	options.set("lod", held.lod < 0 ? json_string("auto") : json_number(held.lod));
 	JsonValue registers_held = JsonValue::make_object();
-	for (const auto &entry : held.ctrl) registers_held.set(entry.first, num(double(entry.second)));
+	for (const auto &entry : held.ctrl)
+		registers_held.set(entry.first, json_number(double(entry.second)));
 	options.set("ctrl", registers_held);
 	options.set("playing", JsonValue::make_bool(held.playing));
 	JsonValue marks = JsonValue::make_object();
@@ -97,16 +85,16 @@ io::JsonValue model_preview_to_json(const ModelPreviewSnapshot &snapshot) {
 	options.set("overlays", marks);
 	out.set("options", options);
 	JsonValue clock = JsonValue::make_object();
-	clock.set("time_ms", num(double(model.clock_ms())));
+	clock.set("time_ms", json_number(double(model.clock_ms())));
 	clock.set("playing", JsonValue::make_bool(held.playing));
 	out.set("clock", clock);
 	const OrbitCamera &camera = model.camera();
 	JsonValue view = JsonValue::make_object();
 	view.set("target", vec3(camera.target));
-	view.set("yaw", num(camera.yaw));
-	view.set("pitch", num(camera.pitch));
-	view.set("distance", num(camera.distance));
-	view.set("fov", num(OrbitCamera::fov_horizontal_degrees()));
+	view.set("yaw", json_number(camera.yaw));
+	view.set("pitch", json_number(camera.pitch));
+	view.set("distance", json_number(camera.distance));
+	view.set("fov", json_number(OrbitCamera::fov_horizontal_degrees()));
 	out.set("camera", view);
 	JsonValue lod = JsonValue::make_object();
 	JsonValue registers = JsonValue::make_array();
@@ -114,52 +102,52 @@ io::JsonValue model_preview_to_json(const ModelPreviewSnapshot &snapshot) {
 	if (ready(snapshot)) {
 		const threedi::Threedi3di3 &shown = *model.model();
 		int32_t projected = 0;
-		lod.set("shown", num(model.lod()));
-		lod.set("auto", num(model.auto_lod(&projected)));
-		lod.set("count", num(double(shown.lod_count)));
-		lod.set("projected_px", num(projected / 65536.0));
+		lod.set("shown", json_number(model.lod()));
+		lod.set("auto", json_number(model.auto_lod(&projected)));
+		lod.set("count", json_number(double(shown.lod_count)));
+		lod.set("projected_px", json_number(projected / 65536.0));
 		JsonValue thresholds = JsonValue::make_array();
-		for (size_t i = 0; i < shown.lod_count; ++i) thresholds.push(num(shown.lods[i].lod_threshold));
+		for (size_t i = 0; i < shown.lod_count; ++i) thresholds.push(json_number(shown.lods[i].lod_threshold));
 		lod.set("thresholds", thresholds);
 		PreviewVec3 center;
 		float radius = 0.0f;
 		model_preview_sphere(shown, center, radius);
 		JsonValue sphere = JsonValue::make_object();
 		sphere.set("center", vec3(center));
-		sphere.set("radius", num(radius));
+		sphere.set("radius", json_number(radius));
 		out.set("sphere", sphere);
 		for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
-			const std::string name = fixed_name(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
+			const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 			JsonValue row = JsonValue::make_object();
-			row.set("name", str(name));
+			row.set("name", json_string(name));
 			const auto value = held.ctrl.find(name);
-			row.set("value", num(value == held.ctrl.end() ? 0.0 : double(value->second)));
+			row.set("value", json_number(value == held.ctrl.end() ? 0.0 : double(value->second)));
 			registers.push(row);
 		}
 		for (const ModelOverlay &overlay : model.overlays()) {
 			JsonValue row = JsonValue::make_object();
-			row.set("kind", str(model_overlay_kind_token(overlay.kind)));
-			row.set("index", num(overlay.index));
-			row.set("id", num(double(model_preview_record(snapshot, overlay).child)));
-			row.set("name", str(overlay.name));
-			row.set("part", num(overlay.part));
+			row.set("kind", json_string(model_overlay_kind_token(overlay.kind)));
+			row.set("index", json_number(overlay.index));
+			row.set("id", json_number(double(model_preview_record(snapshot, overlay).child)));
+			row.set("name", json_string(overlay.name));
+			row.set("part", json_number(overlay.part));
 			row.set("position", vec3(overlay.at));
 			float x = 0.0f, y = 0.0f;
 			if (camera.project(overlay.at, model.device_width(), model.device_height(), x, y)) {
 				JsonValue screen = JsonValue::make_array();
-				screen.push(num(x));
-				screen.push(num(y));
+				screen.push(json_number(x));
+				screen.push(json_number(y));
 				row.set("screen", screen);
 			} else {
 				row.set("screen", JsonValue());
 			}
 			if (overlay.has_direction) row.set("direction", vec3(overlay.direction));
 			if (overlay.kind == ModelOverlayKind::Light) {
-				row.set("radius", num(overlay.radius));
-				row.set("cone", num(overlay.cone));
+				row.set("radius", json_number(overlay.radius));
+				row.set("cone", json_number(overlay.cone));
 				char color[8];
 				std::snprintf(color, sizeof(color), "%06X", overlay.color & 0xFFFFFFu);
-				row.set("color", str(color));
+				row.set("color", json_string(color));
 			}
 			overlays.push(row);
 		}
@@ -167,7 +155,7 @@ io::JsonValue model_preview_to_json(const ModelPreviewSnapshot &snapshot) {
 	out.set("lod", lod);
 	out.set("registers", registers);
 	out.set("overlays", overlays);
-	options.set("rig_model", str(held.rig_model));
+	options.set("rig_model", json_string(held.rig_model));
 	out.set("options", options);
 	if (!model.animating()) {
 		out.set("animation", JsonValue());
@@ -175,24 +163,24 @@ io::JsonValue model_preview_to_json(const ModelPreviewSnapshot &snapshot) {
 	}
 	const PreviewRig &rig = model.rig();
 	JsonValue animation = JsonValue::make_object();
-	animation.set("table", str(rig.table));
-	animation.set("clip", str(rig.clip));
-	animation.set("model", str(rig.model));
-	animation.set("source", str(rig.source));
+	animation.set("table", json_string(rig.table));
+	animation.set("clip", json_string(rig.clip));
+	animation.set("model", json_string(rig.model));
+	animation.set("source", json_string(rig.source));
 	animation.set("rig", JsonValue::make_bool(model.skeleton() != nullptr));
-	animation.set("key", str(model.clip_key()));
-	animation.set("variant", num(model.clip_variant()));
-	animation.set("file", str(model.clip_file()));
-	animation.set("ticks", num(model.clip_ticks()));
-	animation.set("frame", num(model.clip_frame()));
-	animation.set("length_ticks", num(model.clip_length_ticks()));
+	animation.set("key", json_string(model.clip_key()));
+	animation.set("variant", json_number(model.clip_variant()));
+	animation.set("file", json_string(model.clip_file()));
+	animation.set("ticks", json_number(model.clip_ticks()));
+	animation.set("frame", json_number(model.clip_frame()));
+	animation.set("length_ticks", json_number(model.clip_length_ticks()));
 	animation.set("loops", JsonValue::make_bool(model.clip_loops()));
 	JsonValue events = JsonValue::make_array();
 	for (const PreviewClipEvent &event : model.clip_events()) {
 		JsonValue row = JsonValue::make_object();
-		row.set("frame", num(event.frame));
-		row.set("tick", num(event.tick));
-		row.set("trigger", num(double(event.trigger)));
+		row.set("frame", json_number(event.frame));
+		row.set("tick", json_number(event.tick));
+		row.set("trigger", json_number(double(event.trigger)));
 		events.push(row);
 	}
 	animation.set("events", events);
@@ -210,10 +198,10 @@ io::JsonValue model_preview_hit_to_json(const ModelPreviewSnapshot &snapshot, fl
 		index = pick_model_overlay(overlays, model.camera(), model.device_width(), model.device_height(), x, y);
 	}
 	const ModelOverlay *hit = index >= 0 ? &overlays[size_t(index)] : nullptr;
-	out.set("kind", str(hit ? model_overlay_kind_token(hit->kind) : ""));
-	out.set("index", num(hit ? hit->index : -1));
-	out.set("id", num(hit ? double(model_preview_record(snapshot, *hit).child) : 0.0));
-	out.set("name", str(hit ? hit->name : std::string()));
+	out.set("kind", json_string(hit ? model_overlay_kind_token(hit->kind) : ""));
+	out.set("index", json_number(hit ? hit->index : -1));
+	out.set("id", json_number(hit ? double(model_preview_record(snapshot, *hit).child) : 0.0));
+	out.set("name", json_string(hit ? hit->name : std::string()));
 	out.set("current", JsonValue::make_bool(current(snapshot)));
 	return out;
 }
@@ -230,14 +218,14 @@ bool model_preview_options_from_json(const io::JsonValue &json, ModelPreviewMode
 			if (value.is_string() && value.string == "auto") {
 				options.lod = -1;
 			} else {
-				if (!whole_in(value, 0.0, 255.0, number)) return false;
+				if (!json_whole_in(value, 0.0, 255.0, number)) return false;
 				options.lod = int(number);
 			}
 		} else if (key == "ctrl") {
 			if (!value.is_object()) return false;
 			options.ctrl.clear();
 			for (const io::JsonMember &held : value.object) {
-				if (!whole_in(held.value, -9007199254740992.0, 9007199254740992.0, number)) return false;
+				if (!json_whole_in(held.value, -9007199254740992.0, 9007199254740992.0, number)) return false;
 				if (number != 0) options.ctrl[held.key] = number;
 			}
 		} else if (key == "playing") {
@@ -258,7 +246,7 @@ bool model_preview_options_from_json(const io::JsonValue &json, ModelPreviewMode
 			if (!value.is_number() || !(value.number >= 0.0)) return false;
 			seek_ms = int64_t(std::min(std::trunc(value.number), double(UINT32_MAX)));
 		} else if (key == "clip_ticks") {
-			if (!whole_in(value, 0.0, double(INT32_MAX), seek_ticks)) return false;
+			if (!json_whole_in(value, 0.0, double(INT32_MAX), seek_ticks)) return false;
 		} else if (key == "rig_model") {
 			if (!value.is_string()) return false;
 			options.rig_model = value.string;
@@ -295,7 +283,7 @@ bool model_preview_camera_from_json(const io::JsonValue &json, ModelPreviewModel
 			if (!value.is_bool()) return false;
 			frame = value.boolean;
 		} else if (key == "width" || key == "height") {
-			if (!whole_in(value, 1.0, 8192.0, key == "width" ? width : height)) return false;
+			if (!json_whole_in(value, 1.0, 8192.0, key == "width" ? width : height)) return false;
 		} else {
 			return false;
 		}

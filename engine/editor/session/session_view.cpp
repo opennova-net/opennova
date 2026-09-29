@@ -27,6 +27,10 @@ std::string editor_window_title(const SessionView &view) {
 	return view.document.title + (unsaved ? " \xE2\x97\x8F - " : " - ") + product;
 }
 
+bool holds(const std::vector<NodeAddress> &selected, const NodeAddress &address) {
+	return std::find(selected.begin(), selected.end(), address) != selected.end();
+}
+
 void SessionView::select_only(const NodeAddress &address) {
 	selection = address;
 	selected.clear();

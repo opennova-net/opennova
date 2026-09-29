@@ -167,8 +167,10 @@ void clipped_text(const std::string &text, const std::string &tip) {
 	tooltip(!tip.empty() ? tip : shown != text ? text : std::string());
 }
 
+bool tooltip_hovered() { return ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled); }
+
 void tooltip(const std::string &text) {
-	if (text.empty() || !ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) return;
+	if (text.empty() || !tooltip_hovered()) return;
 	ImGui::BeginTooltip();
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
 	ImGui::TextUnformatted(text.c_str());

@@ -43,10 +43,6 @@ std::string details(const FieldSchema &field) {
 	return tip;
 }
 
-void item_tip(const std::string &text) {
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ui_kit::tooltip(text);
-}
-
 unsigned channel(float f) { return unsigned(std::clamp(f, 0.0f, 1.0f) * 255.0f + 0.5f); }
 
 int64_t whole(const Value &value) {
@@ -228,7 +224,7 @@ Edited choice(const FieldSchema &field, Value &value, bool mixed) {
 		const bool typable = field.open_choices && !token.empty() && typed_value(field, token, typed_as);
 		if (typable && !known) {
 			if (ImGui::Selectable(("Use \"" + token + "\"").c_str()) || enter) take(typed_as);
-			item_tip("Written as typed: the file takes a value the list does not know.");
+			ui_kit::tooltip("Written as typed: the file takes a value the list does not know.");
 		} else if (enter && (typable || listed.size() == 1)) {
 			take(typable ? typed_as : choice_value(field, *listed.front()));
 		}
@@ -238,13 +234,14 @@ Edited choice(const FieldSchema &field, Value &value, bool mixed) {
 			ImGui::PushID(static_cast<int>(option - field.choices.data()));
 			if (ImGui::Selectable(choice_title(*option).c_str(), current == option) && !out.changed)
 				take(choice_value(field, *option));
-			if (!option->label.empty()) item_tip(option->name.empty() ? "(not written)" : option->name);
+			if (!option->label.empty())
+				ui_kit::tooltip(option->name.empty() ? "(not written)" : option->name);
 			ImGui::PopID();
 		}
 		if (listed.empty() && !(typable && !known)) ImGui::TextDisabled("Nothing matches.");
 		ImGui::EndCombo();
 	}
-	if (current && !current->label.empty()) item_tip(current->name.empty() ? "(not written)" : current->name);
+	if (current && !current->label.empty()) ui_kit::tooltip(current->name.empty() ? "(not written)" : current->name);
 	return out;
 }
 
@@ -346,7 +343,7 @@ Edited group(const std::vector<FieldSchema> &fields, std::vector<Value> &values,
 		ImGui::BeginDisabled(fields[i].read_only);
 		ImGui::SetNextItemWidth(cell);
 		const Edited one = value(fields[i], values[i], true, i < mixed.size() && mixed[i]);
-		item_tip(field_title(fields[i]) + "\n" + details(fields[i]));
+		ui_kit::tooltip_lazy([&] { return field_title(fields[i]) + "\n" + details(fields[i]); });
 		ImGui::EndDisabled();
 		ImGui::PopID();
 		if (one.changed) {

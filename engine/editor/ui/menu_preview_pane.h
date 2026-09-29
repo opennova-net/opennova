@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mnu_clipboard.h>
 #include <editor/model/value.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
@@ -108,7 +109,7 @@ private:
 		const Node *screen = nullptr;
 		NodeAddress selected;             // the primary window of the screen (none: none)
 		std::vector<NodeAddress> windows; // every selected window of the screen, the primary among them
-		bool only_windows = false;        // every selected record is a window of the screen (Copy, Cut, Duplicate)
+		MenuClipboard clipboard;          // what Copy, Cut, Duplicate and Paste take
 		const menu::MenuFrameCompiler *compiler = nullptr;
 		const menu::MenuFrameState *state = nullptr;
 		bool current = false; // the picture shows the document's revision
