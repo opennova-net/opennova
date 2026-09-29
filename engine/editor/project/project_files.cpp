@@ -158,6 +158,10 @@ std::string shown_path(const std::string &path, const std::string &root) {
 	return relative.generic_string();
 }
 
+std::string basename_of(const std::string &path) {
+	return fs::path(path).filename().generic_string();
+}
+
 bool check_file_name(const std::string &name, AssetKind kind, std::string &problem, std::string &message) {
 	if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos) {
 		problem = "name";

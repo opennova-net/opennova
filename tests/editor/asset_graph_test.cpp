@@ -37,6 +37,7 @@
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/mission/mission_mis.h>
 #include <runtime/renderer/material_texture.h>
 
 #include "common/retail_paths.h"
@@ -452,6 +453,12 @@ static int test_native_extractors() {
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
 		TEST_EXPECT(editor_test::write_bytes(root + "/test.bms", bytes));
+		// The same mission in the mission editors' text form (S13 PR0): a mission to the scan,
+		// which the graph does not read (the mission document will), so it is no finding and
+		// names nothing.
+		std::string text;
+		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
+		TEST_EXPECT(editor_test::write_text(root + "/test.mis", text));
 	}
 	// A synthetic model from the fixtures, when the checkout carries them.
 	const fs::path fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
@@ -477,6 +484,7 @@ static int test_native_extractors() {
 	TEST_EXPECT(terrain && graph.resolve(ReferenceKind::Terrain, "island") == ReferenceStatus::Missing);
 	TEST_EXPECT(edge_to(graph, "test.bms", ReferenceKind::Environment, "day"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Environment, "day") == ReferenceStatus::Present);
+	TEST_EXPECT(graph.references_of("test.mis").empty());
 	if (have_model) {
 		bool texture_edge = false;
 		for (const GraphEdge *edge : graph.references_of("armory.3di"))

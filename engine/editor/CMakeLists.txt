@@ -41,6 +41,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/source_issue_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/validation_cache.cpp
     # graph — the asset graph: the extractors, the reference kinds' table, the one resolver, the
     # rename transaction

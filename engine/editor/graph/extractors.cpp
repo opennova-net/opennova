@@ -12,6 +12,7 @@
 #include <variant>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
@@ -178,7 +179,12 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	return true;
 }
 
+// A mission's references, from the binary form the game loads. A .mis is a mission too, the
+// mission editors' text form (docs/mission/mis-format-re.md), which no BMS parse reads: the
+// mission document will read it, so it gives nothing here, never graph.unreadable.
 bool extract_mission(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	if (!strutil::ends_with_icase(name, ".bms"))
+		return true;
 	bms::File file;
 	std::string message;
 	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {

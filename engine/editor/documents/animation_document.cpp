@@ -98,12 +98,6 @@ bad::BadBuildVec3 mission_velocity(const bad::BadEvent &e) {
 	return bad::bad_mission_from_clip(bad::BadBuildVec3{e.velocity[0], e.velocity[1], e.velocity[2]});
 }
 
-bool same(const Value &a, const Value &b) {
-	const double *x = std::get_if<double>(&a);
-	const double *y = std::get_if<double>(&b);
-	return x && y ? std::memcmp(x, y, sizeof(double)) == 0 : a == b;
-}
-
 uint32_t known_trigger_bits() {
 	uint32_t mask = 0;
 	for (const anim::AnimEventBit &bit : anim::kAnimEventBits) mask |= bit.mask;
@@ -257,7 +251,7 @@ bool AnimationDocument::set_field(Node &node, const NodeAddress &address, const 
 		error = "Unknown field.";
 		return false;
 	}
-	if (same(current, value)) return true;
+	if (same_value(current, value)) return true;
 	const int64_t *whole = std::get_if<int64_t>(&value);
 	const double *number = std::get_if<double>(&value);
 	const std::string *text = std::get_if<std::string>(&value);

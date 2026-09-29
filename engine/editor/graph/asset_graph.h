@@ -304,7 +304,7 @@ void extract_from_document(const Document &document, Extracted &out);
 // loader decodes them): a document type's through its document (Document::load_bytes), a
 // native kind's through the engine's parser. `name` is what the edges and symbols name
 // the file by (the project-relative path in the graph). True with nothing for a kind the
-// graph does not read.
+// graph does not read, and for a mission's .mis text form (the graph reads the .bms).
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
