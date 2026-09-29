@@ -820,6 +820,7 @@ public:
 	static PackedInt64Array profile_awake_frame(double p_delta);
 	static uint64_t lifetime_generation() { return lifetime_generation_; }
 	void set_present_planned(bool p_planned) { present_planned_ = p_planned; }
+	bool is_present_planned() const { return present_planned_; }
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
 	bool is_runtime_frame_awake() const { return awake_; }
