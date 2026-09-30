@@ -158,7 +158,8 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	const Ref<Simulation> action_sim = sim();
 	const auto actions = actions_.poll(GodotActionSource(controls_),
 			{p_gameplay_input_active, input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED,
-					action_sim.is_valid()});
+					action_sim.is_valid(),
+					controls_.is_valid() && controls_->is_keyboard_captured()});
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
 	for (const auto &request : actions.requests) apply_player_action(*action_sim.ptr(), request);

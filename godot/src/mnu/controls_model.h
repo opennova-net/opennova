@@ -72,6 +72,10 @@ public:
 	// those same two passes — the sampler's seam for rules that look at WHICH
 	// key fired (the USE hold's digit swallow). Mouse-mask holds report 0.
 	int pressed_key_for_token(const String &p_token) const;
+	// The chat line's keyboard capture (engine BindingSet::set_keyboard_captured
+	// carries the rule and its witness): no keyboard slot fires while set.
+	void set_keyboard_captured(bool p_captured) { bindings_.set_keyboard_captured(p_captured); }
+	bool is_keyboard_captured() const { return bindings_.keyboard_captured(); }
 	// The in-game display string of a token's binding — the death screen's
 	// "call a medic" hint formatter (engine controls format_display_string;
 	// retail KeyBinding_FormatDisplayString @0x496bd0). "" when unbound.

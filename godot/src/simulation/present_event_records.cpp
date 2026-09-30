@@ -285,23 +285,6 @@ void RoundImpactRow::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(RoundImpactRow, Variant::INT, light_ticks)
 }
 
-// --- ChatLineRow ------------------------------------------------------------
-
-String ChatLineRow::get_text() const { return to_gd(value_.text); }
-int64_t ChatLineRow::get_argb() const {
-	return static_cast<int64_t>(opennova::hud::chat_channel_color(value_.channel));
-}
-int ChatLineRow::get_sink() const {
-	return static_cast<int>(opennova::hud::chat_channel_sink(value_.channel));
-}
-
-void ChatLineRow::_bind_methods() {
-	OPENNOVA_RECORD_READ_ONLY(ChatLineRow, Variant::STRING, text)
-	OPENNOVA_RECORD_READ_ONLY(ChatLineRow, Variant::INT, argb)
-	OPENNOVA_RECORD_READ_ONLY(ChatLineRow, Variant::INT, sink)
-	OPENNOVA_RECORD_READ_ONLY(ChatLineRow, Variant::INT, channel)
-}
-
 // --- DeathPieceRow ----------------------------------------------------------
 
 Ref<DeathPieceRow> DeathPieceRow::make(int p_slot, int64_t p_generation, int p_type_index,

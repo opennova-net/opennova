@@ -148,6 +148,23 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	return true;
 }
 
+// An open text line takes the digits: a (mouse-bound) USE hold selects no
+// seat while the keyboard is captured, so its release still mounts
+// [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with g_InputCaptureMode
+// clear].
+bool test_captured_keyboard_keeps_the_use_digits() {
+	constexpr PlayerActionPoll kTyping{true, true, true, true};
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("useitem");
+	CHECK(actions.poll(keys, kTyping).requests.empty());
+	keys.digits[3] = true;
+	CHECK(actions.poll(keys, kTyping).requests.empty());
+	keys.release("useitem");
+	CHECK(requests_are(actions.poll(keys, kTyping), {{Action::ToggleMount}}));
+	return true;
+}
+
 bool test_use_previous_frame_and_single_seat() {
 	PlayerActions actions;
 	Keys keys;
@@ -342,7 +359,8 @@ int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
 			test_missing_simulation_freezes_only_scope_zero, test_reset_preserves_switch_hud_medic_and_use_state,
-			test_use_previous_frame_and_single_seat, test_use_release_digit_priority_and_no_sim_consumption,
+			test_use_previous_frame_and_single_seat, test_captured_keyboard_keeps_the_use_digits,
+			test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,

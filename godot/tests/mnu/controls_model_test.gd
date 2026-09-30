@@ -107,6 +107,34 @@ func test_is_token_pressed_follows_the_two_passes() -> void:
 	assert_false(model.is_token_pressed("Knife"), "released")
 
 
+# An open chat line owns the keyboard, not the mouse: a captured model fires no
+# keyboard slot, while a held mouse button still fires its row [orig:
+# Input_ProcessPlayerFrame @0x49d4c0 -- the mouse pass gated only on the
+# playback file @0x49d4d5, the held keyboard pass behind !g_InputCaptureMode
+# @0x49d509].
+func test_a_captured_keyboard_leaves_the_mouse_rows_live() -> void:
+	var model := ControlsModel.new()
+	_press(KEY_W, true)
+	assert_true(model.is_token_pressed("move_forward"), "W walks")
+	model.set_keyboard_captured(true)
+	assert_false(model.is_token_pressed("move_forward"), "the line owns W")
+	assert_eq(model.pressed_key_for_token("move_forward"), 0, "no keyboard VK fires")
+	_click(MOUSE_BUTTON_LEFT, true)
+	assert_true(model.is_token_pressed("attack_1"), "the held left button still fires")
+	_click(MOUSE_BUTTON_LEFT, false)
+	model.set_keyboard_captured(false)
+	assert_true(model.is_token_pressed("move_forward"), "the closed line hands W back")
+	_press(KEY_W, false)
+
+
+func _click(button: MouseButton, pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = button
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
+
+
 # Physical key state through Input, flushed so the sampler sees it this frame.
 func _press(keycode: Key, pressed: bool) -> void:
 	var event := InputEventKey.new()

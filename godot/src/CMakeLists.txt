@@ -152,7 +152,6 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
-    hud/feed_row.cpp
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp

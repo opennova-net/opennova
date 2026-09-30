@@ -545,10 +545,12 @@ func is_root_render_stats_measured() -> bool:
 	return _render_stats.is_measured()
 
 
+# An open chat line does not park gameplay input: it owns the keyboard only
+# (ControlsModel.set_keyboard_captured, set each frame in _process), so mouse
+# look and the mouse rows stay live as retail's do.
 func is_gameplay_input_active() -> bool:
 	return _state == State.WORLD and not _end_flow.is_round_ended() \
-			and (not is_dev_tools_open() or _dev_tools.is_game_playing()) \
-			and not (_hud_presenter != null and _hud_presenter.is_chat_capturing())
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing())
 
 
 # --- End of mission (SP) -------------------------------------------------------
@@ -1274,6 +1276,10 @@ func _process(delta: float) -> void:
 		_dev_tools.set_game_play_available(false)
 		return
 	_refresh_dev_tools_game_state()
+	# The chat line's keyboard capture for this frame's samplers (the witness
+	# rides ControlsModel.set_keyboard_captured).
+	ControlsBindings.model().set_keyboard_captured(_state == State.WORLD \
+			and _hud_presenter != null and _hud_presenter.is_chat_capturing())
 	var stats_on: bool = _frame_phase_sampler.begin_shell_control()
 	var probe_enabled := _perf_probe.enabled
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and

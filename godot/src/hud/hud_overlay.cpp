@@ -168,8 +168,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_vehicle_panel);
 	ClassDB::bind_method(D_METHOD("push_chat_line", "text", "argb"),
 			&HudOverlay::push_chat_line);
-	ClassDB::bind_method(D_METHOD("post_game_text_lines", "sim", "gametext"),
-			&HudOverlay::post_game_text_lines);
+	ClassDB::bind_method(D_METHOD("post_feed_lines", "sim", "gametext", "mp_verbose"),
+			&HudOverlay::post_feed_lines);
 	ClassDB::bind_method(D_METHOD("set_end_round_statistics", "shown", "raised",
 			"title", "labels", "values"),
 			&HudOverlay::set_end_round_statistics);
@@ -778,14 +778,28 @@ void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	queue_redraw();
 }
 
-void HudOverlay::post_game_text_lines(const Ref<Simulation> &p_sim,
-		const Ref<RtxtStringFile> &p_gametext) {
-	if (p_sim.is_null()) return;
-	std::vector<std::string> lines;
-	p_sim->drain_game_text_lines(game_text_lookup(p_gametext), lines);
-	for (const std::string &line : lines)
-		compiler_.push_feed_line(line, opennova::hud::kGameTextLineColor, state_.ticks);
-	if (!lines.empty()) queue_redraw();
+String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext, bool p_mp_verbose) {
+	String announcement;
+	if (p_sim.is_null()) return announcement;
+	std::vector<opennova::hud::FeedPost> posts;
+	p_sim->drain_feed_posts(game_text_lookup(p_gametext), p_mp_verbose, posts);
+	for (const opennova::hud::FeedPost &post : posts) {
+		switch (post.sink) {
+			case opennova::hud::ChatSink::System:
+				compiler_.push_feed_line(post.text, post.argb, state_.ticks);
+				break;
+			case opennova::hud::ChatSink::Chat:
+				compiler_.push_chat_line(post.text, post.argb, state_.ticks);
+				break;
+			case opennova::hud::ChatSink::Queue:
+			case opennova::hud::ChatSink::Channel3:
+				break; // neither is a ring
+		}
+		if (post.announce) announcement = opennova::to_gd(post.text);
+	}
+	if (!posts.empty()) queue_redraw();
+	return announcement;
 }
 
 void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,

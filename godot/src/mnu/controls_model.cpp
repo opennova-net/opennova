@@ -335,6 +335,9 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
+	ClassDB::bind_method(D_METHOD("set_keyboard_captured", "captured"),
+			&ControlsModel::set_keyboard_captured);
+	ClassDB::bind_method(D_METHOD("is_keyboard_captured"), &ControlsModel::is_keyboard_captured);
 	ClassDB::bind_method(D_METHOD("build_help_screen"), &ControlsModel::build_help_screen);
 	ClassDB::bind_method(D_METHOD("cycle_help_page", "forward"), &ControlsModel::cycle_help_page);
 	ClassDB::bind_method(D_METHOD("get_help_title"), &ControlsModel::get_help_title);

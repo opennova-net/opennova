@@ -47,6 +47,9 @@ struct PlayerActionPoll {
 	bool active = false;
 	bool captured = false;
 	bool simulation_available = false;
+	// An open text line owns the keyboard (BindingSet::set_keyboard_captured):
+	// the held-USE digits go to the line, not the seats.
+	bool keyboard_captured = false;
 };
 
 struct PlayerActionFrame {

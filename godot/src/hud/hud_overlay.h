@@ -166,13 +166,15 @@ public:
 	// loaded per sid (the set_weapon reload idiom). Pass null when hiding.
 	void set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_block, int p_stance,
 			const Ref<Simulation> &p_sim);
-	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
-	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.
+	// One line for the CHAT ring (the script chat lines); the engine ring
+	// word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
-	// Drain the sim's S2C 0x32 join/leave lines (engine-formatted against the
-	// gametext table) into the SYSTEM ring in their fixed grey.
-	void post_game_text_lines(const Ref<Simulation> &p_sim,
-			const Ref<RtxtStringFile> &p_gametext);
+	// Drain the sim's S2C 0x1E feed lines, 0x14 chat lines and 0x32 join/leave
+	// lines (Simulation::drain_feed_posts, resolved against the gametext
+	// table) into their rings in wire order. Returns the frame's last involved
+	// 0x1E line ("" when none), which the shell hands the kill banner.
+	String post_feed_lines(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext,
+			bool p_mp_verbose);
 	// The Recent Messages (J) window: the OldMessages toggle and its stdbox
 	// title (gametext Overlays/STROVER43, resolved by the shell).
 	// The SP Show Score statistics panel (hud/end_round_statistics.h).

@@ -1,5 +1,6 @@
 #include <runtime/hud/feed_format.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <utility>
@@ -118,6 +119,7 @@ void feed_event_rows(const FeedEventInput *events, std::size_t count,
 		FeedRow row;
 		row.event_type = ev.event_type;
 		row.kind = ev.kind;
+		row.order = ev.order;
 		row.camp = camp;
 		row.own = own;
 		row.announce = own && ((ev.event_type >= 1 && ev.event_type <= 18) ||
@@ -394,6 +396,11 @@ std::string chat_format_player_tokens(const std::string &format, const char *tok
 		out.push_back(*src++);
 	}
 	return out;
+}
+
+void order_feed_posts(std::vector<FeedPost> &posts) {
+	std::stable_sort(posts.begin(), posts.end(),
+			[](const FeedPost &a, const FeedPost &b) { return a.order < b.order; });
 }
 
 std::string formatted_game_text_line(int subtype, const std::string &text, int team,

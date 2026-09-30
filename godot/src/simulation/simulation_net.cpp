@@ -7,7 +7,6 @@
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
-#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
 #include "util/string_convert.h"
@@ -530,6 +529,13 @@ void Simulation::set_app_id(const String &p_token) {
 	install_app_id();
 }
 
+void Simulation::set_join_network_type(int p_type) {
+	net_.join_network_type =
+			p_type == static_cast<int>(opennova::inmatch::NetworkType::NovaWorld)
+			? opennova::inmatch::NetworkType::NovaWorld
+			: opennova::inmatch::NetworkType::Lan;
+}
+
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN. Retained
 	// and re-applied to the joiner runtime on each (re)load via install_join_cd_cookie.
@@ -1017,43 +1023,6 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 	return h.valid();
 }
 
-
-// Drain this frame's folded S2C 0x1E game events into typed feed rows. The
-// fold is the engine's (runtime/hud/feed_format.h feed_event_rows); this seam
-// only resolves actor names against the decoded roster (a pool-0 INDEX on the
-// wire becomes the handle (0<<12)|index) and packs the rows.
-TypedArray<FeedRow> Simulation::drain_feed_events(bool p_mp_verbose) {
-	TypedArray<FeedRow> out;
-	if (!runtime_) return out;
-	opennova::replication::ClientState &cs = runtime_->state();
-	const uint16_t self_handle =
-			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
-	// The name is the driving slot's (with its registry clan tag) before the
-	// entity's own (replication::feed_actor_name carries the witness).
-	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
-		const auto *e = cs.find(static_cast<uint16_t>(index));
-		return opennova::hud::FeedActor{
-			opennova::replication::feed_actor_name(cs, index,
-					e != nullptr ? e->display_name : std::string()),
-			e != nullptr ? e->team : uint8_t{0}};
-	};
-	std::vector<opennova::hud::FeedEventInput> inputs;
-	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
-		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
-				ev.aux_index, ev.kind, ev.pos_x });
-	}
-	std::vector<opennova::hud::FeedRow> rows;
-	const opennova::hud::FeedContext context{
-		self_handle, p_mp_verbose, runtime_->game_type()};
-	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), context, actor_of, rows);
-	for (const opennova::hud::FeedRow &row : rows) {
-		Ref<FeedRow> r;
-		r.instantiate();
-		r->assign(row);
-		out.push_back(r);
-	}
-	return out;
-}
 
 void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 	if (runtime_) runtime_->state().kill_announcement.record(

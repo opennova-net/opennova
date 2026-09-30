@@ -100,6 +100,7 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 
 	if (rec.event_type >= 19 && rec.event_type <= 21)
 		pending_effect_commands_.push_back(rec);
+	ev.feed_order = next_feed_order_++;
 	pending_game_events_.push_back(ev);
 }
 
@@ -118,7 +119,7 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	line.channel = rec.channel;
 	line.sender_slot = rec.sender_slot;
 	line.text = rec.text;
-	pending_chat_lines_.push_back(std::move(line));
+	post_chat_line(std::move(line));
 }
 
 // THE JOIN/LEAVE LANE (S2C 0x32): the record rides to the HUD, which picks
@@ -135,6 +136,7 @@ void ClientReplicaPipeline::apply_formatted_game_text(const std::vector<uint8_t>
 	text.subtype = rec.subtype;
 	text.text = std::move(rec.text);
 	text.team = rec.team;
+	text.feed_order = next_feed_order_++;
 	pending_game_texts_.push_back(std::move(text));
 }
 

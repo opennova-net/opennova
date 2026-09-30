@@ -128,6 +128,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// blob) it validates in the 0x00 JOIN (codes 23/24/25). Both empty/"0"
 	// for LAN.
 	join_preload_sim_->set_app_id(p_target->get_app_id());
+	join_preload_sim_->set_join_network_type(p_target->get_network_type());
 	join_preload_sim_->set_join_cd_cookie(p_target->get_cd_cookie());
 	// A nonzero .joi LN asks for the LAN-discovered endpoint of the named
 	// session instead of the NK relay the target carries. That endpoint has no

@@ -247,7 +247,10 @@ public:
 	std::vector<ClientGameText> drain_game_texts();
 	std::vector<WeaponReload> drain_weapon_reloads();
 	std::vector<ClientEffectCommand> drain_effect_commands();
-	void post_chat_line(ClientChatLine line) { pending_chat_lines_.push_back(std::move(line)); }
+	void post_chat_line(ClientChatLine line) {
+		line.feed_order = next_feed_order_++;
+		pending_chat_lines_.push_back(std::move(line));
+	}
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns
@@ -417,6 +420,8 @@ private:
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
 	std::vector<ClientGameText> pending_game_texts_;
+	// The dispatch stamp the ring-bound records take (ClientGameEvent::feed_order).
+	uint32_t next_feed_order_ = 0;
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;

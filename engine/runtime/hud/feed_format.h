@@ -174,6 +174,7 @@ struct FeedEventInput {
 	uint8_t aux_index = 0xFF;
 	uint8_t kind = 0;
 	int16_t pos_x = 0; // 46/47 carry the signed bonus count here.
+	uint32_t order = 0; // the event's dispatch stamp, carried onto its row
 };
 
 // One feed row — everything the presenter needs to post the line: the compose
@@ -195,6 +196,7 @@ struct FeedRow {
 	std::string extra;       // the aux actor's name, only when it is the local player
 	std::string wpname_key;  // camp rows only
 	uint32_t color = kFeedColorWhite;
+	uint32_t order = 0;      // FeedEventInput::order
 };
 
 // The roster lookup a row resolves actor names through: a wire index (a pool-0
@@ -267,6 +269,25 @@ std::string chat_format_player_tokens(const std::string &format, const char *tok
 std::string formatted_game_text_line(int subtype, const std::string &text, int team,
 		uint32_t game_type, const GameTextLookup &gametext);
 inline constexpr uint32_t kGameTextLineColor = 0xFFAFAFAFu;
+
+// ONE RING-BOUND LINE with its message's dispatch stamp. Retail posts every
+// feed line inside the handler of the message that carried it, so a frame's
+// S2C 0x1E, 0x14 and 0x32 lines reach the rings in wire order, not lane by
+// lane [orig: NetPacket_HandleGameEvent @0x426270, NapiNPClientMsg_0x032
+// @0x428060 (the post @0x428181..0x428195) and NapiNPClientMsg_ChatMessage
+// @0x42f240 -> Chat_DispatchToChannel @0x42b910 each post as they run]. The
+// embedder drains the three lanes into posts and orders them here; the post
+// lands in `sink`'s ring (Queue / Channel3 have none), and `announce` marks
+// the involved 0x1E line the kill banner retains.
+struct FeedPost {
+	uint32_t order = 0;
+	ChatSink sink = ChatSink::System;
+	uint32_t argb = 0;
+	std::string text;
+	bool announce = false;
+};
+// Order the posts by dispatch stamp; a message's own lines keep their order.
+void order_feed_posts(std::vector<FeedPost> &posts);
 
 // Strip retail's inline text markup (`<cRRGGBB>` colour, `<b>` bold — every
 // `<...>` run) from a string: the byte walk that drops each '<'..'>' span and

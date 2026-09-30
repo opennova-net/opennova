@@ -124,7 +124,11 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 		use_consume_pending_ = false;
 	}
 	for (int digit = 0; digit < 10; ++digit) {
-		if (!world::latched_key_edge(source.digit_down(digit), use_held_prev_,
+		// The digit arm is a key-press path, so an open text line takes the
+		// digits [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with
+		// g_InputCaptureMode clear, Input_ProcessKeyboardEvents @0x49d2e3].
+		const bool digit_down = !gate.keyboard_captured && source.digit_down(digit);
+		if (!world::latched_key_edge(digit_down, use_held_prev_,
 				use_digit_was_down_[digit])) continue;
 		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
 		const int seat = digit == 0 ? 9 : digit - 1;

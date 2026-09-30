@@ -111,29 +111,13 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	return out;
 }
 
-TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
-	// The S2C 0x14 player-chat lines folded by the replica pipeline since the
-	// last drain, each already routed by the witnessed channel table
-	// (hud/feed_format.h): sink 0 = the SYSTEM ring, 1 = the CHAT ring,
-	// 2 = the message queue (no ring), 3 = channel 3 (the unported third ring).
-	TypedArray<ChatLineRow> out;
-	if (!runtime_) return out;
-	for (const opennova::replication::ClientChatLine &line :
-			runtime_->view().drain_chat_lines()) {
-		Ref<ChatLineRow> d;
-		d.instantiate();
-		d->assign(line);
-		out.push_back(d);
-	}
-	return out;
-}
-
 opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) const {
-	// The NovaWorld network type: the authority's own transport mode, or a
-	// joiner that joined through a NovaWorld APPID (a LAN join carries "0").
+	// The NovaWorld network type (hud::ChatEntryFacts::novaworld): the
+	// authority's own transport mode, or the network type the joiner's join
+	// carried (JoinTarget::network_type).
 	const opennova::inmatch::NapiNPServerCtx *host = host_ctx();
 	const bool novaworld = is_joiner()
-			? net_.app_id != "0"
+			? net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld
 			: (host != nullptr &&
 					host->transport_mode == opennova::inmatch::NetworkType::NovaWorld);
 	return opennova::inmatch::chat_entry_facts(role_view(), novaworld, p_frame);
@@ -156,16 +140,57 @@ void Simulation::raise_chat_denied_sound() {
 	kernel_->world.out.script_sounds.push_back(std::move(tone));
 }
 
-void Simulation::drain_game_text_lines(const opennova::hud::GameTextLookup &p_gametext,
-		std::vector<std::string> &r_lines) {
-	r_lines.clear();
+// This frame's ring-bound lines from the three S2C lanes, in the order their
+// messages dispatched (hud::FeedPost carries the witness): the 0x1E game
+// events folded to rows (the engine's feed_event_rows; the actor names
+// resolve here against the decoded roster, a pool-0 INDEX on the wire being
+// the handle (0<<12)|index, the driving slot's name with its registry clan
+// tag first — replication::feed_actor_name) and resolved against gametext;
+// the 0x14 chat lines routed by the channel table; the 0x32 lines formatted.
+void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametext,
+		bool p_mp_verbose, std::vector<opennova::hud::FeedPost> &r_posts) {
+	r_posts.clear();
 	if (!runtime_) return;
+	opennova::replication::ClientState &cs = runtime_->state();
+	const uint16_t self_handle =
+			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
+	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
+		const auto *e = cs.find(static_cast<uint16_t>(index));
+		return opennova::hud::FeedActor{
+			opennova::replication::feed_actor_name(cs, index,
+					e != nullptr ? e->display_name : std::string()),
+			e != nullptr ? e->team : uint8_t{0}};
+	};
+	std::vector<opennova::hud::FeedEventInput> inputs;
+	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
+		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
+				ev.aux_index, ev.kind, ev.pos_x, ev.feed_order });
+	}
+	std::vector<opennova::hud::FeedRow> rows;
+	const opennova::hud::FeedContext context{
+		self_handle, p_mp_verbose, runtime_->game_type()};
+	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), context, actor_of, rows);
+	for (const opennova::hud::FeedRow &row : rows) {
+		std::string line = opennova::hud::feed_row_line(row, p_gametext);
+		if (line.empty()) continue;
+		r_posts.push_back({row.order, opennova::hud::ChatSink::System, row.color,
+				std::move(line), row.announce});
+	}
+	for (const opennova::replication::ClientChatLine &line :
+			runtime_->view().drain_chat_lines()) {
+		if (line.text.empty()) continue;
+		r_posts.push_back({line.feed_order, opennova::hud::chat_channel_sink(line.channel),
+				opennova::hud::chat_channel_color(line.channel), line.text, false});
+	}
 	const uint32_t game_type = runtime_->game_type();
 	for (const opennova::replication::ClientGameText &text : runtime_->view().drain_game_texts()) {
 		std::string line = opennova::hud::formatted_game_text_line(
 				text.subtype, text.text, text.team, game_type, p_gametext);
-		if (!line.empty()) r_lines.push_back(std::move(line));
+		if (line.empty()) continue;
+		r_posts.push_back({text.feed_order, opennova::hud::ChatSink::System,
+				opennova::hud::kGameTextLineColor, std::move(line), false});
 	}
+	opennova::hud::order_feed_posts(r_posts);
 }
 
 } // namespace godot

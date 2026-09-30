@@ -690,12 +690,12 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
-	_flush_feed_events()
+	_flush_feed_lines()
 	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
 	_score_fanfare.update(sim, _world)
 	# The three overlay windows follow the engine's toggle flags (the ShowScore
 	# gate, the sibling close and the respawn clears are its rules).
-	_message_log.update(_game_hud, sim, _toggles.is_message_log_open())
+	_message_log.update(_game_hud, _toggles.is_message_log_open())
 	_update_overlay_windows(sim)
 	_end_round_stats.update(_game_hud, sim, _toggles.is_end_round_stats_open())
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
@@ -1323,30 +1323,21 @@ func _queue_chat_line(text: String) -> void:
 		_pending_hud_messages.pop_front()
 
 
-## The message feed: this frame's folded S2C 0x1E game events, each resolved
-## into the game's own canned sentence and posted to the SYSTEM ring. The sim
-## hands over the rows; the gametext resolve and the witnessed substitution
-## are the engine's (FeedRow.resolve_line over hud::feed_row_line), so the
-## sentence is always the game's own text and never one we compose.
-func _flush_feed_events() -> void:
+## The message feeds: this frame's S2C 0x1E game events (the game's own canned
+## sentences), 0x14 chat lines and 0x32 join/leave lines, posted into their
+## rings in wire order. The resolve, the formatting, the channel routing and
+## the order are the engine's (HudOverlay.post_feed_lines over
+## Simulation::drain_feed_posts); the involved 0x1E line feeds the banner.
+func _flush_feed_lines() -> void:
 	if _game_hud == null or _world == null:
 		return
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	var rows: Array[FeedRow] = sim.drain_feed_events(_toggles.is_mp_verbose())
-	if rows.is_empty():
-		return
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if table == null:
-		return
-	for row: FeedRow in rows:
-		var line := row.resolve_line(table)
-		if line.is_empty():
-			continue
-		_game_hud.push_feed_line(line, row.get_color())
-		if row.is_announcement():
-			sim.retain_feed_announcement(line, _hud_ticks())
+	var announcement := _game_hud.post_feed_lines(sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT), _toggles.is_mp_verbose())
+	if not announcement.is_empty():
+		sim.retain_feed_announcement(announcement, _hud_ticks())
 
 
 func _flush_pending_hud_messages() -> void:

@@ -77,7 +77,6 @@ class MusicDirector;
 class RtxtStringFile; // the gametext table the end-round / deploy feeds resolve through
 class EntityCard;     // the typed per-entity debug card (world::inspect, ADR 0042 d5)
 class EntityRow;      // one typed entity-directory row
-class FeedRow;        // one typed message-feed row (hud::FeedRow, ADR 0040 B3)
 class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def.h)
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
@@ -1196,6 +1195,9 @@ public:
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character/integrity data.
 	void set_app_id(const String &p_token);
+	// The joiner's network type (JoinTarget::NetworkType): what retail stores
+	// as g_NapiNPCtx.transport_mode from the menu's connect type on the join.
+	void set_join_network_type(int p_type);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
@@ -1650,14 +1652,15 @@ public:
 	// folds mission (x,y) to terrain/Godot (x,z)). NOT ClassDB-bound.
 	void drain_terrain_scorches(std::vector<opennova::world::TerrainScorchEvent> &r_events,
 			std::vector<opennova::world::TerrainPageInvalidationEvent> &r_invalidations);
-	// Drain this frame's folded S2C 0x1E game events as typed feed rows — one
-	// per line the original posts to its message feed. The fold (suppression,
-	// the own/verbose gate, the camp keys, the bonus recompose, the color) is
-	// the engine's (runtime/hud/feed_format.h feed_event_rows); the actor
-	// names resolve here, where the decoded roster lives. The embedder
-	// resolves each row's keys against gametext and calls the format helpers
-	// below.
-	TypedArray<FeedRow> drain_feed_events(bool p_mp_verbose);
+	// NOT ClassDB-bound (HudOverlay::post_feed_lines' seam): this frame's
+	// ring-bound lines from the S2C 0x1E game events, 0x14 chat lines and 0x32
+	// game texts, resolved and formatted by the engine's feed formatters and
+	// ordered by their messages' dispatch (hud::order_feed_posts). The 0x1E
+	// fold (suppression, the own/verbose gate, the camp keys, the bonus
+	// recompose, the color) is feed_event_rows; the actor names resolve here,
+	// where the decoded roster lives.
+	void drain_feed_posts(const opennova::hud::GameTextLookup &p_gametext, bool p_mp_verbose,
+			std::vector<opennova::hud::FeedPost> &r_posts);
 	void retain_feed_announcement(const String &text, int64_t tick);
 	String get_kill_announcement_text() const;
 	int64_t get_kill_announcement_tick(int64_t now);
@@ -1687,16 +1690,9 @@ public:
 			std::vector<opennova::hud::HudLfpZone> &r_zones);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
-	// The S2C 0x14 player-chat lines since the last drain, each routed by the
-	// witnessed channel table (ChatLineRow.sink: 0 = the SYSTEM ring, 1 = the
-	// CHAT ring, 2 = the message queue, 3 = channel 3).
-	TypedArray<ChatLineRow> drain_chat_lines();
-	// NOT ClassDB-bound: the S2C 0x32 lines since the last drain, engine-
-	// formatted (hud::formatted_game_text_line), for HudOverlay's SYSTEM ring;
-	// the talk keys' facts (inmatch::chat_entry_facts), C2S 0x0D send
-	// (ClientRuntime::queue_chat_message) and the crew key's denied tone.
-	void drain_game_text_lines(const opennova::hud::GameTextLookup &p_gametext,
-			std::vector<std::string> &r_lines);
+	// NOT ClassDB-bound: the talk keys' facts (inmatch::chat_entry_facts),
+	// C2S 0x0D send (ClientRuntime::queue_chat_message) and the crew key's
+	// denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
 	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
 	void raise_chat_denied_sound();

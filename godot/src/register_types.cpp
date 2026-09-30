@@ -100,7 +100,6 @@
 #include "simulation/environment_snapshot.h"
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
-#include "hud/feed_row.h"
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
@@ -296,7 +295,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SlotSoundRow);
 	GDREGISTER_CLASS(SoundEmitterRow);
 	GDREGISTER_CLASS(RoundImpactRow);
-	GDREGISTER_CLASS(ChatLineRow);
 	GDREGISTER_CLASS(MissionEffect);
 	GDREGISTER_CLASS(DeathPieceRow);
 	GDREGISTER_CLASS(DeathPieceDraw);
@@ -312,7 +310,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
-	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);

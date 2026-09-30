@@ -113,6 +113,44 @@ int main() {
 	host_owned->apply(s2c::GAME_RESET, {});
 	CHECK(!host_owned->state().round_reset_hold);
 
+	// THE WIRE ORDER ACROSS THE THREE RING LANES: each record takes the
+	// dispatch stamp of the message that carried it, so a 0x32 that arrives
+	// between two 0x1E events sorts between their lines, and a 0x14 after them
+	// [orig: each handler posts as it runs — NetPacket_HandleGameEvent
+	// @0x426270, NapiNPClientMsg_0x032 @0x428181..0x428195,
+	// Chat_DispatchToChannel @0x42b910].
+	{
+		auto order_owned = std::make_unique<ClientReplicaPipeline>();
+		ClientReplicaPipeline &o = *order_owned;
+		const std::vector<uint8_t> kill = {1, 2, 3, 0xFF, 0, 0, 0, 0};
+		o.apply(s2c::GAME_EVENT, kill);
+		o.apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 0, 1});
+		o.apply(s2c::GAME_EVENT, kill);
+		o.apply(s2c::CHAT_BROADCAST, chat_body(0, 7, "Server: hi"));
+		const std::vector<ClientGameEvent> events = o.drain_game_events();
+		const std::vector<ClientGameText> joins = o.drain_game_texts();
+		const std::vector<ClientChatLine> chats = o.drain_chat_lines();
+		CHECK(events.size() == 2 && joins.size() == 1 && chats.size() == 1);
+		if (events.size() == 2 && joins.size() == 1 && chats.size() == 1) {
+			CHECK(events[0].feed_order < joins[0].feed_order);
+			CHECK(joins[0].feed_order < events[1].feed_order);
+			CHECK(events[1].feed_order < chats[0].feed_order);
+			// The merge keeps that order, and a message's own lines keep
+			// theirs (stable) whatever lane order the embedder drains in.
+			std::vector<hud::FeedPost> posts = {
+				{chats[0].feed_order, hud::ChatSink::System, 0, "chat", false},
+				{joins[0].feed_order, hud::ChatSink::System, 0, "join", false},
+				{events[0].feed_order, hud::ChatSink::System, 0, "kill-a", false},
+				{events[0].feed_order, hud::ChatSink::System, 0, "kill-a2", false},
+				{events[1].feed_order, hud::ChatSink::System, 0, "kill-b", true},
+			};
+			hud::order_feed_posts(posts);
+			CHECK(posts[0].text == "kill-a" && posts[1].text == "kill-a2" &&
+					posts[2].text == "join" && posts[3].text == "kill-b" &&
+					posts[4].text == "chat");
+		}
+	}
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

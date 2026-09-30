@@ -160,6 +160,13 @@ struct ClientRoundEvent {
 // HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60].
 // `kind` is hud::GameEventKind (runtime/hud/feed_format.h) carried as its
 // underlying byte so this header stays free of the runtime include.
+// Every ring-bound record (0x1E game events, 0x14 chat lines, 0x32 game texts)
+// carries `feed_order`, the replica's dispatch stamp: retail posts each line
+// the moment its message dispatches, so the HUD rings take the lines in this
+// order across the three lanes (hud::order_feed_posts) [orig: the 0x1E arm
+// NetPacket_HandleGameEvent @0x426270 -> Chat_AddMessageChannel2, the 0x32
+// arm @0x428181..0x428195, the 0x14 arm Chat_DispatchToChannel @0x42b910 —
+// each posts inside its own message handler].
 struct ClientGameEvent {
 	uint8_t event_type = 0;
 	uint8_t attacker_index = 0xFF;
@@ -168,6 +175,7 @@ struct ClientGameEvent {
 	int16_t pos_x = 0;
 	int16_t pos_y = 0;
 	uint8_t kind = 0;
+	uint32_t feed_order = 0;
 };
 
 // One folded S2C 0x32 formatted game text — the join/leave SYSTEM-ring lane.
@@ -180,6 +188,7 @@ struct ClientGameText {
 	int8_t subtype = 0;
 	std::string text;
 	int8_t team = 0;
+	uint32_t feed_order = 0;
 };
 
 // One folded S2C 0x14 chat line — the player-chat lane. The wire carries
@@ -194,6 +203,7 @@ struct ClientChatLine {
 	int8_t channel = 0;      // body[0], sign-extended into the switch
 	uint8_t sender_slot = 0; // body[1], the roster index
 	std::string text;
+	uint32_t feed_order = 0;
 };
 
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the

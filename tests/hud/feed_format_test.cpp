@@ -188,6 +188,12 @@ void test_feed_event_rows() {
         CHECK(rows[0].color == kFeedColorWhite);
         CHECK(rows[0].event_type == 4 && rows[0].kind == 1);
     }
+    // The row keeps its event's dispatch stamp (the wire-order merge key,
+    // hud::order_feed_posts).
+    {
+        auto rows = fold({ { 4, 3, 7, 0xFF, 1, 0, 42 } }, 3, true);
+        CHECK(rows.size() == 1 && rows[0].order == 42);
+    }
     // The same kill seen by an uninvolved viewer: grey while verbose, dropped
     // when the verbose toggle is off; an unknown index resolves to "".
     {

@@ -377,7 +377,7 @@ std::vector<int> BindingSet::keys_for_token(const std::string &token) const {
 int BindingSet::pressed_key(int index,
                             const std::function<bool(int)> &key_down) const {
   const BindingRecord *r = record(index);
-  if (r == nullptr) {
+  if (r == nullptr || keyboard_captured_) {
     return 0;
   }
   auto slot_down = [&](uint16_t vk) { return vk != 0 && key_down(vk); };

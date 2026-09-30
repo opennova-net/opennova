@@ -4,7 +4,7 @@ extends GutTest
 # Messages + the chat drain, AAS zone status), exercised over a REAL HudOverlay
 # with the sim absent: the toggle edge machine, the hide-once bookkeeping, and
 # the null paths. The native row feeds (Simulation.fill_vehicle_panel /
-# fill_lfp_zones / drain_chat_lines) need a live mission and are pinned by the
+# fill_lfp_zones / drain_feed_posts) need a live mission and are pinned by the
 # engine ctests (vehicle_panel_feed, lfp_feed, client_replica_chat).
 
 const VehiclePanelPresenter := preload("res://game/world/vehicle_panel_presenter.gd")
@@ -84,11 +84,11 @@ func test_message_log_lane_shows_history() -> void:
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
-	lane.update(hud, null, true)
+	lane.update(hud, true)
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"Opening the window through the lane lists the expired line.")
 	await get_tree().process_frame
-	lane.update(hud, null, false)
+	lane.update(hud, false)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"Closing through the lane hides the history.")
 

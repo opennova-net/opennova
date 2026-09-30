@@ -12,7 +12,6 @@
 #include "simulation/hitbox_debug_report.h" // the hitbox oracle payload
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
-#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h"
 #include "network/host_session_options.h" // the hosted-session request record
 #include "simulation/fp_viewmodel_spec.h" // the first-person submit spec record
@@ -255,11 +254,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
-	ClassDB::bind_method(D_METHOD("drain_feed_events", "mp_verbose"), &Simulation::drain_feed_events);
 	ClassDB::bind_method(D_METHOD("retain_feed_announcement", "text", "tick"), &Simulation::retain_feed_announcement);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_text"), &Simulation::get_kill_announcement_text);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_tick", "now"), &Simulation::get_kill_announcement_tick);
-	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
 	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
 			&Simulation::get_vehicle_panel_view);
 	ClassDB::bind_method(D_METHOD("get_session_game_type"),

@@ -292,6 +292,28 @@ bool test_mouse_dispatch() {
   return true;
 }
 
+// An open chat line owns the keyboard, not the mouse [orig:
+// Input_ProcessPlayerFrame @0x49d4c0 -- the mouse pass gated only on the
+// playback file @0x49d4d5, the held keyboard pass behind !g_InputCaptureMode
+// @0x49d509].
+bool test_keyboard_capture_leaves_the_mouse_rows() {
+  BindingSet set;
+  const int fwd = set.index_of_token("move_forward");
+  const int fire = set.index_of_token("attack_1");
+  const BindingRecord *r = set.record(fwd);
+  CHECK(r != nullptr && r->primary != 0, "move_forward has a key");
+  const int vk = r->primary;
+  auto held = [vk](int k) { return k == vk; };
+  CHECK(set.pressed_key(fwd, held) == vk, "the key walks");
+  set.set_keyboard_captured(true);
+  CHECK(set.keyboard_captured(), "the capture reads back");
+  CHECK(set.pressed_key(fwd, held) == 0, "the line owns the key");
+  CHECK(set.pressed_mouse(fire, kMouseLeft, held), "the held left button still fires");
+  set.set_keyboard_captured(false);
+  CHECK(set.pressed_key(fwd, held) == vk, "the closed line hands the key back");
+  return true;
+}
+
 bool test_binding_set_assignment() {
   BindingSet set;
   const int fwd = set.index_of_token("move_forward");
@@ -597,6 +619,7 @@ int main() {
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_mouse_dispatch);
+  RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
