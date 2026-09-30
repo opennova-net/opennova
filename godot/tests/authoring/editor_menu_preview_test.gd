@@ -130,8 +130,10 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 		assert_eq(their_notes, our_notes)
 		# MAIN's CUSTOM appearance: the shell's hook, a note the preview alone shows.
 		assert_true(our_notes.has("MAIN appearance_custom"), str(our_notes))
+	# A menu the project lacks: refused, as every menu read names a menu (S13 A5).
 	var missing_render: Variant = JSON.parse_string(String(_seam.get_menu_render_json("nope.mnu", screen_id)))
-	assert_eq(String((missing_render as Dictionary).get("status", "")), "no_screen")
+	assert_true(String((missing_render as Dictionary).get("error", "")).contains("no menu 'nope.mnu'"),
+			str(missing_render))
 
 	# The game's hit test at its centre finds it; above MAIN there is nothing.
 	var hit: Variant = JSON.parse_string(String(_app.menu_preview_hit_json(

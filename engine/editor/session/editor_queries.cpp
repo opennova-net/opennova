@@ -1,6 +1,7 @@
 #include <editor/session/editor_queries.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdlib>
 #include <iterator>
@@ -42,21 +43,23 @@ constexpr const char *kOffsetDoc =
 constexpr const char *kLimitDoc = "How many entries the page holds at most, 1 to 200.";
 constexpr const char *kCursorDoc =
 		"The page's first entry by its absolute index (the last page's next_cursor; 0 the oldest "
-		"held).";
+		"held). One the list dropped before it was read starts the page at the oldest held: the "
+		"answer's cursor comes back larger than asked.";
 constexpr const char *kDocumentDoc =
 		"An open document by its project-relative path or its logical name; left out, the active "
 		"one.";
 constexpr const char *kMenuDoc =
-		"A menu by its project-relative path or its logical name; left out, the previewed menu, "
-		"else the active document when it is a menu. A closed menu answers as the last validation "
-		"read it.";
+		"A menu by its project-relative path or its logical name; left out, the active document, "
+		"which must be a menu (as a pathless request's edits name records of the active "
+		"document). A closed menu answers as the last validation read it.";
 
 constexpr QueryParam kStateParams[] = {
 	{ "sections", J::Strings, false, nullptr,
 			"The sections to answer, by name (the catalog's sections); every one when left out." },
 	{ "since", J::Integer, false, nullptr,
-			"A revision an earlier answer carried: the sections none of whose concerns moved since "
-			"it are left out." },
+			"A view_revision an earlier answer carried: the sections none of whose concerns moved "
+			"since are left out; 0 or left out, every section. One past the view's clock is "
+			"refused." },
 };
 
 constexpr QueryParam kPageParams[] = {
@@ -165,7 +168,7 @@ constexpr QueryParam kMenuFindingsParams[] = {
 };
 
 constexpr QueryParam kMenuRenderParams[] = {
-	{ "path", J::String, true, nullptr, "A menu by its project-relative path." },
+	{ "path", J::String, false, nullptr, kMenuDoc },
 	{ "screen", J::Integer, true, nullptr, "The screen, by its row identity." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
@@ -269,17 +272,26 @@ JsonValue answer_state(const QueryContext &context, const QueryArgs &args, std::
 		for (size_t i = 0; i < kViewSectionCount; ++i)
 			sections.push_back(static_cast<ViewSection>(i));
 	}
-	const bool since = args.has("since");
-	const uint64_t revision = since ? uint64_t(args.integer("since")) : 0;
+	// `since` a view_revision an earlier answer carried (0: every section); the view's clock never
+	// moves back, so one past it names no answer the session gave.
+	const uint64_t since = uint64_t(args.integer("since"));
+	const uint64_t clock = view.revisions.any();
+	if (since > clock) {
+		error = "\"since\" is " + std::to_string(since) + ", past the view's clock, " +
+				std::to_string(clock) + ".";
+		return JsonValue::make_null();
+	}
 	JsonValue out = JsonValue::make_object();
+	// Each concern's stamp: the clock value at which it last moved (0: never).
 	JsonValue revisions = JsonValue::make_object();
 	for (size_t i = 0; i < kViewConcernCount; ++i) {
 		const ViewConcern concern = static_cast<ViewConcern>(i);
-		revisions.set(view_concern_token(concern), json_number(double(view.revisions.of(concern))));
+		revisions.set(
+				view_concern_token(concern), json_number(double(view.revisions.stamp(concern))));
 	}
 	out.set("revisions", std::move(revisions));
 	for (const ViewSection section : sections)
-		if (!since || view_section_moved(view, section, revision))
+		if (since == 0 || view_section_moved(view, section, since))
 			out.set(view_section_row(section).token, view_section_to_json(view, section));
 	return out;
 }
@@ -526,16 +538,23 @@ JsonValue answer_project_search(
 			graph ? graph->search(text) : std::vector<GraphSearchHit>(), page_of(args));
 }
 
-std::string no_menu(const std::string &path) {
-	return path.empty() ? std::string("no menu is previewed or open: name one with \"path\".")
-						: "no menu '" + path + "' in the project.";
+// Why no menu answers: the path names none, or, left out, no document is active or the active one
+// is no menu (a pathless read never falls back to another menu: a pathless edit's records are the
+// active document's).
+std::string no_menu(const SessionView &view, const std::string &path) {
+	if (!path.empty())
+		return "no menu '" + path + "' in the project.";
+	if (view.documents.active.empty())
+		return "no document is active: name a menu with \"path\".";
+	return "the active document, " + view.documents.active +
+			", is not a menu: name one with \"path\".";
 }
 
 JsonValue answer_menu_tree(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const std::string path = args.text("path");
 	JsonValue tree = menu_tree_to_json(context.core.view(), path);
 	if (tree.is_null()) {
-		error = no_menu(path);
+		error = no_menu(context.core.view(), path);
 		return tree;
 	}
 	// Each screen's windows a page (window_count the screen's whole count); one screen alone
@@ -567,7 +586,7 @@ JsonValue answer_menu_findings(
 	const std::string path = args.text("path");
 	JsonValue report = menu_findings_to_json(context.core.view(), path);
 	if (report.is_null()) {
-		error = no_menu(path);
+		error = no_menu(context.core.view(), path);
 		return report;
 	}
 	if (args.has("severity")) {
@@ -589,9 +608,14 @@ JsonValue answer_menu_findings(
 	return report;
 }
 
-JsonValue answer_menu_render(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return menu_render_to_json(
-			context.core.view(), args.text("path"), NodeId(args.integer("screen")), page_of(args));
+JsonValue answer_menu_render(
+		const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const std::string path = args.text("path");
+	JsonValue render = menu_render_to_json(
+			context.core.view(), path, NodeId(args.integer("screen")), page_of(args));
+	if (render.is_null())
+		error = no_menu(context.core.view(), path);
+	return render;
 }
 
 JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &) {
@@ -619,7 +643,7 @@ struct Query {
 	EditorQueryRow row;
 	template <size_t N>
 	constexpr Query(K kind, const char *token, QueryHandler handler, const QueryParam (&params)[N],
-			ViewConcern reads, const char *doc) :
+			ConcernSet reads, const char *doc) :
 			row() {
 		row.kind = kind;
 		row.token = token;
@@ -630,7 +654,7 @@ struct Query {
 		row.doc = doc;
 	}
 	constexpr Query(
-			K kind, const char *token, QueryHandler handler, ViewConcern reads, const char *doc) :
+			K kind, const char *token, QueryHandler handler, ConcernSet reads, const char *doc) :
 			row() {
 		row.kind = kind;
 		row.token = token;
@@ -648,35 +672,51 @@ struct Query {
 
 using C = ViewConcern;
 
+// What the answers read, beyond one concern each: an open document read by its path or, pathless,
+// the active one; a record's references as the graph resolves them; a Go to's files by the scan;
+// a menu, open or as the render check read its file, with the render check's findings; and the
+// Problems rows with the fixes each row carries (problem_query_key, problem_fix_key).
+constexpr ConcernSet kDocumentReads =
+		concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument });
+constexpr ConcernSet kRecordReads =
+		concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument, C::Graph });
+constexpr ConcernSet kTargetReads =
+		concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument, C::Graph, C::Files });
+constexpr ConcernSet kMenuReads =
+		concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument, C::Files, C::Findings });
+constexpr ConcernSet kProblemsReads = concern_set({ C::Findings, C::ActiveDocument, C::DocumentSet,
+		C::Project, C::Files, C::Graph, C::Preferences });
+constexpr ConcernSet kGraphReads = concern_set({ C::Graph });
+
 constexpr EditorQueryRow kRows[] = {
-	Query(K::State, "state", answer_state, kStateParams, C::kCount,
+	Query(K::State, "state", answer_state, kStateParams, kEveryConcern,
 			"The view by section (the catalog's sections: the status line, the project, the "
 			"requirements, the open documents, the selection, the operation, Play, the import "
 			"dialog, the dialogs, the problem and graph counts, the preferences, the output lines "
-			"and the events held): `revisions` each concern's counter, `revision` the one that "
-			"moves with any; with `since`, the sections whose concerns have not moved since that "
-			"revision left out.")
+			"and the events held): `view_revision` the view's clock, `revisions` each concern's "
+			"stamp (the clock value at which it last moved); with `since`, a view_revision an "
+			"earlier answer carried, the sections none of whose concerns moved since left out.")
 			.row,
-	Query(K::Files, "files", answer_files, kPageParams, C::Files,
+	Query(K::Files, "files", answer_files, kPageParams, concern_set({ C::Files }),
 			"A page of the files the project's scan lists, in its order: each file's path, name, "
 			"kind (its asset kind's token) and editable, whether the editor opens it.")
 			.pages("files")
 			.row,
-	Query(K::Documents, "documents", answer_documents, kPageParams, C::Documents,
+	Query(K::Documents, "documents", answer_documents, kPageParams, kDocumentReads,
 			"The active document and a page of the open documents, each's lifecycle state: path, "
 			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
 			"issues; a record document's also file_state_changed, row_count, last_added and the "
 			"kinds of row its outline adds (top_kinds).")
 			.pages("documents")
 			.row,
-	Query(K::Document, "document", answer_document, kDocumentParams, C::Documents,
+	Query(K::Document, "document", answer_document, kDocumentParams, kDocumentReads,
 			"One open document's lifecycle state (as the documents query gives it) and, for a "
 			"record document, a page of its rows, each with its id, kind, name, change since the "
 			"save (unchanged, changed, added) and the collections it holds, their records at "
 			"every depth.")
 			.pages("rows")
 			.row,
-	Query(K::Record, "record", answer_record, kRecordParams, C::Documents,
+	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,
 			"One record of an open record document, by its id or by the symbol it defines: its id, "
 			"address (row, kind, child), name, path, locator, change since the save, owner and "
 			"index, every field as it applies to it (value, label, unit, range, choices, whether "
@@ -684,116 +724,124 @@ constexpr EditorQueryRow kRows[] = {
 			"one's saved value) and the collections it holds.")
 			.row,
 	Query(K::ReferenceChoices, "reference_choices", answer_reference_choices, kFieldParams,
-			C::Graph,
+			kRecordReads,
 			"A page of the names a record's reference field's picker offers there: each with "
 			"its name, the kind it names, the file and record that define it, the status the "
 			"field set to it would have, and why no lookup of the game finds an inert one.")
 			.pages("choices")
 			.row,
 	Query(K::ReferenceTargets, "reference_targets", answer_reference_targets, kFieldParams,
-			C::Graph,
+			kTargetReads,
 			"A page of the places a record's reference field's Go to leads with the value it "
 			"holds: each with its label, file, locator and field, and whether the editor opens "
 			"the file.")
 			.pages("targets")
 			.row,
 	Query(K::DocumentSearch, "document_search", answer_document_search, kDocumentSearchParams,
-			C::Documents,
+			kDocumentReads,
 			"A page of the fields of an open document whose value, as the Inspector shows it, "
 			"holds the text, in document order: each hit its record's id, address, record path "
 			"and locator, the field's id and label, the text as shown and where the text is in "
 			"it.")
 			.pages("hits")
 			.row,
-	Query(K::Problems, "problems", answer_problems, kProblemsParams, C::Findings,
+	Query(K::Problems, "problems", answer_problems, kProblemsParams, kProblemsReads,
 			"The Problems rows as the Problems window shows them: errors, then warnings, then "
 			"notes; total, shown (the rows matching), counts by severity, a page of the rows, "
 			"each with what it is about and its fixes ({label, detail, bulk, request}: the "
 			"request an editor_request passes back as it is), and grouped, the page's groups.")
 			.pages("problems")
 			.row,
-	Query(K::References, "references", answer_references, kReferencesParams, C::Graph,
+	Query(K::References, "references", answer_references, kReferencesParams, kGraphReads,
 			"A page of what a file names in the asset graph: each edge with its record, locator, "
 			"field, kind, value, target, scope, status and the file it resolves to.")
 			.pages("edges")
 			.row,
-	Query(K::Referrers, "referrers", answer_referrers, kReferrersParams, C::Graph,
+	Query(K::Referrers, "referrers", answer_referrers, kReferrersParams, kGraphReads,
 			"A page of the edges that name a file, or a symbol of a kind and name in a scope.")
 			.pages("edges")
 			.row,
-	Query(K::Usages, "usages", answer_usages, kReferrersParams, C::Graph,
+	Query(K::Usages, "usages", answer_usages, kReferrersParams, kGraphReads,
 			"A page of who uses a file: the edges that name it, then those naming each symbol it "
 			"defines; for a symbol, as referrers.")
 			.pages("edges")
 			.row,
-	Query(K::Missing, "missing", answer_missing, kPageParams, C::Graph,
+	Query(K::Missing, "missing", answer_missing, kPageParams, kGraphReads,
 			"A page of every reference that resolves to nothing (count the graph's own count of "
 			"them).")
 			.pages("edges")
 			.row,
-	Query(K::Symbols, "symbols", answer_symbols, kSymbolsParams, C::Graph,
+	Query(K::Symbols, "symbols", answer_symbols, kSymbolsParams, kGraphReads,
 			"A page of the names the files define: each with its kind, name, file, record, "
 			"locator, address, field, scope, line, a style variable's value, and inert with why "
 			"where no lookup of the game finds it.")
 			.pages("symbols")
 			.row,
-	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams, C::Graph,
+	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams,
+			kGraphReads,
 			"A page of the files whose names and the symbols whose names hold the text, without "
 			"case, files first, each with its usages.")
 			.pages("hits")
 			.row,
-	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, C::Documents,
+	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,
 			"A menu's screens (id, name, the render check's status and whether it is current) and "
 			"a page of each screen's windows in pre-order: id, name, type, parent, depth, index, "
 			"text, the lists it holds and, while the render is current, its rect and local rect "
 			"in 800x600 design units and whether it is shown.")
 			.pages("windows")
 			.row,
-	Query(K::MenuFindings, "menu_findings", answer_menu_findings, kMenuFindingsParams, C::Findings,
+	Query(K::MenuFindings, "menu_findings", answer_menu_findings, kMenuFindingsParams, kMenuReads,
 			"A menu's Problems rows, each with its source (graph, render, menu, ...), the counts "
 			"by severity and by source, each screen's render status, notes and problems, and a "
 			"page of the rows.")
 			.pages("problems")
 			.row,
-	Query(K::MenuRender, "menu_render", answer_menu_render, kMenuRenderParams, C::Findings,
+	Query(K::MenuRender, "menu_render", answer_menu_render, kMenuRenderParams, kMenuReads,
 			"A menu's screen as the render check compiled it headless with the last validation, "
 			"in the preview's schema: its status, a page of its widgets (index, id, name, type, "
 			"shown, disabled, rect and local in 800x600 design units, text, font, text_color) and "
-			"by the same page its compiler notes (note_count their whole count).")
+			"by the same page its compiler notes (note_count their whole count; next_offset runs "
+			"to the end of the longer list).")
 			.pages("widgets")
 			.row,
-	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams, C::Dialogs,
+	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
+			concern_set({ C::Dialogs, C::Preferences, C::Files }),
 			"The import dialog's preview: open, with_dependencies, a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, "
 			"made_from, needed_by, found_in, selected, problem, rivals), by the same page what it "
-			"offers and chose (choices, roots) and the files not found, then the kinds not "
-			"followed, truncated and the plan's findings.")
+			"offers and chose (choices, roots) and the files not found, each list with its own "
+			"count (next_offset runs to the end of the longest), then the kinds not followed, "
+			"truncated and the plan's findings.")
 			.pages("rows")
 			.row,
-	Query(K::Output, "output", answer_output, kCursorParams, C::Output,
+	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),
 			"A page of the output lines by absolute index: first (the oldest held), next (one "
-			"past the newest), cursor and next_cursor; paging by next_cursor skips and repeats no "
-			"line while the log drops its oldest past 2000.")
+			"past the newest), cursor (the page's first) and next_cursor. Paging by next_cursor "
+			"repeats no line; the log keeps its last 2000, so a client more than 2000 lines behind "
+			"misses the lines dropped, the cursor coming back larger than it asked.")
 			.pages("lines")
 			.row,
-	Query(K::Operation, "operation", answer_operation, C::Operation,
+	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
 			"The operation that runs (running, and while one does its id, kind, label, done and "
 			"total in its unit, cancellable, and what it reads and writes), what the last one "
 			"came to (last_operation: id, kind, end, findings) and the last build.")
 			.row,
-	// Events are posted beside a Selection or a Dialogs change; the page is stamped with `any`.
-	Query(K::Events, "events", answer_events, kCursorParams, C::kCount,
-			"A page of the view events by seq (the one-shot asks a request makes of a window, the "
-			"last 64 held): first, next, cursor, next_cursor and the items, each its seq, kind "
-			"(reveal_record, reveal_file, ask_rename, settings_applied, import_planned) and the "
-			"fields its kind sets.")
+	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
+	Query(K::Events, "events", answer_events, kCursorParams,
+			concern_set({ C::Selection, C::Dialogs }),
+			"A page of the view events by seq (the one-shot asks a request makes of a window): "
+			"first, next, cursor, next_cursor and the items, each its seq, kind (reveal_record, "
+			"reveal_file, ask_rename, settings_applied, import_planned) and the fields its kind "
+			"sets. The last 64 are held: a client more than 64 behind misses the events dropped, "
+			"the cursor coming back larger than it asked.")
 			.pages("items")
 			.row,
-	Query(K::Catalog, "catalog", answer_catalog, C::Findings,
+	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "
 			"needs, who serves it and what it does; every request field; every query with its "
-			"params, the list it pages and the concern it reads; the state's sections; the view's "
-			"concerns; and the codes of the findings the session holds.")
+			"params, the list it pages and the concerns it reads; the state's sections; the view's "
+			"concerns; and the codes of the findings the session holds now (S13 A6's findings "
+			"table will list every code the session and the types know).")
 			.row,
 };
 
@@ -815,12 +863,13 @@ constexpr bool same_text(const char *a, const char *b) {
 	return *a == *b;
 }
 
-// Every row a token of its own, a handler and a doc; every param a name of its own in its row and
-// a doc; a paged row takes a limit and an offset or a cursor.
+// Every row a token of its own, a handler, a doc and a concern it reads at least; every param a
+// name of its own in its row and a doc; a paged row takes a limit and an offset or a cursor.
 constexpr bool rows_named() {
 	for (size_t i = 0; i < kEditorQueryKindCount; ++i) {
 		const EditorQueryRow &row = kRows[i];
-		if (!row.token[0] || !row.handler || !row.doc || !row.doc[0])
+		if (!row.token[0] || !row.handler || !row.doc || !row.doc[0] || !row.reads ||
+				(row.reads & ~kEveryConcern))
 			return false;
 		for (size_t j = i + 1; j < kEditorQueryKindCount; ++j)
 			if (same_text(row.token, kRows[j].token))
@@ -842,8 +891,8 @@ constexpr bool rows_named() {
 	return true;
 }
 static_assert(rows_named(),
-		"each query has a token of its own, a handler and a doc, its params a name of their own "
-		"and a doc, and a paged query its limit and its offset or cursor");
+		"each query has a token of its own, a handler, a doc and a concern it reads, its params a "
+		"name of their own and a doc, and a paged query its limit and its offset or cursor");
 
 // A param a query takes, by name, or null.
 const QueryParam *param_of(const EditorQueryRow &row, const char *name) {
@@ -1004,8 +1053,11 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		entry.set("params", std::move(params));
 		if (row.list_key)
 			entry.set("list", json_string(row.list_key));
-		entry.set("reads",
-				json_string(row.reads == C::kCount ? "any" : view_concern_token(row.reads)));
+		JsonValue reads = JsonValue::make_array();
+		for (size_t c = 0; c < kViewConcernCount; ++c)
+			if (row.reads & concern_bit(static_cast<ViewConcern>(c)))
+				reads.push(json_string(view_concern_token(static_cast<ViewConcern>(c))));
+		entry.set("reads", std::move(reads));
 		entry.set("doc", json_string(row.doc));
 		queries.push(std::move(entry));
 	}
@@ -1117,6 +1169,7 @@ const char *query_json_token(QueryJson type) {
 
 JsonValue run_query(
 		SessionCore &core, std::string_view name, const JsonValue &args, std::string &error) {
+	error.clear();
 	EditorQueryKind kind = K::State;
 	if (!editor_query_from_token(name, kind)) {
 		std::string names;
@@ -1137,11 +1190,10 @@ JsonValue run_query(
 		error = what + error;
 		return JsonValue::make_null();
 	}
-	// The revision the answer is of: the concern it reads (the state's: any).
-	const ViewRevisions &revisions = core.view().revisions;
-	answer.set("revision",
-			json_number(
-					double(row.reads == C::kCount ? revisions.any() : revisions.of(row.reads))));
+	// The clock value at which what the answer reads last moved (the state's: the clock). An
+	// answer's own `revision` (a document's, a menu's) is its own; view_revision is this alone.
+	assert(!answer.get("view_revision") && "a query's view_revision is run_query's to stamp");
+	answer.set("view_revision", json_number(double(core.view().revisions.stamp_of(row.reads))));
 	return answer;
 }
 

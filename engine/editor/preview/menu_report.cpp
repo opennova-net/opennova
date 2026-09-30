@@ -37,10 +37,12 @@ bool names_menu(const DocumentBase &document, const std::string &path) {
 	       normalized_logical_name(basename_of(document.path())) == normalized_logical_name(path);
 }
 
-// The menu's project-relative path: an open document's, else the scan's entry for it.
+// The menu's project-relative path: an open document's, else the scan's entry for it. A pathless
+// read is of the active document, as a pathless request's edits are (S13 A5): none when it is no
+// menu, never the previewed menu instead (the identities a read gives are those a pathless edit
+// names).
 std::string menu_path(const SessionView &view, const std::string &path) {
-	std::string wanted = path;
-	if (wanted.empty()) wanted = !view.documents.previews.menu.path.empty() ? view.documents.previews.menu.path : view.documents.active;
+	const std::string wanted = path.empty() ? view.documents.active : path;
 	if (wanted.empty()) return std::string();
 	for (const auto &open : view.documents.open)
 		if (open && is_menu_kind(open->kind()) && names_menu(*open, wanted)) return open->path();
@@ -218,13 +220,15 @@ io::JsonValue menu_render_to_json(
 		none.status = MenuPreviewStatus::NoProject;
 		out = menu_preview_to_json(none);
 	} else {
+		const std::string relative = menu_path(view, path);
+		if (relative.empty()) return JsonValue::make_null();
 		const MenuRenderCheck &check = *view.findings.render_check;
 		// The open document when the menu is open (its current state), else the file as the check
 		// read it.
-		const MnuDocument *document = check.document(path);
-		if (const MnuDocument *open = open_menu(view, path)) document = open;
+		const MnuDocument *document = check.document(relative);
+		if (const MnuDocument *open = open_menu(view, relative)) document = open;
 		const Node *screen = document ? document->row(row) : nullptr;
-		const MenuScreenRender *render = check.render(path, row);
+		const MenuScreenRender *render = check.render(relative, row);
 		if (!document || !screen || !render) {
 			none.document = document;
 			out = menu_preview_to_json(none);
@@ -244,7 +248,8 @@ io::JsonValue menu_render_to_json(
 	};
 	const size_t widgets = page_of("widgets");
 	const size_t notes = page_of("notes");
-	set_page(out, page, widgets);
+	// `count` the widgets'; the page runs on while either list has entries past it.
+	set_page(out, page, widgets, notes);
 	out.set("widget_count", json_number(double(widgets)));
 	out.set("note_count", json_number(double(notes)));
 	return out;

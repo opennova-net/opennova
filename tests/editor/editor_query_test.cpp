@@ -27,6 +27,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_fields.h>
@@ -155,23 +156,29 @@ bool pages_concatenate(ProjectSession &session, const char *name, const std::str
 std::set<std::string> sections_of(const JsonValue &state) {
 	std::set<std::string> out;
 	for (const opennova::io::JsonMember &member : state.object)
-		if (member.key != "revision" && member.key != "revisions")
+		if (member.key != "view_revision" && member.key != "revisions")
 			out.insert(member.key);
 	return out;
 }
 
-// The sections that follow a concern of which moved between two views' revisions.
-std::set<std::string> sections_moved(const ViewRevisions &before, const ViewRevisions &after) {
+// The sections that follow a concern of which moved after the clock value `since` (its stamp past
+// it).
+std::set<std::string> sections_moved(const ViewRevisions &revisions, uint64_t since) {
 	std::set<std::string> out;
 	for (size_t s = 0; s < kViewSectionCount; ++s) {
 		const ViewSectionRow &row = view_section_row(static_cast<ViewSection>(s));
 		for (size_t c = 0; c < kViewConcernCount; ++c) {
 			const ViewConcern concern = static_cast<ViewConcern>(c);
-			if ((row.concerns & concern_bit(concern)) && before.of(concern) != after.of(concern))
+			if ((row.concerns & concern_bit(concern)) && revisions.stamp(concern) > since)
 				out.insert(row.token);
 		}
 	}
 	return out;
+}
+
+// An answer's view_revision.
+uint64_t view_revision_of(const JsonValue &answer) {
+	return uint64_t(answer.get_number("view_revision", -1.0));
 }
 
 const JsonValue *window_named(const JsonValue &tree, const char *name) {
@@ -343,6 +350,9 @@ static int test_refusals() {
 	TEST_EXPECT(says("references", "{}", "needs \"path\""));
 	TEST_EXPECT(says("references", "null", "needs \"path\""));
 	TEST_EXPECT(says("menu_render", R"({"path": "main.mnu"})", "needs \"screen\""));
+	TEST_EXPECT(says("menu_tree", "{}", "no document is active"));
+	TEST_EXPECT(
+			says("state", R"({"since": 999999})", "\"since\" is 999999, past the view's clock"));
 	TEST_EXPECT(says("files", "[]", "its args are an object"));
 	TEST_EXPECT(says("state", R"({"sections": ["problems"]})", "no section \"problems\""));
 	TEST_EXPECT(says("state", R"({"sections": "status"})", "must be a string[]"));
@@ -361,25 +371,109 @@ static int test_refusals() {
 }
 
 // The Problems query's params (S13 A5: the problems row, which the Problems query's own JSON
-// reader became): nothing asked is the default query; each param reads; an empty severity list
-// shows nothing; a token the query does not know is refused.
+// reader became): nothing asked is the default query; each param has its effect, the rows it
+// shows those answer_problems shows for the query with that param set, and other than the
+// default's; an empty severity list shows nothing; a token the query does not know is refused.
 static int test_problems_params() {
 	editor_test::TempProjectDir dir("opennova_editor_query_problems");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Problems"));
-	const JsonValue all = ask(session, "problems");
+	// The stylesheet alone made: every other required file missing (errors, each with a fix), and
+	// the stylesheet's variables no menu names (notes about its file, open and active).
+	session.handle(request::create_missing({ "menu_style" }));
+	session.handle(request::open_document("menu_style.mns"));
+	const SessionView &view = session.view();
+	const Document *style = session.document_for("menu_style.mns");
+	TEST_EXPECT(style && view.documents.active == style->path());
+	if (!style)
+		return 1;
+	const JsonValue all = ask(session, "problems", R"({"limit": 200})");
 	const double total = all.get_number("total", -1.0);
 	TEST_EXPECT(total > 0 && all.get_number("shown", -1.0) == total &&
 			all.get_number("count", -1.0) == total);
-	TEST_EXPECT(all.get_number("revision", -1.0) ==
-			double(session.view().revisions.of(ViewConcern::Findings)));
-	const JsonValue errors = ask(session, "problems", R"({"severities": ["error"]})");
-	TEST_EXPECT(errors.get_number("shown", -1.0) == all.get("counts")->get_number("errors", -2.0));
-	const JsonValue grouped = ask(session, "problems",
-			R"({"severities": ["error", "info"], "text": "req", "scope": "open_files", "fixable": true, "group": "kind", "offset": 0, "limit": 5})");
-	TEST_EXPECT(grouped.is_object() && grouped.get("groups") != nullptr);
+	TEST_EXPECT(view_revision_of(all) ==
+			view.revisions.stamp_of(editor_query_row(EditorQueryKind::Problems).reads));
+	// Each row "severity code asset", in order.
+	const auto shown = [](const JsonValue &answer) {
+		std::vector<std::string> rows;
+		const JsonValue *problems = answer.get("problems");
+		for (size_t i = 0; problems && i < problems->array.size(); ++i) {
+			const JsonValue &row = problems->array[i];
+			rows.push_back(row.get_string("severity", "") + " " + row.get_string("code", "") + " " +
+					row.get_string("asset", ""));
+		}
+		return rows;
+	};
+	const auto expected = [&view](const ProblemQuery &query) {
+		std::vector<std::string> rows;
+		for (const size_t index : answer_problems(query, view).rows) {
+			const Diagnostic &d = view.findings.diagnostics[index];
+			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code + " " +
+					d.asset);
+		}
+		return rows;
+	};
+	const std::vector<std::string> every = shown(all);
+	TEST_EXPECT(every == expected(ProblemQuery()));
+	// Each param alone: its rows answer_problems's for it, a nonempty part of the default's.
+	const auto effect = [&](const char *args, const ProblemQuery &query) {
+		const JsonValue answer = ask(session, "problems", args);
+		const std::vector<std::string> rows = shown(answer);
+		const bool same =
+				rows == expected(query) && answer.get_number("shown", -1.0) == double(rows.size());
+		const bool part = !rows.empty() && rows.size() < every.size();
+		if (!same || !part)
+			std::printf("  problems %s: %zu rows of %zu%s\n", args, rows.size(), every.size(),
+					same ? "" : ", not the query's");
+		return same && part;
+	};
+	ProblemQuery severities;
+	severities.warnings = false;
+	severities.infos = false;
+	TEST_EXPECT(effect(R"({"severities": ["error"], "limit": 200})", severities));
+	ProblemQuery text;
+	text.text = "MENU_STYLE";
+	TEST_EXPECT(effect(R"({"text": "MENU_STYLE", "limit": 200})", text));
+	ProblemQuery active;
+	active.scope = ProblemScope::ActiveFile;
+	TEST_EXPECT(effect(R"({"scope": "active_file", "limit": 200})", active));
+	ProblemQuery open;
+	open.scope = ProblemScope::OpenFiles;
+	TEST_EXPECT(effect(R"({"scope": "open_files", "limit": 200})", open));
+	ProblemQuery fixable;
+	fixable.fixable = true;
+	TEST_EXPECT(effect(R"({"fixable": true, "limit": 200})", fixable));
+	for (const JsonValue &row :
+			ask(session, "problems", R"({"fixable": true})").get("problems")->array)
+		TEST_EXPECT(!row.get("fixes")->array.empty());
+	// Grouped: the rows in the groups' order, each naming its group, and the groups of the page.
+	for (const auto &[token, grouping] :
+			{ std::pair<const char *, ProblemGrouping>{ "kind", ProblemGrouping::Kind },
+					std::pair<const char *, ProblemGrouping>{ "file", ProblemGrouping::File } }) {
+		ProblemQuery grouped;
+		grouped.grouping = grouping;
+		const JsonValue answer = ask(
+				session, "problems", std::string(R"({"group": ")") + token + R"(", "limit": 200})");
+		const ProblemAnswer made = answer_problems(grouped, view);
+		TEST_EXPECT(shown(answer) == expected(grouped) && answer.get("groups") &&
+				answer.get_number("group_count", -1.0) == double(made.groups.size()) &&
+				made.groups.size() > 1);
+		for (const JsonValue &row : answer.get("problems")->array)
+			TEST_EXPECT(!row.get_string("group", "").empty() || grouping == ProblemGrouping::File);
+	}
+	TEST_EXPECT(ask(session, "problems").get("groups") == nullptr);
+	// Several together: the query with each set.
+	ProblemQuery together;
+	together.warnings = false;
+	together.text = "style";
+	together.scope = ProblemScope::OpenFiles;
+	together.grouping = ProblemGrouping::Kind;
+	TEST_EXPECT(
+			shown(ask(session, "problems",
+					R"({"severities": ["error", "info"], "text": "style", "scope": "open_files", "group": "kind", "limit": 200})")) ==
+			expected(together));
 	TEST_EXPECT(ask(session, "problems", R"({"severities": []})").get_number("shown", -1.0) == 0.0);
 	for (const char *bad : { R"({"severity": "error"})", R"({"severities": "error"})",
 				 R"({"severities": ["fatal"]})", R"({"scope": "everything"})",
@@ -405,13 +499,21 @@ static int test_state_since() {
 	session.handle(request::open_document("main.mnu"));
 	const SessionView &view = session.view();
 
-	// Every section by default, each its row's token; `revision` is any, `revisions` each concern.
+	// Every section by default, each its row's token; `view_revision` is the clock, `revisions`
+	// each concern's stamp (the clock value at which it last moved).
 	const JsonValue everything = ask(session, "state");
 	TEST_EXPECT(sections_of(everything).size() == kViewSectionCount);
-	TEST_EXPECT(everything.get_number("revision", -1.0) == double(view.revisions.any()));
+	TEST_EXPECT(view_revision_of(everything) == view.revisions.any() &&
+			everything.get("revision") == nullptr);
 	for (const ViewConcernRow &row : kViewConcernRows)
 		TEST_EXPECT(everything.get("revisions")->get_number(row.token, -1.0) ==
-				double(view.revisions.of(row.concern)));
+				double(view.revisions.stamp(row.concern)));
+	// `since` 0 is every section, as none is; one past the clock is refused, naming the clock.
+	TEST_EXPECT(sections_of(ask(session, "state", R"({"since": 0})")).size() == kViewSectionCount);
+	TEST_EXPECT(refusal(session, "state",
+						R"({"since": )" + std::to_string(view.revisions.any() + 1) + "}")
+						.find("past the view's clock, " + std::to_string(view.revisions.any()) +
+								".") != std::string::npos);
 	TEST_EXPECT(everything.get("project")->get_bool("open", false) &&
 			everything.get("project")->get_string("title", "") == "State");
 	TEST_EXPECT(everything.get("project")->get("files") == nullptr &&
@@ -436,7 +538,7 @@ static int test_state_since() {
 	session.handle(request::select_record("main.mnu", main));
 	std::set<std::string> answered = sections_of(
 			ask(session, "state", R"({"since": )" + std::to_string(before.any()) + "}"));
-	TEST_EXPECT(answered == sections_moved(before, view.revisions));
+	TEST_EXPECT(answered == sections_moved(view.revisions, before.any()));
 	TEST_EXPECT(answered.count("selection") == 1 && answered.count("project") == 0 &&
 			answered.count("requirements") == 0 && answered.count("problem_counts") == 0 &&
 			answered.count("graph_counts") == 0);
@@ -446,7 +548,7 @@ static int test_state_since() {
 	session.handle(request::clear_output());
 	answered = sections_of(
 			ask(session, "state", R"({"since": )" + std::to_string(before.any()) + "}"));
-	TEST_EXPECT(answered == sections_moved(before, view.revisions));
+	TEST_EXPECT(answered == sections_moved(view.revisions, before.any()));
 	TEST_EXPECT(answered == std::set<std::string>({ "status", "output" }));
 
 	// An edit of a window's number: the documents, the status and the output; the files and the
@@ -457,9 +559,24 @@ static int test_state_since() {
 					std::to_string(main.child) + R"(, "field": "position.left", "value": 3}]})")));
 	answered = sections_of(
 			ask(session, "state", R"({"since": )" + std::to_string(before.any()) + "}"));
-	TEST_EXPECT(answered == sections_moved(before, view.revisions));
+	TEST_EXPECT(answered == sections_moved(view.revisions, before.any()));
 	TEST_EXPECT(answered.count("documents") == 1 && answered.count("project") == 0 &&
 			answered.count("preferences") == 0);
+
+	// One clock (S13 A5): a query's view_revision is the clock value at which what it reads last
+	// moved, and `since` takes it back as it takes the state's. The files' is Files' stamp; an
+	// Output Clear after it brings back what moved since that stamp, the status and the output
+	// among it, and no section whose concerns stood still since.
+	const uint64_t files_seen = view_revision_of(ask(session, "files", R"({"limit": 1})"));
+	TEST_EXPECT(files_seen == view.revisions.stamp(ViewConcern::Files) && files_seen > 0 &&
+			files_seen < view.revisions.any());
+	session.handle(request::clear_output());
+	TEST_EXPECT(view_revision_of(ask(session, "output")) == view.revisions.any());
+	answered =
+			sections_of(ask(session, "state", R"({"since": )" + std::to_string(files_seen) + "}"));
+	TEST_EXPECT(answered == sections_moved(view.revisions, files_seen));
+	TEST_EXPECT(answered.count("status") == 1 && answered.count("output") == 1 &&
+			answered.size() < kViewSectionCount);
 
 	// `since` with sections: those of them that moved.
 	before = view.revisions;
@@ -535,9 +652,17 @@ static int test_catalog() {
 				editor_query_from_token(row.token, back) && back == row.kind);
 		TEST_EXPECT(entry.get_string("doc", "") == row.doc && !std::string(row.doc).empty());
 		TEST_EXPECT(entry.get_string("list", "") == (row.list_key ? row.list_key : ""));
-		TEST_EXPECT(entry.get_string("reads", "") ==
-				(row.reads == ViewConcern::kCount ? std::string("any")
-												  : std::string(view_concern_token(row.reads))));
+		// The concerns it reads, in the enum's order, one at least; the state's every one.
+		const JsonValue *reads = entry.get("reads");
+		std::vector<std::string> expected;
+		for (const ViewConcernRow &concern : kViewConcernRows)
+			if (row.reads & concern_bit(concern.concern))
+				expected.push_back(concern.token);
+		std::vector<std::string> listed;
+		for (size_t r = 0; reads && r < reads->array.size(); ++r)
+			listed.push_back(reads->array[r].string);
+		TEST_EXPECT(!expected.empty() && listed == expected);
+		TEST_EXPECT(row.kind != EditorQueryKind::State || row.reads == kEveryConcern);
 		const JsonValue *params = entry.get("params");
 		TEST_EXPECT(params && params->array.size() == row.param_count);
 		for (size_t p = 0; params && p < params->array.size() && p < row.param_count; ++p) {
@@ -627,13 +752,28 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(refusal(session, "menu_findings", R"({"path": "nothing.mnu"})").find("no menu") !=
 			std::string::npos);
 
-	// No menu previewed and the stylesheet active: a pathless read names no menu.
+	// The stylesheet active: a pathless menu read reads the active document, which is no menu, and
+	// is refused (never another menu); a menu read naming the stylesheet is refused, and so is a
+	// menu's edit in it (a window added); the stylesheet stays as it was.
 	session.handle(request::open_document("menu_style.mns"));
-	TEST_EXPECT(view.documents.previews.menu.path.empty());
-	TEST_EXPECT(
-			refusal(session, "menu_tree", "{}").find("no menu is previewed") != std::string::npos);
+	const Document *style = session.document_for("menu_style.mns");
+	TEST_EXPECT(style && view.documents.active == style->path() &&
+			view.documents.previews.menu.path.empty());
+	if (!style)
+		return 1;
+	const uint64_t style_revision = style->revision();
+	const std::string not_a_menu = "the active document, " + style->path() + ", is not a menu";
+	TEST_EXPECT(refusal(session, "menu_tree", "{}").find(not_a_menu) != std::string::npos &&
+			refusal(session, "menu_findings", "{}").find(not_a_menu) != std::string::npos &&
+			refusal(session, "menu_render", R"({"screen": 1})").find(not_a_menu) !=
+					std::string::npos);
 	TEST_EXPECT(refusal(session, "menu_tree", R"({"path": "menu_style.mns"})")
 						.find("no menu 'menu_style.mns'") != std::string::npos);
+	TEST_EXPECT(refused_with(
+			send(session,
+					R"({"kind": "edit_record", "path": "menu_style.mns", "edits": [{"op": "add", "kind": "window"}]})"),
+			"unknown record kind \"window\""));
+	TEST_EXPECT(style->revision() == style_revision && !style->dirty());
 
 	// The batch: a button and a list added and filled in by label, one undo step.
 	session.handle(request::open_document("main.mnu"));
@@ -686,13 +826,23 @@ static int test_menu_reads_and_batches() {
 	Value value;
 	TEST_EXPECT(menu->get(show, "type", value) && std::get<std::string>(value) == "WINDOW");
 	TEST_EXPECT(menu->get(show, "target", value) && std::get<std::string>(value) == "TITLE");
+	TEST_EXPECT(menu->collections_of(hello).size() > 0);
 	// The selection is the two windows (their ACTIONs, SOUND and ITEM held by them).
 	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({ hello, choices }) &&
 			view.documents.selection == hello);
 
-	// The tree now, pathless: the menu previewed.
+	// The tree now, pathless: the active document, the menu. The answer's own revision is the
+	// menu's, its view_revision the clock value at which what it reads last moved.
 	tree = ask(session, "menu_tree");
 	TEST_EXPECT(tree.get_bool("open", false) && tree.get_bool("dirty", false));
+	TEST_EXPECT(tree.get_number("revision", -1.0) == double(menu->revision()) &&
+			view_revision_of(tree) ==
+					view.revisions.stamp_of(editor_query_row(EditorQueryKind::MenuTree).reads));
+	const JsonValue document = ask(session, "document", R"({"path": "main.mnu", "limit": 1})");
+	TEST_EXPECT(document.get_number("revision", -1.0) == double(menu->revision()) &&
+			view_revision_of(document) ==
+					view.revisions.stamp_of(editor_query_row(EditorQueryKind::Document).reads) &&
+			view_revision_of(document) == view_revision_of(ask(session, "document")));
 	const JsonValue *hello_json = window_named(tree, "HELLO");
 	const JsonValue *choices_json = window_named(tree, "CHOICES");
 	const JsonValue *main_after = window_named(tree, "MAIN");
@@ -708,6 +858,7 @@ static int test_menu_reads_and_batches() {
 			hello_json->get("lists")->get("window") == nullptr);
 	TEST_EXPECT(rect_edge(*hello_json, 0, "local") == 340 &&
 			rect_edge(*hello_json, 1, "local") == 430 && rect_edge(*hello_json, 2, "local") == 460);
+	TEST_EXPECT(rect_edge(*choices_json, 3, "local") == 520);
 	TEST_EXPECT(rect_edge(*hello_json, 1) == 430 + rect_edge(*main_after, 1) &&
 			rect_edge(*hello_json, 0) == 340);
 	TEST_EXPECT(hello_json->get_bool("shown", false) &&
@@ -833,7 +984,15 @@ static int test_menu_reads_and_batches() {
 			actions = collection.ids;
 	TEST_EXPECT(actions.size() == 2);
 	const uint64_t unchanged = menu->revision();
+	// A batch of nothing (an empty list replaced by none) is done with nothing to do: no status
+	// line, and neither the output nor the documents move.
+	const std::string status = view.activity.status;
+	const uint64_t output_stamp = view.revisions.stamp(ViewConcern::Output);
+	const uint64_t documents_stamp = view.revisions.stamp(ViewConcern::Documents);
 	TEST_EXPECT(done(list_edit("hotkey", "[]")) && menu->revision() == unchanged);
+	TEST_EXPECT(view.activity.status == status &&
+			view.revisions.stamp(ViewConcern::Output) == output_stamp &&
+			view.revisions.stamp(ViewConcern::Documents) == documents_stamp);
 	// A record's fields in the order written: a body's draw kind, then its flag cleared, leaves no
 	// draw kind; the flag cleared first, then the kind, leaves the kind.
 	std::string display;
@@ -892,25 +1051,46 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(render.get_string("status", "") == "ready" &&
 			render.get_int("widget_count", -1) == render.get_int("count", -2) &&
 			render.get_int("note_count", 0) > 0);
+	TEST_EXPECT(render.get_number("revision", -1.0) == double(menu->revision()) &&
+			render.get("shown_revision") != nullptr &&
+			view_revision_of(render) ==
+					view.revisions.stamp_of(editor_query_row(EditorQueryKind::MenuRender).reads));
+	// Pathless, the active menu's screen.
+	TEST_EXPECT(opennova::io::json_write(ask(session, "menu_render",
+						R"({"screen": )" + startup_id + "}")) == opennova::io::json_write(render));
 	TEST_EXPECT(
 			ask(session, "menu_render", R"({"path": ")" + menu->path() + R"(", "screen": 999999})")
 					.get_string("status", "") == "no_screen");
 
-	// The menu previewed and the stylesheet active: a pathless read finds the menu, and an edit of
-	// the menu by its path lands on it, not on the stylesheet.
+	// The menu previewed and the stylesheet active: a pathless read is of the stylesheet, which is
+	// no menu, and refused, never the previewed menu; a menu's edit naming the stylesheet is
+	// refused. The menu active again: a pathless read and a pathless edit are both of it, so the
+	// edit of an identity the tree gave lands on the menu's record, not on the stylesheet's record
+	// of that identity.
 	session.handle(request::open_document("menu_style.mns"));
-	const Document *style = session.document_for("menu_style.mns");
-	TEST_EXPECT(style && view.documents.active == style->path() &&
+	TEST_EXPECT(view.documents.active == style->path() &&
 			view.documents.previews.menu.path == menu->path());
-	TEST_EXPECT(ask(session, "menu_tree").get_string("path", "") == menu->path() &&
-			ask(session, "menu_findings").get_string("path", "") == menu->path());
-	const uint64_t style_before = style ? style->revision() : 0;
+	TEST_EXPECT(refusal(session, "menu_tree", "{}").find(not_a_menu) != std::string::npos &&
+			refusal(session, "menu_findings", "{}").find(not_a_menu) != std::string::npos);
+	const uint64_t style_before = style->revision();
+	TEST_EXPECT(refused_with(
+			send(session,
+					R"({"kind": "edit_record", "path": "menu_style.mns", "edits": [{"op": "add", "kind": "window", "parent": )" +
+							h + "}]}"),
+			"unknown record kind \"window\""));
+	session.handle(request::open_document("main.mnu"));
+	TEST_EXPECT(view.documents.active == menu->path());
+	const JsonValue pathless = ask(session, "menu_tree");
+	const JsonValue *hello_listed = window_named(pathless, "HELLO");
+	TEST_EXPECT(pathless.get_string("path", "") == menu->path() &&
+			ask(session, "menu_findings").get_string("path", "") == menu->path() && hello_listed &&
+			id_of(*hello_listed, "id") == hello.child);
 	TEST_EXPECT(done(send(session,
-			R"({"kind": "edit_record", "path": "main.mnu", "edits": [{"op": "set", "id": )" + h +
+			R"({"kind": "edit_record", "edits": [{"op": "set", "id": )" + h +
 					R"(, "field": "name", "value": "HELLO_AGAIN"}]})")));
 	NodeAddress again;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO_AGAIN", again) && again == hello &&
-			style && style->revision() == style_before && !style->dirty());
+			style->revision() == style_before && !style->dirty());
 	return 0;
 }
 
@@ -928,6 +1108,22 @@ static int test_wire_edits() {
 			send(session,
 					R"({"kind": "edit_record", "path": "main.mnu", "edits": [{"op": "set", "id": 2, "field": "name", "value": "X"}]})"),
 			"record 2 is named in the document the request acts on, and none is open"));
+	// A request refused as it is read opens nothing, open_first or not: a malformed edit, a kind
+	// the blank of the path's type does not know, and a kind that takes no open_first.
+	TEST_EXPECT(refused_with(
+			send(session,
+					R"({"kind": "edit_record", "path": "main.mnu", "open_first": true, "edits": [{"op": "teleport", "id": 2}]})"),
+			"unknown edit op \"teleport\""));
+	TEST_EXPECT(refused_with(
+			send(session,
+					R"({"kind": "edit_record", "path": "main.mnu", "open_first": true, "edits": [{"op": "add", "kind": "gizmo"}]})"),
+			"unknown record kind \"gizmo\""));
+	TEST_EXPECT(refused_with(
+			send(session,
+					R"({"kind": "revert_to_saved", "path": "main.mnu", "open_first": true, "edits": [{"id": 2, "field": "name"}]})"),
+			"revert_to_saved takes no \"open_first\""));
+	TEST_EXPECT(session.document_base_for("main.mnu") == nullptr &&
+			session.view().documents.active.empty());
 	// With open_first the document opens first, and the records are named in it.
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");

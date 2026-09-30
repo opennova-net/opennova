@@ -96,19 +96,27 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"files to import as the paths of preview_import.";
 	}
 	// The record document a request's edits are named in: the one its path names, else the active
-	// one, opened first when the request asks it to be and nothing is open there (a fix's edit);
-	// an open document of another kind holds no records to name (S13 D6).
+	// one (an open document of another kind holds no records to name, S13 D6). A kind that takes
+	// open_first, asking it with nothing open at its path (a fix's edit), is read once before the
+	// document opens, so one refused as it is read asks nothing of the session.
 	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
 		const std::string path = json.get_string("path", "");
-		if (!document_base_for(path) && !path.empty() && json.get_bool("open_first", false) &&
-				project_open())
-			handle(request::open_document(path));
-		names.document = document_for(path);
-		if (const DocumentBase *open = names.document ? nullptr : document_base_for(path)) {
+		const DocumentBase *open = document_base_for(path);
+		if (open && !records_of(*open)) {
 			ok = false;
 			error = open->path() + " holds no records (document.no_records): its edits name none.";
+		} else if (!open && !path.empty() && project_open() &&
+				request_kind_row(kind).params.has(RequestFieldId::OpenFirst) &&
+				json.get_bool("open_first", false)) {
+			RequestNames first;
+			first.unresolved = true;
+			EditorRequest unread;
+			ok = editor_request_from_json(json, unread, error, &first);
+			if (ok)
+				handle(request::open_document(path));
 		}
+		names.document = document_for(path);
 	}
 	ok = ok && editor_request_from_json(json, request, error, &names);
 	bool served = false;
@@ -136,7 +144,7 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 		answer.set("outcome", std::move(came));
 	}
 	answer.set("status", io::json_string(view().activity.status));
-	answer.set("revision", io::json_number(double(view().revisions.any())));
+	answer.set("view_revision", io::json_number(double(view().revisions.any())));
 	return answer;
 }
 

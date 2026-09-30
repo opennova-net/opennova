@@ -1104,13 +1104,19 @@ static int test_over_a_session() {
 	TEST_EXPECT(!font->get_string("reference_file", "").empty());
 	const JsonValue graph_counts = section(ViewSection::GraphCounts);
 	TEST_EXPECT(graph_counts.get_int("edges", 0) > 0 && graph_counts.get_int("symbols", 0) > 0);
-	// What the graph's last update did (S13 D3): its stats' counts, as the stats hold them.
-	const GraphStats &stats = view.findings.graph->stats();
-	TEST_EXPECT(graph_counts.get_int("edges", 0) == int64_t(view.findings.graph->edge_count()) &&
-			graph_counts.get_int("missing", -1) == int64_t(view.findings.graph->missing_count()) &&
-			graph_counts.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
-			graph_counts.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
-			graph_counts.get_int("findings_made", -1) == int64_t(stats.findings_made));
+	// What the graph holds, totals moving with its generation (the Graph concern); what its last
+	// update did (S13 D3's GraphStats) moves with every update and is read in C++, not here.
+	const AssetGraph &graph = *view.findings.graph;
+	TEST_EXPECT(graph_counts.get_int("files", -1) == int64_t(graph.index().slot_count()) &&
+			graph_counts.get_int("files", 0) > 0 &&
+			graph_counts.get_int("edges", 0) == int64_t(graph.edge_count()) &&
+			graph_counts.get_int("symbols", 0) == int64_t(graph.symbol_count()) &&
+			graph_counts.get_int("missing", -1) == int64_t(graph.missing_count()));
+	for (const char *stat : { "files_extracted", "files_reused", "files_failed", "files_patched",
+				 "edges_resolved", "findings_made" })
+		TEST_EXPECT(graph_counts.get(stat) == nullptr);
+	const GraphStats &stats = graph.stats();
+	TEST_EXPECT(stats.files_extracted + stats.files_reused + stats.files_failed > 0);
 	TEST_EXPECT(!graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.empty());
 	TEST_EXPECT(graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());
@@ -1762,6 +1768,30 @@ static int test_import_pages() {
 	            first.get_int("root_count", 0) == 250 && first.get_int("next_offset", 0) == 200);
 	TEST_EXPECT(first.get("rows") && first.get("rows")->array.size() == 200 && first.get("choices")->array.size() == 200 &&
 	            first.get("roots")->array.size() == 200 && first.get("not_found")->array.size() == 3);
+	// The install's files to choose from, nothing chosen yet (preview_install_import {}): no row,
+	// and the choices a page at a time past the rows' end, next_offset following the longest list
+	// the page covers, each list with its own count.
+	SessionView listed;
+	listed.dialogs.import_preview.open = true;
+	for (int i = 0; i < 250; ++i)
+		listed.dialogs.import_preview.choices.push_back(
+				{"C:/Games/JO/f" + std::to_string(i) + ".txt", "", true, false});
+	listed.dialogs.import_preview.plan = std::make_shared<const ImportPlan>();
+	std::vector<std::string> chosen_from;
+	size_t from = 0;
+	for (int guard = 0; guard < 10; ++guard) {
+		const JsonValue page = import_preview_to_json(listed, JsonPage{from, 100});
+		TEST_EXPECT(page.get_int("count", -1) == 0 && page.get_int("choice_count", -1) == 250 &&
+		            page.get("rows")->array.empty() && page.get_int("offset", -1) == int(from));
+		for (const JsonValue &choice : page.get("choices")->array)
+			chosen_from.push_back(choice.get_string("path", ""));
+		const JsonValue *next = page.get("next_offset");
+		if (!next || next->is_null()) break;
+		TEST_EXPECT(size_t(next->number) == from + 100);
+		from = size_t(next->number);
+	}
+	TEST_EXPECT(chosen_from.size() == 250 && chosen_from.front() == "C:/Games/JO/f0.txt" &&
+	            chosen_from.back() == "C:/Games/JO/f249.txt");
 	const JsonValue second = import_preview_to_json(view, JsonPage{200, 200});
 	const JsonValue *rows = second.get("rows");
 	TEST_EXPECT(second.get_int("offset", -1) == 200 && rows && rows->array.size() == 50 &&

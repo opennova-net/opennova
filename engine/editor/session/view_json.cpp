@@ -274,23 +274,19 @@ JsonValue problem_counts_section(const SessionView &view) {
 	return out;
 }
 
-// What the asset graph holds (the missing edges a count kept by the graph, never a walk) and what
-// its last update did.
+// What the asset graph holds: its files, edges, symbols and missing edges (a count kept by the
+// graph, never a walk), totals that move only with its generation, as Graph does. What its last
+// update did (GraphStats) moves with every update, one that changed nothing too, so it stays in
+// C++.
 JsonValue graph_counts_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	if (!view.findings.graph)
 		return out;
 	const AssetGraph &graph = *view.findings.graph;
-	const GraphStats &stats = graph.stats();
+	out.set("files", json_number(double(graph.index().slot_count())));
 	out.set("edges", json_number(double(graph.edge_count())));
 	out.set("symbols", json_number(double(graph.symbol_count())));
 	out.set("missing", json_number(double(graph.missing_count())));
-	out.set("files_extracted", json_number(double(stats.files_extracted)));
-	out.set("files_reused", json_number(double(stats.files_reused)));
-	out.set("files_failed", json_number(double(stats.files_failed)));
-	out.set("files_patched", json_number(double(stats.files_patched)));
-	out.set("edges_resolved", json_number(double(stats.edges_resolved)));
-	out.set("findings_made", json_number(double(stats.findings_made)));
 	return out;
 }
 
@@ -360,7 +356,8 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::ProblemCounts, "problem_counts", concern_set({ C::Findings }), problem_counts_section,
 			"How many Problems rows there are, by severity (the problems query pages them)." },
 	{ S::GraphCounts, "graph_counts", concern_set({ C::Graph }), graph_counts_section,
-			"What the asset graph holds (edges, symbols, missing) and what its last update did." },
+			"What the asset graph holds: files, edges, symbols and missing (the references that "
+			"resolve to nothing)." },
 	{ S::Preferences, "preferences", concern_set({ C::Preferences }), preferences_section,
 			"The editor's settings: the recent projects, the game install, Play in it, the "
 			"runtime, the import setting." },
@@ -618,7 +615,9 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	std::vector<const ImportPlanRow *> rows, not_found;
 	for (const ImportPlanRow &row : plan.rows)
 		(row.state == ImportPlanRow::State::NotFound ? not_found : rows).push_back(&row);
-	set_page(out, page, rows.size());
+	// `count` the rows'; the page runs on while any list it covers has entries past it.
+	set_page(out, page, rows.size(),
+			std::max({ preview.choices.size(), preview.roots.size(), not_found.size() }));
 	JsonValue planned = JsonValue::make_array();
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));

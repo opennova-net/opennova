@@ -54,19 +54,20 @@ public:
 	bool handle(const EditorRequest &request);
 	// A request in its wire form (S13 A5; the editor MCP's editor_request, the Shell's
 	// request_json): read by session_json's editor_request_from_json, its edits named in the
-	// record document it acts on (the one its path names, else the active one; opened first when
-	// it asks, open_first, and nothing is open there; a document of another kind open there holds
-	// no records to name, S13 D6, and the request is refused as it is read), then handled. The
-	// answer: {ok (it read), served, error?,
-	// outcome (action_outcome_to_json: what it came to, with the records its edits made, `added`,
-	// and for an edit_record `made`, each label its batch gave to the record it named), status,
-	// revision (the view's any)}. A shell row is not served here: `shell`, when given, receives it
-	// (served false) for the shell to serve; the pickers need a person and are refused by their
-	// kind before their fields are read.
+	// record document it acts on (the one its path names, else the active one; a document of
+	// another kind there holds no records to name, S13 D6, and the request is refused as it is
+	// read), then handled. A kind that takes open_first, asking it with nothing open at its path,
+	// is read once before the document opens (RequestNames::unresolved), so a request refused as it
+	// is read opens nothing, and again in the document once open. The answer: {ok (it read),
+	// served, error?, outcome (action_outcome_to_json: what it came to, with the records its edits
+	// made, `added`, and for an edit_record `made`, each label its batch gave to the record it
+	// named), status, view_revision (the view's clock after it)}. A shell row is not served here:
+	// `shell`, when given, receives it (served false) for the shell to serve; the pickers need a
+	// person and are refused by their kind before their fields are read.
 	io::JsonValue handle_json(const io::JsonValue &json, EditorRequest *shell = nullptr);
 	// What is asked of the session without a request (S13 A5, editor_queries.h): the query row
-	// `name` answers `args` (an object of its params, or null for none), stamped with the revision
-	// of the concern it reads; null with `error` for a name no row has, args the row refuses (a
+	// `name` answers `args` (an object of its params, or null for none), stamped with its
+	// view_revision (run_query); null with `error` for a name no row has, args the row refuses (a
 	// member it does not take, one it needs left out, a wrongly typed one, an offset or a limit out
 	// of range), or a question it cannot answer (no such document or record).
 	io::JsonValue query(std::string_view name, const io::JsonValue &args, std::string &error);

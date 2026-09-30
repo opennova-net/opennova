@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <string>
 
 #include <base/io/json.h>
@@ -36,20 +35,6 @@ enum class ViewSection : uint8_t {
 };
 
 inline constexpr size_t kViewSectionCount = static_cast<size_t>(ViewSection::kCount);
-
-// A set of concerns, one bit each.
-using ConcernSet = uint32_t;
-static_assert(kViewConcernCount <= 32, "a ConcernSet holds every view concern");
-
-constexpr ConcernSet concern_bit(ViewConcern concern) {
-	return ConcernSet(1) << static_cast<unsigned>(concern);
-}
-constexpr ConcernSet concern_set(std::initializer_list<ViewConcern> concerns) {
-	ConcernSet set = 0;
-	for (const ViewConcern concern : concerns)
-		set |= concern_bit(concern);
-	return set;
-}
 
 // One row per section (view_json.cpp, static_asserted into place): its token (its key in the state
 // answer), the concerns whose moves it follows, what writes it, and what it shows.

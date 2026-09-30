@@ -8,6 +8,7 @@
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
@@ -332,11 +333,12 @@ RecordBatchForm batch_form(EditorRequestKind kind) {
 
 // A blank record document of the type that opens `path` (its kinds' tokens, no records): what a
 // request's edits name their kinds in when no document it acts on is open (a fix's edit, whose
-// document opens first). Null for a path no document type opens, or one whose documents hold no
-// records (S13 D6).
+// document opens first). The path's kind is the scan's by its name (classify_asset: a menu's too,
+// which the runtime's classifier types). Null for a path no document type opens, or one whose
+// documents hold no records (S13 D6).
 std::unique_ptr<Document> blank_names(const std::string &path) {
 	if (path.empty()) return nullptr;
-	const DocumentType *type = document_type_for(asset_kind_for_name(basename_of(path)));
+	const DocumentType *type = document_type_for(classify_asset(basename_of(path), nullptr));
 	return type && type->make ? records_of(type->make()) : nullptr;
 }
 
@@ -473,10 +475,11 @@ bool import_source_from_json(const JsonValue &json, ImportSource &out, std::stri
 }
 
 // A request's field `id` from its wire form into `request` (its edits named in `names`, their
-// labels into `labels`); false with `error` for a value of another type, an unknown token or a
-// malformed object.
+// records not looked for when `unresolved`, RequestNames', their labels into `labels`); false with
+// `error` for a value of another type, an unknown token or a malformed object.
 bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &request,
-		const Document *names, std::vector<std::string> &labels, std::string &error) {
+		const Document *names, bool unresolved, std::vector<std::string> &labels,
+		std::string &error) {
 	using F = RequestFieldId;
 	const char *token = request_field(id).token;
 	const std::string shown = json.is_string() ? json.string : std::string("?");
@@ -508,7 +511,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	}
 	case F::Edits: {
 		RecordBatch batch;
-		if (!record_batch_from_json(json, names, batch_form(request.kind), batch, error))
+		if (!record_batch_from_json(
+					json, names, batch_form(request.kind), batch, error, !unresolved))
 			return false;
 		request.edits = std::move(batch.edits);
 		labels = std::move(batch.made_labels);
@@ -649,11 +653,12 @@ std::vector<std::string> editor_request_kind_tokens() {
 	return tokens;
 }
 
-void set_page(JsonValue &out, const JsonPage &page, size_t total) {
+void set_page(JsonValue &out, const JsonPage &page, size_t total, size_t beside) {
 	out.set("count", json_number(double(total)));
-	const size_t first = page.first(total), last = page.last(total);
+	const size_t span = total > beside ? total : beside;
+	const size_t first = page.first(span), last = page.last(span);
 	out.set("offset", json_number(double(first)));
-	out.set("next_offset", last < total ? json_number(double(last)) : JsonValue::make_null());
+	out.set("next_offset", last < span ? json_number(double(last)) : JsonValue::make_null());
 }
 
 JsonValue value_to_json(const Value &value) {
@@ -710,7 +715,9 @@ bool editor_request_from_json(
 					fields_taken(params) + ").";
 			return false;
 		}
-		if (!field_from_json(id, member.value, request, document, labels, error)) return false;
+		if (!field_from_json(id, member.value, request, document, names && names->unresolved,
+					labels, error))
+			return false;
 		carried |= field_bit(id);
 	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {

@@ -2521,17 +2521,21 @@ static int test_view_revisions() {
 		TEST_EXPECT(moved_since(v, before) ==
 				Concerns({ViewConcern::Findings, ViewConcern::Output}));
 	}
-	// The state query's revision is `any`, and its revisions each concern's counter (S13 A5).
+	// One clock on the wire (S13 A5): the state query's view_revision is the view's clock, `any`,
+	// and its revisions each concern's stamp, the clock value at which it last moved.
 	std::string error;
 	const opennova::io::JsonValue json =
 			session.query("state", opennova::io::JsonValue::make_null(), error);
-	TEST_EXPECT(error.empty() && json.get_number("revision", -1.0) == double(v.revisions.any()));
+	TEST_EXPECT(error.empty() &&
+			json.get_number("view_revision", -1.0) == double(v.revisions.any()) &&
+			json.get("revision") == nullptr);
 	const opennova::io::JsonValue *revisions = json.get("revisions");
 	TEST_EXPECT(revisions != nullptr);
 	if (revisions)
 		for (const ViewConcernRow &row : kViewConcernRows) {
-			const double counter = double(v.revisions.of(row.concern));
-			TEST_EXPECT(revisions->get_number(row.token, -1.0) == counter);
+			const double stamp = double(v.revisions.stamp(row.concern));
+			TEST_EXPECT(revisions->get_number(row.token, -1.0) == stamp &&
+					stamp <= double(v.revisions.any()));
 		}
 
 	// Closed (saved first, so nothing waits on the prompt): every concern moves, and the graph

@@ -312,7 +312,7 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	var preview := await _call("editor_menu_preview", {"op": "state"})
 	assert_eq(String(preview.get("status", "")), "no_project", str(preview))
 	assert_eq(int(preview.get("widget_count", -1)), 0)
-	assert_true((await _query("menu_tree")).get("_error", "").contains("no menu"), "no project, no menu")
+	assert_true((await _query("menu_tree")).get("_error", "").contains("no document is active"), "no project, no menu")
 	assert_true((await _query("nope")).get("_error", "").contains("Unknown query"), "an unknown query")
 	var logs := await _call("editor_logs")
 	var texts: Array[String] = []

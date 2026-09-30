@@ -42,9 +42,13 @@ enum class RecordBatchForm { Edits, Fields };
 // written). Fields: {id, field}. Strict: an unknown op, member, label, identity or kind is refused
 // with the reason, and nothing is read; so are an apply (its change is made in C++ by its document
 // type, Edit::payload, S13 D6), a `payload` and a paste. `names` is the record document the
-// request acts on; with none, an edit naming a record or a kind is refused.
+// request acts on; with none, an edit naming a record or a kind is refused. `resolve` false: a
+// first read before the document opens (RequestNames::unresolved): a record's identity is read as
+// a whole number and not looked for in `names` (a blank of the type, which names kinds alone), a
+// replaced list's records and a duplicate's place wait for the read after it opens, and `out` is
+// no batch to apply.
 bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
-		RecordBatch &out, std::string &error);
+		RecordBatch &out, std::string &error, bool resolve = true);
 
 // The batch form of `edits`, which record_batch_from_json reads back as they are: each record by
 // its identity (one an earlier edit of the batch makes by a label, "edit<i>", the edit that makes

@@ -111,9 +111,10 @@ using QueryHandler = io::JsonValue (*)(
 // The query table: one row per EditorQueryKind, in the enum's order (static_asserted as the
 // request table is): its token on the wire, its handler, the params it takes, the key of the list
 // it pages (null for none: its offset or cursor and its limit checked once, the answer's `count`
-// the list's whole length), the concern whose revision the answer carries (ViewConcern::kCount:
-// `any`, the state's, beside its `revisions`, and the events', which several concerns post), and
-// what it answers.
+// the list's whole length), the concerns its answer reads (one at least: every one whose move can
+// change what it answers, ActiveDocument too where a pathless read follows the active document;
+// the state's are every concern), whose stamps give the answer's `view_revision`, and what it
+// answers.
 struct EditorQueryRow {
 	EditorQueryKind kind = EditorQueryKind::kCount;
 	const char *token = "";
@@ -121,7 +122,7 @@ struct EditorQueryRow {
 	const QueryParam *params = nullptr;
 	size_t param_count = 0;
 	const char *list_key = nullptr;
-	ViewConcern reads = ViewConcern::kCount;
+	ConcernSet reads = 0;
 	const char *doc = "";
 };
 
@@ -133,9 +134,11 @@ bool editor_query_from_token(std::string_view token, EditorQueryKind &out);
 const char *query_json_token(QueryJson type);
 
 // The query `name` answered over the session's core: its row found, its args checked (an object
-// of its params, or null for none), its handler run, the answer stamped with `revision`, the
-// counter of the concern the row reads (`any` for the state and the events). Null with `error`
-// naming the query for a name no row has, args it refuses, or a question it cannot answer.
+// of its params, or null for none), its handler run, the answer stamped with `view_revision`, the
+// view's clock value at which the concerns the row reads last moved (ViewRevisions::stamp_of: the
+// state's is the clock itself), beside whatever `revision` of its own the answer carries (a
+// document's, a menu's). Null with `error` (cleared first) naming the query for a name no row has,
+// args it refuses, or a question it cannot answer.
 io::JsonValue run_query(
 		SessionCore &core, std::string_view name, const io::JsonValue &args, std::string &error);
 

@@ -99,16 +99,44 @@ inline const char *view_concern_token(ViewConcern concern) {
 	return kViewConcernRows[static_cast<size_t>(concern)].token;
 }
 
-// The view's counters: one per concern, and `any`, which moves with each of them. `any` feeds
-// only the view JSON's "revision" (what a client polls to see that anything moved); no window
-// keys a cache on it. The counters move only through touch: the session's (SessionCore::
-// touch), a test's hand-made view's; a window holds the view const and never can.
+// A set of concerns, one bit each: what a state section follows, what a query's answer reads
+// (S13 A5).
+using ConcernSet = uint32_t;
+static_assert(kViewConcernCount <= 32, "a ConcernSet holds every view concern");
+
+constexpr ConcernSet concern_bit(ViewConcern concern) {
+	return ConcernSet(1) << static_cast<unsigned>(concern);
+}
+constexpr ConcernSet concern_set(std::initializer_list<ViewConcern> concerns) {
+	ConcernSet set = 0;
+	for (const ViewConcern concern : concerns)
+		set |= concern_bit(concern);
+	return set;
+}
+inline constexpr ConcernSet kEveryConcern = (ConcernSet(1) << kViewConcernCount) - 1;
+
+// The view's counters: one per concern, and `any`, the view's clock, which moves with each of
+// them. The wire reads the clock alone (S13 A5): every answer carries a `view_revision`, the
+// clock value at which the concerns it reads last moved (their stamps' largest; the state's is
+// the clock itself), and the state's `since` takes one back. No window keys a cache on the clock:
+// a window's key is the counters of the concerns it reads (RevisionKey). The counters move only
+// through touch: the session's (SessionCore::touch), a test's hand-made view's; a window holds
+// the view const and never can.
 struct ViewRevisions {
 	uint64_t of(ViewConcern concern) const { return counters_[static_cast<size_t>(concern)]; }
 	uint64_t any() const { return any_; }
-	// The value `any` took when `concern` last moved (0: never): a client that read the view at
-	// revision `r` finds a concern moved since when its stamp is past `r` (S13 A5's `since`).
+	// The clock value at which `concern` last moved (0: never): a client that read the view at
+	// `r` finds a concern moved since when its stamp is past `r`.
 	uint64_t stamp(ViewConcern concern) const { return stamps_[static_cast<size_t>(concern)]; }
+	// The clock value at which any of `concerns` last moved: the largest of their stamps (0: none
+	// ever did). kEveryConcern's is the clock.
+	uint64_t stamp_of(ConcernSet concerns) const {
+		uint64_t latest = 0;
+		for (size_t i = 0; i < kViewConcernCount; ++i)
+			if ((concerns & concern_bit(static_cast<ViewConcern>(i))) && stamps_[i] > latest)
+				latest = stamps_[i];
+		return latest;
+	}
 	// A change of `concern`: its counter and `any` move together.
 	void touch(ViewConcern concern) {
 		++counters_[static_cast<size_t>(concern)];

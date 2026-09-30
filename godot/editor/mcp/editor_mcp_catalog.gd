@@ -63,7 +63,9 @@ const REQUEST_PROSE := (
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
 		+ "unsaved_prompt, operation (the one it started or joined, 0 for none; build and play return at once "
 		+ "and editor_query operation shows it stepping), findings, added (the records its edits made, in "
-		+ "order) and, for an edit_record, made {label: id}. While an operation runs, a request that conflicts "
+		+ "order) and, for an edit_record, made {label: id}; then status and view_revision (the view's clock "
+		+ "after it, which editor_state's since takes). A request that asks open_first is read once before its "
+		+ "document opens: one refused as it is read opens nothing. While an operation runs, a request that conflicts "
 		+ "with what it reads or writes is refused (operation.busy); the pickers are refused, pass paths "
 		+ "instead. A problem's fixes (editor_query problems) are requests of these kinds, passed back as they "
 		+ "are. The kinds:")
@@ -71,18 +73,23 @@ const REQUEST_PROSE := (
 const QUERY_PROSE := (
 		"Ask the editor what it holds, by query name (the query table, engine/editor/session/editor_queries.cpp): "
 		+ "the params the query takes, flat beside `query`; a param it does not take, or one it needs left "
-		+ "out, is refused naming what it takes. Every answer carries `revision`, the counter of the concern "
-		+ "it reads (editor_state's revisions): ask again when that moves. A list is served a page at a "
-		+ "time: offset (or cursor, for the output lines and the events, which move on while they are read) "
-		+ "and limit (1 to 200, 100 by default); count is the list's whole length, next_offset the next "
-		+ "page's (null at the end), next_cursor the next cursor. The queries:")
+		+ "out, is refused naming what it takes. Every answer carries view_revision, the view's clock value at "
+		+ "which what it reads last moved (a document's or a menu's own revision is its own): a later answer "
+		+ "past it has moved, and editor_state's since takes it back. A path left out names the active "
+		+ "document (a menu read's too: refused when the active document is no menu). A list is served a page "
+		+ "at a time: offset (or cursor, for the output lines and the events, which move on while they are "
+		+ "read: a client more than 2000 lines or 64 events behind finds the cursor larger than it asked) and "
+		+ "limit (1 to 200, 100 by default); count is the list's whole length, next_offset the next page's "
+		+ "(null at the end; where one page covers several lists, it runs to the end of the longest), "
+		+ "next_cursor the next cursor. Offset pages are gapless while the list stays as it was. The queries:")
 
 const STATE_PROSE := (
-		"Read the editor's state by section: revisions (a counter per concern, each moving only with what "
-		+ "it covers) and revision (the one that moves with any), then each section asked for (every one "
-		+ "when sections is left out); since, a revision an earlier answer carried, leaves out the sections "
-		+ "none of whose concerns moved since. The lists are editor_query's (files, problems, output, events, "
-		+ "import_preview). The sections:")
+		"Read the editor's state by section: view_revision (the view's clock) and revisions (each "
+		+ "concern's stamp, the clock value at which it last moved), then each section asked for (every one "
+		+ "when sections is left out); since, a view_revision any earlier answer carried (a query's or a "
+		+ "request's too), leaves out the sections none of whose concerns moved since (0 or left out: every "
+		+ "section; one past the clock is refused). The lists are editor_query's (files, problems, output, "
+		+ "events, import_preview). The sections:")
 
 ## The request fields whose schema says more than their type.
 const FIELD_SCHEMAS := {

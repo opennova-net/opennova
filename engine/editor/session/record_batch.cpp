@@ -28,6 +28,8 @@ struct Made {
 // given so far.
 struct Reader {
 	const Document *names = nullptr;
+	// False on a first read before the document opens: identities are read, not looked for.
+	bool resolve = true;
 	std::map<std::string, Made> labels;
 	std::string place;
 	std::string error;
@@ -75,6 +77,11 @@ bool record_of(const JsonValue &json, const char *what, Reader &reader, NodeAddr
 	uint64_t id = 0;
 	if (!whole(json, id) || id == 0)
 		return reader.refuse(std::string("\"") + what + "\" must be a record identity or a label.");
+	// Read before the document opens: an identity as it is, looked for once it is open.
+	if (!reader.resolve) {
+		out = { NodeId(id), 0, 0 };
+		return true;
+	}
 	// No document, or a blank of the type (whose kinds alone name something): no record to find.
 	if (!reader.names || reader.names->path().empty())
 		return reader.refuse("record " + std::to_string(id) +
@@ -110,6 +117,20 @@ bool read_list(const JsonValue &json, const NodeAddress &holder, Reader &reader,
 		return reader.refuse("a replace_list names its \"records\", a list of {field: value}.");
 	if (is_batch_made(holder.child))
 		return reader.refuse("a replace_list names a record the document has, not a label.");
+	if (!reader.resolve) {
+		// Before the document opens: the records' shapes alone; the list is the open document's.
+		for (const JsonValue &record : records->array) {
+			if (!record.is_object())
+				return reader.refuse("every record is an object of {field: value}.");
+			for (const io::JsonMember &member : record.object) {
+				Value value;
+				if (!value_from_json(member.value, value))
+					return reader.refuse(
+							"\"" + member.key + "\" must be a number, a string or a bool.");
+			}
+		}
+		return true;
+	}
 	const Document &document = *reader.names;
 	const Document::Collection *collection = nullptr;
 	const std::vector<Document::Collection> collections = document.collections_of(holder);
@@ -270,7 +291,8 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		edit.position = size_t(at);
 	} else if (edit.operation == EditOperation::Move) {
 		return reader.refuse("a move names its \"position\".");
-	} else if (edit.operation == EditOperation::Duplicate && !is_batch_made(edit.address.child)) {
+	} else if (edit.operation == EditOperation::Duplicate && reader.resolve &&
+			!is_batch_made(edit.address.child)) {
 		// Right after the record, as the document stands before the batch.
 		Document::Placement at;
 		if (reader.names->placement(edit.address, at))
@@ -321,7 +343,7 @@ bool read_field(const JsonValue &json, Reader &reader, RecordBatch &out) {
 } // namespace
 
 bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
-		RecordBatch &out, std::string &error) {
+		RecordBatch &out, std::string &error, bool resolve) {
 	if (!edits.is_array() || edits.array.empty()) {
 		error = "\"edits\" is a list of one edit or more.";
 		return false;
@@ -329,6 +351,7 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 	RecordBatch batch;
 	Reader reader;
 	reader.names = names;
+	reader.resolve = resolve;
 	for (size_t i = 0; i < edits.array.size(); ++i) {
 		reader.place = "edits[" + std::to_string(i) + "]";
 		const bool read = form == RecordBatchForm::Fields

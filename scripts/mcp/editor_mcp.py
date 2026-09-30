@@ -8,7 +8,7 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
 
     python scripts/mcp/editor_mcp.py launch --headless --open "C:/mods/My Game" --pid-file build/editor.pid
     python scripts/mcp/editor_mcp.py state --sections documents,problem_counts  # the view by section
-    python scripts/mcp/editor_mcp.py state --since 42                         # only what moved since revision 42
+    python scripts/mcp/editor_mcp.py state --since 42                         # only what moved since view_revision 42
     python scripts/mcp/editor_mcp.py query catalog                  # every request and query, with its params
     python scripts/mcp/editor_mcp.py query files --limit 5          # a page of the files; next_offset the next page
     python scripts/mcp/editor_mcp.py query files --limit 5 --offset 5
@@ -429,7 +429,8 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("--sections", default=None,
                        help="comma-separated: the sections to read (query catalog lists them; every one by default)")
     state.add_argument("--since", type=int, default=None,
-                       help="a revision an earlier answer carried: the sections that have not moved since are left out")
+                       help="a view_revision an earlier answer carried: the sections that have not moved since are "
+                            "left out (0 or left out: every section)")
     state.set_defaults(func=cmd_state)
 
     query = commands.add_parser("query", help="editor_query: one query by name, its answer as JSON")

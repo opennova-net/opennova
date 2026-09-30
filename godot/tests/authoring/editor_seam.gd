@@ -18,7 +18,7 @@ func _init(editor_app: Node) -> void:
 
 # --- the wire -------------------------------------------------------------------------------------
 
-## A request by its wire form: the answer {ok, served, error?, outcome, status, revision}, whole
+## A request by its wire form: the answer {ok, served, error?, outcome, status, view_revision}, whole
 ## numbers as integers.
 func request(fields: Dictionary) -> Dictionary:
 	var answer: Variant = parsed(String(app.call("request_json", JSON.stringify(fields, "", false))))

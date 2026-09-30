@@ -51,6 +51,11 @@ std::vector<std::string> editor_request_kind_tokens();
 struct RequestNames {
 	const Document *document = nullptr;
 	std::vector<std::string> made_labels;
+	// A first read, before the document the request asks to open first opens (open_first): its
+	// edits' records are read as identities and not looked for, what only the document knows (a
+	// replaced list's records, a duplicate's place) waits for the read after it opens, and their
+	// kinds are named in a blank of the path's type. A request refused here opens nothing.
+	bool unresolved = false;
 };
 
 // A request from its wire form (S13 A4): an object with "kind", the kind's token, and the fields
@@ -86,8 +91,12 @@ struct JsonPage {
 	}
 };
 // A page's place in its list: `count` the list's whole length, `offset` the page's first, and
-// `next_offset` the next page's while entries remain (null at the end).
-void set_page(io::JsonValue &out, const JsonPage &page, size_t total);
+// `next_offset` the next page's while entries remain (null at the end). `beside` is the longest
+// other list the same page covers (an import plan's choices beside its rows, a screen's notes
+// beside its widgets; 0 for none), each written with its own count: the page runs on to the end
+// of the longer, so paging by next_offset reads every list whole. Offset pages are gapless while
+// the list stays as it was; one that changes between pages can shift an entry across them.
+void set_page(io::JsonValue &out, const JsonPage &page, size_t total, size_t beside = 0);
 
 // A record's address, {row, kind, child}; an import source as a request's imports take it,
 // {path, entry?, install?, native?}.
@@ -148,11 +157,11 @@ io::JsonValue reference_choices_to_json(const Document &document, const NodeAddr
 		const std::string &field, const SessionView &view, const JsonPage &page = {});
 io::JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address,
 		const std::string &field, const SessionView &view, const JsonPage &page = {});
-// Find in a document (editor_document op=search): {count, hits}, each hit its record's id (the
+// Find in a document (the document_search query): {count, hits}, each hit its record's id (the
 // nested record's identity, else the row's), address, record path and locator, the field's id
 // and name, the value as shown and where the text is found in it.
 io::JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits, const JsonPage &page = {});
-// Find in the project (editor_graph op=search): {count, hits}, each a file ({kind "file", name,
+// Find in the project (the project_search query): {count, hits}, each a file ({kind "file", name,
 // file, usages}) or a symbol ({kind as its token, name, file, and as graph_symbol_to_json the
 // record, locator, field, scope and inert, then usages}).
 io::JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits, const JsonPage &page = {});
