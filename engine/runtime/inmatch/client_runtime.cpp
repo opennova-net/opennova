@@ -485,55 +485,68 @@ bool ClientRuntime::queue_medic_request() {
 }
 
 // [orig: Chat_CheckFloodControl @0x498F60] The 16-entry table of recent lines
-// `[u32 time][char[64] text]`: a line longer than 59 characters is cut to 59
-// first (`message[59] = 0`); an unseen line shifts the table down and lands
-// in the newest slot; a seen line within 0x500 ms of its entry is refused; an
-// older repeat is moved to the newest slot (the entries after it shift down).
-bool ClientRuntime::chat_flood_control(std::string &text) {
+// `[u32 frame][char[64] text]`: a line longer than 59 characters is cut to 59
+// first (`message[59] = 0` @0x498f80); an unseen line shifts the table down
+// and lands in the newest slot (@0x498fe0..0x498fed); a seen line within
+// 0x500 main frames of its entry is refused (@0x499028); an older repeat is
+// moved to the newest slot, the entries after it shifting down (@0x49904a).
+bool ClientRuntime::chat_flood_control(std::string &text, uint32_t frame) {
 	if (text.size() > 0x3B) text.resize(59);
-	const uint32_t now_ms = joiner_->monotonic_milliseconds32();
 	size_t index = 0;
 	while (index < chat_flood_.size() && chat_flood_[index].text != text) ++index;
 	if (index >= chat_flood_.size()) {
 		for (size_t i = 0; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-		chat_flood_.back() = ChatFloodEntry{now_ms, text};
+		chat_flood_.back() = ChatFloodEntry{frame, text};
 		return true;
 	}
-	if (now_ms - chat_flood_[index].time_ms <= 0x500u) return false;
+	if (frame - chat_flood_[index].frame <= 0x500u) return false;
 	for (size_t i = index; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-	chat_flood_.back() = ChatFloodEntry{now_ms, text};
+	chat_flood_.back() = ChatFloodEntry{frame, text};
 	return true;
 }
 
-bool ClientRuntime::queue_chat_message(uint8_t channel, const std::string &text) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() || text.empty())
-		return false;
-	// The `all` (4) and non-peer `team` (5) senders queue nothing on a session
-	// peer [orig: Chat_SendAllMessage @0x49AC70 / sub_49ABA0 @0x49ABA0 —
-	//  `if (!is_mp_session_peer)`]; a joiner is always the peer.
-	if (channel == 4 || channel == 5) return false;
-	// `(!g_DeathScreenActive || g_SpawnSuccessGate)`; the admin key tests
-	// `!g_DeathScreenActive` alone [orig: @0x49A6B0 / @0x49A780 first tests].
-	// authoritative_spawn_released_ models the spawn-success gate's clear.
+hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::string &text,
+		uint32_t frame) {
+	using Result = hud::ChatSendResult;
+	const bool joiner_path = role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session();
+	const bool host_path = role_ == Role::HostClient && loopback_ != nullptr;
+	if (!joiner_path && !host_path) return Result::Refused;
+	// The local (13) and crew (11) senders test `!g_DeathScreenActive` alone;
+	// the rest `(!g_DeathScreenActive || g_SpawnSuccessGate)`, the round-over
+	// latch the folded 0x1D header raises [orig: @0x49A868 / @0x49A7A8;
+	// @0x49A931 / @0x49A6E1 / @0x49AA81 / @0x49ACA1 / @0x49ABD1].
 	const bool death_screen = view_.state().death_screen_active;
-	if (channel == 11 ? death_screen : (death_screen && authoritative_spawn_released_))
-		return false;
-	std::string line = text;
-	if (!chat_flood_control(line)) return false;
-	const std::string stripped = chat_strip_tags(line);
-	// NetPacket_WriteByteAndString: [u8 channel][cstr].
+	const bool spawn_gate = view_.state().end_round.header_known;
+	if ((channel == 13 || channel == 11) ? death_screen : (death_screen && !spawn_gate))
+		return Result::Refused;
+	if (text.empty()) return Result::Refused; // [orig: `message && *message`]
+	// A refused repeat: the sender echoes the line locally instead
+	// [orig: the Chat_AddMessageChannel1 else-arms].
+	if (!chat_flood_control(text, frame)) return Result::Flooded;
+	// The red/blue pair sends only from a non-peer, and a HUD-bearing
+	// process is always a session peer [orig: `if (!is_mp_session_peer)`
+	// @0x49ACE2 / @0x49AC12].
+	if (channel == 4 || channel == 5) return Result::Refused;
+	const std::string stripped = chat_strip_tags(text); // [orig: Chat_StripHtmlTags]
+	// NetPacket_WriteByteAndString: [u8 channel][cstr] [orig: @0x42A900].
 	std::vector<uint8_t> body;
 	body.reserve(stripped.size() + 2);
 	body.push_back(channel);
 	body.insert(body.end(), stripped.begin(), stripped.end());
 	body.push_back(0);
+	if (host_path) {
+		// The listen host's client half queues it on its loopback — retail's
+		// same QueueReliableMessage over transport mode 1 — to its own server.
+		loopback_->client_send(c2s::CHAT_MESSAGE, std::move(body));
+		return Result::Sent;
+	}
 	ProtocolMessage chat = make_protocol_message(c2s::CHAT_MESSAGE, std::move(body));
 	// QueueReliableMessage(0xD, 1, 310): the same 310-flush finite lifetime
 	// the 0x4C report and the medic call carry; the senders run outside the
 	// client net frame, so the line rides the held one-shot queue.
 	chat.retention_flushes = 310;
 	pre_send_queue_.push_back(std::move(chat));
-	return true;
+	return Result::Sent;
 }
 
 // [orig: Game_ProcessMainFrame — `if (--dword_24D1DDC <= 0) { dword_24D1DDC =
@@ -824,6 +837,20 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
 			}
 			sync_retries.clear();
+			// Each S2C 0x6A action-3 walk reply queues the next step of the
+			// clan-registry walk: one reliable C2S 0x4E {netId}
+			// [orig: NapiNPClientMsg_HandlePlayerJoinLeave ->
+			//  CNapiNetwork_QueueReliableMessage(ctx, 0x4E, 1, 0, {netId}, 4)
+			//  @0x43265c..0x43266c].
+			std::vector<uint32_t> &clan_walk = view_.state().pending_clan_walk_requests;
+			for (const uint32_t net_id : clan_walk) {
+				ClanRosterWalkRequest request;
+				request.after_account_id = net_id;
+				std::vector<uint8_t> datagram = joiner_->frame_inner(
+						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request));
+				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
+			}
+			clan_walk.clear();
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.

@@ -38,6 +38,7 @@ void LaunchFlags::_bind_methods() {
 			&LaunchFlags::integrity_profile);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("capture_pcap"), &LaunchFlags::capture_pcap);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("clear_args_override"),
@@ -158,6 +159,10 @@ String LaunchFlags::capture_pcap() {
 
 int LaunchFlags::mcp_port() {
 	return parse().mcp_port;
+}
+
+bool LaunchFlags::no_hud() {
+	return parse().no_hud;
 }
 
 void LaunchFlags::set_args_override(const PackedStringArray &args) {

@@ -271,7 +271,7 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 		std::vector<world::MinimapOverlayClassification> entries;
 		auto append = [&](const world::Entity &e, bool persistent) {
 			world::MinimapOverlayClassification entry =
-					world::classify_minimap_overlay(e);
+					world::classify_minimap_overlay(e, &world);
 			if (!entry.visible) return;
 			if (persistent) entry.flags |= 0x10;
 			entries.push_back(entry);

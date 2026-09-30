@@ -404,6 +404,15 @@ std::vector<uint8_t> encode_medic_request(const MedicRequest &request);
 // byte1 @0x5047CE, the string copy @0x5047F9..0x50480A]
 std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat);
 
+// S2C 0x32 formatted game text, the inverse of decode_formatted_game_text:
+// [u8 subtype][cstr text], subtypes 1/2 then [u8 team]. Retail builds 1 inline
+// in Server_PlayerAdd and 2 through NetPacket_SerializeMinimapSlot_0 — the
+// same byte layout; 3/4/5 carry the text alone.
+// [orig: Server_PlayerAdd @0x51d21e..0x51d277; NetPacket_SerializeMinimapSlot_0
+//  @0x505a60 — the type byte @0x505a81, the name @0x505b6c..0x505b7a, the team
+//  byte @0x505b80..0x505b95, the name-only type 5 @0x505ac9..0x505ada]
+std::vector<uint8_t> encode_formatted_game_text(const FormattedGameText &text);
+
 std::vector<uint8_t> encode_auto_medic_preference(
 		const AutoMedicPreference &preference);
 

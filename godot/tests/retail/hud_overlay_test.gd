@@ -60,7 +60,7 @@ func _load_weapon(name: String) -> WeaponDef:
 
 
 func _set_hud_weapon(hud: HudOverlay, def: PlayerHudWeaponDef, display_name: String) -> void:
-	hud.set_weapon(def.weapon_name, display_name, def.round_type, def.clipsize,
+	hud.set_weapon(def.weapon_name, display_name, def.clipsize,
 			def.rounds_per_icon, def.clipgfx_texture, def.clipgfx_offset,
 			def.rndgfx_texture, def.rndgfx_offset, def.rndgfx_step)
 

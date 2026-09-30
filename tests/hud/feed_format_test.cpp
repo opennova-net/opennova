@@ -293,7 +293,66 @@ void test_strip_inline_tags() {
 
 } // namespace
 
+// Chat_FormatPlayerTokens: $A/$B/$C case-sensitive, every occurrence, a NULL
+// token inserts nothing but still eats the two characters, anything else
+// after '$' (and a trailing '$') copies the '$' [orig: @0x4a5190].
+void test_player_tokens() {
+    CHECK(chat_format_player_tokens("$A joined", "Rock") == "Rock joined");
+    CHECK(chat_format_player_tokens("$A and $A", "x") == "x and x");
+    CHECK(chat_format_player_tokens("$a stays", "x") == "$a stays"); // case-sensitive
+    CHECK(chat_format_player_tokens("[$B]", "x") == "[]");           // NULL $B eats both chars
+    CHECK(chat_format_player_tokens("$B/$C", "a", "b", "c") == "b/c");
+    CHECK(chat_format_player_tokens("cost $5", "x") == "cost $5");
+    CHECK(chat_format_player_tokens("tail $", "x") == "tail $");
+    CHECK(chat_format_player_tokens("$$A", "x") == "$x");
+    CHECK(chat_format_player_tokens("", "x").empty());
+    // A token is not rescanned.
+    CHECK(chat_format_player_tokens("$A!", "$A") == "$A!");
+}
+
+// The S2C 0x32 line: the Client template per subtype and team, $A = the
+// text; nothing for subtype 4, other subtypes, or a team outside 0..4 in a
+// team game [orig: NapiNPClientMsg_0x032 @0x428060].
+void test_formatted_game_text_line() {
+    const GameTextLookup gametext = [](const char *section, const char *key,
+            const char *fallback) -> std::string {
+        if (std::string(section) != "Client") return fallback;
+        const std::string k = key;
+        if (k == "STRCLI11") return "$A has joined the game";
+        if (k == "STRCLI12") return "$A has joined the Joint Ops";
+        if (k == "STRCLI13") return "$A has joined the Rebels";
+        if (k == "STRCLI14") return "$A has joined Yellow";
+        if (k == "STRCLI15") return "$A has joined Violet";
+        if (k == "STRCLI16") return "$A is leaving the game";
+        if (k == "STRCLI22") return "$A has joined the game as a spectator";
+        if (k == "STRCLI24") return "$A is now spectating";
+        return fallback;
+    };
+    CHECK(formatted_game_text_line(1, "Rock", 0, 0x10000, gametext) ==
+            "Rock has joined the game as a spectator");
+    CHECK(formatted_game_text_line(1, "Rock", 1, 0, gametext) == "Rock has joined the game");
+    CHECK(formatted_game_text_line(1, "Rock", 2, 8, gametext) == "Rock has joined the game");
+    CHECK(formatted_game_text_line(1, "Rock", 1, 0x10000, gametext) ==
+            "Rock has joined the Joint Ops");
+    CHECK(formatted_game_text_line(1, "Rock", 2, 0x10000, gametext) == "Rock has joined the Rebels");
+    CHECK(formatted_game_text_line(1, "Rock", 3, 0x10000, gametext) == "Rock has joined Yellow");
+    CHECK(formatted_game_text_line(1, "Rock", 4, 0x10000, gametext) == "Rock has joined Violet");
+    CHECK(formatted_game_text_line(1, "Rock", 5, 0x10000, gametext).empty());
+    CHECK(formatted_game_text_line(1, "Rock", -1, 0x10000, gametext).empty());
+    CHECK(formatted_game_text_line(2, "Rock", 1, 0x10000, gametext) == "Rock is leaving the game");
+    CHECK(formatted_game_text_line(3, "Wolves", 0, 0x10000, gametext) ==
+            "\"Wolves\" squadron has entered.");
+    CHECK(formatted_game_text_line(4, "Wolves", 0, 0x10000, gametext).empty());
+    CHECK(formatted_game_text_line(5, "Rock", 0, 0x10000, gametext) == "Rock is now spectating");
+    CHECK(formatted_game_text_line(6, "Rock", 0, 0x10000, gametext).empty());
+    // A missing template formats to nothing (the empty-line gate @0x428179).
+    CHECK(formatted_game_text_line(2, "Rock", 1, 0x10000, GameTextLookup{}).empty());
+    CHECK(kGameTextLineColor == 0xFFAFAFAFu);
+}
+
 int main() {
+    test_player_tokens();
+    test_formatted_game_text_line();
     test_strip_inline_tags();
     test_suppression_set();
     test_verbose_gate();

@@ -21,13 +21,11 @@ class Simulation;
 // The local player's input sampling/routing (the former player_input_router.gd,
 // ADR 0043 slice G8), a plain member of LocalPlayerPresenter: the
 // movement/device sampling into the native controls::PlayerActions table,
-// request forwarding, the raw B/N/NVG gameplay keys, mouse look, and mouse
-// capture/release. The presenter keeps the camera cluster and the
+// request forwarding, mouse look, and mouse capture/release. The presenter keeps the camera cluster and the
 // avatar/viewmodel presentation; the camera MODE is the sim's resolved word
 // (the arbiter over the chase preference and the seat), mirrored by the
 // presenter -- no key here flips it. The presenter's before_world_tick /
-// handle_key_input / handle_input stay the externally pinned names and
-// delegate here. The live binding table arrives as the ControlsModel the
+// handle_input stay the externally pinned names and delegate here. The live binding table arrives as the ControlsModel the
 // shell's ControlsBindings singleton owns (persistence stays shell-side); a
 // null model reads every token released.
 class PlayerInputRouter {
@@ -45,7 +43,6 @@ public:
 
 	Ref<MissionFrameInput> before_world_tick(double p_delta, bool p_capture_mouse,
 			bool p_gameplay_input_active);
-	bool handle_key_input(const Ref<InputEvent> &p_event, bool p_active);
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	// Drop the trigger latches (the presenter's reset-state path). The

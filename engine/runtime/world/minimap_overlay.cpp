@@ -1,6 +1,7 @@
 #include <runtime/world/minimap_overlay.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 
@@ -30,7 +31,8 @@ uint8_t minimap_team_color(uint8_t team) {
 	return team == 2 ? 0x09 : 0x0C;
 }
 
-MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
+MinimapOverlayClassification classify_minimap_overlay(const Entity &entity,
+		const World *world) {
 	MinimapOverlayClassification out;
 	out.handle = entity.handle.packed;
 	out.flags = ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0
@@ -45,13 +47,30 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 		out.visible = true;
 		return out;
 	}
-	// ItemDefAttrib2 FARP. VehicleBay's groupFlags-dependent 19..22 selector
-	// remains definition-data-gated and is deliberately not approximated.
+	// The vehicle bay (attrib2 bit 0) BEFORE the FARP: its spawn groups'
+	// flags pick cell 19 (bit0), 20 (bit1) or 21 (bit2) — the 22 the
+	// both-bits test writes is always overwritten — and no flag leaves it
+	// iconless. [orig: Entity_ClassifyForMinimap @0x50FAEB..0x50FB2C over
+	//  ItemDef+0xAD8]
+	if ((entity.item_attrib2 & 1u) != 0) {
+		if ((entity.vehicle_bay_flags & 1u) != 0) out.icon = 19;
+		else if ((entity.vehicle_bay_flags & 2u) != 0) out.icon = 20;
+		else if ((entity.vehicle_bay_flags & 4u) != 0) out.icon = 21;
+		else return out;
+		out.visible = true;
+		return out;
+	}
 	if ((entity.item_attrib2 & 0x00002000u) != 0) {
 		out.icon = 5;
 		out.visible = true;
 		return out;
 	}
+	// The powerup class (attrib bit 1) ends the walk: with a model, its
+	// pickup block at entity+0x2C0 picks cell 16 / 17 / 29 in colour 15. The
+	// port carries no pickup block, so the class stays iconless here (the
+	// return is witnessed; the three cells await that producer).
+	// [orig: @0x50FB40..0x50FB9C]
+	if ((entity.item_attrib & kItemAttribPowerup) != 0) return out;
 	if (entity.item_unit_type == 11 && !dead) {
 		out.icon = 9;
 		out.visible = true;
@@ -65,6 +84,22 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 	if (entity.item_type == 5) { // Building
 		if (!entity.has_minimap_model_marker) return out;
 		if (entity.team != 1 && entity.team != 2) out.color = 0;
+		out.visible = true;
+		return out;
+	}
+	// The flag ids draw cell 2 and the bay ids cell 6, each in its id's
+	// fixed team colour (4091 / 4098 blue, 4093 / 4100 / 4101 red, the rest
+	// neutral). [orig: @0x50FC11..0x50FDFA]
+	const int32_t id = entity.item_id;
+	if (id == 4091 || id == 4093 || id == 4095 || id == 4096 || id == 4097) {
+		out.icon = 2;
+		out.color = id == 4091 ? 0x0A : (id == 4093 ? 0x09 : 0x0C);
+		out.visible = true;
+		return out;
+	}
+	if (id == 4098 || id == 4100 || id == 4101 || id == 4102 || id == 4103) {
+		out.icon = 6;
+		out.color = id == 4098 ? 0x0A : ((id == 4100 || id == 4101) ? 0x09 : 0x0C);
 		out.visible = true;
 		return out;
 	}
@@ -85,7 +120,15 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 		out.visible = true;
 		return out;
 	}
-	if ((entity.item_attrib & kItemAttribEweap) != 0 && !dead) {
+	if ((entity.item_attrib & kItemAttribEweap) != 0) {
+		// A live emplacement draws unless its groundEntity parent is a
+		// vehicle — or a def-less parent. [orig: @0x50FCF3..0x50FD4F]
+		if (dead) return out;
+		if (world != nullptr) {
+			const Entity *parent = world->registry.get(entity.ground_target);
+			if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
+				return out;
+		}
 		out.icon = (entity.item_id == 1869 || entity.item_id == 1886) ? 12 : 4;
 		out.color = 8;
 		out.visible = true;

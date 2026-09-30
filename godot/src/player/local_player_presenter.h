@@ -223,9 +223,6 @@ public:
 	// seam: the world tests pin the fixed-tick order through it).
 	int fixed_weapon_batches_consumed() const { return fixed_weapon_batches_consumed_; }
 
-	// The gameplay keys (F4/B/N/NVG gain/stance) live in the input router;
-	// this pinned presenter name delegates (main_game calls it).
-	bool handle_key_input(const Ref<InputEvent> &p_event, bool p_active);
 	// The shell consumed the live USE-ITEM hold for a chord of its own (the
 	// debug pick rides Shift+F6; the tools window opening mid-hold): the
 	// router's release edge then runs no mount toggle.

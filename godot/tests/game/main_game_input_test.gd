@@ -97,7 +97,7 @@ func _tap_with_shift(keycode: Key) -> void:
 	await get_tree().process_frame
 
 
-func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
+func test_friendly_tags_ride_the_showfriendly_row_while_n_reaches_nvg() -> void:
 	var shell := await _booted_in_world()
 	if shell == null:
 		return
@@ -106,19 +106,46 @@ func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
 	var tags_before := hud.friendly_tag_mode()
 	var nvg_before: bool = world.local_player_view().nvg_active
 
+	# F is retail's ToSpecial default (row 37), not a HUD key.
 	await _tap(KEY_F)
+	assert_eq(hud.friendly_tag_mode(), tags_before, "F does not cycle friendly tags")
+	# K is the ShowFriendly row's default (row 100, dispatch 30).
+	await _tap(KEY_K)
 	assert_eq(hud.friendly_tag_mode(), HudOverlay.next_friendly_tag_mode(tags_before),
-			"F cycles the retail friendly-tag mode")
-	# The shell consumes the friendly-tag key: the player router's own state
-	# (the NVG view it toggles on N) is untouched.
+			"K cycles the retail friendly-tag mode")
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
-			"the shell consumes the friendly-tag key")
+			"the friendly-tag row leaves the NVG view alone")
 
 	await _tap(KEY_N)
 	assert_eq(hud.friendly_tag_mode(), HudOverlay.next_friendly_tag_mode(tags_before),
 			"N does not cycle friendly tags")
 	assert_ne(world.local_player_view().nvg_active, nvg_before,
 			"N reaches the local-player router for NVG")
+
+
+# F1 / F12 / I are keep-one HUD windows on their catalog rows; PgDn turns the
+# open help page; Esc closes one window per press before the in-game menu
+# [orig: dispatch 8 / 234 / 53; Input_HandleSpecialKeys @0x49caa6; the escape
+# chain case 18 @0x49b2b3..0x49b32d].
+func test_help_legend_and_briefing_windows() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F1)
+	assert_true(toggles.is_help_open(), "F1 opens the key-binding help")
+	var page := ControlsBindings.model().get_help_page_line()
+	await _tap(KEY_PAGEDOWN)
+	assert_ne(ControlsBindings.model().get_help_page_line(), page, "PgDn turns the help page")
+	await _tap(KEY_F12)
+	assert_true(toggles.is_map_legend_open(), "F12 opens the map legend")
+	assert_false(toggles.is_help_open(), "the legend's respawn init closes the help")
+	await _tap(KEY_I)
+	assert_eq(toggles.get_briefing_mode(), 2, "I opens the briefing")
+	assert_false(toggles.is_map_legend_open(), "the briefing closes the legend")
+	await _tap(KEY_ESCAPE)
+	assert_eq(toggles.get_briefing_mode(), 0, "Esc closes the open briefing first")
+	assert_true(shell.is_gameplay_input_active(), "closing a window does not open the menu")
 
 
 func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
@@ -176,3 +203,24 @@ func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> vo
 			"a chorded press never cycles a HUD row")
 	assert_not_null(shell.find_child("PickToast", true, false),
 			"the chord landed on the debug picker (every attempt confirms with a toast)")
+
+
+# The talk rows (T/Ctrl+T/Y/Ctrl+Y/U/Enter) open no chat line out of a
+# session — the dispatch arms' is_in_session gate — so gameplay input stays
+# live and the shell routes no key to the editor; PgDn with no session board
+# still reaches the other windows (the help page).
+func test_talk_keys_stay_closed_out_of_a_session() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	await _tap(KEY_T)
+	assert_false(hud.is_chat_capturing(), "SP opens no chat line on T")
+	await _tap(KEY_ENTER)
+	assert_false(hud.is_chat_capturing(), "SP opens no chat line on Enter")
+	assert_true(shell.is_gameplay_input_active(), "gameplay input stays live")
+	await _tap(KEY_F1)
+	var page := ControlsBindings.model().get_help_page_line()
+	await _tap(KEY_PAGEDOWN)
+	assert_ne(ControlsBindings.model().get_help_page_line(), page,
+			"out of a session PgDn passes the board to the help page")

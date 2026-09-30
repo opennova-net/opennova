@@ -4222,10 +4222,12 @@ bool run_world_state_load_bursts_on_every_0x0f() {
 }
 
 // The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
-// the 59-character cut, refused for a repeat inside the 1280 ms flood window,
-// and dropped for the non-peer channels 4/5 [orig: Chat_SendGlobalMessage
-// @0x49A6B0; Chat_CheckFloodControl @0x498F60; Chat_StripHtmlTags @0x4983F0].
+// the 59-character cut, `Flooded` for a repeat within 0x500 main frames of
+// its entry, and nothing for the non-peer channels 4/5 [orig:
+// Chat_SendGlobalMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
+// `dword_A8705C - entry <= 0x500` @0x499028; Chat_StripHtmlTags @0x4983F0].
 bool run_chat_uplink_api() {
+	using Result = hud::ChatSendResult;
 	const std::string client_scrk = "CLIENT-CHAT-SCRK";
 	const std::string server_scrk = "SERVER-CHAT-SCRK";
 	uint64_t now_ms = 10000;
@@ -4233,14 +4235,22 @@ bool run_chat_uplink_api() {
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
-	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
-			"a global line is accepted"))
+	const auto send = [&client](uint8_t channel, std::string text, uint32_t frame) {
+		return client.queue_chat_message(channel, text, frame);
+	};
+	uint32_t frame = 1000;
+	if (!expect(send(2, "hi <b>there</b>", frame) == Result::Sent, "a team line is accepted"))
 		return false;
-	if (!expect(!client.queue_chat_message(2, "hi <b>there</b>"),
-			"the same line inside the flood window is refused"))
+	// The window counts main frames, not milliseconds: wall time alone never
+	// reopens it.
+	now_ms += 100000;
+	if (!expect(send(2, "hi <b>there</b>", frame + 0x500) == Result::Flooded,
+			"the same line inside the flood window is flooded"))
 		return false;
-	if (!expect(!client.queue_chat_message(4, "all"),
-			"the non-peer all channel sends nothing from a joiner"))
+	if (!expect(send(4, "all", frame) == Result::Refused,
+			"the non-peer red channel sends nothing from a joiner"))
+		return false;
+	if (!expect(send(2, "", frame) == Result::Refused, "an empty line sends nothing"))
 		return false;
 	const std::vector<std::vector<uint8_t>> outbound = client.Client_ProcessNetworkFrame(1);
 	std::vector<uint8_t> chat_body;
@@ -4255,12 +4265,14 @@ bool run_chat_uplink_api() {
 	if (!expect(chat_body == expected, "the line rides out as [channel][stripped cstr]"))
 		return false;
 	// Past the window the same line goes again; a long line is cut to 59 first.
-	now_ms += 0x501;
-	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
+	frame += 0x501;
+	if (!expect(send(2, "hi <b>there</b>", frame) == Result::Sent,
 			"the same line past the flood window is accepted"))
 		return false;
-	const std::string long_line(70, 'x');
-	if (!expect(client.queue_chat_message(1, long_line), "a long team line is accepted"))
+	std::string long_line(70, 'x');
+	if (!expect(client.queue_chat_message(1, long_line, frame) == Result::Sent &&
+					long_line.size() == 59,
+			"a long global line is accepted, cut to 59 in place"))
 		return false;
 	const std::vector<std::vector<uint8_t>> again = client.Client_ProcessNetworkFrame(2);
 	std::size_t long_body = 0;
@@ -4273,6 +4285,25 @@ bool run_chat_uplink_api() {
 				long_body = m.payload.size();
 	}
 	return expect(long_body == 1 + 59 + 1, "a long line is cut to 59 characters");
+}
+
+// The listen host's own client is a session peer too: its talk line rides
+// its loopback to its own server as the same C2S 0x0D [orig: the senders'
+// QueueReliableMessage(0xD) over transport mode 1]; the local and crew keys
+// refuse on the death screen alone.
+bool run_host_chat_uplink() {
+	using Result = hud::ChatSendResult;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host(host_loop);
+	std::string line = "hello <i>all</i>";
+	if (!expect(host.queue_chat_message(13, line, 50) == Result::Sent,
+			"the host's local line is sent"))
+		return false;
+	ns::Datagram dg;
+	if (!expect(host_loop.host_recv(dg) && dg.tag == c2s::CHAT_MESSAGE, "it lands on the loopback"))
+		return false;
+	const std::vector<uint8_t> want = {13, 'h', 'e', 'l', 'l', 'o', ' ', 'a', 'l', 'l', 0};
+	return expect(dg.body == want, "the host's body is [13][stripped cstr]");
 }
 
 // The client window of CNetQuality: a ring of 400 ms round trips scores the
@@ -5858,7 +5889,15 @@ bool run_contextual_radio_keys_match_retail() {
     const auto zone_handle = world.registry.spawn(3, zone);
     if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MP_TKTH1",
             "an interior neutral zone supplies the hill context")) return false;
+    // The probe's value itself (the HUD's "In the Zone" gate reads it too).
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 100,
+            "the hill centre covers 100 percent")) return false;
+    speaker.position.x = 50.0;
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 50,
+            "halfway out covers 50 percent")) return false;
     speaker.position.x = 99.5;
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 0,
+            "the outermost ring scores zero")) return false;
     if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MEDIC1",
             "a sub-one-percent coverage ring falls back to the class context")) return false;
     speaker.position.x = 0;
@@ -6158,7 +6197,7 @@ int main() {
 	                run_rtt_pong_fills_the_client_ring() &&
 	                run_server_ping_answers_and_measures() &&
 	                run_world_state_load_bursts_on_every_0x0f() &&
-	                run_chat_uplink_api() &&
+	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
 	                run_joiner_goodbye_tears_down_host();

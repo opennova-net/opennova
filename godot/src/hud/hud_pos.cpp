@@ -7,6 +7,7 @@
 
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "simulation/hud_view_records.h"
 #include "util/data_format.h"
 
 #include <formats/def/def.h>
@@ -96,7 +97,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &HudPos::crosshair_error_row);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_should_draw", "aimed", "keep_while_aimed"), &HudPos::crosshair_should_draw);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
-	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_display_name", "mission", "gametext", "name_id"), &HudPos::waypoint_display_name);
+	ClassDB::bind_static_method("HudPos", D_METHOD("waypoint_label", "mission", "gametext", "view", "in_session", "game_type"), &HudPos::waypoint_label);
 	ClassDB::bind_static_method("HudPos", D_METHOD("subgoal_message", "mission", "lost", "header_id"), &HudPos::subgoal_message);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_directive", "mission", "win", "header_id"), &HudPos::objective_directive);
@@ -436,10 +437,22 @@ bool HudPos::crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed) {
 
 // --- game text (hud/hud_game_text.h carries the witnesses) ------------------
 
-String HudPos::waypoint_display_name(const Ref<RtxtStringFile> &p_mission,
-		const Ref<RtxtStringFile> &p_gametext, int p_name_id) {
-	return opennova::to_gd(opennova::hud::waypoint_display_name(p_name_id,
-			game_text_lookup(p_mission), game_text_lookup(p_gametext)));
+String HudPos::waypoint_label(const Ref<RtxtStringFile> &p_mission,
+		const Ref<RtxtStringFile> &p_gametext, const Ref<WaypointHudView> &p_view,
+		bool p_in_session, int64_t p_game_type) {
+	if (p_view.is_null() || p_view->get_current() < 0) return String();
+	const opennova::world::WaypointHudView &v = p_view->value();
+	opennova::hud::WaypointNameKey key;
+	key.name_id = v.entry.name_id;
+	key.has_def = v.has_def;
+	key.def_type = v.def_type;
+	key.def_attrib = v.def_attrib;
+	key.zone_number = v.zone_number;
+	const uint32_t game_type = static_cast<uint32_t>(p_game_type);
+	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
+	const std::string name = opennova::hud::waypoint_display_name(key, p_in_session, game_type,
+			game_text_lookup(p_mission), gametext);
+	return opennova::to_gd(opennova::hud::waypoint_label_text(name, key, game_type, gametext));
 }
 
 String HudPos::subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,

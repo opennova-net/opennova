@@ -11,12 +11,18 @@
 
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/hud/hud_chat_entry.h> // ChatEntryFacts
+#include <runtime/hud/hud_frame.h> // HudSessionState
 #include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
+#include <runtime/hud/hud_map_view.h> // DeathMapFacts
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/weapon_inventory.h> // WeaponSlotBarCategory
+
+#include <array>
 
 #include <cstdint>
 #include <string>
@@ -26,6 +32,9 @@
 
 namespace opennova::mission {
 class MissionKernel;
+}
+namespace opennova::hud {
+struct HudScoreboardState;
 }
 
 namespace opennova::inmatch {
@@ -66,6 +75,29 @@ EndRoundSessionState end_round_session_state(const RoleView &view);
 // The overlay ladder's input off the folded 0x1D header and the round clock.
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 
+// THE TAB BOARD'S FACTS for this client: the projected rows (their live
+// entity team and class answered by the role's own entity model — the
+// authority's pools, a joiner's decoded rows), the 0x16 team table and side
+// count, the SU gate and the timed flag off the replica, the KOTH minutes
+// (the authority's own g_TimeLimitMinutes, a joiner's session-config copy),
+// the local player's team byte, and the latched flag carrier's name and team.
+// Strings (title, labels, class names) stay the embedder's.
+// [orig: HUD_DrawKillList @0x423a30 — T @0x423a4b..0x423a5e, the local team
+//  @0x423d64; HUD_DrawGameScoreOverlay @0x423060 — the team table
+//  @0x4232c5.., the carrier dword_A860C4 @0x423944..0x4239ee]
+void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out);
+
+// THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
+// screen and round-over latches off the replica, the session (a joiner's
+// connection, the authority's is_in_session), the replica's reset hold, the
+// game type's team bit, the authority bit, the local player and whether it
+// rides a def-type-1 carrier, the NovaWorld network type (the embedder's —
+// a joiner's runtime carries none) and the per-main-frame counter. Every
+// process with a HUD in a session is a session peer.
+// [orig: Input_HandleActionBinding @0x49b989..0x49badd; the vehicle walk
+//  Entity_FindChildByDefType(local, 1, 0) @0x49ba38]
+hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame);
+
 // The breath bar's facts for THIS client (hud::HudFrameState breath_samples /
 // breath_time / spawn_success_gate; the label is the embedder's gametext).
 // The samples ride every role's replica (the listen host's loopback included);
@@ -81,6 +113,19 @@ struct BreathBarFacts {
 	bool spawn_success_gate = false;
 };
 BreathBarFacts breath_bar_facts(const RoleView &view);
+
+// THE HUD'S ROLE FACTS, one read per display frame: the breath bar's, the MP
+// session lines' (hud::HudSessionState — its gametext strings are the
+// embedder's hud_session_text) and the HUDLS slot bar's per-category scan with
+// each category's first def's hud_loadout_select texture name (the device
+// loads it). Every field cites its retail global at the fill.
+struct HudRoleFacts {
+	BreathBarFacts breath;
+	hud::HudSessionState session;
+	std::array<world::WeaponSlotBarCategory, 10> slot_bar{};
+	std::array<std::string, 10> slot_bar_icons;
+};
+HudRoleFacts hud_role_facts(const RoleView &view);
 
 // The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
 // 1): the roster joined to the frozen board, the local row resolved from the
@@ -145,6 +190,20 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // False without a kernel, a replica runtime or a local player.
 bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		int local_team, std::vector<hud::HudLfpZone> &out);
+
+// The DEATH MAP window's world facts (hud_map_view.h DeathMapFacts): the
+// local player (position, team +354), the deploy-overlay latch, the
+// spawn-target hold, the game type, the local player's wave zone, the
+// spawn-zone AABB, and one row per registered spawn zone — its team (the
+// zone-timer image's owner once a 0x6F value has landed, else the entity's),
+// the ready verdict of the timer entry the letter gate reads (no entry, or
+// DWORD 9 >= DWORD 10 — the same image collect_lfp_zones reads), the label
+// anchor and the 0x6E queued count / countdown. False without a kernel.
+// [orig: MapOverlay_DrawView @0x5a58e0 — CProximityList_FindEntryById
+//  @0x5a5b6e, EntryById[9] >= [10] @0x5a5b77; the anchor sub_59C300
+//  @0x59c300; entity+550/+548 from the 0x6E fold @0x429880]
+bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		hud::DeathMapFacts &out);
 
 // THE PER-DRAWN-ENTITY LIGHTING FEED (D-RLIT-3 plus the interior lerp).
 // Retail pushes a render-state stack level around every drawn entity's

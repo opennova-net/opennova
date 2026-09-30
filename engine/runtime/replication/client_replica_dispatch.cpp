@@ -13,6 +13,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_session_config(body.data(), body.size(), config)) {
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
 			game_type_known_ = true;
+			// [orig: `mov dword_A821C0, esi` @0x428218 — the second rule dword]
+			state_.session_time_limit_minutes = config.fields[1];
 			const bool permanent_death = (config.bitflags & 0x8000u) != 0;
 			const bool spectators_allowed = (config.bitflags & 0x2000u) != 0;
 			// The deploy screen projects both flags from the LIVE state, so a
@@ -88,6 +90,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// [orig: NapiNPClientMsg_0x00F — g_DeployScreenActive = 0 @0x42e2d8;
 		//  `if (game_flags & 1) g_DeployScreenActive = !g_DeathScreenActive`
 		//  @0x42e2f8]
+		// The talk keys' reset hold clears on every 0x0F, authority or not
+		// [orig: `mov dword_24C195C, eax` (0) @0x42e396].
+		state_.round_reset_hold = false;
 		WorldStateLoad wsl;
 		if (decode_world_state_load(body.data(), body.size(), wsl,
 				game_type::is_waypoint_family(game_type_))) {
@@ -232,6 +237,18 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::PLAYER_LIST: // §5.20 the Tab scoreboard (0x16)
 		apply_player_list(body);
 		break;
+	case s2c::GAME_RESET:
+		// A client raises the talk keys' reset hold until the next 0x0F; the
+		// authority's arm only counts [orig: NapiNPClientMsg_GameReset @0x422800
+		// — the is_authority test @0x422803, `dword_24C195C = 1` @0x42284e].
+		if (!authority_recipient_) state_.round_reset_hold = true;
+		break;
+	case s2c::CLAN_ROSTER: // the NovaWorld clan registry (0x6A)
+		apply_clan_roster(body);
+		break;
+	case s2c::FORMATTED_GAME_TEXT: // the join/leave system lines (0x32)
+		apply_formatted_game_text(body);
+		break;
 	case s2c::PLAYER_SYNC: // §5.21 the connection-slot roster (0x46)
 		apply_player_sync(body);
 		break;
@@ -288,6 +305,12 @@ std::vector<ClientGameEvent> ClientReplicaPipeline::drain_game_events() {
 std::vector<ClientChatLine> ClientReplicaPipeline::drain_chat_lines() {
 	std::vector<ClientChatLine> out;
 	out.swap(pending_chat_lines_);
+	return out;
+}
+
+std::vector<ClientGameText> ClientReplicaPipeline::drain_game_texts() {
+	std::vector<ClientGameText> out;
+	out.swap(pending_game_texts_);
 	return out;
 }
 

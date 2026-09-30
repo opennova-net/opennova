@@ -242,6 +242,9 @@ public:
 	// (client_replica_feed.cpp). Drained once per frame by the embedder, which
 	// routes each line by the HUD channel table and posts it to its ring.
 	std::vector<ClientChatLine> drain_chat_lines();
+	// S2C 0x32 join/leave records folded by apply() (client_replica_feed.cpp),
+	// drained once per frame by the embedder that owns gametext.
+	std::vector<ClientGameText> drain_game_texts();
 	std::vector<WeaponReload> drain_weapon_reloads();
 	std::vector<ClientEffectCommand> drain_effect_commands();
 	void post_chat_line(ClientChatLine line) { pending_chat_lines_.push_back(std::move(line)); }
@@ -362,6 +365,8 @@ private:
 	void apply_chat_broadcast(const std::vector<uint8_t> &body); // 0x14 (player chat)
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
 	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
+	void apply_clan_roster(const std::vector<uint8_t> &body);  // 0x6A (the clan registry)
+	void apply_formatted_game_text(const std::vector<uint8_t> &body); // 0x32 (join/leave lines)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
@@ -411,6 +416,7 @@ private:
     std::function<void(const ClientRoundEvent &)> round_receiver_;
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
+	std::vector<ClientGameText> pending_game_texts_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;

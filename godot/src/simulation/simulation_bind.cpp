@@ -193,6 +193,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::request_hud_radar_zoom);
 	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
 	                     &Simulation::request_hud_map_cycle);
+	ClassDB::bind_method(D_METHOD("request_waypoint_cycle", "direction"),
+	                     &Simulation::request_waypoint_cycle);
 	ClassDB::bind_method(D_METHOD("request_hud_map_close"),
 	                     &Simulation::request_hud_map_close);
 	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
@@ -206,10 +208,14 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_waypoint_hud_view"), &Simulation::get_waypoint_hud_view);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_snapshot"),
 	                     &Simulation::get_hud_minimap_snapshot);
+	ClassDB::bind_method(D_METHOD("step_hud_radar", "hud_tick", "gates"),
+	                     &Simulation::step_hud_radar);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_footprints"),
 	                     &Simulation::get_hud_minimap_footprints);
 	ClassDB::bind_method(D_METHOD("get_hud_map_grid_origin"),
 	                     &Simulation::get_hud_map_grid_origin);
+	ClassDB::bind_method(D_METHOD("get_hud_minimap_overlays", "gametext"),
+	                     &Simulation::get_hud_minimap_overlays);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &Simulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &Simulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &Simulation::get_local_player_anim_key);
@@ -249,7 +255,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
-	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
+	ClassDB::bind_method(D_METHOD("drain_feed_events", "mp_verbose"), &Simulation::drain_feed_events);
 	ClassDB::bind_method(D_METHOD("retain_feed_announcement", "text", "tick"), &Simulation::retain_feed_announcement);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_text"), &Simulation::get_kill_announcement_text);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_tick", "now"), &Simulation::get_kill_announcement_tick);

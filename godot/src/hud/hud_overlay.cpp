@@ -1,4 +1,6 @@
 #include "hud/hud_overlay.h"
+#include "hud/hud_chat_entry.h"
+#include "simulation/hud_view_records.h" // HudMapOverlays
 #include "util/color_convert.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/vehicle_hud_block.h"
@@ -13,6 +15,7 @@
 #include "util/string_convert.h"
 
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
+#include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
 #include <godot_cpp/classes/image.hpp>
@@ -37,6 +40,7 @@
 using namespace godot;
 
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
+#include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
@@ -132,7 +136,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_crosshair_spread_enabled);
 	ClassDB::bind_method(D_METHOD("is_crosshair_spread_enabled"),
 			&HudOverlay::is_crosshair_spread_enabled);
-	ClassDB::bind_method(D_METHOD("set_weapon", "weapon_name", "display_name", "round_type",
+	ClassDB::bind_method(D_METHOD("set_weapon", "weapon_name", "display_name",
 								  "clipsize", "rounds_per_icon", "clipgfx_texture", "clipgfx_offset",
 								  "rndgfx_texture", "rndgfx_offset", "rndgfx_step"),
 			&HudOverlay::set_weapon);
@@ -152,17 +156,35 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_view_state);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "game_type", "frame_counter", "strings", "sim"),
+			D_METHOD("set_scoreboard", "shown", "game_type", "frame_counter", "strings", "sim",
+					"gametext"),
 			&HudOverlay::set_scoreboard);
+	ClassDB::bind_method(D_METHOD("scoreboard_page_key", "forward", "in_session", "board_open"),
+			&HudOverlay::scoreboard_page_key);
+	ClassDB::bind_method(D_METHOD("set_chat_input", "chat", "frame", "mp_session_peer"),
+			&HudOverlay::set_chat_input);
+	ClassDB::bind_method(D_METHOD("reset_scoreboard_page"), &HudOverlay::reset_scoreboard_page);
 	ClassDB::bind_method(D_METHOD("set_vehicle_panel", "shown", "block", "stance", "sim"),
 			&HudOverlay::set_vehicle_panel);
 	ClassDB::bind_method(D_METHOD("push_chat_line", "text", "argb"),
 			&HudOverlay::push_chat_line);
+	ClassDB::bind_method(D_METHOD("post_game_text_lines", "sim", "gametext"),
+			&HudOverlay::post_game_text_lines);
 	ClassDB::bind_method(D_METHOD("set_end_round_statistics", "shown", "raised",
 			"title", "labels", "values"),
 			&HudOverlay::set_end_round_statistics);
 	ClassDB::bind_method(D_METHOD("set_message_log_shown", "shown"),
 			&HudOverlay::set_message_log_shown);
+	ClassDB::bind_method(D_METHOD("set_help_screen", "shown", "title", "page_line", "footer",
+								 "keys", "texts"),
+			&HudOverlay::set_help_screen);
+	ClassDB::bind_method(D_METHOD("set_map_legend", "shown", "title", "labels", "frame_counter"),
+			&HudOverlay::set_map_legend);
+	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_legend_keys"),
+			&HudOverlay::map_legend_keys);
+	ClassDB::bind_method(D_METHOD("set_briefing", "shown", "sim"), &HudOverlay::set_briefing);
+	ClassDB::bind_method(D_METHOD("cycle_briefing_page", "direction", "in_session"),
+			&HudOverlay::cycle_briefing_page);
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
 			&HudOverlay::set_message_log_title);
 	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
@@ -188,8 +210,11 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_radio_request_icon_viewer", "viewer"),
 			&HudOverlay::set_radio_request_icon_viewer);
-	ClassDB::bind_method(D_METHOD("set_breath_bar", "sim", "gametext"),
-			&HudOverlay::set_breath_bar);
+	ClassDB::bind_method(D_METHOD("set_role_facts", "sim", "gametext"),
+			&HudOverlay::set_role_facts);
+	ClassDB::bind_method(D_METHOD("set_weapon_ammo_key", "ammo_bucket", "ammo_class_id"),
+			&HudOverlay::set_weapon_ammo_key);
+	ClassDB::bind_method(D_METHOD("set_no_hud", "no_hud"), &HudOverlay::set_no_hud);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -226,6 +251,12 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_minimap_grid_origin);
 	ClassDB::bind_method(D_METHOD("set_minimap_footprints", "feed"),
 			&HudOverlay::set_minimap_footprints);
+	ClassDB::bind_method(D_METHOD("set_minimap_overlays", "overlays"),
+			&HudOverlay::set_minimap_overlays);
+	ClassDB::bind_method(D_METHOD("set_minimap_radar", "feed"),
+			&HudOverlay::set_minimap_radar);
+	ClassDB::bind_method(D_METHOD("get_radar_frame_gates"),
+			&HudOverlay::get_radar_frame_gates);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("set_draw_timing_enabled", "enabled"),
 			&HudOverlay::set_draw_timing_enabled);
@@ -249,28 +280,12 @@ HudOverlay::~HudOverlay() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs != nullptr) {
 		if (additive_item_.is_valid()) rs->free_rid(additive_item_);
-		if (map_base_item_.is_valid()) rs->free_rid(map_base_item_);
-		if (map_add_item_.is_valid()) rs->free_rid(map_add_item_);
-		if (map_water_item_.is_valid()) rs->free_rid(map_water_item_);
-		if (map_top_item_.is_valid()) rs->free_rid(map_top_item_);
-		if (big_map_base_item_.is_valid()) rs->free_rid(big_map_base_item_);
-		if (big_map_add_item_.is_valid()) rs->free_rid(big_map_add_item_);
-		if (big_map_water_item_.is_valid()) rs->free_rid(big_map_water_item_);
-		if (big_map_top_item_.is_valid()) rs->free_rid(big_map_top_item_);
+		if (top_item_.is_valid()) rs->free_rid(top_item_);
 	}
+	corner_map_.release();
+	big_map_.release();
 	additive_item_ = RID();
-	map_base_item_ = RID();
-	map_add_item_ = RID();
-	map_water_item_ = RID();
-	map_top_item_ = RID();
-	big_map_base_item_ = RID();
-	big_map_add_item_ = RID();
-	big_map_water_item_ = RID();
-	big_map_top_item_ = RID();
-	map_water_sampling_configured_ = false;
-	map_top_sampling_configured_ = false;
-	big_map_water_sampling_configured_ = false;
-	big_map_top_sampling_configured_ = false;
+	top_item_ = RID();
 	clear_font_();
 }
 
@@ -565,6 +580,20 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.lfp_tile_other_texture_valid = tile_other.is_valid();
 	}
 
+	{
+		// The HUDLS bar's bracket and more-available marker, named by hudpos.
+		const Ref<Texture2D> bracket = load_hud_texture_(opennova::to_gd(assets.hudls_bracket));
+		const Ref<Texture2D> moreav = load_hud_texture_(opennova::to_gd(assets.hudls_moreav));
+		textures_[opennova::hud::kHudTexSlotBarBracket] = bracket;
+		textures_[opennova::hud::kHudTexSlotBarMoreAv] = moreav;
+		layout_.hudls.bracket_texture_valid = bracket.is_valid();
+		layout_.hudls.bracket_tex_w = bracket.is_valid() ? bracket->get_width() : 0;
+		layout_.hudls.bracket_tex_h = bracket.is_valid() ? bracket->get_height() : 0;
+		layout_.hudls.moreav_texture_valid = moreav.is_valid();
+		layout_.hudls.moreav_tex_w = moreav.is_valid() ? moreav->get_width() : 0;
+		layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
+	}
+
 	// The six stance frames' textures by slot (the engine resolved the
 	// HUDSTANCE ids and offsets).
 	for (int i = 0; i < 6; ++i) {
@@ -604,8 +633,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// read ~2x ours before this). RGB doubles with saturation; alpha stays.
 	textures_[opennova::hud::kHudTexMapCompass] =
 			double_saturate_texture_(load_hud_texture_("compring.tga"));
-	// Slot kHudTexMapRadar stays empty: the radar-contacts sector-slice leg
-	// is unported (D-HUD-21) and nothing emits its texture index yet.
+	// The radar sector-slice marks load like the compass ring; their
+	// MODULATE2X stage folds into the coloured diffuse at compile, so the
+	// textures stay raw. The marks draw only while both loaded
+	// (HudMinimapInput::radar_slices_loaded carries the witness).
+	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga");
+	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_("dmgslc_n.tga");
+	state_.minimap.radar_slices_loaded =
+			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
+			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
 			load_hud_texture_("WPIndctr.tga");
 
@@ -678,7 +714,7 @@ void HudOverlay::apply_crosshair_options_() {
 }
 
 void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display_name,
-		const String &p_round_type, int p_clipsize, int p_rounds_per_icon,
+		int p_clipsize, int p_rounds_per_icon,
 		const String &p_clipgfx_texture, const Vector2i &p_clipgfx_offset,
 		const String &p_rndgfx_texture, const Vector2i &p_rndgfx_offset,
 		const Vector2i &p_rndgfx_step) {
@@ -688,7 +724,6 @@ void HudOverlay::set_weapon(const String &p_weapon_name, const String &p_display
 	wep = opennova::hud::HudWeaponState{};
 	wep.active = was_active;
 	wep.display_name = opennova::to_std(p_display_name);
-	wep.round_type = opennova::to_std(p_round_type);
 	wep.capacity = p_clipsize;
 	wep.rounds_per_icon = p_rounds_per_icon;
 	wep.clipgfx_offset_x = p_clipgfx_offset.x;
@@ -741,6 +776,16 @@ void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	compiler_.push_feed_line(opennova::to_std(p_text),
 			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
+}
+
+void HudOverlay::post_game_text_lines(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (p_sim.is_null()) return;
+	std::vector<std::string> lines;
+	p_sim->drain_game_text_lines(game_text_lookup(p_gametext), lines);
+	for (const std::string &line : lines)
+		compiler_.push_feed_line(line, opennova::hud::kGameTextLineColor, state_.ticks);
+	if (!lines.empty()) queue_redraw();
 }
 
 void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,
@@ -815,12 +860,23 @@ void HudOverlay::set_view_state(bool p_binoculars_view_active, const Vector2 &p_
 	queue_redraw();
 }
 
+void HudOverlay::set_weapon_ammo_key(int p_ammo_bucket, int p_ammo_class_id) {
+	state_.weapon.ammo_bucket = p_ammo_bucket;
+	state_.weapon.ammo_class_id = static_cast<uint8_t>(p_ammo_class_id);
+}
+
+void HudOverlay::set_no_hud(bool p_no_hud) {
+	state_.overlay_master = opennova::hud::hud_overlay_master(p_no_hud);
+	queue_redraw();
+}
+
 void HudOverlay::set_objectives_header(const String &p_text) {
 	state_.objectives_header = opennova::to_std(p_text);
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-		const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
+		const Dictionary &p_strings, const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
@@ -834,16 +890,52 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_c
 	sb.players_line = opennova::to_std(String(p_strings.get("players", "")));
 	sb.spectators_line = opennova::to_std(String(p_strings.get("spectators", "")));
 	sb.footer = opennova::to_std(String(p_strings.get("footer", "")));
-	// Rows come straight from the replication projection — no script-side
-	// Dictionary round-trip to drop fields or lose the score sign.
+	// The drawers' own gametext (class names, the team-score labels, the
+	// flag-carrier label) resolves through the engine's key table.
+	const opennova::hud::ScoreboardText text =
+			opennova::hud::scoreboard_text(game_text_lookup(p_gametext));
+	sb.class_names = text.class_names;
+	sb.header_text = text.header;
+	sb.flag_carrier_label = text.flag_carrier_label;
+	// Rows and session facts come straight from the role feed — no
+	// script-side Dictionary round-trip to drop fields or lose the score sign.
 	if (p_shown && p_sim.is_valid()) {
-		p_sim->fill_scoreboard_rows(sb.rows);
-		sb.team_count = p_sim->scoreboard_team_count();
+		p_sim->fill_scoreboard(sb);
 	} else {
 		sb.rows.clear();
 		sb.team_count = 0;
+		sb.flag_carrier = false;
 	}
 	queue_redraw();
+}
+
+void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame,
+		bool p_mp_session_peer) {
+	opennova::hud::HudChatInputState &ci = state_.chat_input;
+	const bool shown = p_chat.is_valid() && p_chat->is_capturing();
+	if (!shown && !ci.shown) return;
+	ci.shown = shown;
+	if (shown) {
+		const opennova::hud::ChatEntry &entry = p_chat->entry();
+		ci.prompt = entry.prompt();
+		ci.text = entry.text();
+		ci.color = opennova::hud::chat_input_line_color(entry.open_dispatch(), p_mp_session_peer);
+		ci.frame = static_cast<uint32_t>(p_frame);
+	}
+	queue_redraw();
+}
+
+// The special-key handler's scoreboard arm (hud_scoreboard.h
+// scoreboard_takes_page_keys): true = consumed.
+bool HudOverlay::scoreboard_page_key(bool p_forward, bool p_in_session, bool p_board_open) {
+	if (!opennova::hud::scoreboard_takes_page_keys(p_in_session, p_board_open)) return false;
+	compiler_.scoreboard_page_step(p_forward ? 1 : -1);
+	queue_redraw();
+	return true;
+}
+
+void HudOverlay::reset_scoreboard_page() {
+	compiler_.reset_scoreboard_page();
 }
 
 void HudOverlay::set_end_round_overlay(bool p_shown, int p_top, int p_bottom,
@@ -1172,6 +1264,7 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			// The radio-request icon's per-tag fold (the gather carries the
 			// witness); the viewer gate is set_radio_request_icon_viewer's.
 			tag.radio_request = t.radio_request;
+			tag.squad_color_index = t.squad_color_index;
 			state_.friendly_tags.push_back(tag);
 		}
 	}
@@ -1258,18 +1351,34 @@ void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
 	queue_redraw();
 }
 
-// The breath bar's facts off the sim's role view (inmatch::breath_bar_facts)
-// and its label: HUD_DrawBreathBar fetches Overlays/STROVER91 through
-// GameText_GetString at every draw, whose miss is "".
-void HudOverlay::set_breath_bar(const Ref<Simulation> &p_sim,
+// The HUD's role facts off the sim's role view (inmatch::hud_role_facts):
+// the breath bar, the MP session lines with their gametext strings
+// (hud::hud_session_text), and the HUDLS scan, whose icons load by name
+// through the combat sprite cache only while HUDLS_SYSTEM makes the bar draw.
+void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext) {
-	const opennova::inmatch::BreathBarFacts facts = p_sim.is_valid()
-			? p_sim->breath_bar_facts()
-			: opennova::inmatch::BreathBarFacts();
-	state_.breath_samples = facts.samples;
-	state_.breath_time = facts.breath_time;
-	state_.spawn_success_gate = facts.spawn_success_gate;
+	const opennova::inmatch::HudRoleFacts facts = p_sim.is_valid()
+			? p_sim->hud_role_facts()
+			: opennova::inmatch::HudRoleFacts();
+	state_.breath_samples = facts.breath.samples;
+	state_.breath_time = facts.breath.breath_time;
+	state_.spawn_success_gate = facts.breath.spawn_success_gate;
 	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
+	state_.session = facts.session;
+	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
+	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
+		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];
+		slot = opennova::hud::HudSlotBarSlot{};
+		if (layout_.hudls.system == 0) continue;
+		slot.present = facts.slot_bar[c].adm_index >= 0;
+		slot.count = facts.slot_bar[c].count;
+		opennova::hud::HudSprite icon;
+		combat_texture_(opennova::hud::kHudTexSlotBarIcon0 + static_cast<int>(c),
+				slot.present ? opennova::to_gd(facts.slot_bar_icons[c]) : String(), icon);
+		slot.icon_valid = icon.valid;
+		slot.icon_w = icon.width;
+		slot.icon_h = icon.height;
+	}
 	queue_redraw();
 }
 
@@ -1345,6 +1454,18 @@ void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,
 	queue_redraw();
 }
 
+void HudOverlay::set_minimap_radar(const PackedInt32Array &p_feed) {
+	// The layout and its parse are the engine's (hud/hud_minimap_feed.h): a
+	// foreign header leaves the radar legs with nothing lit.
+	opennova::hud::radar_feed_decode(p_feed.ptr(), static_cast<size_t>(p_feed.size()),
+			state_.minimap.radar);
+	queue_redraw();
+}
+
+int HudOverlay::get_radar_frame_gates() const {
+	return static_cast<int>(compiler_.radar_frame_gates(state_));
+}
+
 void HudOverlay::set_minimap_footprints(const PackedInt32Array &p_feed) {
 	// {version, count} then per row {handle, fill_argb, fill_value_count,
 	// xy..., edge_value_count, xy...} — mission 16.16 world space, baked
@@ -1376,6 +1497,14 @@ void HudOverlay::set_minimap_footprints(const PackedInt32Array &p_feed) {
 		opennova::hud::hud_minimap_finalize_footprint(footprint);
 		state_.map_footprints.push_back(std::move(footprint));
 	}
+	queue_redraw();
+}
+
+void HudOverlay::set_minimap_overlays(const Ref<HudMapOverlays> &p_overlays) {
+	// The engine owns the gather (inmatch/minimap_overlays.h); the frame state
+	// holds the value the spinmap compile borrows.
+	state_.map_overlays = p_overlays.is_valid() ? p_overlays->value()
+			: opennova::hud::HudMinimapOverlays{};
 	queue_redraw();
 }
 
@@ -1418,7 +1547,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	int64_t underlines = 0;
 	int64_t elements = 0;
 	bool map_visible = false;
-	int64_t map_backing_tris = 0;
 	int64_t map_terrain_tris = 0;
 	int64_t map_footprint_tris = 0;
 	int64_t map_sprites = 0;
@@ -1426,7 +1554,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	int64_t map_lines = 0;
 	int64_t map_labels = 0;
 	bool big_map_visible = false;
-	int64_t big_map_backing_tris = 0;
 	int64_t big_map_terrain_tris = 0;
 	int64_t big_map_footprint_tris = 0;
 	int64_t big_map_sprites = 0;
@@ -1457,7 +1584,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 		underlines = static_cast<int64_t>(list.underlines.size());
 		elements = list.elements_drawn;
 		map_visible = list.map.visible;
-		map_backing_tris = static_cast<int64_t>(list.map.backing.size());
 		map_terrain_tris = static_cast<int64_t>(list.map.terrain.size());
 		map_footprint_tris = static_cast<int64_t>(list.map.overlays.size());
 		map_sprites = static_cast<int64_t>(list.map.sprites.size());
@@ -1465,7 +1591,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 		map_lines = static_cast<int64_t>(list.map.lines.size());
 		map_labels = static_cast<int64_t>(list.map.labels.size());
 		big_map_visible = list.big_map.visible;
-		big_map_backing_tris = static_cast<int64_t>(list.big_map.backing.size());
 		big_map_terrain_tris = static_cast<int64_t>(list.big_map.terrain.size());
 		big_map_footprint_tris = static_cast<int64_t>(list.big_map.overlays.size());
 		big_map_sprites = static_cast<int64_t>(list.big_map.sprites.size());
@@ -1485,7 +1610,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	out->set_underlines(underlines);
 	out->set_elements_drawn(elements);
 	out->set_map_visible(map_visible);
-	out->set_map_backing_tris(map_backing_tris);
 	out->set_map_terrain_tris(map_terrain_tris);
 	out->set_map_footprint_tris(map_footprint_tris);
 	out->set_map_sprites(map_sprites);
@@ -1493,7 +1617,6 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	out->set_map_lines(map_lines);
 	out->set_map_labels(map_labels);
 	out->set_big_map_visible(big_map_visible);
-	out->set_big_map_backing_tris(big_map_backing_tris);
 	out->set_big_map_terrain_tris(big_map_terrain_tris);
 	out->set_big_map_footprint_tris(big_map_footprint_tris);
 	out->set_big_map_sprites(big_map_sprites);
@@ -1507,30 +1630,30 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	out->set_map_icon_mipmaps(map_icon_image.is_valid() && map_icon_image->has_mipmaps());
 	out->set_map_icon_width(map_icon_image.is_valid() ? map_icon_image->get_width() : 0);
 	out->set_map_icon_height(map_icon_image.is_valid() ? map_icon_image->get_height() : 0);
-	out->set_map_texture_filter(map_top_sampling_configured_
+	out->set_map_texture_filter(corner_map_.top_sampling_configured()
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
-	out->set_map_texture_repeat(map_top_sampling_configured_
+	out->set_map_texture_repeat(corner_map_.top_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
-	out->set_map_water_texture_filter(map_water_sampling_configured_
+	out->set_map_water_texture_filter(corner_map_.water_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
-	out->set_map_water_texture_repeat(map_water_sampling_configured_
+	out->set_map_water_texture_repeat(corner_map_.water_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
-	out->set_big_map_texture_filter(big_map_top_sampling_configured_
+	out->set_big_map_texture_filter(big_map_.top_sampling_configured()
 			? static_cast<int64_t>(
 					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
-	out->set_big_map_texture_repeat(big_map_top_sampling_configured_
+	out->set_big_map_texture_repeat(big_map_.top_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
-	out->set_big_map_water_texture_filter(big_map_water_sampling_configured_
+	out->set_big_map_water_texture_filter(big_map_.water_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT));
-	out->set_big_map_water_texture_repeat(big_map_water_sampling_configured_
+	out->set_big_map_water_texture_repeat(big_map_.water_sampling_configured()
 			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
 			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT));
 	return out;
@@ -1562,118 +1685,53 @@ void HudOverlay::ensure_minimap_water_material_() {
 	minimap_water_material_->set_shader(minimap_water_shader_);
 }
 
-void HudOverlay::ensure_map_items_() {
-	if (map_base_item_.is_valid() && map_add_item_.is_valid() &&
-			map_water_item_.is_valid() && map_top_item_.is_valid()) {
-		return;
-	}
+void HudOverlay::ensure_map_materials_() {
 	if (additive_material_.is_null()) {
 		additive_material_.instantiate();
 		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
 	}
 	ensure_minimap_water_material_();
-	RenderingServer *rs = RenderingServer::get_singleton();
-	// The retail map decal pipeline quadruples texture x diffuse (the
-	// captures measure exactly 0x60 x 4 = 1.5058 x texture). A 1x canvas
-	// cannot express >1 modulate, so the terrain draws twice — base + an
-	// additive child-item pass — which saturates identically. Everything
-	// the map draws ABOVE its terrain rides a third child so the sandwich
-	// keeps retail's order. The WHOLE corner-map trio draws BEHIND the
-	// parent's own commands: retail pushes the map before the friendly-tag
-	// and console-message passes, so those overlays paint OVER the corner
-	// map (witness at hud_frame.cpp element ordering and hud_minimap.cpp
-	// kTerrainTint; hud-re.md carries the pass addresses). Per-command
-	// blend modes do not exist on a CanvasItem.
-	if (!map_base_item_.is_valid()) {
-		map_base_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(map_base_item_, get_canvas_item());
-		rs->canvas_item_set_draw_behind_parent(map_base_item_, true);
-		rs->canvas_item_set_draw_index(map_base_item_, 0);
-	}
-	if (!map_add_item_.is_valid()) {
-		map_add_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(map_add_item_, get_canvas_item());
-		rs->canvas_item_set_material(map_add_item_,
-				additive_material_->get_rid());
-		rs->canvas_item_set_draw_behind_parent(map_add_item_, true);
-		rs->canvas_item_set_draw_index(map_add_item_, 1);
-	}
-	if (!map_water_item_.is_valid()) {
-		map_water_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(map_water_item_, get_canvas_item());
-		rs->canvas_item_set_material(map_water_item_,
-				minimap_water_material_->get_rid());
-		rs->canvas_item_set_draw_behind_parent(map_water_item_, true);
-		rs->canvas_item_set_draw_index(map_water_item_, 2);
-		rs->canvas_item_set_default_texture_filter(map_water_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
-		rs->canvas_item_set_default_texture_repeat(map_water_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-		map_water_sampling_configured_ = true;
-	}
-	if (!map_top_item_.is_valid()) {
-		map_top_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(map_top_item_, get_canvas_item());
-		rs->canvas_item_set_draw_behind_parent(map_top_item_, true);
-		rs->canvas_item_set_draw_index(map_top_item_, 3);
-		rs->canvas_item_set_default_texture_filter(map_top_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
-		rs->canvas_item_set_default_texture_repeat(map_top_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-		map_top_sampling_configured_ = true;
-	}
 }
 
-void HudOverlay::ensure_big_map_items_() {
-	if (big_map_base_item_.is_valid() && big_map_add_item_.is_valid() &&
-			big_map_water_item_.is_valid() && big_map_top_item_.is_valid()) {
-		return;
-	}
-	if (additive_material_.is_null()) {
-		additive_material_.instantiate();
-		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
-	}
-	ensure_minimap_water_material_();
-	RenderingServer *rs = RenderingServer::get_singleton();
-	// The whole big-map sandwich sits ABOVE the flat HUD and the corner
-	// map: retail draws the M map after the full overlay pass, so bars,
-	// chat, and the corner spinmap all disappear under it (only the
-	// objectives-family legs draw later — that residual is ledgered on
-	// D-HUD-21; witness at hud_frame.h HudDrawList::big_map).
-	if (!big_map_base_item_.is_valid()) {
-		big_map_base_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(big_map_base_item_, get_canvas_item());
-		rs->canvas_item_set_draw_index(big_map_base_item_, 5);
-	}
-	if (!big_map_add_item_.is_valid()) {
-		big_map_add_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(big_map_add_item_, get_canvas_item());
-		rs->canvas_item_set_material(big_map_add_item_,
-				additive_material_->get_rid());
-		rs->canvas_item_set_draw_index(big_map_add_item_, 6);
-	}
-	if (!big_map_water_item_.is_valid()) {
-		big_map_water_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(big_map_water_item_, get_canvas_item());
-		rs->canvas_item_set_material(big_map_water_item_,
-				minimap_water_material_->get_rid());
-		rs->canvas_item_set_draw_index(big_map_water_item_, 7);
-		rs->canvas_item_set_default_texture_filter(big_map_water_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
-		rs->canvas_item_set_default_texture_repeat(big_map_water_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-		big_map_water_sampling_configured_ = true;
-	}
-	if (!big_map_top_item_.is_valid()) {
-		big_map_top_item_ = rs->canvas_item_create();
-		rs->canvas_item_set_parent(big_map_top_item_, get_canvas_item());
-		rs->canvas_item_set_draw_index(big_map_top_item_, 8);
-		rs->canvas_item_set_default_texture_filter(big_map_top_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
-		rs->canvas_item_set_default_texture_repeat(big_map_top_item_,
-				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-		big_map_top_sampling_configured_ = true;
-	}
+RID HudOverlay::map_additive_material() {
+	ensure_map_materials_();
+	return additive_material_->get_rid();
+}
+
+RID HudOverlay::map_water_material() {
+	ensure_map_materials_();
+	return minimap_water_material_->get_rid();
+}
+
+HudMapPassTextures HudOverlay::map_pass_textures() const {
+	HudMapPassTextures out;
+	out.terrain = textures_[opennova::hud::kHudTexMapTerrain];
+	out.water = textures_[opennova::hud::kHudTexMapWater];
+	out.slots = textures_.data();
+	out.slot_count = kTextureSlots;
+	out.pages = page_textures_.data();
+	out.page_count = page_textures_.size();
+	return out;
+}
+
+const opennova::hud::HudFrameCompiler::MapWindowDraw *HudOverlay::compile_death_map(
+		const opennova::hud::DeathMapFrame &p_frame,
+		const opennova::hud::DeathMapFacts &p_facts, float p_surface_w, float p_surface_h) {
+	if (!configured_) return nullptr;
+	// The window's letters lay out in this overlay's label fonts, loaded for
+	// the width tier like every other map pass (engine hud_label_font_choice).
+	ensure_label_fonts_(p_surface_w);
+	return &compiler_.compile_death_map(state_, p_frame, p_facts, p_surface_w, p_surface_h);
+}
+
+const opennova::hud::HudFrameCompiler::MapWindowDraw *HudOverlay::compile_command_map(
+		opennova::hud::CommandMapView &p_cmap, const opennova::hud::MapViewRect &p_rect,
+		int32_t p_scaled_800, const opennova::hud::DeathMapFacts &p_facts, float p_surface_w,
+		float p_surface_h) {
+	if (!configured_) return nullptr;
+	ensure_label_fonts_(p_surface_w);
+	return &compiler_.compile_command_map(state_, p_cmap, p_rect, p_scaled_800, p_facts,
+			p_surface_w, p_surface_h);
 }
 
 void HudOverlay::_notification(int p_what) {
@@ -1687,29 +1745,10 @@ void HudOverlay::_draw() {
 	if (additive_item_.is_valid()) {
 		rs->canvas_item_clear(additive_item_);
 	}
-	if (map_base_item_.is_valid()) {
-		rs->canvas_item_clear(map_base_item_);
-	}
-	if (map_add_item_.is_valid()) {
-		rs->canvas_item_clear(map_add_item_);
-	}
-	if (map_water_item_.is_valid()) {
-		rs->canvas_item_clear(map_water_item_);
-	}
-	if (map_top_item_.is_valid()) {
-		rs->canvas_item_clear(map_top_item_);
-	}
-	if (big_map_base_item_.is_valid()) {
-		rs->canvas_item_clear(big_map_base_item_);
-	}
-	if (big_map_add_item_.is_valid()) {
-		rs->canvas_item_clear(big_map_add_item_);
-	}
-	if (big_map_water_item_.is_valid()) {
-		rs->canvas_item_clear(big_map_water_item_);
-	}
-	if (big_map_top_item_.is_valid()) {
-		rs->canvas_item_clear(big_map_top_item_);
+	corner_map_.clear();
+	big_map_.clear();
+	if (top_item_.is_valid()) {
+		rs->canvas_item_clear(top_item_);
 	}
 	if (!configured_) {
 		return;
@@ -1751,20 +1790,69 @@ PackedInt64Array HudOverlay::consume_draw_timing_us() {
 }
 
 void HudOverlay::render_list_(const HudDrawList &p_list) {
-	RenderingServer *rs = RenderingServer::get_singleton();
 	render_map_(p_list.map, p_list.map_glyphs, false);
 	// The M-cycle big map rides its OWN sandwich above the flat HUD and the
 	// corner map — retail draws it as a second pass over the whole overlay
 	// set. Each pass carries its own glyphs.
 	render_map_(p_list.big_map, p_list.big_map_glyphs, true);
+	// The flat HUD below the big map, then the gameplay-overlay windows the
+	// compiler marked (HudDrawList::top_begin) on the child item above it.
+	const auto &top = p_list.top_begin;
+	FlatRange below;
+	below.quads_end = std::min(top.quads, p_list.quads.size());
+	below.tris_end = std::min(top.tris, p_list.tris.size());
+	below.lines_end = std::min(top.lines, p_list.lines.size());
+	below.glyphs_end = std::min(top.glyphs, p_list.glyphs.size());
+	below.underlines_end = std::min(top.underlines, p_list.underlines.size());
+	render_flat_(get_canvas_item(), p_list, below);
+	FlatRange above;
+	above.quads_begin = below.quads_end;
+	above.quads_end = p_list.quads.size();
+	above.tris_begin = below.tris_end;
+	above.tris_end = p_list.tris.size();
+	above.lines_begin = below.lines_end;
+	above.lines_end = p_list.lines.size();
+	above.glyphs_begin = below.glyphs_end;
+	above.glyphs_end = p_list.glyphs.size();
+	above.underlines_begin = below.underlines_end;
+	above.underlines_end = p_list.underlines.size();
+	if (above.quads_begin == above.quads_end && above.tris_begin == above.tris_end &&
+			above.lines_begin == above.lines_end && above.glyphs_begin == above.glyphs_end &&
+			above.underlines_begin == above.underlines_end) {
+		return;
+	}
+	ensure_top_item_();
+	render_flat_(top_item_, p_list, above);
+}
+
+void HudOverlay::ensure_top_item_() {
+	if (top_item_.is_valid()) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	top_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(top_item_, get_canvas_item());
+	// Above the big-map sandwich (draw indices 5..8).
+	rs->canvas_item_set_draw_index(top_item_, 9);
+}
+
+void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, const FlatRange &p_range) {
+	RenderingServer *rs = RenderingServer::get_singleton();
 	// Kind-grouped submission preserves the compiler's per-kind insertion
 	// order and keeps every glyph above the quads (retail draws its text
 	// elements over the bars/frames the same walk emitted).
-	for (const opennova::hud::HudQuad &quad : p_list.quads) {
+	for (size_t i = p_range.quads_begin; i < p_range.quads_end; ++i) {
+		const opennova::hud::HudQuad &quad = p_list.quads[i];
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
 		const Color color = opennova::color_from_argb(quad.color);
 		if (!quad.filled) {
-			draw_rect(rect, color, false, -1.0f);
+			PackedVector2Array outline;
+			outline.push_back(Vector2(quad.x0, quad.y0));
+			outline.push_back(Vector2(quad.x1, quad.y0));
+			outline.push_back(Vector2(quad.x1, quad.y1));
+			outline.push_back(Vector2(quad.x0, quad.y1));
+			outline.push_back(Vector2(quad.x0, quad.y0));
+			PackedColorArray outline_color;
+			outline_color.push_back(color);
+			rs->canvas_item_add_polyline(p_item, outline, outline_color, -1.0f);
 			continue;
 		}
 		Ref<Texture2D> tex;
@@ -1786,26 +1874,25 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 		if (tex.is_valid()) {
 			if (quad.u0 != 0.0f || quad.v0 != 0.0f || quad.u1 != 1.0f || quad.v1 != 1.0f) {
 				const Vector2 tex_size = tex->get_size();
-				draw_texture_rect_region(tex, rect,
+				rs->canvas_item_add_texture_rect_region(p_item, rect, tex->get_rid(),
 						Rect2(quad.u0 * tex_size.x, quad.v0 * tex_size.y,
 								(quad.u1 - quad.u0) * tex_size.x,
 								(quad.v1 - quad.v0) * tex_size.y),
 						color);
 			} else {
-				draw_texture_rect(tex, rect, false, color);
+				rs->canvas_item_add_texture_rect(p_item, rect, tex->get_rid(), false, color);
 			}
 		} else {
-			draw_rect(rect, color, true);
+			rs->canvas_item_add_rect(p_item, rect, color);
 		}
 	}
 	// Consecutive texture runs preserve primitive order and per-vertex color.
 	// Device submission follows the font batch witness in docs/fonts/fnt-re.md;
 	// the compiler still owns all crosshair and glyph geometry.
-	const RID canvas = get_canvas_item();
-	for (size_t first = 0; first < p_list.tris.size();) {
+	for (size_t first = p_range.tris_begin; first < p_range.tris_end;) {
 		const int texture = p_list.tris[first].texture;
 		size_t end = first + 1;
-		while (end < p_list.tris.size() && p_list.tris[end].texture == texture) ++end;
+		while (end < p_range.tris_end && p_list.tris[end].texture == texture) ++end;
 		Ref<Texture2D> tex;
 		if (texture >= 0 && texture < kTextureSlots) tex = textures_[static_cast<size_t>(texture)];
 		const int count = static_cast<int>((end - first) * 3);
@@ -1831,20 +1918,21 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 				++vertex_index;
 			}
 		}
-		rs->canvas_item_add_triangle_array(canvas, indices, points, colors, uvs,
+		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uvs,
 				PackedInt32Array(), PackedFloat32Array(), tex.is_valid() ? tex->get_rid() : RID());
 		first = end;
 	}
-	for (const opennova::hud::HudLine &line : p_list.lines) {
-		draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
+	for (size_t i = p_range.lines_begin; i < p_range.lines_end; ++i) {
+		const opennova::hud::HudLine &line = p_list.lines[i];
+		rs->canvas_item_add_line(p_item, Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
 				opennova::color_from_argb(line.color), line.width);
 	}
 	// Keep the existing kind order, page order, italic corners, half-pixel
 	// offsets and underline layer. Never sort text by texture across runs.
-	for (size_t first = 0; first < p_list.glyphs.size();) {
+	for (size_t first = p_range.glyphs_begin; first < p_range.glyphs_end;) {
 		const uint32_t page = p_list.glyphs[first].page;
 		size_t end = first + 1;
-		while (end < p_list.glyphs.size() && p_list.glyphs[end].page == page) ++end;
+		while (end < p_range.glyphs_end && p_list.glyphs[end].page == page) ++end;
 		if (page >= page_textures_.size() || page_textures_[page].is_null()) {
 			first = end;
 			continue;
@@ -1876,13 +1964,15 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 			static constexpr int corners[] = {0, 1, 2, 0, 2, 3};
 			for (int corner = 0; corner < 6; ++corner) index[i * 6 + corner] = base + corners[corner];
 		}
-		rs->canvas_item_add_triangle_array(canvas, indices, points, colors, uvs,
+		rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uvs,
 				PackedInt32Array(), PackedFloat32Array(), page_textures_[page]->get_rid());
 		first = end;
 	}
-	for (const opennova::hud::GameFontUnderline &underline : p_list.underlines) {
-		draw_line(Vector2(underline.x0, underline.y), Vector2(underline.x1, underline.y),
-				opennova::color_from_argb(underline.color), 1.0f);
+	for (size_t i = p_range.underlines_begin; i < p_range.underlines_end; ++i) {
+		const opennova::hud::GameFontUnderline &underline = p_list.underlines[i];
+		rs->canvas_item_add_line(p_item, Vector2(underline.x0, underline.y),
+				Vector2(underline.x1, underline.y), opennova::color_from_argb(underline.color),
+				1.0f);
 	}
 }
 
@@ -1890,202 +1980,23 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		const std::vector<opennova::hud::GameFontQuad> &p_map_glyphs,
 		bool p_big) {
 	if (!p_map.visible) return;
-	RID base_item, add_item, water_item, top_item;
+	ensure_map_materials_();
+	const RID additive = additive_material_->get_rid();
+	const RID water = minimap_water_material_->get_rid();
 	if (p_big) {
-		ensure_big_map_items_();
-		base_item = big_map_base_item_;
-		add_item = big_map_add_item_;
-		water_item = big_map_water_item_;
-		top_item = big_map_top_item_;
-	} else {
-		ensure_map_items_();
-		// The whole corner-map trio draws behind the parent's own commands
-		// (retail pushes the map before the tag/message passes).
-		base_item = map_base_item_;
-		add_item = map_add_item_;
-		water_item = map_water_item_;
-		top_item = map_top_item_;
+		// The whole big-map sandwich sits ABOVE the flat HUD and the corner
+		// map: retail draws the M map after the full overlay pass, so bars,
+		// chat, and the corner spinmap all disappear under it (only the
+		// objectives-family legs draw later — that residual is ledgered on
+		// D-HUD-21; witness at hud_frame.h HudDrawList::big_map).
+		big_map_.ensure(get_canvas_item(), 5, false, additive, water);
+		big_map_.render(p_map, p_map_glyphs, map_pass_textures());
+		return;
 	}
-	RenderingServer *rs = RenderingServer::get_singleton();
-
-	// One triangle-array submission per (item, texture) group: the per-frame
-	// map redraw must not request one RenderingServer polygon per triangle
-	// (each polygon is its own GPU buffer request — the per-tri form measured
-	// in whole milliseconds on missions with dense footprint sets).
-	PackedVector2Array points, uvs;
-	PackedColorArray colors;
-	PackedInt32Array indices;
-	const auto flush_tris = [&](const RID &item, const Ref<Texture2D> &tex) {
-		if (indices.is_empty()) return;
-		rs->canvas_item_add_triangle_array(item, indices, points, colors, uvs,
-				PackedInt32Array(), PackedFloat32Array(),
-				tex.is_valid() ? tex->get_rid() : RID());
-		points.clear();
-		uvs.clear();
-		colors.clear();
-		indices.clear();
-	};
-	const auto push_map_tri = [&](const opennova::hud::HudMapTri &tri) {
-		const int base = static_cast<int>(points.size());
-		points.push_back(Vector2(tri.a.x, tri.a.y));
-		points.push_back(Vector2(tri.b.x, tri.b.y));
-		points.push_back(Vector2(tri.c.x, tri.c.y));
-		uvs.push_back(Vector2(tri.a.u, tri.a.v));
-		uvs.push_back(Vector2(tri.b.u, tri.b.v));
-		uvs.push_back(Vector2(tri.c.u, tri.c.v));
-		const Color color = opennova::color_from_argb(tri.color);
-		colors.push_back(color);
-		colors.push_back(color);
-		colors.push_back(color);
-		indices.push_back(base);
-		indices.push_back(base + 1);
-		indices.push_back(base + 2);
-	};
-	const auto push_quad = [&](const Vector2 *corner, const Vector2 *uv,
-			uint32_t argb) {
-		const int base = static_cast<int>(points.size());
-		const Color color = opennova::color_from_argb(argb);
-		for (int i = 0; i < 4; ++i) {
-			points.push_back(corner[i]);
-			uvs.push_back(uv[i]);
-			colors.push_back(color);
-		}
-		indices.push_back(base);
-		indices.push_back(base + 1);
-		indices.push_back(base + 2);
-		indices.push_back(base);
-		indices.push_back(base + 2);
-		indices.push_back(base + 3);
-	};
-
-	const Ref<Texture2D> empty_texture;
-	for (const opennova::hud::HudMapTri &tri : p_map.backing)
-		push_map_tri(tri);
-	flush_tris(base_item, empty_texture);
-
-	const Ref<Texture2D> terrain_texture =
-			textures_[opennova::hud::kHudTexMapTerrain];
-	for (const opennova::hud::HudMapTri &tri : p_map.terrain)
-		push_map_tri(tri);
-	if (!indices.is_empty()) {
-		// Second (additive) half of the x4 output stage — see
-		// ensure_map_items_. The additive item repeats the same arrays.
-		rs->canvas_item_add_triangle_array(add_item, indices, points, colors,
-				uvs, PackedInt32Array(), PackedFloat32Array(),
-				terrain_texture.is_valid() ? terrain_texture->get_rid()
-						: RID());
-	}
-	flush_tris(base_item, terrain_texture);
-
-	// Retail's alpha-tested depthspin draw is opaque and follows the completed
-	// terrain output. Canvas splits that output across base/additive items, so
-	// the sampled height cutoff rides its own shader item after both; putting
-	// it in either terrain item lets the later leg add terrain back over water.
-	const Ref<Texture2D> water_texture =
-			textures_[opennova::hud::kHudTexMapWater];
-	for (const opennova::hud::HudMapTri &tri : p_map.terrain_water)
-		push_map_tri(tri);
-	flush_tris(water_item, water_texture);
-
-	// The under-layer lines (the 300-wu grid rules) draw FIRST on the top
-	// item: retail's grid branch runs before the marker walk, so the
-	// buildings-first footprint fills paint OVER the rules (witness at
-	// hud_minimap.h HudMapPass::lines_under).
-	const auto submit_lines = [&](const std::vector<opennova::hud::HudMapLine>
-			&lines) {
-		if (lines.empty()) return;
-		PackedVector2Array line_points;
-		PackedColorArray line_colors;
-		line_points.resize(static_cast<int64_t>(lines.size()) * 2);
-		line_colors.resize(static_cast<int64_t>(lines.size()));
-		int64_t li = 0;
-		for (const opennova::hud::HudMapLine &line : lines) {
-			line_points.set(li * 2, Vector2(line.x0, line.y0));
-			line_points.set(li * 2 + 1, Vector2(line.x1, line.y1));
-			line_colors.set(li, opennova::color_from_argb(line.color));
-			++li;
-		}
-		rs->canvas_item_add_multiline(top_item, line_points, line_colors, 1.0f);
-	};
-	submit_lines(p_map.lines_under);
-
-	// Footprint fills draw in the MARKER-WALK slot: retail's building fills
-	// blend their ctx alpha over the terrain AFTER the decal's x4 output
-	// stage completes, so here they must ride the TOP item — anything on
-	// the base item gets the additive child's terrain resubmission summed
-	// on top of it (that ordering mistake read near-white; the reference
-	// capture measures retail's fill band at ~147..158 per channel over
-	// ground, i.e. the 0xD0-alpha gray over the finished doubled terrain).
-	// They paint over the grid rules and before the icon sprites, like
-	// retail's grid-branch-then-buildings-first walk (witness at
-	// world::minimap_footprint_fill_argb).
-	for (const opennova::hud::HudMapTri &tri : p_map.overlays)
-		push_map_tri(tri);
-	flush_tris(top_item, empty_texture);
-
-	// Sprites batch by consecutive texture slot (insertion order is the
-	// compiler layer order, so only same-texture runs may merge).
-	int run_texture_slot = -1;
-	Ref<Texture2D> run_texture;
-	for (const opennova::hud::HudMapSprite &sprite : p_map.sprites) {
-		const int texture_slot = opennova::hud::kHudTexMapIcons + sprite.texture;
-		if (texture_slot != run_texture_slot) {
-			flush_tris(top_item, run_texture);
-			run_texture_slot = texture_slot;
-			run_texture = texture_slot >= 0 && texture_slot < kTextureSlots
-					? textures_[static_cast<size_t>(texture_slot)]
-					: Ref<Texture2D>();
-		}
-		const float c = std::cos(sprite.rotation_rad);
-		const float s = std::sin(sprite.rotation_rad);
-		auto corner = [&](float x, float y) {
-			return Vector2(sprite.center_x + x * c - y * s,
-					sprite.center_y + x * s + y * c);
-		};
-		const Vector2 corners[4] = {
-			corner(-sprite.half_w, -sprite.half_h),
-			corner(sprite.half_w, -sprite.half_h),
-			corner(sprite.half_w, sprite.half_h),
-			corner(-sprite.half_w, sprite.half_h),
-		};
-		const Vector2 quad_uvs[4] = {
-			Vector2(sprite.u0, sprite.v0),
-			Vector2(sprite.u1, sprite.v0),
-			Vector2(sprite.u1, sprite.v1),
-			Vector2(sprite.u0, sprite.v1),
-		};
-		push_quad(corners, quad_uvs, sprite.color);
-	}
-	flush_tris(top_item, run_texture);
-
-	submit_lines(p_map.lines);
-
-	// Map text: element_spinmap compiles per-pass GameFont glyph quads; they
-	// render LAST on this pass top item, above its grid rules and markers.
-	// Batched by consecutive font page.
-	uint32_t run_page = 0xFFFFFFFFu;
-	Ref<Texture2D> run_page_texture;
-	for (const opennova::hud::GameFontQuad &glyph : p_map_glyphs) {
-		if (glyph.page >= page_textures_.size()) continue;
-		if (glyph.page != run_page) {
-			flush_tris(top_item, run_page_texture);
-			run_page = glyph.page;
-			run_page_texture = page_textures_[glyph.page];
-		}
-		if (run_page_texture.is_null()) continue;
-		const Vector2 corners[4] = {
-			Vector2(glyph.x_top_left, glyph.y_top),
-			Vector2(glyph.x_top_right, glyph.y_top),
-			Vector2(glyph.x_bottom_right, glyph.y_bottom),
-			Vector2(glyph.x_bottom_left, glyph.y_bottom),
-		};
-		const Vector2 quad_uvs[4] = {
-			Vector2(glyph.u0, glyph.v0),
-			Vector2(glyph.u1, glyph.v0),
-			Vector2(glyph.u1, glyph.v1),
-			Vector2(glyph.u0, glyph.v1),
-		};
-		push_quad(corners, quad_uvs, glyph.color);
-	}
-	flush_tris(top_item, run_page_texture);
+	// The WHOLE corner-map set draws BEHIND the parent's own commands:
+	// retail pushes the map before the friendly-tag and console-message
+	// passes, so those overlays paint OVER the corner map (witness at
+	// hud_frame.cpp element ordering).
+	corner_map_.ensure(get_canvas_item(), 0, true, additive, water);
+	corner_map_.render(p_map, p_map_glyphs, map_pass_textures());
 }

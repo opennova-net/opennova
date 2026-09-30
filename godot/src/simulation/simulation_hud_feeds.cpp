@@ -11,6 +11,11 @@
 
 #include <formats/mission/mission.h> // runtime type -> authored item ID
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
+#include <runtime/hud/feed_format.h> // formatted_game_text_line (the 0x32 lines)
+#include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
+#include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
+#include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
+#include <runtime/world/script_sounds.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/lfp_feed.h>
@@ -121,6 +126,46 @@ TypedArray<ChatLineRow> Simulation::drain_chat_lines() {
 		out.push_back(d);
 	}
 	return out;
+}
+
+opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) const {
+	// The NovaWorld network type: the authority's own transport mode, or a
+	// joiner that joined through a NovaWorld APPID (a LAN join carries "0").
+	const opennova::inmatch::NapiNPServerCtx *host = host_ctx();
+	const bool novaworld = is_joiner()
+			? net_.app_id != "0"
+			: (host != nullptr &&
+					host->transport_mode == opennova::inmatch::NetworkType::NovaWorld);
+	return opennova::inmatch::chat_entry_facts(role_view(), novaworld, p_frame);
+}
+
+opennova::hud::ChatSendResult Simulation::send_chat_line(int p_dispatch, std::string &r_text,
+		uint32_t p_frame) {
+	const int channel = opennova::hud::chat_dispatch_channel(p_dispatch);
+	if (runtime_ == nullptr || channel < 0) return opennova::hud::ChatSendResult::Refused;
+	return runtime_->queue_chat_message(static_cast<uint8_t>(channel), r_text, p_frame);
+}
+
+void Simulation::raise_chat_denied_sound() {
+	if (!kernel_) return;
+	// The crew key's denied tone rides the interface channel like the other
+	// DRY_CLAYSATCH plays (world/player_present.h).
+	opennova::world::ScriptSoundEvent tone;
+	tone.name = opennova::world::kWeaponSwitchDenySoundset;
+	tone.kind = opennova::world::ScriptSoundEvent::Kind::Interface;
+	kernel_->world.out.script_sounds.push_back(std::move(tone));
+}
+
+void Simulation::drain_game_text_lines(const opennova::hud::GameTextLookup &p_gametext,
+		std::vector<std::string> &r_lines) {
+	r_lines.clear();
+	if (!runtime_) return;
+	const uint32_t game_type = runtime_->game_type();
+	for (const opennova::replication::ClientGameText &text : runtime_->view().drain_game_texts()) {
+		std::string line = opennova::hud::formatted_game_text_line(
+				text.subtype, text.text, text.team, game_type, p_gametext);
+		if (!line.empty()) r_lines.push_back(std::move(line));
+	}
 }
 
 } // namespace godot

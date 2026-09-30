@@ -38,6 +38,15 @@ void HudMapGridOrigin::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(HudMapGridOrigin, Variant::VECTOR3, position)
 }
 
+// --- HudMapOverlays ---------------------------------------------------------
+
+void HudMapOverlays::_bind_methods() {
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, pool_entity_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, location_name_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, name_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, tracked_ticks)
+}
+
 // --- VehiclePanelView -------------------------------------------------------
 
 void VehiclePanelView::_bind_methods() {

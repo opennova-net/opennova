@@ -309,7 +309,8 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parse_pos_aligned(vals, nvals, hud->wpd_info);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "zoneinfo", 8)) {
-            parse_pos_aligned(vals, nvals, hud->zone_info);
+            /* x, y, alignment word [orig: @0x5A0642..0x5A0676] */
+            parse_pos_align3(vals, nvals, hud->zone_info);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "exppoints", 9)) {
             parse_pos_aligned(vals, nvals, hud->exp_points);
@@ -342,6 +343,42 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "breathtime", 10)) {
             parse_pos_align3(vals, nvals, hud->breath_time);
+            parsed = 1;
+        }
+        /* HUDLS — the weapon slot bar (def.h DefHudPosDef carries the field
+           map). [orig: HUD_ParseHudposToken @0x59FE41..0x59FF9C] */
+        else if (lower_starts_with(lower, ll, "hudls_system", 12)) {
+            if (nvals >= 1) hud->hudls_system = parse_int_n(vals[0].s, vals[0].len); /* @0x59FE66 */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_bracket", 13)) {
+            if (nvals >= 1)
+                safe_copy(hud->hudls_bracket, sizeof(hud->hudls_bracket), vals[0].s,
+                          vals[0].len); /* the strcpy @0x59FE90 */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_keyofst", 13)) {
+            for (int i = 0; i < 2 && i < nvals; ++i) /* @0x59FEC7 / @0x59FEDF */
+                hud->hudls_keyofst[i] = parse_int_n(vals[i].s, vals[i].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_moreav", 12)) {
+            if (nvals >= 1)
+                safe_copy(hud->hudls_moreav, sizeof(hud->hudls_moreav), vals[0].s,
+                          vals[0].len); /* the strcpy @0x59FF05 */
+            /* the ftol'd offsets keep their LOW BYTE [orig: `mov byte_2723733, al`
+               @0x59FF21, `mov byte_2723734, al` @0x59FF39] */
+            for (int i = 0; i < 2 && i + 1 < nvals; ++i)
+                hud->hudls_moreav_off[i] =
+                    (int8_t)(uint8_t)parse_int_n(vals[i + 1].s, vals[i + 1].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_slot", 10)) {
+            if (nvals >= 1) {
+                const int n = parse_int_n(vals[0].s, vals[0].len);
+                /* n outside 1..10 authors nothing [orig: `sub edi,1; cmp edi,9; ja`
+                   @0x59FF6A..0x59FF70] */
+                if ((unsigned)(n - 1) <= 9u) {
+                    if (nvals >= 2) hud->hudls_slot[n - 1][0] = parse_int_n(vals[1].s, vals[1].len);
+                    if (nvals >= 3) hud->hudls_slot[n - 1][1] = parse_int_n(vals[2].s, vals[2].len);
+                }
+            }
             parsed = 1;
         }
         /* XY positions */

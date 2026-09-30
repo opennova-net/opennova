@@ -4,6 +4,7 @@
 #include <runtime/world/minimap_overlay.h>
 #include <runtime/world/occlusion.h>
 #include <runtime/world/entity_registry.h>
+#include <runtime/world/world.h>
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
@@ -64,7 +65,7 @@ void test_00trg_persistent_overlay_set() {
 		const world::Entity *e = rig.world.registry.get(h);
 		if (e == nullptr) continue;
 		++pool2;
-		if (world::classify_minimap_overlay(*e).visible) handles.push_back(h.packed);
+		if (world::classify_minimap_overlay(*e, nullptr).visible) handles.push_back(h.packed);
 	}
 	std::sort(handles.begin(), handles.end());
 	std::printf("minimap 00TRg: %d pool-2 entities, %zu persistent overlay handles:", pool2, handles.size());
@@ -87,49 +88,97 @@ int main(int argc, char **argv) {
 	world::Entity entity = base_entity();
 	entity.item_type = 1;
 	entity.item_unit_type = 6;
-	auto row = world::classify_minimap_overlay(entity);
+	auto row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 15 && row.color == 0x0A &&
 			row.handle == entity.handle.packed && row.source == 6,
 			"air vehicle classification carries icon, identity, color, and source");
 
 	entity.item_attrib = world::kItemAttribArmory;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 13,
 			"armory classification outranks the vehicle branch");
 
 	entity = base_entity();
 	entity.item_type = 5;
 	entity.team = 0;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(!row.visible, "ordinary building needs the resolved model marker");
 	entity.has_minimap_model_marker = true;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 0 && row.color == 0,
 			"marked neutral building uses icon/color zero");
 
 	entity = base_entity();
 	entity.item_type = 3;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 3 && row.flags == 0,
 			"live Person uses icon 3");
 	entity.engine_flags |= world::kEntityFlagDead;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 8 && row.flags == 1,
 			"dead Person remains visible with icon 8 and dead flag");
 
 	entity = base_entity();
 	entity.item_attrib = world::kItemAttribEweap;
 	entity.item_id = 1869;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 12 && row.color == 8,
 			"alternate emplacement uses icon 12 and emplacement color");
 	entity.item_id = 1902;
-	row = world::classify_minimap_overlay(entity);
+	row = world::classify_minimap_overlay(entity, nullptr);
 	CHECK(row.visible && row.icon == 4,
 			"ordinary emplacement uses icon 4");
 
+	// The EWEAP parent gate: a vehicle (or def-less) groundEntity parent hides
+	// the emplacement. [orig: Entity_ClassifyForMinimap @0x50FCF3..0x50FD4F]
+	{
+		world::World w;
+		w.registry.configure_pool(1, 4);
+		world::Entity parent = base_entity();
+		parent.item_type = 1;
+		const world::EntityHandle ph = w.registry.spawn(1, parent);
+		world::Entity gun = base_entity();
+		gun.item_attrib = world::kItemAttribEweap;
+		gun.item_id = 1902;
+		gun.ground_target = ph;
+		CHECK(!world::classify_minimap_overlay(gun, &w).visible,
+				"an emplacement on a vehicle parent draws no marker");
+		w.registry.get(ph)->item_type = 5;
+		CHECK(world::classify_minimap_overlay(gun, &w).visible,
+				"an emplacement on a non-vehicle parent keeps its marker");
+	}
+	// The vehicle bay's spawn-group flags pick cell 19/20/21 before the FARP
+	// test; the flag and bay ids draw cells 2 and 6 in their id colours; the
+	// powerup class ends the walk iconless.
+	// [orig: @0x50FAEB..0x50FB2C; @0x50FC11..0x50FDFA; @0x50FB40]
+	{
+		world::Entity bay = base_entity();
+		bay.item_attrib2 = 1u | 0x2000u;
+		bay.vehicle_bay_flags = 2u | 4u;
+		row = world::classify_minimap_overlay(bay, nullptr);
+		CHECK(row.visible && row.icon == 20, "bay flag bit1 before bit2 picks cell 20");
+		bay.vehicle_bay_flags = 0;
+		CHECK(!world::classify_minimap_overlay(bay, nullptr).visible,
+				"a flagless bay stays iconless (the FARP test never runs)");
+		world::Entity flag = base_entity();
+		flag.item_id = 4093;
+		row = world::classify_minimap_overlay(flag, nullptr);
+		CHECK(row.visible && row.icon == 2 && row.color == 0x09, "flag 4093 is cell 2 in red");
+		flag.item_id = 4098;
+		row = world::classify_minimap_overlay(flag, nullptr);
+		CHECK(row.visible && row.icon == 6 && row.color == 0x0A, "bay 4098 is cell 6 in blue");
+		flag.item_id = 4102;
+		row = world::classify_minimap_overlay(flag, nullptr);
+		CHECK(row.visible && row.icon == 6 && row.color == 0x0C, "bay 4102 is cell 6, neutral");
+		world::Entity powerup = base_entity();
+		powerup.item_type = 3;
+		powerup.item_attrib = world::kItemAttribPowerup;
+		CHECK(!world::classify_minimap_overlay(powerup, nullptr).visible,
+				"the powerup class ends the walk before the Person branch");
+	}
+
 	entity.item_attrib = world::kItemAttribNoHud;
-	CHECK(!world::classify_minimap_overlay(entity).visible,
+	CHECK(!world::classify_minimap_overlay(entity, nullptr).visible,
 			"NoHud suppresses classification");
 	entity.item_attrib = 0;
 	entity.engine_flags = 1;

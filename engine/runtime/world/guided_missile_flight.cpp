@@ -144,6 +144,8 @@ GuidedMotorEvents GuidedFlight::motor(GuidedFlightState &s, GuidedFamily family,
             if (err[3] < kSteerGuard) { detonate(); return ev; }
             ev.proximity = err[2] < kProximity;
         }
+        // Every peer reaches the lock note here [orig: @0x4465db..0x446622].
+        ev.threat_note = true;
         if (s.age >= 31) turn(s, err, boost(s, a), a);
         return ev;
     }

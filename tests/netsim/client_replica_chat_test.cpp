@@ -82,6 +82,37 @@ int main() {
 			hud::kHudColorCyan == 0xFF00EAE7u && hud::kHudColorOrange == 0xFFFF8020u &&
 			hud::kHudColorMagenta == 0xFFFF40FFu && hud::kHudColorYellow == 0xFFF0F000u);
 
+	// THE S2C 0x32 JOIN/LEAVE LANE: the handled subtypes fold verbatim (the
+	// signed team byte of the join/leave pair), in wire order; others drop
+	// [orig: NapiNPClientMsg_0x032 @0x428060].
+	view.apply(s2c::FORMATTED_GAME_TEXT, {1, 'R', 'o', 'c', 'k', 0, 2});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 'o', 'c', 'k', 0, 0xFF});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {5, 'S', 'p', 'e', 'c', 0});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {9, 'x', 0});
+	const std::vector<ClientGameText> texts = view.drain_game_texts();
+	CHECK(texts.size() == 3);
+	CHECK(texts.size() == 3 && texts[0].subtype == 1 && texts[0].text == "Rock" &&
+			texts[0].team == 2);
+	CHECK(texts.size() == 3 && texts[1].subtype == 2 && texts[1].team == -1);
+	CHECK(texts.size() == 3 && texts[2].subtype == 5 && texts[2].text == "Spec");
+	CHECK(view.drain_game_texts().empty());
+	// The listen host's own loopback posts them too (no authority gate).
+	auto host_owned = std::make_unique<ClientReplicaPipeline>();
+	host_owned->set_authority_recipient(true);
+	host_owned->apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 0, 1});
+	CHECK(host_owned->drain_game_texts().size() == 1);
+
+	// The talk keys' reset hold: S2C 0x25 raises it on a client (never on the
+	// authority's loopback), the next S2C 0x0F lowers it
+	// [orig: NapiNPClientMsg_GameReset @0x42284e; NapiNPClientMsg_0x00F @0x42e396].
+	CHECK(!view.state().round_reset_hold);
+	view.apply(s2c::GAME_RESET, {});
+	CHECK(view.state().round_reset_hold);
+	view.apply(s2c::WORLD_STATE_LOAD, {});
+	CHECK(!view.state().round_reset_hold);
+	host_owned->apply(s2c::GAME_RESET, {});
+	CHECK(!host_owned->state().round_reset_hold);
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

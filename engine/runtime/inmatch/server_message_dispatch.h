@@ -142,8 +142,7 @@ ProtocolMessage build_player_list_message(const GameConfig &config,
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16
 // row without the unknown-slot 0x22 retry churn. [orig: Server_PlayerAdd @0x51CBC0 broadcasts 0x46
-// fieldFlags 0x1CF7 to all in-game @0x51D296 (`push 7415` @0x51d2bf); the 0x32 name broadcast
-// stays deferred with D-NET-149]
+// fieldFlags 0x1CF7 to all in-game @0x51D296 (`push 7415` @0x51d2bf)]
 void broadcast_player_sync_on_join(const GameConfig &config,
                                    std::vector<NapiNPConnection> &roster,
                                    const NapiNPConnection &joined, const world::World *world);

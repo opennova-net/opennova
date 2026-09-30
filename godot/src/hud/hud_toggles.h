@@ -32,19 +32,57 @@ public:
 		EVENT_SHOW_SCORE_TOGGLED = opennova::hud::hud_toggle_event::kShowScoreToggled,
 		EVENT_OVERLAY_WINDOWS_CLEARED = opennova::hud::hud_toggle_event::kOverlayWindowsCleared,
 		EVENT_GUN_VIEW_SELECTED = opennova::hud::hud_toggle_event::kGunViewSelected,
+		EVENT_FRIENDLY_TAGS_CYCLED = opennova::hud::hud_toggle_event::kFriendlyTagsCycled,
+		EVENT_HELP_TOGGLED = opennova::hud::hud_toggle_event::kHelpToggled,
+		EVENT_MAP_LEGEND_TOGGLED = opennova::hud::hud_toggle_event::kMapLegendToggled,
+		EVENT_BRIEFING_TOGGLED = opennova::hud::hud_toggle_event::kBriefingToggled,
+		EVENT_BRIEFING_PAGES_RESET = opennova::hud::hud_toggle_event::kBriefingPagesReset,
+		EVENT_VERBOSE_TOGGLED = opennova::hud::hud_toggle_event::kVerboseToggled,
+		EVENT_ESCAPE_CLOSED_WINDOW = opennova::hud::hud_toggle_event::kEscapeClosedWindow,
+		EVENT_ESCAPE_OPEN_MENU = opennova::hud::hud_toggle_event::kEscapeOpenMenu,
+		EVENT_COMMAND_MAP_OPENED = opennova::hud::hud_toggle_event::kCommandMapOpened,
+		EVENT_SCOREBOARD_PAGE_RESET = opennova::hud::hud_toggle_event::kScoreboardPageReset,
+	};
+	// The polled catalog rows, one bit each (engine HudToggleRow).
+	enum Row {
+		ROW_HUD_DETAIL = opennova::hud::kRowHudDetail,
+		ROW_HUD_COLOR = opennova::hud::kRowHudColor,
+		ROW_SHOWHUD = opennova::hud::kRowShowHud,
+		ROW_DOTSIZE = opennova::hud::kRowDotsize,
+		ROW_GOALS = opennova::hud::kRowGoals,
+		ROW_VIEW1ST = opennova::hud::kRowView1st,
+		ROW_VIEW_WITH_GUN = opennova::hud::kRowViewWithGun,
+		ROW_VIEW_CHASE = opennova::hud::kRowViewChase,
+		ROW_PLAYER_LIST = opennova::hud::kRowPlayerList,
+		ROW_OLD_MESSAGES = opennova::hud::kRowOldMessages,
+		ROW_SHOW_SCORE = opennova::hud::kRowShowScore,
+		ROW_FRIENDLY_TAGS = opennova::hud::kRowFriendlyTags,
+		ROW_HELP = opennova::hud::kRowHelp,
+		ROW_HELP_MAP = opennova::hud::kRowHelpMap,
+		ROW_BRIEFING = opennova::hud::kRowBriefing,
+		ROW_VERBOSE = opennova::hud::kRowVerbose,
+		ROW_COMMANDER_MENU = opennova::hud::kRowCommanderMenu,
+		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
-	// One frame's poll over the sampled key states; returns the Event bits.
-	int poll(bool p_huddetail, bool p_hudcolor, bool p_rows_share_key, bool p_showhud,
-			bool p_dotsize, bool p_goals, bool p_view1st, bool p_viewwithgun, bool p_viewchase,
-			bool p_playerlist, bool p_old_messages, bool p_show_score, bool p_chorded,
-			bool p_active, bool p_in_session);
-	// The respawn / mission init: the three overlay windows and the latches clear.
+	// One frame's poll over the sampled rows (a mask of 1 << Row); returns the
+	// Event bits.
+	// `local_alive` feeds the commander_menu row's dead-player gate.
+	int poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
+			bool p_in_session, bool p_objective_game, bool p_local_alive = true);
+	// The escape action's HUD-window close chain; returns the Event bits.
+	int escape(bool p_in_session, bool p_spawn_gate);
+	// The catalog config token behind a Row.
+	static String row_token(int p_row);
+	// The respawn / mission init: the overlay windows and the latches clear.
 	void reset_mission();
 	// The death-screen force of the live declutter level.
 	void force_death_screen_hud_detail();
 	// The friendly-tags cycle; returns the gametext Misc toast key for the new mode.
 	String cycle_friendly_tags();
+	// The Misc toast key for the current friendly-tag mode / verbose flag.
+	String friendly_tag_toast_key() const;
+	String verbose_toast_key() const;
 	// The direct cycles (the action dispatch without a key: tests, the F3 seams).
 	void cycle_hud_color();
 	void cycle_hud_detail();
@@ -62,6 +100,10 @@ public:
 	bool is_scoreboard_open() const;
 	bool is_message_log_open() const;
 	bool is_end_round_stats_open() const;
+	bool is_help_open() const;
+	bool is_map_legend_open() const;
+	int get_briefing_mode() const;
+	bool is_mp_verbose() const;
 
 	const opennova::hud::HudToggleState &state() const { return state_; }
 
@@ -75,3 +117,4 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::HudToggles::Event);
+VARIANT_ENUM_CAST(godot::HudToggles::Row);

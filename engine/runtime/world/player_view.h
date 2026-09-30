@@ -20,6 +20,7 @@
 
 #include <runtime/renderer/frame_fx_effects.h>
 #include <runtime/world/death_camera.h>
+#include <runtime/world/radar_contacts.h>
 
 namespace opennova::terrain {
 struct TerrainHeightField;
@@ -345,18 +346,18 @@ inline int32_t screen_flash_revive_channel(const ScreenFlashState &st) {
 
 // THE LOCAL PLAYER'S DAMAGE FEEDBACK, one retail function
 // [orig: Player_OnDamageReceived @0x4DD880]: the red vignette gains 120 and the
-// camera shake 10, both capped at 255, then a radar damage blip is added and
-// two per-player-slot words are stamped. Every one of retail's five call sites
-// is gated on the victim being the local player; this function is the arm they
-// share. A world with no bound local player state is a no-op.
+// camera shake 10, both capped at 255, then a radar damage blip is added at
+// `pos_q16` (mission 16.16) for `source` — kind 255 for self damage, else 2
+// when the source's +0x170 entity is class 6, else 0 (radar_damage_kind) —
+// and two per-player-slot words are stamped. Every one of retail's five call
+// sites is gated on the victim being the local player; this function is the
+// arm they share. A world with no bound local player state is a no-op.
 //
-// UNPORTED here, deliberately: the radar damage blip producer
-// [orig: Radar_AddBlip @0x59b280 from @0x4dd8c5 (self damage: all 12 sectors)
-//  and @0x4dd8ee (type 2 when the attacker's ItemDef +0x294 == 6, else 0)] —
-// the radar blip system as a whole is not ported (D-HUD-21) — and the
-// unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)] words +11 = 6 / +12 = 10
-// [orig: @0x4dd907..0x4dd916], whose consumers are unwitnessed.
-void player_on_damage_received(World &world);
+// UNPORTED here, deliberately: the unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)]
+// words +11 = 6 / +12 = 10 [orig: @0x4dd907..0x4dd916], whose consumers are
+// unwitnessed.
+void player_on_damage_received(World &world, const RadarSource &source,
+                               const int32_t pos_q16[3]);
 
 // Retail's six-lane first-person pose: three float Q16 position values and
 // three wrapping BAM words, not six interchangeable scalar angles.

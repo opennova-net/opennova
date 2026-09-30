@@ -59,6 +59,16 @@ Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gam
 	return out;
 }
 
+bool Simulation::fill_death_map_facts(opennova::hud::DeathMapFacts &r_out) {
+	// The engine gather (inmatch/role_feeds.h death_map_facts) over the role's
+	// replica view and the spawn-zone registry this sim builds per load.
+	if (!kernel_) {
+		r_out = opennova::hud::DeathMapFacts{};
+		return false;
+	}
+	return opennova::inmatch::death_map_facts(role_view(), deploy_zone_registry(), r_out);
+}
+
 TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_default_key,
 		const String &p_default_home, const Dictionary &p_zone_names) {
 	// The compiled SPAWNPOINTS_LIST: the engine builder runs both witnessed

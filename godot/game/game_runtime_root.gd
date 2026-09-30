@@ -52,7 +52,7 @@ func _input(event: InputEvent) -> void:
 		return
 	var tools := _main_game.get_dev_tools()
 	var handled := false
-	if key.keycode == KEY_F3:
+	if key.keycode == MainGame.DEV_TOOLS_KEY:
 		handled = tools.handle_tools_toggle()
 	elif key.keycode == KEY_ESCAPE:
 		handled = tools.handle_game_escape()

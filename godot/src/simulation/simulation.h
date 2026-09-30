@@ -31,6 +31,7 @@
 #include <runtime/mission/event_runtime.h>
 #include <runtime/mission/promote.h>
 #include <runtime/hud/end_round_overlay.h> // EndRoundOverlayInput (the end-round ladder feed)
+#include <runtime/hud/hud_chat_entry.h> // ChatEntryFacts / ChatSendResult / GameTextLookup
 #include <runtime/hud/hud_frame.h> // HudVehiclePanelState / HudLfpZone (the panel feed seams)
 #include <runtime/world/deploy_screen_feed.h> // DeployZoneRow (the DEATH screen's zone feed), kDeployRefreshTicks
 #include <runtime/hud/hud_minimap.h>
@@ -167,9 +168,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include "simulation/present_event_records.h" // the per-tick present drain records (typed-array returns)
 #include "devtools/frame_stats.h"
 
-namespace opennova::hud {
-struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
-}
+namespace opennova::hud { struct HudScoreboardState; } // hud/hud_frame.h (the Tab board)
 
 namespace godot {
 
@@ -791,11 +790,9 @@ private:
 	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();
-	// The deploy/spawn-zone registry (letters/pick-index space) on net_, built
-	// lazily per load (engine: runtime/hud/hud_lfp_panel.h).
+	// The spawn-zone registry (letters/pick-index space), lazily built per load.
 	const opennova::world::SpawnZoneRegistry &deploy_zone_registry();
-	// The DEATH screen's zone rows over the registry: the record feed and
-	// the compiled list builder both read this one walk.
+	// The DEATH screen's zone rows over it (the record + list feeds share it).
 	std::vector<opennova::world::DeployZoneRow> deploy_zone_rows();
 	// --- the local player's view state (ADS ease + 3P anchor chase) --------------------
 	// The view state and its trackers live on the kernel (kernel_->local.view /
@@ -1314,6 +1311,8 @@ public:
 	// STROVER_CALLMEDIC static takes (the controls model resolves it).
 	Ref<DeployStatus> get_deploy_status(const Ref<RtxtStringFile> &p_gametext,
 			const String &p_medic_key_label);
+	// The DEATH MAP window's world facts (inmatch/role_feeds.h death_map_facts).
+	bool fill_death_map_facts(opennova::hud::DeathMapFacts &r_out);
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (engine: runtime/inmatch/client_runtime.h)
@@ -1439,10 +1438,10 @@ public:
 	int get_hud_radar_zoom_q16() const;
 	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
 	int request_hud_map_cycle();
-	// The overlay-window actions' respawn init closes the map (witness at
-	// hud::HudMapControl::on_respawn_init; ordered by HudToggles'
-	// EVENT_OVERLAY_WINDOWS_CLEARED).
+	// The overlay-window respawn init closes the map (witness at hud::HudMapControl::
+	// on_respawn_init; ordered by HudToggles' EVENT_OVERLAY_WINDOWS_CLEARED).
 	void request_hud_map_close();
+	void request_waypoint_cycle(int p_direction); // NextWaypoint: WaypointTrack::manual_cycle
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay
@@ -1607,13 +1606,13 @@ public:
 	// list index + 1 @ 0x4b88e8]. Read-only; the track advances in the world
 	// tick. (docs/interface/hud-re.md §Waypoint HUD)
 	Ref<WaypointHudView> get_waypoint_hud_view() const;
-	// Header {version, stride, row_count}, followed by rows {bank, handle, x,
-	// y, z, heading_bam, icon, argb, flags, source, remaining_ticks,
-	// entity_known, policy_flags, half_x_q16, half_y_q16, floor_px}.
-	// Coordinates are mission 16.16; the policy tail is resolved from the
-	// LOCAL entity's def class exactly where retail resolves it (witness at
-	// world::minimap_blip_draw_policy). No native pointers escape.
+	// The retained marker feed (layout: hud/hud_minimap_feed.h) and the non-bank
+	// map legs' feed (inmatch/minimap_overlays.h); LOCAL-entity policy tails.
 	PackedInt32Array get_hud_minimap_snapshot() const;
+	Ref<HudMapOverlays> get_hud_minimap_overlays(const Ref<RtxtStringFile> &p_gametext) const;
+	// One HUD frame of the radar legs (world::radar_hud_frame) behind the
+	// overlay's gate bits, packed as hud::radar_feed_encode.
+	PackedInt32Array step_hud_radar(int p_hud_tick, int p_gates);
 	// Static footprint polygons for footprint-class markers (buildings/zones
 	// with marker models): {version=1, count} then per row {handle,
 	// fill_argb, fill_value_count, xy_q16..., edge_value_count, xy_q16...}.
@@ -1623,13 +1622,13 @@ public:
 
 	// The type-2043 grid-origin marker: present + Godot-space position.
 	Ref<HudMapGridOrigin> get_hud_map_grid_origin() const;
-	// The objectives-panel rows for header slots 1..8, terminated at the
-	// first 0/255 win-condition id — exactly the panel's row walk
-	// (engine: runtime/mission/promote.cpp) — filled natively for
-	// HudOverlay::set_objectives: the SHOWN rows with their mission-text
-	// lines resolved through the table. NOT ClassDB-bound.
+	// The objectives-panel rows for header slots 1..8, terminated at the first 0/255 win-condition
+	// id — the panel's row walk (engine: runtime/mission/promote.cpp) — filled natively for
+	// HudOverlay::set_objectives: the SHOWN rows, lines resolved through the table. NOT bound.
 	void fill_objectives(const Ref<RtxtStringFile> &p_mission_text,
 			std::vector<opennova::hud::HudObjectiveRow> &r_rows) const;
+	// The briefing panel's text: info/briefing2, else info/briefing (HudBriefingState). NOT bound.
+	const std::string &mission_briefing_text() const { return net_.mission_text.briefing2; }
 	// The FSM snapshot for the shell: latest clip/action payloads, diagnostic serials,
 	// ammo, kick, and the 3P body channel. Ordered presentation events drain through
 	// drain_local_player_weapon_events(); the snapshot alone is not an event queue.
@@ -1658,26 +1657,18 @@ public:
 	// names resolve here, where the decoded roster lives. The embedder
 	// resolves each row's keys against gametext and calls the format helpers
 	// below.
-	TypedArray<FeedRow> drain_feed_events();
+	TypedArray<FeedRow> drain_feed_events(bool p_mp_verbose);
 	void retain_feed_announcement(const String &text, int64_t tick);
 	String get_kill_announcement_text() const;
 	int64_t get_kill_announcement_tick(int64_t now);
 	// The folded Tab board's HEADER (replication ClientScoreboard counts + the
 	// session strings): known/team_mode/timed, the witnessed players count
 	// (accepted rows minus the spectator trailer, replication::scoreboard_header),
-	// in_game/spectators, game_type, server and mission names. The rows no
-	// longer round-trip through script — HudOverlay pulls them natively via fill_scoreboard_rows.
+	// in_game/spectators, game_type, server and mission names.
 	Ref<ScoreboardHeader> get_scoreboard() const;
-	// The native Tab-board row handoff: fills the drawer's entries via the
-	// replication projection (replication::project_scoreboard — wire order, the server
-	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
-	// calls it through this typed seam. Returns false (rows cleared) when no runtime exists.
-	bool fill_scoreboard_rows(
-			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
-	// The folded board's team-table count (replication ClientScoreboard::team_count,
-	// the host's configured side count as the 0x16 carries it); 0 without a
-	// runtime. NOT ClassDB-bound; HudOverlay reads it beside the rows.
-	int scoreboard_team_count() const;
+	// The native Tab-board handoff (NOT ClassDB-bound; HudOverlay's seam):
+	// inmatch::scoreboard_feed's rows and session facts; false without a runtime.
+	bool fill_scoreboard(opennova::hud::HudScoreboardState &r_state) const;
 	// The mounted-vehicle panel (hud/hud_vehicle_panel.h, world/vehicle_panel_feed.h):
 	// {shown, item_id} — the panel's root vehicle (the attached gun child
 	// re-roots to its parent), whose items.def sid the shell joins to its
@@ -1700,6 +1691,15 @@ public:
 	// witnessed channel table (ChatLineRow.sink: 0 = the SYSTEM ring, 1 = the
 	// CHAT ring, 2 = the message queue, 3 = channel 3).
 	TypedArray<ChatLineRow> drain_chat_lines();
+	// NOT ClassDB-bound: the S2C 0x32 lines since the last drain, engine-
+	// formatted (hud::formatted_game_text_line), for HudOverlay's SYSTEM ring;
+	// the talk keys' facts (inmatch::chat_entry_facts), C2S 0x0D send
+	// (ClientRuntime::queue_chat_message) and the crew key's denied tone.
+	void drain_game_text_lines(const opennova::hud::GameTextLookup &p_gametext,
+			std::vector<std::string> &r_lines);
+	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
+	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
+	void raise_chat_denied_sound();
 	// Substitute actor names into a canned template (engine: runtime/replication/client_replica_feed.cpp): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so
 	// the string lookup can live with the string table while the substitution
@@ -2464,7 +2464,7 @@ public:
 	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
 	// False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
-	opennova::inmatch::BreathBarFacts breath_bar_facts() const; // role_feeds.h; NOT bound
+	opennova::inmatch::HudRoleFacts hud_role_facts() const; // role_feeds.h; NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
 	// friendly_tag_radio_request_viewer): a driver/controller seat or an own latch.
 	bool local_player_radio_request_icon_viewer() const;

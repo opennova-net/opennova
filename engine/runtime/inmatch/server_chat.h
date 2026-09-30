@@ -48,6 +48,24 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format,
 		NapiNPConnection &conn, std::vector<NapiNPConnection> &roster, world::World *world);
 
+// THE JOIN/LEAVE LINES — S2C 0x32 (npwire FormattedGameText), reliable, to
+// every OTHER in-match connection (the listen host's loopback included; the
+// joiner's own slot is not in-game yet, the leaver's is going): subtype 1
+// {name, team} from the player add, ahead of its 0x46 push, and subtype 2
+// {name, team} from the disconnect, before the leaver's entity is torn down.
+// The name is the slot's own (the ClientAuth NA the reply echoes); the team
+// the slot's live entity's, else the reserved assignment. The squadron pair
+// 3/4 beside them needs a NovaWorld clan-registry node, which an opennova
+// host never keeps (LAN accounts are 0).
+// [orig: Server_PlayerAdd @0x51d213..0x51d291 (send_mask 0x80, [u8 1][cstr
+//  slot+0x28][u8 slot+0x1A0]; subtype 3 @0x51d174..0x51d20e);
+//  Server_HandlePlayerDisconnect @0x51b69b..0x51b6d3 (send_mask 0x80,
+//  NetPacket_SerializeMinimapSlot_0(.., 2); subtype 4 @0x51b6d8..0x51b781)]
+void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection &joined, const world::World *world);
+void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection &leaver, const world::World *world);
+
 // The tag strip [orig: @0x513852..0x5138B6]: a '<' closes the copy, a '>'
 // reopens it; a stray '>' while open is kept.
 std::string chat_strip_angle_tags(const std::string &text);

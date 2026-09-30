@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 
 #include <runtime/controls/binding_set.h>
+#include <runtime/controls/help_screen.h>
 
 namespace godot {
 
@@ -91,8 +92,20 @@ public:
 	Dictionary save_blob() const;
 	void load_blob(const Dictionary &p_blob);
 
+	// The F1 key-binding help pages over the live records
+	// (engine controls/help_screen.h): rebuilt at mission start, the page
+	// keys walk them, and the HUD reads the current page's text.
+	void build_help_screen();
+	void cycle_help_page(bool p_forward);
+	String get_help_title() const;
+	String get_help_page_line() const;
+	PackedStringArray get_help_keys() const;
+	PackedStringArray get_help_texts() const;
+	static String help_footer();
+
 private:
 	opennova::controls::BindingSet bindings_;
+	opennova::controls::HelpScreen help_screen_;
 };
 
 } // namespace godot

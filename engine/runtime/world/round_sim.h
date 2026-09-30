@@ -326,6 +326,10 @@ struct LiveRound {
     // victim takes the same-projectile cause bit 0x100 [orig:
     // Projectile_ProcessDamageOnTarget @0x4e8169..0x4e816b].
     uint8_t player_kills = 0;
+    // The tracer-whiz latch, bit 0x40000 of the round's ammo-flags copy: set
+    // once the round's pass near the listener has been judged, so it whizzes
+    // once [orig: +0x114 |= 0x40000 @0x4e5cb9; tested @0x4ea98e].
+    bool whiz_latched = false;
 };
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer

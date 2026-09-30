@@ -56,16 +56,52 @@ std::string hud_sprintf(const std::string &format, int32_t value);
 std::string service_prompt_text(int prompt, const std::string &use_key, int32_t wait_seconds,
 		const GameTextLookup &gametext);
 
-// The waypoint label's display name. Our SP runtime is the co-op session
-// shape (gametype 0x30020), whose `& 0x20000` branch keys STRWPNAME by the
-// RAW authored id — the +1 remap belongs to the non-co-op MP gametypes,
-// unported with them. The armory/target/flag specials key off MP POI entity
-// types, not SP route markers.
-// [orig: HUD_GetWaypointName @0x594630 — index remap @0x594678; mission-table
-//  fallback @0x59473d ("STRWPNAME%03i" in WPNames); empty or "null" ->
-//  gametext WPNames/STRWPNAMEDEFAULT @0x59477b]
-std::string waypoint_display_name(int name_id, const GameTextLookup &mission,
-		const GameTextLookup &gametext);
+// The waypoint marker facts the name and label read off the current entry's
+// entity: the raw name id (entity+672, the BMS record's +0x60), its item
+// def's type id (def+80) and attrib dword (def+84) when it has a def
+// (entity+32), and the authored zone byte (entity+538, .mis "lfp_group").
+struct WaypointNameKey {
+	int32_t name_id = 0;
+	bool has_def = false;
+	int32_t def_type = 0;
+	uint32_t def_attrib = 0;
+	uint8_t zone_number = 0;
+};
+
+// The waypoint label's display name [orig: HUD_GetWaypointName @0x594630].
+// Outside a session: mission WPNames/STRWPNAME%03i of the RAW id
+// (@0x594668). In a session the id is first remapped +1 unless the game type
+// carries the co-op bit 0x20000 (@0x594678 — retail single player boots as
+// 0x10020 and is never in session, so it always keys the raw id); then a def
+// picks a gametext WPNames special key — attrib 0x80000 ARMORY, else 0x8000
+// TARGET, else type 4091/4093/4095/4096/4097 FLAG, 4098/4100..4103 FLAGBAY
+// (@0x594688..0x59470D) — and an empty result (no key, a miss) falls back to
+// the mission STRWPNAME%03i of the remapped id (@0x59472D). The mission
+// fallback's empty or "null" (any case) takes gametext
+// WPNames/STRWPNAMEDEFAULT (@0x59476F..0x59477B); a special key's text is
+// never "null"-tested.
+std::string waypoint_display_name(const WaypointNameKey &key, bool in_session,
+		uint32_t game_type, const GameTextLookup &mission, const GameTextLookup &gametext);
+
+// The drawn waypoint label [orig: HUD_DrawWaypointNameAndDistance
+// @0x5948d3..0x5949c0]: gametext hud/mto ("m to") and the name joined
+// "%s %s" — under CTF (0x10004) a def of type 4091/4098 wraps the name in the
+// blue run "%s <c4050FF>%s<co>", 4093/4100 in the red "%s <cFF3535>%s<co>";
+// then a def with attrib 0x40000 and a nonzero zone byte b REPLACES it with
+// "%s %s %c-%d" of mto, Overlays/LFP, the letter (b & 0x1F) + 64 and b >> 5.
+std::string waypoint_label_text(const std::string &name, const WaypointNameKey &key,
+		uint32_t game_type, const GameTextLookup &gametext);
+
+// The MP session lines' gametext strings (hud_frame.h HudSessionText), each
+// through GameText_GetString, whose miss is "" [orig: @0x51EC00]: the timer
+// label Overlays/STROVER50 [orig: HUD_DrawGameTimer @0x593E00], the counts'
+// Client/STRCLI25 / STRCLI04 / STRCLI23 [orig: HUD_DrawScoreOverlay
+// @0x593ED9 / @0x593F04 / @0x593F28], "In the Zone" Overlays/STROVER53
+// [orig: HUD_DrawGameTimerOverlay @0x59CE2D], the team names client/strcli19,
+// 05, 06, 17, 18, 01 and the A&D suffixes strcli20 / strcli21 [orig:
+// HUD_DrawTeamIdLine @0x59AAED..0x59AC96].
+struct HudSessionText;
+void hud_session_text(const GameTextLookup &gametext, HudSessionText &out);
 
 // A resolved subgoal's chat-feed announcement: the mission table's
 // WinConditions/STRWINMSG%03d or LoseConditions/STRLOSEMSG%03d line for the

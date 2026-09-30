@@ -303,4 +303,38 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 	return replies;
 }
 
+namespace {
+
+// One join/leave line to every OTHER in-match connection [orig: the
+// send_mask 0x80 SendFiltered(0x32, reliable) @0x51d28a / @0x51b6d3].
+void fan_game_text(std::vector<NapiNPConnection> &roster, const NapiNPConnection &subject,
+		int8_t subtype, const world::World *world) {
+	FormattedGameText text;
+	text.subtype = subtype;
+	text.text = subject.reply.player_name; // [orig: slot+0x28]
+	// [orig: slot+0x1A0] — the live entity's team, else the reservation
+	uint8_t team = subject.assigned_team_valid ? subject.assigned_team : uint8_t{0};
+	if (world != nullptr && subject.link.owned_entity.valid()) {
+		if (const world::Entity *e = world->registry.get(subject.link.owned_entity)) team = e->team;
+	}
+	text.team = static_cast<int8_t>(team);
+	const std::vector<uint8_t> body = encode_formatted_game_text(text);
+	for (NapiNPConnection &c : roster) {
+		if (&c == &subject || !is_in_match(c) || c.link.transport == nullptr) continue;
+		c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);
+	}
+}
+
+} // namespace
+
+void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection &joined, const world::World *world) {
+	fan_game_text(roster, joined, kGameTextPlayerJoined, world); // [orig: @0x51d21e]
+}
+
+void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
+		const NapiNPConnection &leaver, const world::World *world) {
+	fan_game_text(roster, leaver, kGameTextPlayerLeaving, world); // [orig: @0x51b6a8]
+}
+
 } // namespace opennova::inmatch

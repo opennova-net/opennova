@@ -598,7 +598,42 @@ void test_fill_seeds_the_slot_zoom() {
     CHECK(weapon_slot_initial_zoom(8, 8, 2, false) == 8);  // WPN_EMP50BD '8 8'
 }
 
+// The HUDLS slot bar's category scan [orig: HUD_DrawWeaponSlotBar
+// @0x599D0A..0x599D69]: categories 1..5 never scanned; the first def-bearing
+// slot recorded and its loadout_subclasses variants jumped; every other
+// def-bearing slot counted, a later weapon's own variants included.
+void test_slot_bar_scan() {
+    Fixture f;
+    const int first = add_entry(f.t, "WPN_C6A", 6, 0, 1, 1, "AMMO_C6", 1, 0, 0, /*subclasses=*/1);
+    const int first_sub = add_entry(f.t, "WPN_C6A_V", 6, 1, 1, 1, "AMMO_C6", 1, 0);
+    const int second = add_entry(f.t, "WPN_C6B", 6, 5, 1, 1, "AMMO_C6", 1, 0, 0, /*subclasses=*/1);
+    const int second_sub = add_entry(f.t, "WPN_C6B_V", 6, 6, 1, 1, "AMMO_C6", 1, 0);
+    const int c9 = add_entry(f.t, "WPN_C9", 9, 3, 1, 1, "AMMO_C9", 1, 0);
+    const int c0 = add_entry(f.t, "WPN_C0", 0, 2, 1, 1, "AMMO_C0", 1, 0);
+    WeaponInventory inv;
+    inv.reset(f.t);
+    const auto place = [&](int adm, int cat, int rank) {
+        inv.slots[static_cast<size_t>(cat * 65 + rank)].adm_index = static_cast<int16_t>(adm);
+    };
+    place(first, 6, 0);
+    place(first_sub, 6, 1);
+    place(second, 6, 5);
+    place(second_sub, 6, 6);
+    place(c9, 9, 3);
+    place(c0, 0, 2);
+    place(f.m4, 3, 0); // category 3: never scanned
+    const auto scan = weapon_inventory_slot_bar_scan(f.t, inv);
+    CHECK(scan[6].adm_index == first);
+    // The first weapon's variant is jumped; the second AND its variant count.
+    CHECK(scan[6].count == 3);
+    CHECK(scan[9].adm_index == c9 && scan[9].count == 1);
+    CHECK(scan[0].adm_index == c0 && scan[0].count == 1);
+    CHECK(scan[3].adm_index == -1 && scan[3].count == 0);
+    CHECK(scan[7].adm_index == -1 && scan[7].count == 0);
+}
+
 int main() {
+    test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
     test_two_weapons_share_loaded_ammo();
     test_knife_is_selectable();

@@ -669,6 +669,44 @@ int check_door_slot_action_pair() {
 	return 0;
 }
 
+// S2C 0x32 — formatted game text: [i8 subtype][cstr text], +[i8 team] for the
+// join/leave pair; subtypes outside 1..5 are the handler's no-op default.
+// [orig: NapiNPClientMsg_0x032 @0x428060; Server_PlayerAdd @0x51d21e]
+int check_S_32_formatted_game_text() {
+	FormattedGameText join;
+	join.subtype = kGameTextPlayerJoined;
+	join.text = "Sgt Rock";
+	join.team = 2;
+	const std::vector<uint8_t> wire = encode_formatted_game_text(join);
+	const std::vector<uint8_t> want = {1, 'S', 'g', 't', ' ', 'R', 'o', 'c', 'k', 0, 2};
+	EXPECT(wire == want);
+	FormattedGameText out;
+	bool clean = false;
+	EXPECT(decode_formatted_game_text(wire.data(), wire.size(), out, &clean));
+	EXPECT(clean && out.subtype == 1 && out.text == "Sgt Rock" && out.team == 2);
+	// The team byte is read signed [orig: movsx @0x4280d5].
+	const std::vector<uint8_t> neg = {2, 'x', 0, 0xFF};
+	EXPECT(decode_formatted_game_text(neg.data(), neg.size(), out, &clean));
+	EXPECT(clean && out.subtype == 2 && out.team == -1);
+	// Subtypes 3..5 carry the text alone.
+	FormattedGameText spec;
+	spec.subtype = kGameTextPlayerSpectating;
+	spec.text = "Watcher";
+	const std::vector<uint8_t> spec_wire = encode_formatted_game_text(spec);
+	EXPECT(spec_wire.size() == 1 + 8 && spec_wire.back() == 0);
+	EXPECT(decode_formatted_game_text(spec_wire.data(), spec_wire.size(), out, &clean));
+	EXPECT(clean && out.subtype == 5 && out.text == "Watcher");
+	// A missing team byte reads 0 and the body reports unclean.
+	const std::vector<uint8_t> short_join = {1, 'a', 0};
+	EXPECT(decode_formatted_game_text(short_join.data(), short_join.size(), out, &clean));
+	EXPECT(!clean && out.team == 0 && out.text == "a");
+	// Any other subtype is the default arm.
+	const std::vector<uint8_t> other = {6, 'a', 0};
+	EXPECT(!decode_formatted_game_text(other.data(), other.size(), out, &clean));
+	cover('S', 0x32);
+	return 0;
+}
+
 // S2C 0x6A — clan-roster update: actions 1/3 [u8][u32 id][cstr name][cstr tag] with the
 // 64 / 8 char caps, action 2 [u8 2][u32 id]; any other action is ignored (false).
 // [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NetPacket_SerializeMinimapSlot @0x5073B0]
@@ -1883,6 +1921,7 @@ int main() {
 	if (check_C_28_loadout_request()) return 1;
 	if (check_door_slot_action_pair()) return 1;
 	if (check_S_6A_clan_roster()) return 1;
+	if (check_S_32_formatted_game_text()) return 1;
 	if (check_C_4E_clan_roster_walk()) return 1;
 	if (check_S_70_vehicle_spawn_availability()) return 1;
 	if (check_C_42_vehicle_spawn_availability_request()) return 1;

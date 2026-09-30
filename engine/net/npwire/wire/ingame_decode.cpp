@@ -1826,6 +1826,39 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	return c.ok && (c.p == c.end);
 }
 
+// S2C 0x32 formatted game text. [orig: NapiNPClientMsg_0x032 @0x428060]
+bool decode_formatted_game_text(const uint8_t *body, size_t len, FormattedGameText &out,
+		bool *clean) {
+	out = FormattedGameText{};
+	const uint8_t *p = body;
+	const uint8_t *const end = body + len;
+	bool ok = true;
+	// The subtype byte, 0 on an empty body [orig: @0x428075..0x42807d], read
+	// signed into the switch [orig: movsx @0x428080].
+	if (p + 1 <= end) out.subtype = static_cast<int8_t>(*p++);
+	else ok = false;
+	if (out.subtype < kGameTextPlayerJoined || out.subtype > kGameTextPlayerSpectating) {
+		if (clean != nullptr) *clean = false;
+		return false; // [orig: the default arm returns @0x428099]
+	}
+	// The text is the payload up to its NUL; an unterminated tail keeps what
+	// is there (retail's strlen reads on past the body).
+	const uint8_t *nul = p;
+	while (nul < end && *nul != 0) ++nul;
+	out.text.assign(reinterpret_cast<const char *>(p), static_cast<size_t>(nul - p));
+	if (nul >= end) ok = false;
+	const uint8_t *after = nul < end ? nul + 1 : end;
+	if (out.subtype == kGameTextPlayerJoined || out.subtype == kGameTextPlayerLeaving) {
+		// The team byte past the NUL (clamped to the body end), 0 when short,
+		// sign-extended [orig: @0x4280b8..0x4280d5].
+		if (after + 1 <= end) out.team = static_cast<int8_t>(*after++);
+		else ok = false;
+	}
+	if (after != end) ok = false;
+	if (clean != nullptr) *clean = ok;
+	return true;
+}
+
 bool decode_end_round_header(const uint8_t *body, size_t len,
 		bool non_team_form, EndRoundHeader &out) {
 	out = EndRoundHeader{};

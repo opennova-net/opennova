@@ -16,6 +16,10 @@ public:
 	virtual bool pressed(const char *token) const = 0;
 	virtual int pressed_key(const char *token) const = 0;
 	virtual bool digit_down(int digit) const = 0;
+	// Shift held: a fallback-pass row fires with the direction bit
+	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 — Shift or row
+	//  flag 0x200 ORs 0x80000000 into the queued action].
+	virtual bool shift_down() const = 0;
 };
 
 enum class PlayerAction {
@@ -28,6 +32,10 @@ enum class PlayerAction {
 	ScopeZero,
 	RadarZoom,
 	MapCycle,
+	Binoculars,
+	NightVision,
+	NvgGain,
+	WaypointCycle, // value -1 = backward (the Shift direction bit)
 };
 
 struct PlayerActionRequest {

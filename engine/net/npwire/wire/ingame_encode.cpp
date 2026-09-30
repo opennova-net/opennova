@@ -993,6 +993,18 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
 	return out;
 }
 
+std::vector<uint8_t> encode_formatted_game_text(const FormattedGameText &text) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(static_cast<uint8_t>(text.subtype)); // [orig: @0x51d21e / @0x505a81]
+	w.cstr(text.text);                        // [orig: @0x51d250 / @0x505b72]
+	// The team byte rides only the player join/leave pair
+	// [orig: `mov [esi], cl` @0x51d277; @0x505b95 for types 1/2].
+	if (text.subtype == kGameTextPlayerJoined || text.subtype == kGameTextPlayerLeaving)
+		w.u8(static_cast<uint8_t>(text.team));
+	return out;
+}
+
 // [orig: WacScript_ExecuteBytecode @0x4F58B0 — payload build @0x4f5cd0..0x4f5dc2]
 std::vector<uint8_t> encode_script_remote_command(const ScriptRemoteCommand &command) {
 	std::vector<uint8_t> out;

@@ -51,6 +51,11 @@ struct FriendlyTagSource {
     //  @0x5a3c1a]. The viewer half of the arm is
     // friendly_tag_radio_request_viewer below.
     bool radio_request = false;
+    // The player slot's squad colour index (slot+0x33), the good/middle tier
+    // override (hud_frame.h friendly_tag_squad_color). Its only writer is the
+    // client-local CMAP entity click [orig: CMap_EntityWidgetHandler @0x5485E4],
+    // unported — no gather fills it yet, so it stays 0 (no override).
+    uint8_t squad_color_index = 0;
 };
 
 // Whether the groundEntity walk from `first` reaches a def-type-1 (vehicle)

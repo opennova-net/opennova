@@ -68,6 +68,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.integrity_profile = value_after(args, "--integrity-profile");
     f.capture_pcap = value_after(args, "--capture-pcap");
     f.mcp_port = int_after(args, "--mcp-port", 1, 65535, 0);
+    f.no_hud = has_flag(args, "/NOHUD"); // [orig: @0x4A79F6..0x4A7A09]
     return f;
 }
 

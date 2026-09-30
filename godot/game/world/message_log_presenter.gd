@@ -39,11 +39,13 @@ func update(hud: HudOverlay, sim: Simulation, open: bool) -> void:
 		_pushed = false
 
 
-## Drain the folded S2C 0x14 lines into their rings. Runs whether or not the
-## window is open — the rings are the live HUD feeds' too.
+## Drain the folded S2C 0x14 lines into their rings, and the S2C 0x32
+## join/leave lines (formatted natively) into the SYSTEM ring. Runs whether or
+## not the window is open — the rings are the live HUD feeds' too.
 func flush_chat_lines(hud: HudOverlay, sim: Simulation) -> void:
 	if hud == null or sim == null:
 		return
+	hud.post_game_text_lines(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	for row_v in sim.drain_chat_lines():
 		var row: ChatLineRow = row_v
 		if row.text.is_empty():

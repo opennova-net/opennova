@@ -18,6 +18,7 @@
 
 #include <runtime/replication/client_state.h>
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
@@ -36,5 +37,13 @@ struct MinimapMarkerInputs {
 // Builds the rows in draw order. `out` is replaced.
 void build_minimap_markers(const MinimapMarkerInputs &in,
                            std::vector<hud::HudMinimapMarker> &out);
+
+// Stamps a marker's v5 live pool-entity facts (hud::HudMinimapMarker) from
+// one resolved entity: team, zone number/radius/index, def type, the class
+// bits, position, the placement-matrix anchor and the entity+0 radius.
+// `zones` may be null (zone index -1).
+void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &entity,
+                                const world::Entity *local_player,
+                                const world::SpawnZoneRegistry *zones);
 
 } // namespace opennova::inmatch

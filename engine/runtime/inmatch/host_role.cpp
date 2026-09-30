@@ -173,17 +173,24 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  push 16h @ 0x4E04E4) -> NapiNPServerMsg_HandleWeaponToggle @ 0x511A70;
 		//  Input_HandleActionBinding action 217 @ 0x49B4B4..0x49B50C (push 2Eh
 		//  @ 0x49B500)]
+		// The host player's chat line rides the same queue (the talk senders
+		// are a session peer's QueueReliableMessage(0xD) too); its handler
+		// reads the server context [orig: NapiNPServer_HandleChatMessage
+		// @0x513760].
 		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
-				dg.tag != c2s::MEDIC_REQUEST) {
+				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
+		const bool chat = dg.tag == c2s::CHAT_MESSAGE;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
+		inmatch::ServerDispatchInputs inputs;
+		if (chat) inputs.server_ctx = &state.host_owner.ctx;
 		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
 				state.host_owner.ctx.config, *local, messages, state.host_owner.now_tick,
-				state.host_owner.ctx.np_protocol.connection_list, &kernel.world);
+				state.host_owner.ctx.np_protocol.connection_list, &kernel.world, inputs);
 		for (ProtocolMessage &reply : replies) state.host_loop.host_send(reply.tag, std::move(reply.payload));
 	}
 	for (replication::Datagram &preserved : deferred) state.host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));

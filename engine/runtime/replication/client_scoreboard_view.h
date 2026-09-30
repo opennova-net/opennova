@@ -9,13 +9,13 @@
 // roster that must move between 0x16s. This projection is the one place that
 // joins them.
 //
-// Deliberately NOT projected until their drawers land (recorded D-HUD-24
-// residuals): score2, the teams[] table (koth_hold/ctf_flag — the per-mode
-// team-score header block and flag-carrier line [orig: @0x4232bf-0x423a12]),
-// and rows_dropped_unknown_slot (a diagnostic).
+// Not projected here: score2 (no retail reader), the teams[] table and the
+// session facts (the role feed inmatch::scoreboard_feed carries them to the
+// header block), and rows_dropped_unknown_slot (a diagnostic).
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -35,13 +35,37 @@ struct ClientScoreboardHeader {
 	int in_game = 0;     // trailer byte
 };
 
+// The drawer's reads of a row's LIVE entity — its team byte and playerClass
+// [orig: player_entity->Team @0x423d21, ->playerClass @0x423d8a] — which live
+// on the role's own entity model (the authority's pools, a joiner's decoded
+// rows), so the embedder's role feed answers them by pool-0 handle.
+struct ScoreboardEntityFacts {
+	bool found = false;
+	uint8_t team = 0;
+	uint8_t player_class = 0;
+};
+using ScoreboardEntityLookup = std::function<ScoreboardEntityFacts(uint16_t handle)>;
+
 // Fills `out_rows` with the drawn projection (wire order — the server sorts,
-// the client never re-sorts) and returns the header counts.
+// the client never re-sorts) and returns the header counts. Without a lookup
+// a row keeps its 0x16 team and no class.
 ClientScoreboardHeader project_scoreboard(
-		const ClientState &state, std::vector<hud::ScoreboardEntry> &out_rows);
+		const ClientState &state, std::vector<hud::ScoreboardEntry> &out_rows,
+		const ScoreboardEntityLookup &entity_of = {});
 
 // The header counts alone (no row materialization).
 ClientScoreboardHeader scoreboard_header(const ClientState &state);
+
+// The kill feed's actor name for a pool-0 index: the live connection slot
+// driving that entity (PlayerSlot_FindByEntityPtr) supplies its 0x46 name
+// (slot+0x14) followed by "<ch>" + its registry clan tag (slot+0x20) + "<co>"
+// when the tag is non-empty; an entity no slot drives falls back to its own
+// name (entity+0xF4, `entity_name`) [orig: HUD_FormatKillEventMessage
+// @0x422DA0 — the slot find @0x422e01/@0x422eba, Napi_CopyString(name, 256)
+// @0x422e1d, the tag test @0x422e2c and String_AppendN "<ch>" / tag / "<co>"
+// @0x422e40..0x422e64; the entity-name copy @0x422e6e].
+std::string feed_actor_name(const ClientState &state, uint16_t index,
+		const std::string &entity_name);
 
 // (The game-type label rung lives with the rest of the game-type key maps:
 // npwire game_type.h overlay_label_key [orig: @0x5b8680].)

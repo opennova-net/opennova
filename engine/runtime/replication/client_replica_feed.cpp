@@ -46,6 +46,12 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
     if (strutil::iequals(command, "SETCEASEFIRE")) {
         state_.cease_fire = std::strtol(value.c_str(), nullptr, 10) != 0;
         state_.mark_changed();
+    } else if (strutil::iequals(command, "SU")) {
+        // The scoreboard status-suffix gate, the byte of atol(n)
+        // [orig: `mov g_ScoreboardStatusSuffixEnabled, al` @0x429f71].
+        state_.scoreboard_status_suffix =
+                static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+        state_.mark_changed();
     }
 }
 
@@ -113,6 +119,23 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	line.sender_slot = rec.sender_slot;
 	line.text = rec.text;
 	pending_chat_lines_.push_back(std::move(line));
+}
+
+// THE JOIN/LEAVE LANE (S2C 0x32): the record rides to the HUD, which picks
+// the Client template and substitutes $A. No authority gate — the listen
+// host's own client posts the lines its server fans too
+// [orig: NapiNPClientMsg_0x032 @0x428060 has no is_authority test]. Only the
+// handled subtypes 1..5 surface [orig: the default arm @0x428099].
+void ClientReplicaPipeline::apply_formatted_game_text(const std::vector<uint8_t> &body) {
+	FormattedGameText rec;
+	bool clean = false;
+	if (!decode_formatted_game_text(body.data(), body.size(), rec, &clean)) return;
+	if (!clean) ++malformed_bodies_;
+	ClientGameText text;
+	text.subtype = rec.subtype;
+	text.text = std::move(rec.text);
+	text.team = rec.team;
+	pending_game_texts_.push_back(std::move(text));
 }
 
 std::vector<ClientEffectCommand> ClientReplicaPipeline::drain_effect_commands() {

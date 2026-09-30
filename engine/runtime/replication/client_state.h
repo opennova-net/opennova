@@ -38,6 +38,26 @@ struct ClientRosterSlot {
 	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
 	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
 	                          // [orig: the no-entity -1 store @0x431489]
+	// 0x0800: the NovaWorld account netId (slot dword 15, 0 on LAN) — the
+	// clan-registry key [orig: the store @0x431736].
+	uint32_t account_id = 0;
+	// The slot's registry-resolved clan tag (slot+0x20, the table's 9-byte
+	// "extra" buffer): the registry node's tag when the account id is nonzero
+	// and a node carries it, else empty — re-resolved on every 0x800 store and
+	// every 0x6A change [orig: PlayerSlot_SetName @0x4348f0 — Napi_CopyString
+	// (slot+0x20, node+81, 9) @0x434935, "" @0x434909; the buffer size
+	// PlayerSlotTable_Create(.., 9) @0x434bb0]. The kill feed's <ch>..<co>
+	// suffix and the Tab row's label read it.
+	std::string registry_clan;
+};
+
+// One S2C 0x6A clan-registry node [orig: the CLinkedList node — netId +0xC,
+// name +16 (char[65]), tag +81 (char[9]); CLinkedList_FindOrCreateByNetId
+// @0x52B540 copies both with Napi_CopyString 65 / 9].
+struct ClientClanRegistryNode {
+	uint32_t net_id = 0;
+	std::string name;
+	std::string tag;
 };
 
 // The decoded S2C 0x16 scoreboard. Rows arrive PRE-SORTED by the server (team
@@ -66,6 +86,10 @@ struct ClientScoreboardRow {
 	bool spectator = false;     // flags bit0
 	std::string name;           // joined from the roster at apply time
 	std::string clan;
+	// The slot's registry clan tag copied into rec+32 with a 7-character cap
+	// [orig: Napi_CopyString(rec + 32, slot+0x20, 8) @0x42fd85; "" @0x42fd8f]
+	// — the board's <ch>..<co> label.
+	std::string label;
 };
 
 // One team-table row. The u16 pair carries the SAME two stats as the player
@@ -74,9 +98,12 @@ struct ClientScoreboardRow {
 // byte (game type 0x10001 [orig: @0x50dc62]) and the CTF flag state (types
 // 0x10002/0x90002/0x10004 [orig: @0x50dd30]). The old player_count/alive_count
 // names were decode-era guesses.
+// Both words are SIGN-EXTENDED into their dwords like the player rows'
+// [orig: the movsx stores @0x42fe08 / @0x42fe19 into 0xA85AEC + 16t], and
+// the header block prints them "%3i" / "%i".
 struct ClientScoreboardTeam {
-	uint16_t score1 = 0;
-	uint16_t score2 = 0;
+	int16_t score1 = 0;
+	int16_t score2 = 0;
 	uint8_t koth_hold = 0;
 	uint8_t ctf_flag = 0;
 };
@@ -141,6 +168,18 @@ struct ClientGameEvent {
 	int16_t pos_x = 0;
 	int16_t pos_y = 0;
 	uint8_t kind = 0;
+};
+
+// One folded S2C 0x32 formatted game text — the join/leave SYSTEM-ring lane.
+// The record rides verbatim (subtype, the $A text, the signed team byte of the
+// join/leave pair); the Client-template pick and the $A substitution are the
+// HUD's (hud/feed_format.h formatted_game_text_line), where gametext lives
+// [orig: NapiNPClientMsg_0x032 @0x428060 -> Chat_FormatPlayerTokens @0x4a5190
+//  -> Chat_AddMessageChannel2(line, 0xFFAFAFAF, 930) @0x428195].
+struct ClientGameText {
+	int8_t subtype = 0;
+	std::string text;
+	int8_t team = 0;
 };
 
 // One folded S2C 0x14 chat line — the player-chat lane. The wire carries
@@ -807,10 +846,35 @@ struct ClientState {
 	std::array<int32_t, 255> weapon_availability{};
 	uint64_t weapon_availability_revision = 0;
 	bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+	// The per-recipient SU gate: S2C 0x24 "SU <n>" stores (u8)atol(n); it
+	// zeroes the 0x16 status words at parse time while clear and gates the
+	// Tab board's " [..]" suffix; a session start clears it
+	// [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49 — the store
+	//  NapiNPClientMsg_HandleTextCommand @0x429f71, the parse gate @0x42fbfb,
+	//  the drawer test @0x423ef8, the reset Client_ResetDisconnectState
+	//  @0x5202d9].
+	uint8_t scoreboard_status_suffix = 0;
 	hud::KillAnnouncement kill_announcement;
 	// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 	bool permanent_death = false;
+	// The session's KOTH time limit in minutes, the 0x08 record's second rule
+	// dword — a joiner's GAMEINFO team timers read this copy where the
+	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored
+	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
+	// board's KOTH countdowns @0x423281 / @0x423a58].
+	int32_t session_time_limit_minutes = 0;
 	bool spectators_allowed = false;
+	// The flag carrier the FlagBall / type-8 header line names: the carrier
+	// handle of the last S2C 0x2F for a flag item (4091/4093/4095) in those
+	// game types, 0xFFFF when none [orig: dword_A860C4 — the stores
+	// NapiNPClientMsg_0x02F @0x43114d/@0x43115a; cleared by ZoneTimers_ResetState
+	// @0x4244ac].
+	uint16_t flag_carrier_handle = 0xFFFF;
+	// The talk keys' reset hold: raised by S2C 0x25 on a client, lowered by
+	// the next S2C 0x0F [orig: dword_24C195C — NapiNPClientMsg_GameReset
+	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
+	// @0x49b9ad].
+	bool round_reset_hold = false;
 	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
 	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
@@ -928,12 +992,24 @@ struct ClientState {
 	ClientSpawnWaveStatus spawn_waves;
 	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
+	// The S2C 0x6A clan registry, in node insertion order (retail walks its
+	// list head-first by netId, ids unique) [orig: g_SpawnWaveList.field_C —
+	// the IDB name is a misnomer; NapiNPClientMsg_HandlePlayerJoinLeave
+	// @0x432510].
+	std::vector<ClientClanRegistryNode> clan_registry;
+	// The C2S 0x4E {netId} continuations each action-3 update queues (the
+	// runtime frames and clears them) [orig: CNapiNetwork_QueueReliableMessage
+	// (0x4E, {netId}) @0x43266c].
+	std::vector<uint32_t> pending_clan_walk_requests;
 	std::vector<std::string> location_names;
 	struct RadioTarget {
 		uint16_t handle = 0xFFFF;
 		uint32_t ticks_remaining = 0;
 		int32_t position[3] = {};
 		bool friendly = false;
+		// Bumps on every set: the map's tracked callout restamps its colour
+		// global then [orig: HUD_SetTrackedEntityTarget @0x59D0EF..0x59D0FF].
+		uint32_t serial = 0;
 	} radio_target;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;

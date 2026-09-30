@@ -23,6 +23,8 @@
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
 #include <runtime/replication/client_scoreboard_view.h> // the Tab board's draw-time projection
+#include <runtime/hud/hud_frame.h> // HudScoreboardState (the Tab board feed)
+#include <runtime/inmatch/role_feeds.h> // scoreboard_feed
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
@@ -1020,16 +1022,20 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 // fold is the engine's (runtime/hud/feed_format.h feed_event_rows); this seam
 // only resolves actor names against the decoded roster (a pool-0 INDEX on the
 // wire becomes the handle (0<<12)|index) and packs the rows.
-TypedArray<FeedRow> Simulation::drain_feed_events() {
+TypedArray<FeedRow> Simulation::drain_feed_events(bool p_mp_verbose) {
 	TypedArray<FeedRow> out;
 	if (!runtime_) return out;
 	opennova::replication::ClientState &cs = runtime_->state();
 	const uint16_t self_handle =
 			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
+	// The name is the driving slot's (with its registry clan tag) before the
+	// entity's own (replication::feed_actor_name carries the witness).
 	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
 		const auto *e = cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? opennova::hud::FeedActor{e->display_name, e->team}
-		                    : opennova::hud::FeedActor{};
+		return opennova::hud::FeedActor{
+			opennova::replication::feed_actor_name(cs, index,
+					e != nullptr ? e->display_name : std::string()),
+			e != nullptr ? e->team : uint8_t{0}};
 	};
 	std::vector<opennova::hud::FeedEventInput> inputs;
 	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
@@ -1038,7 +1044,7 @@ TypedArray<FeedRow> Simulation::drain_feed_events() {
 	}
 	std::vector<opennova::hud::FeedRow> rows;
 	const opennova::hud::FeedContext context{
-		self_handle, opennova::hud::kMpVerboseDefault, runtime_->game_type()};
+		self_handle, p_mp_verbose, runtime_->game_type()};
 	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), context, actor_of, rows);
 	for (const opennova::hud::FeedRow &row : rows) {
 		Ref<FeedRow> r;
@@ -1141,17 +1147,7 @@ Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
 	return out;
 }
 
-bool Simulation::fill_scoreboard_rows(
-		std::vector<opennova::hud::ScoreboardEntry> &r_rows) const {
-	if (!runtime_) {
-		r_rows.clear();
-		return false;
-	}
-	opennova::replication::project_scoreboard(runtime_->state(), r_rows);
-	return true;
-}
-
-int Simulation::scoreboard_team_count() const {
-	if (!runtime_) return 0;
-	return static_cast<int>(runtime_->state().scoreboard.team_count);
+bool Simulation::fill_scoreboard(opennova::hud::HudScoreboardState &r_state) const {
+	opennova::inmatch::scoreboard_feed(role_view(), r_state);
+	return runtime_ != nullptr;
 }

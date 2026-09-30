@@ -115,6 +115,16 @@ void test_row_fields_and_flags() {
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(7, 0xFF, kPlayerSyncHasName | kPlayerSyncHasTeamString,
 					"SPAGHETTI", "TAG"));
+	// Without the SU gate the parser zeroes the status word [orig: @0x42fbfb].
+	view.apply(s2c::PLAYER_LIST, make_list(0x03, {{7, 0x0401, 12, 900, 0x04}}, 3, 1));
+	CHECK(view.state().scoreboard.rows.size() == 1 &&
+			view.state().scoreboard.rows[0].status_flags == 0);
+	// "SU 1" opens the gate [orig: NapiNPClientMsg_HandleTextCommand @0x429f71].
+	const std::string su = "\"SU\" \"1\"";
+	std::vector<uint8_t> su_body(su.begin(), su.end());
+	su_body.push_back(0);
+	view.apply(s2c::TEXT_COMMAND, su_body);
+	CHECK(view.state().scoreboard_status_suffix == 1);
 	// slot 7, status 0x0401, score1 12, score2 900, flags 0x04 => team 2, not spectator
 	view.apply(s2c::PLAYER_LIST, make_list(0x03, {{7, 0x0401, 12, 900, 0x04}}, 3, 1));
 	const ClientScoreboard &sb = view.state().scoreboard;
@@ -256,6 +266,167 @@ void test_team_table_fields() {
 		CHECK(sb.teams[1].ctf_flag == 1);
 		CHECK(sb.teams[2].ctf_flag == 2);
 	}
+}
+
+// The team table's two words sign-extend like the player rows' [orig: movsx
+// @0x42fe00 / @0x42fe16] — a negative team total prints negative.
+void test_team_scores_sign_extend() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_LIST, make_list_with_teams(0x01, {},
+			{{0, 0, 0, 0}, {0xFFFE, 0x8000, 0, 0}, {5, 0xFFFF, 0, 0}}, 0, 0));
+	const ClientScoreboard &sb = view.state().scoreboard;
+	CHECK(sb.teams.size() == 3);
+	if (sb.teams.size() == 3) {
+		CHECK(sb.teams[1].score1 == -2);
+		CHECK(sb.teams[1].score2 == -32768);
+		CHECK(sb.teams[2].score1 == 5);
+		CHECK(sb.teams[2].score2 == -1);
+	}
+}
+
+// [u8 slot][u16 0x0800][u8 entity][u32 account] — the account-id sync.
+std::vector<uint8_t> make_sync_account(uint8_t slot, uint8_t entity_slot, uint32_t account) {
+	std::vector<uint8_t> b;
+	b.push_back(slot);
+	u16(b, kPlayerSyncHasAccountId);
+	b.push_back(entity_slot);
+	for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(account >> (8 * i)));
+	return b;
+}
+
+// [u8 action][u32 netId] (+ [cstr name][cstr tag] for actions 1/3).
+std::vector<uint8_t> make_clan(uint8_t action, uint32_t net_id, const std::string &name = {},
+		const std::string &tag = {}) {
+	std::vector<uint8_t> b;
+	b.push_back(action);
+	for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(net_id >> (8 * i)));
+	if (action != 2) {
+		b.insert(b.end(), name.begin(), name.end());
+		b.push_back(0);
+		b.insert(b.end(), tag.begin(), tag.end());
+		b.push_back(0);
+	}
+	return b;
+}
+
+// THE S2C 0x6A CLAN REGISTRY: actions 1/3 upsert a node, 2 removes it; every
+// change re-resolves each live slot's tag through its 0x46 account id; the
+// 0x16 row copies the tag into its label at 7 characters; action 3 queues the
+// C2S 0x4E walk continuation; the authority ignores the message
+// [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; PlayerSlot_SetName
+// @0x4348f0; the label copy @0x42fd85].
+void test_clan_registry_fold() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Rock", 5));
+	view.apply(s2c::PLAYER_SYNC, make_sync_account(3, 5, 0x1234));
+	CHECK(view.state().roster[3].account_id == 0x1234);
+	CHECK(view.state().roster[3].registry_clan.empty()); // no node yet
+	view.apply(s2c::CLAN_ROSTER, make_clan(1, 0x1234, "Sgt Rock", "LONGTAG8"));
+	CHECK(view.state().clan_registry.size() == 1);
+	CHECK(view.state().roster[3].registry_clan == "LONGTAG8");
+	CHECK(view.state().pending_clan_walk_requests.empty()); // action 1 queues nothing
+	// The Tab row copies it at 7 characters.
+	view.apply(s2c::PLAYER_LIST, make_list(0x01, {{3, 0, 0, 0, 0x02}}, 1, 0));
+	CHECK(!view.state().scoreboard.rows.empty() &&
+			view.state().scoreboard.rows[0].label == "LONGTAG");
+	std::vector<hud::ScoreboardEntry> rows;
+	project_scoreboard(view.state(), rows);
+	CHECK(rows.size() == 1 && rows[0].label == "LONGTAG");
+	// The kill feed names the slot with its tag highlighted; an entity no slot
+	// drives keeps its own name [orig: HUD_FormatKillEventMessage
+	// @0x422e1d..0x422e80].
+	CHECK(feed_actor_name(view.state(), 5, "entity") == "Rock<ch>LONGTAG8<co>");
+	CHECK(feed_actor_name(view.state(), 9, "entity") == "entity");
+	// Action 3 updates the node in place and queues {netId}.
+	view.apply(s2c::CLAN_ROSTER, make_clan(3, 0x1234, "Sgt Rock", "NEW"));
+	CHECK(view.state().clan_registry.size() == 1);
+	CHECK(view.state().roster[3].registry_clan == "NEW");
+	CHECK(view.state().pending_clan_walk_requests.size() == 1 &&
+			view.state().pending_clan_walk_requests[0] == 0x1234);
+	// Action 2 removes the node and the slot's tag empties.
+	view.apply(s2c::CLAN_ROSTER, make_clan(2, 0x1234));
+	CHECK(view.state().clan_registry.empty());
+	CHECK(view.state().roster[3].registry_clan.empty());
+	CHECK(feed_actor_name(view.state(), 5, "entity") == "Rock"); // no tag, no run
+	// A node that arrives FIRST resolves at the account-id store.
+	view.apply(s2c::CLAN_ROSTER, make_clan(1, 0x99, "Other", "OTH"));
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(4, "Late", 6));
+	view.apply(s2c::PLAYER_SYNC, make_sync_account(4, 6, 0x99));
+	CHECK(view.state().roster[4].registry_clan == "OTH");
+	// A zero account never matches, even with a zero-id node
+	// [orig: `if (*(this + 15) && ...)` @0x434923].
+	view.apply(s2c::PLAYER_SYNC, make_sync_account(5, 7, 0));
+	view.apply(s2c::CLAN_ROSTER, make_clan(1, 0, "Nobody", "ZERO"));
+	CHECK(view.state().roster[5].registry_clan.empty());
+	// The authority's own loopback never folds 0x6A.
+	ClientReplicaPipeline host;
+	host.set_authority_recipient(true);
+	host.apply(s2c::CLAN_ROSTER, make_clan(1, 0x55, "H", "HOST"));
+	CHECK(host.state().clan_registry.empty());
+}
+
+// The projection reads a row's LIVE entity team and class through the
+// embedder's lookup, and caps the joined name at 31 characters
+// [orig: @0x423d21 / @0x423d8a; Napi_CopyString(rec, .., 32) @0x42fd59].
+void test_projection_entity_facts() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC,
+			make_sync(3, 5, kPlayerSyncHasName | kPlayerSyncHasTeamString,
+					"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "CLANTAG"));
+	view.apply(s2c::PLAYER_LIST, make_list(0x01, {{3, 0, 0, 0, 0x02}}, 1, 0));
+	std::vector<hud::ScoreboardEntry> rows;
+	project_scoreboard(view.state(), rows, [](uint16_t handle) {
+		ScoreboardEntityFacts f;
+		f.found = handle == 5;
+		f.team = 3;
+		f.player_class = 7;
+		return f;
+	});
+	CHECK(rows.size() == 1);
+	if (!rows.empty()) {
+		CHECK(rows[0].team == 3);
+		CHECK(rows[0].player_class == 7);
+		CHECK(rows[0].name.size() == 31);
+		CHECK(rows[0].name == "CLANTAG ABCDEFGHIJKLMNOPQRSTUVW");
+	}
+	// Without a lookup the row keeps its 0x16 team.
+	project_scoreboard(view.state(), rows);
+	CHECK(!rows.empty() && rows[0].team == 1 && rows[0].player_class == 0);
+}
+
+// The FlagBall / type-8 carrier latch off S2C 0x2F for a flag item: the
+// attach handle, or none for 0xFFFF [orig: NapiNPClientMsg_0x02F
+// @0x4310fa..0x43115a]; other game types never latch.
+void test_flag_carrier_latch() {
+	const auto body = [](uint16_t flag, uint16_t attach) {
+		std::vector<uint8_t> b;
+		u16(b, flag);
+		b.push_back(0);
+		for (int i = 0; i < 12; ++i) b.push_back(0);
+		u16(b, attach);
+		u16(b, 0xFFFF);
+		return b;
+	};
+	ClientReplicaPipeline view;
+	ClientEntityState flag;
+	flag.handle = 0x1010;
+	flag.type_id = 4091;
+	view.state().entities.push_back(flag);
+	view.set_game_type(0x10004); // CTF: no latch
+	view.apply(s2c::OBJECTIVE_ENTITY_STATE, body(0x1010, 0x0003));
+	CHECK(view.state().flag_carrier_handle == 0xFFFF);
+	view.set_game_type(0x10008); // FlagBall
+	view.apply(s2c::OBJECTIVE_ENTITY_STATE, body(0x1010, 0x0003));
+	CHECK(view.state().flag_carrier_handle == 0x0003);
+	view.apply(s2c::OBJECTIVE_ENTITY_STATE, body(0x1010, 0xFFFF));
+	CHECK(view.state().flag_carrier_handle == 0xFFFF);
+	// A non-flag entity never latches.
+	ClientEntityState crate;
+	crate.handle = 0x1011;
+	crate.type_id = 1234;
+	view.state().entities.push_back(crate);
+	view.apply(s2c::OBJECTIVE_ENTITY_STATE, body(0x1011, 0x0004));
+	CHECK(view.state().flag_carrier_handle == 0xFFFF);
 }
 
 // Accepted rows write the row team through the slot's entity binding, like
@@ -495,6 +666,10 @@ int main() {
 	test_removal_resets_slot();
 	test_roster_fields_are_last_write_wins_per_bit();
 	test_team_table_fields();
+	test_team_scores_sign_extend();
+	test_clan_registry_fold();
+	test_projection_entity_facts();
+	test_flag_carrier_latch();
 	test_row_team_refreshes_entity();
 	test_roster_sync_bumps_revision();
 	test_projection_joins_and_counts();

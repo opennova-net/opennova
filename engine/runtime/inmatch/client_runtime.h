@@ -2,6 +2,7 @@
 
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
@@ -201,12 +202,14 @@ public:
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
 	// this profile (the embedder's, normally the world's; null = no clocks).
 	void set_profile(devtools::TickProfile *profile) { profile_ = profile; }
-	// The chat flood table's 16 recent lines `[u32 time][char[64]]`: a repeat
-	// of a line sent within 1280 ms is refused, an older repeat is moved to the
-	// newest slot [orig: Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte
-	//  table @0xB3B788, the `<= 0x500` window, the shift-down + append].
+	// The chat flood table's 16 recent lines `[u32 frame][char[64]]`: a repeat
+	// of a line within 0x500 main frames of its entry is refused, an older
+	// repeat is moved to the newest slot. The clock is the per-main-frame
+	// counter the talk debounce reads too, not wall time [orig:
+	// Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte table @0xB3B788,
+	// `dword_A8705C - entry <= 0x500` @0x499028, the shift-down + append].
 	struct ChatFloodEntry {
-		uint32_t time_ms = 0;
+		uint32_t frame = 0;
 		std::string text;
 	};
 
@@ -224,18 +227,23 @@ public:
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
 	// One C2S 0x0D chat line `[u8 channel][cstr text]` on the wire channel the
-	// caller's sender picked (retail's per-key senders: 2 global, 1 team on a
-	// peer, 12 squad on a peer, 11 admin, 13 the squad-alt key; 4 all / 5 team
-	// exist only for a non-peer, so a joiner drops them). The retail sender
-	// gates: in session, non-empty, `!g_DeathScreenActive || g_spawn_success_
-	// gate` (the admin key: `!g_DeathScreenActive` alone), the 1280 ms
-	// per-identical-line flood table, then the `<...>` strip; queued reliable
-	// with the 310-flush finite lifetime. False = gated/flooded, nothing sent.
-	// [orig: Chat_SendGlobalMessage @0x49A6B0, Chat_SendAdminMessage
-	//  @0x49A780, sub_49A840 @0x49A840, Chat_SendTeamMessage @0x49A900,
-	//  Chat_SendSquadMessage @0x49AA50, sub_49ABA0 @0x49ABA0,
-	//  Chat_SendAllMessage @0x49AC70 -> CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
-	bool queue_chat_message(uint8_t channel, const std::string &text);
+	// caller's sender picked (hud::chat_dispatch_channel: 13 local, 1 global,
+	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,
+	// and every process with a HUD is a session peer, so they queue nothing).
+	// The retail sender gates: non-empty; `!g_DeathScreenActive ||
+	// g_SpawnSuccessGate` — the local and crew keys test `!g_DeathScreenActive`
+	// alone; the flood table (a refusal is `Flooded`: the caller echoes the
+	// line); then the `<...>` strip. A joiner queues it reliable with the
+	// 310-flush lifetime; the listen host's own client (a peer too) sends it
+	// over its loopback to its own server, which fans it like any peer's.
+	// `text` is cut to 59 characters in place by the flood check; `frame` is
+	// the per-main-frame counter.
+	// [orig: sub_49A840 @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
+	//  misnomer; 1), Chat_SendGlobalMessage @0x49A6B0 (IDB misnomer; 2),
+	//  Chat_SendSquadMessage @0x49AA50 (12), Chat_SendAdminMessage @0x49A780
+	//  (11), Chat_SendAllMessage @0x49AC70 (4), sub_49ABA0 @0x49ABA0 (5) ->
+	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
+	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
@@ -439,6 +447,7 @@ public:
 
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
+	bool in_session() const { return joiner_ && joiner_->in_session(); }
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
@@ -608,7 +617,7 @@ private:
 	void update_net_quality();
 	// Chat_CheckFloodControl @0x498F60: truncates `text` to 59 characters in
 	// place first, then the table walk; true = the line may go out.
-	bool chat_flood_control(std::string &text);
+	bool chat_flood_control(std::string &text, uint32_t frame);
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only

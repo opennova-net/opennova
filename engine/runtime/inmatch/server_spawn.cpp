@@ -857,10 +857,10 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		// the death record.
 		(void)conn.reply.spectator_convert_killer;
 		// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
-		std::vector<uint8_t> body;
-		body.push_back(5);
-		for (const char ch : conn.reply.player_name) body.push_back(static_cast<uint8_t>(ch));
-		body.push_back(0);
+		FormattedGameText text;
+		text.subtype = kGameTextPlayerSpectating;
+		text.text = conn.reply.player_name;
+		const std::vector<uint8_t> body = encode_formatted_game_text(text);
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!is_in_match(c) || c.link.transport == nullptr) continue;
 			c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);

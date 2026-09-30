@@ -495,7 +495,7 @@ func runtime_status() -> Dictionary:
 	if runtime == null or sim == null:
 		return {
 			"label": "No mission",
-			"detail": "F3 remains available for process-wide diagnostics.",
+			"detail": "The dev tools (Insert) remain available for process-wide diagnostics.",
 			"playing": false,
 			"authority": false,
 		}

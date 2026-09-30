@@ -506,6 +506,8 @@ struct LocalPlayerWeaponView {
     int32_t rescope_serial = 0;
     int32_t clip = 0;
     int32_t reserve = 0;
+    int32_t ammo_bucket = 0;   // the def's ammobucket (def+0xDC)
+    int32_t ammo_class_id = 0; // the def's resolved ammo-class id (def+0xD8)
     int32_t kick = 0;
     int32_t recoil_pitch_bam = 0;
     int32_t weapon_weight_spread_bam = 0;

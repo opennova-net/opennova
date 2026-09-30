@@ -29,6 +29,10 @@ public:
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
 	}
+	bool shift_down() const override {
+		Input *input = Input::get_singleton();
+		return input != nullptr && input->is_physical_key_pressed(KEY_SHIFT);
+	}
 
 private:
 	const Ref<ControlsModel> &controls_;
@@ -51,6 +55,10 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::ScopeZero: p_sim.request_local_player_scope_zero(p_request.value); break;
 		case Action::RadarZoom: p_sim.request_hud_radar_zoom(p_request.value); break;
 		case Action::MapCycle: p_sim.request_hud_map_cycle(); break;
+		case Action::Binoculars: p_sim.request_local_player_binoculars_toggle(); break;
+		case Action::NightVision: p_sim.request_local_player_nvg_toggle(); break;
+		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
+		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
 	}
 }
 
@@ -159,59 +167,6 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 
 void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
-}
-
-// Edge-triggered gameplay keys. No key here moves the camera: the view rows
-// (view1st F2 / viewwithgun F3 / viewchase F4) only write the chase
-// PREFERENCE and the FP-gun bit, and the sim's arbiter resolves the mode from
-// the preference and the seat -- GameHudPresenter polls those rows beside
-// its other HUD rows [orig: Input_HandleActionBinding cases 400/401/402
-// @0x49c073..0x49c107; the arbiter Render_ProcessMainSceneFrame @0x5ca1d2;
-// full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14
-// (D-INF-11), net-re §5.39]. Stance rows are polled by the native action table.
-// The keys below still read RAW keycodes rather than the binding table's rows
-// (binocular action 26 / NVG action 41 / gain actions 56/57): ported verbatim
-// from the GDScript router, a tracked divergence follow-up.
-bool PlayerInputRouter::handle_key_input(const Ref<InputEvent> &p_event, bool p_active) {
-	LocalPlayerPresenter *owner = presenter();
-	if (!p_active || owner == nullptr || !owner->has_player()) {
-		return false;
-	}
-	InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr());
-	if (key == nullptr) {
-		return false;
-	}
-	if (!key->is_pressed() || key->is_echo()) {
-		return false;
-	}
-	const Key physical = key->get_physical_keycode() != KEY_NONE ? key->get_physical_keycode()
-																  : key->get_keycode();
-	const Ref<Simulation> key_sim = sim();
-	if (physical == KEY_B) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_binoculars_toggle();
-		}
-		return true;
-	}
-	if (physical == KEY_N) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_toggle();
-		}
-		return true;
-	}
-	if (physical == KEY_EQUAL || physical == KEY_PLUS || physical == KEY_KP_ADD) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_gain(1);
-		}
-		return true;
-	}
-	if (physical == KEY_MINUS || physical == KEY_KP_SUBTRACT) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_gain(-1);
-		}
-		return true;
-	}
-	return false;
 }
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline

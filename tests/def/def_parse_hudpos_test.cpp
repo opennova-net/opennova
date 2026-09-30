@@ -10,13 +10,79 @@
 
 using namespace opennova::def;
 
-int main(void) {
-    /* Every leg here reads the shipped hudpos.def (the memory legs compare
-       against its path parse), so the whole test gates on the reference
-       fixture set (OPENNOVA_JO_ASSETS). */
+/* The synthetic legs: the HUDLS weapon slot bar tokens and ZONEINFO's
+   three-field form, parsed from authored text (no retail bytes).
+   [orig: HUD_ParseHudposToken — HUDLS_* @0x59FE41..0x59FF9C; ZONEINFO
+   @0x5A0642..0x5A0676] */
+static int synthetic_legs(void) {
+    int failures = 0;
+    static const char text[] =
+        "HUDLS_SYSTEM\t1\n"
+        "HUDLS_BRACKET\tls_brack.tga\n"
+        "HUDLS_KEYOFST\t4,-6\n"
+        "HUDLS_MOREAV\tls_more.tga 300 -2\n"
+        "HUDLS_SLOT\t6 100,700\n"
+        "HUDLS_SLOT\t10 180 700\n"
+        "HUDLS_SLOT\t0 11 12\n"
+        "HUDLS_SLOT\t11 13 14\n"
+        "ZONEINFO\t1013,386,Right\n";
+    DefHudPosFile f;
+    memset(&f, 0, sizeof(f));
+    if (def_parse_hudpos_memory((const unsigned char *)text, sizeof(text) - 1, &f) != 0) {
+        fprintf(stderr, "FAIL: synthetic HUDLS parse failed\n");
+        return 1;
+    }
+    const DefHudPosDef *h = &f.hud;
+    if (h->hudls_system != 1) {
+        fprintf(stderr, "FAIL: HUDLS_SYSTEM = %d\n", h->hudls_system);
+        ++failures;
+    }
+    if (strcmp(h->hudls_bracket, "ls_brack.tga") != 0 || strcmp(h->hudls_moreav, "ls_more.tga") != 0) {
+        fprintf(stderr, "FAIL: HUDLS texture names '%s' '%s'\n", h->hudls_bracket, h->hudls_moreav);
+        ++failures;
+    }
+    if (h->hudls_keyofst[0] != 4 || h->hudls_keyofst[1] != -6) {
+        fprintf(stderr, "FAIL: HUDLS_KEYOFST = %d,%d\n", h->hudls_keyofst[0], h->hudls_keyofst[1]);
+        ++failures;
+    }
+    /* The MOREAV offsets keep the LOW BYTE, signed: 300 -> 44, -2 -> -2
+       [orig: `mov byte_2723733, al` @0x59FF21 / movsx @0x599E30]. */
+    if (h->hudls_moreav_off[0] != 44 || h->hudls_moreav_off[1] != -2) {
+        fprintf(stderr, "FAIL: HUDLS_MOREAV offsets = %d,%d\n", h->hudls_moreav_off[0],
+                h->hudls_moreav_off[1]);
+        ++failures;
+    }
+    /* HUDLS_SLOT n lands at n-1 for n in 1..10; 0 and 11 author nothing. */
+    int others = 0;
+    for (int i = 0; i < 10; ++i)
+        if (i != 5 && i != 9) others |= h->hudls_slot[i][0] | h->hudls_slot[i][1];
+    if (h->hudls_slot[5][0] != 100 || h->hudls_slot[5][1] != 700 || h->hudls_slot[9][0] != 180 ||
+        h->hudls_slot[9][1] != 700 || others != 0) {
+        fprintf(stderr, "FAIL: HUDLS_SLOT placement (%d,%d) (%d,%d) others %d\n",
+                h->hudls_slot[5][0], h->hudls_slot[5][1], h->hudls_slot[9][0],
+                h->hudls_slot[9][1], others);
+        ++failures;
+    }
+    /* ZONEINFO: x, y, then the alignment word as the THIRD token. */
+    if (h->zone_info[0] != 1013 || h->zone_info[1] != 386 || h->zone_info[2] != 1) {
+        fprintf(stderr, "FAIL: ZONEINFO = %d,%d,%d\n", h->zone_info[0], h->zone_info[1],
+                h->zone_info[2]);
+        ++failures;
+    }
+    def_free_hudpos(&f);
+    if (failures == 0) printf("HUDLS + ZONEINFO synthetic legs OK\n");
+    return failures;
+}
+
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
+    if (synthetic_legs() != 0) return 1;
+    /* Every remaining leg reads the shipped hudpos.def (the memory legs compare
+       against its path parse), so they gate on the reference fixture set
+       (OPENNOVA_JO_ASSETS). */
     const std::string fixture = retail::reference_fixture("def/hudpos.def");
     if (fixture.empty())
-        return retail::skip("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
+        return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/hudpos.def (the shipped HUD layout table)");
     const char *path = fixture.c_str();
 
     DefHudPosFile hudpos;

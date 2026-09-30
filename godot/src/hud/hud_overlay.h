@@ -23,15 +23,20 @@
 #include <runtime/hud/hud_math.h> // FriendlyTagMode
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
+#include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
+
+#include "hud/hud_map_pass_renderer.h"
 
 #include <array>
 
 namespace godot {
 
+class HudChatEntry;
 class HudDrawListStats;
 class RtxtStringFile;
 class Simulation;
 class PlayerLocalView;
+class HudMapOverlays;
 class VehicleHudBlock;
 
 class HudPos;
@@ -100,7 +105,7 @@ public:
 	// passed typed) plus its resolved display name; loads the per-weapon
 	// HUDCLIPGFX/HUDRNDGFX art.
 	void set_weapon(const String &p_weapon_name, const String &p_display_name,
-			const String &p_round_type, int p_clipsize, int p_rounds_per_icon,
+			int p_clipsize, int p_rounds_per_icon,
 			const String &p_clipgfx_texture, const Vector2i &p_clipgfx_offset,
 			const String &p_rndgfx_texture, const Vector2i &p_rndgfx_offset,
 			const Vector2i &p_rndgfx_step);
@@ -123,15 +128,32 @@ public:
 	// aim_screen is the projected aim point in screen pixels; a non-finite
 	// vector (Vector2.INF) is the first-person pin to the design center.
 	void set_view_state(bool p_binoculars_view_active, const Vector2 &p_aim_screen);
+	// The clip-flash key's def halves (hud_frame.h HudWeaponState carries the
+	// witness): the equipped def's ammo bucket and ammo-class id, off the
+	// PlayerWeaponView the presenter already reads.
+	void set_weapon_ammo_key(int p_ammo_bucket, int p_ammo_class_id);
+	// The /NOHUD launch flag's overlay master word (hud_frame.h
+	// hud_overlay_master): true clears it for the process.
+	void set_no_hud(bool p_no_hud);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open, the strings the shell resolved,
-	// and the Simulation the rows are pulled from natively
-	// (Simulation::fill_scoreboard_rows — no script-side row round-trip).
-	// Typed cross-class args on the bound API follow the set_minimap_terrain
-	// precedent; pass null when hiding.
+	// the Simulation the rows and session facts are pulled from natively
+	// (Simulation::fill_scoreboard — no script-side row round-trip), and the
+	// gametext table the drawers' own lookups resolve through
+	// (hud::scoreboard_text). Typed cross-class args on the bound API follow
+	// the set_minimap_terrain precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-			const Dictionary &p_strings, const Ref<Simulation> &p_sim);
+			const Dictionary &p_strings, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
+	// The open chat capture's input line off the talk-key object: its prompt,
+	// text and dispatch color (hud::chat_input_line_color, the Global color
+	// keyed on the session-peer bit) and the frame counter the cursor blinks on.
+	void set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame, bool p_mp_session_peer);
+	// PgUp/PgDn for the Tab board — consumed (true) only in a session with the
+	// board up (hud::scoreboard_takes_page_keys); the open edge resets the page.
+	bool scoreboard_page_key(bool p_forward, bool p_in_session, bool p_board_open);
+	void reset_scoreboard_page();
 	// The end-of-round overlay (net-re §5.68): the resolved Impact38 text
 	// ladder (hud/end_round_overlay.h lines the presenter formatted) and the
 	// overlay safe-area top/bottom in design px.
@@ -147,6 +169,10 @@ public:
 	// One player-chat line for the CHAT ring (S2C 0x14 routed to the chat
 	// sink by Simulation::drain_chat_lines); the engine ring word-wraps it.
 	void push_chat_line(const String &p_text, int64_t p_argb);
+	// Drain the sim's S2C 0x32 join/leave lines (engine-formatted against the
+	// gametext table) into the SYSTEM ring in their fixed grey.
+	void post_game_text_lines(const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	// The Recent Messages (J) window: the OldMessages toggle and its stdbox
 	// title (gametext Overlays/STROVER43, resolved by the shell).
 	// The SP Show Score statistics panel (hud/end_round_statistics.h).
@@ -154,6 +180,19 @@ public:
 			const String &p_title, const PackedStringArray &p_labels,
 			const PackedStringArray &p_values);
 	void set_message_log_shown(bool p_shown);
+	// The key-toggled windows (hud_overlay_windows.cpp; engine
+	// runtime/hud/hud_overlay_windows.h): the F1 help page's resolved text,
+	// the F12 legend's title / labels (one per map_legend_keys() entry) and
+	// pulse clock, the I briefing panel (its text read from the sim's
+	// mission text) and the briefing's page keys (direction 0 resets).
+	void set_help_screen(bool p_shown, const String &p_title, const String &p_page_line,
+			const String &p_footer, const PackedStringArray &p_keys,
+			const PackedStringArray &p_texts);
+	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels,
+			int p_frame_counter);
+	static PackedStringArray map_legend_keys();
+	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
+	void cycle_briefing_page(int p_direction, bool p_in_session);
 	void set_message_log_title(const String &p_title);
 	// The AAS zone status panel: shown, the session game type (the conquest
 	// arm is unmodelled and draws nothing), the viewer's team, the HUD frame
@@ -201,11 +240,13 @@ public:
 	// seat or the player's own S2C 0x6D latch); the compiler ANDs it with
 	// each tag's own fold before drawing the icon cell.
 	void set_radio_request_icon_viewer(bool p_viewer);
-	// The breath bar (the compiler's element_breath_bar): this frame's samples,
-	// breath seconds and round-over latch from the sim's role view
-	// (Simulation::breath_bar_facts) plus the Overlays/STROVER91 label; no sim
-	// leaves the bar empty.
-	void set_breath_bar(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The HUD's per-frame role facts (Simulation::hud_role_facts ->
+	// inmatch::hud_role_facts): the breath bar's samples, seconds and
+	// round-over latch plus its Overlays/STROVER91 label; the MP session lines'
+	// facts plus their gametext strings (hud_session_text); the HUDLS slot
+	// bar's category scan with its icons, loaded only while the layout's
+	// HUDLS_SYSTEM draws the bar. No sim leaves every one empty.
+	void set_role_facts(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {
@@ -269,6 +310,13 @@ public:
 	// Static building/zone footprint polygons (the sim feed, baked once per
 	// mission; witness at world::minimap_footprint_from_occlusion).
 	void set_minimap_footprints(const PackedInt32Array &p_feed);
+	// The non-bank map legs' feed (Simulation::get_hud_minimap_overlays);
+	// null clears it.
+	void set_minimap_overlays(const Ref<HudMapOverlays> &p_overlays);
+	// The per-frame radar-contact snapshot (Simulation.step_hud_radar), and
+	// the HUD-pass gates that step rides (HudFrameCompiler::radar_frame_gates).
+	void set_minimap_radar(const PackedInt32Array &p_feed);
+	int get_radar_frame_gates() const;
 
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
@@ -282,6 +330,22 @@ public:
 	PackedInt64Array consume_draw_timing_us();
 
 	void _draw() override;
+
+	// The menu map windows' seam (hud/map_view_window.h, C++ only): compile
+	// the DEATH or the CMAP window pass over this overlay's frame state
+	// (terrain, markers, footprints, fonts) at the host's surface, and hand
+	// the host's renderer the textures and materials the map passes sample.
+	// Null before configure().
+	const opennova::hud::HudFrameCompiler::MapWindowDraw *compile_death_map(
+			const opennova::hud::DeathMapFrame &p_frame,
+			const opennova::hud::DeathMapFacts &p_facts, float p_surface_w, float p_surface_h);
+	const opennova::hud::HudFrameCompiler::MapWindowDraw *compile_command_map(
+			opennova::hud::CommandMapView &p_cmap, const opennova::hud::MapViewRect &p_rect,
+			int32_t p_scaled_800, const opennova::hud::DeathMapFacts &p_facts,
+			float p_surface_w, float p_surface_h);
+	HudMapPassTextures map_pass_textures() const;
+	RID map_additive_material();
+	RID map_water_material();
 
 protected:
 public:
@@ -365,22 +429,16 @@ private:
 	Ref<ShaderMaterial> minimap_water_material_;
 	// The spinmap sandwich: the retail terrain draws twice (base + additive
 	// x4-stage resubmission), so the second pass and everything the map
-	// layers above it ride pinned-order child items. The M-cycle big map
-	// gets its OWN trio ABOVE the flat HUD and the corner map — retail
-	// draws it as a second pass over the whole overlay set, under only the
-	// objectives-family legs (witness at hud_frame.h HudDrawList::big_map).
-	RID map_base_item_;
-	RID map_add_item_;
-	RID map_water_item_;
-	bool map_water_sampling_configured_ = false;
-	RID map_top_item_;
-	bool map_top_sampling_configured_ = false;
-	RID big_map_base_item_;
-	RID big_map_add_item_;
-	RID big_map_water_item_;
-	bool big_map_water_sampling_configured_ = false;
-	RID big_map_top_item_;
-	bool big_map_top_sampling_configured_ = false;
+	// layers above it ride pinned-order child items (hud_map_pass_renderer.h).
+	// The M-cycle big map gets its OWN set ABOVE the flat HUD and the corner
+	// map — retail draws it as a second pass over the whole overlay set,
+	// under only the objectives-family legs (witness at hud_frame.h
+	// HudDrawList::big_map).
+	HudMapPassRenderer corner_map_;
+	HudMapPassRenderer big_map_;
+	// The gameplay-overlay windows' layer above the big map
+	// (HudDrawList::top_begin).
+	RID top_item_;
 
 	Vector2 draw_surface_() const;
 	// Restamp state_'s declutter visibility/level from declutter_.
@@ -407,9 +465,19 @@ private:
 	void push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_choice);
 	void ensure_additive_item_();
 	void ensure_minimap_water_material_();
-	void ensure_map_items_();
-	void ensure_big_map_items_();
+	void ensure_map_materials_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
+	// One index range per flat kind of a draw list.
+	struct FlatRange {
+		size_t quads_begin = 0, quads_end = 0;
+		size_t tris_begin = 0, tris_end = 0;
+		size_t lines_begin = 0, lines_end = 0;
+		size_t glyphs_begin = 0, glyphs_end = 0;
+		size_t underlines_begin = 0, underlines_end = 0;
+	};
+	void render_flat_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
+			const FlatRange &p_range);
+	void ensure_top_item_();
 	// p_big selects the sandwich: the corner map's base rides the control's
 	// own item (under the flat HUD) with its add/top children just above the
 	// flat pass; the big map's whole trio sits above everything flat.

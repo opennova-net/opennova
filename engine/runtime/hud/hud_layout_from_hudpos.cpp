@@ -81,6 +81,25 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.weapon_name = pos_record4(hud.weapon_name_pos);
 	out.game_info = pos_record4(hud.game_info);
 	out.wpd_info = pos_record4(hud.wpd_info);
+	// The session-line anchors (hud_frame.h HudLayout carries the witnesses):
+	// HUDTIMECLOCK keeps x, y only; ZONEINFO's third field is its alignment.
+	out.time_clock = pos_record2(hud.time_clock[0], hud.time_clock[1]);
+	out.player_count = pos_record4(hud.player_count);
+	out.team_xy = pos_record4(hud.team_xy);
+	out.zone_info = pos_record2(hud.zone_info[0], hud.zone_info[1]);
+	out.zone_info.align = hud.zone_info[2];
+	// The HUDLS block [orig: dword_2723700..dword_272373C + 8*9].
+	out.hudls.system = hud.hudls_system;
+	out.hudls.key_ofst_x = hud.hudls_keyofst[0];
+	out.hudls.key_ofst_y = hud.hudls_keyofst[1];
+	out.hudls.moreav_dx = hud.hudls_moreav_off[0];
+	out.hudls.moreav_dy = hud.hudls_moreav_off[1];
+	for (size_t i = 0; i < out.hudls.slot_x.size(); ++i) {
+		out.hudls.slot_x[i] = hud.hudls_slot[i][0];
+		out.hudls.slot_y[i] = hud.hudls_slot[i][1];
+	}
+	assets.hudls_bracket = hud.hudls_bracket;
+	assets.hudls_moreav = hud.hudls_moreav;
 	out.chat_text = pos_record2(hud.chat_text[0], hud.chat_text[1]);
 	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
 	// are NOT the HUDCHATTEXT anchor: retail's g_HUDChatBoxCoords are written

@@ -37,6 +37,18 @@ HudMinimapMarker sample(uint16_t handle) {
     m.half_y_q16 = 0x4000;
     m.floor_px = 6;
     m.medic = 1;
+    // v5: the live pool-entity facts.
+    m.team = 2;
+    m.zone_number = 5;
+    m.def_type = 3;
+    m.entity_bits = kMarkerEntityHasModel | kMarkerEntityDead;
+    m.zone_index = 4;
+    m.zone_radius = 70;
+    m.entity_x = 65536 * 13;
+    m.entity_y = -65536 * 8;
+    m.anchor_x = 65536 * 14;
+    m.anchor_y = -65536 * 9;
+    m.bound_radius_q16 = 65536 * 2;
     return m;
 }
 
@@ -46,7 +58,12 @@ bool same(const HudMinimapMarker &a, const HudMinimapMarker &b) {
            a.flags == b.flags && a.source == b.source && a.remaining_ticks == b.remaining_ticks &&
            a.entity_known == b.entity_known && a.rotate == b.rotate &&
            a.footprint == b.footprint && a.half_x_q16 == b.half_x_q16 &&
-           a.half_y_q16 == b.half_y_q16 && a.floor_px == b.floor_px && a.medic == b.medic;
+           a.half_y_q16 == b.half_y_q16 && a.floor_px == b.floor_px && a.medic == b.medic &&
+           a.team == b.team && a.zone_number == b.zone_number && a.def_type == b.def_type &&
+           a.entity_bits == b.entity_bits && a.zone_index == b.zone_index &&
+           a.zone_radius == b.zone_radius && a.entity_x == b.entity_x &&
+           a.entity_y == b.entity_y && a.anchor_x == b.anchor_x && a.anchor_y == b.anchor_y &&
+           a.bound_radius_q16 == b.bound_radius_q16;
 }
 
 void test_round_trip_is_exact() {

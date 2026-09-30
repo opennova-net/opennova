@@ -375,6 +375,62 @@ std::string feed_camp_key(uint8_t event_type, uint8_t team) {
 	return std::string();
 }
 
+std::string chat_format_player_tokens(const std::string &format, const char *token_a,
+		const char *token_b, const char *token_c) {
+	// [orig: Chat_FormatPlayerTokens @0x4a5190 — the empty-format return
+	//  @0x4a51ad; the '$' test @0x4a51c5; A @0x4a51d0, B @0x4a5218, C @0x4a5258
+	//  copy the token (a NULL one copies nothing) and skip two @0x4a5210 /
+	//  @0x4a5250 / @0x4a528e; any other byte, and a '$' not followed by
+	//  A/B/C, copies one @0x4a5293]
+	std::string out;
+	const char *src = format.c_str();
+	while (*src != 0) {
+		if (src[0] == '$' && (src[1] == 'A' || src[1] == 'B' || src[1] == 'C')) {
+			const char *token = src[1] == 'A' ? token_a : src[1] == 'B' ? token_b : token_c;
+			if (token != nullptr) out += token;
+			src += 2;
+			continue;
+		}
+		out.push_back(*src++);
+	}
+	return out;
+}
+
+std::string formatted_game_text_line(int subtype, const std::string &text, int team,
+		uint32_t game_type, const GameTextLookup &gametext) {
+	std::string format;
+	switch (subtype) {
+		case 1: // a player joined
+			if (team == 0) {
+				format = game_text(gametext, "Client", "STRCLI22", ""); // [orig: @0x4280e6]
+			} else if (game_type < 2u || game_type == 8u) {
+				format = game_text(gametext, "Client", "STRCLI11", ""); // [orig: @0x428131]
+			} else {
+				switch (team) {
+					case 1: format = game_text(gametext, "Client", "STRCLI12", ""); break;
+					case 2: format = game_text(gametext, "Client", "STRCLI13", ""); break;
+					case 3: format = game_text(gametext, "Client", "STRCLI14", ""); break;
+					case 4: format = game_text(gametext, "Client", "STRCLI15", ""); break;
+					default: return std::string(); // [orig: @0x428123]
+				}
+			}
+			break;
+		case 2: // a player is leaving [orig: @0x42813d]
+			format = game_text(gametext, "Client", "STRCLI16", "");
+			break;
+		case 3: // a squadron entered — the one literal [orig: @0x428144]
+			format = "\"$A\" squadron has entered.";
+			break;
+		case 5: // a player became a spectator [orig: @0x428155]
+			format = game_text(gametext, "Client", "STRCLI24", "");
+			break;
+		default: // 4 formats nothing; the rest never reach the switch
+			return std::string();
+	}
+	// [orig: Chat_FormatPlayerTokens(format, text, NULL, NULL) @0x42816d]
+	return chat_format_player_tokens(format, text.c_str());
+}
+
 std::string strip_inline_tags(const std::string &text) {
     // [orig: Chat_StripHtmlTags @0x4983f0]: on '<' (0x3C) skip to the next
     // '>' (0x3E) and drop the span; an unterminated tag runs to the end and

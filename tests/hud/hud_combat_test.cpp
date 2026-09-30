@@ -134,12 +134,19 @@ static void mortar_map_and_world_cues() {
 	state.combat.impact_radius_q16 = 3 << 16;
 	const auto &map = compiler.compile(state, 1024, 768).big_map;
 	CHECK(map.visible);
-	CHECK(std::count_if(map.lines.begin(), map.lines.end(),
-				  [](const auto &l) { return l.color == 0xFFFFFF00u; }) == 64);
+	// The 254 preview's three filled yellow centre rings are anti-aliased
+	// bands (untextured sprites), and the 0xD0 special slot (bit7 set) draws
+	// on layers 1, 2 and 3 — nine yellow bands.
+	// [orig: Render_MinimapSlotBlip 254 arm @0x5be2a8..0x5be3b5 ->
+	//  Render_DrawRingOverlay @0x5D4270; MapOverlay_RenderAllByLayer
+	//  @0x5BE780..0x5BE7D7]
+	const auto yellow_band = [](const auto &sp) {
+		return sp.texture == opennova::hud::kHudMapTextureNone && sp.color == 0xFFFFFF00u;
+	};
+	CHECK(std::count_if(map.sprites.begin(), map.sprites.end(), yellow_band) == 9);
 	state.combat.impact_map = false;
 	const auto &cleared = compiler.compile(state, 1024, 768).big_map;
-	CHECK(std::none_of(cleared.lines.begin(), cleared.lines.end(),
-			[](const auto &l) { return l.color == 0xFFFFFF00u; }));
+	CHECK(std::none_of(cleared.sprites.begin(), cleared.sprites.end(), yellow_band));
 	state.combat.designator = true;
 	state.combat.impact_point = { 512, 384, 0, true };
 	const auto &designator = compiler.compile(state, 1024, 768);

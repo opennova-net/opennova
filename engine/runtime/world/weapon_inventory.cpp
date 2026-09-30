@@ -565,4 +565,30 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
     return out;
 }
 
+
+std::array<WeaponSlotBarCategory, 10> weapon_inventory_slot_bar_scan(const WeaponTable &table,
+                                                                     const WeaponInventory &inv) {
+    // [orig: HUD_DrawWeaponSlotBar @0x599D0A..0x599D69 — `entry_offset` 0..650
+    //  step 65 (one category), the 1..5 skip @0x599D24, the def pointer
+    //  slot+0x20 @0x599D36, the first-hit record + `i += def[940/4]`
+    //  @0x599D40..0x599D4D, the count @0x599D51]. The debug fill under
+    //  dword_24C1930 & 0x8000000 @0x599D75 is dead: nothing sets the bit.
+    std::array<WeaponSlotBarCategory, 10> out{};
+    for (int category = 0; category < 10; ++category) {
+        if (category >= 1 && category <= 5) continue;
+        WeaponSlotBarCategory &cat = out[static_cast<size_t>(category)];
+        for (int i = 0; i < weapon_combo::kRanksPerCategory; ++i) {
+            const int32_t combo = category * weapon_combo::kRanksPerCategory + i;
+            const WeaponTableEntry *def = entry_at(table, inv, combo);
+            if (def == nullptr) continue;
+            if (cat.adm_index < 0) {
+                cat.adm_index = inv.slot(combo)->adm_index;
+                i += def->loadout_subclasses;
+            }
+            ++cat.count;
+        }
+    }
+    return out;
+}
+
 } // namespace opennova::world

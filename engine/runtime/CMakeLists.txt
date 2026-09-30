@@ -34,6 +34,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/help_screen.cpp       # the F1 key-binding help pages
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start network sample
@@ -100,13 +101,25 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_scoreboard.cpp # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_chat_entry.cpp   # the talk keys + the captured line editor
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_chat_input.cpp # the chat input line element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_vehicle_panel.cpp # its compile element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_message_log.cpp   # the Recent Messages (J) window element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_overlay_windows.cpp # the briefing / help / map legend windows
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_end_round_statistics.cpp # the SP Show Score panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_session_lines.cpp # GAMEINFO/ZONEINFO, CLOCK, TEAMID
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_slot_bar.cpp      # the HUDLS weapon slot bar element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_banks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_pointer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_rings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_map_view.cpp       # the DEATH / CMAP windowed map views
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_radar.cpp # the spinmap's bit-10 legs
     # renderer — fixed-function material/light/order math
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/authored_occluder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
@@ -239,6 +252,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/music_vars.cpp       # the gamemus var pump from the local player
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/radar_contacts.cpp # the local radar contact state + producers
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_combat_feed.cpp
@@ -361,6 +375,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp

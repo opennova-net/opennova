@@ -14,8 +14,6 @@ const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
 const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
-# The HUD presenter's gameplay keys (objectives/friendly-tags) live with the
-# presenter — GameHudPresenter.handle_gameplay_key.
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -26,8 +24,11 @@ const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_wi
 # router's per-frame chain over the polled `useitem` row (the hold latch, the
 # USE+digit seat pick, the mount toggle on release); the shell only matches
 # the press event against that row's live keys (_is_use_item_key).
-# F3: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
-const DEV_TOOLS_KEY := KEY_F3
+# Insert: the in-engine dev tools (the DevTools node's ImGui windows, ADR 0039).
+# Off F3, which is retail's `viewwithgun` default (catalog row 108). Insert is
+# also retail Jump's secondary key (row 8): the polled Jump row still sees a
+# toggle press, an accepted overlap for a debug-build key.
+const DEV_TOOLS_KEY := KEY_INSERT
 # Shift+F6: pick the entity under the crosshair into the debug pick list
 # (DebugPickSession). Works while playing or with F3 in Interact. Unmodified F6 stays
 # with the retail-configurable binding rows (huddetail's default, shadowing
@@ -43,7 +44,7 @@ const PICK_KEY := KEY_F6
 # mouse is released and player input idles. Retail's dead player has no gameplay
 # input anyway — the uplink is held by dword_81474C and the input legs gate on
 # g_SpawnSuccessGate — so this state is what makes the spawn list clickable.
-enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND }
+enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND, COMMAND_MAP }
 
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
@@ -54,7 +55,7 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY, END_ROUND }
 var _root: ResourceRoot
 var _state: int = State.MENU
 var _shell_wired := false
-# The in-engine dev tools' seam: F3 opens them, the mouse policy follows them.
+# The in-engine dev tools' seam: Insert opens them, the mouse policy follows them.
 var _dev_tools: DevTools
 var _debug_adapter: GameDebugAdapter
 # The debug pick state (list, toast flow, click-catcher latch): SHELL-owned so
@@ -82,6 +83,7 @@ var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
+var _command_map_presenter: CommandMapPresenter  # the commander map (cmap.mnu CMAP)
 var _end_round_presenter: EndRoundPresenter  # the MP end-of-round overlay + stat.mnu STAT
 var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
@@ -151,7 +153,8 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	finish_hud_hidden_capture()
 	_close_retail_picker()
 	for presenter in [
-		_player_presenter, _armory_presenter, _deploy_presenter, _hud_presenter,
+		_player_presenter, _armory_presenter, _deploy_presenter, _command_map_presenter,
+		_hud_presenter,
 	]:
 		if presenter != null:
 			presenter.teardown()
@@ -296,6 +299,15 @@ func _ready() -> void:
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
+	# The deploy screen's MAP window draws through the HUD overlay's map state.
+	_deploy_presenter.set_hud_source(_hud_presenter.get_game_hud)
+	# The commander map (cmap.mnu CMAP) over live play; the commander_menu row's
+	# poll event opens it from WORLD, and it owns the cursor while up.
+	_command_map_presenter = CommandMapPresenter.install(self, _world.world_view(),
+			_hud if _hud != null else self, func() -> void: _state = State.COMMAND_MAP,
+			_leave_screen.bind(State.COMMAND_MAP))
+	_command_map_presenter.set_hud_source(_hud_presenter.get_game_hud)
+	_hud_presenter.command_map_requested.connect(_on_command_map_requested)
 	_on_player_options_changed(_player_options.current())
 	# The MP end-of-round flow (net-re 5.68; HUD_DrawOverlayPanels @0x5c0072): STAT owns the cursor.
 	_end_round_presenter = EndRoundPresenter.install(self, _world.world_view(),
@@ -354,6 +366,15 @@ func _ready() -> void:
 # reports unhandled even after emitting pressed; without this early claim the same
 # Esc closes ARMORY and then immediately opens PAUSE.
 func _input(event: InputEvent) -> void:
+	# An open chat line takes every key (Esc included) before anything else
+	# sees it; only the shell's own window/tools keys pass.
+	if event is InputEventKey and _state == State.WORLD and _hud_presenter != null \
+			and _hud_presenter.is_chat_capturing():
+		var chat_key := event as InputEventKey
+		if not WindowState.is_toggle_event(event) and chat_key.keycode != DEV_TOOLS_KEY \
+				and _hud_presenter.handle_chat_key(chat_key):
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey:
 		var tools_key := event as InputEventKey
 		if tools_key.pressed and not tools_key.echo and tools_key.keycode == KEY_ESCAPE \
@@ -383,6 +404,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		if _dev_tools.handle_tools_toggle():
 			get_viewport().set_input_as_handled()
 		return
+	# PgUp / PgDn turn the open help screen's or briefing's page.
+	if (key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN) and is_gameplay_input_active() 			and _hud_presenter != null and _hud_presenter.handle_page_key(key.keycode == KEY_PAGEDOWN):
+		get_viewport().set_input_as_handled()
+		return
 	if key.keycode == PICK_KEY and key.shift_pressed and _world != null \
 			and _world.is_loaded() and (is_gameplay_input_active() \
 			or (is_dev_tools_open() and not _dev_tools.is_game_playing())):
@@ -390,12 +415,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			# The chord consumed the USE hold: no mount toggle on its release.
 			_player_presenter.consume_use_hold()
 		pick_at_crosshair()
-		get_viewport().set_input_as_handled()
-		return
-	# The HUD presenter's gameplay keys (objectives toggle / friendly-tags
-	# cycle), in-world only — bindings + orig cites at the presenter.
-	if is_gameplay_input_active() and _hud_presenter != null \
-			and _hud_presenter.handle_gameplay_key(key.keycode):
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
@@ -424,10 +443,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				pass  # vehicle.mnu VEHICLE (D-HUD-14)
 			get_viewport().set_input_as_handled()
 		return
-	# Gameplay keys (B/N/NVG, Z/X/C stance) live on LocalPlayerPresenter; view rows on GameHudPresenter.
-	if _player_presenter != null and _player_presenter.handle_key_input(
-			event, is_gameplay_input_active()):
-		get_viewport().set_input_as_handled()
 
 
 # The workspace's shell policy. Interact owns the cursor and world click-pick;
@@ -532,7 +547,8 @@ func is_root_render_stats_measured() -> bool:
 
 func is_gameplay_input_active() -> bool:
 	return _state == State.WORLD and not _end_flow.is_round_ended() \
-			and (not is_dev_tools_open() or _dev_tools.is_game_playing())
+			and (not is_dev_tools_open() or _dev_tools.is_game_playing()) \
+			and not (_hud_presenter != null and _hud_presenter.is_chat_capturing())
 
 
 # --- End of mission (SP) -------------------------------------------------------
@@ -583,6 +599,8 @@ func shell_state_name() -> String:
 			return "armory"
 		State.DEPLOY:
 			return "deploy"
+		State.COMMAND_MAP:
+			return "command_map"
 		_:
 			return "menu"
 
@@ -1085,12 +1103,23 @@ func _on_camera_escape() -> void:
 		if not _end_flow.request_screen_exit():
 			_on_end_screen_exit()
 		return
+	# Over live play the HUD's escape chain closes one open HUD window first;
+	# only with none open does the in-game menu open.
+	if _state == State.WORLD and _hud_presenter != null and _hud_presenter.handle_escape():
+		return
 	if _state in [State.WORLD, State.DEPLOY, State.END_ROUND]:
 		# ESC from the deploy screen still reaches the in-game menu (and therefore
 		# RETURN TO MENU): a joiner parked at the pick must be able to leave.
 		_pause()
 	elif _state == State.PAUSED or _state == State.ARMORY:
 		resume()
+	elif _state == State.COMMAND_MAP and _command_map_presenter != null:
+		_command_map_presenter.close()
+
+
+func _on_command_map_requested() -> void:
+	if _state == State.WORLD and _command_map_presenter != null:
+		_command_map_presenter.open()
 
 
 func _leave_screen(from_state: int) -> void:  # a closing screen hands play back
@@ -1175,6 +1204,8 @@ func _teardown_world_to_menu() -> void:
 	if _deploy_presenter != null:
 		_deploy_presenter.teardown()  # same stale-root hazard, and the shell's blanket
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
+	if _command_map_presenter != null:
+		_command_map_presenter.teardown()  # the cmap.mnu frame holds the OLD world's root
 	if _end_round_presenter != null:
 		_end_round_presenter.teardown()  # same stale-root hazard: the stat.mnu frame and
 		# its MenuAudio hold the OLD world's resource root, and a frame left visible when
@@ -1254,7 +1285,7 @@ func _process(delta: float) -> void:
 	var dev_tools_open := is_dev_tools_open()
 	# Release the captured mouse while UI overlays the world or nothing is loaded.
 	var dev_tools_interacting := dev_tools_open and not _dev_tools.is_game_playing()
-	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND] \
+	if _state in [State.PAUSED, State.ARMORY, State.DEPLOY, State.END_ROUND, State.COMMAND_MAP] \
 			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -1309,7 +1340,8 @@ func _process(delta: float) -> void:
 	# (WORLD or the live-play ARMORY) [orig: HUD_BuildEntityInfo @0x4b8440 per frame].
 	var skip_hud := probe_enabled and _perf_probe.skip_hud
 	if _hud_presenter != null and not skip_hud \
-			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND]:
+			and _state in [State.WORLD, State.ARMORY, State.DEPLOY, State.END_ROUND,
+					State.COMMAND_MAP]:
 		_hud_presenter.tick(is_gameplay_input_active())
 		_end_round_presenter.tick()  # the same HUD frame [orig: HUD_DrawOverlayPanels]
 	var probe_t4 := Time.get_ticks_usec() if timing else 0

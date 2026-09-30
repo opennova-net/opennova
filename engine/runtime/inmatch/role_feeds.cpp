@@ -4,6 +4,8 @@
 #include <runtime/inmatch/role_feeds.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/fixed.h>
+#include <runtime/replication/client_scoreboard_view.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -11,6 +13,7 @@
 #include <runtime/replication/client_roster_tags.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
+#include <runtime/world/radio_call.h> // capture_zone_max_coverage
 
 #include <algorithm>
 #include <cstdio>
@@ -116,6 +119,67 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].
 	if (!view.joiner && view.kernel != nullptr)
 		out.breath_time = view.kernel->world.script.wac_values.breathtime;
+	return out;
+}
+
+HudRoleFacts hud_role_facts(const RoleView &view) {
+	HudRoleFacts out;
+	out.breath = breath_bar_facts(view);
+	if (view.kernel == nullptr) return out;
+	const world::World &w = view.kernel->world;
+	hud::HudSessionState &s = out.session;
+	// g_NapiNPCtx.is_in_session: the session bit the world carries (our SP
+	// runs a listen host, but retail's single player never sets it).
+	s.in_session = w.rules.mp_session;
+	s.game_type = view.runtime != nullptr ? view.runtime->game_type() : 0; // g_GameType
+	// g_RoundTimeRemaining, UNclamped — the -1 untimed seed is the timer's gate
+	// [orig: HUD_DrawGameTimer @0x593D99]: the authority's Match clock, a
+	// joiner's folded 0x0A copy.
+	s.round_time_remaining = view.joiner
+			? (view.runtime != nullptr ? view.runtime->state().round_time_remaining_ticks : -1)
+			: w.match.remaining_ticks();
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		const replication::ClientScoreboard &sb = cs.scoreboard;
+		s.permanent_death = cs.permanent_death;              // byte_A821EF
+		s.remaining_count = sb.alive_player_count;            // g_ScoreboardDeadRowCount
+		s.row_count = static_cast<int>(sb.rows.size());       // g_ScoreboardRowCount
+		s.spectator_count = sb.spectator_count;               // g_ScoreboardSpectatorCount
+		// Teams 1 and 2 of the 0x16 team table, score1 read signed like the
+		// movsx that stores it [orig: the team rows 0xA85AEC + 16t, the
+		// stores @0x42fe00..0x42fe42; read @0x59CDF4 / @0x59CEA8 / @0x59CF54].
+		for (size_t t = 0; t < 2; ++t) {
+			if (sb.teams.size() <= t + 1) break;
+			s.team_score1[t] = static_cast<int16_t>(sb.teams[t + 1].score1);
+			s.team_koth[t] = sb.teams[t + 1].koth_hold;
+		}
+		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes; // dword_A821C0
+	}
+	// The authority reads its own g_TimeLimitMinutes [orig: @0x59CCDB..0x59CCE3].
+	if (!view.joiner && view.host != nullptr)
+		s.time_limit_minutes = static_cast<int32_t>(view.host->config.time_limit_minutes);
+	const world::Entity *player = w.registry.get(w.cached.local_player);
+	if (player != nullptr) {
+		s.team = player->team; // hudInfo+0x176 = entity+0x162 [orig: @0x4B8464]
+		// [orig: CaptureZone_FindMaxProximityCoverage(&g_LocalPlayerEntity->boundRadius)
+		//  @0x59CDE8]
+		s.zone_coverage = world::capture_zone_max_coverage(w, *player);
+	}
+	s.attack_defend = view.kernel->local.attack_defend_role; // dword_B78FE8
+	// The HUDLS scan over the local slot table and each category's first
+	// def's slot-bar icon [orig: HUD_DrawWeaponSlotBar @0x599D0A..0x599D69;
+	// def+0x1B8 <- hud_loadout_select, WeaponDefs_ParseLineCallback @0x544A44].
+	if (view.kernel->local.inventory_valid) {
+		out.slot_bar = world::weapon_inventory_slot_bar_scan(w.tables.weapons,
+				view.kernel->local.inventory);
+		for (size_t c = 0; c < out.slot_bar.size(); ++c) {
+			const int16_t adm = out.slot_bar[c].adm_index;
+			if (adm < 0) continue;
+			if (const world::WeaponTableEntry *def =
+							w.tables.weapons.by_index(static_cast<uint8_t>(adm)))
+				out.slot_bar_icons[c] = def->hud_loadout_select;
+		}
+	}
 	return out;
 }
 
@@ -348,6 +412,92 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 		return 0;
 	};
 	world::build_lfp_zones(w, zones, *local, local_team, timer, capture_flags, out);
+	return true;
+}
+
+namespace {
+
+// Math_FixedPointTransformPoint22: the 3x3 Q22 rotation with the +0x200000
+// rounding bias before each >> 22, then the translation column.
+// [orig: Math_FixedPointTransformPoint22 @0x615810]
+void transform_point22(const world::CollisionMatrix &m, const int32_t in[3], int32_t out[3]) {
+	for (int row = 0; row < 3; ++row) {
+		const int64_t sum = static_cast<int64_t>(in[0]) * m.m[row * 4 + 0] +
+				static_cast<int64_t>(in[1]) * m.m[row * 4 + 1] +
+				static_cast<int64_t>(in[2]) * m.m[row * 4 + 2] + 0x200000;
+		out[row] = static_cast<int32_t>(static_cast<uint32_t>(sum >> 22) +
+				static_cast<uint32_t>(m.m[row * 4 + 3]));
+	}
+}
+
+} // namespace
+
+bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		hud::DeathMapFacts &out) {
+	out = hud::DeathMapFacts{};
+	if (view.kernel == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	if (const world::Entity *player = w.registry.get(w.cached.local_player)) {
+		out.player_present = true;
+		out.player_x = io::float_to_fp16_16_sat(player->position.x);
+		out.player_y = io::float_to_fp16_16_sat(player->position.y);
+		out.player_z = io::float_to_fp16_16_sat(player->position.z);
+		out.player_team = player->team;
+	}
+	out.bounds_min_x = zones.min_x;
+	out.bounds_min_y = zones.min_y;
+	out.bounds_max_x = zones.max_x;
+	out.bounds_max_y = zones.max_y;
+	const ClientRuntime *runtime = view.runtime;
+	if (runtime != nullptr) {
+		const replication::ClientState &cs = runtime->state();
+		// [orig: g_DeployScreenActive @0xA860DC; dword_A85B68 (the 0x0A
+		//  sub-block-0 hold byte); g_GameType; word_A85BC0]
+		out.deploy_screen_active = cs.deploy_overlay_active;
+		out.hold_seconds = cs.spawn_hold_seconds;
+		out.game_type = runtime->game_type();
+		if (cs.spawn_waves.known) out.self_zone_handle = cs.spawn_waves.self_zone_handle;
+	}
+	for (size_t i = 0; i < zones.entries.size(); ++i) {
+		const world::Entity *e = w.registry.get(zones.entries[i]);
+		if (e == nullptr) continue;
+		hud::DeathMapZone zone;
+		zone.handle = e->handle.packed;
+		zone.index = static_cast<int32_t>(i);
+		zone.team = e->team;
+		if (runtime != nullptr) {
+			const auto live = runtime->zone_states().find(e->handle.packed);
+			if (live != runtime->zone_states().end() && live->second.has_value) {
+				zone.team = static_cast<uint8_t>(live->second.entry.mode_a);
+				zone.timer_ready = !(live->second.entry.value_target <
+						live->second.entry.value_limit);
+			}
+			if (runtime->state().spawn_waves.known) {
+				for (const SpawnWaveGroup &g : runtime->state().spawn_waves.value.groups) {
+					if (g.zone_handle != e->handle.packed) continue;
+					zone.queued = g.queued_count;
+					zone.countdown = static_cast<uint16_t>(g.wave_countdown);
+				}
+			}
+		}
+		// The anchor: the Euler matrix (no scale) about the position applied
+		// to the bbox centre [orig: sub_59C300 @0x59c311..0x59c327].
+		int32_t euler[3];
+		world::entity_live_euler_bam(*e, euler);
+		const int32_t position[3] = {io::float_to_fp16_16_sat(e->position.x),
+				io::float_to_fp16_16_sat(e->position.y),
+				io::float_to_fp16_16_sat(e->position.z)};
+		const world::CollisionMatrix m =
+				world::collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
+		const int32_t centre[3] = {io::float_to_fp16_16_sat(e->bbox_center.x),
+				io::float_to_fp16_16_sat(e->bbox_center.y),
+				io::float_to_fp16_16_sat(e->bbox_center.z)};
+		int32_t anchor[3];
+		transform_point22(m, centre, anchor);
+		zone.anchor_x = anchor[0];
+		zone.anchor_y = anchor[1];
+		out.zones.push_back(zone);
+	}
 	return true;
 }
 
@@ -655,6 +805,129 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			out.push_back(EntityLightingChange{ true, 0, handle, lighting });
 		}
 	}
+}
+
+namespace {
+
+// One entity's team, playerClass and name as retail's drawers read them off
+// the entity (+0x162, +0x294, +0xF4): the authority's own pools, or a
+// joiner's decoded row — its compact field-17 low nibble once a compact
+// landed (the client apply rewrites playerClass [orig:
+// Entity_SetHealthFromDifficultyByte @0x4AD580]), else the spawn's class.
+struct EntityReads {
+	bool found = false;
+	uint8_t team = 0;
+	uint8_t player_class = 0;
+	std::string name;
+};
+EntityReads entity_reads(const RoleView &view, uint16_t handle) {
+	EntityReads r;
+	if (view.joiner) {
+		const replication::ClientEntityState *row =
+				view.runtime != nullptr ? view.runtime->state().find(handle) : nullptr;
+		if (row == nullptr) return r;
+		r.found = true;
+		r.team = row->team_known ? row->team : 0;
+		r.player_class = row->net_has_compact
+				? static_cast<uint8_t>(row->health_class_byte & 0x0Fu)
+				: row->spawn_player_class;
+		r.name = row->display_name;
+		return r;
+	}
+	if (view.kernel == nullptr) return r;
+	const world::Entity *e = view.kernel->world.registry.get(world::EntityHandle{handle});
+	if (e == nullptr) return r;
+	r.found = true;
+	r.team = e->team;
+	r.player_class = e->player_class;
+	r.name = e->display_name;
+	return r;
+}
+
+} // namespace
+
+void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {
+	out.rows.clear();
+	out.team_count = 0;
+	out.teams = {};
+	out.flag_carrier = false;
+	out.flag_carrier_name.clear();
+	out.flag_carrier_team = 0;
+	out.local_team = -1;
+	if (view.runtime == nullptr) return;
+	const replication::ClientState &state = view.runtime->state();
+	replication::project_scoreboard(state, out.rows, [&view](uint16_t handle) {
+		const EntityReads r = entity_reads(view, handle);
+		replication::ScoreboardEntityFacts facts;
+		facts.found = r.found;
+		facts.team = r.team;
+		facts.player_class = r.player_class;
+		return facts;
+	});
+	// [orig: g_ScoreboardTeamCount @0x42fdda; the table 0xA85AEC + 16t]
+	out.team_count = static_cast<int>(state.scoreboard.team_count);
+	for (size_t t = 0; t < out.teams.size() && t < state.scoreboard.teams.size(); ++t) {
+		out.teams[t].score1 = state.scoreboard.teams[t].score1;
+		out.teams[t].ctf_flag = state.scoreboard.teams[t].ctf_flag;
+		out.teams[t].koth_hold = state.scoreboard.teams[t].koth_hold;
+	}
+	out.status_suffix = state.scoreboard_status_suffix != 0; // [orig: @0x423ef8]
+	out.timed = state.scoreboard.timed;                       // [orig: g_ScoreboardFlags & 2]
+	// [orig: `is_authority ? g_TimeLimitMinutes : dword_A821C0` @0x423a4b]
+	out.time_limit = !view.joiner && view.host != nullptr
+			? static_cast<int>(view.host->config.time_limit_minutes)
+			: static_cast<int>(state.session_time_limit_minutes);
+	// The local player's own entity team [orig: g_LocalPlayerEntity->Team
+	// @0x423d64].
+	if (view.joiner) {
+		if (view.runtime->has_self_handle()) {
+			const EntityReads self = entity_reads(view, view.runtime->self_handle());
+			if (self.found) out.local_team = self.team;
+		}
+	} else if (view.kernel != nullptr) {
+		if (const world::Entity *player = view.kernel->local.player()) out.local_team = player->team;
+	}
+	// The latched carrier [orig: dword_A860C4 @0x423944; +0x162 @0x42396f;
+	// +0xF4 @0x4239c3]. The latch stores whatever the attach handle names;
+	// the drawer's `if (dword_A860C4)` is the entity's presence.
+	if (state.flag_carrier_handle != 0xFFFFu) {
+		const EntityReads carrier = entity_reads(view, state.flag_carrier_handle);
+		if (carrier.found) {
+			out.flag_carrier = true;
+			out.flag_carrier_name = carrier.name;
+			out.flag_carrier_team = carrier.team;
+		}
+	}
+}
+
+hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame) {
+	hud::ChatEntryFacts f;
+	f.frame = frame;
+	f.novaworld = novaworld;
+	f.death_screen = local_death_screen_active(view); // [orig: g_DeathScreenActive]
+	if (view.runtime != nullptr) {
+		const replication::ClientState &state = view.runtime->state();
+		f.spawn_gate = state.end_round.header_known;  // [orig: g_SpawnSuccessGate]
+		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
+		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
+	}
+	// [orig: g_NapiNPCtx.is_in_session / is_authority] — the authority's
+	// multiplayer session is the world's mp_session rule: the SP listen
+	// server runs its own replication loop but is never in a session.
+	f.in_session = view.joiner ? (view.runtime != nullptr && view.runtime->in_session())
+			: (view.kernel != nullptr && view.kernel->world.rules.mp_session);
+	f.authority = !view.joiner && view.host != nullptr;
+	f.mp_session_peer = f.in_session;
+	if (view.kernel != nullptr) {
+		const world::World &w = view.kernel->world;
+		if (const world::Entity *local = w.registry.get(w.cached.local_player)) {
+			f.has_local_player = true;
+			// [orig: Entity_FindChildByDefType(local, 1, 0) @0x49ba38 — the
+			// groundEntity walk for a def-type-1 link]
+			f.in_vehicle = world::friendly_tag_aboard_vehicle(w, local->ground_target);
+		}
+	}
+	return f;
 }
 
 } // namespace opennova::inmatch

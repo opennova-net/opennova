@@ -1,5 +1,8 @@
 #pragma once
 
+#include <runtime/hud/game_text_lookup.h>
+
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -117,12 +120,19 @@ inline bool scoreboard_is_non_team(uint32_t game_type) {
 // One row as the drawer needs it.
 struct ScoreboardEntry {
 	uint8_t slot_id = 0;
+	// The status word as the 0x16 parser STORED it: zero unless the SU gate
+	// was on at parse time [orig: `if (!g_ScoreboardStatusSuffixEnabled)
+	// ping = 0` @0x42fbfb].
 	uint16_t status_flags = 0;
 	// The mode stat — SIGNED, as the parser movsx's the wire u16 into its
 	// record and "%3i" prints negatives as negatives [orig: the movsx
 	// @0x42fb9d into rec+0x28]. The type carries the sign so no consumer can
 	// re-read 65534 for -2.
 	int16_t score1 = 0;
+	// The row's team as the drawer reads it: the LIVE entity team byte when
+	// the slot binds one [orig: player_entity->Team @0x423d21 / the pre-pass
+	// @0x423b29], else the 0x16 row's own flags >> 1 (which the parser also
+	// wrote onto the entity @0x42fc88).
 	uint8_t team = 0;
 	bool spectator = false;
 	// Whether the row's connection slot still binds a live entity. Team modes
@@ -133,32 +143,83 @@ struct ScoreboardEntry {
 	bool has_entity = false;
 	std::string name;   // "clan name" — already joined by the embedder in the
 	                    // parser's own order [orig: "%s %s" (clan, name)
-	                    // @0x42fd46]. The row's third string (the slot+0x20
-	                    // squad label, drawn highlighted <ch>..<co>
-	                    // @0x423ddf) ships empty and is a recorded residual.
+	                    // @0x42fd46], at most 31 characters [orig:
+	                    // Napi_CopyString(rec, .., 32) @0x42fd59/@0x42fd6a].
+	// The row's highlighted label (the <ch>%s<co> run): the slot's
+	// clan-registry tag (slot+0x20, PlayerSlot_SetName @0x4348f0) copied into
+	// rec+32 at parse time, 7 characters at most [orig:
+	// Napi_CopyString(rec + 32, tag, 8) @0x42fd85; empty @0x42fd8f].
+	std::string label;
 	uint8_t quality = 0;  // the 0x46 quality byte, 1..3 draws an icon band
+	// The row entity's playerClass (entity+0x294, 5..9) — the same-team
+	// class suffix's switch [orig: @0x423d8a].
+	uint8_t player_class = 0;
 };
 
-// The status-glyph suffix a row appends when its bitfield is non-zero: `" ["`,
-// one character per set bit IN THE WITNESSED APPEND ORDER, then `"]"`, and
-// finally a trailing `S` for bit 0x400 AFTER the bracket
-// [orig: the append chain @0x423ef1-0x4240e8; " [" @0x423f1c, "]" @0x4240c8].
-// Retail's append runs under the per-recipient SU gate
-// [orig: g_ScoreboardStatusSuffixEnabled test @0x423ef8] and, when that gate
-// is ON, a zero word still yields the empty bracket pair " []". The gate is
-// an unported residual (D-HUD-24); until it lands, "zero word, no suffix"
-// reproduces the gate-OFF default exactly (the parser zeroes every word when
-// the gate is off [orig: @0x42fbfb]) and approximates gate-ON by dropping the
-// empty " []".
-std::string scoreboard_status_glyphs(uint16_t status_flags);
+// THE STATUS SUFFIX — gated per recipient by the SU text command
+// [orig: g_ScoreboardStatusSuffixEnabled test @0x423ef8; set by S2C 0x24
+// "SU <n>" @0x429f71]. Gate OFF: nothing. Gate ON: `" ["`, one character per
+// set bit IN THE WITNESSED APPEND ORDER, then `"]"`, and finally a trailing
+// `S` for bit 0x400 AFTER the bracket — so a zero word still yields the empty
+// pair " []" [orig: the append chain @0x423ef1-0x4240e8; " [" @0x423f1c,
+// "]" @0x4240c8].
+std::string scoreboard_status_suffix(bool enabled, uint16_t status_flags);
 
-// The row's text, without the rank (which draws separately in its own color).
-// Non-team PLAYER rows lead with the score [orig: fmt "%3i %s<ch>%s<co>
-// [%02ld]" @0x7c4bc4]; team rows AND spectator rows in either mode carry no
-// score [orig: fmt @0x7c4c00; the spectator arm @0x423e04 takes it in
-// non-team mode too]. The bracketed value is the player's SLOT id
-// [orig: the lookup @0x423c6a].
-std::string scoreboard_row_text(const ScoreboardEntry &e, bool non_team);
+// The class names the same-team suffix switches over, resolved by the
+// embedder from gametext Overlays [orig: @0x423d8a..0x423dbe]: index 0..4 =
+// playerClass 5..9 (STROVR_MEDIC / _SNIPER / _GUNNER / _RIFLEMAN /
+// _ENGINEER), index 5 = every other class (STROVR_UNKNOWN).
+inline constexpr int kScoreboardClassNameCount = 6;
+using ScoreboardClassNames = std::array<std::string, kScoreboardClassNameCount>;
+const char *scoreboard_class_name_key(int index);
+const std::string &scoreboard_class_name(const ScoreboardClassNames &names,
+		uint8_t player_class);
+
+// What the row composer reads beside the row.
+struct ScoreboardRowContext {
+	bool non_team = false;
+	// The SU gate [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49].
+	bool status_suffix = false;
+	// Solo KOTH's countdown rows [orig: g_ScoreboardFlags & 2 @0x423e7d].
+	bool timed = false;
+	// The countdown's minutes [orig: is_authority ? g_TimeLimitMinutes :
+	// dword_A821C0 @0x423a4b..0x423a5e].
+	int time_limit = 0;
+	// The local player's team byte, -1 without a local entity (retail
+	// dereferences g_LocalPlayerEntity unguarded @0x423d64; no entity never
+	// matches here).
+	int local_team = -1;
+};
+
+// The row text composer — one per board draw, fed the rows that reach the
+// drawn arms IN WIRE ORDER (every non-team row; team-mode spectators and
+// team-mode rows on the page's two teams — including the ones the page fold
+// scrolls out of view, since the text is built before the visibility test).
+// Rows: non-team PLAYER rows lead with the score, or with solo KOTH's
+// countdown when the timed flag is up [orig: "%3i %s<ch>%s<co> [%02ld]"
+// @0x423ee9; "%2i:%02i %s<ch>%s<co> [%02ld]" with (60T - score) / 60 and
+// % 60 @0x423ec9]; team rows AND spectator rows in either mode carry no score
+// [orig: "%s<ch>%s<co> [%02ld]" @0x423ddf/@0x423e2d]. The bracketed value is
+// the SLOT id [orig: the lookup @0x423c6a]. Then the SU suffix, then the
+// class suffix " (%s)"
+// [orig: @0x424104]. The composer carries retail's class-suffix LEAK: the
+// team arm stashes the class name of any row whose entity shares the local
+// team, and only a NON-spectator row consumes it — so a same-team
+// spectator's stash rides into the next drawn row's text [orig: the stash
+// @0x423dc3, the consume + clear gated on `!spectator` @0x4240f0..0x424150].
+class ScoreboardRowComposer {
+public:
+	ScoreboardRowComposer(const ScoreboardRowContext &ctx, const ScoreboardClassNames &names)
+		: ctx_(ctx), names_(names) {}
+	// The row's text, without the rank (which draws separately in its own
+	// color).
+	std::string compose(const ScoreboardEntry &e);
+
+private:
+	ScoreboardRowContext ctx_;
+	const ScoreboardClassNames &names_;
+	const std::string *pending_class_ = nullptr;
+};
 
 // The column a row draws in. Non-team mode alternates A/B by non-spectator
 // ordinal; team mode maps the page's team_a -> A and team_b -> B; spectators
@@ -175,5 +236,103 @@ int scoreboard_column_x(const ScoreboardEntry &e, bool non_team, int ordinal,
 uint32_t scoreboard_row_color(const ScoreboardEntry &e, bool non_team,
                               uint32_t hud_color,
                               const ScoreboardTeamPage &page = ScoreboardTeamPage{});
+
+// THE PAGE FOLD [orig: HUD_DrawKillList @0x423bac..0x423c3a]. The pre-pass
+// counts the two player columns — non-team rows alternate, team rows count
+// teams 1|3 into A and 2|4 into B whatever the page (a row needs a live
+// entity) [orig: @0x423af1..0x423b93] — and the spectators; two spacer rows
+// sit between players and spectators when both exist [orig: @0x423ba1].
+// The spectator column seeds below the LONGER player column plus those rows
+// [orig: @0x423c3a].
+struct ScoreboardColumnCounts {
+	int column_a = 0;
+	int column_b = 0;
+	int spectators = 0;
+	int header_rows = 0;
+};
+ScoreboardColumnCounts scoreboard_column_counts(const std::vector<ScoreboardEntry> &rows,
+		bool non_team);
+// The float the page height is scaled by — 1/18 rounded to float
+// [orig: flt_7C4C78, the fmul @0x423bd4].
+inline constexpr float kScoreboardPageScale = 0.0555555559694767f;
+// pages = max(1, ftol(ceil((max(A, B) + header_rows + spectators) /
+// ((490 - base) * 1/18f)))) [orig: @0x423bb4..0x423bf1].
+int scoreboard_page_count(const ScoreboardColumnCounts &counts, int list_base);
+// The stored page folds before every draw and is WRITTEN BACK: below zero
+// wraps to the last page, past the last to the first
+// [orig: @0x423bf6..0x423c0f].
+int scoreboard_page_fold(int page, int pages);
+// The row cursors' base: the list base scrolled up one page height per page
+// [orig: base - page * (490 - base) @0x423c19..0x423c1c]. A row draws only
+// while base <= y < 490 against the UNSCROLLED base [orig: @0x424168].
+int scoreboard_row_base(int list_base, int page);
+
+// The special-key handler's scoreboard arm: PgUp/PgDn move the page only in
+// a session with the board up, and are CONSUMED then — ahead of the help and
+// briefing page keys [orig: Input_HandleSpecialKeys @0x49c8fd..0x49c945 —
+// is_in_session, g_ScoreboardPanelVisible == 1, VK 0x21 @0x49c912 page -= 1
+// @0x49c917, VK 0x22 page += 1 @0x49c93e]. The open edge resets the page
+// [orig: Scoreboard_TogglePlayerList @0x4244e4].
+inline bool scoreboard_takes_page_keys(bool in_session, bool board_open) {
+	return in_session && board_open;
+}
+
+// THE TEAM-SCORE HEADER BLOCK — the per-mode lines the header draws after
+// its spectator rung, centred at x 502 in the bold slot, the active HUD
+// color, one 20-unit step each [orig: HUD_DrawGameScoreOverlay @0x423060,
+// the gate @0x423287..0x4232b4 (skipped for the co-op 0x10020 family and the
+// non-team types 0/1/8), the switch @0x4232bf..0x423925]. `teams` is indexed
+// by team 0..4 (T0 neutral first, the 0x16 team-table order): score1
+// @0xA85AEC+16t, the ctf byte @+8, the koth byte @+12 [orig: the stores
+// @0x42fe08..0x42fe42]. The scores are the table's SIGN-EXTENDED u16s.
+struct ScoreboardTeamScore {
+	int score1 = 0;
+	int ctf_flag = 0;
+	int koth_hold = 0;
+};
+// The Client gametext labels the block formats with [orig: STRCLI05 /
+// STRCLI06 / STRCLI17 / STRCLI18 the four team names, STRCLI07 / STRCLI08
+// the "(of" pair].
+struct ScoreboardHeaderText {
+	std::array<std::string, 4> team_names;
+	std::string of_team_a;
+	std::string of_team_b;
+};
+struct ScoreboardHeaderInput {
+	uint32_t game_type = 0;
+	int team_count = 0;   // [orig: g_ScoreboardTeamCount — the 4-team rows test == 4]
+	int time_limit = 0;   // TKOTH's minutes (ScoreboardRowContext::time_limit)
+	std::array<ScoreboardTeamScore, 5> teams{};
+};
+std::vector<std::string> scoreboard_team_score_lines(const ScoreboardHeaderInput &in,
+		const ScoreboardHeaderText &text);
+
+// THE FLAG CARRIER LINE — FlagBall (0x10008) and the stand-alone type 8 only,
+// while a carrier is latched [orig: `gameType != 65544 && gameType != 8`
+// @0x423932..0x423937; `dword_A860C4` @0x423944]: the Overlays label
+// (STROVER_FLAGCARRIER, fallback "!FlagCarrier:" [orig: @0x423959]), two
+// spaces, the carrier's entity name (entity+0xF4) [orig: @0x4239b1..0x4239ee],
+// centred at x 502 on the header's final y WITHOUT advancing it
+// [orig: HUD_DrawTextAligned(.., 2, 256) @0x423a0a; `return yPos` @0x423a12].
+inline bool scoreboard_has_flag_carrier_line(uint32_t game_type) {
+	return game_type == 0x10008u || game_type == 8u;
+}
+std::string scoreboard_flag_carrier_text(const std::string &label, const std::string &name);
+// The carrier's team byte picks the color: 1 the light-blue palette[3], 2
+// the salmon palette[5], anything else the active HUD color
+// [orig: @0x42396f..0x42398e].
+uint32_t scoreboard_flag_carrier_color(uint8_t team, uint32_t hud_color);
+
+// The board's gametext the drawers look up each draw: the class names
+// (GameText_GetString, "" when absent [orig: @0x423d96..0x423dbe]), the
+// Client team/"(of" labels [orig: @0x4232d5..0x4238ed], and the flag
+// carrier label with its literal fallback [orig: GameText_GetStringWithFallback
+// ("Overlays", "STROVER_FLAGCARRIER", "!FlagCarrier:") @0x423959].
+struct ScoreboardText {
+	ScoreboardClassNames class_names;
+	ScoreboardHeaderText header;
+	std::string flag_carrier_label;
+};
+ScoreboardText scoreboard_text(const GameTextLookup &gametext);
 
 } // namespace opennova::hud

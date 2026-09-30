@@ -37,6 +37,18 @@ void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
         // AnimMap_IsSlotActive(playerClass, 8) @0x5a4ab3 under the local-team
         // gate @0x5a4ac6/@0x5a4acf].
         dst[16] = m.medic ? 1 : 0;
+        // v5: the live pool-entity facts (hud_minimap.h HudMinimapMarker).
+        dst[17] = m.team;
+        dst[18] = m.zone_number;
+        dst[19] = m.def_type;
+        dst[20] = m.entity_bits;
+        dst[21] = m.zone_index;
+        dst[22] = m.zone_radius;
+        dst[23] = m.entity_x;
+        dst[24] = m.entity_y;
+        dst[25] = m.anchor_x;
+        dst[26] = m.anchor_y;
+        dst[27] = m.bound_radius_q16;
         dst += kMinimapFeedStride;
     }
 }
@@ -75,7 +87,83 @@ bool minimap_feed_decode(const int32_t *data, std::size_t size,
         marker.half_y_q16 = row[14];
         marker.floor_px = static_cast<uint8_t>(row[15]);
         marker.medic = row[16] != 0 ? 1 : 0;
+        marker.team = static_cast<uint8_t>(row[17]);
+        marker.zone_number = static_cast<uint8_t>(row[18]);
+        marker.def_type = static_cast<uint8_t>(row[19]);
+        marker.entity_bits = static_cast<uint8_t>(row[20]);
+        marker.zone_index = static_cast<int16_t>(row[21]);
+        marker.zone_radius = static_cast<uint16_t>(row[22]);
+        marker.entity_x = row[23];
+        marker.entity_y = row[24];
+        marker.anchor_x = row[25];
+        marker.anchor_y = row[26];
+        marker.bound_radius_q16 = row[27];
         out.push_back(marker);
+    }
+    return true;
+}
+
+namespace {
+
+template <size_t N>
+int32_t pack_sectors(const std::array<uint8_t, N> &sectors) {
+    uint32_t bits = 0;
+    for (size_t i = 0; i < N; ++i)
+        if (sectors[i] != 0) bits |= 1u << i;
+    return static_cast<int32_t>(bits);
+}
+
+template <size_t N>
+void unpack_sectors(int32_t packed, std::array<uint8_t, N> &sectors) {
+    for (size_t i = 0; i < N; ++i)
+        sectors[i] = (static_cast<uint32_t>(packed) >> i) & 1u ? 1 : 0;
+}
+
+} // namespace
+
+void radar_feed_encode(const HudMinimapRadar &radar, std::vector<int32_t> &out) {
+    out.assign(static_cast<std::size_t>(kRadarFeedHeaderSize) +
+                   radar.threats.size() * static_cast<std::size_t>(kRadarFeedThreatStride),
+               0);
+    out[0] = kRadarFeedVersion;
+    out[1] = radar.rules_no_tracers ? 1 : 0;
+    out[2] = radar.local_x;
+    out[3] = radar.local_y;
+    out[4] = pack_sectors(radar.red12);
+    out[5] = pack_sectors(radar.olive12);
+    out[6] = pack_sectors(radar.red24);
+    out[7] = pack_sectors(radar.olive24);
+    out[8] = static_cast<int32_t>(radar.threats.size());
+    int32_t *dst = out.data() + kRadarFeedHeaderSize;
+    for (const HudMinimapRadar::Threat &threat : radar.threats) {
+        dst[0] = threat.present;
+        dst[1] = threat.x;
+        dst[2] = threat.y;
+        dst += kRadarFeedThreatStride;
+    }
+}
+
+bool radar_feed_decode(const int32_t *data, std::size_t size, HudMinimapRadar &out) {
+    out = HudMinimapRadar{};
+    if (data == nullptr || size < static_cast<std::size_t>(kRadarFeedHeaderSize) ||
+        data[0] != kRadarFeedVersion || data[8] < 0)
+        return false;
+    out.rules_no_tracers = (data[1] & 1) != 0;
+    out.local_x = data[2];
+    out.local_y = data[3];
+    unpack_sectors(data[4], out.red12);
+    unpack_sectors(data[5], out.olive12);
+    unpack_sectors(data[6], out.red24);
+    unpack_sectors(data[7], out.olive24);
+    const std::size_t available = (size - static_cast<std::size_t>(kRadarFeedHeaderSize)) /
+                                  static_cast<std::size_t>(kRadarFeedThreatStride);
+    const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(data[8]), available);
+    out.threats.resize(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const int32_t *row = data + kRadarFeedHeaderSize + i * kRadarFeedThreatStride;
+        out.threats[i].present = row[0] != 0 ? 1 : 0;
+        out.threats[i].x = row[1];
+        out.threats[i].y = row[2];
     }
     return true;
 }

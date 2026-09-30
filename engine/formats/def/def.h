@@ -1085,7 +1085,12 @@ typedef struct DefHudPosDef {
     int flag_carrier[4];
     int game_info[4];
     int wpd_info[4];
-    int zone_info[4];
+    /* ZONEINFO is a THREE-field form like BREATHTIME: x, y, then the alignment
+       word as the third token, no hidden dword (JOX authors `ZONEINFO
+       1013,386,Right`). [orig: HUD_ParseHudposToken @0x5A0642..0x5A0676 ->
+       g_HUDZoneInfoX @0x2723DA4 / dword_2723DA8 (atof) / dword_2723DAC
+       (HUD_ParseTextAlignment on the third token)] */
+    int zone_info[3];
     int exp_points[4];
     int connect_status[4];
     int team_xy[4];
@@ -1100,6 +1105,25 @@ typedef struct DefHudPosDef {
        HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18 via
        atof, atof, HUD_ParseTextAlignment] */
     int breath_time[3];
+
+    /* HUDLS — the weapon slot bar's layout block. Every field keeps the
+       retail global's width: the two texture names are the fixed buffers
+       the handler strcpy's into (20 and 19 bytes, bounded here), the MOREAV
+       offset pair is stored as two SIGNED bytes (the ftol'd value's low
+       byte, read back with movsx @0x599e30/@0x599e42), and HUDLS_SLOT n x y
+       lands at slot n-1 only for n in 1..10 (anything else is ignored).
+       [orig: HUD_ParseHudposToken — HUDLS_SYSTEM @0x59FE53..0x59FE66 ->
+       dword_2723700; HUDLS_BRACKET @0x59FE84..0x59FE9C -> byte_2723704;
+       HUDLS_KEYOFST @0x59FEB9..0x59FEDF -> dword_2723718/1C; HUDLS_MOREAV
+       @0x59FEFD..0x59FF39 -> byte_2723720 + byte_2723733/34; HUDLS_SLOT
+       @0x59FF57..0x59FF9C -> dword_2723738[8*(n-1)] / dword_272373C, the
+       `sub edi,1; cmp edi,9; ja` range test @0x59FF6A..0x59FF70] */
+    int hudls_system;
+    char hudls_bracket[20];
+    int hudls_keyofst[2];
+    char hudls_moreav[19];
+    int8_t hudls_moreav_off[2];
+    int hudls_slot[10][2];
 
     int title_x, title_y;
     int ping_x, ping_y;

@@ -7,6 +7,7 @@
 // [orig: HUD_GetWaypointName @0x594630; HUD_DisplayTriggeredText @0x51f190;
 //  HUD_FormatKillEventMessage @0x422DA0]
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/hud_frame.h> // HudSessionText
 #include <runtime/hud/hud_game_text.h>
 
 #include <cstdio>
@@ -54,14 +55,136 @@ int main() {
 	});
 	const GameTextLookup empty = table_of({});
 
-	// The waypoint name: the raw id keys the mission table; empty or "null"
-	// (any case) falls back to the gametext default; no default reads "".
-	CHECK(waypoint_display_name(1, mission, gametext) == "Alpha");
-	CHECK(waypoint_display_name(2, mission, gametext) == "Waypoint");
-	CHECK(waypoint_display_name(3, mission, gametext) == "Waypoint");
-	CHECK(waypoint_display_name(4, mission, gametext) == "Waypoint");
-	CHECK(waypoint_display_name(9, mission, gametext) == "Waypoint");
-	CHECK(waypoint_display_name(9, mission, empty).empty());
+	// The waypoint name outside a session: the RAW id keys the mission table;
+	// empty or "null" (any case) falls back to the gametext default; no
+	// default reads "" [orig: HUD_GetWaypointName @0x594668 / @0x59476F].
+	const auto wp = [](int32_t id) {
+		WaypointNameKey k;
+		k.name_id = id;
+		return k;
+	};
+	CHECK(waypoint_display_name(wp(1), false, 0x10020u, mission, gametext) == "Alpha");
+	CHECK(waypoint_display_name(wp(2), false, 0x10020u, mission, gametext) == "Waypoint");
+	CHECK(waypoint_display_name(wp(3), false, 0x10020u, mission, gametext) == "Waypoint");
+	CHECK(waypoint_display_name(wp(4), false, 0x10020u, mission, gametext) == "Waypoint");
+	CHECK(waypoint_display_name(wp(9), false, 0x10020u, mission, gametext) == "Waypoint");
+	CHECK(waypoint_display_name(wp(9), false, 0x10020u, mission, empty).empty());
+	// Out of a session the def specials are never consulted.
+	{
+		WaypointNameKey k = wp(1);
+		k.has_def = true;
+		k.def_attrib = 0x80000u;
+		CHECK(waypoint_display_name(k, false, 0x10004u, mission, gametext) == "Alpha");
+	}
+	// In a session the id is remapped +1 unless the game type carries 0x20000
+	// [orig: @0x594678]: retail's 00TRa "Alley Corner" is STRWPNAME002 = raw id
+	// 1 + 1; the co-op shape 0x30020 keys the raw id.
+	{
+		const GameTextLookup trg = table_of({
+				{ "WPNames/STRWPNAME001", "Front Gate" },
+				{ "WPNames/STRWPNAME002", "Alley Corner" },
+		});
+		CHECK(waypoint_display_name(wp(1), true, 0x10020u, trg, gametext) == "Alley Corner");
+		CHECK(waypoint_display_name(wp(1), true, 0x30020u, trg, gametext) == "Front Gate");
+		CHECK(waypoint_display_name(wp(1), false, 0x10020u, trg, gametext) == "Front Gate");
+	}
+	// The in-session def specials [orig: @0x594688..0x59470D]: ARMORY beats
+	// TARGET beats the type lists; a special's miss (and no special at all)
+	// falls back to the mission name of the REMAPPED id.
+	{
+		const GameTextLookup specials = table_of({
+				{ "WPNames/STRWPNAMEARMORY", "Armory" },
+				{ "WPNames/STRWPNAMETARGET", "Target" },
+				{ "WPNames/STRWPNAMEFLAG", "Flag" },
+				{ "WPNames/STRWPNAMEFLAGBAY", "Flag Bay" },
+				{ "WPNames/STRWPNAMEDEFAULT", "Waypoint" },
+		});
+		WaypointNameKey k = wp(0);
+		k.has_def = true;
+		k.def_attrib = 0x80000u | 0x8000u;
+		CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Armory");
+		k.def_attrib = 0x8000u;
+		CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Target");
+		k.def_attrib = 0;
+		for (const int32_t t : {4091, 4093, 4095, 4096, 4097}) {
+			k.def_type = t;
+			CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Flag");
+		}
+		for (const int32_t t : {4098, 4100, 4101, 4102, 4103}) {
+			k.def_type = t;
+			CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Flag Bay");
+		}
+		// 4099 and 4094 are in neither list: the remapped mission id 0 + 1.
+		k.def_type = 4099;
+		CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Alpha");
+		k.def_type = 4094;
+		CHECK(waypoint_display_name(k, true, 0x10004u, mission, specials) == "Alpha");
+		// A special key the gametext lacks misses to the mission name.
+		k.def_type = 4091;
+		CHECK(waypoint_display_name(k, true, 0x10004u, mission, gametext) == "Alpha");
+	}
+	// The label: gametext hud/mto and the name joined "%s %s"; CTF colour runs
+	// by the def type; the LFP override replaces the whole label
+	// [orig: HUD_DrawWaypointNameAndDistance @0x5948D3..0x5949C0].
+	{
+		const GameTextLookup labels = table_of({
+				{ "hud/mto", "m to" },
+				{ "Overlays/LFP", "Objective" },
+		});
+		WaypointNameKey k;
+		CHECK(waypoint_label_text("Alpha", k, 0x10020u, labels) == "m to Alpha");
+		CHECK(waypoint_label_text("", k, 0x10020u, labels) == "m to ");
+		// No "mto" row: GameText_GetString's "" still joins.
+		CHECK(waypoint_label_text("Alpha", k, 0x10020u, empty) == " Alpha");
+		// A '%' in the name is data, not a conversion.
+		CHECK(waypoint_label_text("100%s", k, 0x10020u, labels) == "m to 100%s");
+		k.has_def = true;
+		k.def_type = 4091;
+		CHECK(waypoint_label_text("Flag", k, 0x10004u, labels) == "m to <c4050FF>Flag<co>");
+		k.def_type = 4098;
+		CHECK(waypoint_label_text("Bay", k, 0x10004u, labels) == "m to <c4050FF>Bay<co>");
+		k.def_type = 4093;
+		CHECK(waypoint_label_text("Flag", k, 0x10004u, labels) == "m to <cFF3535>Flag<co>");
+		k.def_type = 4100;
+		CHECK(waypoint_label_text("Bay", k, 0x10004u, labels) == "m to <cFF3535>Bay<co>");
+		// Outside CTF the runs never apply.
+		k.def_type = 4091;
+		CHECK(waypoint_label_text("Flag", k, 0x10008u, labels) == "m to Flag");
+		// The LFP override: attrib 0x40000 and a nonzero zone byte; the letter
+		// is (b & 0x1F) + 64, the number b >> 5.
+		k.def_type = 0;
+		k.def_attrib = 0x40000u;
+		k.zone_number = 0x22; // 'B', 1
+		CHECK(waypoint_label_text("Zone", k, 0x10020u, labels) == "m to Objective B-1");
+		k.zone_number = 0;
+		CHECK(waypoint_label_text("Zone", k, 0x10020u, labels) == "m to Zone");
+	}
+
+	// The session lines' strings, keyed as retail looks them up; a miss is "".
+	{
+		const GameTextLookup session = table_of({
+				{ "Overlays/STROVER50", "Timer" },
+				{ "Client/STRCLI25", "Players remaining:" },
+				{ "Client/STRCLI04", "Number of players:" },
+				{ "Client/STRCLI23", "Number of Spectators:" },
+				{ "Overlays/STROVER53", "In the Zone" },
+				{ "client/strcli19", "Green Team" },
+				{ "client/strcli05", "Joint Ops Team" },
+				{ "client/strcli06", "Rebel Team" },
+				{ "client/strcli17", "Yellow Team" },
+				{ "client/strcli18", "Violet Team" },
+				{ "client/strcli20", " - Attacking" },
+		});
+		HudSessionText t;
+		hud_session_text(session, t);
+		CHECK(t.timer == "Timer" && t.players_remaining == "Players remaining:" &&
+				t.players == "Number of players:" && t.spectators == "Number of Spectators:" &&
+				t.in_the_zone == "In the Zone");
+		CHECK(t.team_names[0] == "Green Team" && t.team_names[1] == "Joint Ops Team" &&
+				t.team_names[2] == "Rebel Team" && t.team_names[3] == "Yellow Team" &&
+				t.team_names[4] == "Violet Team" && t.team_names[5].empty());
+		CHECK(t.attacking == " - Attacking" && t.defending.empty());
+	}
 
 	// The subgoal announcements by section; a miss posts nothing.
 	CHECK(subgoal_message(false, 7, mission) == "Objective secured");

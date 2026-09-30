@@ -213,10 +213,10 @@ bool Simulation::fill_friendly_tags(std::vector<opennova::world::FriendlyTagSour
 	return opennova::inmatch::collect_friendly_tags(role_view(), r_tags);
 }
 
-opennova::inmatch::BreathBarFacts Simulation::breath_bar_facts() const {
-	// The breath bar's samples, seconds and round-over latch for this client
-	// (inmatch/role_feeds.h breath_bar_facts carries the witnesses).
-	return opennova::inmatch::breath_bar_facts(role_view());
+opennova::inmatch::HudRoleFacts Simulation::hud_role_facts() const {
+	// The breath bar's, the MP session lines' and the HUDLS scan's facts for
+	// this client (inmatch/role_feeds.h hud_role_facts carries the witnesses).
+	return opennova::inmatch::hud_role_facts(role_view());
 }
 
 bool Simulation::local_player_radio_request_icon_viewer() const {

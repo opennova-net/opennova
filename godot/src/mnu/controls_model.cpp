@@ -123,6 +123,26 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	return opennova::to_gd(opennova::controls::format_display_string(*r));
 }
 
+void ControlsModel::build_help_screen() { help_screen_.build(bindings_); }
+void ControlsModel::cycle_help_page(bool p_forward) { help_screen_.cycle_page(p_forward); }
+String ControlsModel::get_help_title() const { return opennova::to_gd(help_screen_.title()); }
+String ControlsModel::get_help_page_line() const {
+	return opennova::to_gd(help_screen_.page_line());
+}
+PackedStringArray ControlsModel::get_help_keys() const {
+	PackedStringArray out;
+	for (const opennova::controls::HelpScreenRow &row : help_screen_.rows())
+		out.push_back(opennova::to_gd(row.key));
+	return out;
+}
+PackedStringArray ControlsModel::get_help_texts() const {
+	PackedStringArray out;
+	for (const opennova::controls::HelpScreenRow &row : help_screen_.rows())
+		out.push_back(opennova::to_gd(row.text));
+	return out;
+}
+String ControlsModel::help_footer() { return opennova::to_gd(opennova::controls::help_screen_footer()); }
+
 int ControlsModel::pressed_key_for_token(const String &p_token) const {
 	Input *input = Input::get_singleton();
 	if (input == nullptr) {
@@ -315,6 +335,13 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
+	ClassDB::bind_method(D_METHOD("build_help_screen"), &ControlsModel::build_help_screen);
+	ClassDB::bind_method(D_METHOD("cycle_help_page", "forward"), &ControlsModel::cycle_help_page);
+	ClassDB::bind_method(D_METHOD("get_help_title"), &ControlsModel::get_help_title);
+	ClassDB::bind_method(D_METHOD("get_help_page_line"), &ControlsModel::get_help_page_line);
+	ClassDB::bind_method(D_METHOD("get_help_keys"), &ControlsModel::get_help_keys);
+	ClassDB::bind_method(D_METHOD("get_help_texts"), &ControlsModel::get_help_texts);
+	ClassDB::bind_static_method("ControlsModel", D_METHOD("help_footer"), &ControlsModel::help_footer);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
 	ClassDB::bind_static_method("ControlsModel",

@@ -199,6 +199,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                         target.position[1] = world::to_fixed(speaker->position.y);
                         target.position[2] = world::to_fixed(speaker->position.z);
                         target.friendly = speaker->team == local->team || speaker->team == 0;
+                        ++target.serial;
                     }
                 }
                 if (auto *row = view_.state().find(call->player_index)) {

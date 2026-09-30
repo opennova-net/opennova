@@ -53,6 +53,8 @@ public:
 	static String capture_pcap();
 	// 0 = no runtime MCP endpoint.
 	static int mcp_port();
+	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
+	static bool no_hud();
 
 	// Tests substitute the launch token list; the real runtime parses its own
 	// command line (engine + user args).

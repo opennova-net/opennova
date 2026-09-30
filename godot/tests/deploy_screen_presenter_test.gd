@@ -207,6 +207,32 @@ func test_open_and_close_emit_the_shell_state_signals() -> void:
 	assert_signal_emit_count(presenter, "closed", 1, "closing an already-closed screen is a no-op")
 
 
+# The MAP window (hud-re D-HUD-19): the presenter mounts the windowed map view
+# over the authored MAP widget inside DEATH_SHROUD, follows its frame rect, and
+# the show event fits the zoom; the window's model takes the mouse-class events.
+func test_map_window_mounts_over_the_map_widget() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open())
+	var map_window := presenter.get_map_window()
+	assert_not_null(map_window, "the MAP widget hosts the map window")
+	if map_window == null:
+		return
+	var driver := presenter.get_menu_driver()
+	var rect := driver.widget_frame_rect(driver.widget_id("MAP"))
+	assert_eq(map_window.position, rect.position, "placed at the widget's frame rect")
+	assert_eq(map_window.size, rect.size)
+	assert_eq(map_window.get_widget_design_rect(), Rect2i(310, 30, 460, 460),
+			"the absolute authored rect (DEATH_SHROUD origin + MAP position)")
+	assert_true(map_window.visible)
+	var zoom := map_window.get_zoom()
+	assert_between(zoom, 0.1, 10.0, "the show-time fit lands inside the clamp")
+	map_window.push_map_event(MapViewWindow.MAP_EVENT_WHEEL, Vector2i(400, 200), 0, 1)
+	assert_almost_eq(map_window.get_zoom(), maxf(zoom * 0.85, 0.1), 0.0001)
+	presenter.close()
+	assert_false(presenter.is_open())
+
+
 func test_open_refuses_when_no_pick_is_owed() -> void:
 	# A spawned OFFLINE player owes no deployment pick — the real
 	# is_join_deploy_pick_pending is false outside a held join.

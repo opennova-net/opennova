@@ -104,7 +104,9 @@
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
+#include "hud/map_view_window.h"
 #include "hud/hud_toggles.h"
+#include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
 #include "hud/hud_inset_scope.h"
 #include "devtools/dev_tools.h"
@@ -262,6 +264,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerWeaponView);
 	GDREGISTER_CLASS(WaypointHudView);
 	GDREGISTER_CLASS(HudMapGridOrigin);
+	GDREGISTER_CLASS(HudMapOverlays);
 	GDREGISTER_CLASS(VehiclePanelView);
 	GDREGISTER_CLASS(ScoreFeedback);
 	GDREGISTER_CLASS(ScoreboardHeader);
@@ -304,7 +307,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(HudToggles);
+	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
 	GDREGISTER_CLASS(FeedRow);

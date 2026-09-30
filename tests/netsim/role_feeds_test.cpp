@@ -125,6 +125,68 @@ int main() {
 		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
 	}
 
+	// The HUD's role facts: the session lines' globals off the replica (a
+	// joiner's 0x08 time-limit copy, the 0x16 team rows read signed, the
+	// UNclamped round clock) and the kernel (the session bit, the local
+	// team, the A&D latch) [orig: HUD_DrawGameTimerOverlay @0x59cc80;
+	// HUD_DrawScoreOverlay @0x593e50; HUD_DrawTeamIdLine @0x59aa30].
+	{
+		ClientRuntime rt("hud-facts");
+		replication::ClientState &st = rt.state();
+		st.permanent_death = true;
+		st.session_time_limit_minutes = 15;
+		st.round_time_remaining_ticks = -1;
+		st.scoreboard.alive_player_count = 3;
+		st.scoreboard.spectator_count = 2;
+		st.scoreboard.rows.resize(6);
+		st.scoreboard.teams.resize(3);
+		st.scoreboard.teams[1].score1 = static_cast<uint16_t>(0xFFFEu); // -2 through movsx
+		st.scoreboard.teams[1].koth_hold = 4;
+		st.scoreboard.teams[2].score1 = 90;
+		mission::MissionKernel kernel;
+		kernel.world.rules.mp_session = true;
+		kernel.world.registry.configure_pool(0, 8);
+		world::Entity seed;
+		seed.kind = world::EntityKind::Organic;
+		seed.team = 2;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
+		kernel.local.attack_defend_role = 1;
+		RoleView view;
+		view.runtime = &rt;
+		view.kernel = &kernel;
+		view.joiner = true;
+		const HudRoleFacts f = hud_role_facts(view);
+		CHECK(f.session.in_session && f.session.round_time_remaining == -1 &&
+				f.session.permanent_death && f.session.remaining_count == 3 &&
+				f.session.row_count == 6 && f.session.spectator_count == 2);
+		CHECK(f.session.time_limit_minutes == 15 && f.session.team_score1[0] == -2 &&
+				f.session.team_koth[0] == 4 && f.session.team_score1[1] == 90);
+		CHECK(f.session.team == 2 && f.session.attack_defend == 1 && f.session.zone_coverage == 0);
+		// No inventory: every slot-bar category empty.
+		CHECK(f.slot_bar[6].adm_index == -1 && f.slot_bar[0].count == 0);
+		const HudRoleFacts none = hud_role_facts(RoleView{});
+		CHECK(!none.session.in_session && none.session.round_time_remaining == -1);
+		// The A&D side latch: the first TARGET-attrib def in pool 2 (then 1)
+		// against the local team — another team's target attacks (2), our own
+		// defends (1); any other game type clears it [orig: sub_524110 @0x524110].
+		kernel.world.registry.configure_pool(1, 4);
+		kernel.world.registry.configure_pool(2, 4);
+		world::Entity item;
+		item.has_item_def = true;
+		item.item_attrib = 0x8000u;
+		item.team = 2;
+		kernel.world.registry.spawn(1, item);
+		kernel.local.latch_attack_defend_role(0x10002u);
+		CHECK(kernel.local.attack_defend_role == 1);
+		world::Entity building = item;
+		building.team = 1;
+		kernel.world.registry.spawn(2, building); // pool 2 is walked first
+		kernel.local.latch_attack_defend_role(0x10002u);
+		CHECK(kernel.local.attack_defend_role == 2);
+		kernel.local.latch_attack_defend_role(0x10000u);
+		CHECK(kernel.local.attack_defend_role == 0);
+	}
+
 	// The DEATH screen facts: the sub-block-0 timers and the being-revived latch.
 	cs.respawn_penalty_seconds = 4;
 	cs.local_revive_seconds = 30;

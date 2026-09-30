@@ -3,6 +3,8 @@
 
 #include <runtime/hud/hud_game_text.h>
 
+#include <runtime/hud/hud_frame.h> // HudSessionText
+
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -10,16 +12,83 @@
 
 namespace opennova::hud {
 
-std::string waypoint_display_name(int name_id, const GameTextLookup &mission,
-		const GameTextLookup &gametext) {
-	char key[32];
-	std::snprintf(key, sizeof(key), "STRWPNAME%03d", name_id);
-	const std::string name = game_text(mission, "WPNames", key, "");
+std::string waypoint_display_name(const WaypointNameKey &key, bool in_session,
+		uint32_t game_type, const GameTextLookup &mission, const GameTextLookup &gametext) {
+	int32_t id = key.name_id; // entity+672 [orig: @0x594650]
+	char buf[32];
+	if (in_session) { // [orig: `g_NapiNPCtx.is_in_session` @0x594668]
+		if ((game_type & 0x20000u) == 0u) ++id; // [orig: @0x594678..0x59467A]
+		if (key.has_def) { // entity+32 [orig: @0x59467D..0x594682]
+			buf[0] = 0;
+			if ((key.def_attrib & 0x80000u) != 0u) {
+				std::snprintf(buf, sizeof(buf), "STRWPNAMEARMORY"); // @0x594698
+			} else if ((key.def_attrib & 0x8000u) != 0u) {
+				std::snprintf(buf, sizeof(buf), "STRWPNAMETARGET"); // @0x5946AC
+			} else {
+				const int32_t t = key.def_type; // def+80 @0x5946AE
+				if (t == 4091 || t == 4093 || t == 4095 || t == 4096 || t == 4097)
+					std::snprintf(buf, sizeof(buf), "STRWPNAMEFLAG"); // @0x59470D
+				else if (t == 4098 || t == 4100 || t == 4101 || t == 4102 || t == 4103)
+					std::snprintf(buf, sizeof(buf), "STRWPNAMEFLAGBAY"); // @0x594701
+			}
+			// An empty key misses like any other [orig: GameText_GetString
+			// @0x59471F; the empty test @0x59472D].
+			std::string special = buf[0] != 0 ? game_text(gametext, "WPNames", buf, "") : std::string();
+			if (!special.empty()) return special;
+		}
+	}
+	std::snprintf(buf, sizeof(buf), "STRWPNAME%03d", id); // [orig: @0x59473D]
+	const std::string name = game_text(mission, "WPNames", buf, "");
 	// Empty or the literal "null" falls back to the gametext default
-	// [orig: @0x59477b].
+	// [orig: @0x59476F..0x59477B].
 	if (name.empty() || strutil::iequals(name.c_str(), "null"))
 		return game_text(gametext, "WPNames", "STRWPNAMEDEFAULT", "");
 	return name;
+}
+
+std::string waypoint_label_text(const std::string &name, const WaypointNameKey &key,
+		uint32_t game_type, const GameTextLookup &gametext) {
+	// "m to" is gametext hud/mto [orig: GameText_GetString(off_7C4B24 "hud",
+	// off_7D8F74 "mto") @0x59492B / @0x59490B / @0x59494B / @0x5949AD].
+	const std::string mto = game_text(gametext, "hud", "mto", "");
+	std::string label;
+	const char *format = "%s %s"; // [orig: @0x594956]
+	if (key.has_def && game_type == 0x10004u) { // [orig: @0x5948C2..0x5948D3]
+		if (key.def_type == 4091 || key.def_type == 4098)
+			format = "%s <c4050FF>%s<co>"; // [orig: @0x594936]
+		else if (key.def_type == 4093 || key.def_type == 4100)
+			format = "%s <cFF3535>%s<co>"; // [orig: @0x594916]
+	}
+	HudTextArg a;
+	a.text = mto;
+	HudTextArg b;
+	b.text = name;
+	label = hud_sprintf(format, {a, b});
+	// The LFP override replaces the whole label [orig: @0x59495B..0x5949C0 —
+	// def+84 & 0x40000 and entity+538 nonzero; "%s %s %c-%d" with
+	// Overlays/LFP (off_7D8F48), (b & 0x1F) + 64, b >> 5].
+	if (key.has_def && (key.def_attrib & 0x40000u) != 0u && key.zone_number != 0) {
+		char buf[256];
+		std::snprintf(buf, sizeof(buf), "%s %s %c-%d", mto.c_str(),
+				game_text(gametext, "Overlays", "LFP", "").c_str(),
+				static_cast<char>((key.zone_number & 0x1F) + 64), key.zone_number >> 5);
+		label = buf;
+	}
+	return label;
+}
+
+void hud_session_text(const GameTextLookup &gametext, HudSessionText &out) {
+	out.timer = game_text(gametext, "Overlays", "STROVER50", "");            // @0x593E00
+	out.players_remaining = game_text(gametext, "Client", "STRCLI25", "");  // @0x593ED9
+	out.players = game_text(gametext, "Client", "STRCLI04", "");            // @0x593F04
+	out.spectators = game_text(gametext, "Client", "STRCLI23", "");         // @0x593F28
+	out.in_the_zone = game_text(gametext, "Overlays", "STROVER53", "");     // @0x59CE2D
+	static const char *const kTeamKeys[6] = {"strcli19", "strcli05", "strcli06", "strcli17",
+			"strcli18", "strcli01"}; // [orig: @0x59AAED..0x59ABDF]
+	for (size_t i = 0; i < out.team_names.size(); ++i)
+		out.team_names[i] = game_text(gametext, "client", kTeamKeys[i], "");
+	out.attacking = game_text(gametext, "client", "strcli20", ""); // @0x59AC86
+	out.defending = game_text(gametext, "client", "strcli21", ""); // @0x59AC96
 }
 
 std::string subgoal_message(bool lost, int header_id, const GameTextLookup &mission) {

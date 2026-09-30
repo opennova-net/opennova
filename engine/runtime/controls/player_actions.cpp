@@ -84,6 +84,17 @@ const ActionRow kRows[] = {
 	// [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
 	//  @0x520bc0 (0->2->3->0)]
 	{"map_toggle", {Action::MapCycle}, Gate::Active},
+	// B / N / Ctrl+= / Ctrl+-: the sim owns the witnessed refusals (fire
+	// charge, the scoped seat-3 view) and the gain clamp 0..4.
+	// [orig: rows 103/104/45/46 = dispatch 26 / 41 / 56 / 57 ->
+	//  Input_HandleActionBinding_0 cases 0x1A, 0x29, 0x38, 0x39 @0x4e0420]
+	{"binoculars", {Action::Binoculars}, Gate::Active},
+	{"NVG", {Action::NightVision}, Gate::Active},
+	{"nvggainup", {Action::NvgGain, 1}, Gate::Active},
+	{"nvggaindown", {Action::NvgGain, -1}, Gate::Active},
+	// F7; the value is replaced by the Shift direction when the row fires.
+	// [orig: row 51 = dispatch 23 @0x49b3de]
+	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
 };
 
 } // namespace
@@ -159,7 +170,11 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		// Raw event-row latches advance behind overlays, without capture,
 		// during a USE hold and without a sim. Only scope-zero freezes above.
 		if (world::latched_key_edge(down, active && !swallowed, rows_[i].down) &&
-				gate.simulation_available) frame.requests.push_back(row.request);
+				gate.simulation_available) {
+			PlayerActionRequest request = row.request;
+			if (request.action == Action::WaypointCycle && source.shift_down()) request.value = -1;
+			frame.requests.push_back(request);
+		}
 	}
 	return frame;
 }

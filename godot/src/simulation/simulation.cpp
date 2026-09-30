@@ -196,6 +196,7 @@ void Simulation::reset_world() {
 	assets_.infantry_adm_item_db.unref();
 	present_.occlusion_culled_bms.clear();
 	present_.minimap_snapshot_valid = false;
+	present_.minimap_overlays_valid = false;
 	// Rebuild the kernel's terrain store from the retained TerrainData (the
 	// legacy pre-load set_terrain_height_field seam), then layer the shell-fed
 	// surface extras back on.
@@ -782,6 +783,7 @@ void Simulation::restore_world_baseline() {
 	// The logic tick rewinds and the runtime may be recreated below — a cached
 	// minimap snapshot keyed on (revision, tick) could collide across epochs.
 	present_.minimap_snapshot_valid = false;
+	present_.minimap_overlays_valid = false;
 	if (kernel_->wire_header_world) {
 		// ClientState survives Stop/Start, while the body-empty baseline removes
 		// its registry carriers. Force one exact rematerialization fold; retain the

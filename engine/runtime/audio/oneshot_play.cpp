@@ -34,7 +34,8 @@ void SoundSetIndex::add_bank(int32_t bank_index, const lwf::File &bank) {
 		if (index_.find(key) != index_.end()) {
 			continue;
 		}
-		index_.emplace(key, SetLocation{ bank_index, static_cast<int32_t>(si) });
+		index_.emplace(key, SetLocation{ bank_index, static_cast<int32_t>(si),
+				static_cast<int32_t>(bank.multis[si].target_id) });
 		names_.push_back(key);
 	}
 }

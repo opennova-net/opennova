@@ -22,10 +22,11 @@ extends Node
 ##  DeathScreen_UpdateUI @0x553150 (map zoom fit from the zone AABB,
 ##  SWAP_TEAMS/BUTTON_TEAMLIST only in the TDM family)]
 ##
-## The MAP window's terrain/zone/blip draw (the windowed map renderer
-## MapOverlay_DrawView @0x5a58e0, sibling of HUD_DrawMapOverlay @0x5a5f40) is the tracked
-## next map-phase witness (docs/interface/hud-re.md follow-ups); until it lands
-## the authored window chrome renders without the map image.
+## The MAP window hosts the windowed map view (MapViewWindow over the engine's
+## DeathMapView and the HUD compiler's DEATH pass, hud/hud_map_view.h): the
+## terrain, the marker walk, the zone letters and the player crosshair, with
+## left-drag pan, right-drag / wheel zoom, the show-time zoom fit against the
+## DEATH_SHROUD window and the per-tick pan ease. Witnesses: hud-re D-HUD-19.
 
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
@@ -34,6 +35,10 @@ const MENU_SCREEN := "DEATH"
 # the cadence rides the tick, not a round 250 ms).
 static var REFRESH_INTERVAL_S: float = Simulation.deploy_refresh_interval_seconds()
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
+# The custom-draw MAP window and the shroud window whose authored size the
+# show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
+const MAP_WIDGET := "MAP"
+const SHROUD_WIDGET := "DEATH_SHROUD"
 
 signal opened
 signal closed
@@ -66,6 +71,11 @@ class SpawnRow extends RefCounted:
 		param = p_param
 
 var _spawn_rows: Array[SpawnRow] = []
+# The MAP window host mounted over the MAP widget (null until the menu builds
+# on a screen that authors MAP), and the shell's HUD overlay getter: the map
+# pass compiles over the HUD's terrain / markers / fonts.
+var _map_window: MapViewWindow = null
+var _hud_source: Callable = Callable()
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -77,6 +87,18 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## The HUD overlay getter the MAP window draws through (the shell hands the HUD
+## presenter's get_game_hud; the overlay builds lazily with the first HUD frame).
+func set_hud_source(source: Callable) -> void:
+	_hud_source = source
+
+
+## The MAP window host (ADR 0018 read seam; null before the menu builds or when
+## the screen authors no MAP widget).
+func get_map_window() -> MapViewWindow:
+	return _map_window if _map_window != null and is_instance_valid(_map_window) else null
 
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam):
@@ -134,6 +156,7 @@ func open() -> bool:
 	_populate_spawn_list(sim)
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
+	_show_map_window(sim)
 	_refresh_accum = 0.0
 	set_process(true)
 	opened.emit()
@@ -142,6 +165,9 @@ func open() -> bool:
 
 func close() -> void:
 	set_process(false)
+	var map_window := get_map_window()
+	if map_window != null:
+		map_window.screen_unload()
 	if MenuFrameSurface.hide_frame(_frame):
 		closed.emit()
 
@@ -174,6 +200,7 @@ func teardown() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
+	_map_window = null
 	_spawn_rows = []
 
 
@@ -184,6 +211,7 @@ func _process(delta: float) -> void:
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
 	_driver.tick(_view.frame_clock_ms)
+	_place_map_window()
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
 		close()
@@ -389,7 +417,59 @@ func _ensure_menu() -> bool:
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
+	_mount_map_window()
 	return true
+
+
+# Mount the MAP window host as a frame child over the authored MAP widget (the
+# credits/preview mount pattern; the frame's cursor overlay stays above it).
+func _mount_map_window() -> void:
+	var id := _driver.widget_id(MAP_WIDGET)
+	if id < 0:
+		return
+	_map_window = MapViewWindow.new()
+	_map_window.name = "DeployMapWindow"
+	_frame.add_child(_map_window)
+	_place_map_window()
+
+
+# Follow the widget: its frame rect, its authored design rect, and its
+# effective visibility (the shroud hides with the CONFIRM_EXIT dialog).
+func _place_map_window() -> void:
+	var map_window := get_map_window()
+	if map_window == null or _driver == null:
+		return
+	var id := _driver.widget_id(MAP_WIDGET)
+	var index := _driver.frame_index(id)
+	if index < 0:
+		map_window.visible = false
+		return
+	var rect := _driver.widget_frame_rect(id)
+	map_window.position = rect.position
+	map_window.size = rect.size
+	var design := _frame.widget_rect(index)
+	map_window.set_widget_design_rect(Rect2i(design))
+	map_window.visible = _frame.is_widget_shown(index) and rect.size.x > 0.0 \
+			and rect.size.y > 0.0
+
+
+# The screen's load + show events for the MAP window: the sources, then the
+# seed (first load) and the zoom fit against the shroud's authored size.
+func _show_map_window(sim: Simulation) -> void:
+	var map_window := get_map_window()
+	if map_window == null:
+		return
+	var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
+	map_window.set_hud_overlay(hud)
+	map_window.set_simulation(sim)
+	_place_map_window()
+	var shroud_id := _driver.widget_id(SHROUD_WIDGET)
+	var shroud_index := _driver.frame_index(shroud_id) if shroud_id >= 0 else -1
+	var shroud_size := Vector2i.ZERO
+	if shroud_index >= 0:
+		shroud_size = Vector2i(_frame.widget_rect(shroud_index).size)
+	map_window.screen_load()
+	map_window.screen_show(shroud_index >= 0, shroud_size)
 
 
 # The compiled frame is a passive surface; MenuFrameSurface.forward_gui_input
@@ -420,3 +500,4 @@ func _game_text(section: String, key: String, fallback: String) -> String:
 func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
+	_place_map_window()

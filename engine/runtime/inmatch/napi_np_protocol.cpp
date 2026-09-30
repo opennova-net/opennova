@@ -1,6 +1,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 
 #include <runtime/inmatch/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
+#include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
 #include <runtime/inmatch/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
@@ -219,6 +220,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	const world::EntityHandle owned_entity = it->link.owned_entity;
 	const uint8_t player_slot = it->reply.player_slot;
 	if (had_player) {
+		// The leave line first, while the leaver's entity still stands
+		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
+		// @0x51b809..0x51b82e].
+		broadcast_player_leaving_text(list, *it, ctx.world);
 		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
 				owned_entity.pool() == 0;
 		const uint16_t freed_pool0_slot =
@@ -1065,9 +1070,11 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// the roster slot's 0x46 REMOVAL to the remaining in-match peers (@0x51b8ad re-serializes
 	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
 	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
-	// PlayerSlot_ClearAndUnlink @0x431420). Deferred, tracked in D-NET-149: the 0x32
-	// minimap-slot + 0x6A squad broadcasts and the team spawn-token return
-	// (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses this same teardown path.
+	// PlayerSlot_ClearAndUnlink @0x431420), led by the 0x32 leave line (@0x51b6d3, see
+	// teardown_connection). Deferred, tracked in D-NET-149: the 0x32 subtype-4 + 0x6A
+	// clan-registry pair (an opennova host keeps no NovaWorld registry) and the team
+	// spawn-token return (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses
+	// this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);
 	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide || body.size() < 4) return;
 	const uint32_t receiver_local_key =
@@ -1366,8 +1373,10 @@ std::vector<TickOut> tick_connections(
 			++ctx.np_protocol.roster_generation;
 			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
 			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
-			// unknown-slot churn behind the stale HUD count (D-NET-158). [orig:
-			// Server_PlayerAdd @0x51D296]
+			// unknown-slot churn behind the stale HUD count (D-NET-158). The
+			// 0x32 join line leads it, as in the original [orig:
+			// Server_PlayerAdd @0x51d28a (0x32) then @0x51D296 (0x46)].
+			broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, ctx.world);
 			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
 			                              ctx.world);
 		}

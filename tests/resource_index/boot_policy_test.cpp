@@ -35,6 +35,12 @@ void test_flags_parse_case_insensitively_with_values() {
     // distinct from no flag at all (the bundled assets/ boot).
     const LaunchFlags bare = parse_launch_flags({"game.exe", "--resource-dir"});
     CHECK(bare.resource_dir.empty() && bare.resource_dir_given);
+    // /NOHUD: the whole token in any case; a prefix or suffix is no match
+    // [orig: Game_ParseCommandLineAndInit `_stricmp(token, "/NOHUD")` @0x4A79FC].
+    CHECK(parse_launch_flags({"game.exe", "/nohud"}).no_hud);
+    CHECK(parse_launch_flags({"game.exe", "/NOHUD", "/d"}).no_hud);
+    CHECK(!parse_launch_flags({"game.exe", "/NOHUDX"}).no_hud);
+    CHECK(!parse_launch_flags({"game.exe"}).no_hud);
 }
 
 void test_runtime_launch_flags_parse() {

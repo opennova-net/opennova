@@ -388,6 +388,10 @@ struct Entity {
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di
     // assets. Armory/zone/etc. classifiers do not require it.
     bool has_minimap_model_marker = false;
+    // Whether the entity's def graphic loaded (retail entity+0x30 non-null):
+    // the persistent map bank draws only model-bearing slots.
+    // [orig: MapOverlay_RenderAllByLayer @0x5BE6C4..0x5BE6C9]
+    bool has_graphic_model = false;
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).
@@ -884,6 +888,12 @@ struct Entity {
 	// group by that bit [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
 	// @0x51C5C0 `(1 << typeIndex) & def+2772`, then g_ItemGroups[typeIndex]].
 	std::vector<uint8_t> vehicle_spawn_groups;
+	// ItemDef+0xAD8 on a vehicle bay (attrib2 bit 0): the OR of its spawn
+	// groups' flags — bit0 a unitType 1/2/12 member, bit1 3/4, bit2 5..8 —
+	// the minimap classifier's cell 19/20/21 selector.
+	// [orig: ItemDefs_LoadAndValidate @0x4a1fa7..0x4a1fcf (group flags),
+	//  @0x4a2010..0x4a2058 (the bay OR); Entity_ClassifyForMinimap @0x50FAF0]
+	uint8_t vehicle_bay_flags = 0;
 
 	// --- Advance & Secure zone fields (net-re §5.61) ---
 	// entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;

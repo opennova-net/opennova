@@ -69,6 +69,12 @@ struct HudCombatState {
 	uint32_t designator_color = 0x60FF0000u;
 	HudProjectedPoint impact_point;
 	HudProjectedPoint target_point, aim_point, commander_point;
+	// The nearest FARP of the proximity list (def attrib2 0x2000, zone-owned
+	// or unnumbered) within 0x40000000 Q16 — hudInfo+0x10 and its position
+	// g_TrackedTargetPos, rebuilt every frame [orig: HUD_BuildEntityInfo
+	// @0x4b891a..0x4b89e3 after the memset @0x5a80b1].
+	bool farp_present = false;
+	int32_t farp_x_q16 = 0, farp_y_q16 = 0;
 	bool vehicle_controls = false, parachute = false, armor = false, carrying = false;
 	uint64_t vehicle_identity = 0;
 	std::string weapon_identity;

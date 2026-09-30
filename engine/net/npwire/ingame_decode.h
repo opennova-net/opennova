@@ -2103,6 +2103,43 @@ struct ChatBroadcast {
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 
+// S2C 0x32 — FORMATTED GAME TEXT, the SYSTEM-ring join/leave lines:
+// `[i8 subtype][cstr text]`, subtypes 1/2 add `[i8 team]` after the NUL.
+// Every other subtype posts nothing. The client resolves the Client gametext
+// template per subtype and substitutes the text as `$A`:
+//   1 a player joined (`{name, team}`) — team 0: STRCLI22 (as a spectator);
+//     game type < 2 or == 8: STRCLI11; teams 1..4: STRCLI12..15; any other
+//     team: nothing;
+//   2 a player is leaving (STRCLI16);
+//   3 a squadron entered (the literal `"$A" squadron has entered.`);
+//   4 a squadron left (no line — the case exists but posts nothing);
+//   5 a player became a spectator (STRCLI24).
+// The subtype and team bytes are read SIGNED (movsx); a short body reads 0
+// for each byte and the text is the bytes up to the NUL or the body end.
+// [orig: NapiNPClientMsg_0x032 @0x428060 — the subtype read @0x42807b, the
+//  movsx switch @0x428080..0x428099, the team byte past the NUL
+//  @0x4280ac..0x4280d5, the key picks @0x4280df..0x428155; the senders
+//  Server_PlayerAdd {1, slot+0x28, slot+0x1A0} @0x51d21e..0x51d291 and {3,
+//  node name} @0x51d18e..0x51d20e, Server_HandlePlayerDisconnect {2, name,
+//  team} via NetPacket_SerializeMinimapSlot_0 @0x51b6a8..0x51b6d3 and {4,
+//  node name} @0x51b705..0x51b781, the spectator convert {5, name}
+//  @0x519edc..0x519f43 — every one reliable, send mask 0x80]
+inline constexpr int8_t kGameTextPlayerJoined = 1;
+inline constexpr int8_t kGameTextPlayerLeaving = 2;
+inline constexpr int8_t kGameTextSquadronEntered = 3;
+inline constexpr int8_t kGameTextSquadronLeft = 4;
+inline constexpr int8_t kGameTextPlayerSpectating = 5;
+struct FormattedGameText {
+	int8_t subtype = 0;
+	std::string text;
+	int8_t team = 0;   // subtypes 1/2 only
+};
+// True for subtypes 1..5 (the handled switch), false for every other; `clean`
+// reports a well-formed body (terminated text, the team byte present for 1/2,
+// nothing trailing).
+bool decode_formatted_game_text(const uint8_t *body, size_t len, FormattedGameText &out,
+		bool *clean = nullptr);
+
 // §5.68 S2C 0x56 — END-OF-ROUND STAT BOARD. Everything the post-round
 // stat.mnu screen shows arrives here, and it arrives CHUNKED and PULLED: each
 // datagram is [u16 total_size][u16 chunk_offset][chunk], written into a

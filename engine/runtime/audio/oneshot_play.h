@@ -30,6 +30,10 @@ namespace opennova::audio {
 struct SetLocation {
 	int32_t bank = -1;
 	int32_t set = -1;
+	// The set's in-memory +72 word (Multi.target_id): the 3D one-shot cull
+	// range in whole units, also read by the ammo loader's whiz radius
+	// [orig: AmmoDef_InitEffectsTable @0x40a050 / @0x40a072].
+	int32_t cull_range = 0;
 	bool valid() const { return bank >= 0; }
 };
 

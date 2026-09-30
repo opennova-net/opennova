@@ -180,6 +180,10 @@ void Simulation::request_hud_map_close() {
 	kernel_->local.hud_map_control.on_respawn_init();
 }
 
+void Simulation::request_waypoint_cycle(int p_direction) {
+	kernel_->world.script.waypoints.manual_cycle(p_direction < 0, is_mp_session());
+}
+
 int Simulation::get_hud_map_mode() const {
 	return kernel_->local.hud_map_control.mode;
 }
