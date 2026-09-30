@@ -329,9 +329,11 @@ constexpr RequestKindRow kRows[] = {
 			.acts_on_saved()
 			.validates()
 			.row,
-	// It stops the import's plan that runs (Supersede: ImportPlan gives way to it).
+	// It stops the import's plan or write that runs (Supersede: ImportPlan and ImportApply give way to
+	// it; an import that wrote cannot be cancelled, and refuses it until it ends).
 	Request(K::CancelImport, "cancel_import", serve_cancel_import,
-			"The import dialog closed, its plan stopped when one runs.")
+			"The import dialog closed, its plan stopped when one runs, and an import it raised stopped "
+			"before it writes.")
 			.holds(kNone, kNone, OnBusy::Supersede)
 			.row,
 	Request(K::CreateMissing, "create_missing", serve_create_missing,

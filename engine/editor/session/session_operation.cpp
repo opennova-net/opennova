@@ -20,7 +20,8 @@ constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
 // import's write and a rename's commit read and write the files and the open documents (the import
 // pass writes the imported outputs, a finish reads documents again): an edit waits. An import's plan
 // reads the files: an edit goes on, a save waits, and a new plan (or the dialog's Cancel) takes its
-// place.
+// place; the dialog's Cancel stops an import's write too, before it writes (after, it is refused
+// until the import ends).
 constexpr OperationKindRow kOperationKindRows[] = {
 	{OperationKind::Open, "open", kHoldsAll, kHoldsAll | HoldsSlot, {}, {}, "Opening", "opening the project"},
 	{OperationKind::Refresh, "refresh", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {}, "Refreshing",
@@ -29,8 +30,8 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	{OperationKind::ImportPlan, "import_plan", HoldsFiles, HoldsSlot, {},
 	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewInstallImport, K::CancelImport},
 	 "Planning the import", "the import's plan"},
-	{OperationKind::ImportApply, "import_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
-	 "Importing", "the import"},
+	{OperationKind::ImportApply, "import_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {},
+	 {K::CancelImport}, "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Renaming", "the rename"},
 };

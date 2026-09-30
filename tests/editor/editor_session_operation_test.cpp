@@ -248,6 +248,8 @@ static int test_request_table() {
 	for (const K kind : {K::Save, K::ImportFiles, K::Rescan, K::Build, K::RenameSymbol})
 		TEST_EXPECT(gate_answer(kind, planning) == GateAnswer::Refuse);
 	TEST_EXPECT(gate_answer(K::CancelImport, planning) == GateAnswer::Supersede);
+	TEST_EXPECT(gate_answer(K::CancelImport, status_of(OperationKind::ImportApply, true)) == GateAnswer::Supersede &&
+	            gate_answer(K::CancelImport, status_of(OperationKind::ImportApply, false)) == GateAnswer::Refuse);
 	const OperationStatus refreshing = status_of(OperationKind::Refresh, true);
 	for (const K kind : {K::EditRecord, K::Save, K::OpenDocument, K::Build})
 		TEST_EXPECT(gate_answer(kind, refreshing) == GateAnswer::Refuse);
