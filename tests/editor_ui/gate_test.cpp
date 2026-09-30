@@ -17,9 +17,12 @@
 
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/rename_transaction.h>
+#include <editor/import/import_run.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include "editor_ui_test_support.h"
 
@@ -98,7 +101,7 @@ struct Probe {
 
 // Every probe pressed under `status`: the ones whose answer is not the gate's reported.
 void check_probes(Ui &ui, SessionView &v, const OperationStatus &status, const std::vector<Probe> &probes) {
-	v.operation = status;
+	v.activity.operation = status;
 	v.revisions.touch(ViewConcern::Operation);
 	ui.frames(2);
 	ui.away();
@@ -136,33 +139,33 @@ void test_windows_show_the_gate() {
 	a->undo();
 	CHECK(a->dirty() && a->can_undo() && a->can_redo() && b->dirty(), "unsaved, an undo and a redo");
 	SessionView v = menu_view(a);
-	v.project_root = "C:/mods/Gate";
-	v.documents = {a, b};
-	v.scan.entries = {file_entry("a.mnu", a->path(), AssetKind::Menu), file_entry("b.mnu", b->path(), AssetKind::Menu),
+	v.project.root = "C:/mods/Gate";
+	v.documents.open = {a, b};
+	editor_test::own(v.project.scan).entries = {file_entry("a.mnu", a->path(), AssetKind::Menu), file_entry("b.mnu", b->path(), AssetKind::Menu),
 	                  file_entry("logo.png", "art/logo.png", AssetKind::ImageSource)};
-	v.scan.index();
+	editor_test::own(v.project.scan).index();
 	ImportedSource logo;
 	logo.source = "art/logo.png";
 	logo.outputs = {".opennova/imported/0a1b/logo.pcx"};
-	v.imports = {logo};
-	v.recent_projects = {"C:/mods/Gate", "C:/mods/Other"};
-	v.retail_directory = "C:/games/Joint Operations";
-	v.has_build = true;
-	v.last_build.ok = true;
-	v.last_build.build_dir = "C:/mods/Gate/.opennova/build/play/0123456789abcdef";
+	v.project.imports = std::make_shared<const std::vector<ImportedSource>>(std::vector<ImportedSource>{logo});
+	v.project.recent_projects = {"C:/mods/Gate", "C:/mods/Other"};
+	v.project.retail_directory = "C:/games/Joint Operations";
+	v.activity.has_build = true;
+	editor_test::own(v.activity.last_build).ok = true;
+	editor_test::own(v.activity.last_build).build_dir = "C:/mods/Gate/.opennova/build/play/0123456789abcdef";
 	RequirementRow gametext;
 	gametext.role = "gametext";
 	gametext.name = "gametext.bin";
 	gametext.required = true;
 	gametext.expected_kind = AssetKind::Strings;
 	gametext.state = RequirementState::Missing;
-	v.requirements.rows = {gametext};
-	v.requirements.required_total = 1;
-	v.requirements.required_missing = 1;
+	editor_test::own(v.project.requirements).rows = {gametext};
+	editor_test::own(v.project.requirements).required_total = 1;
+	editor_test::own(v.project.requirements).required_missing = 1;
 	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	lacking.role = "gametext";
 	lacking.target = "gametext.bin";
-	v.diagnostics = {lacking};
+	v.findings.diagnostics = {lacking};
 
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -176,7 +179,7 @@ void test_windows_show_the_gate() {
 	const ImGuiID table = item_id(files, {"files"});
 	const ImGuiID combo = ImHashStr("##Combo_00");
 	const ImGuiID tab = document_tab_id(a->path());
-	const ImGuiID summary = item_id(Ui::window_id("Problems"), {v.project_root.c_str(), "required"});
+	const ImGuiID summary = item_id(Ui::window_id("Problems"), {v.project.root.c_str(), "required"});
 
 	// Where a right click opens a file's menu: a.mnu's row and logo.png's.
 	const ImGuiWindow *files_window = ImGui::FindWindowByName("Files");
@@ -236,7 +239,7 @@ void test_windows_show_the_gate() {
 		};
 	};
 	const auto running_cancellable = [](const SessionView &view) {
-		return view.operation.running() && view.operation.cancellable;
+		return view.activity.operation.running() && view.activity.operation.cancellable;
 	};
 
 	using K = EditorRequestKind;
@@ -331,18 +334,18 @@ void test_windows_show_the_gate() {
 
 	// The confirmation is weighed again while it is open: an operation started since holds its
 	// Apply back, and once it is gone Apply raises the fixes.
-	v.operation = OperationStatus();
+	v.activity.operation = OperationStatus();
 	v.revisions.touch(ViewConcern::Operation);
 	ui.frames(2);
 	ui.activate(item_id(pushed(summary, static_cast<int>(K::CreateMissing)), {"###fix"}));
 	ui.frames(2);
 	CHECK(modal_open("Apply fixes"), "the confirmation asks");
-	v.operation = status_of(OperationKind::Build, true);
+	v.activity.operation = status_of(OperationKind::Build, true);
 	v.revisions.touch(ViewConcern::Operation);
 	ui.frames(2);
 	ui.activate(item_id(ImHashStr("Apply fixes"), {"Apply"}));
 	CHECK(!has(ui.drain(), K::CreateMissing) && modal_open("Apply fixes"), "Apply held back while a build packs");
-	v.operation = OperationStatus();
+	v.activity.operation = OperationStatus();
 	v.revisions.touch(ViewConcern::Operation);
 	ui.frames(2);
 	ui.activate(item_id(ImHashStr("Apply fixes"), {"Apply"}));
@@ -365,7 +368,7 @@ void test_windows_show_the_gate() {
 	         in_dialog(item_id(import_body_id(), {"###needs"}), K::SetImportDependencies), nullptr},
 	        {"the import dialog's Cancel", K::CancelImport, in_dialog(item_id(dialog, {"Cancel"}), K::CancelImport), nullptr},
 	};
-	v.import_preview = planned_import("C:/assets");
+	v.dialogs.import_preview = planned_import("C:/assets");
 	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	CHECK(modal_open("Import files"), "the import dialog opens");
@@ -373,29 +376,29 @@ void test_windows_show_the_gate() {
 		check_probes(ui, v, status, import_probes);
 		ui.frames(3); // an Import or a Cancel closed it: the view still previews, so it opens again
 	}
-	v.import_preview = SessionView::ImportPreview();
+	v.dialogs.import_preview = DialogsView::ImportPreview();
 	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(3);
 	CHECK(!modal_open("Import files"), "the import dialog closes");
 
 	// Rename everywhere (a modal), asked on the screen's name: its Rename.
-	v.rename_preview.symbol = true;
-	v.rename_preview.kind = ReferenceKind::MenuScreen;
-	v.rename_preview.path = a->path();
-	v.rename_preview.locator = "OPTIONS";
-	v.rename_preview.field = "name";
-	v.rename_preview.old_name = "OPTIONS";
-	v.rename_preview.new_name = v.rename_preview.requested = "SETTINGS";
+	v.dialogs.rename_preview.serial = 1;
+	v.dialogs.rename_preview.symbol = true;
+	v.dialogs.rename_preview.kind = ReferenceKind::MenuScreen;
+	v.dialogs.rename_preview.path = a->path();
+	v.dialogs.rename_preview.locator = "OPTIONS";
+	v.dialogs.rename_preview.field = "name";
+	v.dialogs.rename_preview.old_name = "OPTIONS";
+	v.dialogs.rename_preview.new_name = v.dialogs.rename_preview.requested = "SETTINGS";
 	RenameSite site;
 	site.file = a->path();
 	site.field = "name";
 	site.before = "OPTIONS";
 	site.after = "SETTINGS";
-	v.rename_preview.sites = {site};
+	v.dialogs.rename_preview.sites = std::make_shared<const std::vector<RenameSite>>(std::vector<RenameSite>{site});
 	const ImGuiID rename = ImHashStr("Rename everywhere");
 	for (const OperationStatus &status : statuses) {
-		++v.rename_preview.ask_serial;
-		v.revisions.touch(ViewConcern::Dialogs);
+		post_event(v, ViewEventKind::AskRename, a->path(), NodeAddress(), "name", false, v.dialogs.rename_preview.serial);
 		ui.frames(3);
 		CHECK(modal_open("Rename everywhere"), "Rename everywhere opens");
 		check_probes(ui, v, status,
@@ -404,24 +407,24 @@ void test_windows_show_the_gate() {
 		if (modal_open("Rename everywhere")) ui.activate(item_id(rename, {"Cancel"}));
 		ui.frames(2);
 	}
-	v.rename_preview = SessionView::RenamePreview();
+	v.dialogs.rename_preview = DialogsView::RenamePreview();
 
 	// The game running: Stop, from the menu and the bar.
-	v.play_state = PlayState::Running;
+	v.activity.play_state = PlayState::Running;
 	v.revisions.touch(ViewConcern::Run);
 	const std::vector<Probe> stop_probes = {
 	        {"Build > Stop", K::StopPlay, menu("Build", {"Stop"}, K::StopPlay), nullptr},
 	        {"the bar's Stop", K::StopPlay, pressed(item_id(bar, {"status", "Stop"}), K::StopPlay), nullptr},
 	};
 	for (const OperationStatus &status : statuses) check_probes(ui, v, status, stop_probes);
-	v.play_state = PlayState::Stopped;
+	v.activity.play_state = PlayState::Stopped;
 	v.revisions.touch(ViewConcern::Run);
 
 	// No project open: the welcome view's Create project (a folder picked), its Browse... (a new
 	// project's), Open a project folder..., a recent project and its Forget.
-	v.project_open = false;
-	v.documents.clear();
-	v.active_document.clear();
+	v.project.open = false;
+	v.documents.open.clear();
+	v.documents.active.clear();
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern) v.revisions.touch(static_cast<ViewConcern>(concern));
 	ui.frames(3);
 	ui.windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
@@ -440,7 +443,7 @@ void test_windows_show_the_gate() {
 	         pressed(item_id(document, {"recent", "C:/mods/Other", "Forget"}), K::ForgetRecent), nullptr},
 	};
 	for (const OperationStatus &status : statuses) check_probes(ui, v, status, welcome_probes);
-	v.operation = OperationStatus();
+	v.activity.operation = OperationStatus();
 	ui.away();
 }
 

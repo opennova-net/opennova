@@ -16,7 +16,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/pff/pff.h>
 
 #include "editor/editor_test_support.h"
@@ -114,11 +114,11 @@ struct Project {
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Plan"));
 	}
 	const SessionView &view() const { return session.view(); }
-	std::string root() const { return session.view().project_root; }
+	std::string root() const { return session.view().project.root; }
 	ImportPlan plan(const std::vector<ImportSource> &sources, bool with_dependencies = true,
 	                const std::string &retail = std::string(), size_t cap = kImportPlanFileCap) const {
 		const SessionView &v = session.view();
-		return plan_import(sources, with_dependencies, ProjectPaths::for_root(v.project_root), v.document, v.scan, *v.graph,
+		return plan_import(sources, with_dependencies, ProjectPaths::for_root(v.project.root), *v.project.document, *v.project.scan, *v.findings.graph,
 		                   retail, cap);
 	}
 };

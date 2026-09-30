@@ -46,7 +46,7 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 		return false;
 	}
 	const RequestKindRow &row = request_kind_row(request.kind);
-	SessionView::UnsavedPrompt prompt;
+	DialogsView::UnsavedPrompt prompt;
 	prompt.open = true;
 	prompt.action = request.kind;
 	prompt.target = row.guard == GuardScope::Document ? unsaved.front() : request.path;
@@ -54,7 +54,7 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 	prompt.can_discard = row.can_discard;
 	pending_ = request;
 	pending_->path = prompt.target;
-	view_.unsaved_prompt = std::move(prompt);
+	view_.dialogs.unsaved_prompt = std::move(prompt);
 	core_.outcome().unsaved_prompt = true;
 	core_.touch(ViewConcern::Dialogs);
 	return true;
@@ -74,18 +74,18 @@ std::optional<EditorRequest> UnsavedGuard::resolve(UnsavedChoice choice) {
 		close_prompt();
 		return std::nullopt;
 	}
-	if (choice == UnsavedChoice::Discard && !view_.unsaved_prompt.can_discard) {
+	if (choice == UnsavedChoice::Discard && !view_.dialogs.unsaved_prompt.can_discard) {
 		core_.refuse_now("unsaved.discard", "Build and Play pack the files on disk: save the edited files or cancel.");
 		core_.outcome().unsaved_prompt = true;
 		return std::nullopt;
 	}
 	std::vector<std::string> unsaved;
 	files(*pending_, unsaved);
-	const std::vector<std::string> &listed = view_.unsaved_prompt.files;
+	const std::vector<std::string> &listed = view_.dialogs.unsaved_prompt.files;
 	for (const std::string &file : unsaved) {
 		if (std::find(listed.begin(), listed.end(), file) != listed.end()) continue;
-		view_.unsaved_prompt.files = unsaved;
-		view_.status = file + " has unsaved changes too: the prompt lists it now.";
+		view_.dialogs.unsaved_prompt.files = unsaved;
+		view_.activity.status = file + " has unsaved changes too: the prompt lists it now.";
 		core_.outcome().unsaved_prompt = true;
 		core_.touch(ViewConcern::Dialogs);
 		core_.touch(ViewConcern::Output);
@@ -95,7 +95,7 @@ std::optional<EditorRequest> UnsavedGuard::resolve(UnsavedChoice choice) {
 	DocumentSet &documents = core_.documents();
 	if (choice == UnsavedChoice::Save) {
 		documents.end_edit_groups();
-		if (!documents.save_documents(view_.unsaved_prompt.files, false)) {
+		if (!documents.save_documents(view_.dialogs.unsaved_prompt.files, false)) {
 			core_.outcome().unsaved_prompt = true;
 			return std::nullopt;
 		}
@@ -129,7 +129,7 @@ bool UnsavedGuard::answer_refused(UnsavedChoice choice) {
 
 void UnsavedGuard::close_prompt() {
 	pending_.reset();
-	view_.unsaved_prompt = SessionView::UnsavedPrompt();
+	view_.dialogs.unsaved_prompt = DialogsView::UnsavedPrompt();
 	core_.touch(ViewConcern::Dialogs);
 }
 

@@ -10,6 +10,7 @@
 namespace opennova::editor {
 
 class SessionCore;
+struct ImportPlan;
 struct ProjectPaths;
 struct SessionView;
 
@@ -45,12 +46,12 @@ public:
 
 private:
 	void preview(std::vector<ImportSource> choices, std::vector<ImportSource> roots, bool with_dependencies);
-	void plan_preview();
+	// The open preview planned again; `shown`, the plan an Import was shown, says whether it changed.
+	void plan_preview(const ImportPlan *shown = nullptr);
 
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
-	uint64_t import_serial_ = 0; // the import plans made: each preview's plan takes the next
 };
 
 } // namespace opennova::editor

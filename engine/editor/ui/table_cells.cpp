@@ -1,6 +1,6 @@
 #include "table_cells.h"
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 
 #include <algorithm>

@@ -9,7 +9,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/model/edit.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -44,8 +44,8 @@ ModelPreviewSnapshot model_preview_snapshot(const SessionView &view, const Model
 	ModelPreviewSnapshot snapshot;
 	snapshot.status = device ? model.status() : ModelPreviewStatus::NoDevice;
 	snapshot.model = &model;
-	for (const auto &open : view.documents)
-		if (open && open->path() == view.model_preview.path) snapshot.document = dynamic_cast<const ModelDocument *>(open.get());
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == view.documents.previews.model.path) snapshot.document = dynamic_cast<const ModelDocument *>(open.get());
 	return snapshot;
 }
 

@@ -2,15 +2,6 @@
 
 namespace opennova::editor {
 
-const char *play_state_label(PlayState state) {
-	switch (state) {
-	case PlayState::Stopped: return "stopped";
-	case PlayState::Running: return "running";
-	case PlayState::Stopping: return "stopping";
-	}
-	return "stopped";
-}
-
 bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {
 	if (state_ != PlayState::Stopped) {
 		error = make_diagnostic(DiagnosticSeverity::Error, "play.already_running",

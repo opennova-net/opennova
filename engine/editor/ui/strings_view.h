@@ -19,6 +19,8 @@ class StringsDocument;
 class StringsView {
 public:
 	void draw(Workspace &workspace, const StringsDocument &document);
+	// A RevealRecord event for its document: the next draw shows the selection again.
+	void reveal_again() { reveal_.ask(); }
 
 private:
 	// `section` the selected one (its tools; null: none selected, listed only across every

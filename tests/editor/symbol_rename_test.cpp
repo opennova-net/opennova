@@ -25,7 +25,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 
@@ -51,11 +51,11 @@ struct Project {
 		editor_test::create_missing_files(session);
 	}
 	const SessionView &view() const { return session.view(); }
-	const AssetGraph &graph() const { return *session.view().graph; }
-	std::string root() const { return session.view().project_root; }
+	const AssetGraph &graph() const { return *session.view().findings.graph; }
+	std::string root() const { return session.view().project.root; }
 	// A project file's path, by its name.
 	std::string path(const char *name) const {
-		const AssetEntry *entry = view().scan.find(name);
+		const AssetEntry *entry = view().project.scan->find(name);
 		return entry ? entry->relative_path : std::string();
 	}
 	bool write(const std::string &relative, const std::string &text) { return editor_test::write_text(root() + "/" + relative, text); }
@@ -79,9 +79,9 @@ struct Project {
 		return out;
 	}
 	// The plan of renaming `symbol` to `name`, as the view carries it.
-	const SessionView::RenamePreview &preview(const GraphSymbol &symbol, const std::string &name) {
+	const DialogsView::RenamePreview &preview(const GraphSymbol &symbol, const std::string &name) {
 		session.handle(request(EditorRequestKind::PreviewRename, symbol, name));
-		return view().rename_preview;
+		return view().dialogs.rename_preview;
 	}
 	// The rename committed: whether it went through.
 	bool rename(const GraphSymbol &symbol, const std::string &name) {
@@ -96,11 +96,11 @@ const GraphEdge *edge_to(const AssetGraph &graph, const std::string &source, Ref
 	return nullptr;
 }
 
-size_t sites_in(const SessionView::RenamePreview &plan, const std::string &file) {
-	return size_t(std::count_if(plan.sites.begin(), plan.sites.end(), [&](const RenameSite &site) { return site.file == file; }));
+size_t sites_in(const DialogsView::RenamePreview &plan, const std::string &file) {
+	return size_t(std::count_if(plan.sites->begin(), plan.sites->end(), [&](const RenameSite &site) { return site.file == file; }));
 }
 
-bool refused(const SessionView::RenamePreview &plan, const char *code, const std::string &file) {
+bool refused(const DialogsView::RenamePreview &plan, const char *code, const std::string &file) {
 	return std::any_of(plan.refusals.begin(), plan.refusals.end(),
 	                   [&](const Diagnostic &d) { return d.code == code && d.asset == file; });
 }
@@ -132,10 +132,10 @@ static int test_menu_screen() {
 	const GraphSymbol *home = project.defined(ReferenceKind::MenuScreen, "HOME", "menus/a.mnu");
 	TEST_EXPECT(home && !home->inert);
 	if (!home) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*home, "START");
+	const DialogsView::RenamePreview &plan = project.preview(*home, "START");
 	TEST_EXPECT(plan.symbol && plan.kind == ReferenceKind::MenuScreen && plan.old_name == "HOME" && plan.refusals.empty());
-	TEST_EXPECT(plan.sites.size() == 3 && sites_in(plan, "menus/a.mnu") == 2 && sites_in(plan, "menus/b.mnu") == 1);
-	for (const RenameSite &site : plan.sites) TEST_EXPECT(site.before == "HOME" && site.after == "START");
+	TEST_EXPECT(plan.sites->size() == 3 && sites_in(plan, "menus/a.mnu") == 2 && sites_in(plan, "menus/b.mnu") == 1);
+	for (const RenameSite &site : *plan.sites) TEST_EXPECT(site.before == "HOME" && site.after == "START");
 	TEST_EXPECT(project.rename(*home, "START"));
 	const AssetGraph &graph = project.graph();
 	TEST_EXPECT(project.defined(ReferenceKind::MenuScreen, "START", "menus/a.mnu") &&
@@ -169,12 +169,12 @@ static int test_style_variable() {
 	const GraphSymbol *plain = project.defined(ReferenceKind::StyleVar, "SHADOWED", sheet);
 	TEST_EXPECT(brand && !brand->inert && plain && plain->inert);
 	if (!brand || !plain) return 1;
-	const SessionView::RenamePreview &shadowed = project.preview(*plain, "OLDSHADE");
-	TEST_EXPECT(shadowed.refusals.empty() && shadowed.sites.size() == 1 && shadowed.sites[0].file == sheet);
-	const SessionView::RenamePreview &plan = project.preview(*brand, "%BRANDED%");
-	TEST_EXPECT(plan.refusals.empty() && plan.new_name == "BRANDED" && plan.sites.size() == 2);
-	TEST_EXPECT(plan.sites.size() == 2 && plan.sites[0].after == "BRANDED" && plan.sites[1].file == "menus/c.mnu" &&
-	            plan.sites[1].before == "%SHADOWED%" && plan.sites[1].after == "%BRANDED%");
+	const DialogsView::RenamePreview &shadowed = project.preview(*plain, "OLDSHADE");
+	TEST_EXPECT(shadowed.refusals.empty() && shadowed.sites->size() == 1 && (*shadowed.sites)[0].file == sheet);
+	const DialogsView::RenamePreview &plan = project.preview(*brand, "%BRANDED%");
+	TEST_EXPECT(plan.refusals.empty() && plan.new_name == "BRANDED" && plan.sites->size() == 2);
+	TEST_EXPECT(plan.sites->size() == 2 && (*plan.sites)[0].after == "BRANDED" && (*plan.sites)[1].file == "menus/c.mnu" &&
+	            (*plan.sites)[1].before == "%SHADOWED%" && (*plan.sites)[1].after == "%BRANDED%");
 	TEST_EXPECT(project.rename(*brand, "BRANDED"));
 	const AssetGraph &graph = project.graph();
 	const GraphSymbol *binding = graph.style_binding("BRANDED");
@@ -236,16 +236,16 @@ static int test_string_key() {
 		(symbol->scope == "GAMETEXT.BIN/WepDes" ? weapon_key : menu_key) = symbol;
 	TEST_EXPECT(weapon_key && menu_key && menu_key->scope == "GAMETEXT.BIN/menu");
 	if (!weapon_key || !menu_key) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*weapon_key, "WEP_RENAMED");
-	TEST_EXPECT(plan.refusals.empty() && plan.sites.size() == 2 && sites_in(plan, weapons) == 1 &&
+	const DialogsView::RenamePreview &plan = project.preview(*weapon_key, "WEP_RENAMED");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, weapons) == 1 &&
 	            sites_in(plan, "menus/d.mnu") == 0);
 	// The table has unsaved edits: the rename waits on the prompt, whose Save writes them first.
 	const EditorRequest weapon_rename = project.request(EditorRequestKind::RenameSymbol, *weapon_key, "WEP_RENAMED");
 	project.session.handle(weapon_rename);
-	TEST_EXPECT(project.session.outcome().unsaved_prompt && project.view().unsaved_prompt.open &&
-	            project.view().unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
-	            !project.view().unsaved_prompt.can_discard &&
-	            project.view().unsaved_prompt.files == std::vector<std::string>{table_path});
+	TEST_EXPECT(project.session.outcome().unsaved_prompt && project.view().dialogs.unsaved_prompt.open &&
+	            project.view().dialogs.unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
+	            !project.view().dialogs.unsaved_prompt.can_discard &&
+	            project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{table_path});
 	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
 	save.unsaved_choice = UnsavedChoice::Save;
 	project.session.handle(save);
@@ -281,8 +281,8 @@ static int test_weapon_name() {
 	TEST_EXPECT(refused(project.preview(*gun, "GUN_C"), "rename.exists", weapons));
 	TEST_EXPECT(refused(project.preview(*gun, std::string(200, 'G')), "rename.too_long", weapons));
 	TEST_EXPECT(refused(project.preview(*gun, ""), "rename.name", weapons));
-	const SessionView::RenamePreview &plan = project.preview(*gun, "GUN_B");
-	TEST_EXPECT(plan.refusals.empty() && plan.sites.size() == 2 && sites_in(plan, items) == 1);
+	const DialogsView::RenamePreview &plan = project.preview(*gun, "GUN_B");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, items) == 1);
 	TEST_EXPECT(project.rename(*gun, "GUN_B"));
 	TEST_EXPECT(project.defined(ReferenceKind::Weapon, "GUN_B", weapons));
 	const GraphEdge *primary = edge_to(project.graph(), items, ReferenceKind::Weapon, "GUN_B");
@@ -302,8 +302,8 @@ static int test_ammo_name() {
 	const GraphSymbol *round = project.defined(ReferenceKind::Ammo, "AMMO_A", ammo);
 	TEST_EXPECT(round != nullptr);
 	if (!round) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*round, "AMMO_B");
-	TEST_EXPECT(plan.refusals.empty() && plan.sites.size() == 2 && sites_in(plan, weapons) == 1);
+	const DialogsView::RenamePreview &plan = project.preview(*round, "AMMO_B");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, weapons) == 1);
 	TEST_EXPECT(project.rename(*round, "AMMO_B"));
 	const GraphEdge *used = edge_to(project.graph(), weapons, ReferenceKind::Ammo, "AMMO_B");
 	TEST_EXPECT(used && project.graph().resolve(*used) == ReferenceStatus::Present);
@@ -329,7 +329,7 @@ static int test_item_id_refused() {
 	const GraphSymbol *item = project.defined(ReferenceKind::Item, "100300", items);
 	TEST_EXPECT(item != nullptr);
 	if (!item) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*item, "100301");
+	const DialogsView::RenamePreview &plan = project.preview(*item, "100301");
 	TEST_EXPECT(refused(plan, "rename.site", "missions/place.bms"));
 	TEST_EXPECT(refused(project.preview(*item, "not a number"), "rename.name", items));
 	const std::string before = project.read(items);
@@ -362,10 +362,10 @@ static int test_user_point() {
 	const GraphSymbol *point = project.defined(ReferenceKind::UserPoint, "Armory", "models/armory.3di");
 	TEST_EXPECT(point && point->scope == "ARMORY.3DI");
 	if (!point) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*point, "Muzzle");
-	TEST_EXPECT(plan.refusals.empty() && plan.sites.size() == 2 && sites_in(plan, items) == 1 &&
+	const DialogsView::RenamePreview &plan = project.preview(*point, "Muzzle");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, items) == 1 &&
 	            sites_in(plan, "models/other.3di") == 0);
-	TEST_EXPECT(plan.sites.size() == 2 && plan.sites[1].before == "ARMORY" && plan.sites[1].after == "Muzzle");
+	TEST_EXPECT(plan.sites->size() == 2 && (*plan.sites)[1].before == "ARMORY" && (*plan.sites)[1].after == "Muzzle");
 	TEST_EXPECT(project.rename(*point, "Muzzle"));
 	const AssetGraph &graph = project.graph();
 	TEST_EXPECT(project.defined(ReferenceKind::UserPoint, "Muzzle", "models/armory.3di") &&
@@ -401,7 +401,7 @@ static int test_saved_use_behind_an_edit() {
 	if (!gun) return 1;
 	project.session.handle(project.request(EditorRequestKind::RenameSymbol, *gun, "GUN_B"));
 	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
-	            project.view().unsaved_prompt.files == std::vector<std::string>{items});
+	            project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{items});
 	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
 	save.unsaved_choice = UnsavedChoice::Save;
 	project.session.handle(save);
@@ -419,9 +419,9 @@ static int test_style_variable_as_font() {
 	const GraphSymbol *font = project.defined(ReferenceKind::StyleVar, "DEF_FONTNAME_LG", sheet);
 	TEST_EXPECT(font && !font->inert);
 	if (!font) return 1;
-	const SessionView::RenamePreview &plan = project.preview(*font, "DEF_FONTNAME_BIG");
+	const DialogsView::RenamePreview &plan = project.preview(*font, "DEF_FONTNAME_BIG");
 	TEST_EXPECT(plan.refusals.empty() && sites_in(plan, menu) >= 1);
-	for (const RenameSite &site : plan.sites)
+	for (const RenameSite &site : *plan.sites)
 		if (site.file == menu) TEST_EXPECT(site.before == "%DEF_FONTNAME_LG%" && site.after == "%DEF_FONTNAME_BIG%");
 	TEST_EXPECT(project.rename(*font, "DEF_FONTNAME_BIG"));
 	TEST_EXPECT(project.graph().style_binding("DEF_FONTNAME_BIG") && !project.graph().style_binding("DEF_FONTNAME_LG"));
@@ -463,11 +463,11 @@ static int test_item_id_canonical() {
 	TEST_EXPECT(item != nullptr);
 	if (!item) return 1;
 	TEST_EXPECT(refused(project.preview(*item, "0100301"), "rename.exists", items));
-	TEST_EXPECT(project.view().rename_preview.requested == "0100301");
-	const SessionView::RenamePreview &plan = project.preview(*item, "0100302");
+	TEST_EXPECT(project.view().dialogs.rename_preview.requested == "0100301");
+	const DialogsView::RenamePreview &plan = project.preview(*item, "0100302");
 	// The preview is the typed name's (the dialog compares what it asked), its new name the number.
 	TEST_EXPECT(plan.refusals.empty() && plan.requested == "0100302" && plan.new_name == "100302" &&
-	            plan.sites.size() == 1 && plan.sites[0].after == "100302");
+	            plan.sites->size() == 1 && (*plan.sites)[0].after == "100302");
 	TEST_EXPECT(project.rename(*item, "0100302"));
 	TEST_EXPECT(project.defined(ReferenceKind::Item, "100302", items) && project.read(items).find("100302") != std::string::npos);
 	return 0;
@@ -486,7 +486,7 @@ static int test_written_together() {
 	const GraphSymbol *gun = project.defined(ReferenceKind::Weapon, "GUN_A", weapons);
 	TEST_EXPECT(gun != nullptr);
 	if (!gun) return 1;
-	const SymbolRenamePlan plan = plan_symbol_rename_project(project.view().scan, project.graph(), *gun, "GUN_B");
+	const SymbolRenamePlan plan = plan_symbol_rename_project(*project.view().project.scan, project.graph(), *gun, "GUN_B");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 2);
 	const std::string weapons_before = project.read(weapons), items_before = project.read(items);
 	const ProjectPaths paths = ProjectPaths::for_root(project.root());
@@ -500,7 +500,7 @@ static int test_written_together() {
 		return replace_file(from, to, error);
 	};
 	std::vector<Diagnostic> findings;
-	TEST_EXPECT(!apply_symbol_rename(paths, project.view().document, project.view().scan, project.graph(), plan, findings,
+	TEST_EXPECT(!apply_symbol_rename(paths, *project.view().project.document, *project.view().project.scan, project.graph(), plan, findings,
 	                                 refuse_weapons));
 	TEST_EXPECT((replaced == std::vector<std::string>{"items.def", "weapon.def"}));
 	TEST_EXPECT(project.read(items) == items_before && project.read(weapons) == weapons_before);
@@ -508,7 +508,7 @@ static int test_written_together() {
 	TEST_EXPECT(!findings.empty() && findings[0].code == "rename.write" &&
 	            findings[0].message.find("write-protected") != std::string::npos);
 	findings.clear();
-	TEST_EXPECT(apply_symbol_rename(paths, project.view().document, project.view().scan, project.graph(), plan, findings));
+	TEST_EXPECT(apply_symbol_rename(paths, *project.view().project.document, *project.view().project.scan, project.graph(), plan, findings));
 	TEST_EXPECT(project.read(items).find("GUN_B") != std::string::npos && project.read(weapons).find("GUN_B") != std::string::npos);
 	return 0;
 }
@@ -564,7 +564,7 @@ static int test_open_menu_that_does_not_write() {
 	TEST_EXPECT(refused(project.preview(*brand, "BRANDED"), "rename.site", "menus/c.mnu"));
 	const std::string menu_before = project.read("menus/c.mnu");
 	TEST_EXPECT(project.rename(*plain, "OLDSHADE"));
-	TEST_EXPECT(!project.view().unsaved_prompt.open);
+	TEST_EXPECT(!project.view().dialogs.unsaved_prompt.open);
 	TEST_EXPECT(project.read(sheet).find("OLDSHADE") != std::string::npos && project.read("menus/c.mnu") == menu_before);
 	return 0;
 }

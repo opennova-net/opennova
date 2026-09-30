@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/assets/asset_import.h>
+#include <editor/assets/import_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 
@@ -22,8 +22,8 @@ enum class EditorRequestKind {
 	CloseProject,
 	ForgetRecent,         // path
 	Rescan,               // re-read the project's files
-	ApplyProjectSettings, // settings = the settings to set, each left out as it is; the view's
-	                      // settings_result says what came of it
+	ApplyProjectSettings, // settings = the settings to set, each left out as it is; a
+	                      // SettingsApplied view event says it came (settings_result: what failed)
 	// The import dialog (the view's import_preview): a preview plans importing the files chosen
 	// (editor/import/import_plan), with the files they need when its flag says so.
 	PreviewImport,        // paths = the files picked: the loose ones are chosen, an archive's members are
@@ -52,9 +52,10 @@ enum class EditorRequestKind {
 	                      // when the name alone cannot say
 	OpenDocument,         // path; edit.address = the record to select once open, or text = its locator
 	                      // (Document::locator: a record the graph read, found again once open; Go to),
-	                      // edit.field = its field to show (the view's reveal_field)
+	                      // edit.field = its field to show (a RevealRecord view event)
 	ShowInFiles,          // path = a project file (project-relative or logical): Files selects it and scrolls
-	                      // to it (the view's reveal_file); flag = and asks its new name (Files' Rename...)
+	                      // to it (a RevealFile view event); flag = and asks its new name (Files'
+	                      // Rename...)
 	ReloadDocument, CloseDocument,
 	SelectRecord,         // path = the document, edit.address = the record, select_mode = how it
 	                      // joins the selection (the selected records stay inside one row)
@@ -86,7 +87,7 @@ enum class EditorRequestKind {
 	                      // path = the file defining a name, text = its record's locator, edit.field = the
 	                      // field defining it, edit.value = the new name (Rename everywhere); edit.field "" =
 	                      // the file at path renamed to edit.value (Files' Rename...); flag = and ask the new
-	                      // name (the Rename everywhere dialog opens)
+	                      // name (an AskRename view event: the Rename everywhere dialog opens)
 	RenameSymbol,         // path, text, edit.field and edit.value as PreviewRename's: the name and every use
 	                      // that reaches it rewritten on disk (graph/rename_transaction), not undoable, or
 	                      // refused with the reasons; a file it rewrites with unsaved edits: asks to save
@@ -123,8 +124,8 @@ enum class SelectMode { Replace, Add, Toggle };
 // project's (its name and features, written to project.opennova, which needs a project
 // open) and the editor's (the game install, the runtime Play runs, Play in the game
 // install, written to the editor's settings). Only what differs from the value in effect
-// is written. `serial` names the application: the view's settings_result carries it back
-// with what could not be written.
+// is written. `serial` names the application: the SettingsApplied view event carries it back
+// (its tag), the view's settings_result what could not be written.
 struct ProjectSettingsChange {
 	uint64_t serial = 0;
 	std::optional<std::string> title;

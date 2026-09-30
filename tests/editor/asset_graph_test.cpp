@@ -34,10 +34,11 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -154,11 +155,11 @@ static int test_blank_project() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Graph"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.graph != nullptr);
-	const AssetGraph &graph = *view.graph;
+	TEST_EXPECT(view.findings.graph != nullptr);
+	const AssetGraph &graph = *view.findings.graph;
 	TEST_EXPECT(!graph.edges().empty() && !graph.symbols().empty());
 	TEST_EXPECT(graph.missing().empty());
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
 	TEST_EXPECT(has_symbol(graph, ReferenceKind::StyleVar, "DEF_FONTNAME_LG"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::StyleVar, "%NOPE%") == ReferenceStatus::Missing);
@@ -226,13 +227,13 @@ static int test_menu_references() {
 		if (field.id == "value") value = &field;
 	TEST_EXPECT(font && value);
 	edit_window(session, *document, exit, "font.name", std::string("%NOPE%"));
-	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Warning));
 	const FieldUse font_use = document->field_on(exit, *font);
 	TEST_EXPECT(document->reference_status(font_use, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
 	TEST_EXPECT(document->reference_status(font_use, std::string("%DEF_FONTNAME_LG%"), view, nullptr) ==
 	            ReferenceStatus::Present);
 	// The finding says what it misses (S11b): the reference's kind and name, as written.
-	const Diagnostic *nope = missing_of(view.diagnostics, "font.name", ReferenceKind::StyleVar);
+	const Diagnostic *nope = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
 	TEST_EXPECT(nope && nope->target == "%NOPE%");
 	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
 	// define it), never a font file named %NOPE%; a variable that resolves makes none.
@@ -246,27 +247,27 @@ static int test_menu_references() {
 	// A name the game's expansion stops inside (a space) is no variable: a font file of
 	// that name (S12 B2).
 	edit_window(session, *document, exit, "font.name", std::string("%NO PE%"));
-	TEST_EXPECT(!missing_of(view.diagnostics, "font.name", ReferenceKind::StyleVar));
-	const Diagnostic *spaced = missing_of(view.diagnostics, "font.name", ReferenceKind::Font);
+	TEST_EXPECT(!missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar));
+	const Diagnostic *spaced = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(spaced && spaced->target == "%NO PE%");
 	edit_window(session, *document, exit, "font.name", std::string("nofont.fnt"));
-	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Error));
-	const Diagnostic *nofont = missing_of(view.diagnostics, "font.name", ReferenceKind::Font);
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Error));
+	const Diagnostic *nofont = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(nofont && nofont->target == "nofont.fnt" && nofont->scope.empty() && nofont->role.empty());
 	TEST_EXPECT(document->missing_finding(exit, font_use, std::string("nofont.fnt"), view, picked) &&
 	            picked.reference == ReferenceKind::Font && picked.target == "nofont.fnt");
 	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one.
 	set_image(session, *document, exit, "missing.tga");
-	TEST_EXPECT(has_missing(view.diagnostics, "value", DiagnosticSeverity::Error));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
 	TEST_EXPECT(document->reference_status(document->field_on(row, *value), std::string("missing.tga"), view, nullptr) ==
 	            ReferenceStatus::Missing);
-	const Diagnostic *texture = missing_of(view.diagnostics, "value", ReferenceKind::MenuTexture);
+	const Diagnostic *texture = missing_of(view.findings.diagnostics, "value", ReferenceKind::MenuTexture);
 	TEST_EXPECT(texture && texture->target == "missing.tga");
 	edit_window(session, *document, exit, "string.type", std::string("ID"));
 	edit_window(session, *document, exit, "string.value", std::string("NO_SUCH_ID"));
-	TEST_EXPECT(has_missing(view.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// A string id's scope is where it was looked up: the "menu" section of its window's table.
-	const Diagnostic *text_id = missing_of(view.diagnostics, "string.value", ReferenceKind::TextId);
+	const Diagnostic *text_id = missing_of(view.findings.diagnostics, "string.value", ReferenceKind::TextId);
 	TEST_EXPECT(text_id && text_id->target == "NO_SUCH_ID" && text_id->scope.find("/menu") != std::string::npos);
 	// Every ACTION's file is an edge (a second action's too), every SOUND's file a sound
 	// bank the game opens by that name (a warning while the project lacks it).
@@ -278,13 +279,13 @@ static int test_menu_references() {
 	const NodeAddress sound = add_record(session, *document, exit, "sound");
 	edit_window(session, *document, sound, "file", std::string("click.lwf"));
 	size_t action_files = 0, sounds = 0;
-	for (const GraphEdge *edge : view.graph->references_of(document->path())) {
+	for (const GraphEdge *edge : view.findings.graph->references_of(document->path())) {
 		if (edge->field == "file" && edge->kind == ReferenceKind::Menu) ++action_files;
 		if (edge->field == "file" && edge->kind == ReferenceKind::SoundBank && edge->value == "click.lwf") ++sounds;
 	}
 	TEST_EXPECT(action_files == 2 && sounds == 1);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Missing);
-	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Warning));
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Missing);
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "file", DiagnosticSeverity::Warning));
 	// The font picker: the project's fonts, then the stylesheet's variables, each as the field
 	// would reference it.
 	const std::vector<ReferenceChoice> fonts = document->reference_choices(font_use, view);
@@ -295,19 +296,19 @@ static int test_menu_references() {
 	// The finding names the record and the session's address, so Problems can select it.
 	const NodeAddress second_action = menu_test::child_of(*document, exit, "action", 1);
 	bool located = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
 		    d.child_id == second_action.child && d.record == "STARTUP/MAIN/EXIT/Action 2")
 			located = true;
 	TEST_EXPECT(located);
 	// The open document's edges follow its revision: the same edit count, no re-read.
-	const size_t before = view.graph->stats().files_extracted;
+	const size_t before = view.findings.graph->stats().files_extracted;
 	TEST_EXPECT(before >= 1);
 	// A saved menu with a missing texture is blocked by the build (an error).
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(!view.last_build.ok);
+	TEST_EXPECT(!view.activity.last_build->ok);
 	return 0;
 }
 
@@ -363,12 +364,12 @@ static int test_menu_text_scope() {
 	edit_window(session, *menu, title, "string.type", std::string("ID"));
 	edit_window(session, *menu, title, "string.value", std::string("TITLE_ID"));
 	const auto title_edge = [&]() -> const GraphEdge * {
-		for (const GraphEdge *edge : view.graph->references_of(menu->path()))
+		for (const GraphEdge *edge : view.findings.graph->references_of(menu->path()))
 			if (edge->kind == ReferenceKind::TextId && edge->field == "string.value") return edge;
 		return nullptr;
 	};
 	const auto missing_message = [&](const char *needle) {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "reference.missing" && d.field == "string.value" && d.message.find(needle) != std::string::npos)
 				return true;
 		return false;
@@ -384,10 +385,10 @@ static int test_menu_text_scope() {
 	session.handle(write);
 	edit_window(session, *menu, main, "text_rsrc", std::string("menutxt.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "MENUTXT.BIN/menu");
-	TEST_EXPECT(!has_missing(view.diagnostics, "string.value", DiagnosticSeverity::Warning));
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/menu") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/Menu").size() == 1);
-	TEST_EXPECT(view.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "GAMETEXT.BIN/menu").empty());
+	TEST_EXPECT(!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/menu") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/Menu").size() == 1);
+	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "GAMETEXT.BIN/menu").empty());
 	// Its picker offers the ids of that table's "menu" section alone: not another section's, nor
 	// another table's.
 	const auto offered = [&](const char *key, ReferenceChoice &out) {
@@ -407,14 +408,14 @@ static int test_menu_text_scope() {
 	edit_window(session, *menu, title, "string.value", std::string("STATS_ONLY"));
 	TEST_EXPECT(missing_message("\"menu\" section of MENUTXT.BIN"));
 	edit_window(session, *menu, title, "string.value", std::string("GAME_TITLE"));
-	TEST_EXPECT(has_missing(view.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// TITLE's own TEXT_RSRC wins over its root's.
 	EditorRequest own = write;
 	own.edit.address = title;
 	session.handle(own);
 	edit_window(session, *menu, title, "text_rsrc", std::string("gametext.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "GAMETEXT.BIN/menu");
-	TEST_EXPECT(!has_missing(view.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// A table the project does not have.
 	edit_window(session, *menu, title, "text_rsrc", std::string("nosuch.bin"));
 	TEST_EXPECT(missing_message("NOSUCH.BIN, a string table the project does not have"));
@@ -431,7 +432,7 @@ static int test_native_extractors() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Native"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	// An environment naming sky textures and celestial models.
 	{
 		opennova::env::Config config;
@@ -469,7 +470,7 @@ static int test_native_extractors() {
 	const bool have_model = fs::is_regular_file(fixture, ec);
 	if (have_model) fs::copy_file(fixture, fs::path(root) / "armory.3di", ec);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const AssetGraph &graph = *session.view().graph;
+	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *sky = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
 	TEST_EXPECT(sky && !sky->rewritable && sky->field == "sky_map1");
 	TEST_EXPECT(edge_to(graph, "day.env", ReferenceKind::Model, "sun.3di"));
@@ -496,8 +497,8 @@ static int test_native_extractors() {
 	}
 	const size_t missing = graph.missing().size();
 	TEST_EXPECT(missing >= 4); // sky_b, sun, puff.tga, island
-	TEST_EXPECT(count_code(session.view().diagnostics, "reference.missing") == missing);
-	TEST_EXPECT(count_code(session.view().diagnostics, "graph.unreadable") == 0);
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "reference.missing") == missing);
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 	// The .mis is skipped, never extracted (graph_reads_file): a changed one is read by nothing.
 	TEST_EXPECT(!graph_reads_file(AssetKind::Mission, "test.mis") &&
 			graph_reads_file(AssetKind::Mission, "TEST.BMS"));
@@ -505,7 +506,7 @@ static int test_native_extractors() {
 	session.handle(make_request(EditorRequestKind::Rescan));
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
 	TEST_EXPECT(graph.references_of("test.mis").empty() &&
-			count_code(session.view().diagnostics, "graph.unreadable") == 0);
+			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
 	// while the file is unchanged; a document type's file that does not load is its
@@ -514,7 +515,7 @@ static int test_native_extractors() {
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
 	TEST_EXPECT(editor_test::write_bytes(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const std::vector<Diagnostic> &diagnostics = session.view().diagnostics;
+	const std::vector<Diagnostic> &diagnostics = session.view().findings.diagnostics;
 	const auto unreadable = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
 		for (const Diagnostic &d : diagnostics)
@@ -536,7 +537,7 @@ static int test_native_extractors() {
 	fs::remove(fs::path(root) / "broken.bms");
 	fs::remove(fs::path(root) / "broken.3di");
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(session.view().diagnostics, "graph.unreadable") == 0);
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 	return 0;
 }
 
@@ -573,13 +574,13 @@ static int test_catalog_symbols() {
 		edit_window(session, *weapon, row, "gfx1", std::string("gun.3di"));
 	}
 	const SessionView &view = session.view();
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	TEST_EXPECT(has_symbol(graph, ReferenceKind::Ammo, "AMMO_GRAPH") && has_symbol(graph, ReferenceKind::Weapon, "WPN_GRAPH"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "ammo_graph") == ReferenceStatus::Present);
 	const std::vector<const GraphEdge *> users = graph.referrers_of(ReferenceKind::Ammo, "AMMO_GRAPH");
 	TEST_EXPECT(users.size() == 1 && users[0]->source == weapon->path() && users[0]->field == "round_type");
 	TEST_EXPECT(graph.symbols_of(ammo->path(), "AMMO_GRAPH").size() == 1);
-	TEST_EXPECT(has_missing(view.diagnostics, "gfx1", DiagnosticSeverity::Error));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "gfx1", DiagnosticSeverity::Error));
 	std::string file;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "AMMO_GRAPH", std::string(), &file) == ReferenceStatus::Present && file == ammo->path());
 	// A def's game-text field is a string id in a known table and section.
@@ -627,7 +628,7 @@ static int test_catalog_symbols() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_GRAPH", "GAMETEXT.BIN/WepDes") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_GRAPH", "GAMETEXT.BIN/Overlays") == ReferenceStatus::Missing);
 	edit_window(session, *weapon, {weapon->rows()[0]->id, weapon->kind_from_name("weapon"), 0}, "loadout_menu_textid", std::string("WEP_GRAPH"));
-	TEST_EXPECT(!has_missing(view.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
+	TEST_EXPECT(!has_missing(view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
 	// A string's key is a symbol of its own (S12 D2): the record, the place and the field that
 	// define it, its table and section; its users are its own, not its section's.
 	const std::vector<const GraphSymbol *> key = graph.symbols_of(strings->path(), "WepDes/WEP_GRAPH");
@@ -674,11 +675,11 @@ static int test_catalog_symbols() {
 			return edge->source == weapon->path() && edge->field == "loadout_menu_textid" && !edge->locator.empty();
 		}));
 		if (!targets.empty()) go_to(session, targets[0]);
-		TEST_EXPECT(view.active_document == strings->path() && wepdes_key.size() == 1 &&
-		            view.selection == wepdes_key[0]->address && view.reveal_field == "key");
+		TEST_EXPECT(view.documents.active == strings->path() && wepdes_key.size() == 1 &&
+		            view.documents.selection == wepdes_key[0]->address && editor_test::revealed_field(view) == "key");
 	}
 	edit_window(session, *weapon, {weapon->rows()[0]->id, weapon->kind_from_name("weapon"), 0}, "loadout_menu_textid", std::string("WEP_NOPE"));
-	TEST_EXPECT(has_missing(view.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
 	// The items' identities.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
 	Document *items = session.document_for("items.def");
@@ -697,7 +698,7 @@ static int test_rename() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -710,22 +711,22 @@ static int test_rename() {
 	// The menu naming it has unsaved edits: the rename waits on the unsaved prompt, which
 	// lists the menu; cancelled, nothing moves.
 	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
-	TEST_EXPECT(session.outcome().unsaved_prompt && view.unsaved_prompt.files == std::vector<std::string>({menu->path()}));
+	TEST_EXPECT(session.outcome().unsaved_prompt && view.dialogs.unsaved_prompt.files == std::vector<std::string>({menu->path()}));
 	TEST_EXPECT(fs::exists(root + "/logo.tga") && !fs::exists(root + "/logo2.tga"));
 	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
 	cancel.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(cancel);
-	TEST_EXPECT(!view.unsaved_prompt.open && menu->dirty());
+	TEST_EXPECT(!view.dialogs.unsaved_prompt.open && menu->dirty());
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	TEST_EXPECT(!menu->dirty());
 	{
-		const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "logo.tga", "logo2.tga");
+		const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "logo2.tga");
 		TEST_EXPECT(plan.ok() && plan.sites.size() == 1 && plan.sites[0].file == menu->path() && plan.sites[0].after == "logo2.tga");
 		TEST_EXPECT(plan.new_path == "logo2.tga" && plan.old_name == "logo.tga");
-		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "logo.tga", "logo.pcx").ok());
-		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "logo.tga", "main.mnu").ok());
-		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "logo.tga", "a_name_far_too_long.tga").ok());
-		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "nope.tga", "x.tga").ok());
+		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "logo.pcx").ok());
+		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "main.mnu").ok());
+		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "a_name_far_too_long.tga").ok());
+		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "nope.tga", "x.tga").ok());
 	}
 	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
 	TEST_EXPECT(!fs::exists(root + "/logo.tga") && fs::exists(root + "/logo2.tga"));
@@ -736,8 +737,8 @@ static int test_rename() {
 	            std::get<std::string>(image) == "logo2.tga");
 	TEST_EXPECT(read_text(root + "/menus/main.mnu").find("logo2.tga") != std::string::npos ||
 	            read_text(root + "/main.mnu").find("logo2.tga") != std::string::npos);
-	TEST_EXPECT(view.graph->missing().empty());
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
+	TEST_EXPECT(view.findings.graph->missing().empty());
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
 	// A site the editor cannot rewrite refuses the whole rename: an environment names
 	// the texture too.
 	{
@@ -750,7 +751,7 @@ static int test_rename() {
 	}
 	session.handle(make_request(EditorRequestKind::Rescan));
 	session.handle(make_request(EditorRequestKind::RenameAsset, "logo2.tga", "logo3.tga"));
-	TEST_EXPECT(view.diagnostics.back().code == "rename.site" || view.diagnostics.back().code == "rename.refused");
+	TEST_EXPECT(view.findings.diagnostics.back().code == "rename.site" || view.findings.diagnostics.back().code == "rename.refused");
 	TEST_EXPECT(fs::exists(root + "/logo2.tga") && !fs::exists(root + "/logo3.tga"));
 	// Through a style variable: the variable's value is the site. (A Rescan keeps an open
 	// document whose file did not change: the same one.)
@@ -761,11 +762,11 @@ static int test_rename() {
 	fs::remove(root + "/day.env");
 	session.handle(make_request(EditorRequestKind::Rescan));
 	std::string font_file;
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &font_file) == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &font_file) == ReferenceStatus::Present);
 	// The variable stays in the menu: the site is its value in menu_style.mns, the one
 	// place that names the font.
 	{
-		const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, font_file, "zz.fnt");
+		const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, font_file, "zz.fnt");
 		TEST_EXPECT(through_style.ok() && !through_style.sites.empty());
 		bool style_site = false;
 		for (const RenameSite &site : through_style.sites) {
@@ -781,7 +782,7 @@ static int test_rename() {
 	TEST_EXPECT(session.outcome().done());
 	const std::string renamed_font = (fs::path(font_file).parent_path() / "zz.fnt").generic_string();
 	TEST_EXPECT(!fs::exists(root + "/" + font_file) && fs::exists(root + "/" + renamed_font));
-	const AssetEntry *style_asset = view.scan.find("menu_style.mns");
+	const AssetEntry *style_asset = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style_asset != nullptr);
 	if (!style_asset) return 1;
 	TEST_EXPECT(read_text(root + "/" + style_asset->relative_path).find("\r\nDEF_FONTNAME_LG\tzz.fnt\r\n") != std::string::npos);
@@ -792,10 +793,10 @@ static int test_rename() {
 	TEST_EXPECT(menu->get(menu_test::child_of(*menu, exit, "appearance"), "value", through) &&
 	            std::get<std::string>(through) == "%DEF_FONTNAME_LG%");
 	std::string resolved_font;
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &resolved_font) ==
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &resolved_font) ==
 	                    ReferenceStatus::Present &&
 	            resolved_font == renamed_font);
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		TEST_EXPECT(!(d.code == "reference.missing" && d.field == "font.name"));
 	font_file = renamed_font;
 	// A value without the extension is no site the rename rewrites: refused, the variable named.
@@ -804,8 +805,8 @@ static int test_rename() {
 	NodeAddress large;
 	TEST_EXPECT(style && style->find("%def_fontname_lg%", large));
 	edit_window(session, *style, large, "value", std::string("zz"));
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
-	const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, font_file, "zz2.fnt");
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
+	const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, font_file, "zz2.fnt");
 	TEST_EXPECT(!through_style.ok() && through_style.refusals.front().code == "rename.style");
 	session.handle(make_request(EditorRequestKind::Undo));
 	session.handle(make_request(EditorRequestKind::CloseDocument, style_asset->relative_path));
@@ -816,21 +817,21 @@ static int test_rename() {
 	// Assign: a required name satisfied by renaming a file of the right kind.
 	TEST_EXPECT(editor_test::write_text(root + "/spare.pcx", "x")); // the wrong kind for a font row
 	std::string missing_role, missing_name;
-	for (const RequirementRow &row : view.requirements.rows)
+	for (const RequirementRow &row : view.project.requirements->rows)
 		if (row.state == RequirementState::Present && row.expected_kind == AssetKind::Strings) { missing_role = row.role; missing_name = row.name; break; }
 	TEST_EXPECT(!missing_role.empty());
-	fs::remove(root + "/" + view.scan.find(missing_name)->relative_path);
+	fs::remove(root + "/" + view.project.scan->find(missing_name)->relative_path);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.requirements.required_missing == 1);
+	TEST_EXPECT(view.project.requirements->required_missing == 1);
 	{
 		EditorRequest assign = make_request(EditorRequestKind::AssignRequirement, "spare.pcx", missing_role);
 		session.handle(assign);
-		TEST_EXPECT(view.diagnostics.back().code == "requirement.kind");
-		TEST_EXPECT(view.requirements.required_missing == 1);
+		TEST_EXPECT(view.findings.diagnostics.back().code == "requirement.kind");
+		TEST_EXPECT(view.project.requirements->required_missing == 1);
 	}
 	// A table of the right kind, copied from another required table.
 	const AssetEntry *some_table = nullptr;
-	for (const AssetEntry &asset : view.scan.entries)
+	for (const AssetEntry &asset : view.project.scan->entries)
 		if (asset.kind == AssetKind::Strings) { some_table = &asset; break; }
 	TEST_EXPECT(some_table);
 	std::error_code ec;
@@ -841,8 +842,8 @@ static int test_rename() {
 		EditorRequest assign = make_request(EditorRequestKind::AssignRequirement, "spare.bin", missing_role);
 		session.handle(assign);
 	}
-	TEST_EXPECT(view.requirements.required_missing == 0);
-	TEST_EXPECT(view.scan.find(missing_name) != nullptr && !fs::exists(root + "/spare.bin"));
+	TEST_EXPECT(view.project.requirements->required_missing == 0);
+	TEST_EXPECT(view.project.scan->find(missing_name) != nullptr && !fs::exists(root + "/spare.bin"));
 	// Assigning a requirement already met renames nothing: a refusal the outcome carries.
 	session.handle(make_request(EditorRequestKind::AssignRequirement, "spare.pcx", missing_role));
 	TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
@@ -861,7 +862,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Sites"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/m16.adm", "adm"));
 	TEST_EXPECT(editor_test::write_text(root + "/m16.3di", "3di"));
 	session.handle(make_request(EditorRequestKind::Rescan));
@@ -884,11 +885,11 @@ static int test_rename_rewrites_planned_sites_only() {
 	TEST_EXPECT(!weapon->dirty());
 	const SessionView &view = session.view();
 	std::string file;
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::AnimationMap, "m16", std::string(), &file) == ReferenceStatus::Present &&
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::AnimationMap, "m16", std::string(), &file) == ReferenceStatus::Present &&
 	            file == "m16.adm");
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Model, "m16", std::string(), &file) == ReferenceStatus::Present &&
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Model, "m16", std::string(), &file) == ReferenceStatus::Present &&
 	            file == "m16.3di");
-	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "m16.adm", "m16b.adm");
+	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "m16.adm", "m16b.adm");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 1);
 	TEST_EXPECT(!plan.sites.empty() && plan.sites[0].field == "animadm" && plan.sites[0].after == "m16b");
 	session.handle(make_request(EditorRequestKind::RenameAsset, "m16.adm", "m16b.adm"));
@@ -901,7 +902,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	Value animation, model;
 	TEST_EXPECT(weapon->get(row, "animadm", animation) && std::get<std::string>(animation) == "m16b");
 	TEST_EXPECT(weapon->get(row, "gfx1", model) && std::get<std::string>(model) == "m16");
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
 
 	// A planned site gone by commit time (the file changed on disk after the last scan):
 	// nothing else is rewritten in its place, the rename reports rename.partial as a
@@ -917,7 +918,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "rename.partial") > 0);
 	// The error names what the file still says (the site's own spelling), not the renamed file.
 	bool partial_error = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		partial_error = partial_error || (d.code == "rename.partial" && d.severity == DiagnosticSeverity::Error &&
 		                                  d.message.find("still names 'm16b' in 1 of its 1") != std::string::npos);
 	TEST_EXPECT(partial_error);
@@ -936,7 +937,7 @@ static int test_rename_by_locator() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locator"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -957,7 +958,7 @@ static int test_rename_by_locator() {
 	}
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	const SessionView &view = session.view();
-	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), view.scan, *view.graph, "logo.tga", "logo2.tga");
+	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "logo2.tga");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 2);
 	TEST_EXPECT(plan.sites[0].record == "STARTUP/MAIN/TWIN/Appearance 1" && plan.sites[1].record == plan.sites[0].record);
 	TEST_EXPECT(!plan.sites[0].locator.empty() && plan.sites[0].locator != plan.sites[1].locator);
@@ -974,7 +975,7 @@ static int test_rename_by_locator() {
 		Value image;
 		if (menu->get(menu->address_at(place), "value", image) && std::get<std::string>(image) == "logo2.tga") ++renamed;
 	}
-	TEST_EXPECT(renamed == 2 && view.graph->missing().empty());
+	TEST_EXPECT(renamed == 2 && view.findings.graph->missing().empty());
 	return 0;
 }
 
@@ -991,35 +992,35 @@ static int test_stylesheet_bindings() {
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = dir.file("project");
-	const AssetEntry *style_asset = view.scan.find("menu_style.mns");
+	const AssetEntry *style_asset = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style_asset != nullptr);
 	const std::string style_path = style_asset->relative_path;
 	const std::string style_dir = fs::path(root + "/" + style_path).parent_path().generic_string();
 	// A symbol carries its record and the value the game reads.
-	const GraphSymbol *large = view.graph->style_binding("%DEF_FONTNAME_LG%");
+	const GraphSymbol *large = view.findings.graph->style_binding("%DEF_FONTNAME_LG%");
 	TEST_EXPECT(large && large->record == "DEF_FONTNAME_LG" && large->value == "Arial16b.fnt" && large->file == style_path);
 	TEST_EXPECT(!large->inert);
 	// The stylesheet's font value is an edge of its own; a menu's font through the
 	// variable says what the value must be there.
-	const GraphEdge *value_edge = edge_to(*view.graph, style_path, ReferenceKind::Font, "Arial16b.fnt");
+	const GraphEdge *value_edge = edge_to(*view.findings.graph, style_path, ReferenceKind::Font, "Arial16b.fnt");
 	TEST_EXPECT(value_edge && value_edge->rewritable && value_edge->field == "value" && value_edge->record == "DEF_FONTNAME_LG");
 	bool through_font = false;
-	for (const GraphEdge &edge : view.graph->edges())
+	for (const GraphEdge &edge : view.findings.graph->edges())
 		through_font = through_font || (edge.kind == ReferenceKind::StyleVar && edge.through == ReferenceKind::Font);
 	TEST_EXPECT(through_font);
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
-	TEST_EXPECT(count_code(view.diagnostics, "style.not_a_color") == 0 && count_code(view.diagnostics, "style.mixed_use") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 0 && count_code(view.findings.diagnostics, "style.mixed_use") == 0);
 
 	// brand.mns over menu_style.mns: a later definition wins.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\nBRAND_ONLY 1\r\n"));
 	// A stylesheet by another name is never read.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "STRAY_ONLY 1\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const GraphSymbol *text_fg = view.graph->style_binding("DEF_TEXT_FG");
+	const GraphSymbol *text_fg = view.findings.graph->style_binding("DEF_TEXT_FG");
 	TEST_EXPECT(text_fg && fs::path(text_fg->file).filename() == "brand.mns" && text_fg->value == "FF102030");
-	TEST_EXPECT(view.graph->resolve_style("%DEF_TEXT_FG%") == "FF102030");
+	TEST_EXPECT(view.findings.graph->resolve_style("%DEF_TEXT_FG%") == "FF102030");
 	size_t inert = 0;
-	for (const GraphSymbol &symbol : view.graph->symbols())
+	for (const GraphSymbol &symbol : view.findings.graph->symbols())
 		if (symbol.kind == ReferenceKind::StyleVar && symbol.inert &&
 		    (symbol.name == "DEF_TEXT_FG" || symbol.name == "STRAY_ONLY")) {
 			++inert;
@@ -1030,24 +1031,24 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(inert == 2); // menu_style.mns's DEF_TEXT_FG and other.mns's name
 	// The picker offers what the game reads, the rest as unreachable with the reason.
 	bool stray_offered = false, brand_offered = false;
-	for (const ReferenceChoice &choice : view.graph->choices(ReferenceKind::StyleVar)) {
+	for (const ReferenceChoice &choice : view.findings.graph->choices(ReferenceKind::StyleVar)) {
 		if (choice.name == "%STRAY_ONLY%") stray_offered = choice.inert && choice.status == ReferenceStatus::Missing && !choice.reason.empty();
 		if (choice.name == "%DEF_TEXT_FG%") brand_offered = !choice.inert && fs::path(choice.file).filename() == "brand.mns";
 	}
 	TEST_EXPECT(stray_offered && brand_offered);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::StyleVar, "%STRAY_ONLY%") == ReferenceStatus::Missing);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::StyleVar, "%BRAND_ONLY%") == ReferenceStatus::Present);
-	TEST_EXPECT(count_code(view.diagnostics, "style.overridden_by_brand") == 1);
-	TEST_EXPECT(count_code(view.diagnostics, "style.not_loaded") == 1);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%STRAY_ONLY%") == ReferenceStatus::Missing);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%BRAND_ONLY%") == ReferenceStatus::Present);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.overridden_by_brand") == 1);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_loaded") == 1);
 	// A colour the menus read through a variable follows wcstoul (a sign and eight digits
 	// read whole, a 'G' stops the digits), and a value holds a %NAME% only where the
 	// game's expansion finds one (S12 B2).
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG +FF102030\r\nBRAND_ONLY 50% of %A B%\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(view.diagnostics, "style.not_a_color") == 0 && count_code(view.diagnostics, "style.nested_var") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 0 && count_code(view.findings.diagnostics, "style.nested_var") == 0);
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF10203G\r\nBRAND_ONLY x%DEF_TEXT_FG%\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(view.diagnostics, "style.not_a_color") == 1 && count_code(view.diagnostics, "style.nested_var") == 1);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 1 && count_code(view.findings.diagnostics, "style.nested_var") == 1);
 
 	// A menu naming the stray name: the finding says the game does not read that stylesheet.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -1056,7 +1057,7 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(menu && menu->find("EXIT", exit));
 	edit_window(session, *menu, exit, "font.name", std::string("%STRAY_ONLY%"));
 	bool stray_message = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		stray_message = stray_message || (d.code == "reference.missing" && d.message.find("does not read") != std::string::npos);
 	TEST_EXPECT(stray_message);
 	session.handle(make_request(EditorRequestKind::Undo));
@@ -1065,7 +1066,7 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME_LG nofont.fnt\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	size_t missing_fonts = 0;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == "reference.missing" && d.message.find("nofont.fnt") != std::string::npos) {
 			++missing_fonts;
 			TEST_EXPECT(fs::path(d.asset).filename() == "brand.mns" && d.record == "DEF_FONTNAME_LG");
@@ -1076,9 +1077,9 @@ static int test_stylesheet_bindings() {
 	// A line after the place the game stops reading defines nothing it reads.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "EARLY 1\r\nBAD%NAME x\r\nLATE_ONLY 2\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::StyleVar, "%EARLY%") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::StyleVar, "%LATE_ONLY%") == ReferenceStatus::Missing);
-	TEST_EXPECT(count_code(view.diagnostics, "style.invalid_name_char") == 1);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%EARLY%") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%LATE_ONLY%") == ReferenceStatus::Missing);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "style.invalid_name_char") == 1);
 
 	// A menu_style.mns font brand.mns replaces is never loaded: its missing file is no
 	// finding. Once brand.mns no longer defines the name, the game reads it: reported, once.
@@ -1091,11 +1092,11 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(editor_test::write_text(style_file, style_text));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME\tArial16n.fnt\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const GraphSymbol *normal = view.graph->style_binding("DEF_FONTNAME");
+	const GraphSymbol *normal = view.findings.graph->style_binding("DEF_FONTNAME");
 	TEST_EXPECT(normal && fs::path(normal->file).filename() == "brand.mns" && normal->value == "Arial16n.fnt");
 	const auto nowhere_findings = [&view]() {
 		size_t n = 0;
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "reference.missing" && d.message.find("Nowhere.fnt") != std::string::npos) ++n;
 		return n;
 	};
@@ -1156,7 +1157,7 @@ static int test_menu_names_and_targets() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Names"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const std::string go_body =
 	        "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"
 	        "<SOUND STATE=\"MOUSEIN\" TRIGGER=\"MOUSE_OVER\">click.lwf</SOUND>\r\n"
@@ -1191,15 +1192,15 @@ static int test_menu_names_and_targets() {
 	for (const SourceIssue &issue : menu->issues()) std::printf("  issue: %s %s\n", issue.field.c_str(), issue.message.c_str());
 	TEST_EXPECT(menu->issues().empty());
 	const SessionView &view = session.view();
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	const std::string path = menu->path();
 
 	// The files, each a Warning while the project lacks it (the game does without it).
 	const GraphEdge *bank = edge_of(graph, path, ReferenceKind::SoundBank, "click.lwf", "file");
 	TEST_EXPECT(bank && bank->rewritable && bank->record == "HOME/PANEL/GO/Sound 1");
-	TEST_EXPECT(finding(view.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1", "plays no sound"));
+	TEST_EXPECT(finding(view.findings.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1", "plays no sound"));
 	const GraphEdge *credits = edge_of(graph, path, ReferenceKind::Credits, "credits.kda", "value");
-	TEST_EXPECT(credits && finding(view.diagnostics, "reference.missing", credits->record, "shows none of its lines"));
+	TEST_EXPECT(credits && finding(view.findings.diagnostics, "reference.missing", credits->record, "shows none of its lines"));
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::MenuTexture, "icon.tga", "file"));
 	const GraphEdge *header = edge_of(graph, path, ReferenceKind::TextId, "HEAD_ID", "text");
 	TEST_EXPECT(header && header->scope == "GAMETEXT.BIN/menu");
@@ -1216,7 +1217,7 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click") == ReferenceStatus::Missing); // opened by the name as written
 	TEST_EXPECT(graph.resolve(ReferenceKind::Credits, "CREDITS.KDA") == ReferenceStatus::Present);
-	TEST_EXPECT(!finding(view.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
+	TEST_EXPECT(!finding(view.findings.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
 
 	// The screens: the last AWAY is the one found; the earlier one, and its windows, are inert.
 	const GraphSymbol *home_screen = symbol_at(graph, path, ReferenceKind::MenuScreen, "HOME");
@@ -1243,7 +1244,7 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(shadowed.inert && shadowed.inert_reason == board->inert_reason &&
 	            shadowed.inert_reason.find("shadowed by a later screen") != std::string::npos);
 	TEST_EXPECT(!found.inert && found.inert_reason.empty() && found.value.empty() && found.line == 0 && home_screen->line == 0);
-	TEST_EXPECT(finding(view.diagnostics, "menu.duplicate_screen", "AWAY"));
+	TEST_EXPECT(finding(view.findings.diagnostics, "menu.duplicate_screen", "AWAY"));
 	// The windows: the first TITLE is found, the second a duplicate; HIDDEN_KID sits under a
 	// window with no NAME; a part is never a symbol.
 	size_t titles = 0;
@@ -1255,7 +1256,7 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(titles == 2);
 	const GraphSymbol *kid = symbol_at(graph, path, ReferenceKind::MenuWindow, "HOME/PANEL/Window 4/HIDDEN_KID");
 	TEST_EXPECT(kid && kid->inert);
-	const Diagnostic *twin = finding(view.diagnostics, "menu.duplicate_window", "HOME/PANEL/TITLE", "first window of a name");
+	const Diagnostic *twin = finding(view.findings.diagnostics, "menu.duplicate_window", "HOME/PANEL/TITLE", "first window of a name");
 	TEST_EXPECT(twin && twin->severity == DiagnosticSeverity::Warning && twin->field == "name" && twin->child_id != 0);
 
 	// The targets, each resolved where the game looks.
@@ -1268,7 +1269,7 @@ static int test_menu_names_and_targets() {
 	            graph.resolve(startup->kind, startup->target, startup->scope) == ReferenceStatus::Present);
 	const GraphEdge *nowhere = edge_of(graph, path, ReferenceKind::MenuScreen, "NOWHERE");
 	TEST_EXPECT(nowhere && graph.resolve(nowhere->kind, nowhere->target, nowhere->scope) == ReferenceStatus::Missing);
-	const Diagnostic *no_screen = finding(view.diagnostics, "reference.missing", nowhere ? nowhere->record : std::string(),
+	const Diagnostic *no_screen = finding(view.findings.diagnostics, "reference.missing", nowhere ? nowhere->record : std::string(),
 	                                      "GRAPH.MNU does not have and no other menu of the project has");
 	TEST_EXPECT(no_screen && no_screen->severity == DiagnosticSeverity::Warning && no_screen->field == "target");
 	// A screen its FILE lacks that another menu has: the game selects over every screen it has
@@ -1276,7 +1277,7 @@ static int test_menu_names_and_targets() {
 	const GraphEdge *other_home = edge_of(graph, path, ReferenceKind::MenuScreen, "HOME");
 	TEST_EXPECT(other_home && other_home->scope == "MAIN.MNU" &&
 	            graph.resolve(other_home->kind, other_home->target, other_home->scope) == ReferenceStatus::Unverified);
-	TEST_EXPECT(other_home && !finding(view.diagnostics, "reference.missing", other_home->record));
+	TEST_EXPECT(other_home && !finding(view.findings.diagnostics, "reference.missing", other_home->record));
 	// The pickers offer what the lookup finds from the ACTION: a SCREEN target the screens of
 	// its FILE, a WINDOW target the windows of the acting window's screen it reaches, each name
 	// once, where it is defined; a window of the screen no lookup reaches is offered as
@@ -1311,7 +1312,7 @@ static int test_menu_names_and_targets() {
 	// A screen of a menu file the project lacks: that file's own error says it, once.
 	const GraphEdge *there = edge_of(graph, path, ReferenceKind::MenuScreen, "THERE");
 	TEST_EXPECT(there && graph.resolve(there->kind, there->target, there->scope) == ReferenceStatus::Unverified);
-	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Error));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "file", DiagnosticSeverity::Error));
 	size_t window_targets = 0;
 	for (const GraphEdge *edge : graph.references_of(path))
 		if (edge->kind == ReferenceKind::MenuWindow) {
@@ -1324,7 +1325,7 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::MenuWindow, "TITLE", "target") ||
 	            graph.resolve(ReferenceKind::MenuWindow, "TITLE", "GRAPH.MNU/HOME") == ReferenceStatus::Present);
 	bool hidden = false, elsewhere = false;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code != "reference.missing" || d.field != "target") continue;
 		hidden = hidden || d.message.find("'HIDDEN_KID'") != std::string::npos &&
 		                           d.message.find("never finds it") != std::string::npos;
@@ -1338,17 +1339,17 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(first_title && first_title->address == title);
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::MenuWindow, "title", "GRAPH.MNU/HOME").size() == 3);
 	// The ACTIONs the game never runs or ignores.
-	TEST_EXPECT(finding(view.diagnostics, "menu.action_inert", "HOME/PANEL/Window 4", "no NAME"));
+	TEST_EXPECT(finding(view.findings.diagnostics, "menu.action_inert", "HOME/PANEL/Window 4", "no NAME"));
 	bool unknown_type = false, no_state = false;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code != "menu.action_inert") continue;
 		unknown_type = unknown_type || (d.field == "type" && d.message.find("'JUMP'") != std::string::npos);
 		no_state = no_state || (d.field == "state" && d.record == "HOME/PANEL/GO/Action 8");
 	}
 	TEST_EXPECT(unknown_type && no_state);
-	TEST_EXPECT(count_code(view.diagnostics, "menu.action_inert") == 3);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "menu.action_inert") == 3);
 	// style.unused leaves TRIM_COLOR, which the colour names.
-	for (const Diagnostic &d : view.diagnostics) TEST_EXPECT(!(d.code == "style.unused" && d.record == "TRIM_COLOR"));
+	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code == "style.unused" && d.record == "TRIM_COLOR"));
 	return 0;
 }
 
@@ -1376,7 +1377,7 @@ static int test_retail_menu_graph() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail"));
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	for (const fs::path &menu : menus) fs::copy_file(menu, fs::path(root) / menu.filename(), ec);
 	// The shipped stylesheet, loose beside the menus or in the reference fixture set.
 	std::string style = retail::asset_file("menu_style.mns");
@@ -1384,7 +1385,7 @@ static int test_retail_menu_graph() {
 	if (!style.empty()) fs::copy_file(style, fs::path(root) / "menu_style.mns", ec);
 	session.handle(make_request(EditorRequestKind::Rescan));
 	const SessionView &view = session.view();
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	std::map<std::string, size_t> edges, missing;
 	size_t screen_targets = 0, screen_found = 0, screen_other = 0, window_targets = 0, window_found = 0;
 	for (const GraphEdge &edge : graph.edges()) {
@@ -1420,12 +1421,12 @@ static int test_retail_menu_graph() {
 	            screen_targets, screen_found, screen_other);
 	std::printf("  WINDOW / TAB / GLB_FILTER targets %zu: %zu found\n", window_targets, window_found);
 	std::printf("  findings: duplicate_screen %zu, duplicate_window %zu, action_inert %zu, style.unused %zu\n",
-	            count_code(view.diagnostics, "menu.duplicate_screen"), count_code(view.diagnostics, "menu.duplicate_window"),
-	            count_code(view.diagnostics, "menu.action_inert"), count_code(view.diagnostics, "style.unused"));
+	            count_code(view.findings.diagnostics, "menu.duplicate_screen"), count_code(view.findings.diagnostics, "menu.duplicate_window"),
+	            count_code(view.findings.diagnostics, "menu.action_inert"), count_code(view.findings.diagnostics, "style.unused"));
 	// The grill's census (B1): 110 WINDOW rows and 7 SCREEN rows, each found.
 	TEST_EXPECT(window_targets == 110 && window_found == window_targets);
 	TEST_EXPECT(screen_targets == 7 && screen_found + screen_other == screen_targets);
-	TEST_EXPECT(count_code(view.diagnostics, "menu.duplicate_screen") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "menu.duplicate_screen") == 0);
 	return 0;
 }
 
@@ -1439,7 +1440,7 @@ static int test_user_point_references() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Points"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const fs::path fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
 	std::error_code ec;
 	fs::create_directories(fs::path(root) / "models", ec);
@@ -1453,7 +1454,7 @@ static int test_user_point_references() {
 	                                    "particlefx Effect_x Nowhere\nend\n"
 	                                    "begin \"No Graphic\"\nid 100102\ntype marker\nparticlefx Effect_x Anything\nend\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const AssetGraph &graph = *session.view().graph;
+	const AssetGraph &graph = *session.view().findings.graph;
 	TEST_EXPECT(graph.resolve(ReferenceKind::UserPoint, "armory", "ARMORY.3DI") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::UserPoint, "Nowhere", "ARMORY.3DI") == ReferenceStatus::Missing);
 	TEST_EXPECT(graph.resolve(ReferenceKind::UserPoint, "Ground", "OTHER.3DI") == ReferenceStatus::Missing);
@@ -1479,7 +1480,7 @@ static int test_user_point_references() {
 		slot_uses += edge->kind == ReferenceKind::UserPoint && edge->record == "Armory Item" ? 1 : 0;
 	TEST_EXPECT(slot_uses == 1);
 	size_t missing_points = 0, stray = 0;
-	for (const Diagnostic &d : session.view().diagnostics) {
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
 		if (d.code != "reference.missing") continue;
 		if (d.message.find("Nowhere") != std::string::npos && d.severity == DiagnosticSeverity::Warning) ++missing_points;
 		if (d.message.find("Anything") != std::string::npos) ++stray;
@@ -1499,32 +1500,32 @@ static int test_symbol_locators() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locators"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const std::vector<const GraphSymbol *> exit = view.graph->symbols_named(ReferenceKind::MenuWindow, "EXIT");
+	const std::vector<const GraphSymbol *> exit = view.findings.graph->symbols_named(ReferenceKind::MenuWindow, "EXIT");
 	TEST_EXPECT(exit.size() == 1 && !exit[0]->locator.empty() && exit[0]->field == "name" && !exit[0]->inert);
 	if (exit.empty()) return 1;
 	MnuDocument reloaded;
 	Diagnostic error;
-	TEST_EXPECT(reloaded.load(view.project_root + "/" + exit[0]->file, exit[0]->file, AssetKind::Menu,
-	                          view.document.target_game, error));
+	TEST_EXPECT(reloaded.load(view.project.root + "/" + exit[0]->file, exit[0]->file, AssetKind::Menu,
+	                          view.project.document->target_game, error));
 	const NodeAddress at = reloaded.address_at(exit[0]->locator);
 	TEST_EXPECT(at.row != 0 && reloaded.record_name(at) == "EXIT");
 	NodeAddress found;
 	TEST_EXPECT(reloaded.find("exit", found) && found == at);
 	TEST_EXPECT(reloaded.find("STARTUP", found) && found.kind == reloaded.kind_from_name("screen") && !found.child);
 	// Two definitions of a name in the stylesheet the game reads: the last one is read.
-	const AssetEntry *style = view.scan.find("menu_style.mns");
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	const std::string style_path = style->relative_path; // the scan is read again below
-	const std::string style_file = view.project_root + "/" + style_path;
+	const std::string style_file = view.project.root + "/" + style_path;
 	TEST_EXPECT(editor_test::write_text(style_file, read_text(style_file) + "\r\nTWICE 1\r\nTWICE 2\r\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const std::vector<const GraphSymbol *> twice = view.graph->symbols_named(ReferenceKind::StyleVar, "twice");
+	const std::vector<const GraphSymbol *> twice = view.findings.graph->symbols_named(ReferenceKind::StyleVar, "twice");
 	TEST_EXPECT(twice.size() == 2 && twice[0]->inert && !twice[1]->inert && twice[1]->value == "2" &&
 	            twice[0]->inert_reason.find("defines it again below") != std::string::npos);
-	TEST_EXPECT(view.graph->style_binding("TWICE") == (twice.size() == 2 ? twice[1] : nullptr));
+	TEST_EXPECT(view.findings.graph->style_binding("TWICE") == (twice.size() == 2 ? twice[1] : nullptr));
 	// A query names a variable as the graph keys it; Document::find takes a menu's %NAME% too.
-	TEST_EXPECT(view.graph->symbols_named(ReferenceKind::StyleVar, "%twice%").empty());
+	TEST_EXPECT(view.findings.graph->symbols_named(ReferenceKind::StyleVar, "%twice%").empty());
 	session.handle(make_request(EditorRequestKind::OpenDocument, style_path));
 	const Document *sheet_document = session.document_for(style_path);
 	NodeAddress by_name, by_variable;
@@ -1562,15 +1563,15 @@ static int test_symbol_locators() {
 	            font[0].label.find("DEF_FONTNAME_LG") != std::string::npos);
 	TEST_EXPECT(font[1].locator.empty() && !font[1].editable && fs::path(font[1].file).extension() == ".fnt");
 	TEST_EXPECT(targets_of(*menu, main, "font.default_fg", view).size() == 1);
-	const std::vector<const GraphEdge *> style_uses = view.graph->usages_of(style_path);
-	TEST_EXPECT(view.graph->referrers_of_file(style_path).empty() && !style_uses.empty());
+	const std::vector<const GraphEdge *> style_uses = view.findings.graph->usages_of(style_path);
+	TEST_EXPECT(view.findings.graph->referrers_of_file(style_path).empty() && !style_uses.empty());
 	TEST_EXPECT(std::all_of(style_uses.begin(), style_uses.end(), [](const GraphEdge *edge) {
 		return edge->kind == ReferenceKind::StyleVar && !edge->locator.empty();
 	}));
 	go_to(session, font[0]);
 	const Document *sheet = session.document_for(style_path);
-	TEST_EXPECT(sheet && view.active_document == sheet->path() && view.selection.row != 0 &&
-	            sheet->record_name(view.selection) == "DEF_FONTNAME_LG" && view.reveal_field == "name");
+	TEST_EXPECT(sheet && view.documents.active == sheet->path() && view.documents.selection.row != 0 &&
+	            sheet->record_name(view.documents.selection) == "DEF_FONTNAME_LG" && editor_test::revealed_field(view) == "name");
 	return 0;
 }
 
@@ -1585,7 +1586,7 @@ static int test_go_to_targets() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const std::string go = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
 	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n"
 	                         "<ACTION TYPE=\"WINDOW\" STATE=\"HIDE\">TITLE</ACTION>\r\n";
@@ -1624,17 +1625,17 @@ static int test_go_to_targets() {
 	TEST_EXPECT(menu->find("AWAY", away) && away == away_screen);
 	TEST_EXPECT(menu->find("AWAY", away, "FLOW.MNU/HOME") && away.row == menu->rows()[0]->id && away.child != 0);
 	const GraphEdge *jump = nullptr;
-	for (const GraphEdge *edge : view.graph->references_of("other.mnu"))
+	for (const GraphEdge *edge : view.findings.graph->references_of("other.mnu"))
 		if (edge->kind == ReferenceKind::MenuScreen) jump = edge;
 	TEST_EXPECT(jump != nullptr);
 	if (jump) {
-		const GraphSymbol *screen_symbol = view.graph->resolve_symbol(jump->kind, jump->value, jump->scope);
+		const GraphSymbol *screen_symbol = view.findings.graph->resolve_symbol(jump->kind, jump->value, jump->scope);
 		TEST_EXPECT(screen_symbol && menu->address_at(screen_symbol->locator) == away_screen);
 	}
 	// The same file: the Go to selects the record there, its NAME shown.
 	if (to_away_title.size() == 1) go_to(session, to_away_title[0]);
-	TEST_EXPECT(view.active_document == menu->path() && view.selection == away_title && view.reveal_field == "name");
-	const std::vector<const GraphEdge *> uses = view.graph->usages_of(menu->path());
+	TEST_EXPECT(view.documents.active == menu->path() && view.documents.selection == away_title && editor_test::revealed_field(view) == "name");
+	const std::vector<const GraphEdge *> uses = view.findings.graph->usages_of(menu->path());
 	const auto used_by = [&uses](const char *source, const char *record) {
 		return std::any_of(uses.begin(), uses.end(), [&](const GraphEdge *edge) {
 			return edge->source == source && edge->record == record;
@@ -1760,7 +1761,7 @@ static int test_model_texture_references() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Textures"));
 	const SessionView &view = session.view();
-	const std::string root = view.project_root;
+	const std::string root = view.project.root;
 	// A model minted from scene text, its texture rows of six types (an .mdt normal map and a
 	// chunk row among them); a particle file.
 	const std::string scene = dir.file("scene");
@@ -1769,7 +1770,7 @@ static int test_model_texture_references() {
 	                                    "texture bump.tga 3 5\ntexture trim.tga 1 3\ntexture ready.mdt 3 4\n"
 	                                    "texture field.nq8 1 16\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
-	const ImportResult imported = import_assets({{scene + "/typed.o3d", {}}}, ProjectPaths::for_root(root), view.document, false);
+	const ImportResult imported = import_assets({{scene + "/typed.o3d", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/typed.3di"}));
 	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
@@ -1781,10 +1782,10 @@ static int test_model_texture_references() {
 		session.handle(make_request(EditorRequestKind::Rescan));
 	};
 	const std::string model = "models/typed.3di";
-	const auto row_of = [&](const char *value) { return edge_to(*view.graph, model, ReferenceKind::Texture, value); };
+	const auto row_of = [&](const char *value) { return edge_to(*view.findings.graph, model, ReferenceKind::Texture, value); };
 	const auto resolved = [&](const char *value, std::string *file = nullptr) {
 		const GraphEdge *edge = row_of(value);
-		return edge ? view.graph->resolve(*edge, file) : ReferenceStatus::NotAReference;
+		return edge ? view.findings.graph->resolve(*edge, file) : ReferenceStatus::NotAReference;
 	};
 	textures({"wall.dds", "plain.dds", "bump.dds", "trim.dds"});
 	TEST_EXPECT(row_of("wall.tga") && row_of("wall.tga")->loader_arg == 0 && row_of("plain.tga")->loader_arg == 1 &&
@@ -1794,15 +1795,15 @@ static int test_model_texture_references() {
 	TEST_EXPECT(resolved("plain.tga") == ReferenceStatus::Missing);
 	TEST_EXPECT(resolved("bump.tga", &file) == ReferenceStatus::Present && file == "textures/bump.dds");
 	TEST_EXPECT(resolved("trim.tga", &file) == ReferenceStatus::Present && file == "textures/trim.dds");
-	TEST_EXPECT(!view.graph->referrers_of_file("wall.dds").empty());
+	TEST_EXPECT(!view.findings.graph->referrers_of_file("wall.dds").empty());
 	// A texture of anything else (no row type) reads as the runtime's texture lookup, which
 	// takes the stem's .dds too.
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "wall.tga", "", &file) == ReferenceStatus::Present &&
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "wall.tga", "", &file) == ReferenceStatus::Present &&
 	            file == "textures/wall.dds");
 	// Only the missing row is a finding, and it carries the row's type as its loader's argument
 	// (in its JSON too).
 	const auto finding_for = [&](const char *target) -> const Diagnostic * {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "reference.missing" && d.asset == model && d.target == target) return &d;
 		return nullptr;
 	};
@@ -1828,14 +1829,14 @@ static int test_model_texture_references() {
 	// so a file the scan types by no extension serves it. Neither is a finding once there.
 	TEST_EXPECT(resolved("ready.mdt") == ReferenceStatus::Missing && resolved("field.nq8") == ReferenceStatus::Missing);
 	textures({"wall.tga", "wall.dds", "plain.tga", "plain.dds", "bump.tga", "bump.dds", "ready.mdt", "field.nq8"});
-	TEST_EXPECT(view.scan.find("ready.mdt") && view.scan.find("ready.mdt")->kind == AssetKind::Texture);
-	TEST_EXPECT(view.scan.find("field.nq8") && view.scan.find("field.nq8")->kind == AssetKind::Unknown);
+	TEST_EXPECT(view.project.scan->find("ready.mdt") && view.project.scan->find("ready.mdt")->kind == AssetKind::Texture);
+	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
 	TEST_EXPECT(resolved("ready.mdt", &file) == ReferenceStatus::Present && file == "textures/ready.mdt");
 	TEST_EXPECT(resolved("field.nq8", &file) == ReferenceStatus::Present && file == "textures/field.nq8");
 	TEST_EXPECT(!finding_for("ready.mdt") && !finding_for("field.nq8"));
-	for (const Diagnostic &d : view.diagnostics) TEST_EXPECT(!(d.code == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
+	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
 	// No other texture takes a file the scan cannot type: a particle naming field.nq8 misses it.
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.
 	session.handle(make_request(EditorRequestKind::OpenDocument, model));
 	const Document *document = session.document_for(model);
@@ -1848,21 +1849,21 @@ static int test_model_texture_references() {
 	TEST_EXPECT(name.reference == ReferenceKind::Texture && name.loader_arg == 0);
 	TEST_EXPECT(document->reference_status(name, std::string("wall.tga"), view, nullptr) == ReferenceStatus::Present);
 	TEST_EXPECT(document->reference_target_file(name, std::string("wall.tga"), view) == "textures/wall.dds");
-	const opennova::io::JsonValue json = graph_edge_to_json(*view.graph, *wall);
+	const opennova::io::JsonValue json = graph_edge_to_json(*view.findings.graph, *wall);
 	TEST_EXPECT(json.get("loader_arg") && json.get("loader_arg")->number == 0.0 && !json.get("material_type") &&
 	            json.get_string("status", "") == "present" && json.get_string("file", "") == "textures/wall.dds");
 	// A particle's texture, as the runtime's lookup reads it: its stem's .dds or its overlay
 	// twin serves it; an extension appended to the whole name does not.
 	textures({"puff.dds"});
-	const GraphEdge *puff = edge_to(*view.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->loader_arg == -1 && view.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
-	            file == "textures/puff.dds" && !graph_edge_to_json(*view.graph, *puff).get("loader_arg"));
+	const GraphEdge *puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
+	TEST_EXPECT(puff && puff->loader_arg == -1 && view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
+	            file == "textures/puff.dds" && !graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
 	textures({"puff_O.tga"});
-	puff = edge_to(*view.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && view.graph->resolve(*puff) == ReferenceStatus::Present);
+	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
+	TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Present);
 	textures({"puff.tga.dds"});
-	puff = edge_to(*view.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && view.graph->resolve(*puff) == ReferenceStatus::Missing);
+	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
+	TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Missing);
 	return 0;
 }
 
@@ -1880,28 +1881,28 @@ static int test_rename_keeps_loader_spelling() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Spelling"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const std::string root = view.project_root;
+	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string scene = dir.file("scene");
 	TEST_EXPECT(editor_test::write_text(scene + "/relief.o3d",
 	                                    "o3d 1\nmodel RELIEF\nmaterial FF_ST_OP\ntexture bump.tga 3 4\ntexture bump.tga 3 5\n"
 	                                    "texture bump.tga 3 6\ntexture bump.tga 3 7\nlod 0\npart 0 0 0 0\nstrip 0 0\n"
 	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
-	TEST_EXPECT(import_assets({{scene + "/relief.o3d", {}}}, paths, view.document, false).imported ==
+	TEST_EXPECT(import_assets({{scene + "/relief.o3d", {}}}, paths, *view.project.document, false).imported ==
 	            std::vector<std::string>({"models/relief.3di"}));
 	TEST_EXPECT(editor_test::write_text(root + "/textures/bump.dds", "dds"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const RenamePlan plan = plan_rename(paths, view.scan, *view.graph, "textures/bump.dds", "stone.dds");
+	const RenamePlan plan = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/bump.dds", "stone.dds");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 4);
 	for (const RenameSite &site : plan.sites) TEST_EXPECT(site.before == "bump.tga" && site.after == "stone.tga");
 	session.handle(make_request(EditorRequestKind::RenameAsset, "textures/bump.dds", "stone.dds"));
-	TEST_EXPECT(session.outcome().done() && view.scan.find("stone.dds") && !view.scan.find("bump.dds"));
+	TEST_EXPECT(session.outcome().done() && view.project.scan->find("stone.dds") && !view.project.scan->find("bump.dds"));
 	size_t rows = 0;
-	for (const GraphEdge *edge : view.graph->references_of("models/relief.3di")) {
+	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di")) {
 		if (edge->kind != ReferenceKind::Texture) continue;
 		++rows;
 		std::string file;
-		TEST_EXPECT(edge->value == "stone.tga" && view.graph->resolve(*edge, &file) == ReferenceStatus::Present &&
+		TEST_EXPECT(edge->value == "stone.tga" && view.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present &&
 		            file == "textures/stone.dds");
 		const uint8_t type = opennova::renderer::material_texture_runtime_type(static_cast<uint8_t>(edge->loader_arg));
 		TEST_EXPECT(opennova::renderer::material_texture_transform(type, edge->value, true) !=
@@ -1925,9 +1926,9 @@ static int test_rename_keeps_loader_spelling() {
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	TEST_EXPECT(editor_test::write_text(root + "/textures/logo.dds", "dds") && editor_test::write_text(root + "/textures/shine.tga", "tga"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const RenamePlan kept = plan_rename(paths, view.scan, *view.graph, "textures/logo.dds", "glow.dds");
+	const RenamePlan kept = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/logo.dds", "glow.dds");
 	TEST_EXPECT(kept.ok() && kept.sites.size() == 1 && kept.sites[0].after == "glow.tga");
-	const RenamePlan taken = plan_rename(paths, view.scan, *view.graph, "textures/logo.dds", "shine.dds");
+	const RenamePlan taken = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/logo.dds", "shine.dds");
 	TEST_EXPECT(taken.ok() && taken.sites.size() == 1 && taken.sites[0].after == "shine.dds");
 	return 0;
 }

@@ -28,6 +28,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/import/png_decode.h>
 #include <editor/import/quantize.h>
@@ -36,7 +37,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/pff/pff.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -90,7 +91,7 @@ std::string read_text(const std::string &path) {
 }
 
 const ImportedSource *imported_source(const SessionView &view, const std::string &source) {
-	for (const ImportedSource &listed : view.imports)
+	for (const ImportedSource &listed : *view.project.imports)
 		if (listed.source == source) return &listed;
 	return nullptr;
 }
@@ -214,23 +215,23 @@ static int test_import_pass() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Imports"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", gradient_png(8, 8)));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	const SessionView &view = session.view();
 	// With no record the PNG is a texture the game loads as it is: nothing imports,
 	// a menu naming it resolves by retail's extension dispatch, and it packs.
-	TEST_EXPECT(view.imports.empty());
-	TEST_EXPECT(view.scan.find("logo.png") && view.scan.find("logo.png")->kind == AssetKind::Texture);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo") == ReferenceStatus::Missing);
+	TEST_EXPECT(view.project.imports->empty());
+	TEST_EXPECT(view.project.scan->find("logo.png") && view.project.scan->find("logo.png")->kind == AssetKind::Texture);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo") == ReferenceStatus::Missing);
 	// Its record makes it an import source.
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.imports.size() == 1 && view.imports[0].source == "art/logo.png" && view.imports[0].reimported);
-	TEST_EXPECT(view.imports[0].importer == "image" && view.imports[0].ok && view.imports[0].outputs.size() == 1);
-	const std::string output = view.imports[0].outputs[0];
+	TEST_EXPECT(view.project.imports->size() == 1 && (*view.project.imports)[0].source == "art/logo.png" && (*view.project.imports)[0].reimported);
+	TEST_EXPECT((*view.project.imports)[0].importer == "image" && (*view.project.imports)[0].ok && (*view.project.imports)[0].outputs.size() == 1);
+	const std::string output = (*view.project.imports)[0].outputs[0];
 	TEST_EXPECT(output.find(".opennova/imported/") == 0 && output.find("logo.pcx") != std::string::npos);
 	TEST_EXPECT(fs::is_regular_file(root + "/" + output));
 	ImportSidecar sidecar;
@@ -245,17 +246,17 @@ static int test_import_pass() {
 	IndexedImage8 decoded;
 	TEST_EXPECT(decode_pcx_indexed(pcx.data(), pcx.size(), decoded, message) && decoded.width == 8 && decoded.height == 8);
 	// The scan lists the output as a project file from its source; the source is never packed.
-	const AssetEntry *produced = view.scan.find("logo.pcx");
+	const AssetEntry *produced = view.project.scan->find("logo.pcx");
 	TEST_EXPECT(produced && produced->imported_from == "art/logo.png" && produced->kind == AssetKind::Texture);
-	const AssetEntry *source = view.scan.find("logo.png");
+	const AssetEntry *source = view.project.scan->find("logo.png");
 	TEST_EXPECT(source && source->kind == AssetKind::ImageSource);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "logo") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo") == ReferenceStatus::Present);
 	// A menu names the output by its own file; the source is not packed, so a menu
 	// naming the PNG finds nothing the game can load.
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.pcx") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Missing);
-	const BuildPlan plan = plan_build(paths, view.scan, view.requirements,
-	                                  validate_open_documents(paths, view.document, view.scan, view.documents));
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.pcx") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Missing);
+	const BuildPlan plan = plan_build(paths, *view.project.scan, *view.project.requirements,
+	                                  validate_open_documents(paths, *view.project.document, *view.project.scan, view.documents.open));
 	bool packed = false, source_packed = false;
 	for (const BuildArchive &archive : plan.archives)
 		for (const BuildEntry &entry : archive.entries) {
@@ -265,36 +266,36 @@ static int test_import_pass() {
 	for (const BuildEntry &entry : plan.loose) if (entry.logical_name == "logo.png") source_packed = true;
 	TEST_EXPECT(packed && !source_packed);
 	// Nothing changed: nothing is imported again. A changed source is; so is a missing output.
-	ImportRunResult run = run_imports(paths, view.document);
+	ImportRunResult run = run_imports(paths, *view.project.document);
 	TEST_EXPECT(run.reimported == 0 && run.sources.size() == 1 && run.sources[0].outputs.size() == 1);
 	// A changed source: its size or last-write time moves (the import cache trusts them
 	// while they hold, the way Godot's does, at the file system's own clock resolution).
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", gradient_png(9, 8, 77)));
-	run = run_imports(paths, view.document);
+	run = run_imports(paths, *view.project.document);
 	TEST_EXPECT(run.reimported == 1);
 	fs::remove(root + "/" + output);
-	run = run_imports(paths, view.document);
+	run = run_imports(paths, *view.project.document);
 	TEST_EXPECT(run.reimported == 1 && fs::is_regular_file(root + "/" + output));
-	run = run_imports(paths, view.document, true);
+	run = run_imports(paths, *view.project.document, true);
 	TEST_EXPECT(run.reimported == 1);
 	// One source by name; an unknown option is a finding and the source stays not ok.
-	run = run_imports(paths, view.document, true, "logo.png");
+	run = run_imports(paths, *view.project.document, true, "logo.png");
 	TEST_EXPECT(run.reimported == 1);
 	sidecar.options["format"] = "tga";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
-	run = run_imports(paths, view.document, true);
+	run = run_imports(paths, *view.project.document, true);
 	TEST_EXPECT(run.reimported == 0 && !run.sources[0].ok && !run.diagnostics.empty() && run.diagnostics[0].code == "import.option");
 	sidecar.options["format"] = "pcx";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// An imported output is never renamed: its source is.
 	session.handle(make_request(EditorRequestKind::Rescan));
-	const RenamePlan rename = plan_rename(paths, view.scan, *view.graph, "logo.pcx", "logo2.pcx");
+	const RenamePlan rename = plan_rename(paths, *view.project.scan, *view.findings.graph, "logo.pcx", "logo2.pcx");
 	TEST_EXPECT(!rename.ok() && rename.refusals.front().code == "rename.imported");
 	// The session's Reimport request and the JSON view.
 	EditorRequest reimport = make_request(EditorRequestKind::Reimport);
 	reimport.flag = true;
 	session.handle(reimport);
-	TEST_EXPECT(view.imports.size() == 1 && view.imports[0].reimported && session.outcome().done());
+	TEST_EXPECT(view.project.imports->size() == 1 && (*view.project.imports)[0].reimported && session.outcome().done());
 	// A forced Reimport that fails: its finding is the request's outcome (refused) and
 	// exactly one Problems row (a Reimport is the refresh with its source forced: one
 	// import pass, whose findings ride the scan).
@@ -304,30 +305,30 @@ static int test_import_pass() {
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", current, error));
 	session.handle(reimport);
 	TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.option") == 1);
-	TEST_EXPECT(count_code(view.diagnostics, "import.option") == 1 && count_code(view.scan.diagnostics, "import.option") == 1);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "import.option") == 1 && count_code(view.project.scan->diagnostics, "import.option") == 1);
 	// Without force the changed record alone imports again (the import cache remembers
 	// the record the outputs were made from), so the finding stays until the option is
 	// fixed, and then nothing is imported: the outputs are the fixed record's.
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(view.diagnostics, "import.option") == 1);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "import.option") == 1);
 	current.options["format"] = "pcx";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", current, error));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(view.diagnostics, "import.option") == 0 && view.imports.size() == 1 && !view.imports[0].reimported);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "import.option") == 0 && view.project.imports->size() == 1 && !(*view.project.imports)[0].reimported);
 	// A PNG that is not one is a finding on its source, and no output.
 	TEST_EXPECT(editor_test::write_text(root + "/art/broken.png", "not a png"));
 	TEST_EXPECT(mark_for_import(root + "/art/broken.png"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	bool broken_reported = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == "import.decode" && d.asset == "art/broken.png") broken_reported = true;
-	TEST_EXPECT(broken_reported && view.imports.size() == 2);
+	TEST_EXPECT(broken_reported && view.project.imports->size() == 2);
 	// A Reimport of one source: another source's failure stays a Problems row but is not
 	// this request's outcome.
 	EditorRequest one = make_request(EditorRequestKind::Reimport, "logo.png");
 	one.flag = true;
 	session.handle(one);
-	TEST_EXPECT(session.outcome().done() && count_code(view.diagnostics, "import.decode") == 1);
+	TEST_EXPECT(session.outcome().done() && count_code(view.findings.diagnostics, "import.decode") == 1);
 	TEST_EXPECT(imported_source(view, "art/logo.png") && imported_source(view, "art/logo.png")->reimported);
 	// A menu's .tga the project lacks loads its .dds (from the first dot), as retail's
 	// loader does (a texture of no model finds it too, the runtime's lookup trying the
@@ -335,13 +336,13 @@ static int test_import_pass() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.dds", std::vector<uint8_t>{'D', 'D', 'S', ' '}));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	std::string sky;
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(), &sky) ==
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(), &sky) ==
 	                    ReferenceStatus::Present && sky == "art/sky.dds");
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(), &sky) == ReferenceStatus::Present &&
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(), &sky) == ReferenceStatus::Present &&
 	            sky == "art/sky.dds");
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.tga", std::vector<uint8_t>(18, 0)));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(), &sky) ==
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(), &sky) ==
 	                    ReferenceStatus::Present && sky == "art/sky.tga");
 	return 0;
 }
@@ -359,7 +360,7 @@ static int test_import_lifetime() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Lifetime"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const std::string root = view.project_root;
+	const std::string root = view.project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const std::string source = root + "/art/logo.png";
 	const std::string sidecar_path = source + ".import";
@@ -375,14 +376,14 @@ static int test_import_lifetime() {
 	// A touched source (a checkout, a copy): nothing imports and the record keeps its bytes.
 	fs::last_write_time(source, fs::last_write_time(source) + std::chrono::hours(1));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.imports.size() == 1 && !view.imports[0].reimported && read_text(sidecar_path) == first);
+	TEST_EXPECT(view.project.imports->size() == 1 && !(*view.project.imports)[0].reimported && read_text(sidecar_path) == first);
 	// The cache lost with the outputs (a fresh clone): imported again, the record unchanged.
 	std::error_code ec;
 	fs::remove_all(paths.imported_dir, ec);
 	fs::remove(paths.import_cache_file, ec);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.imports.size() == 1 && view.imports[0].reimported && read_text(sidecar_path) == first);
-	TEST_EXPECT(view.scan.find("logo.pcx") != nullptr);
+	TEST_EXPECT(view.project.imports->size() == 1 && (*view.project.imports)[0].reimported && read_text(sidecar_path) == first);
+	TEST_EXPECT(view.project.scan->find("logo.pcx") != nullptr);
 	// A cache of another schema (one an older build wrote, its digests made another way)
 	// vouches for nothing: the source is hashed again and the record keeps the true hash.
 	{
@@ -395,14 +396,14 @@ static int test_import_lifetime() {
 			for (io::JsonValue &item : sources->array) item.set("hash", io::JsonValue::make_string(io::hex64(1)));
 		TEST_EXPECT(editor_test::write_text(paths.import_cache_file, io::json_write(cache)));
 		session.handle(make_request(EditorRequestKind::Rescan));
-		TEST_EXPECT(view.imports.size() == 1 && read_text(sidecar_path) == first);
+		TEST_EXPECT(view.project.imports->size() == 1 && read_text(sidecar_path) == first);
 	}
 	// New content of the same size: the record's hash changes.
 	TEST_EXPECT(editor_test::write_bytes(source, gradient_png(8, 8, 99)));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	ImportSidecar after;
 	TEST_EXPECT(load_import_sidecar(sidecar_path, after, error) && after.source_hash != before.source_hash);
-	TEST_EXPECT(view.imports.size() == 1 && view.imports[0].reimported);
+	TEST_EXPECT(view.project.imports->size() == 1 && (*view.project.imports)[0].reimported);
 	// A record that does not parse (a hand edit with a typo) is the author's: reported,
 	// kept byte for byte and its source not imported (its output not listed) for as long
 	// as it does not read; fixed back to what it was, nothing imports.
@@ -413,9 +414,9 @@ static int test_import_lifetime() {
 	TEST_EXPECT(editor_test::write_text(sidecar_path, typo));
 	for (int pass = 0; pass < 2; ++pass) {
 		session.handle(make_request(EditorRequestKind::Rescan));
-		TEST_EXPECT(read_text(sidecar_path) == typo && count_code(view.diagnostics, "import.sidecar") == 1);
-		TEST_EXPECT(view.imports.size() == 1 && !view.imports[0].ok && !view.imports[0].reimported);
-		TEST_EXPECT(view.scan.find("logo.pcx") == nullptr);
+		TEST_EXPECT(read_text(sidecar_path) == typo && count_code(view.findings.diagnostics, "import.sidecar") == 1);
+		TEST_EXPECT(view.project.imports->size() == 1 && !(*view.project.imports)[0].ok && !(*view.project.imports)[0].reimported);
+		TEST_EXPECT(view.project.scan->find("logo.pcx") == nullptr);
 	}
 	EditorRequest forced = make_request(EditorRequestKind::Reimport, "logo.png");
 	forced.flag = true;
@@ -424,8 +425,8 @@ static int test_import_lifetime() {
 	TEST_EXPECT(read_text(sidecar_path) == typo);
 	TEST_EXPECT(editor_test::write_text(sidecar_path, good));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(count_code(view.diagnostics, "import.sidecar") == 0 && view.imports.size() == 1 && view.imports[0].ok &&
-	            !view.imports[0].reimported && view.scan.find("logo.pcx") != nullptr);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "import.sidecar") == 0 && view.project.imports->size() == 1 && (*view.project.imports)[0].ok &&
+	            !(*view.project.imports)[0].reimported && view.project.scan->find("logo.pcx") != nullptr);
 	// A menu names the output; renaming the source renames the output with it.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -435,17 +436,17 @@ static int test_import_lifetime() {
 	set.edits = menu_test::image_edits(*menu, exit, "logo.pcx");
 	session.handle(set);
 	session.handle(make_request(EditorRequestKind::SaveAll));
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
-	const std::string old_dir = view.imports[0].output_dir;
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
+	const std::string old_dir = (*view.project.imports)[0].output_dir;
 	{
-		const RenamePlan plan = plan_rename(paths, view.scan, *view.graph, "art/logo.png", "logo2.png");
+		const RenamePlan plan = plan_rename(paths, *view.project.scan, *view.findings.graph, "art/logo.png", "logo2.png");
 		TEST_EXPECT(plan.ok() && plan.sidecar == "art/logo.png.import" && plan.new_sidecar == "art/logo2.png.import");
 		TEST_EXPECT(plan.outputs.size() == 1 && plan.outputs[0].old_name == "logo.pcx" && plan.outputs[0].new_name == "logo2.pcx");
 		TEST_EXPECT(plan.sites.size() == 1 && plan.sites[0].after == "logo2.pcx" && plan.sites[0].target == plan.outputs[0].path);
 		// The output's new name must fit the archives and be free.
 		TEST_EXPECT(editor_test::write_text(root + "/taken.pcx", "x"));
 		session.handle(make_request(EditorRequestKind::Rescan));
-		const RenamePlan taken = plan_rename(paths, view.scan, *view.graph, "art/logo.png", "taken.png");
+		const RenamePlan taken = plan_rename(paths, *view.project.scan, *view.findings.graph, "art/logo.png", "taken.png");
 		TEST_EXPECT(!taken.ok() && taken.refusals.front().code == "rename.exists");
 		fs::remove(root + "/taken.pcx", ec);
 		session.handle(make_request(EditorRequestKind::Rescan));
@@ -455,23 +456,23 @@ static int test_import_lifetime() {
 	TEST_EXPECT(!fs::exists(source) && fs::exists(root + "/art/logo2.png"));
 	TEST_EXPECT(!fs::exists(sidecar_path) && read_text(root + "/art/logo2.png.import").find("logo2.pcx") != std::string::npos);
 	TEST_EXPECT(!fs::exists(root + "/" + old_dir));
-	const AssetEntry *renamed = view.scan.find("logo2.pcx");
-	TEST_EXPECT(renamed && renamed->imported_from == "art/logo2.png" && view.scan.find("logo.pcx") == nullptr);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "logo2.pcx") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "logo.pcx") == ReferenceStatus::Missing);
+	const AssetEntry *renamed = view.project.scan->find("logo2.pcx");
+	TEST_EXPECT(renamed && renamed->imported_from == "art/logo2.png" && view.project.scan->find("logo.pcx") == nullptr);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo2.pcx") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo.pcx") == ReferenceStatus::Missing);
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	Value image;
 	TEST_EXPECT(menu && menu->find("EXIT", exit) &&
 	            menu->get(menu_test::child_of(*menu, exit, "appearance"), "value", image) &&
 	            std::get<std::string>(image) == "logo2.pcx");
-	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "reference.missing") == 0);
 	// The source gone: its record lists nothing (a warning says so), so the output no
 	// longer resolves and the menu's reference is missing.
 	fs::remove(root + "/art/logo2.png", ec);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(view.imports.empty() && view.scan.find("logo2.pcx") == nullptr);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "logo2.pcx") == ReferenceStatus::Missing);
-	TEST_EXPECT(count_code(view.diagnostics, "import.orphan_record") == 1 && count_code(view.diagnostics, "reference.missing") == 1);
+	TEST_EXPECT(view.project.imports->empty() && view.project.scan->find("logo2.pcx") == nullptr);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo2.pcx") == ReferenceStatus::Missing);
+	TEST_EXPECT(count_code(view.findings.diagnostics, "import.orphan_record") == 1 && count_code(view.findings.diagnostics, "reference.missing") == 1);
 	return 0;
 }
 
@@ -507,22 +508,22 @@ static int test_retail_source() {
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail"));
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.retail_files.empty());
+	TEST_EXPECT(view.project.retail_files.empty());
 	session.handle(make_request(EditorRequestKind::PreviewRetailImport));
-	TEST_EXPECT(!view.import_preview.open && view.diagnostics.back().code == "import.retail");
+	TEST_EXPECT(!view.dialogs.import_preview.open && view.findings.diagnostics.back().code == "import.retail");
 	editor_test::set_retail_directory(session, retail);
-	TEST_EXPECT(view.retail_files.size() == 4); // the archive itself is not an importable file
+	TEST_EXPECT(view.project.retail_files.size() == 4); // the archive itself is not an importable file
 	std::vector<Diagnostic> diagnostics;
-	const std::vector<ImportSource> sources = list_retail_import_sources(retail, view.document, diagnostics);
+	const std::vector<ImportSource> sources = list_retail_import_sources(retail, *view.project.document, diagnostics);
 	TEST_EXPECT(diagnostics.empty() && sources.size() == 4 && sources[0].retail && sources[0].path == retail);
 	// The whole list to choose from, none chosen: nothing planned yet.
 	session.handle(make_request(EditorRequestKind::PreviewRetailImport));
-	TEST_EXPECT(view.import_preview.open && view.import_preview.choices.size() == 4 && view.import_preview.choices[0].retail);
-	TEST_EXPECT(view.import_preview.roots.empty() && view.import_preview.plan.rows.empty());
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.choices.size() == 4 && view.dialogs.import_preview.choices[0].retail);
+	TEST_EXPECT(view.dialogs.import_preview.roots.empty() && view.dialogs.import_preview.plan->rows.empty());
 	// The requirement gametext.bin, missing in the project, chosen from the list (the plan made
 	// again, the list kept) and imported from the game data.
 	const RequirementRow *row = nullptr;
-	for (const RequirementRow &candidate : view.requirements.rows) if (candidate.name == "gametext.bin") row = &candidate;
+	for (const RequirementRow &candidate : view.project.requirements->rows) if (candidate.name == "gametext.bin") row = &candidate;
 	TEST_EXPECT(row && row->state == RequirementState::Missing);
 	EditorRequest choose = make_request(EditorRequestKind::PlanImport);
 	ImportSource source;
@@ -533,22 +534,22 @@ static int test_retail_source() {
 	source.entry = "note.txt";
 	choose.imports.push_back(source);
 	session.handle(choose);
-	TEST_EXPECT(view.import_preview.open && view.import_preview.choices.size() == 4 && view.import_preview.roots.size() == 2);
-	TEST_EXPECT(view.import_preview.plan.rows.size() == 2 && view.import_preview.plan.rows[0].found_in == "the game install");
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.choices.size() == 4 && view.dialogs.import_preview.roots.size() == 2);
+	TEST_EXPECT(view.dialogs.import_preview.plan->rows.size() == 2 && view.dialogs.import_preview.plan->rows[0].found_in == "the game install");
 	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
 	import.imports = choose.imports;
 	session.handle(import);
-	TEST_EXPECT(session.outcome().done() && !view.import_preview.open);
-	for (const RequirementRow &candidate : view.requirements.rows) if (candidate.name == "gametext.bin") row = &candidate;
+	TEST_EXPECT(session.outcome().done() && !view.dialogs.import_preview.open);
+	for (const RequirementRow &candidate : view.project.requirements->rows) if (candidate.name == "gametext.bin") row = &candidate;
 	TEST_EXPECT(row && row->state == RequirementState::Present);
 	std::string text, message;
-	TEST_EXPECT(view.scan.find("note.txt") && read_file_text(view.project_root + "/" + view.scan.find("note.txt")->relative_path, text, message) && text == "retail");
+	TEST_EXPECT(view.project.scan->find("note.txt") && read_file_text(view.project.root + "/" + view.project.scan->find("note.txt")->relative_path, text, message) && text == "retail");
 	// A name the install does not have.
 	import.imports.clear();
 	source.entry = "absent.txt";
 	import.imports.push_back(source);
 	session.handle(import);
-	TEST_EXPECT(view.diagnostics.back().code == "import.read");
+	TEST_EXPECT(view.findings.diagnostics.back().code == "import.read");
 	// A PNG of the game install, and one of an archive, is the game's own file: copied as it is,
 	// with no import record, so it is a texture (a loose PNG from the disk becomes an import
 	// source with its record: test_import_pass, the command line's import).
@@ -562,14 +563,14 @@ static int test_retail_source() {
 	session.handle(import);
 	TEST_EXPECT(session.outcome().done());
 	for (const char *name : {"splash.png", "icon.png"}) {
-		const AssetEntry *png = view.scan.find(name);
+		const AssetEntry *png = view.project.scan->find(name);
 		TEST_EXPECT(png && png->kind == AssetKind::Texture);
-		TEST_EXPECT(png && !fs::exists(fs::path(view.project_root) / (png->relative_path + kImportSidecarSuffix)));
+		TEST_EXPECT(png && !fs::exists(fs::path(view.project.root) / (png->relative_path + kImportSidecarSuffix)));
 	}
-	TEST_EXPECT(view.imports.empty());
+	TEST_EXPECT(view.project.imports->empty());
 	// A directory that is no install.
 	editor_test::set_retail_directory(session, dir.file("empty"));
-	TEST_EXPECT(view.retail_files.empty());
+	TEST_EXPECT(view.project.retail_files.empty());
 	return 0;
 }
 
@@ -585,9 +586,9 @@ static int test_scene_imports() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Scenes"));
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	const ProjectDocument &document = session.view().document;
+	const ProjectDocument &document = *session.view().project.document;
 	const auto has_error = [](const std::vector<Diagnostic> &findings) {
 		for (const Diagnostic &d : findings)
 			if (d.severity == DiagnosticSeverity::Error) return true;

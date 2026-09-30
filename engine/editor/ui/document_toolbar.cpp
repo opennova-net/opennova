@@ -1,6 +1,6 @@
 #include "document_toolbar.h"
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>

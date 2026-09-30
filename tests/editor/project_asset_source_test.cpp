@@ -12,12 +12,14 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/project_asset_source.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
 
@@ -67,12 +69,12 @@ static int test_names_decode_and_rescan() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Assets"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.assets != nullptr);
-	const ProjectAssetSource &assets = *view.assets;
-	const std::string root = view.project_root;
+	TEST_EXPECT(view.findings.assets != nullptr);
+	const ProjectAssetSource &assets = *view.findings.assets;
+	const std::string root = view.project.root;
 
 	// Flat, case-blind names; the folder is organization only.
-	const AssetEntry *menu = view.scan.find("main.mnu");
+	const AssetEntry *menu = view.project.scan->find("main.mnu");
 	TEST_EXPECT(menu && menu->relative_path.find('/') != std::string::npos);
 	TEST_EXPECT(assets.path_of("MAIN.MNU") == menu->relative_path);
 	TEST_EXPECT(assets.path_of("menus/Main.mnu") == menu->relative_path); // a path reads as its name
@@ -106,7 +108,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.path_of("logo.pcx").find(".opennova/imported/") == 0);
 	TEST_EXPECT(assets.read("LOGO.PCX", read) && !read.empty());
 	// The import source is not: the build never packs it, so the game never finds it.
-	TEST_EXPECT(view.scan.find("logo.png") != nullptr);
+	TEST_EXPECT(view.project.scan->find("logo.png") != nullptr);
 	TEST_EXPECT(assets.stamp("logo.png") == 0 && assets.path_of("logo.png").empty());
 	TEST_EXPECT(!assets.read("logo.png", read));
 	TEST_EXPECT(assets.stamp("plain.png") != 0 && assets.read("plain.png", read) && !read.empty());
@@ -128,7 +130,7 @@ static int test_open_document_stands_in() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Open"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const ProjectAssetSource &assets = *view.assets;
+	const ProjectAssetSource &assets = *view.findings.assets;
 	const uint64_t on_disk = assets.stamp("gametext.bin");
 	TEST_EXPECT(on_disk != 0);
 
@@ -155,7 +157,7 @@ static int test_open_document_stands_in() {
 	std::vector<uint8_t> bytes;
 	TEST_EXPECT(assets.read("gametext.bin", bytes) && has_section(bytes, "Unsaved"));
 	std::vector<uint8_t> disk;
-	TEST_EXPECT(file_bytes(session.view().project_root + "/" + strings->path(), disk) && !has_section(disk, "Unsaved"));
+	TEST_EXPECT(file_bytes(session.view().project.root + "/" + strings->path(), disk) && !has_section(disk, "Unsaved"));
 
 	// Undone twice: the state (and so the stamp) it was opened in.
 	session.handle(make_request(EditorRequestKind::Undo, strings->path()));

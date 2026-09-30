@@ -8,7 +8,6 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
 #include <runtime/menu/menu_screen_inputs.h>
 
 #include <algorithm>

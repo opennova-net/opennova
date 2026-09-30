@@ -6,8 +6,9 @@
 #include <utility>
 
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/request_kinds.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/output_window.h>
@@ -88,7 +89,7 @@ bool enabled_button(const char *label, bool enabled) {
 }
 
 // What waits on the unsaved prompt, in the words of the menu that asked for it.
-std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
+std::string waiting_action(const DialogsView::UnsavedPrompt &prompt) {
 	const std::string file = basename_of(prompt.target);
 	switch (prompt.action) {
 	case EditorRequestKind::CloseDocument: return "Close " + file;
@@ -111,7 +112,7 @@ std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
 // Quit: Save all / Discard / Cancel; Build and Play, which pack the files on disk, and an
 // import or a rename, which write over them: Save all and build (play, import, rename) /
 // Cancel.
-void draw_unsaved_prompt(Workspace &workspace, const SessionView::UnsavedPrompt &prompt) {
+void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt &prompt) {
 	if (prompt.open) ImGui::OpenPopup("Unsaved changes");
 	if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	if (!prompt.open) { // answered another way (the editor MCP)
@@ -139,7 +140,7 @@ void draw_unsaved_prompt(Workspace &workspace, const SessionView::UnsavedPrompt 
 	};
 	// An answer the session would refuse while an operation runs (busy_refuses_answer) is
 	// disabled, the prompt kept: the running operation named, as the refusal names it.
-	const OperationStatus &running = workspace.view().operation;
+	const OperationStatus &running = workspace.view().activity.operation;
 	const std::string wait = running.running() ? std::string("Wait for ") + operation_kind_row(running.kind).noun +
 	                                                     " to finish" + (running.cancellable ? ", or cancel it." : ".")
 	                                           : std::string();
@@ -177,8 +178,8 @@ devtools::DockLayout editor_layout() {
 }
 
 const Document *active_document(const SessionView &v) {
-	for (const auto &document : v.documents)
-		if (document->path() == v.active_document) return document.get();
+	for (const auto &document : v.documents.open)
+		if (document->path() == v.documents.active) return document.get();
 	return nullptr;
 }
 
@@ -226,7 +227,11 @@ EditorWindows::EditorWindows() {
 		preview_window_ = preview.get();
 		pass_.register_window(std::move(preview));
 	}
-	pass_.register_window(std::make_unique<InspectorWindow>(*this));
+	{
+		auto inspector = std::make_unique<InspectorWindow>(*this);
+		inspector_window_ = inspector.get();
+		pass_.register_window(std::move(inspector));
+	}
 	problems_window_ = &pass_.register_window(std::make_unique<ProblemsWindow>(*this));
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
@@ -243,8 +248,14 @@ const SessionView &EditorWindows::view() const {
 	return view_ != nullptr ? *view_ : empty_;
 }
 
+void EditorWindows::set_view(const SessionView *view) {
+	if (view == view_) return;
+	view_ = view;
+	dispatched_ = this->view().events.next_seq() - 1;
+}
+
 void EditorWindows::request(EditorRequest request) {
-	if (request.path.empty() && names_the_active_document(request.kind)) request.path = view().active_document;
+	if (request.path.empty() && names_the_active_document(request.kind)) request.path = view().documents.active;
 	if (in_frame_ && acts_on_saved_files(request.kind)) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
 }
@@ -258,10 +269,30 @@ bool EditorWindows::draw_frame(uint64_t frame_index) {
 
 void EditorWindows::begin_frame() {
 	in_frame_ = true;
-	// A ShowInFiles brings Files forward, whether it draws this frame or not; a PreviewRename
-	// that asks the new name opens Rename everywhere.
-	if (files_window_) files_window_->follow_reveal(view());
-	rename_.follow(view());
+	dispatch_events();
+}
+
+// Each view event posted since the last frame to the window it is for, oldest first: the
+// window holds it until it draws (a Files' RevealFile brings Files forward now, whether it draws
+// this frame or not).
+void EditorWindows::dispatch_events() {
+	for (const ViewEvent &event : view().events.held()) {
+		if (event.seq <= dispatched_) continue;
+		dispatched_ = event.seq;
+		switch (event.kind) {
+		case ViewEventKind::RevealRecord:
+			if (document_window_) document_window_->receive(event);
+			if (inspector_window_) inspector_window_->receive(event);
+			break;
+		case ViewEventKind::RevealFile:
+			if (files_window_) files_window_->receive(event);
+			break;
+		case ViewEventKind::AskRename: rename_.receive(event); break;
+		case ViewEventKind::SettingsApplied: settings_.receive(event); break;
+		case ViewEventKind::ImportPlanned: import_.receive(event); break;
+		case ViewEventKind::kCount: break;
+		}
+	}
 }
 
 void EditorWindows::end_frame() {
@@ -294,7 +325,7 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::NewProjectLocation: new_project_.set_folder(path); break;
 	case PickPurpose::OpenProject: request(make_request(EditorRequestKind::OpenProject, path)); break;
 	case PickPurpose::RuntimeExecutable:
-	case PickPurpose::RetailDirectory: settings_.set_picked(purpose, path, view().project_root); break;
+	case PickPurpose::RetailDirectory: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
 	case PickPurpose::None: break;
 	}
@@ -304,7 +335,7 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 	if (paths.empty() || purpose != PickPurpose::ImportFiles) return; // cancelled, or not a file list
 	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
 	preview.paths = paths;
-	preview.flag = view().import_dependencies; // the editor's setting: with the files they need
+	preview.flag = view().project.import_dependencies; // the editor's setting: with the files they need
 	request(std::move(preview));
 }
 
@@ -315,7 +346,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_edit_menu(v, document);
 	draw_build_menu(v);
 	// The modals, every frame, whichever window or menu opened them.
-	draw_unsaved_prompt(*this, v.unsaved_prompt);
+	draw_unsaved_prompt(*this, v.dialogs.unsaved_prompt);
 	import_.draw(*this);
 	settings_.draw(*this);
 	draw_new_project();
@@ -336,40 +367,40 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 		pick.purpose = PickPurpose::OpenProject;
 		request(pick);
 	}
-	if (ImGui::BeginMenu("Open recent", !v.recent_projects.empty())) {
-		for (const std::string &root : v.recent_projects) {
+	if (ImGui::BeginMenu("Open recent", !v.project.recent_projects.empty())) {
+		for (const std::string &root : v.project.recent_projects) {
 			if (menu_item(root.c_str(), nullptr, v.allows(EditorRequestKind::OpenProject)))
 				request(make_request(EditorRequestKind::OpenProject, root));
 		}
 		ImGui::EndMenu();
 	}
 	ImGui::Separator();
-	if (menu_item("Save", "Ctrl+S", !v.active_document.empty() && v.allows(EditorRequestKind::Save)))
+	if (menu_item("Save", "Ctrl+S", !v.documents.active.empty() && v.allows(EditorRequestKind::Save)))
 		request(make_request(EditorRequestKind::Save));
-	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.empty() && v.allows(EditorRequestKind::SaveAll)))
+	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.open.empty() && v.allows(EditorRequestKind::SaveAll)))
 		request(make_request(EditorRequestKind::SaveAll));
-	if (menu_item("Close file", "Ctrl+W", !v.active_document.empty() && v.allows(EditorRequestKind::CloseDocument)))
+	if (menu_item("Close file", "Ctrl+W", !v.documents.active.empty() && v.allows(EditorRequestKind::CloseDocument)))
 		request(make_request(EditorRequestKind::CloseDocument));
 	ImGui::Separator();
-	if (menu_item("Import files...", nullptr, v.project_open && v.allows(EditorRequestKind::PreviewImport))) {
+	if (menu_item("Import files...", nullptr, v.project.open && v.allows(EditorRequestKind::PreviewImport))) {
 		EditorRequest pick = make_request(EditorRequestKind::PickFile);
 		pick.purpose = PickPurpose::ImportFiles;
 		request(pick);
 	}
 	if (menu_item("Import from the game data...", nullptr,
-	              v.project_open && !v.retail_directory.empty() && v.allows(EditorRequestKind::PreviewRetailImport))) {
+	              v.project.open && !v.project.retail_directory.empty() && v.allows(EditorRequestKind::PreviewRetailImport))) {
 		EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
-		listed.flag = v.import_dependencies;
+		listed.flag = v.project.import_dependencies;
 		request(listed);
 	}
-	if (v.project_open && v.retail_directory.empty())
+	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
 	ImGui::Separator();
-	if (menu_item("Project settings...", nullptr, v.project_open && v.allows(EditorRequestKind::ApplyProjectSettings)))
+	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		settings_.open(v);
-	if (menu_item("Show project folder", nullptr, v.project_open && v.allows(EditorRequestKind::RevealPath)))
-		request(make_request(EditorRequestKind::RevealPath, v.project_root));
-	if (menu_item("Close project", nullptr, v.project_open && v.allows(EditorRequestKind::CloseProject)))
+	if (menu_item("Show project folder", nullptr, v.project.open && v.allows(EditorRequestKind::RevealPath)))
+		request(make_request(EditorRequestKind::RevealPath, v.project.root));
+	if (menu_item("Close project", nullptr, v.project.open && v.allows(EditorRequestKind::CloseProject)))
 		request(make_request(EditorRequestKind::CloseProject));
 	ImGui::Separator();
 	if (menu_item("Quit", nullptr, v.allows(EditorRequestKind::Quit))) request(make_request(EditorRequestKind::Quit));
@@ -384,31 +415,31 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const Document *documen
 		request(make_request(EditorRequestKind::Redo));
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
-	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project_open && v.graph)) find_.open();
+	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph)) find_.open();
 	ImGui::EndMenu();
 }
 
 void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
-	if (menu_item("Build", "Ctrl+B", v.project_open && v.allows(EditorRequestKind::Build)))
+	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
 		request(make_request(EditorRequestKind::Build));
-	if (menu_item("Play", "F5", v.project_open && v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
+	if (menu_item("Play", "F5", v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
 		request(make_request(EditorRequestKind::Play));
-	if (menu_item("Stop", "Shift+F5", v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
+	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(make_request(EditorRequestKind::StopPlay));
 	ImGui::Separator();
 	// An editor setting, never refused (the busy gate takes it, as it takes the settings'
 	// Apply); the next Play reads it, so it waits while a game runs.
-	bool retail = v.play_retail;
-	const bool settable = v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::ApplyProjectSettings);
+	bool retail = v.project.play_retail;
+	const bool settable = v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::ApplyProjectSettings);
 	if (ImGui::MenuItem("Play in the game install", nullptr, &retail, settable) && settable) {
 		EditorRequest set = make_request(EditorRequestKind::ApplyProjectSettings);
 		set.settings.play_retail = retail;
 		request(set);
 	}
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
-	if (menu_item("Show build folder", nullptr, v.has_build && v.last_build.ok && v.allows(EditorRequestKind::RevealPath)))
-		request(make_request(EditorRequestKind::RevealPath, v.last_build.build_dir));
+	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
+		request(make_request(EditorRequestKind::RevealPath, v.activity.last_build->build_dir));
 	ImGui::EndMenu();
 }
 
@@ -432,25 +463,25 @@ void EditorWindows::draw_new_project() {
 // while the unsaved prompt is open: an Undo behind it would make a file it does not list
 // unsaved.
 void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
-	if (v.unsaved_prompt.open) return;
+	if (v.dialogs.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
-		if (io.KeyShift && !v.documents.empty() && v.allows(EditorRequestKind::SaveAll))
+		if (io.KeyShift && !v.documents.open.empty() && v.allows(EditorRequestKind::SaveAll))
 			request(make_request(EditorRequestKind::SaveAll));
-		else if (!io.KeyShift && !v.active_document.empty() && v.allows(EditorRequestKind::Save))
+		else if (!io.KeyShift && !v.documents.active.empty() && v.allows(EditorRequestKind::Save))
 			request(make_request(EditorRequestKind::Save));
 	}
-	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.active_document.empty() &&
+	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.documents.active.empty() &&
 	    v.allows(EditorRequestKind::CloseDocument))
 		request(make_request(EditorRequestKind::CloseDocument));
-	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project_open && v.graph) find_.open();
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && v.allows(EditorRequestKind::Build)) {
+	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project.open && v.findings.graph) find_.open();
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project.open && v.allows(EditorRequestKind::Build)) {
 		request(make_request(EditorRequestKind::Build));
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
-		if (io.KeyShift && v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
+		if (io.KeyShift && v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
 			request(make_request(EditorRequestKind::StopPlay));
-		} else if (!io.KeyShift && v.project_open && v.play_state == PlayState::Stopped &&
+		} else if (!io.KeyShift && v.project.open && v.activity.play_state == PlayState::Stopped &&
 		           v.allows(EditorRequestKind::Play)) {
 			request(make_request(EditorRequestKind::Play));
 		}
@@ -472,30 +503,30 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 // over the menus.
 void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	if (!v.project_open) return;
+	if (!v.project.open) return;
 	std::vector<const Document *> unsaved;
-	for (const auto &document : v.documents)
+	for (const auto &document : v.documents.open)
 		if (document->dirty()) unsaved.push_back(document.get());
 	size_t errors = 0, warnings = 0, infos = 0;
-	for (const Diagnostic &d : v.diagnostics) {
+	for (const Diagnostic &d : v.findings.diagnostics) {
 		if (d.severity == DiagnosticSeverity::Error) ++errors;
 		else if (d.severity == DiagnosticSeverity::Warning) ++warnings;
 		else ++infos;
 	}
 	const std::string unsaved_text = std::to_string(unsaved.size()) + " unsaved";
 	std::string state, state_tip;
-	const bool cancel = v.operation.running() && v.operation.cancellable;
-	if (v.operation.running()) {
-		state = operation_text(v.operation);
-		state_tip = operation_tip(v.operation);
-	} else if (v.play_state == PlayState::Running) {
-		state = v.play_retail ? "Game install running" : "Game running";
-		state_tip = "Process " + std::to_string(v.play_pid) + ". Stop ends it.";
-	} else if (v.play_state != PlayState::Stopped) {
+	const bool cancel = v.activity.operation.running() && v.activity.operation.cancellable;
+	if (v.activity.operation.running()) {
+		state = operation_text(v.activity.operation);
+		state_tip = operation_tip(v.activity.operation);
+	} else if (v.activity.play_state == PlayState::Running) {
+		state = v.project.play_retail ? "Game install running" : "Game running";
+		state_tip = "Process " + std::to_string(v.activity.play_pid) + ". Stop ends it.";
+	} else if (v.activity.play_state != PlayState::Stopped) {
 		state = "Stopping the game";
-	} else if (v.has_build) {
-		state = v.last_build.ok ? "Built" : "Build failed";
-		state_tip = v.last_build.ok ? "The last build: " + v.last_build.build_dir : "See Problems.";
+	} else if (v.activity.has_build) {
+		state = v.activity.last_build->ok ? "Built" : "Build failed";
+		state_tip = v.activity.last_build->ok ? "The last build: " + v.activity.last_build->build_dir : "See Problems.";
 	}
 
 	// Each part's width, left to right: the unsaved files, the problem counts, the state and
@@ -523,15 +554,15 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	// a few words, and none in less than a word's room): cut to fit, whole in its tooltip
 	// with the project's folder under it (Output names the project's files from its folder).
 	const float room = std::min(right - total - gap - left, ImGui::GetFontSize() * 24.0f);
-	const std::string status = first == 0 && !v.status.empty() && room >= ImGui::GetFontSize() * 4.0f
-	                                   ? ui_kit::fit(v.status, room)
+	const std::string status = first == 0 && !v.activity.status.empty() && room >= ImGui::GetFontSize() * 4.0f
+	                                   ? ui_kit::fit(v.activity.status, room)
 	                                   : std::string();
 	const float status_width = status.empty() ? 0.0f : ui_kit::text_width(status.c_str()) + gap;
 	ImGui::SetCursorPosX(right - total - status_width);
 	ImGui::PushID("status");
 	if (!status.empty()) {
 		ImGui::TextDisabled("%s", status.c_str());
-		ui_kit::tooltip(v.status + "\n" + v.project_root);
+		ui_kit::tooltip(v.activity.status + "\n" + v.project.root);
 	}
 	const float height = ImGui::GetFrameHeight();
 	// A part a click acts on: a selectable as wide as the part, what it shows drawn over it
@@ -561,8 +592,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first <= 1) {
 		std::string tip = std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
 		                  (warnings == 1 ? " warning, " : " warnings, ") + std::to_string(infos) + " info.";
-		if (const int missing = v.requirements.required_missing + v.requirements.required_wrong_kind)
-			tip += " " + std::to_string(missing) + " of " + std::to_string(v.requirements.required_total) +
+		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
+			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
 		if (clickable("##problems", widths[1], tip + " A click shows Problems.") && problems_window_)
 			problems_window_->request_focus();
@@ -575,15 +606,15 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
 				request(make_request(EditorRequestKind::CancelOperation));
-			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.operation.kind).noun + ": nothing it made is kept.");
+			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun + ": nothing it made is kept.");
 		}
 	}
 	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(make_request(EditorRequestKind::Build));
 	ui_kit::tooltip("Build the project (Ctrl+B).");
-	if (enabled_button("Play", v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
+	if (enabled_button("Play", v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
 		request(make_request(EditorRequestKind::Play));
 	ui_kit::tooltip("Build, then run the game on the build (F5).");
-	if (enabled_button("Stop", v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
+	if (enabled_button("Stop", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(make_request(EditorRequestKind::StopPlay));
 	ui_kit::tooltip("Stop the game (Shift+F5).");
 	ImGui::PopID();

@@ -16,9 +16,10 @@
 // Rename everywhere rewrites its uses.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/project/project_files.h>
 #include <base/vfs/vfs.h>
 #include <base/io/strutil.h>
@@ -125,8 +126,8 @@ int structure_and_save() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "John Smith"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.requirements.required_missing == 0);
-	TEST_EXPECT(!has_code(view.diagnostics, "reference.missing"));
+	TEST_EXPECT(view.project.requirements->required_missing == 0);
+	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document && !document->blocked() && document->rows().size() == 1 && document->identities_match());
@@ -211,7 +212,7 @@ int structure_and_save() {
 	TEST_EXPECT(document->find("EXIT", exit, menu_window_scope(document->path(), document->rows()[0]->name())));
 	TEST_EXPECT(!document->find("EXIT", elsewhere, menu_window_scope(document->path(), document->rows()[1]->name())));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu", document->locator(exit)));
-	TEST_EXPECT(view.selection == exit && window_of(*document, view.selection)->name == "EXIT");
+	TEST_EXPECT(view.documents.selection == exit && window_of(*document, view.documents.selection)->name == "EXIT");
 	return 0;
 }
 
@@ -226,8 +227,8 @@ int validation() {
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.graph && view.graph->resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
-	TEST_EXPECT(view.graph->resolve_style("%DEF_FONTNAME_LG%") != "%DEF_FONTNAME_LG%");
+	TEST_EXPECT(view.findings.graph && view.findings.graph->resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve_style("%DEF_FONTNAME_LG%") != "%DEF_FONTNAME_LG%");
 	NodeAddress exit;
 	TEST_EXPECT(document->find("EXIT", exit));
 	auto edit = [&](const std::vector<Edit> &edits) {
@@ -244,33 +245,33 @@ int validation() {
 	TEST_EXPECT(font && font->reference == ReferenceKind::Font);
 	if (!font) return 1;
 	const FieldUse font_use = document->field_on(exit, *font);
-	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.diagnostics, "reference.missing"));
+	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	TEST_EXPECT(document->reference_status(font_use, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
 	TEST_EXPECT(document->reference_status(font_use, std::string("%DEF_FONTNAME_LG%"), view, nullptr) ==
 	            ReferenceStatus::Present);
-	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.diagnostics, "reference.missing"));
+	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	// An APPEARANCE's value is a texture when its TYPE is IMAGE (field_on).
 	const NodeAddress row = child_of(*document, exit, "appearance");
 	const FieldSchema *value = nullptr;
 	for (const FieldSchema &field : document->fields(row.kind))
 		if (field.id == "value") value = &field;
 	TEST_EXPECT(value && value->reference == ReferenceKind::None && document->field_on(row, *value).reference == ReferenceKind::None);
-	TEST_EXPECT(edit(image_edits(*document, exit, "missing.tga")) && has_code(view.diagnostics, "reference.missing"));
+	TEST_EXPECT(edit(image_edits(*document, exit, "missing.tga")) && has_code(view.findings.diagnostics, "reference.missing"));
 	const FieldUse image = document->field_on(row, *value);
 	TEST_EXPECT(image.reference == ReferenceKind::MenuTexture);
 	TEST_EXPECT(document->reference_status(image, std::string("missing.tga"), view, nullptr) == ReferenceStatus::Missing);
 	TEST_EXPECT(edit({set(exit, "string.type", std::string("ID")), set(exit, "string.value", std::string("NO_SUCH_ID"))}) &&
-	            has_code(view.diagnostics, "reference.missing"));
+	            has_code(view.findings.diagnostics, "reference.missing"));
 	// An ACTION: a new row is POP_SCREEN; a SCREEN action names a menu file.
 	TEST_EXPECT(edit({op(EditOperation::Add, {exit.row, menu_kind("action"), 0}, exit.child)}));
 	const NodeAddress action = child_of(*document, exit, "action");
 	TEST_EXPECT(text_of(*document, action, "type") == "POP_SCREEN");
 	TEST_EXPECT(edit({set(action, "type", std::string("SCREEN")), set(action, "file", std::string("other.mnu"))}) &&
-	            has_code(view.diagnostics, "reference.missing"));
+	            has_code(view.findings.diagnostics, "reference.missing"));
 	// A SCREEN action with no FILE: an error on that action's file field.
 	TEST_EXPECT(edit({set(action, "file", std::string())}));
 	bool on_the_field = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		on_the_field = on_the_field || (d.code == "menu.unserializable" && d.field == "file" && d.child_id == action.child &&
 		                                d.row_id == action.row && d.record_kind == action.kind);
 	TEST_EXPECT(on_the_field);
@@ -279,13 +280,13 @@ int validation() {
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds, blocked by the missing texture.
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(view.unsaved_prompt.open && !view.unsaved_prompt.can_discard && !session.view().operation.running() &&
-	            view.unsaved_prompt.files == std::vector<std::string>{document->path()});
+	TEST_EXPECT(view.dialogs.unsaved_prompt.open && !view.dialogs.unsaved_prompt.can_discard && !session.view().activity.operation.running() &&
+	            view.dialogs.unsaved_prompt.files == std::vector<std::string>{document->path()});
 	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
 	save.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save);
 	session.run_operations();
-	TEST_EXPECT(!document->dirty() && !view.unsaved_prompt.open && view.has_build && !view.last_build.ok);
+	TEST_EXPECT(!document->dirty() && !view.dialogs.unsaved_prompt.open && view.activity.has_build && !view.activity.last_build->ok);
 	// A new menu by name and kind.
 	session.handle(make_request(EditorRequestKind::CreateFile, "extra.mnu", asset_kind_token(AssetKind::Menu)));
 	auto *extra = session.document_for("extra.mnu");
@@ -428,15 +429,15 @@ int windows_at_depth() {
 	remove.edit = op(EditOperation::Remove, exit);
 	session.handle(remove);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.selection == root && view.selected == std::vector<NodeAddress>{root});
+	TEST_EXPECT(view.documents.selection == root && view.documents.selected == std::vector<NodeAddress>{root});
 	session.handle(make_request(EditorRequestKind::Undo, document->path()));
-	TEST_EXPECT(view.selection == root && window_of(*document, exit));
+	TEST_EXPECT(view.documents.selection == root && window_of(*document, exit));
 	// A window added inside TITLE is selected.
 	EditorRequest add = make_request(EditorRequestKind::EditRecord, document->path());
 	add.edit = op(EditOperation::Add, {0, kWindow, 0}, title.child);
 	session.handle(add);
-	TEST_EXPECT(session.last_edit_ok() && view.selection.child == document->last_added() &&
-	            document->ancestors(view.selection).back() == title);
+	TEST_EXPECT(session.last_edit_ok() && view.documents.selection.child == document->last_added() &&
+	            document->ancestors(view.documents.selection).back() == title);
 	session.handle(make_request(EditorRequestKind::Undo, document->path()));
 	// A drag: edits sharing a gesture are one undo step, and the session validates once,
 	// when the gesture ends, however many samples it took.
@@ -701,12 +702,12 @@ int copy_and_paste() {
 	// A row cannot be copied as windows.
 	select(child_of(*document, exit, "appearance"), SelectMode::Replace);
 	session.handle(make_request(EditorRequestKind::Copy, document->path()));
-	TEST_EXPECT(!session.last_edit_ok() && view.clipboard.empty());
+	TEST_EXPECT(!session.last_edit_ok() && view.documents.clipboard.empty());
 	// TITLE and EXIT, in document order whatever the selection order.
 	select(exit, SelectMode::Replace);
 	select(title, SelectMode::Add);
 	session.handle(make_request(EditorRequestKind::Copy, document->path()));
-	TEST_EXPECT(session.last_edit_ok() && view.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
+	TEST_EXPECT(session.last_edit_ok() && view.documents.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
 	// Into a second screen's root: the names are free there.
 	Diagnostic error;
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
@@ -720,13 +721,13 @@ int copy_and_paste() {
 	TEST_EXPECT(session.last_edit_ok() && document->identities_match());
 	second = document->rows()[1].get();
 	TEST_EXPECT(window_names(*document, *second) == std::vector<std::string>({"MAIN", "TITLE", "EXIT"}));
-	TEST_EXPECT(view.selected.size() == 2 && window_of(*document, view.selected[0])->name == "TITLE");
+	TEST_EXPECT(view.documents.selected.size() == 2 && window_of(*document, view.documents.selected[0])->name == "TITLE");
 	// Again into the first screen: every name taken, so each is made unique.
 	TEST_EXPECT(paste_into(*document, 0, SIZE_MAX));
 	TEST_EXPECT(window_names(*document, *document->rows()[0]) ==
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "TITLE2", "EXIT2"}));
 	TEST_EXPECT(document->collections_of({document->rows()[0]->id, kScreen, 0})[0].ids.size() == 3);
-	TEST_EXPECT(window_of(*document, view.selection)->name == "TITLE2" && depth_of(*document, view.selection) == 0);
+	TEST_EXPECT(window_of(*document, view.documents.selection)->name == "TITLE2" && depth_of(*document, view.documents.selection) == 0);
 	session.handle(make_request(EditorRequestKind::Undo, document->path()));
 	// Into another menu file.
 	session.handle(make_request(EditorRequestKind::CreateFile, "extra.mnu", asset_kind_token(AssetKind::Menu)));
@@ -789,9 +790,9 @@ int duplicate_selection() {
 	TEST_EXPECT(duplicate());
 	const Node *screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) == std::vector<std::string>({"MAIN", "TITLE", "TITLE2", "EXIT", "EXIT2"}));
-	TEST_EXPECT(view.selected.size() == 2 && window_of(*document, view.selected[0])->name == "TITLE2" &&
-	            window_of(*document, view.selected[1])->name == "EXIT2" &&
-	            window_of(*document, view.selection)->name == "TITLE2");
+	TEST_EXPECT(view.documents.selected.size() == 2 && window_of(*document, view.documents.selected[0])->name == "TITLE2" &&
+	            window_of(*document, view.documents.selected[1])->name == "EXIT2" &&
+	            window_of(*document, view.documents.selection)->name == "TITLE2");
 	TEST_EXPECT(undo());
 	// MAIN with TITLE inside it: MAIN once, with everything it holds, after itself among the roots.
 	select(main, SelectMode::Replace);
@@ -800,7 +801,7 @@ int duplicate_selection() {
 	screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) ==
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "MAIN2", "TITLE2", "EXIT2"}));
-	TEST_EXPECT(view.selected.size() == 1 && depth_of(*document, view.selection) == 0);
+	TEST_EXPECT(view.documents.selected.size() == 1 && depth_of(*document, view.documents.selection) == 0);
 	TEST_EXPECT(undo());
 	// Two of EXIT's four APPEARANCE rows (the first and the third): each copy after its own.
 	select(child_of(*document, exit, "appearance", 0), SelectMode::Replace);
@@ -1230,7 +1231,7 @@ int parse_notes() {
 	session.handle(make_request(EditorRequestKind::Rescan));
 	const SessionView &view = session.view();
 	auto finding = [&](const char *asset, const char *code) -> const Diagnostic * {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == code && d.asset.find(asset) != std::string::npos) return &d;
 		return nullptr;
 	};
@@ -1339,15 +1340,15 @@ int blank_menu_edits() {
 	edit.edit = set(main_window, "text_rsrc", std::string("mytext.bin"));
 	session.handle(edit);
 	session.handle(make_request(EditorRequestKind::SaveAll));
-	TEST_EXPECT(!has_code(view.diagnostics, "reference.missing"));
-	const std::string menu_path = view.project_root + "/" + document->path();
+	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
+	const std::string menu_path = view.project.root + "/" + document->path();
 	session.handle(make_request(EditorRequestKind::RenameAsset, "mytext.bin", "newtext.bin"));
 	TEST_EXPECT(session.outcome().done());
 	mnu::Document reparsed;
 	std::string message;
 	TEST_EXPECT(mnu::parse_file(menu_path, reparsed, message) && reparsed.screens.size() == 1);
 	TEST_EXPECT(reparsed.screens[0].roots.size() == 1 && reparsed.screens[0].roots[0].text_rsrc == "newtext.bin");
-	TEST_EXPECT(view.graph && view.graph->missing().empty() && !has_code(view.diagnostics, "reference.missing"));
+	TEST_EXPECT(view.findings.graph && view.findings.graph->missing().empty() && !has_code(view.findings.diagnostics, "reference.missing"));
 	document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document && text_of(*document, {document->rows()[0]->id, kWindow, document->window_at(*document->rows()[0], 0)},
 	                                "text_rsrc") == "newtext.bin");
@@ -1377,7 +1378,7 @@ int name_is_its_own_edit() {
 	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n";
 	const std::string panel =
 	        window("STATIC", "PANEL", window("BUTTON", "GO", go) + window("STATIC", "TITLE", ""));
-	TEST_EXPECT(editor_test::write_text(view.project_root + "/flow.mnu",
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/flow.mnu",
 	                                    "<SCREEN>\r\n<NAME>HOME</NAME>\r\n" + panel +
 	                                            "</SCREEN>\r\n<SCREEN>\r\n<NAME>AWAY</NAME>\r\n" +
 	                                            window("BUTTON", "BACK", back) + "</SCREEN>\r\n"));
@@ -1399,7 +1400,7 @@ int name_is_its_own_edit() {
 		return session.outcome().done();
 	};
 	const auto missing = [&](const char *record) {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "reference.missing" && d.record == record) return true;
 		return false;
 	};

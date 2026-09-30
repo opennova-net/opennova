@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -56,12 +56,12 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 		workspace.request(pick);
 	}
 	ImGui::EndDisabled();
-	if (!v.recent_projects.empty()) {
+	if (!v.project.recent_projects.empty()) {
 		ImGui::TextUnformatted("Recent");
 		if (ImGui::BeginTable("recent", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("Project", ImGuiTableColumnFlags_WidthStretch);
 			ImGui::TableSetupColumn("##forget", ImGuiTableColumnFlags_WidthFixed);
-			for (const std::string &root : v.recent_projects) {
+			for (const std::string &root : v.project.recent_projects) {
 				ImGui::PushID(root.c_str());
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
@@ -84,9 +84,9 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 			ImGui::EndTable();
 		}
 	}
-	if (!v.status.empty()) {
+	if (!v.activity.status.empty()) {
 		ImGui::Spacing();
-		ImGui::TextWrapped("%s", v.status.c_str());
+		ImGui::TextWrapped("%s", v.activity.status.c_str());
 	}
 }
 

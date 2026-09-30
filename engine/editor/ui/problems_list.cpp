@@ -7,6 +7,10 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/requirements/requirements.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -45,7 +49,7 @@ std::string signature(const EditorRequest &request) {
 
 // The file a CreateMissing role makes: its requirement row's name.
 std::string role_file(const SessionView &view, const std::string &role) {
-	for (const RequirementRow &row : view.requirements.rows)
+	for (const RequirementRow &row : view.project.requirements->rows)
 		if (row.role == role) return row.name;
 	return role;
 }
@@ -67,19 +71,57 @@ bool ProblemsList::PressLatch::released_on(const std::string &id, bool pressed, 
 	return clicked && (pressed_ == id || !mouse_released);
 }
 
-ProblemsList::ProblemsList() { query_.grouping = ProblemGrouping::Kind; }
+struct ProblemsList::Caches {
+	ProblemQuery query;
+	ProblemQueryCache answers;
+	ProblemFixCache fixes;
+	ProblemQuery refreshed;
+};
+
+ProblemsList::ProblemsList() : caches_(std::make_unique<Caches>()) { caches_->query.grouping = ProblemGrouping::Kind; }
+
+ProblemsList::~ProblemsList() = default;
+
+RevisionKey ProblemsList::cache_key(const SessionView &view, const ProblemQuery &query) {
+	return problem_query_key(view, query) | problem_fix_key(view);
+}
+
+ProblemQuery &ProblemsList::query() {
+	return caches_->query;
+}
+
+const ProblemAnswer &ProblemsList::answer(const SessionView &view) {
+	return caches_->answers.answer(caches_->query, view);
+}
+
+ProblemsList::FindingRef ProblemsList::ref(const SessionView &view, size_t finding) const {
+	return {view.project.root, keys_[finding]};
+}
+
+const std::vector<ProblemFix> &ProblemsList::fixes(const SessionView &view, size_t finding) {
+	return caches_->fixes.fixes(view, finding);
+}
+
+size_t ProblemsList::fixes_asked() const {
+	return caches_->fixes.size();
+}
+
+bool ProblemsList::asks_first(const ProblemFix &fix) {
+	return fix.request.kind == EditorRequestKind::AssignRequirement;
+}
 
 const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
-	const ProblemAnswer &answer = answers_.answer(query_, view);
-	const uint64_t answered = answers_.generation();
-	const uint64_t fixed = fixes_.generation(view);
-	const RevisionKey key = cache_key(view, query_);
-	if (!stale_ && view_ == &view && key_ == key && refreshed_ == query_ &&
-	    answered_ == answered && fixed_ == fixed)
+	Caches &caches = *caches_;
+	const ProblemAnswer &answer = caches.answers.answer(caches.query, view);
+	const uint64_t answered = caches.answers.generation();
+	const uint64_t fixed = caches.fixes.generation(view);
+	const RevisionKey key = cache_key(view, caches.query);
+	if (!stale_ && view_ == &view && key_ == key && caches.refreshed == caches.query && answered_ == answered &&
+	    fixed_ == fixed)
 		return answer;
 	view_ = &view;
 	key_ = key;
-	refreshed_ = query_;
+	caches.refreshed = caches.query;
 	answered_ = answered;
 	fixed_ = fixed;
 	stale_ = false;
@@ -87,7 +129,7 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	keys_.clear();
 	index_.clear();
 	std::unordered_map<std::string, size_t> alike;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		const std::string id = identity(d);
 		std::string key = id + '\x1e' + std::to_string(alike[id]++);
 		std::replace(key.begin(), key.end(), '#', '\x1d'); // a key is an ImGui id: no "###" in it
@@ -98,8 +140,8 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	lines_.clear();
 	group_fixes_.clear();
 	// The groups folded and seen are the project's.
-	if (view.project_root != groups_root_) {
-		groups_root_ = view.project_root;
+	if (view.project.root != groups_root_) {
+		groups_root_ = view.project.root;
 		folded_.clear();
 		auto_folded_.clear();
 		seen_groups_.clear();
@@ -125,16 +167,16 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 		for (const size_t finding : answer.rows) lines_.push_back({false, 0, finding});
 	}
 	required_.clear();
-	for (size_t i = 0; i < view.diagnostics.size(); ++i)
-		if (view.diagnostics[i].code == "requirement.missing") required_.push_back(i);
+	for (size_t i = 0; i < view.findings.diagnostics.size(); ++i)
+		if (view.findings.diagnostics[i].code == "requirement.missing") required_.push_back(i);
 	required_fixes_ = propose(view, fix_all_of(view, required_));
 	return answer;
 }
 
 size_t ProblemsList::resolve(const SessionView &view, const FindingRef &ref) const {
-	if (ref.key.empty() || !view.project_open || ref.root != view.project_root) return SIZE_MAX;
+	if (ref.key.empty() || !view.project.open || ref.root != view.project.root) return SIZE_MAX;
 	const auto found = index_.find(ref.key);
-	if (found == index_.end() || found->second >= view.diagnostics.size()) return SIZE_MAX;
+	if (found == index_.end() || found->second >= view.findings.diagnostics.size()) return SIZE_MAX;
 	return found->second;
 }
 
@@ -152,13 +194,13 @@ void ProblemsList::toggle_selected(const SessionView &view, size_t finding) {
 
 std::string ProblemsList::fix_id(const SessionView &view, size_t finding,
                                  const ProblemFix &fix) const {
-	return view.project_root + '\x1e' + keys_[finding] + '\x1e' + signature(fix.request);
+	return view.project.root + '\x1e' + keys_[finding] + '\x1e' + signature(fix.request);
 }
 
 ProblemsList::Confirmation ProblemsList::fix_all_of(const SessionView &view,
                                                     const std::vector<size_t> &findings) const {
 	Confirmation all;
-	all.root = view.project_root;
+	all.root = view.project.root;
 	for (const size_t finding : findings) all.keys.push_back(keys_[finding]);
 	return all;
 }
@@ -175,7 +217,7 @@ ProblemsList::Confirmation ProblemsList::use_fix(const SessionView &view, size_t
                                                  const ProblemFix &fix) const {
 	Confirmation use;
 	use.of = Confirmation::Of::Fix;
-	use.root = view.project_root;
+	use.root = view.project.root;
 	use.keys = {keys_[finding]};
 	use.label = fix.label;
 	return use;
@@ -188,7 +230,7 @@ ProblemsList::Proposal ProblemsList::propose(const SessionView &view,
 		const std::string key = confirmation.keys.empty() ? std::string() : confirmation.keys[0];
 		const size_t finding = resolve(view, {confirmation.root, key});
 		if (finding == SIZE_MAX) return out;
-		for (const ProblemFix &fix : fixes_.fixes(view, finding))
+		for (const ProblemFix &fix : caches_->fixes.fixes(view, finding))
 			if (fix.label == confirmation.label) {
 				out.lines = {fix.label, fix.detail};
 				out.requests = {fix.request};
@@ -201,7 +243,7 @@ ProblemsList::Proposal ProblemsList::propose(const SessionView &view,
 	for (const std::string &key : confirmation.keys) {
 		const size_t finding = resolve(view, {confirmation.root, key});
 		if (finding == SIZE_MAX) continue;
-		std::vector<ProblemFix> bulk = fixes_.bulk(view, finding);
+		std::vector<ProblemFix> bulk = caches_->fixes.bulk(view, finding);
 		if (bulk.empty()) continue;
 		firsts.push_back(std::move(bulk.front()));
 		++out.findings;
@@ -231,7 +273,7 @@ void ProblemsList::ask(const SessionView &view, Confirmation confirmation) {
 }
 
 bool ProblemsList::follow(const SessionView &view) {
-	if (!view.project_open || view.project_root != confirm_.root) return false;
+	if (!view.project.open || view.project.root != confirm_.root) return false;
 	refresh(view);
 	if (shown_made_ == made_) return true;
 	Proposal now = propose(view, confirm_);

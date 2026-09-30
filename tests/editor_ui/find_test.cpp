@@ -30,16 +30,16 @@ struct FindProject {
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Find"));
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
-		const AssetEntry *items = v.scan.find("items.def");
-		const AssetEntry *weapons = v.scan.find("weapon.def");
+		const AssetEntry *items = v.project.scan->find("items.def");
+		const AssetEntry *weapons = v.project.scan->find("weapon.def");
 		if (!items || !weapons) return false;
 		items_path = items->relative_path;
 		weapons_path = weapons->relative_path;
-		if (!editor_test::write_text(v.project_root + "/" + items_path,
+		if (!editor_test::write_text(v.project.root + "/" + items_path,
 		                             "begin \"Found Thing\"\nid 100300\ntype vehicle\nturn_rate 90\nprimary_weapon Searchgun\n"
 		                             "end\nbegin \"Second Thing\"\nid 100301\ntype vehicle\nturn_rate 90\nend\n"
 		                             "begin \"Third Thing\"\nid 100302\ntype vehicle\nturn_rate 90\nend\n") ||
-		    !editor_test::write_text(v.project_root + "/" + weapons_path, "weapon \"Searchgun\"\nend\n"))
+		    !editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"Searchgun\"\nend\n"))
 			return false;
 		session.handle(make_request(EditorRequestKind::Rescan));
 		session.handle(make_request(EditorRequestKind::OpenDocument, weapons_path));

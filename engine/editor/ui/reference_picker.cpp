@@ -1,6 +1,7 @@
 #include "reference_picker.h"
 
-#include <editor/session/session_view.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -30,6 +31,10 @@ std::string choice_tip(const ReferenceChoice &choice) {
 }
 
 } // namespace
+
+ReferencePicker::ReferencePicker() = default;
+
+ReferencePicker::~ReferencePicker() = default;
 
 ReferencePicker::ListKey ReferencePicker::cache_key(const SessionView &view,
 		const Document &document) {
@@ -64,7 +69,7 @@ void ReferencePicker::prune(const SessionView &view) {
 	pruned_view_ = &view;
 	pruned_key_ = key;
 	std::set<uint64_t> open;
-	for (const auto &document : view.documents)
+	for (const auto &document : view.documents.open)
 		if (document) open.insert(document->identity());
 	for (auto it = popups_.begin(); it != popups_.end();)
 		it = open.count(it->first.document) ? std::next(it) : popups_.erase(it);
@@ -193,7 +198,7 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field
 		const char *data = static_cast<const char *>(dragged->Data);
 		const std::string path(data, strnlen(data, size_t(dragged->DataSize)));
 		const AssetEntry *entry = nullptr;
-		for (const AssetEntry &candidate : view.scan.entries)
+		for (const AssetEntry &candidate : view.project.scan->entries)
 			if (candidate.relative_path == path) entry = &candidate;
 		if (entry && file_serves_reference(entry->kind, field.reference, field.loader_arg) &&
 		    ImGui::AcceptDragDropPayload(kFileDragPayload)) {

@@ -7,11 +7,16 @@
 #include <vector>
 
 #include <editor/assets/asset_kind.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/view_revisions.h>
+#include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
+
+struct AssetEntry;
+struct GraphEdge;
+struct SessionView;
 
 // The name a new file of a free-form kind takes (Files' New: a string table, a menu, a
 // font), asked in a modal the workspace draws every frame: the name, checked as it is
@@ -42,7 +47,7 @@ private:
 // is refused, previewed as the name is typed: PreviewRename), lists its references both ways
 // (each field by the name the inspector shows), shows it in the OS file manager and
 // imports an image source again. A Problems row about a file the editor does not open (or
-// about a file's name) shows it here (ShowInFiles).
+// about a file's name) shows it here (ShowInFiles, a RevealFile view event).
 class FilesWindow : public devtools::Window {
 public:
 	FilesWindow(Workspace &workspace, NewFilePrompt &new_file) : workspace_(workspace), new_file_(new_file) { open = true; }
@@ -59,11 +64,13 @@ public:
 	// How many times the tree and the counts were made again (refresh): once per change of what
 	// they read, never for a change of anything else (a line of Output, a build's step).
 	size_t rebuilds() const { return rebuilds_; }
-	// The file a ShowInFiles asked for (the view's reveal_file, each ask by its serial): Files
-	// comes forward (the workspace asks every frame, whether Files draws or not), then selects
-	// it, clears a filter that hides it, opens its folders, scrolls to it and, when the ask
-	// says so, opens Rename... on it.
-	void follow_reveal(const SessionView &view);
+	// A RevealFile event (a ShowInFiles): Files comes forward at once, whether it draws this frame
+	// or not, and holds the event until it draws; then it selects the file, clears a filter that
+	// hides it, opens its folders, scrolls to it and, when the event asks, opens Rename... on it.
+	// Each event is shown once, the same file asked again shown again.
+	void receive(const ViewEvent &event);
+	// The events it holds until it draws.
+	const ViewEventMailbox &events() const { return events_; }
 
 private:
 	// A folder of the tree: its folders (sorted by name) and its files (the scan's order,
@@ -85,7 +92,7 @@ private:
 	// scan moved; each file's path as the filter compares it made only while a filter is set,
 	// once a scan.
 	const std::vector<size_t> &matching(const SessionView &view);
-	void show_revealed(const SessionView &view);
+	void show_revealed(const SessionView &view, const ViewEvent &event);
 	void draw_toolbar(const SessionView &view);
 	void draw_folder(const SessionView &view, const Folder &folder);
 	void draw_file(const SessionView &view, const AssetEntry &entry, bool in_tree);
@@ -128,11 +135,9 @@ private:
 	bool open_references_ = false;
 	char rename_[64]{};
 	std::string previewed_; // the name Rename...'s preview was last asked for
-	// A ShowInFiles ask: its serial, the file until Files draws it, and then the file to scroll
-	// to and the place whose folders open on the way.
-	uint64_t reveal_serial_ = 0;
-	std::string reveal_;
-	bool reveal_rename_ = false;
+	// The RevealFile events held until Files draws, and then the file to scroll to and the place
+	// whose folders open on the way.
+	ViewEventMailbox events_;
 	std::string scroll_to_;
 	std::string open_to_;
 };

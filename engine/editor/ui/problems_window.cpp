@@ -5,7 +5,9 @@
 #include <utility>
 #include <vector>
 
-#include <editor/session/session_view.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -82,10 +84,10 @@ float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPad
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
-	if (view.project_open) list_.refresh(view);
-	if (!view.project_open) {
+	if (view.project.open) list_.refresh(view);
+	if (!view.project.open) {
 		ui_kit::empty_state("No project open.");
-	} else if (view.diagnostics.empty()) {
+	} else if (view.findings.diagnostics.empty()) {
 		ui_kit::empty_state("No problems.");
 	} else {
 		const ProblemAnswer &answer = draw_filters(view);
@@ -127,7 +129,7 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 // While required files are missing: the game cannot start, and the Fix alls that make them,
 // each asking first.
 void ProblemsWindow::draw_summary(const SessionView &view) {
-	const std::string sentence = ProblemsList::summary(view.requirements);
+	const std::string sentence = ProblemsList::summary(*view.project.requirements);
 	if (sentence.empty()) return;
 	ui_kit::WrapRow row;
 	row.next(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x + ui_kit::text_width(sentence.c_str()));
@@ -135,7 +137,7 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 	ImGui::SameLine();
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextWrapped("%s", sentence.c_str());
-	ImGui::PushID(view.project_root.c_str());
+	ImGui::PushID(view.project.root.c_str());
 	ImGui::PushID("required");
 	for (const EditorRequest &request : list_.required_fixes().requests) {
 		const std::string label = ProblemsList::fix_all_label(request);
@@ -166,7 +168,7 @@ void ProblemsWindow::draw_list(const SessionView &view, const ProblemAnswer &ans
 	ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	ImGui::TableSetupColumn("Fix", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	// The project's own ids: a press in one project never lands in the next.
-	ImGui::PushID(view.project_root.c_str());
+	ImGui::PushID(view.project.root.c_str());
 	// The selected finding's line is drawn whole (its message wrapped, every fix); the lines
 	// either side of it, all as high as a control, only where they show.
 	const std::vector<Line> &lines = list_.lines();
@@ -189,7 +191,7 @@ void ProblemsWindow::draw_lines(const SessionView &view, const ProblemAnswer &an
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const Line &line = list_.lines()[first + size_t(i)];
 			if (line.header) draw_header(view, answer, line);
-			else if (line.finding < view.diagnostics.size()) draw_finding(view, line, false);
+			else if (line.finding < view.findings.diagnostics.size()) draw_finding(view, line, false);
 		}
 }
 
@@ -229,7 +231,7 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 // A finding's line: its severity, its message, where it is and its fixes. Expanded (the
 // selected one), the whole message wrapped, every fix with what it does, and its code.
 void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, bool expanded) {
-	const Diagnostic &d = view.diagnostics[line.finding];
+	const Diagnostic &d = view.findings.diagnostics[line.finding];
 	ImGui::PushID(list_.key(line.finding).c_str());
 	ImGui::TableNextRow(ImGuiTableRowFlags_None, line_height());
 	if (expanded) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));

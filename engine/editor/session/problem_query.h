@@ -7,7 +7,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/value.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -67,7 +67,7 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 // one the table does not name.
 std::string problem_family_title(const std::string &code);
 
-// What an answer reads of a view, as a cache's key (session_revisions.h): the findings; which
+// What an answer reads of a view, as a cache's key (view_revisions.h): the findings; which
 // document is active for the active file's scope (ActiveDocument), which are open for the open
 // files' (DocumentSet); for only the fixable, what their fixes read (problem_fix_key).
 RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query);

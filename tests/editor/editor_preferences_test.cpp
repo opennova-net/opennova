@@ -14,7 +14,7 @@
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -190,15 +190,15 @@ static int test_session_over_a_store() {
 		MemoryPreferencesStore store(every_preference());
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
-		TEST_EXPECT(v.recent_projects == every_preference().recent_projects && v.retail_directory == "D:/Joint Operations" &&
-		            v.play_retail && v.runtime_setting == "C:/tools/opennova.exe" && !v.import_dependencies);
+		TEST_EXPECT(v.project.recent_projects == every_preference().recent_projects && v.project.retail_directory == "D:/Joint Operations" &&
+		            v.project.play_retail && v.project.runtime_setting == "C:/tools/opennova.exe" && !v.project.import_dependencies);
 		EditorRequest on = make_request(EditorRequestKind::SetImportDependencies);
 		on.flag = true;
 		session.handle(on);
-		TEST_EXPECT(v.import_dependencies && store.preferences().import_dependencies);
+		TEST_EXPECT(v.project.import_dependencies && store.preferences().import_dependencies);
 		session.handle(make_request(EditorRequestKind::ForgetRecent, "C:/games/Armory"));
-		TEST_EXPECT(v.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
-		            store.preferences().recent_projects == v.recent_projects);
+		TEST_EXPECT(v.project.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
+		            store.preferences().recent_projects == v.project.recent_projects);
 	}
 	{
 		const std::string path = dir.file("settings/editor_settings.json");
@@ -209,7 +209,7 @@ static int test_session_over_a_store() {
 		Preferences stored;
 		Diagnostic error;
 		TEST_EXPECT(store.load(stored, error) && stored.recent_projects.size() == 1 &&
-		            stored.recent_projects.front() == session.view().project_root);
+		            stored.recent_projects.front() == session.view().project.root);
 	}
 	{
 		TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "{\"schema_version\": 99}"));
@@ -217,8 +217,8 @@ static int test_session_over_a_store() {
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
 		bool said = false;
-		for (const Diagnostic &d : v.diagnostics) said = said || d.code == "editor_settings.schema_version.unsupported";
-		TEST_EXPECT(said && v.recent_projects.empty() && v.import_dependencies);
+		for (const Diagnostic &d : v.findings.diagnostics) said = said || d.code == "editor_settings.schema_version.unsupported";
+		TEST_EXPECT(said && v.project.recent_projects.empty() && v.project.import_dependencies);
 	}
 	return 0;
 }

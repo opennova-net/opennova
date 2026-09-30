@@ -8,10 +8,11 @@
 #include <editor/documents/strings_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "common/test_expect.h"
@@ -188,7 +189,7 @@ int validation_and_session() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Strings"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.requirements.required_missing == 0);
+	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	// The requirement tables open as documents; a new section and string reach the file.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
 	auto *document = session.document_for("gametext.bin");
@@ -199,14 +200,14 @@ int validation_and_session() {
 	add.edit.address = {0, kSection, 0};
 	session.handle(add);
 	const NodeId section = document->last_added();
-	TEST_EXPECT(view.selection.row == section && view.selection.kind == kSection);
+	TEST_EXPECT(view.documents.selection.row == section && view.documents.selection.kind == kSection);
 	EditorRequest name = make_request(EditorRequestKind::EditRecord, document->path());
 	name.edit = set({section, kSection, 0}, "name", std::string("Custom"));
 	session.handle(name);
 	add.edit.address = {section, kString, 0};
 	session.handle(add);
 	const NodeId string = document->last_added();
-	TEST_EXPECT(view.selection.row == section && view.selection.child == string && view.selection.kind == kString);
+	TEST_EXPECT(view.documents.selection.row == section && view.documents.selection.child == string && view.documents.selection.kind == kString);
 	EditorRequest key = make_request(EditorRequestKind::EditRecord, document->path());
 	key.edit = set({section, kString, string}, "key", std::string("HELLO"));
 	session.handle(key);
@@ -218,24 +219,24 @@ int validation_and_session() {
 	empty.edit = set({section, kString, blank}, "key", std::string(""));
 	session.handle(empty);
 	bool empty_error = false;
-	for (const Diagnostic &d : view.diagnostics) empty_error |= d.code == "strings.key_empty" && d.child_id == blank;
+	for (const Diagnostic &d : view.findings.diagnostics) empty_error |= d.code == "strings.key_empty" && d.child_id == blank;
 	TEST_EXPECT(empty_error);
 	empty.edit = set({section, kString, blank}, "key", std::string("hello"));
 	session.handle(empty);
 	bool duplicate = false, still_empty = false;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		duplicate |= d.code == "strings.key_duplicate" && d.severity == DiagnosticSeverity::Warning;
 		still_empty |= d.code == "strings.key_empty";
 	}
 	TEST_EXPECT(duplicate && !still_empty);
 	// Build waits on the unsaved prompt over the edited table; cancelled, nothing is built.
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(view.unsaved_prompt.open && view.unsaved_prompt.action == EditorRequestKind::Build &&
-	            view.unsaved_prompt.files == std::vector<std::string>{document->path()} && !session.view().operation.running());
+	TEST_EXPECT(view.dialogs.unsaved_prompt.open && view.dialogs.unsaved_prompt.action == EditorRequestKind::Build &&
+	            view.dialogs.unsaved_prompt.files == std::vector<std::string>{document->path()} && !session.view().activity.operation.running());
 	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
 	cancel.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(cancel);
-	TEST_EXPECT(!view.unsaved_prompt.open && !view.has_build && document->dirty());
+	TEST_EXPECT(!view.dialogs.unsaved_prompt.open && !view.activity.has_build && document->dirty());
 	EditorRequest remove = make_request(EditorRequestKind::EditRecord, document->path());
 	remove.edit.operation = EditOperation::Remove;
 	remove.edit.address = {section, kString, blank};
@@ -244,23 +245,23 @@ int validation_and_session() {
 	TEST_EXPECT(!document->dirty());
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(view.last_build.ok);
+	TEST_EXPECT(view.activity.last_build->ok);
 	// Reopen from disk: the section and the key survive; Go to finds the key by the locator of
 	// the symbol the key defines.
 	session.handle(make_request(EditorRequestKind::CloseDocument, document->path()));
-	const std::vector<const GraphSymbol *> hello = view.graph->symbols_named(ReferenceKind::TextId, "HELLO");
+	const std::vector<const GraphSymbol *> hello = view.findings.graph->symbols_named(ReferenceKind::TextId, "HELLO");
 	TEST_EXPECT(hello.size() == 1 && hello[0]->field == "key");
 	if (hello.size() != 1) return 1;
 	EditorRequest go_to = make_request(EditorRequestKind::OpenDocument, hello[0]->file, hello[0]->locator);
 	go_to.edit.field = hello[0]->field;
 	session.handle(go_to);
 	document = session.document_for("gametext.bin");
-	TEST_EXPECT(document && view.selection.kind == kString && view.selection.row != 0 && view.reveal_field == "key");
-	TEST_EXPECT(document && text_of(*document, view.selection, "key") == "HELLO");
+	TEST_EXPECT(document && view.documents.selection.kind == kString && view.documents.selection.row != 0 && editor_test::revealed_field(view) == "key");
+	TEST_EXPECT(document && text_of(*document, view.documents.selection, "key") == "HELLO");
 	// A new table is created blank and opened when the request names the kind (a
 	// bare `.bin` name cannot say what it is); an unnamed kind is refused.
 	session.handle(make_request(EditorRequestKind::CreateFile, "extra.bin"));
-	TEST_EXPECT(session.document_for("extra.bin") == nullptr && view.diagnostics.back().code == "document.kind");
+	TEST_EXPECT(session.document_for("extra.bin") == nullptr && view.findings.diagnostics.back().code == "document.kind");
 	session.handle(make_request(EditorRequestKind::CreateFile, "extra.bin", asset_kind_token(AssetKind::Strings)));
 	auto *extra = session.document_for("extra.bin");
 	TEST_EXPECT(extra && extra->rows().empty() && !extra->blocked());
@@ -268,7 +269,7 @@ int validation_and_session() {
 	// S12: sections by the reader's rule. An empty name is an error; a name an earlier section
 	// has, in any case, is a warning on the later one (a lookup by section reads the first).
 	const auto finding = [&](const char *code, NodeId row) {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == code && d.asset == extra->path() && d.row_id == row) return &d;
 		return static_cast<const Diagnostic *>(nullptr);
 	};

@@ -1,9 +1,9 @@
-#include <editor/session/findings_index.h>
+#include <editor/session/view/findings_index.h>
 
 namespace opennova::editor {
 
 void FindingsIndex::follow(const SessionView &view) {
-	const std::vector<Diagnostic> &findings = view.diagnostics;
+	const std::vector<Diagnostic> &findings = view.findings.diagnostics;
 	if (made_ && view_ == &view && key_ == cache_key(view) && count_ == findings.size() &&
 	    data_ == findings.data())
 		return;
@@ -27,7 +27,7 @@ std::vector<size_t> FindingsIndex::of_file(const std::string &file) const {
 	const auto found = files_.find(file);
 	if (found == files_.end() || !view_) return out;
 	for (const size_t i : found->second.findings)
-		if (i < view_->diagnostics.size()) out.push_back(i);
+		if (i < view_->findings.diagnostics.size()) out.push_back(i);
 	return out;
 }
 
@@ -39,7 +39,8 @@ std::vector<size_t> FindingsIndex::of_record(const std::string &file, NodeId row
 	const auto on_row = found->second.rows.find(row);
 	if (on_row == found->second.rows.end()) return out;
 	for (const size_t i : on_row->second)
-		if (i < view_->diagnostics.size() && (!child || view_->diagnostics[i].child_id == child))
+		if (i < view_->findings.diagnostics.size() &&
+		    (!child || view_->findings.diagnostics[i].child_id == child))
 			out.push_back(i);
 	return out;
 }

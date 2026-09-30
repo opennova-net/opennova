@@ -26,7 +26,7 @@
 #include <editor/preview/menu_report.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -133,7 +133,7 @@ static int test_menu_tools() {
 	// path naming the stylesheet, and neither asks anything of it.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
-	TEST_EXPECT(style && view.active_document == style->path() && view.menu_preview.path.empty());
+	TEST_EXPECT(style && view.documents.active == style->path() && view.documents.previews.menu.path.empty());
 	if (!style) return 1;
 	const uint64_t style_revision = style->revision();
 	const std::string rename_first = R"({"edits": [{"op": "set", "id": 1, "field": "name", "value": "RENAMED"}]})";
@@ -186,7 +186,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(menu->get(show, "target", value) && std::get<std::string>(value) == "TITLE");
 	TEST_EXPECT(menu->collections_of(hello).size() > 0);
 	// The selection is the two windows (their ACTIONs, SOUND and ITEM held by them).
-	TEST_EXPECT(view.selected == std::vector<NodeAddress>({hello, choices}) && view.selection == hello);
+	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({hello, choices}) && view.documents.selection == hello);
 
 	// The tree now: the button with its lists, text and rect; the list with its item.
 	tree = menu_tree_to_json(view, "");
@@ -327,7 +327,7 @@ static int test_menu_tools() {
 	// the one menu, so the edit of an id the tree gave lands on it, not on the stylesheet's
 	// record of that id.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
-	TEST_EXPECT(view.active_document == style->path() && view.menu_preview.path == menu->path());
+	TEST_EXPECT(view.documents.active == style->path() && view.documents.previews.menu.path == menu->path());
 	TEST_EXPECT(menu_tree_to_json(view, "").get_string("path", "") == menu->path() &&
 	            menu_findings_to_json(view, "").get_string("path", "") == menu->path());
 	const uint64_t style_before = style->revision();

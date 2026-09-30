@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
@@ -25,7 +26,7 @@
 #include <editor/preview/texture_header.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
 
@@ -54,7 +55,7 @@ struct Device {
 		if (action == MenuPreviewAction::Configure) {
 			++configures;
 			state = opennova::menu::MenuFrameState();
-			assets.configure(compiler, model.image(), model.screen(), *view.assets, decoder, model.style_vars());
+			assets.configure(compiler, model.image(), model.screen(), *view.findings.assets, decoder, model.style_vars());
 			model.configured(assets);
 			apply_menu_preview_options(model.options(), model.forced_index(), compiler, state);
 		} else if (action == MenuPreviewAction::Clear) {
@@ -118,7 +119,7 @@ static int test_headless_preview() {
 	// A menu open with none of its screens the preview's: it asks for one.
 	{
 		SessionView unselected = view;
-		unselected.menu_preview = SessionView::MenuPreviewTarget();
+		unselected.documents.previews.menu = DocumentsView::MenuPreviewTarget();
 		Device other;
 		other.pump(unselected);
 		TEST_EXPECT(other.json(unselected).get_string("status", "") == "no_screen");
@@ -126,7 +127,7 @@ static int test_headless_preview() {
 
 	// Opened, the menu shows its first screen: STARTUP as the game draws it, the title laid
 	// out in its font from fonts/.
-	TEST_EXPECT(view.menu_preview.path == menu->path() && view.menu_preview.screen == menu->rows()[0]->id);
+	TEST_EXPECT(view.documents.previews.menu.path == menu->path() && view.documents.previews.menu.screen == menu->rows()[0]->id);
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, menu->path());
 	select.edit.address = title;
@@ -290,7 +291,7 @@ static int test_headless_preview() {
 
 	// A table the project has that does not parse: named apart from one it lacks (the
 	// rescan keeps the unsaved menu open as it is).
-	TEST_EXPECT(editor_test::write_text(view.project_root + "/text/broken.bin", "not a table"));
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/text/broken.bin", "not a table"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	TEST_EXPECT(session.document_for("main.mnu") == menu && menu->dirty());
 	set(session, *menu, main, "text_rsrc", std::string("broken.bin"));

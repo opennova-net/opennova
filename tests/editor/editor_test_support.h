@@ -7,28 +7,62 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <editor/requirements/requirements.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace editor_test {
+
+// A shared member of a hand-made view (ProjectView's document, scan, requirements and imports,
+// ActivityView's last build, an import preview's plan, a rename preview's sites: each read only
+// through the view), made the test's own to change: a copy of what it holds, which the view holds
+// from then on.
+template <typename T> T &own(std::shared_ptr<const T> &held) {
+	std::shared_ptr<T> copy = std::make_shared<T>(*held);
+	T &out = *copy;
+	held = std::move(copy);
+	return out;
+}
+
+// The field the newest RevealRecord event asks to show, while it is about the selection in the
+// active document ("" otherwise): what a Go to or a Problems row lights in the Inspector.
+inline std::string revealed_field(const opennova::editor::SessionView &view) {
+	const auto &held = view.events.held();
+	for (auto event = held.rbegin(); event != held.rend(); ++event) {
+		if (event->kind != opennova::editor::ViewEventKind::RevealRecord) continue;
+		const bool selected = event->path == view.documents.active && event->address == view.documents.selection;
+		return selected ? event->field : std::string();
+	}
+	return std::string();
+}
+
+// The events of `kind` a view posted after seq `after` (view_events.h), oldest first.
+inline std::vector<opennova::editor::ViewEvent> events_after(const opennova::editor::SessionView &view,
+		uint64_t after, opennova::editor::ViewEventKind kind) {
+	std::vector<opennova::editor::ViewEvent> out;
+	for (const opennova::editor::ViewEvent &event : view.events.held())
+		if (event.seq > after && event.kind == kind) out.push_back(event);
+	return out;
+}
 
 // Create all missing, as the editor asks for it: the roles of every Required row the
 // project does not meet (a CreateMissing naming none makes nothing).
 inline void create_missing_files(opennova::editor::ProjectSession &session) {
 	opennova::editor::EditorRequest request = opennova::editor::make_request(opennova::editor::EditorRequestKind::CreateMissing);
-	request.names = opennova::editor::unmet_required_roles(session.view().requirements);
+	request.names = opennova::editor::unmet_required_roles(*session.view().project.requirements);
 	session.handle(request);
 }
 
 // The project settings dialog's Apply with only the settings `change` names, the others as
-// they are (what came of it is the view's settings_result); and two of them alone: the
-// game install folder, the missions feature.
+// they are (what came of it is the view's settings_result, and its SettingsApplied event); and
+// two of them alone: the game install folder, the missions feature.
 inline void apply_settings(opennova::editor::ProjectSession &session, const opennova::editor::ProjectSettingsChange &change) {
 	opennova::editor::EditorRequest request = opennova::editor::make_request(opennova::editor::EditorRequestKind::ApplyProjectSettings);
 	request.settings = change;

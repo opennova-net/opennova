@@ -42,7 +42,9 @@
     validation and the Problems rows; `PlayController`, `ImportController`,
     `RenameController`; `UnsavedGuard` the unsaved-changes prompt; `EditorPreferences` over
     the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
-    its wire form, and the record batch the editor MCP names records by), `model` (the
+    its wire form, the view the windows read (`session/view`, S13 V4: sub-views of the project,
+    the documents, the findings, the activity and the dialogs, and the events a request posts
+    for one window to take once), and the record batch the editor MCP names records by), `model` (the
     neutral editing core, ADR 0046 d9:
     `Document`, `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
     type), `documents` (the document types over the engine's own records: the def

@@ -9,6 +9,8 @@
 
 #include <memory>
 
+#include <editor/session/view/session_view.h>
+
 #include "env/mission_environment.h"
 #include "object/skeletal_anim.h"
 #include "render/frame_fx.h"
@@ -69,7 +71,7 @@ void ModelPreview::refresh(const opennova::editor::SessionView &view) {
 	case opennova::editor::ModelPreviewAction::Rebuild: {
 		// The textures read through the project's files, each name and stamp remembered so
 		// a changed one builds again.
-		auto files = std::make_shared<opennova::editor::StampedFiles>(view.assets);
+		auto files = std::make_shared<opennova::editor::StampedFiles>(view.findings.assets);
 		data_.instantiate();
 		data_->open_from_model(model_.model(), opennova::to_gd(model_.shown_path()),
 				std::make_shared<opennova::TextureFiles>(files));

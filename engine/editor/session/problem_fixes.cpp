@@ -13,6 +13,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/requirements/requirements.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -28,15 +29,15 @@ constexpr size_t kUseFilesMax = 8;
 // Every fix acts on the files, which the editor's Undo does not reach: its detail says so.
 constexpr const char *kNotUndoable = " It cannot be undone with Undo.";
 
-// The game install's spelling of a file it has (view.retail_files is sorted by the
+// The game install's spelling of a file it has (view.project.retail_files is sorted by the
 // normalized name), or "" when it has none of that name.
 std::string retail_name(const SessionView &view, const std::string &name) {
 	const std::string wanted = normalized_logical_name(name);
-	const auto found = std::lower_bound(view.retail_files.begin(), view.retail_files.end(), wanted,
+	const auto found = std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(), wanted,
 	                                    [](const std::string &file, const std::string &key) {
 		                                    return normalized_logical_name(file) < key;
 	                                    });
-	return found != view.retail_files.end() && normalized_logical_name(*found) == wanted ? *found : std::string();
+	return found != view.project.retail_files.end() && normalized_logical_name(*found) == wanted ? *found : std::string();
 }
 
 // The import dialog on a file of the game install, planned with the files it needs when the
@@ -44,7 +45,7 @@ std::string retail_name(const SessionView &view, const std::string &name) {
 ProblemFix import_fix(const SessionView &view, const std::string &retail) {
 	EditorRequest request = make_request(EditorRequestKind::PreviewRetailImport);
 	request.names = {retail};
-	request.flag = view.import_dependencies;
+	request.flag = view.project.import_dependencies;
 	return {"Import " + retail + " from the game data...",
 	        "Opens the import dialog on " + retail + " from the game install" +
 	                (request.flag ? ", with the files it needs," : "") +
@@ -59,8 +60,8 @@ std::string placeholder(const BlankFactory &factory) {
 // What the rename a Use fix makes rewrites, planned over the view, or why it is refused.
 std::string use_detail(const SessionView &view, const AssetEntry &file, const std::string &name) {
 	const std::string renames = "Renames " + file.logical_name + " to " + name;
-	if (!view.graph) return renames + "." + kNotUndoable;
-	const RenamePlan plan = plan_rename(ProjectPaths::for_root(view.project_root), view.scan, *view.graph, file.relative_path, name);
+	if (!view.findings.graph) return renames + "." + kNotUndoable;
+	const RenamePlan plan = plan_rename(ProjectPaths::for_root(view.project.root), *view.project.scan, *view.findings.graph, file.relative_path, name);
 	if (!plan.ok()) return "Cannot rename " + file.logical_name + " to " + name + ": " + plan.refusals.front().message;
 	if (plan.sites.empty()) return renames + "; nothing refers to it." + kNotUndoable;
 	std::set<std::string> files;
@@ -73,7 +74,7 @@ std::string use_detail(const SessionView &view, const AssetEntry &file, const st
 // the name that is there, of the wrong kind or added since, is not this finding's to fix).
 void requirement_fixes(const Diagnostic &d, const SessionView &view, bool plan, std::vector<ProblemFix> &out) {
 	const RequirementRow *row = nullptr;
-	for (const RequirementRow &candidate : view.requirements.rows)
+	for (const RequirementRow &candidate : view.project.requirements->rows)
 		if (candidate.role == d.role) row = &candidate;
 	if (!row || row->state != RequirementState::Missing) return;
 	if (const BlankFactory *factory = find_blank_factory_for_role(row->role)) {
@@ -93,11 +94,11 @@ void requirement_fixes(const Diagnostic &d, const SessionView &view, bool plan, 
 		return normalized_logical_name(fs::path(name).extension().generic_string());
 	};
 	size_t offered = 0;
-	for (const AssetEntry &file : view.scan.entries) {
+	for (const AssetEntry &file : view.project.scan->entries) {
 		if (file.kind != row->expected_kind || !file.imported_from.empty() ||
 		    extension(file.logical_name) != extension(row->name))
 			continue;
-		const bool required = std::any_of(view.requirements.rows.begin(), view.requirements.rows.end(), [&file](const RequirementRow &other) {
+		const bool required = std::any_of(view.project.requirements->rows.begin(), view.project.requirements->rows.end(), [&file](const RequirementRow &other) {
 			return normalized_logical_name(other.name) == normalized_logical_name(file.logical_name);
 		});
 		if (required) continue;
@@ -124,7 +125,7 @@ ProblemFix rename_fix(const std::string &path) {
 // rename.exists).
 void wrong_kind_fixes(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
 	const RequirementRow *row = nullptr;
-	for (const RequirementRow &candidate : view.requirements.rows)
+	for (const RequirementRow &candidate : view.project.requirements->rows)
 		if (candidate.role == d.role) row = &candidate;
 	if (!row || row->state != RequirementState::WrongKind) return;
 	const std::string retail = retail_name(view, row->name);
@@ -140,12 +141,12 @@ void wrong_kind_fixes(const Diagnostic &d, const SessionView &view, std::vector<
 const AssetEntry *usual_table(ReferenceKind kind, const SessionView &view) {
 	const AssetKind table = reference_row(kind).defined_in;
 	if (table == AssetKind::Unknown) return nullptr;
-	for (const RequirementRow &row : view.requirements.rows) {
+	for (const RequirementRow &row : view.project.requirements->rows) {
 		if (row.expected_kind != table) continue;
-		const AssetEntry *file = view.scan.find(row.name);
+		const AssetEntry *file = view.project.scan->find(row.name);
 		if (file && file->kind == table) return file;
 	}
-	for (const AssetEntry &entry : view.scan.entries)
+	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.kind == table) return &entry;
 	return nullptr;
 }
@@ -159,12 +160,12 @@ const AssetEntry *usual_table(ReferenceKind kind, const SessionView &view) {
 const AssetEntry *defining_file(const Diagnostic &d, const SessionView &view) {
 	if (reference_row(d.reference).scope_names_file) {
 		const std::string scoped = d.scope.substr(0, d.scope.find('/'));
-		return scoped.empty() ? nullptr : view.scan.find(scoped);
+		return scoped.empty() ? nullptr : view.project.scan->find(scoped);
 	}
-	if (view.graph)
-		for (const GraphSymbol *symbol : view.graph->symbols_of_kind(d.reference))
+	if (view.findings.graph)
+		for (const GraphSymbol *symbol : view.findings.graph->symbols_of_kind(d.reference))
 			if (!symbol->inert)
-				if (const AssetEntry *entry = view.scan.at_path(symbol->file)) return entry;
+				if (const AssetEntry *entry = view.project.scan->at_path(symbol->file)) return entry;
 	return usual_table(d.reference, view);
 }
 
@@ -256,7 +257,7 @@ std::string placeholder_file(const Diagnostic &d) {
 void placeholder_fix(const Diagnostic &d, const SessionView &view, std::vector<ProblemFix> &out) {
 	const std::string name = placeholder_file(d);
 	std::string problem, message;
-	if (name.empty() || view.scan.find(name) || !check_file_name(name, AssetKind::Texture, problem, message)) return;
+	if (name.empty() || view.project.scan->find(name) || !check_file_name(name, AssetKind::Texture, problem, message)) return;
 	out.push_back({"Create a placeholder " + name,
 	               "Creates " + name +
 	                       ": the checkerboard the game draws for a missing texture, 128 by 128 gray squares, to replace "
@@ -291,9 +292,9 @@ void reference_fixes(const Diagnostic &d, const SessionView &view, std::vector<P
 	if (names.empty()) return;
 	const std::string &name = names.front();
 	std::string problem, message;
-	if (view.scan.find(name) || !check_file_name(name, kind, problem, message)) return;
+	if (view.project.scan->find(name) || !check_file_name(name, kind, problem, message)) return;
 	const BlankFactory *factory = nullptr;
-	for (const RequirementRow &row : view.requirements.rows)
+	for (const RequirementRow &row : view.project.requirements->rows)
 		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(name))
 			factory = find_blank_factory_for_role(row.role);
 	if (!factory) factory = find_blank_factory_for_kind(kind);
@@ -319,14 +320,14 @@ bool ends_with(const std::string &text, const char *tail) {
 // The fixes of one finding, over the view's index (a Rewrite reads it).
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
              std::vector<ProblemFix> &out) {
-	if (!view.project_open) return;
+	if (!view.project.open) return;
 	if (d.code == "requirement.missing" || d.code == "requirement.optional_missing" || d.code == "play.boot_missing") {
 		if (!d.role.empty()) requirement_fixes(d, view, plan, out);
 	} else if (d.code == "requirement.wrong_kind") {
 		if (!d.role.empty()) wrong_kind_fixes(d, view, out);
 	} else if (d.code == "asset.name.too_long" || d.code == "asset.name.duplicate" || d.code == "build.name_unstorable") {
 		// A name the archives cannot take, or another file has: Files' Rename....
-		if (view.scan.at_path(d.asset)) out.push_back(rename_fix(d.asset));
+		if (view.project.scan->at_path(d.asset)) out.push_back(rename_fix(d.asset));
 	} else if (d.code == "animation_map.no_reset" && !d.asset.empty()) {
 		out.push_back(reset_row_fix(d.asset));
 	} else if (d.code == "reference.missing") {
@@ -335,13 +336,13 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		// A texture an import's model names that the import did not bring: the reference's own
 		// fixes, while the project still lacks the file (the finding is the import's, kept to
 		// the next validation, whose graph reports the reference as missing too).
-		if (view.graph &&
-		    view.graph->resolve(d.reference, d.target, d.scope, nullptr, d.loader_arg) == ReferenceStatus::Missing)
+		if (view.findings.graph &&
+		    view.findings.graph->resolve(d.reference, d.target, d.scope, nullptr, d.loader_arg) == ReferenceStatus::Missing)
 			reference_fixes(d, view, out);
 	} else if (d.code == "document.conflict" && !d.asset.empty()) {
 		// An open document whose file changed outside the editor: read it again, its unsaved
 		// edits dropped (the Reload asks about them first, as any Reload does).
-		const bool open = std::any_of(view.documents.begin(), view.documents.end(),
+		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
 		                              [&d](const auto &document) { return document && document->path() == d.asset; });
 		if (open)
 			out.push_back({"Reload " + basename_of(d.asset),
@@ -356,7 +357,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		               true});
 	} else if (const char *does = rewrite_does(d.code); does && !d.asset.empty() && !index.unserializable.count(d.asset)) {
 		std::string detail = "Writes " + d.asset + " again " + does + ".";
-		for (const auto &document : view.documents)
+		for (const auto &document : view.documents.open)
 			if (document && document->path() == d.asset && document->dirty()) detail += " Its unsaved edits are saved with it.";
 		detail += kNotUndoable;
 		out.push_back({"Rewrite " + basename_of(d.asset), detail, make_request(EditorRequestKind::Save, d.asset), true});
@@ -376,7 +377,7 @@ std::vector<ProblemFix> fixes_over(const Diagnostic &d, const SessionView &view,
 // A file whose own finding says it does not serialize (input the model cannot hold, a value
 // it cannot write): its Save is refused (document.unserializable), so no Rewrite.
 ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (ends_with(d.code, ".unserializable") || ends_with(d.code, ".invalid_input")) unserializable.insert(d.asset);
 }
 
@@ -440,7 +441,7 @@ const std::vector<ProblemFix> &ProblemFixCache::fixes(const SessionView &view, s
 	const ProblemFixIndex &view_index = follow(view);
 	auto found = fixes_.find(index);
 	if (found == fixes_.end())
-		found = fixes_.emplace(index, index < view.diagnostics.size() ? fixes_for(view.diagnostics[index], view, &view_index)
+		found = fixes_.emplace(index, index < view.findings.diagnostics.size() ? fixes_for(view.findings.diagnostics[index], view, &view_index)
 		                                                              : std::vector<ProblemFix>())
 		                .first;
 	return found->second;
@@ -448,7 +449,7 @@ const std::vector<ProblemFix> &ProblemFixCache::fixes(const SessionView &view, s
 
 std::vector<ProblemFix> ProblemFixCache::bulk(const SessionView &view, size_t index) {
 	const ProblemFixIndex &view_index = follow(view);
-	return index < view.diagnostics.size() ? bulk_fixes_for(view.diagnostics[index], view, &view_index)
+	return index < view.findings.diagnostics.size() ? bulk_fixes_for(view.findings.diagnostics[index], view, &view_index)
 	                                       : std::vector<ProblemFix>();
 }
 

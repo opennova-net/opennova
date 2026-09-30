@@ -4,6 +4,7 @@
 #include <string>
 
 #include <editor/session/editor_request.h>
+#include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -14,8 +15,9 @@ namespace opennova::editor {
 // Play runs the game install instead. The fields are the dialog's until Apply, which raises
 // one ApplyProjectSettings naming every one of them: the session writes what differs from
 // the settings in effect, so a retry after a partial failure writes what is still not in
-// effect, whatever the dialog opened with. The dialog waits for its serial in the view's
-// settings_result: none failed, it closes; otherwise it says what failed and stays open.
+// effect, whatever the dialog opened with. The dialog waits for the SettingsApplied view event
+// carrying its serial: none failed, it closes; otherwise it says what failed (the view's
+// settings_result) and stays open.
 // Cancel changes nothing. It belongs to the project it opened in: another project (or none)
 // closes it, and a Browse... answered after that is dropped. The workspace draws it every
 // frame.
@@ -23,6 +25,9 @@ class ProjectSettingsDialog {
 public:
 	// Opens on the next draw for the view's project, the settings in effect in the fields.
 	void open(const SessionView &view);
+	// A SettingsApplied view event, held until the dialog draws (every frame, with the
+	// workspace's modals).
+	void receive(const ViewEvent &event) { events_.post(event); }
 	void draw(Workspace &workspace);
 	// The shell's answer to a Browse... of the dialog: taken while the dialog is open on the
 	// project it asked in (`project_root`, the project open now) for the field it asked for.
@@ -45,7 +50,9 @@ private:
 	std::string root_;        // the project it is for
 	Fields fields_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
+	ViewEventMailbox events_;
 	uint64_t serial_ = 0;     // the last Apply's, and whether its answer is still to come
+	uint64_t seen_ = 0;       // the highest serial an answer carried
 	bool waiting_ = false;
 	std::string error_;       // what the last Apply could not write
 };

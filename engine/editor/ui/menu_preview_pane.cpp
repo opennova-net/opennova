@@ -1,11 +1,18 @@
 #include "menu_preview_pane.h"
 
+#include <editor/documents/mnu_clipboard.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_arrange.h>
+#include <editor/preview/menu_canvas.h>
+#include <editor/preview/menu_preview_state.h>
+#include <editor/preview/menu_preview_viewport.h>
 #include <editor/preview/menu_render_check.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_canvas.h>
+#include <editor/ui/workspace.h>
+#include <runtime/menu/menu_frame.h>
 
 #include <algorithm>
 #include <cmath>
@@ -54,17 +61,67 @@ bool editable(mnu::WindowType type) { return type == mnu::WindowType::Edit || ty
 
 } // namespace
 
-MenuPreviewPane::MenuPreviewPane(Workspace &workspace) :
-		workspace_(workspace), canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight), requests_(workspace) {}
+// The pane's own state and its drawing: the canvas, the menu's half of it, the requests the
+// canvas raises, the toolbar's settings and the window the held state follows.
+class MenuPreviewPane::Impl {
+public:
+	explicit Impl(Workspace &workspace) :
+			workspace_(workspace), canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight), requests_(workspace) {}
+	void draw();
+	void end_frame();
+
+private:
+	// What the pane draws this frame: what its canvas maps, and what the clipboard takes.
+	struct Frame {
+		MenuCanvasFrame canvas;
+		MenuClipboard clipboard;
+	};
+
+	void follow_selection_(const MnuDocument &document, const NodeAddress &selected);
+	void toolbar_(const Frame &frame);
+	void draw_canvas_(const Frame &frame, float height);
+	// The clipboard's shortcuts (the arrows and Esc are the canvas's).
+	void keys_(const Frame &frame);
+	// The Arrange items (the toolbar's menu and the canvas's).
+	void arrange_items_(const Frame &frame);
+	// Copy, Cut, Paste or Duplicate the selected windows (the keys and the canvas's menu).
+	void clipboard_(const Frame &frame, EditorRequestKind kind);
+
+	// The Shell's menu device (the workspace's devices), null for none.
+	MenuPreviewViewport *viewport() const { return workspace_.devices().menu; }
+
+	Workspace &workspace_;
+	ViewportCanvas canvas_;
+	MenuCanvas menu_canvas_;
+	CanvasWindowRequests requests_;
+	bool snap_ = true;
+	NodeId followed_ = 0; // the selected window the held state last followed
+	// The mouse over the picture in design units, from the last canvas pass (the toolbar's
+	// readout).
+	bool mouse_on_picture_ = false;
+	int mouse_design_x_ = 0, mouse_design_y_ = 0;
+};
+
+MenuPreviewPane::MenuPreviewPane(Workspace &workspace) : impl_(std::make_unique<Impl>(workspace)) {}
+
+MenuPreviewPane::~MenuPreviewPane() = default;
+
+void MenuPreviewPane::draw() {
+	impl_->draw();
+}
 
 void MenuPreviewPane::end_frame() {
+	impl_->end_frame();
+}
+
+void MenuPreviewPane::Impl::end_frame() {
 	menu_canvas_.end_frame(requests_);
 	canvas_.end_frame();
 }
 
 // The held state follows the selection: a newly selected window is the one held, and what
 // its type does not have (a check, a list, a caret) is let go.
-void MenuPreviewPane::follow_selection_(const MnuDocument &document, const NodeAddress &selected) {
+void MenuPreviewPane::Impl::follow_selection_(const MnuDocument &document, const NodeAddress &selected) {
 	if (selected.child == followed_) return;
 	followed_ = selected.child;
 	MenuPreviewOptions options = viewport()->options();
@@ -78,7 +135,7 @@ void MenuPreviewPane::follow_selection_(const MnuDocument &document, const NodeA
 }
 
 // The toolbar, on a row that wraps whole controls in a narrow window.
-void MenuPreviewPane::toolbar_(const Frame &frame) {
+void MenuPreviewPane::Impl::toolbar_(const Frame &frame) {
 	const MnuDocument &document = *frame.canvas.document;
 	const NodeAddress &selected = frame.canvas.primary;
 	MenuPreviewOptions options = viewport()->options();
@@ -182,7 +239,7 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 	if (options != before) viewport()->set_options(options);
 }
 
-void MenuPreviewPane::draw() {
+void MenuPreviewPane::Impl::draw() {
 	const SessionView &view = workspace_.view();
 	if (!viewport()) {
 		ui_kit::empty_state(menu_preview_status_message(MenuPreviewStatus::NoDevice, std::string()).c_str());
@@ -194,10 +251,10 @@ void MenuPreviewPane::draw() {
 	// another document (the stylesheet it draws with) is active.
 	Frame frame;
 	MenuCanvasFrame &canvas = frame.canvas;
-	for (const auto &open : view.documents)
-		if (open->path() == view.menu_preview.path)
+	for (const auto &open : view.documents.open)
+		if (open->path() == view.documents.previews.menu.path)
 			canvas.document = dynamic_cast<const MnuDocument *>(open.get());
-	canvas.screen = canvas.document ? canvas.document->row(view.menu_preview.screen) : nullptr;
+	canvas.screen = canvas.document ? canvas.document->row(view.documents.previews.menu.screen) : nullptr;
 	if (status != MenuPreviewStatus::Ready || !canvas.document || !canvas.screen) {
 		ImGui::PushTextWrapPos(0.0f);
 		ImGui::TextDisabled("%s", menu_preview_status_message(status, detail).c_str());
@@ -222,11 +279,11 @@ void MenuPreviewPane::draw() {
 			canvas.compiler && canvas.state && viewport()->shown_revision() == document.revision();
 	// The selection on this screen while the menu is the active document: the primary record,
 	// the window holding it, every selected window, and what the clipboard takes of it.
-	const bool active = view.active_document == document.path();
+	const bool active = view.documents.active == document.path();
 	const std::vector<NodeAddress> none;
 	menu_canvas_select(
-			canvas, active ? view.selection : NodeAddress(), active ? view.selected : none);
-	frame.clipboard = menu_canvas_clipboard(canvas, !view.clipboard.empty());
+			canvas, active ? view.documents.selection : NodeAddress(), active ? view.documents.selected : none);
+	frame.clipboard = menu_canvas_clipboard(canvas, !view.documents.clipboard.empty());
 	follow_selection_(document, canvas.primary);
 	toolbar_(frame);
 	canvas.snap = snap_;
@@ -272,7 +329,7 @@ void MenuPreviewPane::draw() {
 // Ctrl+C / X / V / D copy, cut, paste and duplicate windows while the preview has the focus, no
 // text box takes the keys and no press is down, as the menu clipboard's rule says (the arrows and
 // Esc are the canvas's, preview/menu_canvas).
-void MenuPreviewPane::keys_(const Frame &frame) {
+void MenuPreviewPane::Impl::keys_(const Frame &frame) {
 	const ImGuiIO &io = ImGui::GetIO();
 	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
 	if (!focused || menu_canvas_.gesture().pressed() || frame.canvas.document->blocked())
@@ -288,7 +345,7 @@ void MenuPreviewPane::keys_(const Frame &frame) {
 }
 
 // Copy, Cut, Duplicate and Paste as the menu clipboard's rule says (menu_clipboard).
-void MenuPreviewPane::clipboard_(const Frame &frame, EditorRequestKind kind) {
+void MenuPreviewPane::Impl::clipboard_(const Frame &frame, EditorRequestKind kind) {
 	const MnuDocument &document = *frame.canvas.document;
 	const MenuClipboard &board = frame.clipboard;
 	if (kind != EditorRequestKind::Paste) {
@@ -300,7 +357,7 @@ void MenuPreviewPane::clipboard_(const Frame &frame, EditorRequestKind kind) {
 		                       board.paste_position);
 }
 
-void MenuPreviewPane::arrange_items_(const Frame &frame) {
+void MenuPreviewPane::Impl::arrange_items_(const Frame &frame) {
 	const MenuCanvasFrame &canvas = frame.canvas;
 	const size_t count = canvas.windows.size();
 	for (const ArrangeOp op : kArrangeOps) {
@@ -316,7 +373,7 @@ void MenuPreviewPane::arrange_items_(const Frame &frame) {
 
 // The canvas: the picture, the pointer's gestures on it, the right-click menu, and what the
 // picture maps drawn over it.
-void MenuPreviewPane::draw_canvas_(const Frame &frame, float height) {
+void MenuPreviewPane::Impl::draw_canvas_(const Frame &frame, float height) {
 	const MenuCanvasFrame &canvas = frame.canvas;
 	const MnuDocument &document = *canvas.document;
 	const MenuPreviewOptions &options = viewport()->options();
@@ -336,7 +393,7 @@ void MenuPreviewPane::draw_canvas_(const Frame &frame, float height) {
 		// what the selection can do.
 		if (canvas_.right_clicked() && !menu_canvas_.gesture().pressed()) {
 			const NodeAddress window = menu_window_at(canvas, in);
-			if (window.child && !holds(workspace_.view().selected, window))
+			if (window.child && !holds(workspace_.view().documents.selected, window))
 				window_requests::select(workspace_, document, window);
 			ImGui::OpenPopup("canvas_menu");
 		}

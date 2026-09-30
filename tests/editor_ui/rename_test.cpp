@@ -28,13 +28,13 @@ void test_rename_everywhere_ui() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	const AssetEntry *weapons = v.scan.find("weapon.def");
-	const AssetEntry *items = v.scan.find("items.def");
+	const AssetEntry *weapons = v.project.scan->find("weapon.def");
+	const AssetEntry *items = v.project.scan->find("items.def");
 	CHECK(weapons && items, "the catalogs");
 	if (!weapons || !items) return;
 	const std::string weapons_path = weapons->relative_path;
-	CHECK(editor_test::write_text(v.project_root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") &&
-	              editor_test::write_text(v.project_root + "/" + items->relative_path,
+	CHECK(editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"GUN_A\"\nend\n") &&
+	              editor_test::write_text(v.project.root + "/" + items->relative_path,
 	                                      "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"),
 	      "the fixtures");
 	session.handle(make_request(EditorRequestKind::Rescan));
@@ -108,15 +108,15 @@ void test_hint_on_a_fallback() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Hint"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	const AssetEntry *sheet = v.scan.find("menu_style.mns");
+	const AssetEntry *sheet = v.project.scan->find("menu_style.mns");
 	CHECK(sheet != nullptr, "the stylesheet");
 	if (!sheet) return;
 	const std::string folder = std::filesystem::path(sheet->relative_path).parent_path().generic_string();
 	const std::string brand_path = (folder.empty() ? std::string() : folder + "/") + "brand.mns";
-	CHECK(editor_test::write_text(v.project_root + "/" + sheet->relative_path,
-	                              test_io::read_file_text(v.project_root + "/" + sheet->relative_path) + "X_COLOR FF000000\r\n") &&
-	              editor_test::write_text(v.project_root + "/" + brand_path, "X_COLOR FF102030\r\n") &&
-	              editor_test::write_text(v.project_root + "/menus/f.mnu",
+	CHECK(editor_test::write_text(v.project.root + "/" + sheet->relative_path,
+	                              test_io::read_file_text(v.project.root + "/" + sheet->relative_path) + "X_COLOR FF000000\r\n") &&
+	              editor_test::write_text(v.project.root + "/" + brand_path, "X_COLOR FF102030\r\n") &&
+	              editor_test::write_text(v.project.root + "/menus/f.mnu",
 	                                      "<SCREEN>\r\n<NAME>F</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"W\">\r\n"
 	                                      "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%X_COLOR%</APPEARANCE>\r\n"
 	                                      "</WINDOW>\r\n</SCREEN>\r\n"),
@@ -135,7 +135,7 @@ void test_hint_on_a_fallback() {
 	rename.edit.field = "name";
 	rename.edit.value = std::string("Y_COLOR");
 	session.handle(rename);
-	CHECK(v.graph->resolve(ReferenceKind::StyleVar, "%X_COLOR%") == ReferenceStatus::Present,
+	CHECK(v.findings.graph->resolve(ReferenceKind::StyleVar, "%X_COLOR%") == ReferenceStatus::Present,
 	      "the use now reaches menu_style.mns's X_COLOR");
 	Ui ui;
 	ui.windows.set_view(&v);

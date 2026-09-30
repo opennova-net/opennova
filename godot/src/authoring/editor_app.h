@@ -138,7 +138,7 @@ public:
 	// The wire seam (ADR 0046 d10, the editor MCP): the same requests and view as JSON
 	// text, marshalled by the portable session_json so the transport stays a pump.
 	// request_json answers {ok, served, error, outcome, status, revision (the view's any:
-	// session_revisions.h)}; the pickers are
+	// view_revisions.h)}; the pickers are
 	// refused (they need a person), reveal_path and quit are served here. get_outcome_json
 	// is what the last request came to (a typed seam call's included): {done,
 	// unsaved_prompt, operation, findings}.
@@ -147,9 +147,10 @@ public:
 	// The running operation and what the last one came to, as the view JSON has them
 	// ({operation, last_operation}): what editor_build and editor_play wait on, frame by frame.
 	String get_operation_json() const;
-	// The view (session_view_to_json): a page of the output lines and of the import dialog's lists.
+	// The view (session_view_to_json): a page of the output lines, of the import dialog's lists and
+	// of the view events (by seq, from `p_event_cursor`).
 	String get_view_json(int p_output_cursor = 0, int p_output_limit = 200, int p_import_offset = 0,
-			int p_import_limit = 200) const;
+			int p_import_limit = 200, int p_event_cursor = 0, int p_event_limit = 64) const;
 	// "" = the active document; with rows, every row and its nested records.
 	String get_document_json(const String &p_path, bool p_with_rows) const;
 	String get_record_json(int64_t p_id) const;

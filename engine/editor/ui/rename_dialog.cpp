@@ -1,7 +1,8 @@
 #include "rename_dialog.h"
 
 #include <editor/graph/reference_kinds.h>
-#include <editor/session/session_view.h>
+#include <editor/graph/rename_transaction.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -31,31 +32,31 @@ EditorRequest RenameDialog::preview(const std::string &path, const std::string &
 	return request;
 }
 
-void RenameDialog::follow(const SessionView &view) {
-	const SessionView::RenamePreview &preview = view.rename_preview;
-	if (preview.ask_serial == ask_serial_) return;
-	ask_serial_ = preview.ask_serial;
-	if (!preview.symbol) return;
-	open_ = true;
-	path_ = preview.path;
-	locator_ = preview.locator;
-	field_ = preview.field;
-	old_name_ = preview.old_name;
-	kind_ = preview.kind;
-	const size_t n = std::min(preview.requested.size(), sizeof(name_) - 1);
-	std::memcpy(name_, preview.requested.data(), n);
-	name_[n] = '\0';
-	asked_ = name_;
-}
-
 void RenameDialog::draw(Workspace &workspace) {
 	const SessionView &view = workspace.view();
+	// An ask opens the dialog on the preview it names: a name's rename everywhere (a file's has
+	// its own place in Files), while the view still holds that preview.
+	for (const ViewEvent &ask : events_.take()) {
+		const DialogsView::RenamePreview &preview = view.dialogs.rename_preview;
+		if (ask.kind != ViewEventKind::AskRename || ask.tag != preview.serial || !preview.symbol)
+			continue;
+		open_ = true;
+		path_ = preview.path;
+		locator_ = preview.locator;
+		field_ = preview.field;
+		old_name_ = preview.old_name;
+		kind_ = preview.kind;
+		const size_t n = std::min(preview.requested.size(), sizeof(name_) - 1);
+		std::memcpy(name_, preview.requested.data(), n);
+		name_[n] = '\0';
+		asked_ = name_;
+	}
 	if (open_) {
 		open_ = false;
 		ImGui::OpenPopup(kTitle);
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-	if (!view.project_open) {
+	if (!view.project.open) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -71,7 +72,7 @@ void RenameDialog::draw(Workspace &workspace) {
 	}
 	// The plan shown is the typed name's: the one it was asked for (its new name is the name as the
 	// definition takes it: a style variable's %NAME% typed is its NAME, an item id "0100302" 100302).
-	const SessionView::RenamePreview &plan = view.rename_preview;
+	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
 	const bool current = plan.symbol && plan.path == path_ && plan.locator == locator_ && plan.field == field_ &&
 	                     plan.requested == asked_;
 	const bool ready = current && plan.refusals.empty() && !asked_.empty();
@@ -84,10 +85,11 @@ void RenameDialog::draw(Workspace &workspace) {
 			ImGui::SameLine();
 			ImGui::TextWrapped("%s", refusal.message.c_str());
 		}
-		const size_t uses = plan.sites.empty() ? 0 : plan.sites.size() - 1;
+		const std::vector<RenameSite> &sites = *plan.sites;
+		const size_t uses = sites.empty() ? 0 : sites.size() - 1;
 		ImGui::TextDisabled("The definition and %zu use%s:", uses, uses == 1 ? "" : "s");
-		for (size_t i = 0; i < plan.sites.size(); ++i) {
-			const std::string line = site_line(plan.sites[i]);
+		for (size_t i = 0; i < sites.size(); ++i) {
+			const std::string line = site_line(sites[i]);
 			ImGui::PushID(static_cast<int>(i));
 			ui_kit::clipped_text(line);
 			ImGui::PopID();

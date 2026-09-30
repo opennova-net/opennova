@@ -16,6 +16,8 @@ class DefCatalogDocument;
 class CatalogView {
 public:
 	void draw(Workspace &workspace, const DefCatalogDocument &document);
+	// A RevealRecord event for its document: the next draw shows the selection again.
+	void reveal_again() { reveal_.ask(); }
 
 private:
 	char filter_[128]{};

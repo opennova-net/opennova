@@ -1,7 +1,7 @@
 #include "styles_view.h"
 
 #include <editor/documents/mns_document.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
@@ -32,7 +32,7 @@ const char *sheet_status(const SessionView &view, const FindingsIndex &findings,
                          const MnsDocument &document) {
 	if (!document.read_by_game()) return "Not read by the game: it reads menu_style.mns and brand.mns only.";
 	for (const size_t i : findings.of_file(document.path())) {
-		const Diagnostic &d = view.diagnostics[i];
+		const Diagnostic &d = view.findings.diagnostics[i];
 		if (d.severity == DiagnosticSeverity::Error && d.code.rfind("style.", 0) == 0)
 			return "The game reads it only in part: see Problems.";
 	}
@@ -103,7 +103,7 @@ void StylesView::draw(Workspace &workspace, const MnsDocument &document) {
 	// nothing); its own moves, Up and Down to the place of the listed line before or after it.
 	size_t index = SIZE_MAX;
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.row) index = i;
 	const auto place = std::find(listed.begin(), listed.end(), index);
 	const size_t at = place == listed.end() ? SIZE_MAX : size_t(place - listed.begin());
 	const Node *selected = at != SIZE_MAX ? rows[index].get() : nullptr;
@@ -171,13 +171,13 @@ void StylesView::draw(Workspace &workspace, const MnsDocument &document) {
 		const std::string value = document.get(line, "value", value_field) ? std::get<std::string>(value_field) : std::string();
 		ImGui::PushID(int(row->id));
 		ImGui::TableNextRow();
-		if (view.selection.row == row->id)
+		if (view.documents.selection.row == row->id)
 			ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
 		ImGui::TableNextColumn();
 		// The line's number, marked when it was added or changed since the last save.
 		const int64_t at = document.get(line, "line", number) ? std::get<int64_t>(number) : 0;
 		const float x = ImGui::GetCursorScreenPos().x;
-		if (ImGui::Selectable((ui_kit::kChangeRoom + std::to_string(at)).c_str(), view.selection.row == row->id))
+		if (ImGui::Selectable((ui_kit::kChangeRoom + std::to_string(at)).c_str(), view.documents.selection.row == row->id))
 			select(workspace, document, line);
 		reveal_.scroll_to(line, true);
 		const Document::RecordChange change = document.record_change(line);
@@ -190,9 +190,9 @@ void StylesView::draw(Workspace &workspace, const MnsDocument &document) {
 			// picked with the reference picker from the project's files the kind loads, or a Files
 			// row dropped on the value; its uses, the menus' uses of the definition the game reads.
 			const StyleValueUse &use =
-			        document.style_value_use(line, view.graph.get(), cache_key(view));
+			        document.style_value_use(line, view.findings.graph.get(), cache_key(view));
 			std::vector<const GraphEdge *> users;
-			if (use.bound) users = view.graph->referrers_of(ReferenceKind::StyleVar, row->name());
+			if (use.bound) users = view.findings.graph->referrers_of(ReferenceKind::StyleVar, row->name());
 			text_cell(workspace, document, line, "name");
 			if (ImGui::IsItemActivated()) select(workspace, document, line);
 			ImGui::TableNextColumn();

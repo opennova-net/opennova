@@ -15,7 +15,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
@@ -121,7 +121,7 @@ bool ProjectSession::Impl::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::Rescan:
 		// Only what changed outside the editor is read again: an open document whose file
 		// holds what it was read from keeps its records, its history and its selection.
-		if (view.project_open) {
+		if (view.project.open) {
 			documents.reload_changed();
 			core.refresh();
 		}
@@ -135,13 +135,13 @@ bool ProjectSession::Impl::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::PreviewRetailImport: imports.preview_retail(request); return true;
 	case EditorRequestKind::Reimport: imports.reimport(request.path, request.flag); return true;
 	case EditorRequestKind::CreateMissing:
-		if (view.project_open) core.create_missing(request.names);
+		if (view.project.open) core.create_missing(request.names);
 		return true;
 	case EditorRequestKind::Build:
-		if (view.project_open) core.start_build(false);
+		if (view.project.open) core.start_build(false);
 		return true;
 	case EditorRequestKind::Play:
-		if (view.project_open) core.start_build(true);
+		if (view.project.open) core.start_build(true);
 		return true;
 	case EditorRequestKind::StopPlay: play.stop(); return true;
 	case EditorRequestKind::CancelOperation: core.cancel_operation(true); return true;
@@ -167,7 +167,7 @@ bool ProjectSession::Impl::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::PreviewRename: renames.preview(request); return true;
 	case EditorRequestKind::RenameSymbol: renames.rename_symbol(request); return true;
 	case EditorRequestKind::ClearOutput:
-		view.output.clear();
+		view.activity.output.clear();
 		core.touch(ViewConcern::Output);
 		return true;
 	case EditorRequestKind::PickDirectory:
@@ -180,7 +180,7 @@ bool ProjectSession::Impl::dispatch(const EditorRequest &request) {
 			core.refuse_busy(std::string());
 			return true;
 		}
-		view.quit_requested = true;
+		view.dialogs.quit_requested = true;
 		core.touch(ViewConcern::Project);
 		return true;
 	default: return false;
@@ -228,7 +228,7 @@ void ProjectSession::Impl::join_operation(const EditorRequest &request) {
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;
 	if (request.kind == EditorRequestKind::Play) {
-		core.view().status = "Building, then playing...";
+		core.view().activity.status = "Building, then playing...";
 		core.note("Play starts the game when the build lands.");
 	}
 }
@@ -276,7 +276,7 @@ bool ProjectSession::documents_dirty() const {
 }
 
 bool ProjectSession::project_open() const {
-	return impl_->core.view().project_open;
+	return impl_->core.view().project.open;
 }
 
 const ValidationStats &ProjectSession::validation_stats() const {

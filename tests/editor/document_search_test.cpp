@@ -15,7 +15,7 @@
 #include <editor/model/field_text.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -36,16 +36,16 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Search"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	const AssetEntry *items = v.scan.find("items.def");
-	const AssetEntry *weapons = v.scan.find("weapon.def");
+	const AssetEntry *items = v.project.scan->find("items.def");
+	const AssetEntry *weapons = v.project.scan->find("weapon.def");
 	if (!items || !weapons) return false;
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::string source = dir.file("source");
-	if (!editor_test::write_text(v.project_root + "/" + items->relative_path,
+	if (!editor_test::write_text(v.project.root + "/" + items->relative_path,
 	                             "begin \"Searched Thing\"\nid 100300\ntype vehicle\nturn_rate 90\nprimary_weapon Searchgun\n"
 	                             "end\n") ||
-	    !editor_test::write_text(v.project_root + "/" + weapons->relative_path, "weapon \"Searchgun\"\nend\n") ||
-	    !editor_test::write_bytes(v.project_root + "/models/armory.3di",
+	    !editor_test::write_text(v.project.root + "/" + weapons->relative_path, "weapon \"Searchgun\"\nend\n") ||
+	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")) ||
 	    !editor_test::write_bytes(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
 	    !editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips))
@@ -54,7 +54,7 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	return v.scan.find("SKIN.adm") && v.scan.find("walk.bad") && v.scan.find("armory.3di");
+	return v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") && v.project.scan->find("armory.3di");
 }
 
 std::string upper(std::string text) {
@@ -129,7 +129,7 @@ static int test_each_document_type() {
 	const SessionView &view = session.view();
 	for (const char *name : {"items.def", "weapon.def", "gametext.bin", "main.mnu", "menu_style.mns", "armory.3di",
 	                         "walk.bad", "SKIN.adm"}) {
-		const AssetEntry *entry = view.scan.find(name);
+		const AssetEntry *entry = view.project.scan->find(name);
 		TEST_EXPECT(entry != nullptr);
 		if (!entry) continue;
 		session.handle(make_request(EditorRequestKind::OpenDocument, entry->relative_path));
@@ -145,7 +145,7 @@ static int test_each_document_type() {
 	}
 	// A def's number is found as its line writes it: the turn rate in degrees a second (90), not
 	// the binary angle it is stored as (90 x 192426); a choice by its name.
-	const AssetEntry *items_entry = view.scan.find("items.def");
+	const AssetEntry *items_entry = view.project.scan->find("items.def");
 	const Document *items = items_entry ? session.document_for(items_entry->relative_path) : nullptr;
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
@@ -166,9 +166,9 @@ static int test_project_search() {
 	ProjectSession session(platform, preferences);
 	TEST_EXPECT(make_project(session, dir));
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.graph != nullptr);
-	if (!view.graph) return 1;
-	const AssetGraph &graph = *view.graph;
+	TEST_EXPECT(view.findings.graph != nullptr);
+	if (!view.findings.graph) return 1;
+	const AssetGraph &graph = *view.findings.graph;
 	TEST_EXPECT(graph.search(std::string()).empty());
 	// A weapon's name: the item that names it is its one use, found where it is used.
 	const std::vector<GraphSearchHit> guns = graph.search("searchg");
@@ -179,7 +179,7 @@ static int test_project_search() {
 	if (gun != guns.end()) {
 		const std::vector<const GraphEdge *> users = graph.users_of(*gun->symbol);
 		TEST_EXPECT(users.size() == 1 && users[0]->field == "primary_weapon" &&
-		            users[0]->source == view.scan.find("items.def")->relative_path);
+		            users[0]->source == view.project.scan->find("items.def")->relative_path);
 	}
 	// Files by name, before the symbols: the item table, with the usages of what it defines.
 	const std::vector<GraphSearchHit> tables = graph.search("ITEMS");

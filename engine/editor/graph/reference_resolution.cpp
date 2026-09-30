@@ -6,7 +6,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/document.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include <base/io/strutil.h>
 
@@ -18,7 +18,7 @@ namespace {
 
 // Whether the editor opens a project file's kind.
 bool editable_file(const std::string &path, const SessionView &view) {
-	const AssetEntry *entry = view.scan.at_path(path);
+	const AssetEntry *entry = view.project.scan->at_path(path);
 	return entry && is_editable_kind(entry->kind);
 }
 
@@ -102,13 +102,13 @@ ReferenceStatus Document::reference_status(const FieldUse &field, const Value &v
 		return ReferenceStatus::NotAReference;
 	}
 	if (symbol) *symbol = name;
-	if (!view.graph) return ReferenceStatus::Unverified;
-	return view.graph->resolve(kind, name, scope, nullptr, field.loader_arg);
+	if (!view.findings.graph) return ReferenceStatus::Unverified;
+	return view.findings.graph->resolve(kind, name, scope, nullptr, field.loader_arg);
 }
 
 std::vector<ReferenceChoice> Document::reference_choices(const FieldUse &field, const SessionView &view) const {
-	if (!view.graph || field.reference == ReferenceKind::None) return {};
-	const AssetGraph &graph = *view.graph;
+	if (!view.findings.graph || field.reference == ReferenceKind::None) return {};
+	const AssetGraph &graph = *view.findings.graph;
 	std::vector<ReferenceChoice> out = graph.choices(field.reference, field.scope, field.loader_arg);
 	// What the value may name instead: a stylesheet variable for a menu's font or texture (the
 	// %NAME% stays in the menu and the stylesheet's value is the file, ADR 0005), a string id
@@ -128,8 +128,8 @@ bool Document::missing_finding(const NodeAddress &address, const FieldUse &field
                                const SessionView &view, Diagnostic &out) const {
 	ReferenceKind kind;
 	std::string name, scope;
-	if (!view.graph || !reference_target(field, value, kind, name, scope)) return false;
-	const AssetGraph &graph = *view.graph;
+	if (!view.findings.graph || !reference_target(field, value, kind, name, scope)) return false;
+	const AssetGraph &graph = *view.findings.graph;
 	if (graph.resolve(kind, name, scope, nullptr, field.loader_arg) != ReferenceStatus::Missing) return false;
 	GraphEdge edge;
 	edge.source = path();
@@ -154,8 +154,8 @@ bool Document::missing_finding(const NodeAddress &address, const FieldUse &field
 std::string Document::reference_target_file(const FieldUse &field, const Value &value, const SessionView &view) const {
 	ReferenceKind kind;
 	std::string name, scope, file;
-	if (!view.graph || !reference_target(field, value, kind, name, scope)) return std::string();
-	if (view.graph->resolve(kind, name, scope, &file, field.loader_arg) != ReferenceStatus::Present) return std::string();
+	if (!view.findings.graph || !reference_target(field, value, kind, name, scope)) return std::string();
+	if (view.findings.graph->resolve(kind, name, scope, &file, field.loader_arg) != ReferenceStatus::Present) return std::string();
 	return file;
 }
 
@@ -164,8 +164,8 @@ std::vector<ReferenceTarget> Document::reference_targets(const FieldUse &field, 
 	std::vector<ReferenceTarget> out;
 	ReferenceKind kind;
 	std::string name, scope;
-	if (!view.graph || !reference_target(field, value, kind, name, scope)) return out;
-	const AssetGraph &graph = *view.graph;
+	if (!view.findings.graph || !reference_target(field, value, kind, name, scope)) return out;
+	const AssetGraph &graph = *view.findings.graph;
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.names_symbol()) {
 		if (const GraphSymbol *symbol = graph.resolve_symbol(kind, name, scope)) out.push_back(symbol_target(*symbol, view));

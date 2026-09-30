@@ -6,11 +6,12 @@
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/asset_graph.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -207,14 +208,14 @@ void ModelPreviewModel::reset_animation_() {
 }
 
 ModelPreviewAction ModelPreviewModel::follow(const SessionView &view) {
-	if (!view.project_open || !view.assets) {
+	if (!view.project.open || !view.findings.assets) {
 		shown_identity_ = 0;
 		reset_animation_();
 		return stop_(ModelPreviewStatus::NoProject, std::string());
 	}
 	const Document *document = nullptr;
-	for (const auto &open : view.documents)
-		if (open && open->path() == view.model_preview.path) document = open.get();
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == view.documents.previews.model.path) document = open.get();
 	if (const auto *model = dynamic_cast<const ModelDocument *>(document)) return follow_model_(view, *model);
 	if (document && (is_animation_kind(document->kind()) || is_animation_map_kind(document->kind())))
 		return follow_animation_(view, *document);
@@ -234,10 +235,10 @@ ModelPreviewAction ModelPreviewModel::follow_model_(const SessionView &view, con
 	if (shown_identity_ == document->identity() && shown_revision_ == document->revision()) {
 		// A model the game could not read stays that way until it changes.
 		if (failed_) return ModelPreviewAction::Keep;
-		const uint64_t generation = view.assets->generation();
+		const uint64_t generation = view.findings.assets->generation();
 		if (generation != generation_) {
 			generation_ = generation;
-			if (built_files_ && built_files_->moved(*view.assets)) {
+			if (built_files_ && built_files_->moved(*view.findings.assets)) {
 				++builds_;
 				built_files_.reset();
 				options_moved_ = false;
@@ -251,7 +252,7 @@ ModelPreviewAction ModelPreviewModel::follow_model_(const SessionView &view, con
 	shown_identity_ = document->identity();
 	shown_revision_ = document->revision();
 	shown_path_ = document->path();
-	generation_ = view.assets->generation();
+	generation_ = view.findings.assets->generation();
 	const SerializeResult written = document->serialize();
 	if (!written.ok()) {
 		failed_ = true;
@@ -327,7 +328,7 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 		return stop_(ModelPreviewStatus::Unserializable, unwritable_);
 	}
 	const std::string file = file_of(document.path());
-	PreviewRig rig = view.graph ? resolve_preview_rig(*view.graph, view.scan, file, document.kind(), options_.rig_model)
+	PreviewRig rig = view.findings.graph ? resolve_preview_rig(*view.findings.graph, *view.project.scan, file, document.kind(), options_.rig_model)
 	                            : PreviewRig();
 	if (rig.model.empty()) {
 		rig_ = rig;
@@ -338,16 +339,16 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 		clip_events_.clear();
 		return stop_(ModelPreviewStatus::NoRig, file);
 	}
-	const uint64_t generation = view.assets->generation();
+	const uint64_t generation = view.findings.assets->generation();
 	const bool files_moved = generation != generation_;
 	generation_ = generation;
 	bool rebuild = false;
-	const uint64_t stamp = view.assets->stamp(rig.model);
+	const uint64_t stamp = view.findings.assets->stamp(rig.model);
 	// A rig model that does not read stays that way until its file changes.
 	if (failed_ && rig.model == model_file_ && stamp == model_stamp_) return ModelPreviewAction::Keep;
 	if (!model_ || rig.model != model_file_ || stamp != model_stamp_) {
 		std::vector<uint8_t> bytes;
-		assets::Model model = view.assets->read(rig.model, bytes) ? assets::parse_model(bytes.data(), bytes.size())
+		assets::Model model = view.findings.assets->read(rig.model, bytes) ? assets::parse_model(bytes.data(), bytes.size())
 		                                                        : assets::Model();
 		if (!model) {
 			rig_ = rig;
@@ -362,12 +363,12 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 		model_stamp_ = stamp;
 		drawn_key_ = 0;
 		rebuild = true;
-	} else if (files_moved && built_files_ && built_files_->moved(*view.assets)) {
+	} else if (files_moved && built_files_ && built_files_->moved(*view.findings.assets)) {
 		rebuild = true;
 	}
-	auto files = std::make_shared<StampedFiles>(view.assets);
+	auto files = std::make_shared<StampedFiles>(view.findings.assets);
 	const PreviewRigFiles rig_files(files);
-	const bool rig_moved = rebuild || !same_rig(rig, rig_) || (files_moved && (!rig_read_ || rig_read_->moved(*view.assets)));
+	const bool rig_moved = rebuild || !same_rig(rig, rig_) || (files_moved && (!rig_read_ || rig_read_->moved(*view.findings.assets)));
 	if (rig_moved) {
 		skeleton_ = load_preview_rig(rig, *model_, rig_files);
 		rig_read_ = files;
@@ -377,8 +378,8 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 	// The clip the selection plays (the selection is the active document's).
 	std::string key = clip_key_;
 	int variant = clip_variant_;
-	if (view.active_document == document.path() &&
-	    (!skeleton_ || !preview_clip_of(document, view.selection, rig_, *skeleton_, key, variant)))
+	if (view.documents.active == document.path() &&
+	    (!skeleton_ || !preview_clip_of(document, view.documents.selection, rig_, *skeleton_, key, variant)))
 		key.clear();
 	if (key != clip_key_ || variant != clip_variant_ || rig_moved || document_moved) {
 		if (key != clip_key_ || variant != clip_variant_) seek_ticks(0);
@@ -394,13 +395,13 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 	// An event selected in the clip seeks the clock to the tick the clip first samples it,
 	// and holds it there (as a scrub does).
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
-	if (clip_document && view.active_document == document.path() &&
-	    view.selection.kind == node_kind(AnimationKind::Event) && view.selection.child &&
-	    view.selection.child != sought_event_) {
-		sought_event_ = view.selection.child;
-		if (const Node *row = clip_document->row(view.selection.row)) {
+	if (clip_document && view.documents.active == document.path() &&
+	    view.documents.selection.kind == node_kind(AnimationKind::Event) && view.documents.selection.child &&
+	    view.documents.selection.child != sought_event_) {
+		sought_event_ = view.documents.selection.child;
+		if (const Node *row = clip_document->row(view.documents.selection.row)) {
 			const std::vector<NodeId> &events = row->collections[1];
-			const auto found = std::find(events.begin(), events.end(), view.selection.child);
+			const auto found = std::find(events.begin(), events.end(), view.documents.selection.child);
 			const int32_t tick = found == events.end() ? -1 : tick_of_frame(int(found - events.begin()));
 			if (tick >= 0) {
 				seek_ticks(tick);

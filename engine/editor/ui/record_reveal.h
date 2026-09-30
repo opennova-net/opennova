@@ -10,12 +10,16 @@ namespace opennova::editor {
 struct SessionView;
 
 // Where a Document tab's view shows the selection when it moves there (a Go to, a find's hit, a
-// Problems row, a record picked in another window) or a request asks again to show its field
-// (the view's reveal_serial): the view opens the records and the collections that hold it and
-// scrolls its item into view, once, and only when the item is out of view (a click in the list,
-// whose item shows, moves nothing). A view keeps one and asks it about each record it draws.
+// Problems row, a record picked in another window) or a request asks again to show its field (a
+// RevealRecord view event, which the Document window hands the view of its document when that
+// view draws): the view opens the records and the collections that hold it and scrolls its item
+// into view, once, and only when the item is out of view (a click in the list, whose item shows,
+// moves nothing). A view keeps one and asks it about each record it draws.
 class RecordReveal {
 public:
+	// A RevealRecord event for the view's document, taken as the view draws: the follow() after it
+	// shows the selection again, where it was already too.
+	void ask() { asked_ = true; }
 	// Once a frame, before the view draws its records: whether the selection moved (in another
 	// document too) or was asked for again since the view last drew, and what holds it.
 	void follow(const SessionView &view, const Document &document);
@@ -38,7 +42,7 @@ private:
 
 	uint64_t document_ = 0;       // the document the view last drew
 	NodeAddress seen_;            // the selection it last drew
-	uint64_t serial_ = 0;         // the view's reveal_serial it last drew
+	bool asked_ = false;          // a RevealRecord event came since it last drew
 	bool moved_ = false;          // this frame reveals the selection
 	std::vector<NodeAddress> path_; // the records holding it, the row first, then the selection
 };
