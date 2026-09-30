@@ -70,8 +70,11 @@ struct Project {
 		buffer << in.rdbuf();
 		return buffer.str();
 	}
-	void rescan() { session.handle(request::rescan());
-	session.run_operations(); }
+	// A Rescan, run to its end (an operation, S13 A3).
+	void rescan() {
+		session.handle(request::rescan());
+		session.run_operations();
+	}
 	// The definition of a name of `kind` in `file` (by its path).
 	const GraphSymbol *defined(ReferenceKind kind, const std::string &name, const std::string &file) const {
 		for (const GraphSymbol *symbol : graph().symbols_named(kind, name))
