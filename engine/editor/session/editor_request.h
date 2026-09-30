@@ -133,10 +133,12 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 // carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
-	// A project's directory; a new project's title and game (a gameprofile code, "" the default).
+	// A project's directory; a new project's title and game (a gameprofile code, "" the default);
+	// a game install a project opens with for the session alone ("" its own).
 	std::string dir;
 	std::string title;
 	std::string game;
+	std::string game_install;
 	// A file: a project file or open document ("" the active one where the kind names it), a
 	// source to import again, a path to reveal.
 	std::string path;
@@ -168,7 +170,8 @@ struct EditorRequest {
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
 	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit); a
-	// project opens with its import pass (false: on its files as they are, nothing written).
+	// project opens with its import pass (false: on its files as they are, scanned and checked, no
+	// source imported).
 	bool with_dependencies = false;
 	bool replace = false;
 	bool force = false;
@@ -179,7 +182,8 @@ struct EditorRequest {
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.game == b.game &&
-			a.path == b.path && a.locator == b.locator && a.field == b.field &&
+			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
+			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
 			a.out_dir == b.out_dir && a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
@@ -211,6 +215,11 @@ struct ActionOutcome {
 	// Paste's records, a Duplicate's copies (Document::last_added_records()); none for a request
 	// that made none.
 	std::vector<NodeId> added;
+	// An import's files (S13 A7): those it wrote, project-relative, as published (a file the
+	// project held with the same bytes is neither), and, after a failure while publishing, those
+	// it did not reach, the one that failed first.
+	std::vector<std::string> imported;
+	std::vector<std::string> not_imported;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

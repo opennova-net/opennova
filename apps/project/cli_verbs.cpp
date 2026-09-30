@@ -1,5 +1,8 @@
 #include "cli_verbs.h"
 
+#include <cassert>
+#include <cstdint>
+#include <filesystem>
 #include <initializer_list>
 #include <iterator>
 #include <set>
@@ -10,10 +13,11 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/run/null_process_platform.h>
+#include <editor/session/outcome_json.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_json.h>
+#include <editor/session/request_kinds.h>
 
 namespace opennova::project_cli {
 
@@ -79,17 +83,33 @@ struct CliArgs {
 // --- the session -------------------------------------------------------------------------------
 
 // One run of the command: the headless session it drives (a process seam with no processes, the
-// preferences in memory, both ending with it) and where it prints.
+// preferences in memory, both ending with it), the verb it runs and where it prints.
 struct Cli {
-	Cli(std::FILE *out_to, std::FILE *err_to, bool as_json) : out(out_to), err(err_to), json(as_json) {}
+	Cli(const CliVerbRow &verb_row, std::FILE *out_to, std::FILE *err_to, bool as_json) :
+	        row(verb_row), out(out_to), err(err_to), json(as_json) {}
 
 	editor::NullProcessPlatform platform;
 	editor::MemoryPreferencesStore preferences;
 	editor::ProjectSession session{ platform, preferences };
+	const CliVerbRow &row; // a request it sends is one the row names
 	std::FILE *out;
 	std::FILE *err;
 	bool json; // --json: the answer as JSON, no text
 };
+
+// Whether the verb's row names the request kind `kind`: what a verb sends, its row names (the usage
+// and the tests read the row).
+bool names_request(const CliVerbRow &row, K kind) {
+	for (size_t i = 0; i < row.request_count; ++i)
+		if (row.requests[i] == kind) return true;
+	return false;
+}
+
+// The same of a request the verb makes in its wire form (a kind by its token).
+bool names_wire_request(const CliVerbRow &row, const JsonValue &request) {
+	K kind = K::kCount;
+	return editor::request_kind_from_token(request.get_string("kind", ""), kind) && names_request(row, kind);
+}
 
 // A member of a JSON object, a null value when it has none.
 const JsonValue &at(const JsonValue &object, const char *key) {
@@ -158,6 +178,7 @@ bool has_error(const std::vector<JsonValue> &findings) {
 // A request handled and the operation it starts run to its end (a build packs): what it came to
 // (action_outcome_to_json's: done, the operation, the findings).
 JsonValue handled(Cli &cli, const EditorRequest &request) {
+	assert(names_request(cli.row, request.kind) && "a verb sends only the requests its row names");
 	cli.session.handle(request);
 	JsonValue outcome = editor::action_outcome_to_json(cli.session.outcome());
 	cli.session.run_operations();
@@ -184,6 +205,7 @@ JsonValue send_json(Cli &cli, const JsonValue &request) {
 // form the plan gives them), sent: its outcome, its findings printed; false, said why, when it
 // did not read.
 bool send_wire(Cli &cli, const JsonValue &request, JsonValue &outcome) {
+	assert(names_wire_request(cli.row, request) && "a verb sends only the requests its row names");
 	const JsonValue answer = send_json(cli, request);
 	if (!answer.get_bool("ok", false)) {
 		std::fprintf(cli.err, "opennova-project: %s\n", answer.get_string("error", "").c_str());
@@ -256,16 +278,22 @@ void print_setup_failure(Cli &cli, const JsonValue &outcome) {
 	}
 }
 
-// The verb's first requests: the project opened (made first, for new; with its import pass unless
-// the verb's open skips it or the verb makes a dry run, which writes nothing), then, with
-// --install, its game install set as the editor's project settings set it. False, said why, when
-// the project does not open or the install is not set (exit 2).
+// The verb's first requests: the project opened, with its import pass unless the verb's open skips
+// it (new's: a folder that holds sources gets none imported as the project is made in it; a build's
+// and a reimport's, whose own pass is the one) or the verb makes a dry run; then --install's game
+// install: a dry run opens the project on it for the run alone, writing nothing, and any other run
+// sets it as the editor's project settings set it (the project's .opennova/local.json, replacing the
+// install it names). False, said why, when the project does not open or the install is not set
+// (exit 2).
 bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string &dir = args.positional.front();
+	const bool dry_run = args.has("--dry-run");
+	const std::string install = args.value("--install");
 	const JsonValue opened = handled(
 	        cli, row.requests[0] == K::NewProject
-	                     ? editor::request::new_project(dir, args.value("--title"), args.value("--game"))
-	                     : editor::request::open_project(dir, row.import_pass && !args.has("--dry-run")));
+	                     ? editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass)
+	                     : editor::request::open_project(dir, row.import_pass && !dry_run,
+	                                                     dry_run ? install : std::string()));
 	if (!done(opened) || !project_open(cli)) {
 		print_setup_failure(cli, opened);
 		if (!has_error(items(opened, "findings")))
@@ -273,9 +301,9 @@ bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		return false;
 	}
 	print_findings(cli.err, opened);
-	if (!args.has("--install")) return true;
+	if (install.empty() || dry_run) return true;
 	editor::ProjectSettingsChange change;
-	change.game_install = args.value("--install");
+	change.game_install = install;
 	const JsonValue applied = handled(cli, editor::request::apply_project_settings(change));
 	if (done(applied)) {
 		print_findings(cli.err, applied);
@@ -514,7 +542,7 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		if (entries.empty()) imports.push(import_source(source, std::string()));
 		for (const std::string &entry : entries) imports.push(import_source(source, entry));
 		JsonValue request = JsonValue::make_object();
-		request.set("kind", json_string(editor::editor_request_kind_token(K::PlanImport)));
+		request.set("kind", json_string(editor::request_kind_row(K::PlanImport).token));
 		request.set("imports", std::move(imports));
 		request.set("with_dependencies", boolean(with_dependencies));
 		if (!send_wire(cli, request, planned)) return 2;
@@ -544,7 +572,7 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// one, whole) and each dependency found that the project can take; the files past its cap are
 	// not imported.
 	JsonValue taken = JsonValue::make_array();
-	std::vector<std::string> taken_sources, destinations;
+	std::vector<std::string> taken_sources;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &file : items(page, "rows")) {
 			if (!file.get_bool("selected", false)) {
@@ -552,7 +580,6 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 				             file.get_string("problem", "").c_str());
 				continue;
 			}
-			destinations.push_back(file.get_string("destination", ""));
 			const std::string key = io::json_write(at(file, "source"));
 			bool listed = false;
 			for (const std::string &other : taken_sources) listed = listed || other == key;
@@ -568,26 +595,42 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		std::fprintf(cli.err, "the plan stopped at %zu files: the files past them are not imported (import fewer at once)\n",
 		             count_at(plan, "count"));
 	JsonValue request = JsonValue::make_object();
-	request.set("kind", json_string(editor::editor_request_kind_token(K::ImportFiles)));
+	request.set("kind", json_string(editor::request_kind_row(K::ImportFiles).token));
 	request.set("imports", std::move(taken));
 	request.set("replace", boolean(args.has("--replace")));
 	JsonValue outcome;
 	if (!send_wire(cli, request, outcome)) return 2;
-	if (!cli.json && done(outcome))
-		for (const std::string &destination : destinations) std::fprintf(cli.out, "imported %s\n", destination.c_str());
-	// As the editor reads the project again after an import: a copied-in source is imported now,
-	// and a failure on a file this command brought in fails the command.
+	// What it wrote (a file the project held with the same bytes is not written again) and, when
+	// it stopped part way, what it did not reach: the outcome's own lists.
+	std::set<std::string> wrote;
+	for (const JsonValue &path : items(outcome, "imported")) {
+		wrote.insert(path.string);
+		if (!cli.json) std::fprintf(cli.out, "imported %s\n", path.string.c_str());
+	}
+	if (!cli.json)
+		for (const JsonValue &path : items(outcome, "not_imported"))
+			std::fprintf(cli.out, "not imported %s\n", path.string.c_str());
+	// As the editor reads the project again after an import: a copied-in source is imported now, and
+	// a source this command wrote that the import pass failed fails the command. The Problems rows
+	// on what it wrote, a file or its import record, go to the error stream.
 	std::string error;
 	const JsonValue state = ask(cli, Q::State, sections({ "import" }), error);
+	std::set<std::string> about = wrote;
 	bool import_errors = false;
 	for (const JsonValue &imported : items(at(state, "import"), "imported")) {
-		if (!imported.get_bool("reimported", false)) continue;
 		const std::string name = imported.get_string("source", "");
-		if (!cli.json)
+		if (wrote.count(name)) {
+			about.insert(imported.get_string("sidecar", ""));
+			import_errors = import_errors || !imported.get_bool("ok", true);
+		}
+		if (imported.get_bool("reimported", false) && !cli.json)
 			std::fprintf(cli.out, "imported %s -> %zu output(s)\n", name.c_str(), items(imported, "outputs").size());
-		if (!imported.get_bool("ok", true))
-			for (const std::string &destination : destinations) import_errors = import_errors || destination == name;
 	}
+	std::vector<JsonValue> problems;
+	if (!wrote.empty() && ask_pages(cli, Q::Problems, JsonValue(), true, problems))
+		for (const JsonValue &page : problems)
+			for (const JsonValue &problem : items(page, "problems"))
+				if (about.count(problem.get_string("asset", ""))) print_finding(cli.err, problem);
 	if (cli.json) print_json(cli.out, plan);
 	return items(outcome, "findings").empty() && !import_errors && !truncated ? 0 : 1;
 }
@@ -619,7 +662,15 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 // import pass first (the project opens without its own, so the build's is the only one), then the
 // build run to its end.
 int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
-	const JsonValue outcome = send(cli, editor::request::build(args.value("--out")));
+	// --out is a path on the command line, taken from where the command runs (the request's
+	// out_dir, relative, would be taken from the project's folder).
+	std::string out = args.value("--out");
+	if (!out.empty()) {
+		std::error_code ec;
+		const std::filesystem::path full = std::filesystem::absolute(out, ec);
+		if (!ec) out = full.lexically_normal().generic_string();
+	}
+	const JsonValue outcome = send(cli, editor::request::build(out));
 	JsonValue answer;
 	if (!answer_of(cli, row, answer)) return 2;
 	const JsonValue &operation = at(answer, "operation");
@@ -657,9 +708,15 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 }
 
 // What a request's answer (handle_json's) comes to for the exit code: 2 when it did not read, 1
-// when it was not done or the operation it started did not end done (its findings said), else 0.
+// when the shell serves its kind (a command line has none: nothing was done), when it was not done
+// or the operation it started did not end done (its findings said), else 0.
 int answer_code(Cli &cli, const JsonValue &answer) {
 	if (!answer.get_bool("ok", false)) return 2;
+	if (!answer.get_bool("served", false)) {
+		std::fprintf(cli.err, "opennova-project: the editor's shell serves this request, and a command line has none: "
+		                      "nothing was done\n");
+		return 1;
+	}
 	const JsonValue &outcome = at(answer, "outcome");
 	if (!done(outcome)) return 1;
 	const double operation = outcome.get_number("operation", 0.0);
@@ -684,29 +741,53 @@ void warn_unsaved(Cli &cli) {
 			             document.get_string("path", "").c_str());
 }
 
+// The clock value at which the editor's preferences last moved (the state's revisions).
+uint64_t preferences_stamp(Cli &cli) {
+	std::string error;
+	JsonValue args = JsonValue::make_object();
+	args.set("sections", JsonValue::make_array());
+	const JsonValue state = ask(cli, Q::State, args, error);
+	return uint64_t(at(state, "revisions").get_number("preferences", 0.0));
+}
+
+// Whether a request of the array after `from` answers the unsaved-changes prompt.
+bool answered_later(const std::vector<JsonValue> &requests, size_t from) {
+	for (size_t i = from; i < requests.size(); ++i)
+		if (requests[i].get_string("kind", "") == editor::request_kind_row(K::ResolveUnsaved).token) return true;
+	return false;
+}
+
 // A request as the editor MCP would send it, handled as the Shell's request_json handles one, its
 // answer printed as JSON; or an array of them handled in turn in the run's one session (an edit and
 // the save that writes it), the array of the answers of those sent, the first that did not read or
-// was not done the last. An operation a request starts (a build) runs to its end before the next.
+// was not done the last, but for one held on the unsaved-changes prompt that a resolve_unsaved
+// later in the array answers (an edit, a build, then the prompt's save). An operation a request
+// starts (a build) runs to its end before the next. What a request sets of the editor's own
+// preferences (the recent projects, the runtime, the import setting) lives in memory and ends with
+// the run, which it says.
 int run_request(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 	JsonValue sent;
 	std::string error;
-	if (!io::json_parse(args.positional[1], sent, error)) {
-		JsonValue answer = cli.session.handle_json(JsonValue::make_null());
-		answer.set("error", json_string("The request is not JSON: " + error));
-		print_json(cli.out, answer);
-		return 2;
-	}
+	io::json_parse(args.positional[1], sent, error); // check_request read it before the project opened
 	const bool many = sent.is_array();
 	const std::vector<JsonValue> requests = many ? sent.array : std::vector<JsonValue>{ sent };
 	JsonValue answers = JsonValue::make_array();
 	int code = 0;
-	for (const JsonValue &request : requests) {
-		JsonValue answer = send_json(cli, request);
+	const uint64_t preferences = preferences_stamp(cli);
+	for (size_t i = 0; i < requests.size(); ++i) {
+		JsonValue answer = send_json(cli, requests[i]);
 		code = answer_code(cli, answer);
+		const bool held = at(answer, "outcome").get_bool("unsaved_prompt", false);
 		answers.push(std::move(answer));
+		if (code == 1 && held && answered_later(requests, i + 1)) {
+			code = 0;
+			continue;
+		}
 		if (code != 0) break;
 	}
+	if (preferences_stamp(cli) != preferences)
+		std::fprintf(cli.err, "opennova-project: the editor's own preferences this run set end with it (a command line "
+		                      "keeps none); the project's files and settings are written\n");
 	warn_unsaved(cli);
 	print_json(cli.out, many ? answers : answers.array.front());
 	return code;
@@ -717,16 +798,59 @@ int run_request(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 int run_query(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 	JsonValue query_args = JsonValue::make_object(), answer;
 	std::string error;
-	if (args.positional.size() > 2 && !io::json_parse(args.positional[2], query_args, error))
-		error = "The query's args are not JSON: " + error;
-	else
-		answer = cli.session.query(args.positional[1], query_args, error);
+	if (args.positional.size() > 2) io::json_parse(args.positional[2], query_args, error); // check_query read it
+	answer = cli.session.query(args.positional[1], query_args, error);
 	if (!error.empty()) {
 		answer = JsonValue::make_object();
 		answer.set("error", json_string(error));
 	}
 	print_json(cli.out, answer);
 	return error.empty() ? 0 : 2;
+}
+
+// A request's JSON read before the project opens, so a malformed one opens nothing: an object, or
+// an array of objects, each naming its kind by a token of the request table (its fields are read
+// by the session, as the editor MCP's are).
+bool check_request(const CliArgs &args, std::string &why) {
+	JsonValue sent;
+	std::string error;
+	if (!io::json_parse(args.positional[1], sent, error)) {
+		why = "the request is not JSON: " + error;
+		return false;
+	}
+	const std::vector<JsonValue> requests = sent.is_array() ? sent.array : std::vector<JsonValue>{ sent };
+	for (const JsonValue &request : requests) {
+		K kind = K::kCount;
+		if (!request.is_object()) {
+			why = "a request is a JSON object, {\"kind\": ..., its fields}";
+			return false;
+		}
+		if (!editor::request_kind_from_token(request.get_string("kind", ""), kind)) {
+			why = "unknown request kind \"" + request.get_string("kind", "") + "\" (query catalog lists them)";
+			return false;
+		}
+	}
+	return true;
+}
+
+// A query's name and args read before the project opens: a name of the query table, and args that
+// are JSON (the session reads what they hold, as the editor MCP's).
+bool check_query(const CliArgs &args, std::string &why) {
+	Q kind = Q::kCount;
+	if (!editor::editor_query_from_token(args.positional[1], kind)) {
+		std::string names;
+		for (size_t i = 0; i < editor::kEditorQueryKindCount; ++i)
+			names += (i ? ", " : "") + std::string(editor::editor_query_row(static_cast<Q>(i)).token);
+		why = "unknown query " + args.positional[1] + " (" + names + ")";
+		return false;
+	}
+	JsonValue parsed;
+	std::string error;
+	if (args.positional.size() > 2 && !io::json_parse(args.positional[2], parsed, error)) {
+		why = "the query's args are not JSON: " + error;
+		return false;
+	}
+	return true;
 }
 
 // An import names what it takes: a source file, or the game install's files by --entry; an
@@ -839,9 +963,11 @@ using V = CliVerb;
 
 constexpr VerbRow kRows[] = {
 	Verb(V::New, "new", "<dir> [--title <text>] [--game <code>]", kNewRequests, kDir, run_new,
-	     "create an empty project (project.opennova + .opennova/) in <dir> and open it; --title\n"
-	     "names it (else New Game), --game is its game's code (else jo)")
+	     "create an empty project (project.opennova + .opennova/) in <dir> and open it, no\n"
+	     "source the folder holds imported; --title names it (else the folder's name), --game\n"
+	     "is its game's code (else jo)")
 	        .takes(kNewOptions)
+	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"project\"]}")
 	        .row,
 	Verb(V::Status, "status", "<dir>", kReadRequests, kDir, run_status,
@@ -873,8 +999,7 @@ constexpr VerbRow kRows[] = {
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install, 1000 files at most; an .o3d's textures come only with\n"
 	     "--with-dependencies; --dry-run prints the plan and writes nothing (no import pass\n"
-	     "either; --install still sets the install) (--json: the import_preview query, the\n"
-	     "plan)")
+	     "either; --install is that run's alone) (--json: the import_preview query, the plan)")
 	        .takes(kImportOptions)
 	        .checked_by(check_import)
 	        .answers(Q::ImportPreview)
@@ -888,8 +1013,9 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Build, "build", "<dir> [--out <dir>]", kBuildRequests, kDir, run_build,
 	     "pack the project into a game directory the runtime boots (default:\n"
-	     "<dir>/.opennova/build/play/<build-id>) (--json: the state query's import and\n"
-	     "operation)")
+	     "<dir>/.opennova/build/play/<build-id>; --out from where the command runs, refused\n"
+	     "inside the project but in its cache or export folder) (--json: the state query's\n"
+	     "import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
@@ -897,13 +1023,17 @@ constexpr VerbRow kRows[] = {
 	Verb(V::Request, "request", "<dir> <json>", kReadRequests, kRequestArgs, run_request,
 	     "one request as the editor MCP sends it ({\"kind\": ..., its fields}), its answer as\n"
 	     "JSON (ok, served, outcome, status, view_revision), or an array of them handled in\n"
-	     "turn in the one run (an edit, then the save that writes it), their answers; an\n"
-	     "operation one starts runs to its end first")
+	     "turn in the one run (an edit, then the save that writes it; one held on the\n"
+	     "unsaved-changes prompt goes on when a resolve_unsaved follows), their answers; an\n"
+	     "operation one starts runs to its end first; a kind the editor's shell serves does\n"
+	     "nothing (exit 1)")
+	        .checked_by(check_request)
 	        .answers_with(CliAnswer::Request)
 	        .row,
 	Verb(V::Query, "query", "<dir> <name> [<json>]", kReadRequests, kQueryArgs, run_query,
 	     "one query by name with its args as the editor MCP asks it (query catalog lists\n"
 	     "them), its answer as JSON")
+	        .checked_by(check_query)
 	        .answers_with(CliAnswer::NamedQuery)
 	        .row,
 };
@@ -951,8 +1081,9 @@ constexpr bool requests_known() {
 		if (verb.requests[0] != (verb.verb == V::New ? K::NewProject : K::OpenProject)) return false;
 		for (size_t i = 0; i < verb.request_count; ++i)
 			if (verb.requests[i] >= K::kCount) return false;
-		// Only new's open makes the project, which has nothing to import yet.
-		if (verb.verb == V::New && !verb.import_pass) return false;
+		// new opens with no import pass: a folder that holds sources gets none imported as the
+		// project is made in it.
+		if (verb.verb == V::New && verb.import_pass) return false;
 	}
 	return true;
 }
@@ -1004,7 +1135,9 @@ bool parse_args(const VerbRow &row, int argc, const char *const *argv, CliArgs &
 	const std::string verb = row.cli.token;
 	for (int i = 1; i < argc; ++i) {
 		const std::string arg = argv[i];
-		if (arg.rfind("--", 0) != 0) {
+		// An argument that starts with a dash is an option, the verb's or unknown: a mistyped one
+		// never becomes a folder (new -x makes no ./-x).
+		if (arg.empty() || arg[0] != '-') {
 			if (out.positional.size() >= row.positional_count) {
 				why = verb + " takes no more arguments: " + arg;
 				return false;
@@ -1037,6 +1170,15 @@ bool parse_args(const VerbRow &row, int argc, const char *const *argv, CliArgs &
 			return false;
 		}
 	}
+	// --install names a folder that is there: a typo never replaces a project's install, and
+	// nothing is sent.
+	if (out.has("--install")) {
+		std::error_code ec;
+		if (!std::filesystem::is_directory(out.value("--install"), ec)) {
+			why = "--install names no folder: " + out.value("--install");
+			return false;
+		}
+	}
 	return !row.check || row.check(out, why);
 }
 
@@ -1058,11 +1200,14 @@ int usage(std::FILE *err, const char *why) {
 		std::fprintf(err, "%sopennova-project %s %s\n", i == 0 ? "usage: " : "       ", kRows[i].cli.token,
 		             kRows[i].cli.synopsis);
 	for (const VerbRow &row : kRows) print_doc(err, row.cli.token, row.cli.doc);
-	std::fputs("  every verb also takes --install <dir>, the project's game install, set as the editor's\n"
-	           "  project settings set it (in its .opennova/local.json) before the verb's own requests,\n"
-	           "  and --json, its answer as JSON (as the editor MCP's editor_query gives it)\n"
+	std::fputs("  every verb also takes --install <dir>, the project's game install, a folder that is\n"
+	           "  there: a verb that writes sets it as the editor's project settings set it, in the\n"
+	           "  project's .opennova/local.json, replacing the install it names; a dry run uses it for\n"
+	           "  that run alone and writes nothing; and --json, its answer as JSON (as the editor MCP's\n"
+	           "  editor_query gives it)\n"
 	           "  every verb opens the project as the editor does: the sources that changed are imported\n"
-	           "  first (a build's and a reimport's own pass is the one they run; a dry run runs none)\n",
+	           "  first (a build's and a reimport's own pass is the one they run; new and a dry run run\n"
+	           "  none)\n",
 	           err);
 	return 2;
 }
@@ -1093,7 +1238,7 @@ int run_project_command(int argc, const char *const *argv, std::FILE *out, std::
 	CliArgs args;
 	std::string why;
 	if (!parse_args(row, argc, argv, args, why)) return usage(err, why.c_str());
-	Cli cli(out, err, args.has("--json"));
+	Cli cli(row.cli, out, err, args.has("--json"));
 	if (!set_up(cli, row.cli, args)) return 2;
 	return row.run(cli, row.cli, args);
 }

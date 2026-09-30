@@ -18,20 +18,24 @@
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
 //
-// Every verb also takes --install <dir>, the project's game install set as the editor's project
-// settings set it (apply_project_settings: its .opennova/local.json) before the verb's own
-// requests, and --json. A run is one session: what it holds (an open document, an unsaved edit,
-// a selection) ends with it, so the request verb takes an array of requests to handle in turn
-// (an edit, then the save that writes it).
+// Every verb also takes --install <dir>, the project's game install, a folder that is there: a verb
+// that writes sets it as the editor's project settings set it (apply_project_settings: the
+// project's .opennova/local.json, replacing the install it names) before its own requests, and a
+// dry run opens the project on it for that run alone, writing nothing; and --json. A run is one
+// session: what it holds (an open document, an unsaved edit, a selection) ends with it, so the
+// request verb takes an array of requests to handle in turn (an edit, then the save that writes
+// it).
 //
 // Exit 0 on success; 1 when validate found what a build would be refused for (the build_gate
 // query: a required file missing or wrong, an error the build gates on; validate lists every
 // Problems row, and an error the build does not gate on, a project check's, fails nothing),
 // create-missing left a role it was asked for unmet, an import found a problem in its plan,
 // reported a finding or stopped at the plan's cap, a reimport was refused, a build was blocked or
-// failed, or a request was refused or its operation did not end done; 2 on a usage error, a
-// project that could not be made or opened, a game install that could not be set, a request that
-// did not read (not JSON included) or a query that did not answer.
+// failed, or a request was refused, is the editor's shell's to serve (nothing done) or its operation
+// did not end done; 2 on a usage error (an option or an argument it does not take, an --install
+// that names no folder, a request or a query's args that are not JSON, a query or a request kind no
+// table has), a project that could not be made or opened, a game install that could not be set, a
+// request that did not read or a query that did not answer.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>

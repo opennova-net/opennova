@@ -52,13 +52,16 @@ in the path is what makes the layering visible, so this check reads it:
      entry the tree no longer makes is itself a violation, so the list only
      shrinks.
   8. CLI SESSION (ADR 0046 S13 A7) — apps/project, opennova-project, is the
-     editor's session on the command line and nothing more: it includes
-     editor/ only through editor/session/ (the session's facade, its request
-     and query tables, the request factories, the wire form, the preferences
-     stores) and editor/run/null_process_platform.h (the process seam with no
-     processes), never the editor's own parts (the assets, the graph, the
-     import planner, the build), so it cannot grow a second orchestration
-     beside the session's.
+     editor's session on the command line and nothing more: its own #include
+     lines reach editor/ only through editor/session/ (the session's facade,
+     its request and query tables, the request factories, the outcome's wire
+     form, the preferences stores) and editor/run/null_process_platform.h (the
+     process seam with no processes), never the editor's own parts (the
+     assets, the graph, the import planner, the build). The rule reads direct
+     includes only: a session header that includes a part brings it along
+     unseen, so the headers the command line includes stay light (it takes
+     outcome_json.h, not session_json.h, which includes the graph), and a
+     second orchestration beside the session's is a review concern too.
 
 Modes:
   (default)   report violations; exit 0

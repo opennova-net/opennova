@@ -631,9 +631,11 @@ JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::
 	return activity_operation_to_json(context.core.view());
 }
 
-// What a build started now would be refused for, nothing built (S13 A7): the build's own plan
-// (project_build/build_plan.h) over the files as scanned, the requirements and the Problems rows
-// the build gates on, as start_build plans it; `blocked` exactly when that plan would not pack.
+// What a build would be refused for, nothing built (S13 A7): the build's own plan
+// (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
+// rows the build gates on; `blocked` exactly when that plan would not pack. start_build reads the
+// changed documents again and refreshes first, and a build request joins a running build and waits
+// on unsaved edits: the gate says none of that.
 JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	SessionCore &core = context.core;
 	const SessionView &view = core.view();
@@ -856,11 +858,13 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,
 			concern_set({ C::Project, C::Files, C::Findings }),
-			"What a build started now would be refused for, nothing built: blocked (a build would "
-			"not pack) and a page of the findings that block it, the errors among the Problems rows "
-			"the build gates on, the scan's and the requirements', and the build's own checks of "
-			"the files (an archive in the project, a name no archive can store). A Problems row the "
-			"build does not gate on (a project check's: the render check's) blocks nothing.")
+			"What a build would be refused for over the files as last scanned, nothing built: "
+			"blocked (a build would not pack) and a page of the findings that block it, the errors "
+			"among the Problems rows the build gates on, the scan's and the requirements', and the "
+			"build's own checks of the files (an archive in the project, a name no archive can "
+			"store). A Problems row the build does not gate on (a project check's: the render "
+			"check's) blocks nothing. A build request reads changed files again first, joins a "
+			"build that runs and waits on unsaved edits, which the gate does not weigh.")
 			.pages("blocking")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).

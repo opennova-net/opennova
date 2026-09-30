@@ -487,6 +487,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Dir: return text_of(json, token, request.dir, error);
 	case F::Title: return text_of(json, token, request.title, error);
 	case F::Game: return text_of(json, token, request.game, error);
+	case F::GameInstall: return text_of(json, token, request.game_install, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
 	case F::Field: return text_of(json, token, request.field, error);
@@ -556,6 +557,7 @@ bool field_to_json(
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
 	case F::Title: out = json_string(request.title); return !request.title.empty();
 	case F::Game: out = json_string(request.game); return !request.game.empty();
+	case F::GameInstall: out = json_string(request.game_install); return !request.game_install.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();
 	case F::Field: out = json_string(request.field); return !request.field.empty();
@@ -846,18 +848,6 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		problems.push(std::move(row));
 	}
 	out.set("problems", std::move(problems));
-	return out;
-}
-
-JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
-	JsonValue out = JsonValue::make_object();
-	out.set("done", boolean(outcome.done()));
-	out.set("unsaved_prompt", boolean(outcome.unsaved_prompt));
-	out.set("operation", json_number(double(outcome.operation)));
-	out.set("findings", diagnostics_to_json(outcome.findings));
-	JsonValue added = JsonValue::make_array();
-	for (const NodeId id : outcome.added) added.push(json_number(double(id)));
-	out.set("added", std::move(added));
 	return out;
 }
 

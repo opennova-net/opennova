@@ -21,22 +21,25 @@ inline EditorRequest of(EditorRequestKind kind) {
 
 // --- the project -------------------------------------------------------------------------------
 
-// A project made in `dir` (titled `title`, else New Game; of `game`, a gameprofile code, else
-// jo), then opened.
-inline EditorRequest new_project(
-		std::string dir, std::string title = std::string(), std::string game = std::string()) {
+// A project made in `dir` (titled `title`, else the folder's name; of `game`, a gameprofile code,
+// else jo), then opened, with its import pass unless `import_pass` is false.
+inline EditorRequest new_project(std::string dir, std::string title = std::string(),
+		std::string game = std::string(), bool import_pass = true) {
 	EditorRequest request = of(EditorRequestKind::NewProject);
 	request.dir = std::move(dir);
 	request.title = std::move(title);
 	request.game = std::move(game);
+	request.import_pass = import_pass;
 	return request;
 }
 // The project in `dir` opened, its import pass first unless `import_pass` is false (its files as
-// they are, nothing written).
-inline EditorRequest open_project(std::string dir, bool import_pass = true) {
+// they are, no source imported), on `game_install` for the session alone when given.
+inline EditorRequest open_project(
+		std::string dir, bool import_pass = true, std::string game_install = std::string()) {
 	EditorRequest request = of(EditorRequestKind::OpenProject);
 	request.dir = std::move(dir);
 	request.import_pass = import_pass;
+	request.game_install = std::move(game_install);
 	return request;
 }
 inline EditorRequest close_project() {

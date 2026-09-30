@@ -29,10 +29,10 @@ constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
 void serve_new_project(SessionCore &core, const EditorRequest &request) {
-	core.new_project(request.dir, request.title, request.game);
+	core.new_project(request.dir, request.title, request.game, request.import_pass);
 }
 void serve_open_project(SessionCore &core, const EditorRequest &request) {
-	core.open_project(request.dir, request.import_pass);
+	core.open_project(request.dir, request.import_pass, request.game_install);
 }
 void serve_close_project(SessionCore &core, const EditorRequest &) {
 	core.close_project();
@@ -234,10 +234,11 @@ struct Request {
 // waits.
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
-			"A project made in dir (its title, else New Game; its game, else jo), then opened; "
-			"refused, the open project kept, where dir holds a project already or game names no "
-			"game.")
-			.takes(request_params({ F::Dir }, { F::Title, F::Game }))
+			"A project made in dir (its title, else the folder's name; its game, else jo), then "
+			"opened as open_project opens it (import_pass false: no source the folder holds "
+			"imported); refused, the open project kept, where dir holds a project already or game "
+			"names no game.")
+			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::ImportPass }))
 			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
 			.can_discard()
@@ -245,8 +246,9 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::OpenProject, "open_project", serve_open_project,
 			"The project in dir opened, its import pass first (import_pass false: on its files as "
-			"they are, nothing written); one that does not open leaves the open project open.")
-			.takes(request_params({ F::Dir }, { F::ImportPass }))
+			"they are, no source imported), on game_install for the session alone when given (its "
+			".opennova/local.json kept); one that does not open leaves the open project open.")
+			.takes(request_params({ F::Dir }, { F::GameInstall, F::ImportPass }))
 			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
 			.guarded(GuardScope::AllDirty, "Open another project", "Save all")
 			.can_discard()
@@ -339,9 +341,11 @@ constexpr RequestKindRow kRows[] = {
 	// writes the files and the documents, and the slot. A running build still serves it (its row's
 	// joined_by).
 	Request(K::Build, "build", serve_build,
-			"The project packed into a build under out_dir (left out, the project's "
-			".opennova/build/play), an operation (the outcome names it); a build running already "
-			"serves it, where it packs. Unsaved edits wait on the prompt first.")
+			"The project packed into a build under out_dir (taken from the project's folder when "
+			"relative; left out, the project's .opennova/build/play; refused inside the project "
+			"but in its cache or its export folder, build.out_dir_in_project), an operation (the "
+			"outcome names it); a build running already serves it, where it packs. Unsaved edits "
+			"wait on the prompt first.")
 			.takes(request_params({}, { F::OutDir }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")

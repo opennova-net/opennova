@@ -2,18 +2,26 @@
 // requests and query named in the request and query tables, its args ones the query takes); each
 // verb's --json the very answer a session gives its query after the same requests, for all nine
 // verbs; the request and query verbs answering as the Shell's request_json and query_json do, their
-// refusals included; --install writing the project's local.json as the editor reads it; and, with
-// the game install, a project imported from it whose Problems the query verb reads as the session
-// does (the round's end-to-end check).
+// refusals included, a malformed one refused before the project opens; --install writing the
+// project's local.json as the editor reads it, a dry run's for that run alone, one naming no folder
+// refused; validate exiting as the build's gate says; and, with the game install, a project
+// imported from it whose Problems the query verb reads as the session does (the round's end-to-end
+// check).
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/document_types.h>
+#include <editor/documents/project_check.h>
+#include <editor/import/importer.h>
+#include <editor/import/sidecar.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
@@ -178,6 +186,60 @@ JsonValue import_request(const std::string &path, bool with_dependencies) {
 	out.set("imports", std::move(imports));
 	out.set("with_dependencies", JsonValue::make_bool(with_dependencies));
 	return out;
+}
+
+// A PNG is an import source only with its `.import` record; the importer's defaults written by
+// hand (importing a file writes it).
+bool mark_for_import(const std::string &source) {
+	const editor::Importer *importer = editor::importer_for(source);
+	if (importer == nullptr) return false;
+	editor::ImportSidecar sidecar;
+	sidecar.importer = importer->id;
+	sidecar.version = importer->version;
+	sidecar.options = importer->default_options;
+	editor::Diagnostic error;
+	return editor::save_import_sidecar(source + ".import", sidecar, error);
+}
+
+// An archive of one member at `path`.
+bool write_archive(const std::string &path, const char *member, const std::string &bytes) {
+	const opennova::pff::PffWriteEntry entries[] = {
+	        { member, reinterpret_cast<const uint8_t *>(bytes.data()), uint32_t(bytes.size()), 0, 0, 0 } };
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	       opennova::pff::PFF_WRITE_OK;
+}
+
+// A test's project check (S13 V9's seam) that makes one Error at every validation: a Problems row
+// after the build's gate, which blocks no build.
+class ErringCheck : public editor::ProjectCheck {
+public:
+	bool update(const editor::ProjectCheckInput &) override {
+		const bool moved = findings_.empty();
+		findings_ = { editor::make_diagnostic(editor::DiagnosticSeverity::Error, "probe.error",
+		                                      "The probe's check found this.", "defs/items.def") };
+		return moved;
+	}
+	const std::vector<editor::Diagnostic> &findings() const override { return findings_; }
+	void clear() override { findings_.clear(); }
+
+private:
+	std::vector<editor::Diagnostic> findings_;
+};
+
+std::unique_ptr<editor::ProjectCheck> make_erring_check() {
+	return std::make_unique<ErringCheck>();
+}
+
+// The item catalogs' type with that check as its project check, copied from the registry before
+// any stand-in is in place.
+const editor::DocumentType &erring_catalog_type() {
+	static const editor::DocumentType type = [] {
+		editor::DocumentType row = *editor::document_type(editor::DocumentTypeId::Catalog);
+		row.name = "catalog_erring";
+		row.project_check = make_erring_check;
+		return row;
+	}();
+	return type;
 }
 
 const char *const kTitleMenu =
@@ -361,7 +423,7 @@ static int test_verbs_answer_as_the_session() {
 		TEST_EXPECT(sends(row, { K::NewProject }));
 		const std::string made = dir.file("Made");
 		Headless headless;
-		headless.send(request::new_project(made, "Made", "jo"));
+		headless.send(request::new_project(made, "Made", "jo", false));
 		JsonValue expected = headless.ask(row);
 		std::error_code ec;
 		fs::remove_all(made, ec);
@@ -411,25 +473,52 @@ static int test_verbs_answer_as_the_session() {
 	return 0;
 }
 
-// The request and query verbs refuse as the Shell's request_json and query_json refuse: a request
-// that does not read (a field its kind does not take, text that is not JSON) exits 2 with the
-// answer naming why and nothing asked of the session; one refused exits 1; a query no row has, or
-// args it refuses, exits 2 with {error}; and a build requested runs to its end before the command
-// exits. An array of requests is handled in turn in the run's one session: an edit and the save
-// that writes it; an edit alone is said to end with the run, and the file keeps its bytes.
+// The request and query verbs. A request that is not JSON, or names no kind the request table has,
+// and a query no row has or whose args are not JSON, are refused before the project opens (a usage
+// error, exit 2: a pending import is not run). The rest answer as the Shell's request_json and
+// query_json answer: a request that does not read (a field its kind does not take) exits 2 with
+// the answer naming why; one refused exits 1, and so does one the editor's shell serves (nothing
+// done headless, said); args a query refuses exit 2 with {error}; a build requested runs to its end
+// before the command exits, its out_dir taken from the project's folder and refused inside the
+// project; what a request sets of the editor's own preferences is said to end with the run. An
+// array of requests is handled in turn in the run's one session: an edit and the save that writes
+// it; an edit alone is said to end with the run, and the file keeps its bytes; one held on the
+// unsaved-changes prompt goes on when a resolve_unsaved later in the array answers it.
 static int test_request_and_query_verbs() {
 	editor_test::TempProjectDir dir("opennova_project_cli_wire");
 	const std::string scratch = dir.root(), root = dir.file("Wire");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Wire" }).code == 0);
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
 
-	Ran ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"path\": \"x\"}" });
+	// A source the next open's import pass would import: none of the refusals below runs it.
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
+	const std::string imported_dir = root + "/.opennova/imported";
+	TEST_EXPECT(!fs::exists(imported_dir));
+	Ran ran = run(scratch, { "request", root, "{\"kind\": " });
+	TEST_EXPECT(ran.code == 2 && ran.out.empty() && ran.err.find("the request is not JSON: ") != std::string::npos);
+	ran = run(scratch, { "request", root, "[{\"kind\": \"frobnicate\"}]" });
+	TEST_EXPECT(ran.code == 2 && ran.err.find("unknown request kind \"frobnicate\"") != std::string::npos);
+	ran = run(scratch, { "request", root, "[3]" });
+	TEST_EXPECT(ran.code == 2 && ran.err.find("a request is a JSON object") != std::string::npos);
+	ran = run(scratch, { "query", root, "nope" });
+	TEST_EXPECT(ran.code == 2 && ran.out.empty() && ran.err.find("unknown query nope (state, files, ") != std::string::npos);
+	ran = run(scratch, { "query", root, "files", "{" });
+	TEST_EXPECT(ran.code == 2 && ran.out.empty() && ran.err.find("the query's args are not JSON: ") != std::string::npos);
+	TEST_EXPECT(!fs::exists(imported_dir));
+
+	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"path\": \"x\"}" });
 	JsonValue answer = parsed(ran.out);
 	TEST_EXPECT(ran.code == 2 && !answer.get_bool("ok", true) &&
 	            answer.get_string("error", "") == "build takes no \"path\" (it takes out_dir).");
-	ran = run(scratch, { "request", root, "{\"kind\": " });
+	// A kind the editor's shell serves does nothing headless; what a request sets of the editor's
+	// own preferences ends with the run. Each is said.
+	ran = run(scratch, { "request", root, "{\"kind\": \"reveal_path\", \"path\": \"menus\"}" });
 	answer = parsed(ran.out);
-	TEST_EXPECT(ran.code == 2 && answer.get_string("error", "").rfind("The request is not JSON: ", 0) == 0);
+	TEST_EXPECT(ran.code == 1 && answer.get_bool("ok", false) && !answer.get_bool("served", true) &&
+	            ran.err.find("the editor's shell serves this request") != std::string::npos);
+	ran = run(scratch, { "request", root, "{\"kind\": \"set_import_dependencies\", \"with_dependencies\": false}" });
+	TEST_EXPECT(ran.code == 0 && ran.err.find("the editor's own preferences this run set end with it") != std::string::npos);
 	// Refused as it is served: a required file there already is never made again.
 	ran = run(scratch, { "request", root, "{\"kind\": \"create_missing\", \"roles\": [\"main_menu\"]}" });
 	answer = parsed(ran.out);
@@ -443,6 +532,20 @@ static int test_request_and_query_verbs() {
 	answer = parsed(ran.out);
 	TEST_EXPECT(ran.code == 0 && answer.get("outcome")->get_number("operation", 0) == 1);
 	TEST_EXPECT(!editor::last_good_build_dir(out).empty());
+	// out_dir inside the project is refused (its files would be the next build's), the cache and the
+	// export folder aside; a relative one is taken from the project's folder.
+	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"art/out\"}" });
+	answer = parsed(ran.out);
+	bool inside_refused = false;
+	for (const JsonValue &finding : answer.get("outcome")->get("findings")->array)
+		inside_refused = inside_refused || finding.get_string("code", "") == "build.out_dir_in_project";
+	TEST_EXPECT(ran.code == 1 && inside_refused && !fs::exists(root + "/art/out"));
+	ran = run(scratch, { "build", root, "--out", root + "/art/out" });
+	TEST_EXPECT(ran.code == 1 && ran.err.find("build.out_dir_in_project") != std::string::npos);
+	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"../beside\"}" });
+	TEST_EXPECT(ran.code == 0 && !editor::last_good_build_dir(dir.file("beside")).empty());
+	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"out_dir\": \"build/export/play\"}" });
+	TEST_EXPECT(ran.code == 0 && !editor::last_good_build_dir(root + "/build/export/play").empty());
 
 	// An edit, then the save that writes it, in one run; the edit alone writes nothing.
 	const std::string menu = root + "/menus/main.mnu";
@@ -465,23 +568,38 @@ static int test_request_and_query_verbs() {
 	                     "[{\"kind\": \"create_missing\", \"roles\": [\"main_menu\"]}, {\"kind\": \"save_all\"}]" });
 	answer = parsed(ran.out);
 	TEST_EXPECT(ran.code == 1 && answer.is_array() && answer.array.size() == 1);
+	// A request held on the unsaved-changes prompt goes on when a resolve_unsaved later in the array
+	// answers it: the edit, the build it holds, the prompt's save (the file written, then the build
+	// run to its end).
+	const std::string restore =
+	        "{\"kind\": \"edit_record\", \"path\": \"menus/main.mnu\", \"open_first\": true, \"edits\": "
+	        "[{\"op\": \"set\", \"id\": 1, \"field\": \"name\", \"value\": \"STARTUP\"}]}";
+	const std::string played = root + "/.opennova/build/play";
+	std::error_code ec;
+	fs::remove_all(played, ec);
+	ran = run(scratch, { "request", root,
+	                     "[" + restore + ", {\"kind\": \"build\"}, {\"kind\": \"resolve_unsaved\", \"choice\": \"save\"}]" });
+	answer = parsed(ran.out);
+	TEST_EXPECT(ran.code == 0 && answer.is_array() && answer.array.size() == 3);
+	TEST_EXPECT(answer.array.size() == 3 && answer.array[1].get("outcome")->get_bool("unsaved_prompt", false) &&
+	            answer.array[2].get("outcome")->get_bool("done", false) &&
+	            answer.array[2].get("outcome")->get_number("operation", 0) > 0);
+	TEST_EXPECT(editor::read_file_text(menu, after, io_error) && after.find("STARTUP2") == std::string::npos);
+	TEST_EXPECT(!editor::last_good_build_dir(played).empty());
 
+	// Args a query refuses are the session's answer, {error}.
 	Headless headless;
 	headless.send(request::open_project(root));
 	for (const std::vector<std::string> &query : std::vector<std::vector<std::string>>{
-	             { "nope" }, { "files", "{\"limit\": 0}" }, { "references" }, { "files", "[1]" }, { "files", "{" } }) {
+	             { "files", "{\"limit\": 0}" }, { "references" }, { "files", "[1]" } }) {
 		std::vector<std::string> args = { "query", root };
 		args.insert(args.end(), query.begin(), query.end());
 		ran = run(scratch, args);
 		answer = parsed(ran.out);
 		TEST_EXPECT(ran.code == 2 && !answer.get_string("error", "").empty() && answer.object.size() == 1);
-		if (query.size() == 1 || query[1] != "{") {
-			JsonValue query_args = JsonValue::make_object();
-			if (query.size() > 1) query_args = parsed(query[1]);
-			TEST_EXPECT(same(answer, headless.ask(query[0], query_args)));
-		} else {
-			TEST_EXPECT(answer.get_string("error", "").rfind("The query's args are not JSON: ", 0) == 0);
-		}
+		JsonValue query_args = JsonValue::make_object();
+		if (query.size() > 1) query_args = parsed(query[1]);
+		TEST_EXPECT(same(answer, headless.ask(query[0], query_args)));
 	}
 	return 0;
 }
@@ -489,7 +607,9 @@ static int test_request_and_query_verbs() {
 // --install sets the project's game install as the editor's project settings set it: written to
 // its .opennova/local.json, which the editor then opens the project with; kept absolute from the
 // command line's working directory; on new, the new project's; and on import, the install whose
-// files --entry names.
+// files --entry names. One that names no folder is refused before anything is sent, the project's
+// install kept; a dry run's is that run's alone (the plan reads it, the project's local.json keeps
+// its own).
 static int test_install() {
 	struct WorkingDirectory {
 		fs::path saved = fs::current_path();
@@ -502,11 +622,7 @@ static int test_install() {
 	const std::string scratch = dir.root(), root = dir.file("Install"), install = dir.file("Joint Ops");
 	std::error_code ec;
 	fs::create_directories(install, ec);
-	const std::string font = "fnt";
-	const opennova::pff::PffWriteEntry entries[] = {
-	        { "arial99.fnt", reinterpret_cast<const uint8_t *>(font.data()), uint32_t(font.size()), 0, 0, 0 } };
-	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
-	                                             entries, 1) == opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(write_archive(install + "/resource.pff", "arial99.fnt", "fnt"));
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Install" }).code == 0);
 	fs::current_path(dir.path, ec);
 	TEST_EXPECT(!ec);
@@ -537,6 +653,54 @@ static int test_install() {
 	// An --entry the install lacks: refused, nothing imported.
 	ran = run(scratch, { "import", third, "--entry", "nothing.fnt" });
 	TEST_EXPECT(ran.code == 1 && ran.err.find("nothing.fnt") != std::string::npos);
+
+	// An --install that names no folder: refused, nothing sent, the project's install kept.
+	ran = run(scratch, { "status", root, "--install", dir.file("no such folder") });
+	TEST_EXPECT(ran.code == 2 && ran.err.find("--install names no folder") != std::string::npos);
+	TEST_EXPECT(editor::load_local_settings(editor::ProjectPaths::for_root(root), local, finding) &&
+	            local.game_install == install);
+	// A dry run's is that run's alone: the plan reads the other install, nothing is written.
+	const std::string another = dir.file("Other Ops");
+	fs::create_directories(another, ec);
+	TEST_EXPECT(write_archive(another + "/resource.pff", "arial88.fnt", "fnt"));
+	ran = run(scratch, { "import", root, "--dry-run", "--install", another, "--entry", "arial88.fnt" });
+	TEST_EXPECT(ran.code == 0 &&
+	            ran.out.find("take arial88.fnt (font) -> fonts/arial88.fnt, chosen, from the game install") !=
+	                    std::string::npos);
+	TEST_EXPECT(editor::load_local_settings(editor::ProjectPaths::for_root(root), local, finding) &&
+	            local.game_install == install && !fs::exists(root + "/fonts/arial88.fnt"));
+	return 0;
+}
+
+// validate exits as a build would (the build_gate query): an error the build does not gate on (a
+// project check's, after the gate since S13 V9) is listed and fails nothing, the build going
+// through; the build's own check of the files, which no Problems row shows (an archive in the
+// project), fails it and is said before the verdict, the build refused too.
+static int test_validate_follows_the_gate() {
+	editor_test::TempProjectDir dir("opennova_project_cli_gate");
+	const std::string scratch = dir.root(), root = dir.file("Gate");
+	TEST_EXPECT(run(scratch, { "new", root, "--title", "Gate" }).code == 0);
+	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
+	{
+		const editor::DocumentTypeStandIn stand_in(erring_catalog_type());
+		const Ran ran = run(scratch, { "validate", root });
+		TEST_EXPECT(ran.code == 0);
+		TEST_EXPECT(ran.out.find("error probe.error: The probe's check found this. [defs/items.def]\n") != std::string::npos);
+		TEST_EXPECT(ran.out.find("ok: nothing blocks a build (1 error(s) the build does not gate on)\n") != std::string::npos);
+		Headless headless;
+		headless.send(request::open_project(root));
+		const JsonValue gate = headless.ask("build_gate", JsonValue::make_object());
+		const JsonValue problems = headless.ask("problems", JsonValue::make_object());
+		TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1) == 0 &&
+		            problems.get("counts")->get_number("errors", 0) == 1);
+		TEST_EXPECT(run(scratch, { "build", root }).code == 0);
+	}
+	TEST_EXPECT(write_archive(root + "/extra.pff", "note.txt", "x"));
+	const Ran ran = run(scratch, { "validate", root });
+	TEST_EXPECT(ran.code == 1);
+	TEST_EXPECT(ran.out.find("blocks a build: error build.archive_in_project: extra.pff is an archive") != std::string::npos);
+	TEST_EXPECT(ran.out.find("not ok: 1 finding(s) block a build\n") != std::string::npos);
+	TEST_EXPECT(run(scratch, { "build", root }).code == 1);
 	return 0;
 }
 
@@ -557,10 +721,12 @@ static int test_retail_install_import() {
 	Headless headless;
 	headless.send(request::open_project(root));
 	const JsonValue problems = headless.ask("problems", JsonValue::make_object());
+	const bool blocked = headless.ask("build_gate", JsonValue::make_object()).get_bool("blocked", true);
+	TEST_EXPECT(problems.get_number("total", 0) > 0);
 	ran = run(scratch, { "query", root, "problems", "--json" });
 	TEST_EXPECT(ran.code == 0 && same(parsed(ran.out), problems));
 	ran = run(scratch, { "validate", root, "--json" });
-	TEST_EXPECT(same(parsed(ran.out), problems));
+	TEST_EXPECT(ran.code == (blocked ? 1 : 0) && same(parsed(ran.out), problems));
 	std::printf("retail: %d problems after importing main.mnu and menu_style.mns with the files they need\n",
 	            int(problems.get_number("total", 0)));
 	return 0;
@@ -573,6 +739,7 @@ int main(int argc, char **argv) {
 	failures += test_verbs_answer_as_the_session();
 	failures += test_request_and_query_verbs();
 	failures += test_install();
+	failures += test_validate_follows_the_gate();
 	failures += test_retail_install_import();
 	if (failures == 0) std::printf("project_cli_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

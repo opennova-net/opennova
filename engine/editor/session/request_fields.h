@@ -14,6 +14,7 @@ enum class RequestFieldId : uint8_t {
 	Dir,
 	Title,
 	Game,
+	GameInstall,
 	Path,
 	Locator,
 	Field,

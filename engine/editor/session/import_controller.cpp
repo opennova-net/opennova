@@ -201,6 +201,9 @@ void ImportController::import_files(const EditorRequest &request) {
 		return;
 	}
 	const ImportResult imported = import_assets(request.imports, paths_, *view_.project.document, request.replace);
+	// What it wrote and what it did not reach are the request's outcome (S13 A7), besides Output.
+	core_.outcome().imported = imported.imported;
+	core_.outcome().not_imported = imported.not_imported;
 	if (!imported.imported.empty()) {
 		// A Rescan: the open documents whose files it replaced read again, then the refresh.
 		core_.documents().reload_changed();

@@ -102,6 +102,19 @@ static int test_usage_errors() {
 	TEST_EXPECT(text.find("--entry needs a file name") != std::string::npos);
 	TEST_EXPECT(run_usage(dir.file("err.txt"), { "import", "p", "--retail", "game" }, text) == 2);
 	TEST_EXPECT(text.find("unknown option --retail") != std::string::npos);
+	// An argument that starts with a dash is an option, the verb's or unknown: a mistyped one never
+	// becomes a folder (new -x makes no ./-x).
+	std::error_code ec;
+	const fs::path stray = fs::current_path(ec) / "-x";
+	TEST_EXPECT(!ec && !fs::exists(stray));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", "-x" }, text) == 2);
+	TEST_EXPECT(text.find("unknown option -x for new") != std::string::npos);
+	TEST_EXPECT(!fs::exists(stray));
+	// An option is given once (but --entry), and its value is never another option.
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", dir.file("twice"), "--title", "A", "--title", "B" }, text) == 2);
+	TEST_EXPECT(text.find("--title is given twice") != std::string::npos && !fs::exists(dir.file("twice")));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", dir.file("twice"), "--title", "--game", "jo" }, text) == 2);
+	TEST_EXPECT(text.find("--title needs a text") != std::string::npos && !fs::exists(dir.file("twice")));
 	return 0;
 }
 
@@ -119,6 +132,11 @@ static int test_new_status_validate() {
 	opennova::editor::Diagnostic error;
 	TEST_EXPECT(opennova::editor::open_project(root, doc, error));
 	TEST_EXPECT(doc.title == "CLI Game");
+	// Without --title the project is named after its folder, as on every path that leaves the title
+	// empty (the editor's form, a new_project request).
+	const std::string untitled = dir.file("Folder Named");
+	TEST_EXPECT(run({"new", untitled}) == 0);
+	TEST_EXPECT(opennova::editor::open_project(untitled, doc, error) && doc.title == "Folder Named");
 
 	// Create all missing: the project then validates clean, and a second run is a no-op
 	// (nothing is unmet, so nothing is named). A role asked for by name whose file is there
@@ -185,6 +203,16 @@ static int test_imports() {
 	const std::string capture = dir.file("capture.txt");
 	std::string text;
 	std::error_code ec;
+	// A project made in a folder that holds a source imports none of it: new opens it without the
+	// import pass, and the first verb that reads it imports.
+	const std::string holder = dir.file("Holder");
+	TEST_EXPECT(editor_test::write_bytes(holder + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(mark_for_import(holder + "/art/logo.png"));
+	TEST_EXPECT(run({"new", holder}) == 0);
+	TEST_EXPECT(!fs::exists(holder + "/.opennova/imported"));
+	TEST_EXPECT(run_capture(capture, {"status", holder}, text) == 0);
+	TEST_EXPECT(text.find("imports: 1 source(s), 1 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(fs::exists(holder + "/.opennova/imported"));
 	TEST_EXPECT(run({"new", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
 	// A PNG with no record is a texture the build packs as it is.
@@ -198,6 +226,7 @@ static int test_imports() {
 	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output(s)") != std::string::npos);
+	TEST_EXPECT(text.find("imported splash.png\n") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 2 source(s), 0 imported now, 0 failed") != std::string::npos);
 	// reimport: nothing changed, nothing imports; --force with a source imports that one.
@@ -234,6 +263,11 @@ static int test_imports() {
 	fs::remove(root + "/art/logo.png", ec);
 	TEST_EXPECT(run_capture(capture, {"validate", root}, text) == 0);
 	TEST_EXPECT(text.find("import.orphan_record") != std::string::npos && text.find("import.decode") == std::string::npos);
+	// A PNG brought in that does not decode: it is written, the pass fails on it, and the Problems
+	// row on it is said on the error stream (exit 1).
+	TEST_EXPECT(editor_test::write_text(dir.file("broken.png"), "not a png"));
+	TEST_EXPECT(run_usage(capture, {"import", root, dir.file("broken.png")}, text) == 1);
+	TEST_EXPECT(text.find("error import.decode") != std::string::npos && text.find("broken.png") != std::string::npos);
 	return 0;
 }
 
@@ -324,6 +358,14 @@ static int test_dry_run_writes_nothing() {
 	                        text) == 0);
 	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && text.find("imported ") == std::string::npos);
 	TEST_EXPECT(snapshot(root) == before);
+	// --install too: a dry run opens the project on it for that run alone, so no
+	// .opennova/local.json is made or changed.
+	std::error_code ec;
+	fs::create_directories(dir.file("install"), ec);
+	TEST_EXPECT(run_capture(dir.file("out.txt"),
+	                        {"import", root, dir.file("notes.txt"), "--dry-run", "--install", dir.file("install")}, text) == 0);
+	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && snapshot(root) == before);
+	TEST_EXPECT(!fs::exists(root + "/.opennova/local.json"));
 	// The import itself: the pass first (the changed source's record written again), then the file.
 	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt")}, text) == 0);
 	TEST_EXPECT(text.find("imported notes.txt") != std::string::npos && opennova::editor::read_file_text(record, now, error) &&
@@ -354,6 +396,13 @@ static int test_scene_textures() {
 	                      text) == 1);
 	TEST_EXPECT(fs::is_regular_file(root + "/SPINNER.TGA"));
 	TEST_EXPECT(text.find("glow.tga") != std::string::npos && text.find("names the texture spinner.tga") == std::string::npos);
+	// The same model again: the .3di the project holds with the same bytes is left as it is, so the
+	// import names nothing it wrote (the outcome's imported list is import_assets' own); with
+	// --replace it is written and named again.
+	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, scene + "/spinner.o3d"}, text) == 0);
+	TEST_EXPECT(text.find("imported models/spinner.3di") == std::string::npos);
+	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, scene + "/spinner.o3d", "--replace"}, text) == 1);
+	TEST_EXPECT(text.find("imported models/spinner.3di\n") != std::string::npos);
 	return 0;
 }
 
