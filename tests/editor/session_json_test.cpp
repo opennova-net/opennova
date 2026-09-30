@@ -340,6 +340,31 @@ static int test_request_round_trip() {
 	TEST_EXPECT(parse(by_label.c_str(), parsed) && editor_request_from_json(parsed, back, error, &names));
 	TEST_EXPECT(back.edits.size() == 2 && back.edits[0] == add && back.edits[1] == named &&
 	            names.made_labels == std::vector<std::string>({"w"}));
+	// A row a batch makes (S13 D7): a screen added, named through its label as a row, a window put
+	// in it. The writer labels the add, whose row the later edits name; read back, the batch applies
+	// as one step making the screen and its window.
+	const NodeKind screen = menu.kind_from_name("screen");
+	Edit new_screen, name_screen, window_in;
+	new_screen.operation = EditOperation::Add;
+	new_screen.address = {0, screen, 0};
+	name_screen.address = {batch_made(0), screen, 0};
+	name_screen.field = "name";
+	name_screen.value = std::string("EXTRA");
+	window_in.operation = EditOperation::Add;
+	window_in.address = {batch_made(0), window, 0};
+	const JsonValue rows_json =
+	        editor_request_to_json(request::edit_record(path, std::vector<Edit>{new_screen, name_screen, window_in}), &menu);
+	const JsonValue *row_edits = rows_json.get("edits");
+	TEST_EXPECT(row_edits && row_edits->array.size() == 3 && row_edits->array[0].get_string("as", "") == "edit0" &&
+	            row_edits->array[1].get_string("id", "") == "edit0" &&
+	            row_edits->array[2].get_string("parent", "") == "edit0");
+	TEST_EXPECT(editor_request_from_json(rows_json, back, error, &names) && back.edits.size() == 3);
+	const size_t screens = menu.rows().size();
+	open.session.handle(back);
+	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 &&
+	            menu.rows().back()->name() == "EXTRA" && menu.last_added_records().size() == 2);
+	open.session.handle(request::undo(path));
+	TEST_EXPECT(menu.rows().size() == screens);
 	// A Paste has no batch form (the paste request carries the clipboard): written by its op, which
 	// the reader refuses.
 	Edit paste;
