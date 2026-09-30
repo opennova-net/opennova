@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include <base/gameprofile/gameprofile.h>
 #include <editor/project/project_document.h>
@@ -41,6 +42,16 @@ bool path_field(const char *label, char *buffer, size_t size, const char *browse
 	return ImGui::Button(browse);
 }
 
+// Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
+// view's settings_result is then that Apply's (each answer replaces it). An answer the view no
+// longer holds is not known to be the last.
+bool last_settings_answer(const SessionView &view, uint64_t seq) {
+	if (seq < view.events.first_seq()) return false;
+	for (const ViewEvent &event : view.events.held())
+		if (event.kind == ViewEventKind::SettingsApplied && event.seq > seq) return false;
+	return true;
+}
+
 } // namespace
 
 void ProjectSettingsDialog::open(const SessionView &view) {
@@ -76,11 +87,12 @@ void ProjectSettingsDialog::set_picked(PickPurpose purpose, const std::string &p
 void ProjectSettingsDialog::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	// The session's answers since the dialog last drew: its own Apply's is the one carrying its
-	// serial (a serial another client's Apply took is never the dialog's next).
-	bool answered = false;
+	// serial (a serial another client's Apply took is never the dialog's next), its flag set when
+	// a setting could not be written.
+	std::optional<ViewEvent> answer;
 	for (const ViewEvent &event : events_.take()) {
 		if (event.kind != ViewEventKind::SettingsApplied) continue;
-		answered = answered || event.tag == serial_;
+		if (event.tag == serial_) answer = event;
 		seen_ = std::max(seen_, event.tag);
 	}
 	if (open_requested_) {
@@ -94,17 +106,21 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		ImGui::EndPopup();
 		return;
 	}
-	// The session's answer to its Apply: nothing failed, it is done; else it says what
-	// failed and stays open.
-	if (waiting_ && answered) {
+	// The session's answer to its Apply, by its flag: nothing failed, it is done; else it stays
+	// open saying what failed, the view's settings_result while that is its Apply's (another
+	// client's Apply answered after it, before the dialog drew, replaces it: then it says only
+	// that a setting failed).
+	if (waiting_ && answer) {
 		waiting_ = false;
-		for (const Diagnostic &failure : v.project.settings_result.failures)
-			error_ += (error_.empty() ? "" : "\n") + failure.message;
-		if (error_.empty()) {
+		if (!answer->flag) {
 			close();
 			ImGui::EndPopup();
 			return;
 		}
+		if (last_settings_answer(v, answer->seq))
+			for (const Diagnostic &failure : v.project.settings_result.failures)
+				error_ += (error_.empty() ? "" : "\n") + failure.message;
+		if (error_.empty()) error_ = "A setting could not be saved: see Problems.";
 	}
 	// The project's folder, a long one cut (whole in its tooltip): the dialog fits its fields.
 	const std::string root = ui_kit::fit(v.project.root, field_width() * 1.5f);

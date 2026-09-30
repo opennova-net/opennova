@@ -39,7 +39,7 @@ private:
 	void draw_notes(const DialogsView::ImportPreview &preview);
 	void choose(Workspace &workspace, const DialogsView::ImportPreview &preview);
 
-	ViewEventMailbox events_;
+	ViewEventMailbox<> events_;
 	bool retake_ = true;        // a plan made since the checks were taken: they are taken again
 	std::vector<bool> checked_; // per plan row: taken by the import
 	// Per plan row: why the import cannot take it ("" when it can), found once per plan.

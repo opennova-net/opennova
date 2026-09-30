@@ -209,16 +209,19 @@ void FilesWindow::show_revealed(const SessionView &view, const ViewEvent &event)
 
 void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
-	// The RevealFile events held since Files last drew, each taken now, in order (the last one's
-	// file ends selected); with no project open they show nothing.
+	// The RevealFile events held since Files last drew, taken now: the newest is shown (its file
+	// selected, Rename... opened on it when it asks), as the view's one reveal was, each ask
+	// overwriting the one before; an older ask is passed over, its Rename... too. With no project
+	// open none shows.
 	const std::vector<ViewEvent> reveals = events_.take();
 	if (!v.project.open) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
 	}
 	refresh(v);
-	for (const ViewEvent &reveal : reveals)
-		if (reveal.kind == ViewEventKind::RevealFile) show_revealed(v, reveal);
+	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
+			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
+	if (newest != reveals.rend()) show_revealed(v, *newest);
 	draw_toolbar(v);
 	// The filter, and beside it how many files the project has (under it in a narrow dock).
 	const size_t count = v.project.scan->entries.size();

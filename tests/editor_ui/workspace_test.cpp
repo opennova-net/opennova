@@ -46,6 +46,7 @@
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/files_window.h>
 #include <editor/ui/preview_window.h>
+#include <editor/ui/view_event_mailbox.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
 #include "common/file_io.h"
@@ -735,6 +736,81 @@ void test_project_settings() {
 	ui.activate(item_id(dialog, {"Cancel"}));
 	ui.frames(2);
 	CHECK(!modal_open("Project settings") && ui.drain().empty() && !v.project.document->features.multiplayer, "Cancel changes nothing");
+}
+
+// Two Applies answered before the settings dialog draws, its own and another client's after it
+// (the editor MCP's apply_project_settings): the dialog goes by its own answer, the flag its
+// event carries, never the later Apply's result. Its Apply failed and the other did not: it
+// stays open saying a setting failed. Its Apply wrote and the other failed: it closes, saying
+// nothing of the other's failure.
+void test_project_settings_two_applies() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_settings_two_applies");
+	NoProcess platform;
+	const std::string settings_file = dir.file("settings/editor.json");
+	FilePreferencesStore preferences(settings_file);
+	ProjectSession session(platform, preferences);
+	CHECK(session.handle(make_request(EditorRequestKind::NewProject, dir.file("Armory"), "Armory")),
+			"a project");
+	const SessionView &v = session.view();
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	serve(ui, session);
+	const ImGuiID dialog = ImHashStr("Project settings");
+	// The editor's settings cannot be written (a folder stands where their file is written
+	// first): a runtime typed cannot be set.
+	std::error_code ec;
+	std::filesystem::create_directories(settings_file + ".tmp", ec);
+	CHECK(choose(ui, "File", {"Project settings..."}).empty() && modal_open("Project settings"),
+			"the dialog opens");
+	type_into(ui, item_id(dialog, {"OpenNova runtime"}), "C:/tools/opennova.exe");
+	ui.activate(item_id(dialog, {"Apply"}));
+	std::vector<EditorRequest> requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::ApplyProjectSettings) != nullptr, "the dialog's Apply");
+	for (const EditorRequest &request : requests)
+		session.handle(request);
+	EditorRequest name_only = make_request(EditorRequestKind::ApplyProjectSettings);
+	name_only.settings.title = std::string("Harbor");
+	session.handle(name_only);
+	CHECK(v.project.document->title == "Harbor" && v.project.settings_result.failures.empty(),
+			"the other Apply, after the dialog's, wrote the name");
+	ui.frames(2);
+	CHECK(modal_open("Project settings") &&
+					logged_frame(ui).find("A setting could not be saved") != std::string::npos,
+			"its own Apply failed: it stays open, saying a setting failed");
+
+	// The runtime cleared (as in effect: its Apply writes the name back and nothing it cannot);
+	// the other Apply after it asks a runtime, which fails.
+	type_into(ui, item_id(dialog, {"OpenNova runtime"}), "");
+	ui.activate(item_id(dialog, {"Apply"}));
+	requests = ui.drain();
+	for (const EditorRequest &request : requests)
+		session.handle(request);
+	EditorRequest runtime = make_request(EditorRequestKind::ApplyProjectSettings);
+	runtime.settings.runtime_executable = std::string("C:/tools/other.exe");
+	session.handle(runtime);
+	CHECK(v.project.document->title == "Armory" && v.project.settings_result.failures.size() == 1,
+			"the dialog's Apply wrote the name; the other failed");
+	ui.frames(2);
+	CHECK(!modal_open("Project settings"), "its own Apply wrote: it closes");
+	std::filesystem::remove_all(settings_file + ".tmp", ec);
+}
+
+// A window's mailbox holds at most as many events as the view keeps: one more drops the
+// oldest; taken, the rest come out oldest first, once.
+void test_view_event_mailbox_cap() {
+	ViewEventMailbox<> mailbox;
+	for (uint64_t seq = 1; seq <= ViewEvents::kKept + 6; ++seq) {
+		ViewEvent event;
+		event.seq = seq;
+		mailbox.post(event);
+	}
+	CHECK(mailbox.held() == ViewEvents::kKept, "at most kKept held");
+	const std::vector<ViewEvent> taken = mailbox.take();
+	CHECK(taken.size() == ViewEvents::kKept && taken.front().seq == 7 &&
+					taken.back().seq == ViewEvents::kKept + 6 && mailbox.held() == 0,
+			"the oldest dropped; the rest taken once, oldest first");
 }
 
 // The File, Edit and Build menus raise their requests (a Save, a Close and an Undo naming
@@ -1828,6 +1904,42 @@ void test_view_event_mailboxes() {
 	ui.frames(4);
 	CHECK(logged_frame(ui).find("Rename b.mnu to") == std::string::npos,
 			"taken once: closed, it stays closed");
+	// Two asks before Files draws, the older asking Rename...: the newest is shown and the
+	// older passed over, its Rename... too, whether Files was closed or both came in one pump
+	// (the view's one reveal was overwritten by each ask).
+	files_window.open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealFile, c->path(), NodeAddress(), std::string(), true);
+	post_event(v, ViewEventKind::RevealFile, a->path());
+	ui.frames(3);
+	CHECK(files->events().held() == 2, "both held while Files is closed");
+	files_window.open = true;
+	ui.frames(4);
+	CHECK(files->events().held() == 0 && files->selected() == a->path() &&
+					logged_frame(ui).find("Rename c.mnu to") == std::string::npos,
+			"Files opened: the newest shown, the older's Rename... not opened");
+	post_event(v, ViewEventKind::RevealFile, b->path(), NodeAddress(), std::string(), true);
+	post_event(v, ViewEventKind::RevealFile, c->path());
+	ui.frames(4);
+	CHECK(files->selected() == c->path() &&
+					logged_frame(ui).find("Rename b.mnu to") == std::string::npos,
+			"both in one pump: the same");
+	// Files closed while more asks come than the view keeps, over several frames: the newest
+	// kKept wait, the newest of them shown when it opens.
+	files_window.open = false;
+	ui.frames(2);
+	for (size_t i = 0; i < ViewEvents::kKept + 6; ++i) {
+		const bool last = i + 1 == ViewEvents::kKept + 6;
+		post_event(v, ViewEventKind::RevealFile, last ? b->path() : a->path());
+		if (i % 10 == 9)
+			ui.frames(1);
+	}
+	ui.frames(3);
+	CHECK(files->events().held() == ViewEvents::kKept, "at most as many held as the view keeps");
+	files_window.open = true;
+	ui.frames(4);
+	CHECK(files->events().held() == 0 && files->selected() == b->path(),
+			"opened: the newest shown");
 
 	// Rename everywhere on the preview an AskRename names, once.
 	v.dialogs.rename_preview.serial = 3;
@@ -1905,6 +2017,7 @@ void run_workspace_tests() {
 	test_thirty_tabs();
 	test_welcome_view();
 	test_project_settings();
+	test_project_settings_two_applies();
 	test_menus();
 	test_menu_bar_status();
 	test_files_window();
@@ -1915,6 +2028,7 @@ void run_workspace_tests() {
 	test_preview_model_pane_input();
 	test_window_title();
 	test_view_event_mailboxes();
+	test_view_event_mailbox_cap();
 }
 
 } // namespace editor_ui_test

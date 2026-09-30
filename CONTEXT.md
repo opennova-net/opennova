@@ -564,9 +564,10 @@ A one-shot ask a request makes of one of the editor's windows, which the session
 until the window it is for has had it: show a record's field (a Problems row, a Go to), show a
 file in Files, ask a name's new name (Rename everywhere), say how the settings' Apply came out,
 take a new import plan's checks. Each ask is an event of its own, with its place in the view's
-sequence (the last 64 kept), so the same ask made twice is shown twice; the workspace hands each
-to the window it is for, which holds it until it draws and takes it once. The editor MCP pages
-them by their place.
+sequence (the last 64 kept), so the same ask made twice is two asks; the workspace hands each
+to the window it is for, which holds it until it draws (64 at most) and takes it once, passing
+over an ask a newer one or the selection has overtaken since. The editor MCP pages them by their
+place.
 _Avoid_: serial (the per-ask counters the events replaced), reveal state (the view keeps none),
 notification (the OS's), signal (Godot's)
 

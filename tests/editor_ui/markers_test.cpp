@@ -374,6 +374,81 @@ void test_reveal_waits_for_the_inspector() {
 	ui.drain();
 }
 
+// A field asked to show while the Inspector is closed goes with the selection it was asked on
+// (S13 V4, as the view's one reveal went with the next selection): the selection moved off its
+// record and back before the Inspector draws, the waiting ask shows nothing; nor does one whose
+// document was read again meanwhile (its records numbered anew, the same record number another
+// load's), though the selection did not move. An ask made after the reload shows.
+void test_reveal_goes_with_the_selection() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_selection");
+	std::shared_ptr<MnuDocument> document = load_menu(dir);
+	const NodeAddress back = named(*document, "BACK");
+	const NodeAddress title = named(*document, "TITLE");
+	SessionView v = menu_view(document);
+	select_in(v, back);
+	Ui ui;
+	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 600.0f);
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	const std::vector<InspectorSection> plan = plan_inspector(*document, back, back, "");
+	const InspectorSection *folded = nullptr;
+	for (const InspectorSection &section : plan)
+		if (!section.key.empty() && !section.written && !section.fields.empty())
+			folded = &section;
+	devtools::Window *window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Inspector") == 0)
+			window = &ui.windows.pass().window(i);
+	const InspectorWindow *inspector = dynamic_cast<const InspectorWindow *>(window);
+	CHECK(folded != nullptr && inspector != nullptr,
+			"a folded section with fields, and the Inspector");
+	if (!folded || !inspector)
+		return;
+	const std::string field = folded->fields.back().schema->id;
+	float top = 0.0f, bottom = 0.0f;
+
+	// Asked on BACK, the Inspector closed; TITLE selected, then BACK again; the Inspector opened.
+	window->open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(2);
+	select_in(v, title);
+	ui.frames(2);
+	select_in(v, back);
+	ui.frames(2);
+	CHECK(inspector->events().held() == 1, "held while the Inspector does not draw");
+	window->open = true;
+	ui.frames(4);
+	const ImGuiWindow *form = ImGui::FindWindowByName("Inspector");
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y == 0.0f &&
+					!lit_row(top, bottom),
+			"the selection moved off and back since: taken, nothing shown");
+
+	// Asked on BACK, the Inspector closed; the document read again, BACK still selected by the
+	// same record number.
+	window->open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(2);
+	std::shared_ptr<MnuDocument> fresh = load_menu(dir);
+	CHECK(fresh->identity() != document->identity() && named(*fresh, "BACK") == back,
+			"another load, its BACK the same record number");
+	v.documents.open = { fresh };
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::DocumentSet);
+	ui.frames(2);
+	window->open = true;
+	ui.frames(4);
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y == 0.0f &&
+					!lit_row(top, bottom),
+			"its document read again since: taken, nothing shown");
+	post_event(v, ViewEventKind::RevealRecord, fresh->path(), back, field);
+	ui.frames(4);
+	CHECK(form && form->Scroll.y > 0.0f && lit_in_sight(), "an ask on the new load shows");
+	ui.drain();
+}
+
 // Whether the last frame drew a selected item's highlight (the header colour) in the windows
 // whose names start with `prefix` (a child window's name starts with its parent's): the
 // selection is in view there. A logged frame draws every item, so the reveal is read here.
@@ -774,6 +849,7 @@ void run_marker_tests() {
 	test_outline_marks();
 	test_reveal_field();
 	test_reveal_waits_for_the_inspector();
+	test_reveal_goes_with_the_selection();
 	test_reveal_in_views();
 	test_block_switch();
 	test_revert_several();

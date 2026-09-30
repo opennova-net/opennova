@@ -927,10 +927,20 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 
 } // namespace
 
+void InspectorWindow::receive(const ViewEvent &event) {
+	const SessionView &view = workspace_.view();
+	HeldReveal held;
+	held.event = event;
+	held.selection = view.revisions.of(ViewConcern::Selection);
+	for (const std::shared_ptr<const Document> &document : view.documents.open)
+		if (document->path() == event.path) held.document = document->identity();
+	events_.post(std::move(held));
+}
+
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
 	// The fields asked to show since the Inspector last drew, each taken now (read below).
-	const std::vector<ViewEvent> reveals = events_.take();
+	const std::vector<HeldReveal> reveals = events_.take();
 	const Document *document = active(view);
 	if (!document || !view.documents.selection.row) {
 		ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
@@ -945,10 +955,14 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// A field a request asks to show (a Problems row's): each ask on the record selected now, in
 	// this document, shown once, the filter cleared so nothing hides it; the same row clicked
 	// again is another ask, shown again. An ask about a record no longer selected shows nothing,
-	// and the selection moving off the record shown lets its field go.
-	for (const ViewEvent &reveal : reveals) {
+	// nor one the selection moved from since it was sent (and back) or whose document was read
+	// again; the selection moving off the record shown lets its field go.
+	const uint64_t selected = view.revisions.of(ViewConcern::Selection);
+	for (const HeldReveal &held : reveals) {
+		const ViewEvent &reveal = held.event;
 		if (reveal.kind != ViewEventKind::RevealRecord || reveal.path != document->path() ||
-				reveal.address != selection || reveal.field.empty())
+				reveal.address != selection || reveal.field.empty() ||
+				held.selection != selected || held.document != document->identity())
 			continue;
 		reveal_document_ = document->identity();
 		reveal_field_ = reveal.field;

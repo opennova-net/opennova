@@ -16,8 +16,8 @@ namespace opennova::editor {
 // one ApplyProjectSettings naming every one of them: the session writes what differs from
 // the settings in effect, so a retry after a partial failure writes what is still not in
 // effect, whatever the dialog opened with. The dialog waits for the SettingsApplied view event
-// carrying its serial: none failed, it closes; otherwise it says what failed (the view's
-// settings_result) and stays open.
+// carrying its serial: its flag clear (none failed), it closes; set, it stays open saying what
+// failed (the view's settings_result while no later Apply replaced it).
 // Cancel changes nothing. It belongs to the project it opened in: another project (or none)
 // closes it, and a Browse... answered after that is dropped. The workspace draws it every
 // frame.
@@ -50,7 +50,7 @@ private:
 	std::string root_;        // the project it is for
 	Fields fields_;
 	PickPurpose pick_ = PickPurpose::None; // the Browse... the shell is answering
-	ViewEventMailbox events_;
+	ViewEventMailbox<> events_;
 	uint64_t serial_ = 0;     // the last Apply's, and whether its answer is still to come
 	uint64_t seen_ = 0;       // the highest serial an answer carried
 	bool waiting_ = false;

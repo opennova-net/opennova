@@ -28,7 +28,7 @@ public:
 	                             const std::string &name, bool ask);
 
 private:
-	ViewEventMailbox events_;
+	ViewEventMailbox<> events_;
 	bool open_ = false;
 	std::string path_, locator_, field_, old_name_;
 	ReferenceKind kind_ = ReferenceKind::None;

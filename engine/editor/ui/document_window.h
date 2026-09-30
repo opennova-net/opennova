@@ -81,7 +81,7 @@ private:
 	StylesView styles_;
 	MenuView menu_;
 	RecordReveal outline_; // the outline's reveal of the selection (a model, a clip, an animation table)
-	std::map<std::string, ViewEventMailbox> events_; // by the path of the document they are for
+	std::map<std::string, ViewEventMailbox<>> events_; // by the path of the document they are for
 	// The active document the tab bar last selected the tab of, and the document whose tab
 	// the user chose, the OpenDocument raised for it.
 	std::string followed_;

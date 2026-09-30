@@ -46,10 +46,20 @@ public:
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::Right; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &, uint64_t) override;
+	// A RevealRecord held until the Inspector draws, with what it was sent against: the
+	// selection's revision and the identity of the document it names (Document::identity).
+	// Taken, it shows nothing once the selection has moved since (off its record and back too:
+	// the view's one reveal went with the first move) or its document was read again, its
+	// records numbered anew (closed and opened, reloaded).
+	struct HeldReveal {
+		ViewEvent event;
+		uint64_t selection = 0;
+		uint64_t document = 0;
+	};
 	// A RevealRecord event, held until the Inspector draws.
-	void receive(const ViewEvent &event) { events_.post(event); }
+	void receive(const ViewEvent &event);
 	// The events it holds until it draws.
-	const ViewEventMailbox &events() const { return events_; }
+	const ViewEventMailbox<HeldReveal> &events() const { return events_; }
 
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
@@ -62,7 +72,7 @@ private:
 	// its record and in the document it was in (the selection moving off either lets it go);
 	// whether the form still has to scroll to it, and when it was asked (its row's light fades
 	// from then).
-	ViewEventMailbox events_;
+	ViewEventMailbox<HeldReveal> events_;
 	uint64_t reveal_document_ = 0;
 	NodeAddress reveal_record_;
 	std::string reveal_field_;

@@ -67,10 +67,11 @@ public:
 	// A RevealFile event (a ShowInFiles): Files comes forward at once, whether it draws this frame
 	// or not, and holds the event until it draws; then it selects the file, clears a filter that
 	// hides it, opens its folders, scrolls to it and, when the event asks, opens Rename... on it.
-	// Each event is shown once, the same file asked again shown again.
+	// Each event is shown once, the same file asked again shown again; of the events held when
+	// it draws only the newest is, an older ask (and its Rename...) passed over.
 	void receive(const ViewEvent &event);
 	// The events it holds until it draws.
-	const ViewEventMailbox &events() const { return events_; }
+	const ViewEventMailbox<> &events() const { return events_; }
 
 private:
 	// A folder of the tree: its folders (sorted by name) and its files (the scan's order,
@@ -137,7 +138,7 @@ private:
 	std::string previewed_; // the name Rename...'s preview was last asked for
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.
-	ViewEventMailbox events_;
+	ViewEventMailbox<> events_;
 	std::string scroll_to_;
 	std::string open_to_;
 };
