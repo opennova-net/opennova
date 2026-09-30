@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/ui/problems_list.h>
 
 #include <algorithm>
@@ -9,7 +10,6 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/session_json.h>
@@ -34,7 +34,7 @@ std::string joined(const std::vector<std::string> &names, const char *between) {
 std::string identity(const Diagnostic &d) {
 	static const std::string none;
 	const RequirementSubject *requirement = requirement_subject(d);
-	std::string out = d.code;
+	std::string out = d.code();
 	for (const std::string *part :
 	     {&d.asset, &d.record, &d.field, &subject_target(d), requirement ? &requirement->role : &none})
 		out += '\x1f' + *part;
@@ -173,7 +173,7 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	}
 	required_.clear();
 	for (size_t i = 0; i < view.findings.diagnostics.size(); ++i)
-		if (view.findings.diagnostics[i].code == finding_code(CoreFinding::RequirementMissing).token)
+		if (view.findings.diagnostics[i].row() == &finding_code(CoreFinding::RequirementMissing))
 			required_.push_back(i);
 	required_fixes_ = propose(view, fix_all_of(view, required_));
 	return answer;

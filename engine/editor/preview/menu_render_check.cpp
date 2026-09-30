@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
 
 #include <algorithm>
@@ -7,7 +8,6 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
-#include <editor/session/finding_codes.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
 

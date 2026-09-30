@@ -1,11 +1,13 @@
-// S13 A6: the finding codes (ADR 0046). Every finding is made from a row of a table: the editor's
-// own (CoreFinding) or a document type's (DocumentType::findings), each table static_asserted
-// into its enum's order. Here, over the tables as the registry holds them: every token is its own
-// across every table; finding_row finds each row by its token and nothing else; a type's rows are
-// its family's; the menu's render-check rows are the compiler notes' tokens; the columns say what
-// the fixes, the file index and the Problems location decided by the code's spelling before (the
-// same codes, now read from the rows); a finding made from a row carries its token; and a
-// finding's subject is written with the keys the wire had.
+// S13 A6: the finding codes (ADR 0046). Every finding is made from a row of a table, the editor's
+// own (CoreFinding, model/finding_code_row) or a document type's (DocumentType::findings), each
+// table static_asserted into its enum's order, and keeps it (Diagnostic::row). Here, over the
+// tables as the registry holds them: every token is its own across every table; finding_row finds
+// each row by its token and nothing else, a test's stand-in hiding none; a type's rows are one
+// family, its group's; the menu's render-check rows are the compiler notes' and the stylesheet's
+// reader rows the stylesheet reader's codes; the columns say what the fixes, the file index and
+// the Problems location decided by the code's spelling before, and the spelling still agrees
+// (a naming oracle); a finding keeps its row; and a finding's subject is written with the keys
+// the wire had.
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/catalog_validation.h>
@@ -14,9 +16,11 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <base/io/json.h>
+#include <formats/mns/mns_document.h>
 #include <runtime/menu/menu_frame.h>
 
 #include <algorithm>
@@ -33,7 +37,7 @@ using namespace opennova::editor;
 
 namespace {
 
-// Every table as the registry holds it: the core's, then each type's, with whose it is.
+// Every table as the registry holds it: the core's, then each registered type's, with whose it is.
 struct Table {
 	std::string owner;
 	FindingTable rows;
@@ -41,7 +45,7 @@ struct Table {
 std::vector<Table> tables() {
 	std::vector<Table> out{ { "core", core_finding_codes() } };
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
-		const DocumentType *type = document_type(static_cast<DocumentTypeId>(i));
+		const DocumentType *type = registered_document_type(static_cast<DocumentTypeId>(i));
 		if (type && type->findings) out.push_back({ type->name, type->findings() });
 	}
 	return out;
@@ -62,10 +66,18 @@ std::vector<std::string> fixed_by(FindingFix fixes) {
 	return tokens_where([fixes](const FindingCodeRow &row) { return row.fixes == fixes; });
 }
 
+bool starts_with(const std::string &text, const std::string &head) {
+	return text.compare(0, head.size(), head) == 0;
+}
+bool ends_with(const std::string &text, const std::string &tail) {
+	return text.size() >= tail.size() && text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+}
+
 } // namespace
 
 // Every row has a dotted token, none shared across the tables (the core's and every type's); a
-// Rewrite's words exactly on a Rewrite row, and no Rewrite on a row that blocks the save.
+// Rewrite's words exactly on a Rewrite row, and no Rewrite on a row that blocks the save;
+// finding_tables is the registry's walk; the columns' wire forms are each their own.
 static int test_tokens_unique() {
 	std::map<std::string, std::string> owners; // a token -> the table declaring it
 	size_t rows = 0;
@@ -87,19 +99,22 @@ static int test_tokens_unique() {
 	}
 	TEST_EXPECT(tables().size() == 1 + kDocumentTypeCount);
 	TEST_EXPECT(core_finding_codes().count == kCoreFindingCount);
-	// finding_tables (what the editor MCP's catalog lists) is the same walk.
 	const std::vector<Table> walked = tables();
 	const std::vector<NamedFindingTable> named = finding_tables();
 	TEST_EXPECT(named.size() == walked.size());
-	for (size_t i = 0; i < named.size() && i < walked.size(); ++i)
+	for (size_t i = 0; i < named.size() && i < walked.size(); ++i) {
 		TEST_EXPECT(walked[i].owner == named[i].owner && walked[i].rows.rows == named[i].rows.rows &&
 		            walked[i].rows.count == named[i].rows.count);
-	// The columns' wire forms, each its own.
+		for (const FindingCodeRow &row : named[i].rows)
+			TEST_EXPECT(finding_owner(&row) && std::string(finding_owner(&row)) == named[i].owner);
+	}
+	const FindingCodeRow stray{ "stray.code" };
+	TEST_EXPECT(!finding_owner(&stray) && !finding_owner(nullptr));
 	std::set<std::string> fixes;
 	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
 	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
 	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite })
-		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second);
+		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second && !std::string(finding_fix_token(fix)).empty());
 	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
 	            std::string(finding_place_token(FindingPlace::File)) == "file");
 	std::printf("%zu finding codes in %zu tables (%zu the editor's own)\n", rows, tables().size(),
@@ -107,8 +122,8 @@ static int test_tokens_unique() {
 	return 0;
 }
 
-// finding_row finds each row by its token (the row itself), and none for a token no table
-// declares; a code's row is the one its enumerator names.
+// finding_row finds each row by its token (the row itself), none for a token no table declares; a
+// code's row is the one its enumerator names.
 static int test_lookup() {
 	for (const Table &table : tables())
 		for (const FindingCodeRow &row : table.rows)
@@ -132,27 +147,61 @@ static int test_lookup() {
 	return 0;
 }
 
-// A type's codes are one family, its own (the Problems group they fall in); the menu's render
-// check has a row per compiler note, its token menu.render. and the note's, found by the note.
+// A test's stand-in in a registered type's place (S13 D6), with no finding codes of its own,
+// hides none of that type's: the lookup and the tables read the registry as registered.
+static int test_stand_in_hides_nothing() {
+	const FindingCodeRow *unused = finding_row("style.unused");
+	TEST_EXPECT(unused == &finding_code(StyleFinding::Unused));
+	DocumentType blank_styles;
+	blank_styles.id = DocumentTypeId::Styles;
+	blank_styles.name = "blank";
+	blank_styles.make = registered_document_type(DocumentTypeId::Styles)->make;
+	blank_styles.validate_file = registered_document_type(DocumentTypeId::Styles)->validate_file;
+	{
+		DocumentTypeStandIn stand_in(blank_styles);
+		TEST_EXPECT(document_type(DocumentTypeId::Styles) == &blank_styles);
+		TEST_EXPECT(finding_row("style.unused") == unused && finding_row("style.line_ending"));
+		bool styles = false;
+		for (const NamedFindingTable &table : finding_tables())
+			styles = styles || (std::string(table.owner) == "styles" && table.rows.holds(unused));
+		TEST_EXPECT(styles);
+	}
+	return 0;
+}
+
+// A type's codes are one family, its table's group: every token starts with its group's key; the
+// menu's render check has a row per compiler note, its token menu.render. and the note's, found by
+// the note; the stylesheet's reader rows are the stylesheet reader's codes, style. and the code's
+// token with '_' for '-' (its line-ending the validator's line_ending).
 static int test_type_tables() {
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
-		const DocumentType *type = document_type(static_cast<DocumentTypeId>(i));
+		const DocumentType *type = registered_document_type(static_cast<DocumentTypeId>(i));
 		TEST_EXPECT(type && type->findings);
 		if (!type || !type->findings) continue;
 		const FindingTable table = type->findings();
-		const std::string first = table.rows[0].token;
-		const std::string family = first.substr(0, first.find('.') + 1);
+		const FindingGroup group = table.rows[0].group;
 		for (const FindingCodeRow &row : table)
-			TEST_EXPECT(std::string(row.token).compare(0, family.size(), family) == 0);
+			TEST_EXPECT(row.group == group && starts_with(row.token, std::string(finding_group_key(group)) + "."));
 	}
 	for (int i = 0; i < menu::kMenuFrameNoteCodeCount; ++i) {
 		const auto note = static_cast<menu::MenuFrameNoteCode>(i);
 		const FindingCodeRow &row = finding_code(note);
 		TEST_EXPECT(std::string(row.token) == std::string("menu.render.") + menu::menu_frame_note_token(note));
-		TEST_EXPECT(finding_row(row.token) == &row && row.fixes == FindingFix::None && !row.blocks_save);
+		TEST_EXPECT(finding_row(row.token) == &row && menu_finding_codes().holds(&row) &&
+		            row.source == FindingSource::RenderCheck && row.group == FindingGroup::Menus);
 	}
 	TEST_EXPECT(menu_finding_codes().count ==
 	            static_cast<size_t>(MenuFinding::kCount) + size_t(menu::kMenuFrameNoteCodeCount));
+	for (size_t i = 0; i < mns::kDiagnosticCodeCount; ++i) {
+		const auto code = static_cast<mns::DiagnosticCode>(i);
+		std::string token = "style.";
+		for (const char *c = mns::diagnostic_code_token(code); *c; ++c) token += *c == '-' ? '_' : *c;
+		const FindingCodeRow &row = finding_code(code);
+		if (token != row.token)
+			std::fprintf(stderr, "%s reads as %s\n", mns::diagnostic_code_token(code), row.token);
+		TEST_EXPECT(token == row.token && finding_row(token) == &row && style_finding_codes().holds(&row));
+	}
+	TEST_EXPECT(&finding_code(mns::DiagnosticCode::LineEnding) == &finding_code(StyleFinding::LineEnding));
 	return 0;
 }
 
@@ -160,7 +209,10 @@ static int test_type_tables() {
 // rows): the fixes of each family (problem_fixes' collect), the Rewrite's words (its
 // rewrite_does), the files that do not serialize (ProblemFixIndex's suffix test: .unserializable,
 // .invalid_input), and the findings about the file as a whole (the Problems location's
-// asset.name.*, build.name_unstorable, build.archive_in_project).
+// asset.name.*, build.name_unstorable, build.archive_in_project); and the spelling still agrees
+// with them, a naming oracle over every row: the suffixes exactly on the rows that block the save,
+// asset.name. only on a row about the file as a whole. Every row's group has the family its token
+// starts with; the graph's two rows and the render check's are where they come from.
 static int test_columns() {
 	using Tokens = std::vector<std::string>;
 	TEST_EXPECT(fixed_by(FindingFix::Requirement) ==
@@ -194,23 +246,56 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.name_unstorable" }));
+	std::set<std::string> keys, titles;
+	for (size_t g = 1; g < kFindingGroupCount; ++g) {
+		const auto group = static_cast<FindingGroup>(g);
+		TEST_EXPECT(keys.insert(finding_group_key(group)).second && titles.insert(finding_group_title(group)).second);
+	}
+	for (const Table &table : tables()) {
+		for (const FindingCodeRow &row : table.rows) {
+			const std::string token = row.token;
+			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input")));
+			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
+			const std::string key = finding_group_key(row.group);
+			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));
+			const std::string source = finding_source_token(row);
+			TEST_EXPECT(row.source == FindingSource::Own ? source == key
+			            : row.source == FindingSource::Graph ? source == "graph"
+			                                                 : source == "render");
+		}
+	}
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::Graph; }) ==
+	            Tokens({ "graph.unreadable", "reference.missing" }));
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::RenderCheck; }) ==
+	            tokens_where([](const FindingCodeRow &row) { return starts_with(row.token, "menu.render."); }));
+	TEST_EXPECT(std::string(finding_group_key(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
+	                    "requirement.optional_missing" &&
+	            std::string(finding_group_title(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
+	                    "Optional files");
 	return 0;
 }
 
-// A finding made from a row carries its token, at its place; by a table's enumerator the same as
-// by its row; and it is about nothing more until its producer says what.
+// A finding keeps the row it was made from, its code the row's token; made from a row or its
+// enumerator alike; about nothing more until its producer says what; a Diagnostic no finding was
+// made into has no row and no code.
 static int test_make_finding() {
 	const Diagnostic by_row = make_finding(finding_code(StyleFinding::Unused), DiagnosticSeverity::Info,
 	                                       "No menu uses it.", "menus/menu_style.mns", "value");
 	const Diagnostic by_code = make_finding(StyleFinding::Unused, DiagnosticSeverity::Info, "No menu uses it.",
 	                                        "menus/menu_style.mns", "value");
-	TEST_EXPECT(by_row == by_code && by_row.code == "style.unused" && by_row.severity == DiagnosticSeverity::Info &&
+	TEST_EXPECT(by_row == by_code && by_row.row() == &finding_code(StyleFinding::Unused) &&
+	            by_row.code() == "style.unused" && by_row.severity == DiagnosticSeverity::Info &&
 	            by_row.message == "No menu uses it." && by_row.asset == "menus/menu_style.mns" &&
 	            by_row.field == "value" && std::holds_alternative<std::monostate>(by_row.subject) &&
 	            !requirement_subject(by_row) && !reference_subject(by_row) && subject_target(by_row).empty());
+	const Diagnostic note = make_finding(finding_code(menu::MenuFrameNoteCode::TextTruncated),
+	                                     DiagnosticSeverity::Warning, "Cut.");
+	TEST_EXPECT(note.row() == finding_row("menu.render.text_truncated") && note.code() == "menu.render.text_truncated");
 	const Diagnostic core = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Warning, "Unread.");
-	TEST_EXPECT(core.code == "graph.unreadable" && core.asset.empty() && core.field.empty());
-	// Two findings alike but for what they are about differ.
+	TEST_EXPECT(core.code() == "graph.unreadable" && core.asset.empty() && core.field.empty());
+	const Diagnostic none;
+	TEST_EXPECT(!none.row() && none.code().empty() && none != core);
+	// Two findings alike but for what they are about, or their row, differ.
 	Diagnostic required = make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "Missing.");
 	Diagnostic other = required;
 	required.subject = RequirementSubject{ "gametext", "gametext.bin" };
@@ -219,6 +304,9 @@ static int test_make_finding() {
 	            requirement_subject(required)->role == "gametext" && !reference_subject(required));
 	other.subject = ReferenceSubject{ ReferenceKind::TextTable, "gametext.bin" };
 	TEST_EXPECT(required != other && subject_target(other) == "gametext.bin" && !requirement_subject(other));
+	Diagnostic optional = make_finding(CoreFinding::RequirementOptionalMissing, DiagnosticSeverity::Error, "Missing.");
+	optional.subject = required.subject;
+	TEST_EXPECT(optional != required);
 	return 0;
 }
 
@@ -234,6 +322,7 @@ static int test_subject_keys() {
 	using Keys = std::vector<std::string>;
 	Diagnostic plain = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Warning, "Unread.", "a.mnu");
 	TEST_EXPECT(keys(plain) == Keys({ "severity", "code", "message", "asset" }));
+	TEST_EXPECT(diagnostic_to_json(plain).get_string("code", "") == "graph.unreadable");
 	Diagnostic required = make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "Missing.");
 	required.subject = RequirementSubject{ "gametext", "gametext.bin" };
 	TEST_EXPECT(keys(required) == Keys({ "severity", "code", "message", "role", "target" }));
@@ -259,6 +348,7 @@ int main() {
 	int failures = 0;
 	failures += test_tokens_unique();
 	failures += test_lookup();
+	failures += test_stand_in_hides_nothing();
 	failures += test_type_tables();
 	failures += test_columns();
 	failures += test_make_finding();

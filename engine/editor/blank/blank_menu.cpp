@@ -3,7 +3,6 @@
 #include <filesystem>
 
 #include <base/io/strutil.h>
-#include <editor/session/finding_codes.h>
 #include <formats/mnu/mnu.h>
 
 namespace opennova::editor {

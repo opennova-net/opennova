@@ -1,6 +1,5 @@
 #include "blank_makers.h"
 
-#include <editor/session/finding_codes.h>
 #include <formats/mns/mns_document.h>
 
 namespace opennova::editor {

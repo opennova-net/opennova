@@ -67,7 +67,7 @@ static int history_and_save() {
 	external.replace(hp, 5, "hp 99");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), external));
 	std::filesystem::last_write_time(dir.file("items.def"), stamp);
-	TEST_EXPECT(!document.save(error) && error.code == "document.conflict");
+	TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
 	std::string retained; TEST_EXPECT(read_file_text(dir.file("items.def"), retained, message));
 	TEST_EXPECT(retained == external && document.dirty());
 
@@ -76,7 +76,7 @@ static int history_and_save() {
 	TEST_EXPECT(std::get<DefItemDef>(row_at(reloaded, 0).data).hp == 99);
 	TEST_EXPECT(reloaded.apply(field(row, "hp", int64_t(7)), error));
 	std::filesystem::create_directory(dir.file("items.def.tmp"));
-	TEST_EXPECT(!reloaded.save(error) && error.code == "document.write" && reloaded.dirty());
+	TEST_EXPECT(!reloaded.save(error) && error.code() == "document.write" && reloaded.dirty());
 	TEST_EXPECT(read_file_text(dir.file("items.def"), retained, message) && retained == external);
 	return 0;
 }
@@ -177,7 +177,7 @@ static int malformed() {
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked() && document.issues().front().line == 2);
-	TEST_EXPECT(!document.save(error) && error.code == "document.unserializable");
+	TEST_EXPECT(!document.save(error) && error.code() == "document.unserializable");
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"Open\"\nid 100001\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.blocked());

@@ -308,7 +308,8 @@ static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationMapFind
 		"every AnimationMapFinding has exactly one row");
 static_assert(finding_entries_well_formed(kFindingEntries),
 		"the animation map's rows follow AnimationMapFinding's order, each token its own");
-constexpr auto kFindingRows = finding_rows(kFindingEntries);
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::AnimationMaps);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
 } // namespace
 

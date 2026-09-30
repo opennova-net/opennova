@@ -17,7 +17,6 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/document_base.h>
 #include <editor/model/edit.h>
-#include <editor/session/finding_codes.h>
 
 namespace editor_test {
 

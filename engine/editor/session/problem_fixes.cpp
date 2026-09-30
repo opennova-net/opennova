@@ -14,9 +14,9 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/model/field_text.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
-#include <editor/session/finding_codes.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -314,7 +314,7 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, s
 void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex &index, bool plan,
              std::vector<ProblemFix> &out) {
 	if (!view.project.open) return;
-	const FindingCodeRow *row = finding_row(d.code);
+	const FindingCodeRow *row = d.row();
 	if (!row) return;
 	switch (row->fixes) {
 	case FindingFix::None: return;
@@ -395,7 +395,7 @@ std::vector<ProblemFix> fixes_over(const Diagnostic &d, const SessionView &view,
 // so no Rewrite.
 ProblemFixIndex::ProblemFixIndex(const SessionView &view) {
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (const FindingCodeRow *row = finding_row(d.code); row && row->blocks_save) unserializable.insert(d.asset);
+		if (d.row() && d.row()->blocks_save) unserializable.insert(d.asset);
 }
 
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view, const ProblemFixIndex *index) {

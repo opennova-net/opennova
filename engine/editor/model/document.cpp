@@ -5,8 +5,6 @@
 #include <cctype>
 #include <cstdlib>
 
-#include <editor/session/finding_codes.h>
-
 namespace opennova::editor {
 
 uint64_t next_edit_gesture() {

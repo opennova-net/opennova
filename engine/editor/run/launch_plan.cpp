@@ -1,5 +1,5 @@
+#include <editor/model/diagnostic.h>
 #include <editor/run/launch_plan.h>
-#include <editor/session/finding_codes.h>
 
 #include <filesystem>
 #include <utility>

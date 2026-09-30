@@ -116,7 +116,7 @@ static int test_registry_shape() {
 	std::vector<uint8_t> out;
 	Diagnostic error;
 	TEST_EXPECT(!make_blank(request, AssetKind::Animation, out, error));
-	TEST_EXPECT(error.code == "blank.unavailable");
+	TEST_EXPECT(error.code() == "blank.unavailable");
 	TEST_EXPECT(std::string(blank_placement_dir(AssetKind::Menu)) == "menus");
 	TEST_EXPECT(std::string(blank_placement_dir(AssetKind::Texture)).empty());
 	return 0;
@@ -380,7 +380,7 @@ static int test_placeholder_texture() {
 	for (const char *name : {"skin.png", "skin", "chunk.aoc"}) {
 		request.logical_name = name;
 		TEST_EXPECT(!can_make_blank_texture(name, reason) && !reason.empty());
-		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code == "blank.texture" &&
+		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code() == "blank.texture" &&
 		            error.message == reason && error.asset == name);
 	}
 	return 0;

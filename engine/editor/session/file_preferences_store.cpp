@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/session/file_preferences_store.h>
 
 #include <filesystem>
@@ -7,7 +8,6 @@
 #include <base/io/json.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 
 namespace fs = std::filesystem;
 

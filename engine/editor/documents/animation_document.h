@@ -6,7 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/finding_code_row.h>
 #include <formats/bad/bad.h>
 #include <runtime/assets/asset_store.h>
 

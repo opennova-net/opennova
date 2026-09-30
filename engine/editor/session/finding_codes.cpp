@@ -1,5 +1,6 @@
 #include "finding_codes.h"
 
+#include <iterator>
 #include <string_view>
 #include <unordered_map>
 
@@ -9,197 +10,86 @@ namespace opennova::editor {
 
 namespace {
 
-using C = CoreFinding;
 using F = FindingFix;
-using P = FindingPlace;
+using G = FindingGroup;
 
-// A file's name, as a whole: Problems shows it in Files (renamed there when it has the fix).
-constexpr FindingCodeRow about_the_name(const char *token, FindingFix fixes) {
-	return { token, fixes, nullptr, false, P::File };
-}
-
-constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
-	{ C::AssetKindUnknown, { "asset.kind.unknown" } },
-	{ C::AssetNameDuplicate, about_the_name("asset.name.duplicate", F::Rename) },
-	{ C::AssetNameEmpty, about_the_name("asset.name.empty", F::None) },
-	{ C::AssetNameTooLong, about_the_name("asset.name.too_long", F::Rename) },
-	{ C::AssetUnreadable, { "asset.unreadable" } },
-	{ C::BlankDef, { "blank.def" } },
-	{ C::BlankFont, { "blank.font" } },
-	{ C::BlankMenu, { "blank.menu" } },
-	{ C::BlankStrings, { "blank.strings" } },
-	{ C::BlankStyle, { "blank.style" } },
-	{ C::BlankTexture, { "blank.texture" } },
-	{ C::BlankUnavailable, { "blank.unavailable" } },
-	{ C::BuildArchive, { "build.archive" } },
-	// An archive among the project's files, which the build does not pack: its place.
-	{ C::BuildArchiveInProject, about_the_name("build.archive_in_project", F::None) },
-	{ C::BuildBlocked, { "build.blocked" } },
-	{ C::BuildChanged, { "build.changed" } },
-	{ C::BuildCopy, { "build.copy" } },
-	{ C::BuildNameUnstorable, about_the_name("build.name_unstorable", F::Rename) },
-	{ C::BuildRead, { "build.read" } },
-	{ C::BuildVerify, { "build.verify" } },
-	{ C::BuildWrite, { "build.write" } },
-	{ C::CreateMissingExists, { "create_missing.exists" } },
-	{ C::CreateMissingUnknown, { "create_missing.unknown" } },
-	{ C::CreateMissingWrite, { "create_missing.write" } },
-	{ C::CreateMissingWrongKind, { "create_missing.wrong_kind" } },
-	{ C::DocumentBatch, { "document.batch" } },
-	{ C::DocumentCollection, { "document.collection" } },
-	{ C::DocumentConflict, { "document.conflict", F::Reload } },
-	{ C::DocumentCopy, { "document.copy" } },
-	{ C::DocumentDecode, { "document.decode" } },
-	{ C::DocumentDuplicate, { "document.duplicate" } },
-	{ C::DocumentKind, { "document.kind" } },
-	{ C::DocumentMissing, { "document.missing" } },
-	{ C::DocumentName, { "document.name" } },
-	{ C::DocumentNoFile, { "document.no_file" } },
-	{ C::DocumentNoRecords, { "document.no_records" } },
-	{ C::DocumentNotOpen, { "document.not_open" } },
-	{ C::DocumentParse, { "document.parse" } },
-	{ C::DocumentPaste, { "document.paste" } },
-	{ C::DocumentPath, { "document.path" } },
-	{ C::DocumentPayload, { "document.payload" } },
-	{ C::DocumentRead, { "document.read" } },
-	{ C::DocumentRevertNothing, { "document.revert_nothing" } },
-	{ C::DocumentSelection, { "document.selection" } },
-	{ C::DocumentSnapshot, { "document.snapshot" } },
-	{ C::DocumentStale, { "document.stale" } },
-	{ C::DocumentStructure, { "document.structure" } },
-	// A Save refused: the document holds what it cannot write.
-	{ C::DocumentUnserializable, { "document.unserializable", F::None, nullptr, true } },
-	{ C::DocumentValue, { "document.value" } },
-	{ C::DocumentWrite, { "document.write" } },
-	{ C::EditorSettingsJson, { "editor_settings.json" } },
-	{ C::EditorSettingsSchemaVersionUnsupported, { "editor_settings.schema_version.unsupported" } },
-	{ C::EditorSettingsUnreadable, { "editor_settings.unreadable" } },
-	{ C::EditorSettingsWrite, { "editor_settings.write" } },
-	{ C::GraphUnreadable, { "graph.unreadable" } },
-	{ C::ImportAlphaDropped, { "import.alpha_dropped" } },
-	{ C::ImportArchive, { "import.archive" } },
-	{ C::ImportChanged, { "import.changed" } },
-	{ C::ImportDecode, { "import.decode" } },
-	{ C::ImportDuplicate, { "import.duplicate" } },
-	{ C::ImportEncode, { "import.encode" } },
-	{ C::ImportExists, { "import.exists" } },
-	{ C::ImportFolder, { "import.folder" } },
-	{ C::ImportInstall, { "import.install" } },
-	{ C::ImportKind, { "import.kind" } },
-	{ C::ImportName, { "import.name" } },
-	{ C::ImportNotPlanned, { "import.not_planned" } },
-	{ C::ImportNotPublished, { "import.not_published" } },
-	{ C::ImportOption, { "import.option" } },
-	{ C::ImportOrphanRecord, { "import.orphan_record" } },
-	{ C::ImportOutputMissing, { "import.output_missing", F::Reimport } },
-	{ C::ImportPath, { "import.path" } },
-	{ C::ImportPublish, { "import.publish" } },
-	{ C::ImportRead, { "import.read" } },
-	{ C::ImportRecord, { "import.record" } },
-	{ C::ImportScene, { "import.scene" } },
-	{ C::ImportSceneNote, { "import.scene_note" } },
-	{ C::ImportSidecar, { "import.sidecar" } },
-	{ C::ImportSource, { "import.source" } },
-	{ C::ImportTextureNotImported, { "import.texture_not_imported", F::UnimportedTexture } },
-	{ C::ImportUnreadable, { "import.unreadable" } },
-	{ C::ImportWrite, { "import.write" } },
-	{ C::LocalSettingsJson, { "local_settings.json" } },
-	{ C::LocalSettingsSchemaVersionUnsupported, { "local_settings.schema_version.unsupported" } },
-	{ C::LocalSettingsUnreadable, { "local_settings.unreadable" } },
-	{ C::LocalSettingsWrite, { "local_settings.write" } },
-	{ C::OperationBusy, { "operation.busy" } },
-	{ C::OperationNone, { "operation.none" } },
-	{ C::OperationNotCancellable, { "operation.not_cancellable" } },
-	{ C::PlayAlreadyRunning, { "play.already_running" } },
-	// A file the game reported missing when it booted: the requirement's fixes, while its row is
-	// missing.
-	{ C::PlayBootMissing, { "play.boot_missing", F::Requirement } },
-	{ C::PlayCrashed, { "play.crashed" } },
-	{ C::PlayInstallCopy, { "play.install_copy" } },
-	{ C::PlayInstallMissing, { "play.install_missing" } },
-	{ C::PlayRuntimeMissing, { "play.runtime_missing" } },
-	{ C::PlaySpawn, { "play.spawn" } },
-	{ C::PlayUnsupported, { "play.unsupported" } },
-	{ C::ProjectExists, { "project.exists" } },
-	{ C::ProjectFieldInvalid, { "project.field.invalid" } },
-	{ C::ProjectFileMissing, { "project.file.missing" } },
-	{ C::ProjectFileUnreadable, { "project.file.unreadable" } },
-	{ C::ProjectJson, { "project.json" } },
-	{ C::ProjectNone, { "project.none" } },
-	{ C::ProjectRootUnreadable, { "project.root.unreadable" } },
-	{ C::ProjectSchemaVersionUnsupported, { "project.schema_version.unsupported" } },
-	{ C::ProjectTargetGameUnknown, { "project.target_game.unknown" } },
-	{ C::ProjectTitleEmpty, { "project.title_empty" } },
-	{ C::ProjectWrite, { "project.write" } },
-	{ C::ReferenceMissing, { "reference.missing", F::Reference } },
-	{ C::RenameConflict, { "rename.conflict" } },
-	{ C::RenameCopy, { "rename.copy" } },
-	{ C::RenameExists, { "rename.exists" } },
-	{ C::RenameImported, { "rename.imported" } },
-	{ C::RenameKind, { "rename.kind" } },
-	{ C::RenameMove, { "rename.move" } },
-	{ C::RenameName, { "rename.name" } },
-	{ C::RenamePartial, { "rename.partial" } },
-	{ C::RenamePath, { "rename.path" } },
-	{ C::RenameRemove, { "rename.remove" } },
-	{ C::RenameSite, { "rename.site" } },
-	{ C::RenameStyle, { "rename.style" } },
-	{ C::RenameTooLong, { "rename.too_long" } },
-	{ C::RenameUnchanged, { "rename.unchanged" } },
-	{ C::RenameUnknownFile, { "rename.unknown_file" } },
-	{ C::RenameUnknownSymbol, { "rename.unknown_symbol" } },
-	{ C::RenameWrite, { "rename.write" } },
-	{ C::RequirementAssigned, { "requirement.assigned" } },
-	{ C::RequirementKind, { "requirement.kind" } },
-	{ C::RequirementMissing, { "requirement.missing", F::Requirement } },
-	{ C::RequirementOptionalMissing, { "requirement.optional_missing", F::Requirement } },
-	{ C::RequirementUnknown, { "requirement.unknown" } },
-	{ C::RequirementUnknownFile, { "requirement.unknown_file" } },
-	{ C::RequirementWrongKind, { "requirement.wrong_kind", F::WrongKind } },
-	{ C::UnsavedDiscard, { "unsaved.discard" } },
-	{ C::UnsavedNone, { "unsaved.none" } },
+// Each group's key (the family every code of it starts with, the whole code for the optional
+// files) and title, in FindingGroup's order.
+struct GroupRow {
+	FindingGroup group;
+	const char *key;
+	const char *title;
+};
+constexpr GroupRow kGroups[] = {
+	{ G::None, "", "" },
+	{ G::RequiredFiles, "requirement", "Required files" },
+	{ G::OptionalFiles, "requirement.optional_missing", "Optional files" },
+	{ G::MissingReferences, "reference", "Missing references" },
+	{ G::FilesNotChecked, "graph", "Files not checked" },
+	{ G::ProjectFiles, "asset", "Project files" },
+	{ G::Project, "project", "Project" },
+	{ G::Documents, "document", "Documents" },
+	{ G::Imports, "import", "Imports" },
+	{ G::Build, "build", "Build" },
+	{ G::Play, "play", "Play" },
+	{ G::Renames, "rename", "Renames" },
+	{ G::NewFiles, "blank", "New files" },
+	{ G::CreateMissing, "create_missing", "Create missing files" },
+	{ G::EditorSettings, "editor_settings", "Editor settings" },
+	{ G::LocalSettings, "local_settings", "Local settings" },
+	{ G::Operations, "operation", "Operations" },
+	{ G::UnsavedChanges, "unsaved", "Unsaved changes" },
+	{ G::Catalogs, "catalog", "Catalogs" },
+	{ G::StringTables, "strings", "String tables" },
+	{ G::Menus, "menu", "Menus" },
+	{ G::Stylesheets, "style", "Stylesheets" },
+	{ G::Models, "model", "Models" },
+	{ G::Animations, "animation", "Animations" },
+	{ G::AnimationMaps, "animation_map", "Animation maps" },
 };
 
-static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");
-static_assert(finding_entries_well_formed(kEntries),
-		"the core rows follow CoreFinding's order, each token its own, a Rewrite's words on a Rewrite row");
+constexpr bool groups_well_formed() {
+	for (size_t i = 0; i < std::size(kGroups); ++i) {
+		if (static_cast<size_t>(kGroups[i].group) != i) return false;
+		for (size_t j = 0; j < i; ++j)
+			if (same_finding_token(kGroups[i].key, kGroups[j].key)) return false;
+	}
+	return true;
+}
+static_assert(std::size(kGroups) == kFindingGroupCount, "every FindingGroup has exactly one row");
+static_assert(groups_well_formed(), "the group rows follow FindingGroup's order, each key its own");
 
-constexpr std::array<FindingCodeRow, kCoreFindingCount> kRows = finding_rows(kEntries);
+const std::unordered_map<std::string_view, const FindingCodeRow *> &lookup() {
+	static const std::unordered_map<std::string_view, const FindingCodeRow *> map = [] {
+		std::unordered_map<std::string_view, const FindingCodeRow *> out;
+		for (const NamedFindingTable &table : finding_tables())
+			for (const FindingCodeRow &row : table.rows) out.emplace(row.token, &row);
+		return out;
+	}();
+	return map;
+}
 
 } // namespace
 
-const FindingCodeRow &finding_code(CoreFinding code) {
-	return kRows[static_cast<size_t>(code)];
-}
-
-FindingTable core_finding_codes() { return { kRows.data(), kRows.size() }; }
-
 const FindingCodeRow *finding_row(const std::string &token) {
-	// The core's by a map made once; a type's by its own table, as the registry answers it now (a
-	// test's stand-in in its type's place).
-	static const std::unordered_map<std::string_view, const FindingCodeRow *> core = [] {
-		std::unordered_map<std::string_view, const FindingCodeRow *> out;
-		for (const FindingCodeRow &row : kRows) out.emplace(row.token, &row);
-		return out;
-	}();
-	if (const auto found = core.find(std::string_view(token)); found != core.end())
-		return found->second;
-	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
-		const DocumentType *type = document_type(static_cast<DocumentTypeId>(i));
-		if (!type || !type->findings) continue;
-		for (const FindingCodeRow &row : type->findings())
-			if (token == row.token) return &row;
-	}
-	return nullptr;
+	const auto &map = lookup();
+	const auto found = map.find(std::string_view(token));
+	return found == map.end() ? nullptr : found->second;
 }
 
 std::vector<NamedFindingTable> finding_tables() {
 	std::vector<NamedFindingTable> out{ { "core", core_finding_codes() } };
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
-		const DocumentType *type = document_type(static_cast<DocumentTypeId>(i));
+		const DocumentType *type = registered_document_type(static_cast<DocumentTypeId>(i));
 		if (type && type->findings) out.push_back({ type->name, type->findings() });
 	}
 	return out;
+}
+
+const char *finding_owner(const FindingCodeRow *row) {
+	for (const NamedFindingTable &table : finding_tables())
+		if (table.rows.holds(row)) return table.owner;
+	return nullptr;
 }
 
 const char *finding_fix_token(FindingFix fixes) {
@@ -219,7 +109,26 @@ const char *finding_fix_token(FindingFix fixes) {
 }
 
 const char *finding_place_token(FindingPlace place) {
-	return place == P::File ? "file" : "content";
+	return place == FindingPlace::File ? "file" : "content";
+}
+
+const char *finding_group_key(FindingGroup group) {
+	const size_t at = static_cast<size_t>(group);
+	return at < std::size(kGroups) ? kGroups[at].key : "";
+}
+
+const char *finding_group_title(FindingGroup group) {
+	const size_t at = static_cast<size_t>(group);
+	return at < std::size(kGroups) ? kGroups[at].title : "";
+}
+
+const char *finding_source_token(const FindingCodeRow &row) {
+	switch (row.source) {
+	case FindingSource::Graph: return "graph";
+	case FindingSource::RenderCheck: return "render";
+	case FindingSource::Own: break;
+	}
+	return finding_group_key(row.group);
 }
 
 } // namespace opennova::editor

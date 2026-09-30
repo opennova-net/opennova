@@ -67,6 +67,10 @@ bool makes_records(const DocumentType &type) {
 const DocumentType *document_type(DocumentTypeId id) {
 	if (const DocumentType *stand_in = g_stand_in.load(); stand_in && stand_in->id == id)
 		return stand_in;
+	return registered_document_type(id);
+}
+
+const DocumentType *registered_document_type(DocumentTypeId id) {
 	const size_t index = static_cast<size_t>(id);
 	return index >= 1 && index <= kDocumentTypeCount ? &kTypes[index - 1] : nullptr;
 }

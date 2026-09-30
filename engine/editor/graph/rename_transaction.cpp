@@ -14,8 +14,8 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;

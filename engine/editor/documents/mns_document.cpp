@@ -140,7 +140,8 @@ static_assert(std::size(kFindingEntries) == static_cast<size_t>(StyleFinding::kC
 		"every StyleFinding has exactly one row");
 static_assert(finding_entries_well_formed(kFindingEntries),
 		"the stylesheet's rows follow StyleFinding's order, each token its own");
-constexpr auto kFindingRows = finding_rows(kFindingEntries);
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Stylesheets);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
 const std::string *text_of(const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
@@ -155,16 +156,36 @@ std::string sentence(std::string message) {
 	return message;
 }
 
-// What the stylesheet reader says of a line, as the stylesheet's row: its code (mns::Diagnostic::code,
-// "lone-backslash") is the row's token after "style.", '_' for '-' (style.lone_backslash). A code the
-// reader adds that no row has yet is reported as a reading the game makes otherwise than shown.
-StyleFinding reader_finding(const std::string &code) {
-	std::string token = "style.";
-	for (char c : code) token += c == '-' ? '_' : c;
-	for (size_t i = 0; i < kFindingRows.size(); ++i)
-		if (token == kFindingRows[i].token) return static_cast<StyleFinding>(i);
-	return StyleFinding::ReadDifferently;
-}
+// The stylesheet's row for each of what the reader says of a line, in mns::DiagnosticCode's order:
+// the row whose token is style. and the code's with '_' for '-' (the reader's line-ending is the
+// validator's LineEnding).
+constexpr StyleFinding kReaderRows[] = {
+	StyleFinding::LineEnding,
+	StyleFinding::DirectiveForm,
+	StyleFinding::IfWithoutArgument,
+	StyleFinding::NoncanonicalIfArg,
+	StyleFinding::UnbalancedElse,
+	StyleFinding::DuplicateElse,
+	StyleFinding::UnbalancedEndif,
+	StyleFinding::UnknownDirective,
+	StyleFinding::DirectiveTail,
+	StyleFinding::LoneBackslash,
+	StyleFinding::ValueIsDirective,
+	StyleFinding::ValueStartsWithHash,
+	StyleFinding::ValueOnNextLine,
+	StyleFinding::DuplicateName,
+	StyleFinding::ContinuedDuplicate,
+	StyleFinding::NulByte,
+	StyleFinding::InvalidNameChar,
+	StyleFinding::MissingValueDelimiter,
+	StyleFinding::NoValue,
+	StyleFinding::ContinuationAtEof,
+	StyleFinding::UnterminatedIf,
+	StyleFinding::Hangs,
+	StyleFinding::Stops,
+};
+static_assert(std::size(kReaderRows) == mns::kDiagnosticCodeCount,
+		"every stylesheet reader code has exactly one row");
 
 } // namespace
 
@@ -400,7 +421,7 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	// A line end the game does not read: remembered for Problems; the rows end CR LF, as
 	// Save writes them, so every check reads what the saved file will hold.
 	for (const mns::Diagnostic &d : doc.diagnostics())
-		if (d.code == "line-ending" && !file->line_end_line) {
+		if (d.code == mns::DiagnosticCode::LineEnding && !file->line_end_line) {
 			file->line_end_line = d.line;
 			file->line_end_message = d.message;
 		}
@@ -523,6 +544,10 @@ const FindingCodeRow &finding_code(StyleFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
 }
 
+const FindingCodeRow &finding_code(mns::DiagnosticCode code) {
+	return finding_code(kReaderRows[static_cast<size_t>(code)]);
+}
+
 FindingTable style_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
 
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
@@ -570,7 +595,7 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	for (const mns::Diagnostic &d : evaluated.diagnostics)
 		on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error
 												   : DiagnosticSeverity::Warning,
-				reader_finding(d.code), sentence(d.message), d.line);
+				kReaderRows[static_cast<size_t>(d.code)], sentence(d.message), d.line);
 	// The rows end CR LF; the file keeps the line ends it was read with until Save
 	// writes it (the build packs the file).
 	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());

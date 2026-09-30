@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 
 #include <algorithm>
@@ -10,7 +11,6 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
@@ -479,7 +479,8 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		if (!document->save(error)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
 			// until the document is read again (its Reload fix).
-			if (error.code == finding_code(CoreFinding::DocumentConflict).token && document->dirty()) conflicts_.insert(document->path());
+			if (error.row() == &finding_code(CoreFinding::DocumentConflict) && document->dirty())
+				conflicts_.insert(document->path());
 			failures.push_back(error);
 			continue;
 		}

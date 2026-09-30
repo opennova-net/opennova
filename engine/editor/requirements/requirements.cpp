@@ -1,7 +1,7 @@
+#include <editor/model/diagnostic.h>
 #include <editor/requirements/requirements.h>
 
 #include <editor/assets/asset_type_registry.h>
-#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 

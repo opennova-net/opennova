@@ -9,7 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/finding_code_row.h>
 #include <formats/mns/mns_document.h>
 
 namespace opennova::editor {
@@ -156,9 +156,9 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document);
 // (mns_document.cpp, static_asserted into this order): its validator's (a line end the game does
 // not read, which a rewrite ends CR LF; a stylesheet the game does not read; a value's markup, a
 // %NAME% inside it, a doubled backslash, a value the game reads otherwise than shown), then the
-// stylesheet reader's, one per mns::Diagnostic code (style. and the code, '_' for '-': the
-// reader's line-ending is LineEnding), then the use checks' of its variables
-// (graph/use_checks.h).
+// stylesheet reader's, one per mns::DiagnosticCode (finding_code(mns::DiagnosticCode): style. and
+// the code's token, '_' for '-'; the reader's line-ending is LineEnding), then the use checks' of
+// its variables (graph/use_checks.h).
 enum class StyleFinding {
 	LineEnding,
 	NotLoaded,
@@ -166,7 +166,7 @@ enum class StyleFinding {
 	NestedVar,
 	Backslash,
 	ReadDifferently,
-	// the stylesheet reader's (mns::Diagnostic::code)
+	// the stylesheet reader's (mns::DiagnosticCode)
 	DirectiveForm,
 	IfWithoutArgument,
 	NoncanonicalIfArg,
@@ -197,6 +197,8 @@ enum class StyleFinding {
 	kCount
 };
 const FindingCodeRow &finding_code(StyleFinding code);
+// The row of what the stylesheet reader says of a line.
+const FindingCodeRow &finding_code(mns::DiagnosticCode code);
 FindingTable style_finding_codes();
 
 } // namespace opennova::editor

@@ -26,12 +26,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/create_missing.cpp
     # model — the neutral editing core: the document lifecycle and the undo journal, what a field
-    # shows, and the find over a document's fields
+    # shows, the find over a document's fields, and the finding codes' rows (S13 A6: the tables'
+    # shape and the editor's own table)
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
@@ -120,8 +122,8 @@ add_library(opennova_editor STATIC
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
     # imports, renames, the unsaved guard, the preferences over their store), what Problems
     # shows of its findings and offers to do about them, the request and query tables (S13 A4,
-    # A5) and their wire forms (session_json, view_json), and the finding codes every finding is
-    # made from (S13 A6: the editor's own table and the lookup over it and the types')
+    # A5) and their wire forms (session_json, view_json), and the finding codes' lookup over every
+    # table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp

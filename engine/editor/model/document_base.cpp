@@ -4,7 +4,6 @@
 #include <base/io/hash.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 
 #include <atomic>
 #include <utility>

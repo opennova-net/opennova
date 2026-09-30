@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/preview/menu_preview_json.h>
 
 #include <cmath>
@@ -7,7 +8,6 @@
 #include <editor/model/edit.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>

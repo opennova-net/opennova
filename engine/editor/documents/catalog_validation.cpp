@@ -24,7 +24,8 @@ static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::
 		"every CatalogFinding has exactly one row");
 static_assert(finding_entries_well_formed(kFindingEntries),
 		"the catalog's rows follow CatalogFinding's order, each token its own");
-constexpr auto kFindingRows = finding_rows(kFindingEntries);
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Catalogs);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
 const CatalogRow &catalog_row(const Node &node) { return static_cast<const CatalogRow &>(node); }
 

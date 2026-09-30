@@ -268,10 +268,10 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			ImGui::PopID();
 		}
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text(d.code);
+		ui_kit::clipped_text(d.code());
 		ImGui::PopStyleColor();
 	} else {
-		ui_kit::clipped_text(d.message, d.code.empty() ? std::string() : d.message + "\n\n" + d.code);
+		ui_kit::clipped_text(d.message, d.code().empty() ? std::string() : d.message + "\n\n" + d.code());
 	}
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();

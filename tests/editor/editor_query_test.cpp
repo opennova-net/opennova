@@ -412,7 +412,7 @@ static int test_problems_params() {
 		std::vector<std::string> rows;
 		for (const size_t index : answer_problems(query, view).rows) {
 			const Diagnostic &d = view.findings.diagnostics[index];
-			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code + " " +
+			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code() + " " +
 					d.asset);
 		}
 		return rows;
@@ -699,10 +699,10 @@ static int test_catalog() {
 		TEST_EXPECT(concerns->array[i].string == kViewConcernRows[i].token);
 	// Every code with its row's columns, in the tables' order (the editor's own, then each type's),
 	// each with how many of the findings the session holds carry it: every finding held is counted
-	// under its code's row.
-	std::map<std::string, size_t> counts;
+	// under the row it keeps, each a table's (none listed as table none).
+	std::map<const FindingCodeRow *, size_t> counts;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		++counts[d.code];
+		++counts[d.row()];
 	const JsonValue *codes = catalog.get("finding_codes");
 	TEST_EXPECT(codes && codes->array.size() == rows && !counts.empty());
 	size_t at = 0, held = 0;
@@ -711,7 +711,7 @@ static int test_catalog() {
 			if (!codes || at >= codes->array.size())
 				return 1;
 			const JsonValue &entry = codes->array[at++];
-			const auto count = counts.find(row.token);
+			const auto count = counts.find(&row);
 			const size_t expected = count == counts.end() ? 0 : count->second;
 			held += expected;
 			TEST_EXPECT(entry.get_string("code", "") == row.token &&
@@ -722,10 +722,21 @@ static int test_catalog() {
 							(row.rewrite_does ? row.rewrite_does : "") &&
 					entry.get_bool("blocks_save", !row.blocks_save) == row.blocks_save &&
 					entry.get_string("place", "") == finding_place_token(row.place) &&
+					entry.get_string("group", "") == finding_group_key(row.group) &&
+					entry.get_string("source", "") == finding_source_token(row) &&
 					entry.get_number("count", -1.0) == double(expected));
 		}
 	}
 	TEST_EXPECT(held == session.view().findings.diagnostics.size());
+	// The two sources that are not a group's: the graph's rows and the render check's.
+	for (size_t i = 0; codes && i < codes->array.size(); ++i) {
+		const JsonValue &entry = codes->array[i];
+		const std::string code = entry.get_string("code", "");
+		const std::string source = entry.get_string("source", "");
+		TEST_EXPECT((source == "graph") == (code == "reference.missing" || code == "graph.unreadable"));
+		TEST_EXPECT((source == "render") == (code.rfind("menu.render.", 0) == 0));
+		TEST_EXPECT(source == "graph" || source == "render" || source == entry.get_string("group", "-"));
+	}
 	TEST_EXPECT(catalog.get_number("page_max", 0.0) == double(kQueryPageMax));
 	return 0;
 }

@@ -5,7 +5,6 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
-#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 

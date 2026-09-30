@@ -145,28 +145,33 @@ inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSever
 			std::move(field));
 }
 
-// What a finding is about, as a test reads it: its subject of that kind, or one holding nothing
-// (no role, no target, ReferenceKind::None, no scope, loader_arg -1) when it has none.
+// A finding's subject of the kind a test reads: a finding about anything else stops the test (a
+// check of a member it does not have would pass for nothing).
+[[noreturn]] inline void wrong_subject(const opennova::editor::Diagnostic &d, const char *kind) {
+	std::fprintf(stderr, "%s (%s) is not about a %s\n", d.code().c_str(), d.message.c_str(), kind);
+	std::abort();
+}
 inline const opennova::editor::ReferenceSubject &reference_of(const opennova::editor::Diagnostic &d) {
-	static const opennova::editor::ReferenceSubject none;
 	const opennova::editor::ReferenceSubject *subject = opennova::editor::reference_subject(d);
-	return subject ? *subject : none;
+	if (!subject) wrong_subject(d, "reference");
+	return *subject;
 }
 inline const opennova::editor::RequirementSubject &requirement_of(const opennova::editor::Diagnostic &d) {
-	static const opennova::editor::RequirementSubject none;
 	const opennova::editor::RequirementSubject *subject = opennova::editor::requirement_subject(d);
-	return subject ? *subject : none;
+	if (!subject) wrong_subject(d, "required file");
+	return *subject;
 }
-// A hand-made finding's subject of that kind, the test's to set (the finding is about that kind
-// from then on).
+// A hand-made finding's subject of that kind, the test's to set: made when the finding is about
+// nothing more yet; a finding about the other kind stops the test.
 inline opennova::editor::ReferenceSubject &own_reference(opennova::editor::Diagnostic &d) {
-	if (!std::holds_alternative<opennova::editor::ReferenceSubject>(d.subject))
-		d.subject = opennova::editor::ReferenceSubject();
+	if (std::holds_alternative<std::monostate>(d.subject)) d.subject = opennova::editor::ReferenceSubject();
+	if (!std::holds_alternative<opennova::editor::ReferenceSubject>(d.subject)) wrong_subject(d, "reference");
 	return std::get<opennova::editor::ReferenceSubject>(d.subject);
 }
 inline opennova::editor::RequirementSubject &own_requirement(opennova::editor::Diagnostic &d) {
+	if (std::holds_alternative<std::monostate>(d.subject)) d.subject = opennova::editor::RequirementSubject();
 	if (!std::holds_alternative<opennova::editor::RequirementSubject>(d.subject))
-		d.subject = opennova::editor::RequirementSubject();
+		wrong_subject(d, "required file");
 	return std::get<opennova::editor::RequirementSubject>(d.subject);
 }
 

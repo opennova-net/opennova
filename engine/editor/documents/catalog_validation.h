@@ -3,7 +3,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/finding_code_row.h>
 
 namespace opennova::editor {
 

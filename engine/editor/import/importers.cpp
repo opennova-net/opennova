@@ -9,7 +9,7 @@
 #include <base/io/strutil.h>
 #include <editor/import/png_decode.h>
 #include <editor/import/quantize.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/diagnostic.h>
 #include <formats/pcx/pcx_io.h>
 
 namespace opennova::editor {

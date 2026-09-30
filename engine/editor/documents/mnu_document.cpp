@@ -21,6 +21,15 @@ namespace opennova::editor {
 
 namespace {
 
+// A code the render check makes (preview/menu_render_check.h): a compiler note, a screen it could
+// not map.
+constexpr FindingCodeRow from_render_check(const char *token) {
+	FindingCodeRow row;
+	row.token = token;
+	row.source = FindingSource::RenderCheck;
+	return row;
+}
+
 constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
 	{ MenuFinding::IgnoredInput, { "menu.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
@@ -28,7 +37,7 @@ constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen" } },
 	{ MenuFinding::DuplicateWindow, { "menu.duplicate_window" } },
 	{ MenuFinding::ActionInert, { "menu.action_inert" } },
-	{ MenuFinding::RenderMapping, { "menu.render.mapping" } },
+	{ MenuFinding::RenderMapping, from_render_check("menu.render.mapping") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MenuFinding::kCount),
 		"every MenuFinding has exactly one row");
@@ -37,43 +46,43 @@ static_assert(finding_entries_well_formed(kFindingEntries),
 
 using Note = menu::MenuFrameNoteCode;
 constexpr FindingCodeEntry<Note> kNoteEntries[] = {
-	{ Note::AppearanceStateUnknown, { "menu.render.appearance_state_unknown" } },
-	{ Note::AppearanceTypeUnknown, { "menu.render.appearance_type_unknown" } },
-	{ Note::AppearanceCustom, { "menu.render.appearance_custom" } },
-	{ Note::AppearanceReplaced, { "menu.render.appearance_replaced" } },
-	{ Note::ColorUnparsed, { "menu.render.color_unparsed" } },
-	{ Note::ColorTransparent, { "menu.render.color_transparent" } },
-	{ Note::StyleVarUnresolved, { "menu.render.style_var_unresolved" } },
-	{ Note::TypeUnknown, { "menu.render.type_unknown" } },
-	{ Note::TypeInteriorDeferred, { "menu.render.type_interior_deferred" } },
-	{ Note::ItemKindNotDrawn, { "menu.render.item_kind_not_drawn" } },
-	{ Note::TableCellsDeferred, { "menu.render.table_cells_deferred" } },
-	{ Note::ScrollExtentDefault, { "menu.render.scroll_extent_default" } },
-	{ Note::FontMissing, { "menu.render.font_missing" } },
-	{ Note::FontUnreadable, { "menu.render.font_unreadable" } },
-	{ Note::TextureMissing, { "menu.render.texture_missing" } },
-	{ Note::TextureUnreadable, { "menu.render.texture_unreadable" } },
-	{ Note::TextTableMissing, { "menu.render.text_table_missing" } },
-	{ Note::TextTableUnreadable, { "menu.render.text_table_unreadable" } },
-	{ Note::RectEmpty, { "menu.render.rect_empty" } },
-	{ Note::TextTruncated, { "menu.render.text_truncated" } },
-	{ Note::TextNoRoom, { "menu.render.text_no_room" } },
-	{ Note::TextNoFont, { "menu.render.text_no_font" } },
-	{ Note::TextIdMissing, { "menu.render.text_id_missing" } },
-	{ Note::ImageBandEmpty, { "menu.render.image_band_empty" } },
-	{ Note::ImageHeightShared, { "menu.render.image_height_shared" } },
-	{ Note::StateFallback, { "menu.render.state_fallback" } },
-	{ Note::CheckedNoArt, { "menu.render.checked_no_art" } },
-	{ Note::FrameAbsent, { "menu.render.frame_absent" } },
-	{ Note::FrameStencilUnloaded, { "menu.render.frame_stencil_unloaded" } },
-	{ Note::FrameNoStencil, { "menu.render.frame_no_stencil" } },
-	{ Note::FrameTileZero, { "menu.render.frame_tile_zero" } },
-	{ Note::SpinArrowEmpty, { "menu.render.spin_arrow_empty" } },
-	{ Note::ListRowsClipped, { "menu.render.list_rows_clipped" } },
-	{ Note::TableNoColumns, { "menu.render.table_no_columns" } },
-	{ Note::TableHeaderClipped, { "menu.render.table_header_clipped" } },
-	{ Note::TableHeaderWidthZero, { "menu.render.table_header_width_zero" } },
-	{ Note::MarqueeRuntimeContent, { "menu.render.marquee_runtime_content" } },
+	{ Note::AppearanceStateUnknown, from_render_check("menu.render.appearance_state_unknown") },
+	{ Note::AppearanceTypeUnknown, from_render_check("menu.render.appearance_type_unknown") },
+	{ Note::AppearanceCustom, from_render_check("menu.render.appearance_custom") },
+	{ Note::AppearanceReplaced, from_render_check("menu.render.appearance_replaced") },
+	{ Note::ColorUnparsed, from_render_check("menu.render.color_unparsed") },
+	{ Note::ColorTransparent, from_render_check("menu.render.color_transparent") },
+	{ Note::StyleVarUnresolved, from_render_check("menu.render.style_var_unresolved") },
+	{ Note::TypeUnknown, from_render_check("menu.render.type_unknown") },
+	{ Note::TypeInteriorDeferred, from_render_check("menu.render.type_interior_deferred") },
+	{ Note::ItemKindNotDrawn, from_render_check("menu.render.item_kind_not_drawn") },
+	{ Note::TableCellsDeferred, from_render_check("menu.render.table_cells_deferred") },
+	{ Note::ScrollExtentDefault, from_render_check("menu.render.scroll_extent_default") },
+	{ Note::FontMissing, from_render_check("menu.render.font_missing") },
+	{ Note::FontUnreadable, from_render_check("menu.render.font_unreadable") },
+	{ Note::TextureMissing, from_render_check("menu.render.texture_missing") },
+	{ Note::TextureUnreadable, from_render_check("menu.render.texture_unreadable") },
+	{ Note::TextTableMissing, from_render_check("menu.render.text_table_missing") },
+	{ Note::TextTableUnreadable, from_render_check("menu.render.text_table_unreadable") },
+	{ Note::RectEmpty, from_render_check("menu.render.rect_empty") },
+	{ Note::TextTruncated, from_render_check("menu.render.text_truncated") },
+	{ Note::TextNoRoom, from_render_check("menu.render.text_no_room") },
+	{ Note::TextNoFont, from_render_check("menu.render.text_no_font") },
+	{ Note::TextIdMissing, from_render_check("menu.render.text_id_missing") },
+	{ Note::ImageBandEmpty, from_render_check("menu.render.image_band_empty") },
+	{ Note::ImageHeightShared, from_render_check("menu.render.image_height_shared") },
+	{ Note::StateFallback, from_render_check("menu.render.state_fallback") },
+	{ Note::CheckedNoArt, from_render_check("menu.render.checked_no_art") },
+	{ Note::FrameAbsent, from_render_check("menu.render.frame_absent") },
+	{ Note::FrameStencilUnloaded, from_render_check("menu.render.frame_stencil_unloaded") },
+	{ Note::FrameNoStencil, from_render_check("menu.render.frame_no_stencil") },
+	{ Note::FrameTileZero, from_render_check("menu.render.frame_tile_zero") },
+	{ Note::SpinArrowEmpty, from_render_check("menu.render.spin_arrow_empty") },
+	{ Note::ListRowsClipped, from_render_check("menu.render.list_rows_clipped") },
+	{ Note::TableNoColumns, from_render_check("menu.render.table_no_columns") },
+	{ Note::TableHeaderClipped, from_render_check("menu.render.table_header_clipped") },
+	{ Note::TableHeaderWidthZero, from_render_check("menu.render.table_header_width_zero") },
+	{ Note::MarqueeRuntimeContent, from_render_check("menu.render.marquee_runtime_content") },
 };
 static_assert(std::size(kNoteEntries) == static_cast<size_t>(menu::kMenuFrameNoteCodeCount),
 		"every compiler note has exactly one row");
@@ -83,21 +92,18 @@ static_assert(finding_entries_well_formed(kNoteEntries),
 constexpr size_t kOwnFindings = static_cast<size_t>(MenuFinding::kCount);
 constexpr size_t kNoteFindings = std::size(kNoteEntries);
 
-// The menu's own rows, then the notes'.
+// The menu's own rows, then the notes', every one the menu's group.
 constexpr std::array<FindingCodeRow, kOwnFindings + kNoteFindings> joined_findings() {
 	std::array<FindingCodeRow, kOwnFindings + kNoteFindings> rows{};
-	const auto own = finding_rows(kFindingEntries);
-	const auto noted = finding_rows(kNoteEntries);
+	const auto own = finding_rows(kFindingEntries, FindingGroup::Menus);
+	const auto noted = finding_rows(kNoteEntries, FindingGroup::Menus);
 	for (size_t i = 0; i < kOwnFindings; ++i) rows[i] = own[i];
 	for (size_t i = 0; i < kNoteFindings; ++i) rows[kOwnFindings + i] = noted[i];
 	return rows;
 }
 constexpr std::array<FindingCodeRow, kOwnFindings + kNoteFindings> kFindingRows = joined_findings();
-static_assert(finding_tokens_unique(kFindingRows), "no note's token is one of the menu's own");
-
-} // namespace
-
-namespace {
+static_assert(finding_rows_well_formed(kFindingRows),
+		"no note's token is one of the menu's own, every row the menu's group");
 
 using mnu::SchemaApplies;
 using mnu::SchemaRecord;

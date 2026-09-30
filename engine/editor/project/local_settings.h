@@ -3,8 +3,8 @@
 #include <string>
 
 #include <editor/model/diagnostic.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
-#include <editor/session/finding_codes.h>
 
 namespace opennova::io {
 struct JsonValue;

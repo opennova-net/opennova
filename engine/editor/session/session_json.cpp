@@ -756,7 +756,7 @@ JsonValue editor_request_to_json(const EditorRequest &request, const Document *n
 JsonValue diagnostic_to_json(const Diagnostic &d) {
 	JsonValue out = JsonValue::make_object();
 	out.set("severity", json_string(diagnostic_severity_label(d.severity)));
-	out.set("code", json_string(d.code));
+	out.set("code", json_string(d.code()));
 	out.set("message", json_string(d.message));
 	if (!d.asset.empty()) out.set("asset", json_string(d.asset));
 	if (!d.field.empty()) out.set("field", json_string(d.field));

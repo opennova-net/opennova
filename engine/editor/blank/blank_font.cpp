@@ -1,7 +1,6 @@
 #include "blank_makers.h"
 
 #include <editor/blank/blank_font_art.h>
-#include <editor/session/finding_codes.h>
 #include <formats/fnt/fnt.h>
 
 namespace opennova::editor {

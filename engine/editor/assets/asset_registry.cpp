@@ -13,8 +13,8 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <formats/pff/pff.h>
 
 namespace fs = std::filesystem;
@@ -156,7 +156,7 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 			ImportSidecar sidecar;
 			Diagnostic error;
 			if (!load_import_sidecar(path.generic_string(), sidecar, error)) {
-				if (!error.code.empty()) {
+				if (!error.code().empty()) {
 					error.asset = sidecar_relative;
 					scan.diagnostics.push_back(error);
 				}

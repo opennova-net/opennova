@@ -313,7 +313,7 @@ int findings_follow_rows() {
 		ValidationCache cache;
 		const std::vector<std::shared_ptr<const DocumentBase>> open{ table };
 		for (const Diagnostic &d : validate_project({ paths, project, scan, open }, graph, cache))
-			if (d.code == "animation_map.ignored_input" && d.asset == "notes.adm") return d.row_id;
+			if (d.code() == "animation_map.ignored_input" && d.asset == "notes.adm") return d.row_id;
 		return NodeId(-1);
 	};
 	TEST_EXPECT(tail_row() == idle);
@@ -394,7 +394,7 @@ int validation_and_graph() {
 			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto find = [&](const char *code, const char *asset, size_t nth = 0) -> const Diagnostic * {
 		for (const Diagnostic &d : findings)
-			if (d.code == code && d.asset == asset && nth-- == 0) return &d;
+			if (d.code() == code && d.asset == asset && nth-- == 0) return &d;
 		return nullptr;
 	};
 	const auto has = [&](const char *code, const char *asset) { return find(code, asset) != nullptr; };

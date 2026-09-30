@@ -6,8 +6,8 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
-#include <editor/session/finding_codes.h>
 #include <formats/rtxt/rtxt.h>
 
 namespace opennova::editor {

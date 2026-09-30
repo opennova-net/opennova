@@ -2,24 +2,27 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
+#include <editor/model/finding_code_row.h>
 #include <editor/model/value.h>
 
 namespace opennova::editor {
 
-// One finding about a project, an asset or a field (ADR 0046 d9): the editor's
-// requirements, validation, build and document layers all report through this record
-// so a window, the CLI and a test read the same shape. `code` is a stable dotted
-// token ("asset.name.duplicate"): the token of the finding code's row it was made from
-// (session/finding_codes.h: every finding is made through make_finding, never from free
-// text); `message` is plain language for the user; `asset` is the offending asset's
-// project-relative path (empty for project-level findings) and `field` the field id inside
-// it (empty when the whole asset is meant). A finding inside a document also carries the
-// record it concerns (`record`, `row_id`, `child_id`, `record_kind`) so Problems can open
-// and select it. A finding about a required file or a reference carries what it is about
-// (`subject`), so a fix and a filter read it rather than the message.
+// One finding about a project, an asset or a field (ADR 0046 d9): the editor's requirements,
+// validation, build and document layers all report through this record so a window, the CLI and a
+// test read the same shape. A finding is made from a row of the finding codes' tables and keeps it
+// (`row()`: model/finding_code_row.h; make_finding below is the only way to set it), its `code()`
+// the row's stable dotted token ("asset.name.duplicate"), the wire's `code`. `message` is plain
+// language for the user; `asset` is the offending asset's project-relative path (empty for
+// project-level findings) and `field` the field id inside it (empty when the whole asset is
+// meant). A finding inside a document also carries the record it concerns (`record`, `row_id`,
+// `child_id`, `record_kind`) so Problems can open and select it. A finding about a required file
+// or a reference carries what it is about (`subject`), so a fix and a filter read it rather than
+// the message.
 enum class DiagnosticSeverity { Info, Warning, Error };
 
 // What a finding about a file the game reads by name is about (a requirement's row, a file the
@@ -53,9 +56,15 @@ inline bool operator==(const ReferenceSubject &a, const ReferenceSubject &b) {
 // reference.
 using FindingSubject = std::variant<std::monostate, RequirementSubject, ReferenceSubject>;
 
+struct Diagnostic;
+
+// A finding of a row's code, at a place (the file's project-relative path, the field). The row is
+// a table's (finding_code, a document type's own finding_code overloads), which the finding keeps.
+inline Diagnostic make_finding(const FindingCodeRow &row, DiagnosticSeverity severity,
+		std::string message, std::string asset = std::string(), std::string field = std::string());
+
 struct Diagnostic {
 	DiagnosticSeverity severity = DiagnosticSeverity::Error;
-	std::string code;
 	std::string message;
 	std::string asset;
 	std::string field;
@@ -64,7 +73,44 @@ struct Diagnostic {
 	NodeId row_id = 0, child_id = 0;
 	NodeKind record_kind = 0;
 	FindingSubject subject;
+
+	// The row the finding was made from; null for a Diagnostic no finding was made into (an error
+	// left as it was because nothing failed).
+	const FindingCodeRow *row() const { return row_; }
+	// Its code, the row's token ("" with no row).
+	const std::string &code() const { return code_; }
+
+private:
+	friend Diagnostic make_finding(const FindingCodeRow &row, DiagnosticSeverity severity,
+			std::string message, std::string asset, std::string field);
+
+	const FindingCodeRow *row_ = nullptr;
+	std::string code_;
 };
+
+inline Diagnostic make_finding(const FindingCodeRow &row, DiagnosticSeverity severity,
+		std::string message, std::string asset, std::string field) {
+	Diagnostic d;
+	d.row_ = &row;
+	d.code_ = row.token ? row.token : "";
+	d.severity = severity;
+	d.message = std::move(message);
+	d.asset = std::move(asset);
+	d.field = std::move(field);
+	return d;
+}
+
+// A finding of a table's code, by its enumerator: CoreFinding's, or a document type's own enum
+// (whose finding_code overload, declared beside it in the editor's namespace, names its row). The
+// codes of other namespaces a type keys rows by (the runtime's compiler notes, the menu type's; the
+// stylesheet reader's, the stylesheet type's) take the row form:
+// make_finding(finding_code(note), ...).
+template <typename Code, typename = std::enable_if_t<std::is_enum<Code>::value>>
+Diagnostic make_finding(Code code, DiagnosticSeverity severity, std::string message,
+		std::string asset = std::string(), std::string field = std::string()) {
+	return make_finding(finding_code(code), severity, std::move(message), std::move(asset),
+			std::move(field));
+}
 
 // The finding's subject when it is of that kind; null otherwise.
 inline const RequirementSubject *requirement_subject(const Diagnostic &d) {
@@ -85,7 +131,7 @@ inline const std::string &subject_target(const Diagnostic &d) {
 // The same finding, every member alike (the session's Findings concern moves only when the
 // rows it composes differ).
 inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
-	return a.severity == b.severity && a.code == b.code && a.message == b.message &&
+	return a.severity == b.severity && a.row() == b.row() && a.message == b.message &&
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
 			a.subject == b.subject;

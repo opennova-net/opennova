@@ -3690,19 +3690,20 @@ target_link_libraries(editor_session_json_test PRIVATE opennova_editor)
 target_include_directories(editor_session_json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session_json COMMAND editor_session_json_test)
 
-# The Problems core (S11b): the query the window and the editor MCP share (severities,
-# text, scope, only the fixable, grouping), the fixes for each finding and a Fix all
-# merged from them, where a finding takes Problems, and the findings by file and record
-# (S13 V1: FindingsIndex).
 # The finding codes (S13 A6): every token its own across the editor's table and the document
-# types', each row found by its token, a type's rows its family's, the render check's a row per
-# compiler note, the columns deciding what the codes' spelling decided before, and a finding's
-# subject on the wire under the keys it had.
+# types' as registered (a stand-in hiding none), each row found by its token, a type's rows its
+# group's family, the render check's a row per compiler note and the stylesheet reader's a row
+# per reader code, the columns deciding what the codes' spelling decided before (and the
+# spelling agreeing), a finding keeping its row, and its subject on the wire under the keys it had.
 add_executable(editor_finding_codes_test editor/finding_codes_test.cpp)
 target_link_libraries(editor_finding_codes_test PRIVATE opennova_editor)
 target_include_directories(editor_finding_codes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_finding_codes COMMAND editor_finding_codes_test)
 
+# The Problems core (S11b): the query the window and the editor MCP share (severities,
+# text, scope, only the fixable, grouping), the fixes for each finding and a Fix all
+# merged from them, where a finding takes Problems, and the findings by file and record
+# (S13 V1: FindingsIndex).
 add_executable(editor_problems_test editor/problems_test.cpp)
 target_link_libraries(editor_problems_test PRIVATE opennova_editor)
 target_include_directories(editor_problems_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

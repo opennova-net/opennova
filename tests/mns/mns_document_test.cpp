@@ -70,7 +70,7 @@ std::vector<std::string> split_lines(const std::string &s) {
 
 bool has_diagnostic(const Document &doc, const std::string &code) {
 	for (const auto &d : doc.diagnostics()) {
-		if (d.code == code) return true;
+		if (diagnostic_code_token(d.code) == code) return true;
 	}
 	return false;
 }
@@ -832,10 +832,34 @@ static int test_entries_groups_and_comments() {
 	return 0;
 }
 
+// What a diagnostic says is a code (DiagnosticCode), each with its own stable token, lower case
+// and hyphenated, which the Godot binding and the editor read (the editor's stylesheet type keys
+// a finding's row by the code).
+static int test_diagnostic_code_tokens() {
+	using opennova::mns::DiagnosticCode;
+	std::vector<std::string> tokens;
+	for (size_t i = 0; i < opennova::mns::kDiagnosticCodeCount; ++i) {
+		const std::string token = diagnostic_code_token(static_cast<DiagnosticCode>(i));
+		bool formed = !token.empty() && token.front() != '-' && token.back() != '-';
+		for (const char c : token) formed = formed && ((c >= 'a' && c <= 'z') || c == '-');
+		TEST_EXPECT(formed);
+		for (const std::string &before : tokens) TEST_EXPECT(before != token);
+		tokens.push_back(token);
+	}
+	TEST_EXPECT(tokens.size() == 23);
+	TEST_EXPECT(std::string(diagnostic_code_token(DiagnosticCode::LineEnding)) == "line-ending" &&
+	            std::string(diagnostic_code_token(DiagnosticCode::DuplicateName)) == "duplicate-name" &&
+	            std::string(diagnostic_code_token(DiagnosticCode::ContinuationAtEof)) == "continuation-at-eof" &&
+	            std::string(diagnostic_code_token(DiagnosticCode::Hangs)) == "hangs" &&
+	            std::string(diagnostic_code_token(DiagnosticCode::Stops)) == "stops");
+	std::printf("test_diagnostic_code_tokens passed\n");
+	return 0;
+}
+
 static bool result_has_diagnostic(const opennova::mns::EvaluationResult &result,
 		const std::string &code) {
 	for (const auto &d : result.diagnostics) {
-		if (d.code == code) return true;
+		if (diagnostic_code_token(d.code) == code) return true;
 	}
 	return false;
 }
@@ -914,6 +938,7 @@ int main(int argc, char **argv) {
 	failures += test_value_validation();
 	failures += test_source_text_get_set();
 	failures += test_entries_groups_and_comments();
+	failures += test_diagnostic_code_tokens();
 	failures += test_retail_evaluation_result();
 
 	if (failures == 0) {

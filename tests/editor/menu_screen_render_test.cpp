@@ -76,7 +76,7 @@ size_t list_index(const char *path) {
 std::vector<const Diagnostic *> render_findings(const SessionView &view, const std::string &code = std::string()) {
 	std::vector<const Diagnostic *> out;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code.rfind("menu.render.", 0) == 0 && (code.empty() || d.code == code)) out.push_back(&d);
+		if (d.code().rfind("menu.render.", 0) == 0 && (code.empty() || d.code() == code)) out.push_back(&d);
 	return out;
 }
 
@@ -113,7 +113,7 @@ static int test_blank_startup() {
 	TEST_EXPECT(view.findings.render_check);
 	const MenuRenderCheck &check = *view.findings.render_check;
 	// A new project renders clean.
-	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code.c_str(), d->message.c_str());
+	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code().c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
 
 	session.handle(request::open_document("main.mnu"));
@@ -177,7 +177,7 @@ static int test_blank_startup() {
 	session.handle(request::build());
 	session.run_operations();
 	for (const Diagnostic &d : view.activity.last_build->diagnostics)
-		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code.c_str(), d.message.c_str());
+		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(view.activity.has_build && view.activity.last_build->ok);
 	return 0;
 }
@@ -221,7 +221,7 @@ static int test_render_again_only_when_moved() {
 	// were renders nothing, a validation having run.
 	const auto unused = [&view](const char *name) {
 		return std::any_of(view.findings.diagnostics.begin(), view.findings.diagnostics.end(),
-				[&](const Diagnostic &d) { return d.code == "style.unused" && d.record == name; });
+				[&](const Diagnostic &d) { return d.code() == "style.unused" && d.record == name; });
 	};
 	TEST_EXPECT(unused("SEMIOPAQUE_BLACK"));
 	const ValidationStats &stats = session.validation_stats();
@@ -518,7 +518,7 @@ static int test_notes_alone_recompose() {
 	const auto unreadable = [&view] {
 		size_t found = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
-			found += d.code == "menu.render.font_unreadable" && d.asset == "menus/letters.mnu" ? 1
+			found += d.code() == "menu.render.font_unreadable" && d.asset == "menus/letters.mnu" ? 1
 																							   : 0;
 		return found;
 	};

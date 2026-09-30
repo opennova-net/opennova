@@ -51,12 +51,13 @@
     records by (`record_batch`), the findings; `view_json`: the view by section), the view the
     windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
     the activity and the dialogs, and the events a request posts for one window to take once),
-    and the finding codes (S13 A6, `finding_codes`: every finding is made from a row, the
-    editor's own `CoreFinding` table's or its document type's `findings`, never from free text;
-    what Problems does with a finding reads the row)), `model` (the
+    and the finding codes' lookup (S13 A6, `finding_codes`: a token's row over every table, the
+    tables, the columns' wire forms)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`, and the finding codes (S13 A6,
+    `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
+    or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
@@ -92,10 +93,9 @@
     (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
     child never carry it. Inside it five libraries are ranked, model < documents < graph <
     session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
-    includes only its own rank and below, `graph/reference_kinds.h` and `session/finding_codes.h`
-    being seam headers any may include; the upward includes the tree still makes are the lint's
-    listed exceptions, each naming the slice that removes it, and an exception the tree no longer
-    makes fails the lint.
+    includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
+    include; the upward includes the tree still makes are the lint's listed exceptions, each
+    naming the slice that removes it, and an exception the tree no longer makes fails the lint.
     The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
     allowlist by the `editor/` prefix. No directory under it may start with `build`
     (the lints skip such directories; the build lib is `project_build/`).

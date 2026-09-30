@@ -1,5 +1,5 @@
+#include <editor/model/diagnostic.h>
 #include <editor/project_build/build_plan.h>
-#include <editor/session/finding_codes.h>
 
 #include <algorithm>
 #include <filesystem>

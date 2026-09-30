@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_findings.h>
 
 #include <iterator>
@@ -5,7 +6,6 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/graph/project_validation.h>
 #include <editor/preview/menu_render_check.h>
-#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 

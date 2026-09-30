@@ -26,7 +26,7 @@ namespace opennova::editor {
 namespace {
 
 bool same_finding(const Diagnostic &a, const Diagnostic &b) {
-	return a.severity == b.severity && a.code == b.code && a.message == b.message && a.asset == b.asset &&
+	return a.severity == b.severity && a.row() == b.row() && a.message == b.message && a.asset == b.asset &&
 	       a.field == b.field && a.record == b.record && a.line == b.line;
 }
 
@@ -39,7 +39,7 @@ void SessionCore::start() {
 	// A store that cannot be read, or a settings file set aside (another schema): said, the
 	// defaults in effect.
 	Diagnostic finding;
-	if (!preferences_.load(finding) || !finding.code.empty())
+	if (!preferences_.load(finding) || !finding.code().empty())
 		report(finding);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
@@ -206,7 +206,7 @@ bool SessionCore::open_project(const std::string &dir) {
 	// the project opens as one with none.
 	Diagnostic local_finding;
 	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_finding) ||
-			!local_finding.code.empty())
+			!local_finding.code().empty())
 		report(local_finding);
 	view_.project.open = true;
 	view_.project.root = paths_.root;

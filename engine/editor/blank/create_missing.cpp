@@ -5,8 +5,8 @@
 #include <system_error>
 
 #include <editor/blank/blank_factory.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 
 namespace fs = std::filesystem;
 

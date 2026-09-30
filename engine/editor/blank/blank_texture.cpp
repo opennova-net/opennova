@@ -2,7 +2,6 @@
 
 #include <base/resource_index/resource_kind.h>
 #include <editor/import/quantize.h>
-#include <editor/session/finding_codes.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>

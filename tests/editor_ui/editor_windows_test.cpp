@@ -2115,7 +2115,7 @@ void test_styles_lines_listed() {
 	// The comment selected as its Problems row selects it: the first line whose end is not CR LF.
 	ProblemLocation location;
 	for (const Diagnostic &d : v.findings.diagnostics)
-		if (d.code == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
+		if (d.code() == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
 	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
 	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);

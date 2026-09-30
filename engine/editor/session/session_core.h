@@ -12,7 +12,6 @@
 #include <editor/project_build/build_run.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/session/view/session_view.h>

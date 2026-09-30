@@ -88,7 +88,7 @@ std::map<std::string, ReferenceStatus> file_references(const SessionView &view, 
 
 bool finding(const ActionOutcome &outcome, const char *code, DiagnosticSeverity severity, const std::string &asset) {
 	for (const Diagnostic &d : outcome.findings)
-		if (d.code == code && d.severity == severity && (asset.empty() || d.asset == asset)) return true;
+		if (d.code() == code && d.severity == severity && (asset.empty() || d.asset == asset)) return true;
 	return false;
 }
 
@@ -106,7 +106,7 @@ bool staged_left(const std::string &root) {
 
 bool has_warning(const std::vector<Diagnostic> &findings, const char *code, const std::string &asset) {
 	for (const Diagnostic &d : findings)
-		if (d.code == code && d.severity == DiagnosticSeverity::Warning && d.asset == asset) return true;
+		if (d.code() == code && d.severity == DiagnosticSeverity::Warning && d.asset == asset) return true;
 	return false;
 }
 
@@ -260,7 +260,7 @@ static int test_apply_staging() {
 	TEST_EXPECT(result.imported.empty() && result.not_imported.empty());
 	bool write_failed = false;
 	for (const Diagnostic &d : result.diagnostics)
-		write_failed = write_failed || (d.code == "import.write" && d.asset == "Custom.fnt" && d.severity == DiagnosticSeverity::Error);
+		write_failed = write_failed || (d.code() == "import.write" && d.asset == "Custom.fnt" && d.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(write_failed);
 	TEST_EXPECT(snapshot(root) == before && !staged_left(root) && fs::exists(root + "/menus") == menus);
 	TEST_EXPECT(!fs::exists(root + "/menus/extra.mnu"));
@@ -373,7 +373,7 @@ static int test_apply_scene_textures() {
 	// project lacks it offers that reference's fix, a placeholder; made, nothing is left to fix.
 	Diagnostic glow;
 	for (const Diagnostic &d : outcome.findings)
-		if (d.code == "import.texture_not_imported") glow = d;
+		if (d.code() == "import.texture_not_imported") glow = d;
 	TEST_EXPECT(editor_test::reference_of(glow).kind == ReferenceKind::Texture && subject_target(glow) == "glow.tga" && editor_test::reference_of(glow).loader_arg >= 0);
 	const std::vector<ProblemFix> fixes = fixes_for(glow, view);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Create a placeholder glow.tga" && fixes[0].bulk);
@@ -387,7 +387,7 @@ static int test_apply_scene_textures() {
 	TEST_EXPECT(alone.imported == std::vector<std::string>({"models/spinner.3di"}));
 	size_t told = 0;
 	for (const Diagnostic &d : alone.diagnostics)
-		if (d.code == "import.texture_not_imported" && d.severity == DiagnosticSeverity::Warning) {
+		if (d.code() == "import.texture_not_imported" && d.severity == DiagnosticSeverity::Warning) {
 			++told;
 			TEST_EXPECT(d.asset == "spinner.3di" && d.message.find("--with-dependencies") != std::string::npos &&
 			            d.message.find("Include the files these need") != std::string::npos);

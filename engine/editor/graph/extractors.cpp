@@ -16,8 +16,8 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <formats/avatars/avatars.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>

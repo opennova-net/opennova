@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
@@ -844,8 +845,10 @@ constexpr EditorQueryRow kRows[] = {
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
 			"name), the fixes Problems offers, what a Rewrite does, whether the finding says the "
-			"file does not serialize (blocks_save), where Problems takes it (content or file) and "
-			"how many of the findings held now carry it (count).")
+			"file does not serialize (blocks_save), where Problems takes it (content or file), the "
+			"group it shows under (its key), where it comes from (source) and how many of the "
+			"findings held now carry it (count); a row a held finding carries that no table lists "
+			"comes last, as table none.")
 			.row,
 };
 
@@ -1086,26 +1089,45 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 	out.set("concerns", std::move(concerns));
 	// Every finding code the session and the types know (S13 A6: the rows of the editor's own
 	// table, then each document type's), with what Problems does with a finding of it and how many
-	// of the findings the session holds now (the Problems rows) carry it.
-	std::map<std::string, size_t> held;
+	// of the findings the session holds now (the Problems rows) carry it, counted by the row each
+	// keeps; then, by token, any row held findings carry that no table lists (a test's), as table
+	// none, and a Diagnostic no finding was made into (its code "").
+	std::map<const FindingCodeRow *, size_t> held;
 	for (const Diagnostic &d : context.core.view().findings.diagnostics)
-		++held[d.code];
+		++held[d.row()];
 	JsonValue findings = JsonValue::make_array();
+	const auto listed = [&findings](const FindingCodeRow &row, const char *table, size_t count) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("code", json_string(row.token ? row.token : ""));
+		entry.set("table", json_string(table));
+		entry.set("fixes", json_string(finding_fix_token(row.fixes)));
+		if (row.rewrite_does)
+			entry.set("rewrite_does", json_string(row.rewrite_does));
+		entry.set("blocks_save", JsonValue::make_bool(row.blocks_save));
+		entry.set("place", json_string(finding_place_token(row.place)));
+		entry.set("group", json_string(finding_group_key(row.group)));
+		entry.set("source", json_string(finding_source_token(row)));
+		entry.set("count", json_number(double(count)));
+		findings.push(std::move(entry));
+	};
 	for (const NamedFindingTable &table : finding_tables()) {
 		for (const FindingCodeRow &row : table.rows) {
-			JsonValue entry = JsonValue::make_object();
-			entry.set("code", json_string(row.token));
-			entry.set("table", json_string(table.owner));
-			entry.set("fixes", json_string(finding_fix_token(row.fixes)));
-			if (row.rewrite_does)
-				entry.set("rewrite_does", json_string(row.rewrite_does));
-			entry.set("blocks_save", JsonValue::make_bool(row.blocks_save));
-			entry.set("place", json_string(finding_place_token(row.place)));
-			const auto count = held.find(row.token);
-			entry.set("count", json_number(double(count == held.end() ? 0 : count->second)));
-			findings.push(std::move(entry));
+			const auto count = held.find(&row);
+			listed(row, table.owner, count == held.end() ? 0 : count->second);
+			if (count != held.end())
+				held.erase(count);
 		}
 	}
+	static const FindingCodeRow kNoRow;
+	std::vector<std::pair<const FindingCodeRow *, size_t>> unlisted;
+	for (const auto &[row, count] : held)
+		unlisted.emplace_back(row ? row : &kNoRow, count);
+	std::sort(unlisted.begin(), unlisted.end(), [](const auto &a, const auto &b) {
+		return std::string(a.first->token ? a.first->token : "") <
+		       std::string(b.first->token ? b.first->token : "");
+	});
+	for (const auto &[row, count] : unlisted)
+		listed(*row, "none", count);
 	out.set("finding_codes", std::move(findings));
 	out.set("page_max", json_number(double(kQueryPageMax)));
 	out.set("page_default", json_number(double(kQueryPageDefault)));

@@ -12,8 +12,8 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
 
@@ -302,7 +302,7 @@ void AssetGraph::drop(uint32_t id, Patch &patch) {
 	patch.files.push_back(slot.path);
 	patch.file_set = true;
 	// Its findings and its failure go out of the diagnostics.
-	if (!slot.failure.code.empty() ||
+	if (!slot.failure.code().empty() ||
 			std::any_of(slot.resolutions.begin(), slot.resolutions.end(),
 					[](const EdgeResolution &resolution) { return resolution.missing; }))
 		patch.diagnostics_moved = true;
@@ -589,7 +589,7 @@ void AssetGraph::list_diagnostics() {
 	std::vector<const GraphSlot *> failed;
 	index_.for_each_slot([&](uint32_t id) {
 		const GraphSlot &slot = index_.slot(id);
-		if (!slot.ok && !slot.failure.code.empty()) failed.push_back(&slot);
+		if (!slot.ok && !slot.failure.code().empty()) failed.push_back(&slot);
 	});
 	std::sort(failed.begin(), failed.end(),
 			[](const GraphSlot *a, const GraphSlot *b) { return a->path < b->path; });

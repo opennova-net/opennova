@@ -79,14 +79,44 @@ std::string text_of(const std::vector<uint8_t> &bytes) {
 // subject: a role, a target, a reference kind, a scope and a loader's argument, each its default
 // where the subject has none).
 std::string row_of(const Diagnostic &d) {
-	const RequirementSubject &requirement = editor_test::requirement_of(d);
-	const ReferenceSubject &reference = editor_test::reference_of(d);
-	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code + "|" + d.asset + "|" +
+	static const RequirementSubject no_requirement;
+	static const ReferenceSubject no_reference;
+	const RequirementSubject &requirement =
+			requirement_subject(d) ? *requirement_subject(d) : no_requirement;
+	const ReferenceSubject &reference = reference_subject(d) ? *reference_subject(d) : no_reference;
+	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code() + "|" + d.asset + "|" +
 			std::to_string(d.line) + "|" + d.record + "|" + d.field + "|" +
 			std::to_string(d.row_id) + "|" + std::to_string(d.child_id) + "|" +
 			std::to_string(d.record_kind) + "|" + requirement.role + "|" + subject_target(d) + "|" +
 			reference_row(reference.kind).token + "|" + reference.scope + "|" +
 			std::to_string(reference.loader_arg) + "|" + d.message;
+}
+
+// S13 A6: every composed finding keeps a table's row, the row its token finds; a type's row is on
+// a file its type opens; a finding whose fixes read a required file or a reference is about one.
+int check_rows(const char *project, const std::vector<Diagnostic> &rows, const AssetScan &scan,
+		std::set<std::string> &codes) {
+	for (const Diagnostic &d : rows) {
+		codes.insert(d.code());
+		const char *owner = finding_owner(d.row());
+		if (!owner || finding_row(d.code()) != d.row())
+			std::fprintf(stderr, "%s: %s has no table's row\n", project, d.code().c_str());
+		TEST_EXPECT(owner && finding_row(d.code()) == d.row());
+		if (std::string(owner) != "core") {
+			const AssetEntry *file = scan.at_path(d.asset);
+			const DocumentType *type = file ? document_type_for(file->kind) : nullptr;
+			if (!type || std::string(type->name) != owner)
+				std::fprintf(stderr, "%s: %s (%s's) is on %s\n", project, d.code().c_str(), owner,
+						d.asset.c_str());
+			TEST_EXPECT(type && std::string(type->name) == owner);
+		}
+		const FindingFix fixes = d.row()->fixes;
+		if (fixes == FindingFix::Requirement || fixes == FindingFix::WrongKind)
+			TEST_EXPECT(requirement_subject(d) != nullptr);
+		if (fixes == FindingFix::Reference || fixes == FindingFix::UnimportedTexture)
+			TEST_EXPECT(reference_subject(d) != nullptr);
+	}
+	return 0;
 }
 
 // The rows as a sorted list: the comparison is of the rows, not their order.
@@ -374,13 +404,13 @@ static int test_findings_keep_their_records() {
 		std::vector<Diagnostic> out;
 		for (const Diagnostic &d : validate_project(
 					 { project.paths, project.document, project.scan, open }, graph, cache))
-			if (d.asset == "menus/nested.mnu" && d.code.rfind("menu.", 0) == 0)
+			if (d.asset == "menus/nested.mnu" && d.code().rfind("menu.", 0) == 0)
 				out.push_back(d);
 		return out;
 	};
 	const std::vector<Diagnostic> first = own();
-	TEST_EXPECT(first.size() == 2 && first[0].code == "menu.duplicate_window" &&
-			first[1].code == "menu.action_inert");
+	TEST_EXPECT(first.size() == 2 && first[0].code() == "menu.duplicate_window" &&
+			first[1].code() == "menu.action_inert");
 	if (first.size() != 2)
 		return 1;
 	TEST_EXPECT(first[0].child_id != 0 && first[1].child_id != 0 &&
@@ -438,13 +468,8 @@ static int test_every_finding_has_a_row() {
 						none, none, none },
 				graph, cache, render_check, files);
 		TEST_EXPECT(!composed.rows.empty());
-		for (const Diagnostic &d : composed.rows) {
-			++findings;
-			codes.insert(d.code);
-			if (!finding_row(d.code))
-				std::fprintf(stderr, "%s: %s has no row\n", made.name, d.code.c_str());
-			TEST_EXPECT(finding_row(d.code) != nullptr);
-		}
+		findings += composed.rows.size();
+		TEST_EXPECT(check_rows(made.name, composed.rows, project.scan, codes) == 0);
 	}
 	std::printf("every finding has a row: %zu findings of %zu codes\n", findings, codes.size());
 	return 0;
@@ -486,9 +511,9 @@ static int test_style_name_as_reference() {
 	size_t style_rows = 0;
 	for (const Diagnostic &d :
 			validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
-		if (d.code == "style.unused" || d.code == "style.overridden_by_brand" ||
-				d.code == "style.not_a_color" || d.code == "style.mixed_use") {
-			std::printf("  %s %s: %s\n", d.code.c_str(), d.record.c_str(), d.message.c_str());
+		if (d.code() == "style.unused" || d.code() == "style.overridden_by_brand" ||
+				d.code() == "style.not_a_color" || d.code() == "style.mixed_use") {
+			std::printf("  %s %s: %s\n", d.code().c_str(), d.record.c_str(), d.message.c_str());
 			++style_rows;
 		}
 	TEST_EXPECT(style_rows == 0);
@@ -533,12 +558,12 @@ static int test_style_uses_by_what_names_them() {
 			validate_project({ project.paths, project.document, project.scan, open }, graph, cache);
 	size_t style_rows = 0, nope = 0;
 	for (const Diagnostic &d : rows) {
-		if (d.code == "style.unused" || d.code == "style.mixed_use" ||
-				d.code == "style.not_a_color") {
-			std::printf("  %s %s: %s\n", d.code.c_str(), d.record.c_str(), d.message.c_str());
+		if (d.code() == "style.unused" || d.code() == "style.mixed_use" ||
+				d.code() == "style.not_a_color") {
+			std::printf("  %s %s: %s\n", d.code().c_str(), d.record.c_str(), d.message.c_str());
 			++style_rows;
 		}
-		if (d.code == "reference.missing" && d.record == "MAIN/D") {
+		if (d.code() == "reference.missing" && d.record == "MAIN/D") {
 			++nope;
 			TEST_EXPECT(d.field == "string.value" && editor_test::reference_of(d).kind == ReferenceKind::StyleVar &&
 					d.severity == DiagnosticSeverity::Warning &&
@@ -598,9 +623,9 @@ static int test_item_ids_within_a_table() {
 	bool blocked = false;
 	for (const Diagnostic &d : validate_project(
 				 { project.paths, project.document, project.scan, open }, graph, cache)) {
-		if (d.code == "catalog.item_identity")
+		if (d.code() == "catalog.item_identity")
 			ids.push_back(d.asset + " " + d.record + " " + d.field + ": " + d.message);
-		blocked = blocked || (d.code == "catalog.invalid_input" && d.asset == "c/items.def");
+		blocked = blocked || (d.code() == "catalog.invalid_input" && d.asset == "c/items.def");
 	}
 	const std::string tail = ": the game keeps both, and a lookup by the id finds the earlier one.";
 	TEST_EXPECT(ids ==
@@ -611,7 +636,7 @@ static int test_item_ids_within_a_table() {
 	TEST_EXPECT(blocked && !cache.records_checked("c/items.def") &&
 			cache.records_checked("d/items.def"));
 	TEST_EXPECT(std::any_of(project.scan.diagnostics.begin(), project.scan.diagnostics.end(),
-			[](const Diagnostic &d) { return d.code == "asset.name.duplicate"; }));
+			[](const Diagnostic &d) { return d.code() == "asset.name.duplicate"; }));
 	return 0;
 }
 
@@ -693,12 +718,7 @@ static int test_retail_validation() {
 						none, none, none },
 				graph, cache, render_check, source);
 		std::set<std::string> codes;
-		for (const Diagnostic &d : composed.rows) {
-			codes.insert(d.code);
-			if (!finding_row(d.code))
-				std::fprintf(stderr, "retail: %s has no row\n", d.code.c_str());
-			TEST_EXPECT(finding_row(d.code) != nullptr);
-		}
+		TEST_EXPECT(check_rows("retail", composed.rows, project.scan, codes) == 0);
 		std::printf("retail: every finding has a row: %zu findings of %zu codes\n",
 				composed.rows.size(), codes.size());
 	}

@@ -44,7 +44,7 @@ inline void go_to(editor::ProjectSession &session, const editor::ReferenceTarget
 inline bool has_missing(const std::vector<editor::Diagnostic> &diagnostics,
 		const std::string &field, editor::DiagnosticSeverity severity) {
 	for (const editor::Diagnostic &d : diagnostics)
-		if (d.code == "reference.missing" && d.field == field && d.severity == severity) return true;
+		if (d.code() == "reference.missing" && d.field == field && d.severity == severity) return true;
 	return false;
 }
 
@@ -53,7 +53,7 @@ inline const editor::Diagnostic *missing_of(const std::vector<editor::Diagnostic
                                             const std::string &field, editor::ReferenceKind kind) {
 	for (const editor::Diagnostic &d : diagnostics)
 		if (const editor::ReferenceSubject *missing = editor::reference_subject(d);
-		    missing && d.code == "reference.missing" && d.field == field && missing->kind == kind)
+		    missing && d.code() == "reference.missing" && d.field == field && missing->kind == kind)
 			return &d;
 	return nullptr;
 }

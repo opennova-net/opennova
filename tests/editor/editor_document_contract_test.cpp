@@ -457,7 +457,7 @@ void check_places(const DocumentType &type, const Fixture &fixture, const Docume
 // The one refusal a type gives a Clear or a Write of an optional field it keeps as its record
 // writes it (a def line no tick of its own marks, a menu field no bit marks): always written.
 bool always_written(const Diagnostic &error) {
-	return error.code == "document.value" &&
+	return error.code() == "document.value" &&
 	       (error.message == "This field is always written." || error.message == "This line is always written.");
 }
 
@@ -482,7 +482,7 @@ void check_presence(const Fixture &fixture, Document &document, const std::vecto
 			++counts.optional;
 			error = Diagnostic();
 			if (!document.apply(edit_of(written ? EditOperation::Clear : EditOperation::Write, address, schema.id), error)) {
-				check(always_written(error), where + " (" + error.code + ": " + error.message + ")",
+				check(always_written(error), where + " (" + error.code() + ": " + error.message + ")",
 				      "a type keeps an optional field as it is only as always written");
 				++g_kept;
 				continue;
@@ -730,16 +730,16 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 			check(document.saved_value(address, schema.id, saved), where, "the changed field has its saved value");
 			Diagnostic refused;
 			check(!snapshot->apply(edit_of(EditOperation::Set, address, schema.id, saved), refused) &&
-			              refused.code == "document.snapshot",
+			              refused.code() == "document.snapshot",
 			      where, "a snapshot refuses an edit (document.snapshot)");
 			snapshot->undo();
 			snapshot->redo();
 			refused = Diagnostic();
-			check(!snapshot->save(refused) && refused.code == "document.snapshot", where,
+			check(!snapshot->save(refused) && refused.code() == "document.snapshot", where,
 			      "a snapshot refuses a save (document.snapshot)");
 			refused = Diagnostic();
 			check(!snapshot->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", refused) &&
-			              refused.code == "document.snapshot",
+			              refused.code() == "document.snapshot",
 			      where, "a snapshot refuses a load (document.snapshot)");
 			check(snapshot->revision() == document.revision() && snapshot->serialize().text == after.text &&
 			              document.serialize().text == after.text,
@@ -777,7 +777,7 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 		const Document &document, TypeCounts &counts) {
 	const std::vector<Diagnostic> findings = type.validate_file(document);
 	for (const Diagnostic &d : findings) {
-		const std::string where = fixture.name + " " + d.code;
+		const std::string where = fixture.name + " " + d.code();
 		check(d.asset == document.path(), where,
 				"validate_file's findings are on the document's file");
 		if (d.row_id)
@@ -808,7 +808,7 @@ void check_foreign_payload(const Fixture &fixture, Document &document,
 	Diagnostic refused;
 	const uint64_t revision = document.revision();
 	++g_foreign;
-	check(!document.apply(apply, refused) && refused.code == "document.payload" &&
+	check(!document.apply(apply, refused) && refused.code() == "document.payload" &&
 	              document.revision() == revision && !document.dirty() &&
 	              document.serialize().text == serialized,
 	      fixture.name,

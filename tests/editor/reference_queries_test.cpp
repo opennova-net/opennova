@@ -120,7 +120,7 @@ static int test_menu_references() {
 	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Error));
 	const Diagnostic *nofont =
 			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
-	TEST_EXPECT(nofont && subject_target(*nofont) == "nofont.fnt" && editor_test::reference_of(*nofont).scope.empty() && editor_test::requirement_of(*nofont).role.empty());
+	TEST_EXPECT(nofont && subject_target(*nofont) == "nofont.fnt" && editor_test::reference_of(*nofont).scope.empty() && !requirement_subject(*nofont));
 	TEST_EXPECT(
 			missing_finding(graph, *document, exit, font_use, std::string("nofont.fnt"), picked) &&
 			editor_test::reference_of(picked).kind == ReferenceKind::Font && subject_target(picked) == "nofont.fnt");
@@ -172,7 +172,7 @@ static int test_menu_references() {
 	const NodeAddress second_action = menu_test::child_of(*document, exit, "action", 1);
 	bool located = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
+		if (d.code() == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
 		    d.child_id == second_action.child && d.record == "STARTUP/MAIN/EXIT/Action 2")
 			located = true;
 	TEST_EXPECT(located);

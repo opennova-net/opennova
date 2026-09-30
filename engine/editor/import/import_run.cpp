@@ -9,8 +9,8 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/import/importer.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 
 namespace fs = std::filesystem;
 
@@ -138,7 +138,7 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 			// No record: the file is not an import source (a PNG without one is a
 			// texture the game loads as it is); importing it writes the record
 			// (import_assets).
-			if (error.code.empty()) continue;
+			if (error.code().empty()) continue;
 			// A record that is there but does not read (a hand edit with a typo) is the
 			// author's: reported and left as it is, never replaced by the defaults, and its
 			// source is not imported until it reads again. What this machine knew of the

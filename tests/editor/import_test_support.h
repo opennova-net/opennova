@@ -81,7 +81,7 @@ inline const ImportNotFollowed *not_followed(const ImportPlan &plan, ReferenceKi
 
 inline bool has_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code) return true;
+		if (d.code() == code) return true;
 	return false;
 }
 

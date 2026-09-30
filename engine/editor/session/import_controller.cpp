@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/session/import_controller.h>
 
 #include <algorithm>
@@ -8,7 +9,6 @@
 #include <editor/import/import_run.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 

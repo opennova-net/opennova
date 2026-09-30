@@ -15,8 +15,8 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <formats/mns/mns.h>
 #include <runtime/menu/menu_style.h>
 

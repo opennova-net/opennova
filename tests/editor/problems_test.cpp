@@ -96,7 +96,7 @@ std::vector<std::string> labels_of(const std::vector<ProblemFix> &fixes) {
 // The session's finding of `code` about the requirement `role`.
 const Diagnostic *requirement_finding(const SessionView &view, const char *code, const char *role) {
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == code && editor_test::requirement_of(d).role == role) return &d;
+		if (d.code() == code && editor_test::requirement_of(d).role == role) return &d;
 	return nullptr;
 }
 
@@ -200,11 +200,13 @@ static int test_query() {
 	std::vector<std::string> titles;
 	for (const ProblemGroup &group : kinds.groups) titles.push_back(group.title);
 	TEST_EXPECT(titles == std::vector<std::string>({"Required files", "Missing references", "Stylesheets", "Menus",
-	                                                "Catalogs", "rename"}));
+	                                                "Catalogs", "Renames"}));
 	TEST_EXPECT(kinds.groups[2].key == "style" && kinds.groups[2].rows.size() == 2 && kinds.groups[5].key == "rename");
 	TEST_EXPECT(kinds.rows == std::vector<size_t>({1, 3, 4, 2, 0, 5, 6}) && kinds.total() == 7);
-	TEST_EXPECT(problem_family_title("reference.missing") == "Missing references" &&
-	            problem_family_title("animation_map.row") == "Animation maps" && problem_family_title("odd") == "odd");
+	// A group's title is its row's group's (the families the old table did not name have one too).
+	TEST_EXPECT(std::string(finding_group_title(finding_row("reference.missing")->group)) == "Missing references" &&
+	            std::string(finding_group_title(finding_row("animation_map.row")->group)) == "Animation maps" &&
+	            std::string(finding_group_title(finding_row("rename.site")->group)) == "Renames");
 	// Grouped and filtered: the groups hold what is shown ("4 of 7").
 	query.errors = false;
 	const ProblemAnswer filtered = answer_problems(query, view);
@@ -396,12 +398,13 @@ static int test_fixes() {
 	// Rewrite row of the tables, the editor's and the types' (S13 A6: the five the fixes named
 	// before, each saying what its row's rewrite_does says); none while a finding of the file
 	// says it does not serialize (a blocks_save row's).
-	std::vector<const FindingCodeRow *> rewrites;
-	for (const FindingCodeRow &row : core_finding_codes())
-		if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
-	for (size_t i = 1; i <= kDocumentTypeCount; ++i)
-		for (const FindingCodeRow &row : document_type(static_cast<DocumentTypeId>(i))->findings())
+	std::vector<const FindingCodeRow *> rewrites, blockers;
+	for (const NamedFindingTable &table : finding_tables())
+		for (const FindingCodeRow &row : table.rows) {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
+			if (row.blocks_save) blockers.push_back(&row);
+		}
+	TEST_EXPECT(blockers.size() == 7);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
@@ -417,11 +420,14 @@ static int test_fixes() {
 		TEST_EXPECT(fixes[0].detail == std::string("Writes menus/a.mnu again ") + row->rewrite_does + "." +
 		                                       " It cannot be undone with Undo." &&
 		            fixes[0].detail.find(kNotUndoable) != std::string::npos);
-		SessionView blocked = v;
-		blocked.findings.diagnostics.push_back(
-		        editor_test::finding_of(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/a.mnu"));
-		blocked.revisions.touch(ViewConcern::Findings);
-		TEST_EXPECT(fixes_for(rewrite, blocked).empty() && !has_fixes(rewrite, blocked));
+		// None while any finding of the file says it does not serialize (every blocks_save row's).
+		for (const FindingCodeRow *blocker : blockers) {
+			SessionView blocked = v;
+			blocked.findings.diagnostics.push_back(
+			        make_finding(*blocker, DiagnosticSeverity::Error, "It cannot be written.", "menus/a.mnu"));
+			blocked.revisions.touch(ViewConcern::Findings);
+			TEST_EXPECT(fixes_for(rewrite, blocked).empty() && !has_fixes(rewrite, blocked));
+		}
 	}
 	// Open with unsaved edits, the rewrite saves them too, and says so.
 	session.handle(request::open_document("menus/a.mnu"));
@@ -499,7 +505,10 @@ static int test_fix_cache() {
 	TEST_EXPECT(first->size() == 1 && (*first)[0].label == "Rewrite menu_style.mns");
 	TEST_EXPECT(cache.fixes(view, 1).empty() && cache.fixes(view, 7).empty());
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
-	view.findings.diagnostics[0].code = "menu.duplicate_screen"; // unmarked: still the answer kept
+	// The finding changed in place, unmarked: still the answer kept.
+	const Diagnostic was = view.findings.diagnostics[0];
+	view.findings.diagnostics[0] =
+	        make_finding(finding_code(MenuFinding::DuplicateScreen), was.severity, was.message, was.asset, was.field);
 	TEST_EXPECT(cache.fixes(view, 0).size() == 1 && cache.generation(view) == started);
 	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.fixes(view, 0).empty() && cache.generation(view) == started + 1);
@@ -587,17 +596,21 @@ static int test_location() {
 	}
 	// The rows about the file as a whole (FindingPlace::File: S13 A6, the four the location named
 	// before).
+	std::vector<const FindingCodeRow *> file_rows;
 	std::vector<std::string> about_files;
-	for (const FindingCodeRow &row : core_finding_codes())
-		if (row.place == FindingPlace::File) about_files.push_back(row.token);
-	for (size_t i = 1; i <= kDocumentTypeCount; ++i)
-		for (const FindingCodeRow &row : document_type(static_cast<DocumentTypeId>(i))->findings())
-			if (row.place == FindingPlace::File) about_files.push_back(row.token);
+	for (const NamedFindingTable &table : finding_tables())
+		for (const FindingCodeRow &row : table.rows)
+			if (row.place == FindingPlace::File) {
+				file_rows.push_back(&row);
+				about_files.push_back(row.token);
+			}
 	TEST_EXPECT(about_files == std::vector<std::string>({"asset.name.duplicate", "asset.name.empty", "asset.name.too_long",
 	                                                     "build.archive_in_project", "build.name_unstorable"}));
-	for (const std::string &code : about_files) {
-		Diagnostic named = catalog;
-		named.code = code;
+	for (const FindingCodeRow *row : file_rows) {
+		Diagnostic named = make_finding(*row, catalog.severity, catalog.message, catalog.asset, catalog.field);
+		named.record = catalog.record;
+		named.row_id = catalog.row_id;
+		named.record_kind = catalog.record_kind;
 		const ProblemLocation shown = problem_location(named, view);
 		TEST_EXPECT(shown.path == "defs/items.def" && shown.in_files && shown.record == NodeAddress() &&
 		            shown.request().kind == EditorRequestKind::ShowInFiles);
@@ -658,7 +671,7 @@ static int test_fix_index() {
 	ProblemFixCache cache;
 	for (size_t i : {size_t(0), size_t(7), size_t(8), size_t(37), size_t(2999), size_t(3000)}) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		const bool fixable = d.asset != "defs/f7.def" && d.code == "catalog.ignored_input";
+		const bool fixable = d.asset != "defs/f7.def" && d.code() == "catalog.ignored_input";
 		TEST_EXPECT(has_fixes(d, view) == fixable && has_fixes(d, view, &index) == fixable);
 		TEST_EXPECT(labels_of(fixes_for(d, view, &index)) == labels_of(fixes_for(d, view)));
 		TEST_EXPECT(labels_of(cache.fixes(view, i)) == labels_of(fixes_for(d, view)));
@@ -704,7 +717,7 @@ static int test_placeholders() {
 	session.handle(request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
-			if (d.code == "reference.missing" && editor_test::reference_of(d).kind == kind && subject_target(d) == target) return &d;
+			if (d.code() == "reference.missing" && editor_test::reference_of(d).kind == kind && subject_target(d) == target) return &d;
 		return nullptr;
 	};
 	const Diagnostic *skin = missing(ReferenceKind::Texture, "armry.tga");
@@ -826,8 +839,9 @@ static int test_optional_group() {
 	            kinds.groups[0].rows == std::vector<size_t>({1, 2}));
 	TEST_EXPECT(kinds.groups[1].key == "requirement.optional_missing" && kinds.groups[1].title == "Optional files" &&
 	            kinds.groups[1].infos == 1 && kinds.groups[1].errors == 0);
-	TEST_EXPECT(problem_family_title("requirement.optional_missing") == "Optional files" &&
-	            problem_family_title("requirement.missing") == "Required files");
+	TEST_EXPECT(std::string(finding_group_title(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
+	                    "Optional files" &&
+	            std::string(finding_group_title(finding_code(CoreFinding::RequirementMissing).group)) == "Required files");
 	return 0;
 }
 
@@ -904,7 +918,7 @@ static int test_locations_and_fixes() {
 	session.handle(request::rescan());
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
-			if (d.code == code && d.asset == asset) return &d;
+			if (d.code() == code && d.asset == asset) return &d;
 		return nullptr;
 	};
 
@@ -960,7 +974,7 @@ static int test_locations_and_fixes() {
 	            same_id->severity == DiagnosticSeverity::Warning && same_id->message.find("\"Marker\"") != std::string::npos);
 	size_t catalog_findings = 0;
 	for (const Diagnostic &d : v.findings.diagnostics)
-		catalog_findings += d.asset == items_path && (d.code == "catalog.name_duplicate" || d.code == "catalog.item_identity");
+		catalog_findings += d.asset == items_path && (d.code() == "catalog.name_duplicate" || d.code() == "catalog.item_identity");
 	TEST_EXPECT(catalog_findings == 2); // on the later record alone
 
 	// A name the archives cannot take: shown in Files, whose Rename... the fix opens; the same
@@ -997,7 +1011,7 @@ static int test_locations_and_fixes() {
 	// still reaches the first.
 	std::string twin;
 	for (const Diagnostic &d : v.findings.diagnostics)
-		if (d.code == "asset.name.duplicate") twin = d.asset;
+		if (d.code() == "asset.name.duplicate") twin = d.asset;
 	TEST_EXPECT(twin == "other/twin.tga");
 	Diagnostic duplicate = editor_test::finding_of(DiagnosticSeverity::Error, "asset.name.duplicate", "Two files.", twin);
 	fixes = fixes_for(duplicate, v);
@@ -1014,7 +1028,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/" + moved) && !fs::exists(root + "/" + twin));
 	TEST_EXPECT(fs::exists(root + "/art/twin.tga") &&
 	            std::none_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
-	                         [](const Diagnostic &d) { return d.code == "rename.partial"; }));
+	                         [](const Diagnostic &d) { return d.code() == "rename.partial"; }));
 	std::string c_menu, read_error;
 	TEST_EXPECT(read_file_text(root + "/menus/c.mnu", c_menu, read_error) && c_menu.find(">twin.tga<") != std::string::npos);
 	TEST_EXPECT(v.project.scan->find("twin.tga") && !finding_in("asset.name.duplicate", twin) && !finding_in("reference.missing", "menus/c.mnu"));

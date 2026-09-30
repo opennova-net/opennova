@@ -8,8 +8,8 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>

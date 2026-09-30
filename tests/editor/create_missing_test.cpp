@@ -80,7 +80,7 @@ static int test_default_project_fills_and_validates() {
 	// What is left are the optional files the project lacks: notes, never errors.
 	TEST_EXPECT(!after.report.diagnostics.empty() && !diagnostics_have_errors(after.report.diagnostics));
 	for (const Diagnostic &d : after.report.diagnostics)
-		TEST_EXPECT(d.code == "requirement.optional_missing" && d.severity == DiagnosticSeverity::Info);
+		TEST_EXPECT(d.code() == "requirement.optional_missing" && d.severity == DiagnosticSeverity::Info);
 	for (const RequirementRow &row : after.report.rows) {
 		if (row.required) TEST_EXPECT(row.state == RequirementState::Present);
 	}
@@ -131,7 +131,7 @@ static int test_single_role_and_wrong_kind() {
 	TEST_EXPECT(editor_test::write_text(root + "/menus/main.mnu", "edited since"));
 	const CreateMissingResult stale = create_missing_requirements(paths, doc, before.report, {"main_menu"});
 	TEST_EXPECT(stale.created.empty() && stale.diagnostics.size() == 1 &&
-	            stale.diagnostics[0].code == "create_missing.exists");
+	            stale.diagnostics[0].code() == "create_missing.exists");
 	TEST_EXPECT(read_file_text(root + "/menus/main.mnu", text, io_error) && text == "edited since");
 	// A report that lists it, in another folder: refused the same way, nothing made beside it.
 	TEST_EXPECT(editor_test::write_bytes(root + "/elsewhere/main.mnu", made));
@@ -139,7 +139,7 @@ static int test_single_role_and_wrong_kind() {
 	const Evaluated moved = evaluate(paths, doc);
 	const CreateMissingResult present = create_missing_requirements(paths, doc, moved.report, {"main_menu"});
 	TEST_EXPECT(present.created.empty() && present.diagnostics.size() == 1 &&
-	            present.diagnostics[0].code == "create_missing.exists");
+	            present.diagnostics[0].code() == "create_missing.exists");
 	TEST_EXPECT(!fs::exists(root + "/menus/main.mnu"));
 	TEST_EXPECT(read_file_bytes(root + "/elsewhere/main.mnu", kept, io_error) && kept == made);
 	// An optional row asked for by name is created too.
@@ -153,14 +153,14 @@ static int test_single_role_and_wrong_kind() {
 	// refused, each once.
 	const CreateMissingResult unknown = create_missing_requirements(paths, doc, before.report, {"ammo_def", "nope", "nope"});
 	TEST_EXPECT(unknown.created.empty() && unknown.diagnostics.size() == 2);
-	for (const Diagnostic &d : unknown.diagnostics) TEST_EXPECT(d.code == "create_missing.unknown");
+	for (const Diagnostic &d : unknown.diagnostics) TEST_EXPECT(d.code() == "create_missing.unknown");
 
 	// A present-but-wrong file is refused, never overwritten.
 	TEST_EXPECT(editor_test::write_text(root + "/gametext.bin", "not a string table"));
 	Evaluated wrong = evaluate(paths, doc);
 	const CreateMissingResult refused = create_missing_requirements(paths, doc, wrong.report, {"gametext"});
 	TEST_EXPECT(refused.created.empty());
-	TEST_EXPECT(refused.diagnostics.size() == 1 && refused.diagnostics[0].code == "create_missing.wrong_kind");
+	TEST_EXPECT(refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "create_missing.wrong_kind");
 	TEST_EXPECT(read_file_text(root + "/gametext.bin", text, io_error) && text == "not a string table");
 	return 0;
 }

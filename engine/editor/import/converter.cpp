@@ -1,5 +1,5 @@
 #include <editor/import/converter.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/diagnostic.h>
 
 #include <filesystem>
 #include <sstream>

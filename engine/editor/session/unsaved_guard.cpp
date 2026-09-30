@@ -1,10 +1,10 @@
+#include <editor/model/diagnostic.h>
 #include <editor/session/unsaved_guard.h>
 
 #include <algorithm>
 #include <utility>
 
 #include <editor/session/document_set.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>

@@ -12,6 +12,7 @@
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
@@ -74,12 +75,10 @@ const char *render_status(const MenuScreenRender *render) {
 	return render ? menu_preview_status_token(render->status()) : "none";
 }
 
-// Where a finding comes from, by its code's family.
-std::string finding_source(const std::string &code) {
-	if (code.rfind("reference.", 0) == 0 || code.rfind("graph.", 0) == 0) return "graph";
-	if (code.rfind("menu.render.", 0) == 0) return "render";
-	const size_t dot = code.find('.');
-	return dot == std::string::npos ? code : code.substr(0, dot);
+// Where a finding comes from: its row's source (the asset graph's, the render check's, else its
+// group's key); "" for a Diagnostic no finding was made into.
+std::string finding_source(const Diagnostic &d) {
+	return d.row() ? finding_source_token(*d.row()) : std::string();
 }
 
 JsonValue window_to_json(const MnuDocument &document, const NodeAddress &window, const Document::Placement &at,
@@ -176,7 +175,7 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 	JsonValue problems = JsonValue::make_array();
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.asset != document->path()) continue;
-		const std::string source = finding_source(d.code);
+		const std::string source = finding_source(d);
 		++counts[diagnostic_severity_label(d.severity)];
 		++sources[source];
 		JsonValue row = diagnostic_to_json(d);

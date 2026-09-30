@@ -7,7 +7,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
-#include <editor/session/finding_codes.h>
+#include <editor/model/finding_code_row.h>
 
 namespace opennova::editor {
 
@@ -37,6 +37,9 @@ struct DocumentType {
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a
 // kind the build packs as it is).
 const DocumentType *document_type(DocumentTypeId id);
+// The type the registry holds for an id whatever stands in its place (document_type answers a
+// test's stand-in): what the finding codes' tables are read from (session/finding_codes.h).
+const DocumentType *registered_document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
 // Whether the documents a type makes are record documents (DocumentBase::as_records): what the

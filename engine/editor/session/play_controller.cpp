@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/session/play_controller.h>
 
 #include <algorithm>
@@ -11,7 +12,6 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/session/editor_preferences.h>
-#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 
@@ -87,8 +87,8 @@ void PlayController::start() {
 	view_.findings.diagnostics.erase(
 			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
 					[](const Diagnostic &d) {
-						return d.code == finding_code(CoreFinding::PlayBootMissing).token ||
-						       d.code == finding_code(CoreFinding::PlayCrashed).token;
+						return d.row() == &finding_code(CoreFinding::PlayBootMissing) ||
+						       d.row() == &finding_code(CoreFinding::PlayCrashed);
 					}),
 			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);

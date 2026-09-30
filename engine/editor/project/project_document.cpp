@@ -1,3 +1,4 @@
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 
 #include <cstdio>
@@ -8,7 +9,6 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
-#include <editor/session/finding_codes.h>
 
 namespace fs = std::filesystem;
 
