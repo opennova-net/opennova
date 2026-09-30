@@ -33,7 +33,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
-    # the menu clipboard's one rule for the tree and the canvas
+    # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
+    # per type that has one, kept between validations
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
@@ -45,6 +46,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/source_issue_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/validation_cache.cpp
@@ -72,14 +74,15 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     # preview — the menu preview's portable half: what it shows and when to configure it
     # again, and its JSON (the device is the shell's MenuFrame); the headless render of a
-    # screen, the render check over every menu (the compiler notes as findings), and the
-    # texture header probe it measures with; what a drag of a window's handles writes, and
-    # what arranging several windows (align, distribute, drawing order) writes; a menu's
-    # tree and its findings as the editor MCP's editor_menu reads them; the model
-    # preview's portable half: its camera and the level the game draws, what it shows and
-    # when to build it again, and its JSON (the device is the shell's ObjectModel); the
-    # canvas's one gesture machine, and what a press on the menu's or the model's picture
-    # takes, what its drag writes and what is drawn over the picture
+    # screen, the render check over every menu (the menu type's project check: the compiler
+    # notes as findings), and the texture header probe it measures with; what a drag of a
+    # window's handles writes, and what arranging several windows (align, distribute, drawing
+    # order) writes; a menu's tree, its findings and a screen as the render check compiled it,
+    # as the menu_tree, menu_findings and menu_render queries read them; the model preview's
+    # portable half: its camera and the level the game draws, what it shows and when to build
+    # it again, and its JSON (the device is the shell's ObjectModel); the canvas's one gesture
+    # machine, and what a press on the menu's or the model's picture takes, what its drag
+    # writes and what is drawn over the picture
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
