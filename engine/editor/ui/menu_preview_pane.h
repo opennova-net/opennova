@@ -4,18 +4,16 @@
 #include <vector>
 
 #include <editor/documents/mnu_clipboard.h>
-#include <editor/model/value.h>
-#include <editor/preview/menu_arrange.h>
-#include <editor/preview/menu_layout_edit.h>
+#include <editor/preview/menu_canvas.h>
 #include <editor/preview/menu_preview_state.h>
 #include <editor/session/editor_request.h>
 #include <editor/ui/editor_host.h>
+#include <editor/ui/viewport_canvas.h>
 #include <runtime/menu/menu_frame.h>
 
 namespace opennova::editor {
 
 class MnuDocument;
-struct Node;
 
 // The only seam between the engine-owned menu pane and a rendering device (ADR 0046 d11,
 // the GameViewport pattern): the shell renders the previewed screen through the runtime's
@@ -47,107 +45,54 @@ public:
 	virtual uint64_t shown_revision() const = 0;
 };
 
-// The menu preview, the Preview window's menu pane (ADR 0046 S6c, S9j, S9k1, S9k2, S11d):
-// the selected screen of the menu the view previews as the game draws it, refreshed on
-// every edit of the menu, its stylesheets and its string tables; when there is nothing to
-// draw it says why. The toolbar zooms (fit, a scale, or a device size), snaps drags to the
-// grid, shows hidden windows, holds the selected window in a state and arranges the
-// selected windows (align, distribute, drawing order). On the canvas a click selects the
-// window the game's hit test finds, Shift+click adds one and Ctrl+click adds or drops one,
-// and a drag from the screen's background (a root window not selected, or nothing)
-// selects every window its box touches. Every selected window is outlined, the primary
-// with eight handles: a drag of a handle resizes the primary, a drag of a selected window
-// moves every selected one (one undo step per drag), as do the arrow keys; Esc selects the
-// primary's parent; Ctrl+C / X / V / D copy, cut, paste and duplicate windows, also from
-// the right-click menu; the middle button or Space pans, Ctrl+wheel zooms about the mouse.
+// The menu preview, the Preview window's menu pane (ADR 0046 S6c, S9j, S9k1, S9k2, S11d, S13 V2):
+// the selected screen of the menu the view previews as the game draws it, refreshed on every
+// edit of the menu, its stylesheets and its string tables; when there is nothing to draw it says
+// why. A toolbar and the compiler's notes around one canvas (ui/viewport_canvas over
+// preview/menu_canvas). The toolbar zooms (fit, a scale, or a device size), snaps drags to the
+// grid, shows hidden windows, holds the selected window in a state and arranges the selected
+// windows (align, distribute, drawing order). On the canvas a click selects the window the
+// game's hit test finds, Shift+click adds one and Ctrl+click adds or drops one, and a drag from
+// the screen's background (a root window not selected, or nothing) selects every window its box
+// touches. Every selected window is outlined, the primary with eight handles: a drag of a handle
+// resizes the primary, a drag of a selected window moves every selected one (one undo step per
+// drag), as do the arrow keys; Esc selects the primary's parent; Ctrl+C / X / V / D copy, cut,
+// paste and duplicate windows, also from the right-click menu; the middle button or Space pans,
+// Ctrl+wheel zooms about the mouse.
 class MenuPreviewPane {
 public:
-	explicit MenuPreviewPane(EditorHost &host) : host_(host) {}
+	explicit MenuPreviewPane(EditorHost &host);
 	void set_viewport(MenuPreviewViewport *viewport) { viewport_ = viewport; }
 	// Into the current window, below the Preview window's line naming the screen.
 	void draw();
-	// The Preview window shows the other pane: a drag or a nudge in progress ends, its
-	// gesture's end raised.
-	void end_gestures();
+	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw
+	// this frame (the model pane shown, the window closed or hidden, nothing to show) ends its
+	// drag or nudge, its end raised once for the menu it began in.
+	void end_frame();
 
 private:
-	// How the picture is sized: fitted to the window (the game's 4:3), a scale of the
-	// 800x600 design, or the options' device size (each axis scaled on its own).
-	enum class Zoom : uint8_t { Fit, Scale, Device };
-	// The left button down on the canvas, and the drag it becomes.
-	struct Press {
-		bool active = false;
-		bool resize = false;   // on a handle of the primary window
-		bool marquee = false;  // on the screen's background: a drag selects what its box touches
-		bool dragging = false; // moved past the threshold
-		bool sent = false;     // a step of the drag went out
-		float x = 0.0f, y = 0.0f;   // where, in screen pixels
-		float sx = 1.0f, sy = 1.0f; // the device scale at the press
-		float from_x = 0.0f, from_y = 0.0f, to_x = 0.0f, to_y = 0.0f; // the marquee, in design units
-		int pick = -1;              // the widget the game's hit test found there
-		// Shift: Add, Ctrl: Toggle (the selection changes on release, nothing moves).
-		SelectMode join = SelectMode::Replace;
-		std::string path;
-		NodeAddress window;  // what a drag moves or resizes (none: a click only)
-		LayoutPress layout;  // where the drag began: the windows it takes (the selected ones, or the one picked)
-		LayoutHandle handle = LayoutHandle::Move;
-		uint64_t gesture = 0;
-		int dx = 0, dy = 0, grid = -1; // the last step planned
-	};
-	// Arrow keys on the selected windows: one gesture while any is held.
-	struct Nudge {
-		uint64_t gesture = 0;
-		bool sent = false;
-		std::string path;
-		std::vector<NodeAddress> windows;
-		LayoutPress press;
-		int dx = 0, dy = 0;
-	};
-	// What the canvas pass needs of this frame.
+	// What the pane draws this frame: what its canvas maps, and what the clipboard takes.
 	struct Frame {
-		const MnuDocument *document = nullptr;
-		const Node *screen = nullptr;
-		NodeAddress selected;             // the primary window of the screen (none: none)
-		std::vector<NodeAddress> windows; // every selected window of the screen, the primary among them
-		MenuClipboard clipboard;          // what Copy, Cut, Duplicate and Paste take
-		const menu::MenuFrameCompiler *compiler = nullptr;
-		const menu::MenuFrameState *state = nullptr;
-		bool current = false; // the picture shows the document's revision
-		std::vector<menu::MenuFrameNote> notes;
+		MenuCanvasFrame canvas;
+		MenuClipboard clipboard;
 	};
 
 	void follow_selection_(const MnuDocument &document, const NodeAddress &selected);
 	void toolbar_(const Frame &frame);
-	void canvas_(const Frame &frame, float height);
+	void draw_canvas_(const Frame &frame, float height);
+	// The clipboard's shortcuts (the arrows and Esc are the canvas's).
 	void keys_(const Frame &frame);
-	// The Arrange items (the toolbar's menu and the canvas's), and one of them run.
+	// The Arrange items (the toolbar's menu and the canvas's).
 	void arrange_items_(const Frame &frame);
-	void arrange_(const Frame &frame, ArrangeOp op);
 	// Copy, Cut, Paste or Duplicate the selected windows (the keys and the canvas's menu).
 	void clipboard_(const Frame &frame, EditorRequestKind kind);
-	// The selected window a press at a screen point moves: the primary when its rect holds
-	// the point, else the front-most selected window whose rect does (none: none does).
-	NodeAddress selected_window_at_(const Frame &frame, float x, float y, float origin_x, float origin_y, float sx,
-	                                float sy) const;
-	void press_on_canvas_(const Frame &frame, float mouse_x, float mouse_y, float origin_x, float origin_y, float sx,
-	                      float sy);
-	void drag_step_(const Frame &frame, float mouse_x, float mouse_y, float origin_x, float origin_y, bool free);
-	void release_(const Frame &frame);
-	// The windows the marquee's box touches, selected.
-	void marquee_select_(const Frame &frame);
-	void end_press_();
-	void end_nudge_();
 
 	EditorHost &host_;
 	MenuPreviewViewport *viewport_ = nullptr;
-	Zoom zoom_ = Zoom::Fit;
-	float scale_ = 1.0f; // Zoom::Scale
+	ViewportCanvas canvas_;
+	MenuCanvas menu_canvas_;
+	CanvasWindowRequests requests_;
 	bool snap_ = true;
-	bool scroll_pending_ = false; // a zoom about the mouse: the canvas's scroll next frame
-	float scroll_x_ = 0.0f, scroll_y_ = 0.0f;
-	bool panning_ = false;
-	Press press_;
-	Nudge nudge_;
 	NodeId followed_ = 0; // the selected window the held state last followed
 	// The mouse over the picture in design units, from the last canvas pass (the toolbar's
 	// readout).

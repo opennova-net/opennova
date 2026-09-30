@@ -51,8 +51,8 @@ public:
 	bool draw_frame(uint64_t frame_index);
 	// The frame bracket, for a shell that drives the pass itself (EditorApp's layout pass):
 	// a request that acts on the files as saved, raised in between, waits for every other
-	// request of the frame (request()), and end_frame queues it after them, once a Preview
-	// window the pass did not draw has ended its gestures.
+	// request of the frame (request()), and end_frame queues it after them, once the Preview
+	// window's canvases that did not draw this frame have ended their gestures.
 	void begin_frame();
 	void end_frame();
 

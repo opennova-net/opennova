@@ -3636,6 +3636,17 @@ target_link_libraries(editor_mnu_clipboard_test PRIVATE opennova_editor)
 target_include_directories(editor_mnu_clipboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_mnu_clipboard COMMAND editor_mnu_clipboard_test)
 
+# The Preview's one canvas with no ImGui (S13 V2: preview/canvas_gesture, menu_canvas,
+# model_canvas): the one gesture machine and its single EndEdit; the menu's canvas over a
+# headless render (a click, a drag of a window and of a handle on the grid, the arrows, Esc,
+# several windows, the marquee, the clipboard's rule, Arrange, a part's window, what it draws);
+# the model's canvas over a real session (F, a click on a marker, a marker's drag ended once, the
+# orbit and the dolly).
+add_executable(editor_canvas_test editor/canvas_test.cpp)
+target_link_libraries(editor_canvas_test PRIVATE opennova_editor)
+target_include_directories(editor_canvas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_canvas COMMAND editor_canvas_test)
+
 # The windows' models with no ImGui (S13 V1): what the Problems window lists, folds, proposes
 # and asks (ui/problems_list), and where the find bar is among a document's hits
 # (ui/find_cursor). Built with the windows (their sources are ui/'s).

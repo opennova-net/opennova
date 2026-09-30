@@ -6,12 +6,11 @@
 // ignored-and-left-out fields hidden); then, driven through the real windows, a click on a
 // tree row in the menu's Document tab selects it (Ctrl+click toggles), a drag drops a window
 // inside, before or after another, the toolbar's buttons and Ctrl+C / X / V raise their
-// requests, and the inspector's tables add, move and edit rows in place. S9k1: the Preview
-// window's menu pane over a fake device backed by the headless render: a click selects, a
-// drag of a window or a handle is one gesture of Sets then its end (a small window's middle
-// a move), the arrows nudge, Esc selects the parent, a stale picture maps nothing, the zoom,
-// the held state, the empty states; a drag or a nudge ends once when the pane stops drawing
-// (the model pane shown, Preview closed) and the hidden pane takes no key. S11a: a frame's
+// requests, and the inspector's tables add, move and edit rows in place. S9k1, S13 V2: the
+// Preview window's menu pane over a fake device backed by the headless render, one smoke test
+// of its canvas (a click, a drag, Preview closed mid-drag, the held state, the pane hidden
+// taking no key, Ctrl+wheel, the empty states); the canvas's rules are
+// tests/editor/canvas_test.cpp's. S11a: a frame's
 // Save goes after the frame's edits, and the save
 // shortcuts work while a text field has the keyboard. S11c: the Problems window, pressed
 // with the mouse where a user presses (the filters, the grouping and folding, the fixes and
@@ -835,7 +834,7 @@ void test_actions_after_edits() {
 	ui.drain();
 }
 
-// --- S9k1: the preview window's canvas --------------------------------------------------
+// --- S9k1, S13 V2: the preview window's canvas ------------------------------------------
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu =
@@ -881,11 +880,18 @@ int64_t set_value(const std::vector<Edit> &edits, const char *field) {
 	return -1;
 }
 
-// The canvas through the window: a click selects what the game's hit test finds, a drag of
-// the selected window and of a corner handle writes its POSITION as Sets sharing one
-// gesture then ends it, the arrows nudge, Esc selects the parent, a stale picture maps
-// nothing; the zoom; the state options follow the selection; each empty state says why.
-void test_preview_window_ui() {
+// S13 V2: the canvas through the menu pane on the null backend (its rules are its portable
+// half's, tests/editor/canvas_test.cpp: preview/canvas_gesture, menu_canvas). The pane over a fake
+// device backed by the headless render: Fit at the design's 4:3, then 100% from the toolbar; a
+// click selects what the game's hit test finds; a drag of the selected window is one gesture of
+// Sets on the grid, then its end; the arrows through the canvas's key channel (Right a unit, a
+// nudge one gesture while held and ended when let go, Shift+Up 8, the focus taken mid-nudge ending
+// it once); a stale picture maps nothing; the held state follows the selection, Checked only where
+// the type has one; Ctrl+wheel steps the zoom about the mouse; each empty state says why. The
+// gestures' ends when the pane stops drawing, and the pane hidden taking no key, are
+// test_preview_gestures_end's; the several windows, the clipboard's keys and Arrange
+// test_preview_several_windows_ui's.
+void test_preview_canvas_smoke() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_test");
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
@@ -914,15 +920,9 @@ void test_preview_window_ui() {
 	ui.frames(2);
 	CHECK(fake.width == 800 && fake.height == 600, "100%");
 	ui.drain();
-	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
+	const NodeAddress box = named(*document, "BOX"), other = named(*document, "OTHER");
 	auto at = [&](float x, float y) {
 		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
-	};
-	auto click = [&](ImVec2 p) {
-		ui.mouse(p.x, p.y);
-		ui.button(true);
-		ui.button(false);
-		return ui.drain();
 	};
 	// A drag from `from` by (dx, dy) design units in steps, released there.
 	auto drag = [&](ImVec2 from, float dx, float dy) {
@@ -936,12 +936,13 @@ void test_preview_window_ui() {
 	};
 
 	// A click selects the window the game's hit test finds.
-	std::vector<EditorRequest> requests = click(at(200.0f, 150.0f));
+	ui.click(at(200.0f, 150.0f));
+	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *picked = only(requests, EditorRequestKind::SelectRecord);
 	CHECK(picked && picked->edit.address == box && picked->select_mode == SelectMode::Replace, "a click selects BOX");
 	CHECK(!only(requests, EditorRequestKind::EditRecord), "a click edits nothing");
 
-	// BOX selected: dragged by (40, 20), snapped: one gesture of Sets, then its end.
+	// BOX selected: dragged by (40, 21), snapped: one gesture of Sets, then its end.
 	select_in(v, box);
 	ui.frames(2);
 	ui.drain();
@@ -950,74 +951,56 @@ void test_preview_window_ui() {
 	size_t count = 0;
 	std::vector<Edit> last = batches(requests, gesture, count);
 	CHECK(count >= 2 && gesture != 0, "a drag's steps share one gesture");
-	CHECK(set_value(last, "position.left") == 144 && set_value(last, "position.right") == 344 &&
-	              set_value(last, "position.top") == 120 && set_value(last, "position.bottom") == 220,
-	      "the last step: moved and snapped on the grid of 8");
+	CHECK(set_value(last, "position.left") == 144 && set_value(last, "position.top") == 120,
+			"the last step: moved and snapped on the grid of 8");
 	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit && requests.back().path == document->path(),
 	      "release ends the gesture");
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "the selected window moves without a new selection");
 
-	// Its bottom-right handle, Alt held: resized, not snapped.
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
-	requests = drag(at(300.0f, 200.0f), 13.0f, 7.0f);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
-	ui.frames();
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.right") == 313 && set_value(last, "position.bottom") == 207 &&
-	              set_value(last, "position.left") == -1 && set_value(last, "position.top") == -1,
-	      "a corner handle resizes its two edges");
-
-	// A drag that starts on another window selects it and moves it.
-	requests = drag(at(500.0f, 350.0f), -8.0f, 0.0f);
-	const EditorRequest *took = only(requests, EditorRequestKind::SelectRecord);
-	last = batches(requests, gesture, count);
-	CHECK(took && took->edit.address == other && set_value(last, "position.left") == 392, "OTHER picked and moved");
-
-	// A window 12 pixels across: pressed in its middle it moves (every point of it is within
-	// a handle's reach of a corner, so the handles keep out of its middle); its corner still
-	// resizes it.
-	const NodeAddress tiny = named(*document, "TINY");
-	select_in(v, tiny);
-	ui.frames(2);
-	ui.drain();
-	requests = drag(at(606.0f, 110.0f), 16.0f, 0.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.left") == 616 && set_value(last, "position.right") == 628 &&
-	              set_value(last, "position.top") == -1 && set_value(last, "position.bottom") == -1,
-	      "the middle of a small window moves it, its size kept");
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "the selected small window moves without a new selection");
-	requests = drag(at(612.0f, 116.0f), 12.0f, 12.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.right") == 624 && set_value(last, "position.bottom") == 128 &&
-	              set_value(last, "position.left") == -1 && set_value(last, "position.top") == -1,
-	      "a small window's corner still resizes it");
-	select_in(v, box);
-	ui.frames(2);
-	ui.drain();
-
-	// The arrows nudge the selected window (Shift: 8), one gesture while held.
+	// The arrows through the canvas's key channel: Right moves BOX a unit, one gesture while held
+	// and its end when let go; Shift+Up moves it 8.
 	auto nudge = [&](ImGuiKey key, bool shift) {
-		if (shift) ui.key(ImGuiMod_Shift, true);
+		if (shift)
+			ui.key(ImGuiMod_Shift, true);
 		ui.key(key, true);
 		ui.key(key, false);
-		if (shift) ui.key(ImGuiMod_Shift, false);
+		if (shift)
+			ui.key(ImGuiMod_Shift, false);
 		return ui.drain();
 	};
 	requests = nudge(ImGuiKey_RightArrow, false);
 	last = batches(requests, gesture, count);
-	CHECK(count == 1 && gesture != 0 && set_value(last, "position.left") == 101 && set_value(last, "position.right") == 301,
-	      "Right moves BOX a unit");
-	CHECK(requests.back().kind == EditorRequestKind::EndEdit, "letting go ends the nudge");
+	CHECK(count == 1 && gesture != 0 && set_value(last, "position.left") == 101 &&
+					set_value(last, "position.right") == 301,
+			"Right moves BOX a unit");
+	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit,
+			"letting go ends the nudge");
 	requests = nudge(ImGuiKey_UpArrow, true);
 	last = batches(requests, gesture, count);
-	CHECK(set_value(last, "position.top") == 92 && set_value(last, "position.bottom") == 192, "Shift+Up moves it 8");
+	CHECK(set_value(last, "position.top") == 92 && set_value(last, "position.bottom") == 192,
+			"Shift+Up moves it 8");
+	// An arrow held while another window takes the focus: the nudge's one end then; let go
+	// after, nothing.
+	ui.key(ImGuiKey_RightArrow, true);
+	CHECK(only(ui.drain(), EditorRequestKind::EditRecord) != nullptr, "a nudge's first step");
+	ui.focus("Document");
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path(),
+			"the focus taken mid-nudge: its one end");
+	ui.key(ImGuiKey_RightArrow, false);
+	CHECK(ui.drain().empty(), "letting go of the arrow raises nothing");
+	ui.focus("Preview");
+	ui.drain();
 
-	// Esc selects what holds it.
-	requests = nudge(ImGuiKey_Escape, false);
-	const EditorRequest *parent = only(requests, EditorRequestKind::SelectRecord);
-	CHECK(parent && parent->edit.address == main, "Esc selects MAIN");
+	// A picture of another revision maps nothing, through the pane either.
+	fake.stale = true;
+	ui.click(at(500.0f, 350.0f));
+	CHECK(!only(ui.drain(), EditorRequestKind::SelectRecord), "a stale picture selects nothing");
+	requests = drag(at(200.0f, 150.0f), 40.0f, 0.0f);
+	CHECK(!only(requests, EditorRequestKind::EditRecord), "a stale picture drags nothing");
+	fake.stale = false;
 
 	// The held state follows the selection; Checked only where the type has one.
+	ui.focus("Preview");
 	MenuPreviewOptions options;
 	options.force_state = opennova::menu::kStateMouseover;
 	options.force_window = box.child;
@@ -1033,27 +1016,15 @@ void test_preview_window_ui() {
 	CHECK(fake.held.force_window == box.child && !fake.held.checked, "a plain window lets the check go");
 	ui.drain();
 
-	// A picture of another revision maps nothing.
-	fake.stale = true;
-	requests = click(at(500.0f, 350.0f));
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "a stale picture selects nothing");
-	requests = drag(at(200.0f, 150.0f), 40.0f, 0.0f);
-	CHECK(!only(requests, EditorRequestKind::EditRecord), "a stale picture drags nothing");
-	fake.stale = false;
-
-	// The zoom: 200% from the toolbar; Ctrl+wheel over the picture to the next level.
-	ui.activate(item_id(preview_id, {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"200%"}));
-	ui.frames(2);
-	CHECK(fake.width == 1600 && fake.height == 1200, "200%");
-	const ImVec2 inside_canvas(ImGui::FindWindowByName("Preview")->Pos.x + 40.0f, fake.origin.y + 40.0f);
-	ui.mouse(inside_canvas.x, inside_canvas.y);
+	// Ctrl+wheel over the picture steps the zoom about the mouse: 100% to 150%.
+	const ImVec2 over = at(100.0f, 100.0f);
+	ui.mouse(over.x, over.y);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
 	ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
 	ui.frames(2);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
 	ui.frames(2);
-	CHECK(fake.width == 2400 && fake.height == 1800, "Ctrl+wheel zooms in to 300%");
+	CHECK(fake.width == 1200 && fake.height == 900, "Ctrl+wheel zooms in to 150%");
 	ui.drain();
 
 	// Each empty state says why.
@@ -2277,7 +2248,7 @@ void run_inspector_tests() {
 	test_numeric_go_to_ui();
 }
 void run_preview_tests() {
-	test_preview_window_ui();
+	test_preview_canvas_smoke();
 	test_preview_gestures_end();
 	test_preview_several_windows_ui();
 }

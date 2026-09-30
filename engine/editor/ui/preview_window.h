@@ -30,11 +30,12 @@ PreviewFamily preview_family(const SessionView &view, PreviewFamily last);
 // table's tab keeps showing the menu screen it feeds and a catalog's tab keeps what was
 // shown. A line above the pane names what it shows ("main.mnu - STARTUP", "skinned.3di",
 // "walk.bad on skinned.3di"), marked while that file has unsaved changes; with nothing to
-// show it says what to open. A pane that stops drawing ends a drag or a nudge in progress
-// on it, its gesture's end raised once for the document it began in: when the window
-// shows the other pane, and when the window itself does not draw (closed, collapsed, its
-// tab hidden), which end_frame() catches. The window never takes the focus, and the
-// shell's devices refresh and tick whether a pane shows or not.
+// show it says what to open. Each pane draws on a canvas of its own (ui/viewport_canvas), and
+// a canvas that does not draw a frame ends the drag or the nudge in progress on it, its
+// gesture's end raised once for the document it began in: when the window shows the other
+// pane, when the pane has nothing to show, and when the window itself does not draw (closed,
+// collapsed, its tab hidden), which end_frame() catches. The window never takes the focus,
+// and the shell's devices refresh and tick whether a pane shows or not.
 class PreviewWindow : public devtools::Window {
 public:
 	explicit PreviewWindow(EditorHost &host) : host_(host), menu_(host), model_(host) { open = true; }
@@ -48,7 +49,7 @@ public:
 	}
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 	// After each frame's windows, whether this one drew or not (the workspace's frame
-	// bracket): a frame it did not draw ends both panes' gestures.
+	// bracket): a pane whose canvas did not draw this frame ends its gesture.
 	void end_frame();
 
 	// The family the window last showed (None before it showed one).
@@ -62,7 +63,6 @@ private:
 	ModelPreviewPane model_;
 	ModelPreviewViewport *model_viewport_ = nullptr; // the model pane's: the line names the rig's model
 	PreviewFamily shown_ = PreviewFamily::None;
-	bool drawn_ = false; // drew this frame
 };
 
 } // namespace opennova::editor
