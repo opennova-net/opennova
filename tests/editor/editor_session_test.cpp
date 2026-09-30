@@ -3047,9 +3047,13 @@ static int test_prompt_words_from_the_table() {
 	return 0;
 }
 
-// A request whose row validates first (S13 A4: its plan reads the graph) runs the validation a
-// held pump's edit left due before it plans, where each planner ran it itself; one whose row does
-// not leaves it for the poll.
+// A request whose row validates (request_kinds.cpp, S13 A4) runs the validation an edit inside a
+// held pump left due once the busy gate lets it through, before the unsaved guard and its plan,
+// whatever its handler then does; one whose row does not leaves it due for the poll. Exercised
+// where the dispatch now validates and the planners it replaced ran none: set_import_dependencies
+// with no preview open, and with one open whose setting it leaves as it is; import_files with no
+// preview open; assign_requirement refused before its rename. And where they ran it: a file's
+// preview_rename, a preview_import.
 static int test_rows_validate_first() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validates");
 	FakePlatform platform;
@@ -3062,23 +3066,45 @@ static int test_rows_validate_first() {
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
 	const ValidationStats &stats = session.validation_stats();
+	const SessionView &v = session.view();
 	const NodeAddress marker{items->rows()[0]->id, items->rows()[0]->kind, 0};
-	Edit set;
-	set.address = marker;
-	set.field = "type";
-	set.value = int64_t(0);
-	session.hold_validation();
-	size_t passes = stats.passes;
-	session.handle(request::edit_record(items->path(), set));
-	TEST_EXPECT(stats.passes == passes);
+	// An edit inside a held pump leaves the validation due (each one sets the type the last did
+	// not); the request runs it or leaves it; the poll runs what is left, and nothing more.
+	int64_t type = 4;
+	const auto after_an_edit = [&](const EditorRequest &request, size_t passes_by_it) {
+		type = type == 4 ? 0 : 4;
+		Edit set;
+		set.address = marker;
+		set.field = "type";
+		set.value = type;
+		session.hold_validation();
+		session.handle(request::edit_record(items->path(), set));
+		const size_t passes = stats.passes;
+		session.handle(request);
+		const bool by_it = stats.passes == passes + passes_by_it;
+		session.poll();
+		return by_it && stats.passes == passes + 1;
+	};
 	TEST_EXPECT(!request_kind_row(EditorRequestKind::SelectRecord).validates);
-	session.handle(request::select_record(items->path(), marker));
-	TEST_EXPECT(stats.passes == passes);
-	TEST_EXPECT(request_kind_row(EditorRequestKind::PreviewRename).validates);
-	session.handle(request::preview_file_rename(items->path(), "things.def"));
-	TEST_EXPECT(stats.passes == passes + 1 && session.view().rename_preview.serial != 0);
-	session.poll(); // nothing left due
-	TEST_EXPECT(stats.passes == passes + 1);
+	TEST_EXPECT(after_an_edit(request::select_record(items->path(), marker), 0));
+	TEST_EXPECT(after_an_edit(request::preview_file_rename(items->path(), "things.def"), 1));
+	TEST_EXPECT(v.rename_preview.serial != 0);
+	// No preview open: the setting written, and the validation run first all the same.
+	TEST_EXPECT(!v.import_preview.open);
+	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false), 1));
+	TEST_EXPECT(!v.import_dependencies && !v.import_preview.open);
+	TEST_EXPECT(after_an_edit(request::import_files({}), 1));
+	TEST_EXPECT(v.status == "Nothing to import." && !v.import_preview.open);
+	// Refused before its rename (no requirement has the role).
+	TEST_EXPECT(after_an_edit(request::assign_requirement("no_such_role", items->path()), 1));
+	TEST_EXPECT(has_code(session.outcome().findings, "requirement.unknown"));
+	// A preview open, then its setting left as it is: nothing planned again, the validation run.
+	const std::string loose = dir.file("loose.txt");
+	TEST_EXPECT(editor_test::write_text(loose, "loose"));
+	TEST_EXPECT(after_an_edit(request::preview_import({ loose }, false), 1));
+	TEST_EXPECT(v.import_preview.open && !v.import_preview.with_dependencies);
+	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false), 1));
+	TEST_EXPECT(v.import_preview.open && !v.import_preview.with_dependencies);
 	// Every row whose plan reads the graph validates first: the imports' and the renames'.
 	for (const EditorRequestKind kind :
 	     {EditorRequestKind::PreviewImport, EditorRequestKind::PlanImport, EditorRequestKind::SetImportDependencies,

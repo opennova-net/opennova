@@ -343,6 +343,13 @@ static int test_request_round_trip() {
 		TEST_EXPECT(request_error(json.c_str(), back).find(std::string("Unknown request member \"") + retired) !=
 		            std::string::npos);
 	}
+	// A retired member's refusal names what the kind takes: where its field went.
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
+			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
+			"Unknown request member \"text\" (new_project takes dir, title).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
+			"Unknown request member \"flagg\" (build takes nothing).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes nothing).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
 	            "open_project takes no \"path\" (it takes dir).");
@@ -351,6 +358,19 @@ static int test_request_round_trip() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"save\",\"path\":3}", back).find("path") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":-1}]}", back).find("row") != std::string::npos);
+	// An edit's refusal names it by its place in `edits`.
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":1},3]}", back) ==
+			"\"edits[1]\" must be an object.");
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":1},{\"row\":-1}]}",
+						back) == "edits[1]: \"row\" must be a record identity.");
+	TEST_EXPECT(request_error("{\"kind\":\"revert_to_saved\",\"edits\":[{\"rows\":1}]}", back) ==
+			"Unknown edits[0] member \"rows\".");
+	// A new name sent as a whole number (an item id) is its digits; a fraction names nothing.
+	const char *numbered = "{\"kind\":\"rename_symbol\",\"path\":\"items.def\",\"locator\":\"L\","
+						   "\"field\":\"id\",\"new_name\":100302}";
+	TEST_EXPECT(request_error(numbered, back).empty() && back.new_name == "100302");
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\",\"new_name\":2.5}",
+						back) == "\"new_name\" must be a string or a whole number.");
 	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"teleport\"}]}", back).find("teleport") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"value\":[1]}]}", back).find("value") != std::string::npos);

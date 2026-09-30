@@ -18,9 +18,10 @@ public:
 	EditorPreferences(const EditorPreferences &) = delete;
 	EditorPreferences &operator=(const EditorPreferences &) = delete;
 
-	// What the store keeps, in effect: false with `error`, the defaults in effect, when it cannot
-	// be read.
-	bool load(Diagnostic &error);
+	// What the store keeps, in effect: true, `finding` the warning when the store set aside what it
+	// kept (the defaults in effect) and cleared otherwise; false with `finding` the error, the
+	// defaults in effect, when it cannot be read.
+	bool load(Diagnostic &finding);
 	const Preferences &values() const { return values_; }
 	// `next` kept by the store, then in effect; false with `error`, the values in effect as they
 	// were, when it could not be.

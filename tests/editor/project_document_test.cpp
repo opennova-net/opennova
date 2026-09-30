@@ -153,26 +153,52 @@ static int test_export_dir_and_local_settings() {
 	TEST_EXPECT(save_local_settings(paths, bare, error));
 	TEST_EXPECT(open_local_settings(paths, "Joint Ops", back, error) &&
 	            back.game_install == (fs::current_path() / "Joint Ops").lexically_normal().generic_string());
+	// Another schema is set aside (S13 A4, pre-1.0: no reader for it): read as absent, the warning
+	// naming the file, its schema and what it held; a seed then writes a new file over it.
 	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 9}\n"));
-	TEST_EXPECT(!load_local_settings(paths, back, error));
-	TEST_EXPECT(error.code == "local_settings.schema_version.unsupported");
-	TEST_EXPECT(!open_local_settings(paths, install, back, error) && back.game_install.empty());
+	Diagnostic finding;
+	TEST_EXPECT(load_local_settings(paths, back, finding) && back.game_install.empty() &&
+			back.runtime_executable.empty());
+	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
+			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.message.find(paths.local_settings_file + " is set aside") == 0 &&
+			finding.message.find("(schema 9; this editor reads schema 2)") != std::string::npos);
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
+			back.game_install == install &&
+			finding.code == "local_settings.schema_version.unsupported");
+	std::string text;
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+			text.find("\"schema_version\": 2") != std::string::npos &&
+			text.find("\"game_install\": \"" + install + "\"") != std::string::npos);
 	// The game install's key as S13 A4 named it, schema 2; the file an older editor wrote (schema
-	// 1, the install under retail_root) is refused, nothing of it read (no compat reader: the
-	// install is chosen again), and a seed does not write over it.
+	// 1, the install under retail_root) set aside, the warning naming each thing it held, now
+	// gone: with no seed (the command line) nothing writes over it, and with one a new file.
 	LocalSettings named;
 	named.game_install = install;
 	TEST_EXPECT(save_local_settings(paths, named, error));
-	std::string text;
 	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
 	            text.find("\"game_install\": \"" + install + "\"") != std::string::npos &&
 	            text.find("\"schema_version\": 2") != std::string::npos && text.find("retail") == std::string::npos);
-	const std::string older = "{\"retail_root\": \"" + install + "\", \"runtime_executable\": \"\", \"schema_version\": 1}\n";
+	const std::string older = "{\"retail_root\": \"" + install +
+			"\", \"runtime_executable\": \"C:/games/opennova.exe\", \"schema_version\": 1}\n";
 	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, older));
-	TEST_EXPECT(!load_local_settings(paths, back, error) && error.code == "local_settings.schema_version.unsupported" &&
-	            error.message.find("game install") != std::string::npos);
-	TEST_EXPECT(!open_local_settings(paths, install, back, error) && back.game_install.empty());
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, std::string(), back, finding) &&
+			back.game_install.empty() && back.runtime_executable.empty());
+	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
+			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.message.find("retail_root \"" + install + "\"") != std::string::npos &&
+			finding.message.find("runtime_executable \"C:/games/opennova.exe\"") !=
+					std::string::npos);
 	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) && text == older);
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
+			back.game_install == install && back.runtime_executable.empty() &&
+			finding.code == "local_settings.schema_version.unsupported");
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+			text.find("\"schema_version\": 2") != std::string::npos &&
+			text.find("retail") == std::string::npos);
 	return 0;
 }
 

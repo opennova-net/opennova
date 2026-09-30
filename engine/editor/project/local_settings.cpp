@@ -11,7 +11,52 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnostic &error) {
+namespace {
+
+// A value as the file wrote it, on one line (a string quoted).
+std::string written_value(const io::JsonValue &value) {
+	std::string text = io::json_write(value);
+	if (!text.empty() && text.back() == '\n')
+		text.pop_back();
+	return text;
+}
+
+// A member of a file set aside as its warning names it: a list or an object by its size, any
+// other value as written.
+std::string held_member(const io::JsonMember &member) {
+	const io::JsonValue &value = member.value;
+	if (value.is_array())
+		return member.key + " (" + std::to_string(value.array.size()) +
+				(value.array.size() == 1 ? " entry)" : " entries)");
+	if (value.is_object())
+		return member.key + " (" + std::to_string(value.object.size()) +
+				(value.object.size() == 1 ? " member)" : " members)");
+	return member.key + " " + written_value(value);
+}
+
+} // namespace
+
+Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json,
+		int schema_version, const char *code, const char *afterwards) {
+	const io::JsonValue *version = json.get("schema_version");
+	const std::string reads = "this editor reads schema " + std::to_string(schema_version);
+	std::string origin = "it names no schema version (" + reads + ")";
+	if (version)
+		origin = "another version of the editor wrote it (schema " + written_value(*version) +
+				"; " + reads + ")";
+	std::string held;
+	for (const io::JsonMember &member : json.object) {
+		if (member.key == "schema_version")
+			continue;
+		held += (held.empty() ? "" : ", ") + held_member(member);
+	}
+	return make_diagnostic(DiagnosticSeverity::Warning, code,
+			path + " is set aside: " + origin +
+					", so nothing of it is read, and what it held is gone: " +
+					(held.empty() ? std::string("nothing") : held) + ". " + afterwards);
+}
+
+bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnostic &finding) {
 	const std::string &path = paths.local_settings_file;
 	std::error_code ec;
 	if (!fs::exists(path, ec)) {
@@ -21,24 +66,25 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	std::string text;
 	std::string io_error;
 	if (!read_file_text(path, text, io_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "local_settings.unreadable", io_error);
+		finding = make_diagnostic(DiagnosticSeverity::Error, "local_settings.unreadable", io_error);
 		return false;
 	}
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "local_settings.json",
-		                        path + ": " + (parse_error.empty() ? "not an object" : parse_error));
+		finding = make_diagnostic(DiagnosticSeverity::Error, "local_settings.json",
+				path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
-	// Pre-1.0, another schema reads as an error with no migration (a schema 1 file named the game
-	// install retail_root): the game install is chosen again, which writes this schema.
+	// Pre-1.0 there is no reader for another schema (schema 1 named the game install retail_root):
+	// the file is set aside, read as absent, and the next write makes a new one.
 	if (json.get_int("schema_version", -1) != kLocalSettingsSchemaVersion) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "local_settings.schema_version.unsupported",
-		                        path + ": unsupported schema version (an older editor wrote it): "
-		                               "choose the project's game install again in the editor's "
-		                               "project settings, or delete the file.");
-		return false;
+		finding = settings_set_aside(path, json, kLocalSettingsSchemaVersion,
+				"local_settings.schema_version.unsupported",
+				"The project reads as having no local settings, as a project with "
+				"no local.json does, and the next write makes a new file.");
+		out = LocalSettings();
+		return true;
 	}
 	LocalSettings settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
@@ -68,16 +114,16 @@ std::string absolute_install_path(const std::string &path) {
 	return (ec ? fs::path(path) : absolute).lexically_normal().generic_string();
 }
 
-bool open_local_settings(const ProjectPaths &paths, const std::string &seed_install, LocalSettings &out,
-                         Diagnostic &error) {
-	if (!load_local_settings(paths, out, error)) {
+bool open_local_settings(const ProjectPaths &paths, const std::string &seed_install,
+		LocalSettings &out, Diagnostic &finding) {
+	if (!load_local_settings(paths, out, finding)) {
 		out = LocalSettings();
 		return false;
 	}
 	if (!out.game_install.empty() || seed_install.empty()) return true;
 	LocalSettings seeded = out;
 	seeded.game_install = absolute_install_path(seed_install);
-	if (!save_local_settings(paths, seeded, error)) return false;
+	if (!save_local_settings(paths, seeded, finding)) return false;
 	out = std::move(seeded);
 	return true;
 }

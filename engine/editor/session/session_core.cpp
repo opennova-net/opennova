@@ -36,8 +36,11 @@ SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferenc
 		platform_(platform), preferences_(preferences) {}
 
 void SessionCore::start() {
-	Diagnostic error;
-	if (!preferences_.load(error)) report(error); // the defaults are in effect
+	// A store that cannot be read, or a settings file set aside (another schema): said, the
+	// defaults in effect.
+	Diagnostic finding;
+	if (!preferences_.load(finding) || !finding.code.empty())
+		report(finding);
 	const Preferences &settings = preferences_.values();
 	view_.recent_projects = settings.recent_projects;
 	view_.retail_directory = settings.game_install;
@@ -199,10 +202,12 @@ bool SessionCore::open_project(const std::string &dir) {
 	if (!close_project()) return false;
 	paths_ = ProjectPaths::for_root(dir);
 	// The project's game install is its own (local.json); one that names none starts from the
-	// install last chosen in the editor.
-	Diagnostic local_error;
-	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_error))
-		report(local_error);
+	// install last chosen in the editor. A local.json of another schema is set aside, a warning:
+	// the project opens as one with none.
+	Diagnostic local_finding;
+	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_finding) ||
+			!local_finding.code.empty())
+		report(local_finding);
 	view_.project_open = true;
 	view_.project_root = paths_.root;
 	view_.document = doc;

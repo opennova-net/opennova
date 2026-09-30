@@ -879,16 +879,23 @@ String EditorApp::request_json(const String &p_json) {
 	opennova::io::JsonValue json, answer = opennova::io::JsonValue::make_object();
 	std::string error;
 	EditorRequest request;
-	bool ok = opennova::io::json_parse(opennova::to_std(p_json), json, error) &&
-			opennova::editor::editor_request_from_json(json, request, error);
-	bool served = false;
-	// A kind the shell serves with a person to answer it (the pickers) never comes through here.
-	const auto served_by = opennova::editor::request_kind_row(request.kind).served_by;
-	if (ok && served_by == opennova::editor::ServedBy::ShellNeedsPerson) {
+	bool ok = opennova::io::json_parse(opennova::to_std(p_json), json, error);
+	// A kind the shell serves with a person to answer it (the pickers) never comes through here:
+	// refused by its kind, before its fields are read, naming the fields that carry what it picks.
+	const opennova::io::JsonValue *token = ok ? json.get("kind") : nullptr;
+	EditorRequestKind kind = EditorRequestKind::Rescan;
+	if (token && token->is_string() &&
+			opennova::editor::request_kind_from_token(token->string, kind) &&
+			opennova::editor::request_kind_row(kind).served_by ==
+					opennova::editor::ServedBy::ShellNeedsPerson) {
 		ok = false;
-		error = "The pickers need a person: pass the path with new_project, open_project, apply_project_settings "
-				"or preview_import instead.";
+		error = "The pickers need a person: pass what they pick instead, a project's folder as the "
+				"dir of new_project or open_project, the game install or the runtime as "
+				"settings.game_install or settings.runtime_executable of apply_project_settings, "
+				"files to import as the paths of preview_import.";
 	}
+	ok = ok && opennova::editor::editor_request_from_json(json, request, error);
+	bool served = false;
 	if (ok) {
 		served = session_->handle(request);
 		if (!served) serve(request);

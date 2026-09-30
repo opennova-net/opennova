@@ -5,13 +5,14 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <editor/project/local_settings.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-bool FilePreferencesStore::load(Preferences &out, Diagnostic &error) {
+bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	const std::string &path = path_;
 	std::error_code ec;
 	if (!fs::exists(path, ec)) {
@@ -21,24 +22,26 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &error) {
 	std::string text;
 	std::string io_error;
 	if (!read_file_text(path, text, io_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.unreadable", io_error);
+		finding =
+				make_diagnostic(DiagnosticSeverity::Error, "editor_settings.unreadable", io_error);
 		return false;
 	}
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.json",
-		                        path + ": " + (parse_error.empty() ? "not an object" : parse_error));
+		finding = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.json",
+				path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
-	// Pre-1.0, another schema reads as an error with no migration (a schema 1 file named the game
-	// install retail_directory): the defaults are in effect and the next save writes this schema.
+	// Pre-1.0 there is no reader for another schema (schema 1 named the game install
+	// retail_directory): the file is set aside, read as absent, and the next save writes a new one.
 	if (json.get_int("schema_version", -1) != kPreferencesSchemaVersion) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.schema_version.unsupported",
-		                        path + ": unsupported schema version (an older editor wrote it): the "
-		                               "editor's settings start again, so choose the game install "
-		                               "again in the project settings.");
-		return false;
+		finding = settings_set_aside(path, json, kPreferencesSchemaVersion,
+				"editor_settings.schema_version.unsupported",
+				"The editor starts from its defaults, as with no settings file, "
+				"and its next save writes a new file.");
+		out = Preferences();
+		return true;
 	}
 	Preferences settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");

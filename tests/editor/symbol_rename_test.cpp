@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
@@ -27,6 +28,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/session_json.h>
 #include <editor/session/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -472,6 +474,34 @@ static int test_item_id_canonical() {
 	return 0;
 }
 
+// An item id's new name sent over the wire as a number (the editor MCP's `new_name` 100302, which
+// the edit value that carried it before S13 A4 took): read as its digits, and renamed as the text.
+static int test_item_id_sent_as_a_number() {
+	Project project("opennova_rename_item_json_number");
+	const std::string items = project.path("items.def");
+	TEST_EXPECT(project.write(items, "begin \"One\"\nid 100300\ntype building\nend\n"));
+	project.rescan();
+	const GraphSymbol *item = project.defined(ReferenceKind::Item, "100300", items);
+	TEST_EXPECT(item != nullptr);
+	if (!item)
+		return 1;
+	opennova::io::JsonValue json = opennova::io::JsonValue::make_object();
+	json.set("kind", opennova::io::json_string("rename_symbol"));
+	json.set("path", opennova::io::json_string(item->file));
+	json.set("locator", opennova::io::json_string(item->locator));
+	json.set("field", opennova::io::json_string(item->field));
+	json.set("new_name", opennova::io::json_number(100302));
+	EditorRequest rename;
+	std::string error;
+	TEST_EXPECT(editor_request_from_json(json, rename, error) && rename.new_name == "100302");
+	project.session.handle(rename);
+	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(project.defined(ReferenceKind::Item, "100302", items) &&
+			project.read(items).find("100302") != std::string::npos &&
+			project.read(items).find("100300") == std::string::npos);
+	return 0;
+}
+
 // The files written together (review 2): items.def replaced, then weapon.def refused (a
 // write-protected file; here the replace step fails it). items.def gets its bytes back, weapon.def
 // keeps its own, no written text is left beside either, and the findings say nothing was renamed.
@@ -577,6 +607,7 @@ int main() {
 	failures += test_style_variable_as_font();
 	failures += test_refused_by_a_document();
 	failures += test_item_id_canonical();
+	failures += test_item_id_sent_as_a_number();
 	failures += test_menu_screen();
 	failures += test_style_variable();
 	failures += test_string_key();

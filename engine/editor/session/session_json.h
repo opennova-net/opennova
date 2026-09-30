@@ -50,9 +50,12 @@ std::vector<std::string> editor_request_kind_tokens();
 // (request_fields.h): "dir", "path", "edits" ([{operation, row, kind, child, parent, field, value,
 // position, coalesce, gesture}]), "address" ({row, kind, child}), "paste_at" ({row, parent,
 // position}), "imports" ([{path, entry, install, native}]) and the rest. An edit's value that is a
-// whole JSON number reads as an integer, any other number as a real, a bool as 0 / 1. False with
-// `error` on an unknown kind, member or token, a field the kind does not take, a field it must
-// carry left out, a wrongly typed member or a malformed edit; `out` is untouched on failure.
+// whole JSON number reads as an integer, any other number as a real, a bool as 0 / 1; a
+// "new_name" that is a whole number (an item id) reads as its digits. False with `error` on an
+// unknown kind, member or token, a field the kind does not take, a field it must carry left
+// out, a wrongly typed member or a malformed edit (named by its place, "edits[1]"); an unknown
+// member and a field taken or left out wrongly name the fields the kind takes. `out` is
+// untouched on failure.
 // editor_request_to_json writes the fields the kind takes that a request carries (those it must
 // carry always), which the reader takes back as they were.
 bool editor_request_from_json(const io::JsonValue &json, EditorRequest &out, std::string &error);

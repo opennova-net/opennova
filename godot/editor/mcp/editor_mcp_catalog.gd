@@ -244,7 +244,7 @@ static func definitions() -> Array[McpToolDef]:
 				"path": {"type": "string"},
 				"locator": {"type": "string"},
 				"field": {"type": "string"},
-				"new_name": {"type": "string"},
+				"new_name": {"type": ["string", "integer"]},
 				"role": {"type": "string"},
 				"file_kind": {"type": "string"},
 				"roles": {"type": "array", "items": {"type": "string"}},

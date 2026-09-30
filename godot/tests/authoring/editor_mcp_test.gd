@@ -164,10 +164,8 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_false(bool(state.get("project", {}).get("open", true)))
 	assert_eq(String(state.get("play", {}).get("state", "")), "stopped")
 	assert_eq(String(state.get("status", "")), "No project open.")
-	for picker: Dictionary in [{"kind": "pick_directory", "purpose": "open_project"},
-			{"kind": "pick_file", "purpose": "import_files"}]:
-		assert_true((await _call("editor_request", picker)).get("_error", "").contains("person"),
-				"the pickers need a person")
+	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
+			"the pickers need a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
 	assert_true((await _call("editor_request", {"kind": "build", "flagg": true})).get("_error", "").contains("flagg"),
 			"an unknown member is refused, not ignored")

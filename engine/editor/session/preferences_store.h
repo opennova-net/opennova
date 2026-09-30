@@ -14,8 +14,8 @@ namespace opennova::editor {
 // the build in the game install, and whether an import brings the files the chosen ones need. A
 // project's `.opennova/local.json` overrides the runtime for that project alone, and holds its own
 // game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
-// "play_in_install"); pre-1.0 there is no reader for schema 1: such a file reads as an error, the
-// defaults in effect, and the next save writes schema 2 (the user picks the install again).
+// "play_in_install"); pre-1.0 there is no reader for schema 1: such a file is set aside, read as
+// absent (the defaults) with a warning naming what it held, and the next save writes a new file.
 inline constexpr int kPreferencesSchemaVersion = 2;
 inline constexpr size_t kRecentProjectsMax = 10;
 
@@ -36,9 +36,11 @@ struct Preferences {
 class PreferencesStore {
 public:
 	virtual ~PreferencesStore() = default;
-	// What the store keeps into `out` (the defaults when it keeps nothing); false with `error` when
-	// what it keeps cannot be read.
-	virtual bool load(Preferences &out, Diagnostic &error) = 0;
+	// What the store keeps into `out` (the defaults when it keeps nothing): true, with `finding` a
+	// warning when it set aside what it kept (read as nothing kept, a file of another schema) and
+	// left as it was given otherwise; false with `finding` the error when what it keeps cannot be
+	// read.
+	virtual bool load(Preferences &out, Diagnostic &finding) = 0;
 	// `preferences` kept; false with `error` when they could not be.
 	virtual bool save(const Preferences &preferences, Diagnostic &error) = 0;
 };

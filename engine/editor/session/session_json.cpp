@@ -262,40 +262,55 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	return out;
 }
 
-bool edit_from_json(const JsonValue &json, Edit &out, std::string &error) {
-	if (!json.is_object()) { error = "\"edit\" must be an object."; return false; }
-	if (!members_known(json, {"operation", "row", "kind", "child", "parent", "field", "value", "position", "coalesce", "gesture"},
-	                   "edit", error)) return false;
-	Edit edit;
-	std::string operation;
-	if (!read_string(json, "operation", operation, error)) return false;
-	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation)) {
-		error = "Unknown edit operation \"" + operation + "\".";
+// One edit of a request's `edits`, `what` naming it in a refusal ("edits[2]").
+bool edit_from_json(const JsonValue &json, const std::string &what, Edit &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"" + what + "\" must be an object.";
 		return false;
 	}
+	if (!members_known(json,
+				{ "operation", "row", "kind", "child", "parent", "field", "value", "position",
+						"coalesce", "gesture" },
+				what.c_str(), error))
+		return false;
+	// A member's refusal names the edit it is in.
+	const auto refuse = [&error, &what](const std::string &why) {
+		error = what + ": " + why;
+		return false;
+	};
+	Edit edit;
+	std::string operation;
+	if (!read_string(json, "operation", operation, error))
+		return refuse(error);
+	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation))
+		return refuse("unknown edit operation \"" + operation + "\".");
 	for (const char *key : {"row", "child", "parent"}) {
 		if (const JsonValue *member = json.get(key)) {
 			uint64_t id = 0;
-			if (!read_id(*member, id)) { error = std::string("\"") + key + "\" must be a record identity."; return false; }
+			if (!read_id(*member, id))
+				return refuse(std::string("\"") + key + "\" must be a record identity.");
 			(key[0] == 'r' ? edit.address.row : key[0] == 'c' ? edit.address.child : edit.parent) = id;
 		}
 	}
-	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, edit.address.kind)) {
-		error = "\"kind\" must be a whole number.";
-		return false;
-	}
-	if (!read_string(json, "field", edit.field, error)) return false;
+	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, edit.address.kind))
+		return refuse("\"kind\" must be a whole number.");
+	if (!read_string(json, "field", edit.field, error))
+		return refuse(error);
 	if (const JsonValue *value = json.get("value")) {
-		if (!value_from_json(*value, edit.value)) { error = "\"value\" must be a number, a string or a bool."; return false; }
+		if (!value_from_json(*value, edit.value))
+			return refuse("\"value\" must be a number, a string or a bool.");
 	}
 	if (const JsonValue *position = json.get("position")) {
 		uint64_t index = 0;
-		if (!read_id(*position, index)) { error = "\"position\" must be a whole number."; return false; }
+		if (!read_id(*position, index))
+			return refuse("\"position\" must be a whole number.");
 		edit.position = static_cast<size_t>(index);
 	}
-	if (!read_bool(json, "coalesce", edit.coalesce, error)) return false;
+	if (!read_bool(json, "coalesce", edit.coalesce, error))
+		return refuse(error);
 	if (const JsonValue *gesture = json.get("gesture")) {
-		if (!read_id(*gesture, edit.gesture)) { error = "\"gesture\" must be a whole number."; return false; }
+		if (!read_id(*gesture, edit.gesture))
+			return refuse("\"gesture\" must be a whole number.");
 	}
 	out = edit;
 	return true;
@@ -385,6 +400,21 @@ bool text_of(const JsonValue &json, const char *token, std::string &out, std::st
 	}
 	out = json.string;
 	return true;
+}
+
+// A name a rename gives: a string, or a whole number (an item id sent as one) as its digits.
+bool name_of(const JsonValue &json, const char *token, std::string &out, std::string &error) {
+	if (json.is_string()) {
+		out = json.string;
+		return true;
+	}
+	if (json.is_number() && json.number == std::floor(json.number) &&
+			std::fabs(json.number) < 9007199254740992.0) {
+		out = std::to_string(static_cast<int64_t>(json.number));
+		return true;
+	}
+	error = std::string("\"") + token + "\" must be a string or a whole number.";
+	return false;
 }
 
 bool flag_of(const JsonValue &json, const char *token, bool &out, std::string &error) {
@@ -506,7 +536,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
 	case F::Field: return text_of(json, token, request.field, error);
-	case F::NewName: return text_of(json, token, request.new_name, error);
+	case F::NewName: return name_of(json, token, request.new_name, error);
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::Roles: return texts_of(json, token, request.roles, error);
@@ -532,9 +562,10 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 			return false;
 		}
 		std::vector<Edit> edits;
-		for (const JsonValue &member : json.array) {
+		for (size_t i = 0; i < json.array.size(); ++i) {
 			Edit edit;
-			if (!edit_from_json(member, edit, error)) return false;
+			if (!edit_from_json(json.array[i], "edits[" + std::to_string(i) + "]", edit, error))
+				return false;
 			edits.push_back(std::move(edit));
 		}
 		request.edits = std::move(edits);
@@ -621,14 +652,14 @@ bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &o
 	return false;
 }
 
-// The fields a kind takes, as a refusal names them: "it takes path, locator" or "it takes nothing".
+// The fields a kind takes, as a refusal names them: "path, locator", or "nothing".
 std::string fields_taken(const RequestParams &params) {
 	std::string out;
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
 		if (params.has(id)) out += (out.empty() ? "" : ", ") + std::string(request_field(id).token);
 	}
-	return out.empty() ? std::string("it takes nothing") : "it takes " + out;
+	return out.empty() ? std::string("nothing") : out;
 }
 
 } // namespace
@@ -711,12 +742,13 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		if (member.key == "kind") continue;
 		RequestFieldId id = RequestFieldId::Dir;
 		if (!request_field_from_token(member.key, id)) {
-			error = "Unknown request member \"" + member.key + "\".";
+			error = "Unknown request member \"" + member.key + "\" (" + kind->string + " takes " +
+					fields_taken(params) + ").";
 			return false;
 		}
 		if (!params.has(id)) {
-			error = kind->string + " takes no \"" + member.key + "\" (" + fields_taken(params) +
-			        ").";
+			error = kind->string + " takes no \"" + member.key + "\" (it takes " +
+					fields_taken(params) + ").";
 			return false;
 		}
 		if (!field_from_json(id, member.value, request, error)) return false;
@@ -725,8 +757,8 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
 		if (params.needs(id) && !(carried & field_bit(id))) {
-			error = kind->string + " needs \"" + request_field(id).token + "\" (" +
-			        fields_taken(params) + ").";
+			error = kind->string + " needs \"" + request_field(id).token + "\" (it takes " +
+					fields_taken(params) + ").";
 			return false;
 		}
 	}
