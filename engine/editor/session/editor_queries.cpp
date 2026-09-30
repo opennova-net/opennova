@@ -860,7 +860,7 @@ constexpr EditorQueryRow kRows[] = {
 			"not pack) and a page of the findings that block it, the errors among the Problems rows "
 			"the build gates on, the scan's and the requirements', and the build's own checks of "
 			"the files (an archive in the project, a name no archive can store). A Problems row the "
-			"build does not gate on (the render check's) blocks nothing.")
+			"build does not gate on (a project check's: the render check's) blocks nothing.")
 			.pages("blocking")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
