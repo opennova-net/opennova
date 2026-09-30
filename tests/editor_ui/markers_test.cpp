@@ -24,6 +24,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
@@ -209,7 +210,7 @@ void test_outline_marks() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
+	session.handle(request::open_document("anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
 	CHECK(table && !table->rows().empty(), "the animation table");
 	if (!table || table->rows().empty()) return;
@@ -224,8 +225,8 @@ void test_outline_marks() {
 	      "a row by its slot's words, not its key");
 	NodeAddress walk;
 	CHECK(table->find("anim_walk_forward", walk), "the walk row");
-	EditorRequest pick = make_request(EditorRequestKind::SelectRecord, table->path());
-	pick.edit.address = walk;
+	EditorRequest pick = request::select_record(table->path(), {});
+	pick.address = walk;
 	session.handle(pick);
 	ui.frames(3);
 	ui.away();
@@ -233,19 +234,19 @@ void test_outline_marks() {
 	CHECK(text.find("anim_walk_forward") == std::string::npos && count_of(text, "walk forward") >= 2,
 	      "selected: the outline and the breadcrumb both by its words");
 	const Node &row = *table->rows().back();
-	EditorRequest key = make_request(EditorRequestKind::EditRecord, table->path());
-	key.edit = set_edit({row.id, row.kind, 0}, "key", std::string("anim_idle_2"));
+	EditorRequest key = request::edit_record(table->path(), Edit());
+	key.edits = {set_edit({row.id, row.kind, 0}, "key", std::string("anim_idle_2"))};
 	session.handle(key);
 	ui.frames(3);
 	CHECK(drew_mark("Document/outline", Change::Changed) && !drew_mark("Document/outline", Change::Added), "the row changed");
-	EditorRequest add = make_request(EditorRequestKind::EditRecord, table->path());
-	add.edit.operation = EditOperation::Add;
-	add.edit.address = {0, row.kind, 0};
+	EditorRequest add = request::edit_record(table->path(), Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address = {0, row.kind, 0};
 	session.handle(add);
 	ui.frames(3);
 	CHECK(drew_mark("Document/outline", Change::Added), "the row added");
-	session.handle(make_request(EditorRequestKind::Undo, table->path()));
-	session.handle(make_request(EditorRequestKind::Undo, table->path()));
+	session.handle(request::undo(table->path()));
+	session.handle(request::undo(table->path()));
 	ui.frames(3);
 	CHECK(!table->dirty() && !drew_mark("Document/outline", Change::Changed) && !drew_mark("Document/outline", Change::Added),
 	      "undone: none");
@@ -356,12 +357,12 @@ void test_reveal_in_views() {
 	std::string io_error;
 	CHECK(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(v.project_root + "/strings/many.bin", bytes),
 	      "a table of 200 keys");
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const AssetEntry *many = v.scan.find("many.bin");
 	CHECK(many != nullptr, "the table scanned");
 	if (!many) return;
 	const std::string strings_path = many->relative_path;
-	session.handle(make_request(EditorRequestKind::OpenDocument, strings_path));
+	session.handle(request::open_document(strings_path));
 	const Document *strings = session.document_for(strings_path);
 	NodeAddress first, near, middle, late;
 	CHECK(strings && strings->find("KEY_000", first) && strings->find("KEY_003", near) && strings->find("KEY_100", middle) &&
@@ -369,8 +370,8 @@ void test_reveal_in_views() {
 	      "the keys");
 	if (!strings || !first.child || !near.child || !middle.child || !late.child) return;
 	const auto go_to = [&](const std::string &path, const std::string &locator, const char *field) {
-		EditorRequest open = make_request(EditorRequestKind::OpenDocument, path, locator);
-		open.edit.field = field;
+		EditorRequest open = request::open_document(path, locator);
+		open.field = field;
 		session.handle(open);
 	};
 	const char *const list = "Document/strings_";
@@ -381,7 +382,7 @@ void test_reveal_in_views() {
 	ui.away();
 	CHECK(drew_selected(list) && scrolled(list) == 0.0f, "the first key: the list at its top");
 	// From another file, a Go to a late key: its tab shown, the list scrolled to it.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	ui.frames(3);
 	go_to(strings_path, strings->locator(late), "key");
 	ui.frames(4);
@@ -397,7 +398,7 @@ void test_reveal_in_views() {
 	CHECK(drew_selected(list) && scrolled(list) == 0.0f, "a key in view: nothing moves");
 
 	// A model's user point: the outline, collapsed, opens to it.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/armory.3di"));
+	session.handle(request::open_document("models/armory.3di"));
 	const Document *model = session.document_for("models/armory.3di");
 	CHECK(model && !model->rows().empty(), "the model");
 	if (!model || model->rows().empty()) return;
@@ -408,12 +409,12 @@ void test_reveal_in_views() {
 			point = {row.row, collection.spec.kind, collection.ids.back()};
 	CHECK(point.child != 0, "a user point");
 	if (!point.child) return;
-	EditorRequest pick = make_request(EditorRequestKind::SelectRecord, model->path());
-	pick.edit.address = row;
+	EditorRequest pick = request::select_record(model->path(), {});
+	pick.address = row;
 	session.handle(pick);
 	ui.frames(4);
 	CHECK(drew_selected("Document/outline"), "the model row selected, its node closed");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	ui.frames(3);
 	go_to(model->path(), model->locator(point), "name");
 	ui.frames(4);

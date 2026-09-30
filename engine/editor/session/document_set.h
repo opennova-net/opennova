@@ -125,7 +125,7 @@ private:
 
 	bool apply_edits(Document &document, const std::vector<Edit> &edits);
 	void copy_records(Document &document, bool cut);
-	void paste_records(Document &document, const Edit &target);
+	void paste_records(Document &document, const PasteAt &target);
 	void duplicate_records(Document &document);
 	void rewrite_file(const std::string &path);
 	// The open document at exactly `path` (activate's), or null.

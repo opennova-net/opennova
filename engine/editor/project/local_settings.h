@@ -9,14 +9,16 @@ namespace opennova::editor {
 
 // Machine-local, never-committed settings of one project (ADR 0046 d6):
 // `.opennova/local.json`. Paths here are absolute on this machine; nothing the build
-// output depends on lives here.
-inline constexpr int kLocalSettingsSchemaVersion = 1;
+// output depends on lives here. Schema 2 (S13 A4) renamed the game install's key
+// ("game_install"); pre-1.0 there is no reader for schema 1: such a file reads as an error and
+// the game install is chosen again, which writes schema 2.
+inline constexpr int kLocalSettingsSchemaVersion = 2;
 
 struct LocalSettings {
 	std::string runtime_executable; // the opennova.exe Play launches ("" = beside the editor)
 	// The project's game install (ADR 0046 d6/d10: project-local): what it imports from,
 	// depends on and plays in ("" = none). The editor and opennova-project both read it here.
-	std::string retail_root;
+	std::string game_install;
 };
 
 // The project's local.json (paths.local_settings_file). A missing file reads as defaults; a

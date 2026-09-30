@@ -13,7 +13,8 @@ extends GutTest
 ## grouped by kind), and a problem's fix is a request passed back as it is. S11g: an import
 ## planned with the files it needs, its rows passed back to import_files. S13 A1: a build is
 ## the editor's operation, read mid-way through editor_state while it steps frame by frame,
-## and editor_build joins it and waits for it to land.
+## and editor_build joins it and waits for it to land. S13 A4: the request table on the wire (the kind
+## enum, the fields each kind takes, the game install's words).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
@@ -92,7 +93,7 @@ func test_build_is_an_operation_the_state_reads_mid_way() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova build operation %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	var made := await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Operation"})
+	var made := await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Operation"})
 	assert_true(bool(made.get("ok", false)), str(made))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	_app.call("set_poll_budget", 0, 8192) # a step of 8 KiB a frame
@@ -131,7 +132,7 @@ func _create_missing() -> Dictionary:
 	for row: Variant in (await _call("editor_state")).get("requirements", {}).get("rows", []):
 		if bool((row as Dictionary).get("required", false)) and String((row as Dictionary).get("state", "")) != "present":
 			roles.append(String((row as Dictionary)["role"]))
-	return await _call("editor_request", {"kind": "create_missing", "names": roles})
+	return await _call("editor_request", {"kind": "create_missing", "roles": roles})
 
 
 ## An open document's entry in an editor_state answer ({} when it is not open).
@@ -163,8 +164,10 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_false(bool(state.get("project", {}).get("open", true)))
 	assert_eq(String(state.get("play", {}).get("state", "")), "stopped")
 	assert_eq(String(state.get("status", "")), "No project open.")
-	assert_true((await _call("editor_request", {"kind": "pick_directory"})).get("_error", "").contains("person"),
-			"the pickers need a person")
+	for picker: Dictionary in [{"kind": "pick_directory", "purpose": "open_project"},
+			{"kind": "pick_file", "purpose": "import_files"}]:
+		assert_true((await _call("editor_request", picker)).get("_error", "").contains("person"),
+				"the pickers need a person")
 	assert_true((await _call("editor_request", {"kind": "nope"})).get("_error", "").contains("nope"))
 	assert_true((await _call("editor_request", {"kind": "build", "flagg": true})).get("_error", "").contains("flagg"),
 			"an unknown member is refused, not ignored")
@@ -183,12 +186,66 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true("\n".join(texts).contains("listening"), str(logs))
 
 
+## S13 A4, the request table on the wire: editor_request's kind enum is every token the table
+## serves (EditorApp.get_request_kinds: every row but the pickers, which need a person), each a
+## kind the reader knows (a member no kind takes is refused as that member, never as an unknown
+## kind), the retail token gone; a field outside a kind's set is refused naming what it takes,
+## and one it must carry left out is refused. The game install's words: the settings take
+## game_install and play_in_install (the retail keys refused), the play block says in_install and
+## game_install, the import block install_files, and an import from an install that holds no
+## archives is import.install.
+func test_request_table_on_the_wire() -> void:
+	if _client == null:
+		return
+	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
+	var kinds: Array = []
+	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
+		if String(tool["name"]) == "editor_request":
+			kinds = tool["inputSchema"]["properties"]["kind"].get("enum", [])
+	var served := Array(_app.get_request_kinds())
+	assert_eq(kinds, served, "the kind enum is the tokens the request table serves")
+	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
+	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
+	for kind: Variant in served:
+		var error := String((await _call("editor_request", {"kind": kind, "zzz": 1})).get("_error", ""))
+		assert_true(error.contains("zzz") and not error.contains("Unknown request kind"), "%s: %s" % [kind, error])
+	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
+			"Unknown request kind"), "the retail token names nothing")
+	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
+			"build takes no \"path\" (it takes nothing)"))
+	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
+			"needs \"dir\""))
+	for retired in ["text", "flag", "edit", "unsaved_choice"]:
+		assert_true(String((await _call("editor_request", {"kind": "save", retired: true})).get("_error", "")).contains(
+				"Unknown request member"), "%s names no field" % retired)
+
+	var dir := OS.get_cache_dir().path_join("opennova request table %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Words"})).get("ok", false)))
+	var install := dir.path_join("no install here")
+	var applied := await _call("editor_request", {"kind": "apply_project_settings",
+			"settings": {"serial": 1, "game_install": install, "play_in_install": true}})
+	assert_true(bool(applied.get("ok", false)) and bool(applied.get("outcome", {}).get("done", false)), str(applied))
+	var state := await _call("editor_state", {"output_limit": 0, "import_limit": 0, "files_limit": 0})
+	var play: Dictionary = state.get("play", {})
+	assert_true(bool(play.get("in_install", false)), str(play))
+	assert_true(String(play.get("game_install", "")).ends_with("no install here"), str(play))
+	assert_false(play.has("retail") or play.has("retail_directory"), str(play))
+	var import: Dictionary = state.get("import", {})
+	assert_true(import.has("install_files") and not import.has("retail_files"), str(import))
+	assert_true(String((await _call("editor_request", {"kind": "apply_project_settings",
+			"settings": {"retail_directory": install}})).get("_error", "")).contains("retail_directory"))
+	var listing := await _call("editor_request", {"kind": "preview_install_import", "with_dependencies": true})
+	var findings: Array = listing.get("outcome", {}).get("findings", [])
+	assert_true(not findings.is_empty() and String(findings[0].get("code", "")) == "import.install", str(listing))
+
+
 func test_john_smith_through_the_editor_mcp() -> void:
 	if _client == null:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova john smith mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	var made := await _call("editor_request", {"kind": "new_project", "path": dir, "text": "John Smith"})
+	var made := await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "John Smith"})
 	assert_true(bool(made.get("ok", false)), str(made))
 	var state := await _call("editor_state")
 	assert_true(bool(state["project"]["open"]))
@@ -307,7 +364,7 @@ func test_john_smith_through_the_editor_mcp() -> void:
 		var one := await _call("editor_document", {"op": "set", "id": later, "field": pair[0], "value": pair[1]})
 		assert_true(bool(one.get("ok", false)), str(one))
 	var selected := await _call("editor_request", {
-		"kind": "select_record", "path": "main.mnu", "edit": {"row": screen, "kind": 1, "child": later},
+		"kind": "select_record", "path": "main.mnu", "address": {"row": screen, "kind": 1, "child": later},
 	})
 	assert_true(bool(selected.get("ok", false)), str(selected))
 	state = await _call("editor_state")
@@ -422,7 +479,7 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_eq(String(prompt.get("action", "")), "build")
 	assert_eq(prompt.get("files", []).size(), 2, str(prompt))
 	assert_false(bool(prompt.get("can_discard", true)))
-	var saved := await _call("editor_request", {"kind": "resolve_unsaved", "unsaved_choice": "save"})
+	var saved := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "save"})
 	assert_true(bool(saved.get("outcome", {}).get("done", false)), str(saved))
 	var built := await _call("editor_build")
 	assert_true(bool(built.get("ok", false)), str(built))
@@ -495,7 +552,7 @@ func test_stylesheet_through_the_editor_mcp() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova styles mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	var made := await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Styles"})
+	var made := await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Styles"})
 	assert_true(bool(made.get("ok", false)), str(made))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	var opened := await _call("editor_document", {"op": "open", "path": "menu_style.mns"})
@@ -555,7 +612,7 @@ func test_graph_references_and_rename() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova graph mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Graph"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Graph"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	var references := await _call("editor_graph", {"op": "references", "path": "main.mnu"})
 	assert_gt(int(references.get("count", 0)), 0, str(references))
@@ -688,7 +745,7 @@ func test_graph_references_and_rename() -> void:
 	assert_eq(prompt.get("files", []).size(), 1, str(prompt))
 	assert_false(bool(prompt.get("can_discard", true)))
 	assert_true(FileAccess.file_exists(root.path_join("logo.tga")))
-	var renamed := await _call("editor_request", {"kind": "resolve_unsaved", "unsaved_choice": "save"})
+	var renamed := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "save"})
 	assert_true(bool(renamed.get("outcome", {}).get("done", false)), str(renamed))
 	assert_false(FileAccess.file_exists(root.path_join("logo.tga")))
 	assert_true(FileAccess.file_exists(root.path_join("logo2.tga")))
@@ -762,7 +819,7 @@ func test_request_outcomes() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova outcome mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Outcomes"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Outcomes"})).get("ok", false)))
 	var filled := await _create_missing()
 	assert_true(bool(filled.get("outcome", {}).get("done", false)), str(filled))
 	var bad := await _call("editor_request", {"kind": "create_file", "path": "../x.mnu"})
@@ -788,7 +845,7 @@ func test_request_outcomes() -> void:
 	assert_true(bool((await _call("editor_document", {"op": "set", "id": main, "field": "position.left", "value": 8})).get("ok", false)))
 	var closing := await _call("editor_document", {"op": "close", "path": "extra.mnu"})
 	assert_true(closing.get("_error", "").contains("resolve_unsaved"), str(closing))
-	var discarded := await _call("editor_request", {"kind": "resolve_unsaved", "unsaved_choice": "discard"})
+	var discarded := await _call("editor_request", {"kind": "resolve_unsaved", "choice": "discard"})
 	assert_true(bool(discarded.get("outcome", {}).get("done", false)), str(discarded))
 	var listed := await _call("editor_document", {"op": "list"})
 	for document in listed.get("open", []):
@@ -802,7 +859,7 @@ func test_file_list_pages_past_the_cap() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova files mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Files"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Files"})).get("ok", false)))
 	var extra := EditorMcpCatalog.PAGE_MAX + 10
 	assert_eq(DirAccess.make_dir_recursive_absolute(dir.path_join("notes")), OK)
 	for i in extra:
@@ -847,7 +904,7 @@ func test_png_import_through_the_endpoint() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova import mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Imports"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Imports"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	var root: String = (await _call("editor_state"))["project"]["root"]
 	var image := Image.create(16, 16, false, Image.FORMAT_RGBA8)
@@ -885,7 +942,7 @@ func test_png_import_through_the_endpoint() -> void:
 		if bool(file.get("editable", false)):
 			names.append(String(file["name"]))
 	assert_does_not_have(names, "logo.png", "a source is not an editable file")
-	var again := await _call("editor_request", {"kind": "reimport", "flag": true})
+	var again := await _call("editor_request", {"kind": "reimport", "force": true})
 	assert_true(bool(again.get("ok", false)), str(again))
 	assert_true(String(again.get("status", "")).contains("1 source"), str(again))
 
@@ -902,7 +959,7 @@ func test_import_with_dependencies_through_the_endpoint() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova import deps mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Dependencies"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Dependencies"})).get("ok", false)))
 	var art := dir + " art"
 	_dirs.append(art)
 	assert_eq(DirAccess.make_dir_recursive_absolute(art), OK)
@@ -916,7 +973,7 @@ func test_import_with_dependencies_through_the_endpoint() -> void:
 		assert_not_null(out)
 		out.store_string(String(file[1]))
 		out.close()
-	var preview := await _call("editor_request", {"kind": "preview_import", "paths": [art.path_join("a.mnu")], "flag": true})
+	var preview := await _call("editor_request", {"kind": "preview_import", "paths": [art.path_join("a.mnu")], "with_dependencies": true})
 	assert_true(bool(preview.get("outcome", {}).get("done", false)), str(preview))
 	var planned: Dictionary = (await _call("editor_state")).get("import", {})
 	assert_true(bool(planned.get("open", false)) and bool(planned.get("with_dependencies", false)), str(planned))
@@ -954,7 +1011,7 @@ func test_import_with_dependencies_through_the_endpoint() -> void:
 	assert_eq(String(statuses.get("arial99", "")), "present", str(statuses))
 	assert_eq(String(statuses.get("logo.tga", "")), "present", str(statuses))
 	assert_eq(String(statuses.get("gone.tga", "")), "missing", str(statuses))
-	var setting := await _call("editor_request", {"kind": "set_import_dependencies", "flag": false})
+	var setting := await _call("editor_request", {"kind": "set_import_dependencies", "with_dependencies": false})
 	assert_true(bool(setting.get("outcome", {}).get("done", false)), str(setting))
 	assert_false(bool((await _call("editor_state")).get("import", {}).get("import_dependencies", true)))
 	# A plan longer than a page (the transport caps a list at 200): 201 files chosen, the first
@@ -990,7 +1047,7 @@ func test_clipboard_across_screens_and_arrange() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova clipboard mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Clip"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Clip"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	var menu := await _call("editor_document", {"op": "open", "path": "main.mnu"})
 	assert_eq(String(menu.get("kind", "")), "menu", str(menu))
@@ -1088,7 +1145,7 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova menu tools mcp %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(bool((await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Tools"})).get("ok", false)))
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Tools"})).get("ok", false)))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	# Closed: the render check's copy, every window placed.
 	var closed := await _call("editor_menu", {"op": "tree", "path": "main.mnu"})

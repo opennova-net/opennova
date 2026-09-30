@@ -108,7 +108,7 @@ ImportSource ImportOrigin::source(const std::string &name) const {
 	} else {
 		out.path = path_;
 		out.entry = name;
-		out.retail = kind_ == Kind::GameInstall;
+		out.install = kind_ == Kind::GameInstall;
 	}
 	return out;
 }
@@ -136,7 +136,7 @@ std::string first_candidate(const ImportNeed &need, const Exists &exists) {
 // Two sources of one file: the same member of the same archive or install, or the same
 // file of the same folder (names without case, as the folder's listing compares them).
 bool same_file(const ImportSource &a, const ImportSource &b) {
-	if (a.retail != b.retail || a.entry.empty() != b.entry.empty()) return false;
+	if (a.install != b.install || a.entry.empty() != b.entry.empty()) return false;
 	if (!a.entry.empty()) return fs::path(a.path) == fs::path(b.path) && key(a.entry) == key(b.entry);
 	const fs::path x(a.path), y(b.path);
 	return x.parent_path() == y.parent_path() && key(x.filename().string()) == key(y.filename().string());
@@ -188,14 +188,14 @@ public:
 		const ImportOrigin *from = nullptr;
 		std::string found_in, error;
 		std::vector<uint8_t> bytes;
-		if (source.retail || !source.entry.empty()) {
-			from = origin(source.retail ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error);
+		if (source.install || !source.entry.empty()) {
+			from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error);
 			if (!from) {
-				fail(source.retail ? "import.retail" : "import.archive", error);
+				fail(source.install ? "import.install" : "import.archive", error);
 				return;
 			}
 			if (!from->read(source.entry, bytes)) {
-				fail("import.read", source.retail ? "The game data has no file named " + name + "."
+				fail("import.read", source.install ? "The game data has no file named " + name + "."
 				                                  : "Could not read " + name + " from " + source.path);
 				return;
 			}
@@ -255,7 +255,7 @@ public:
 			row.kind = classify_asset(output.name, &output.bytes);
 			// The game's own file (an archive's, the install's, one copied native) gets no import
 			// record: a PNG of it is the texture the game loads.
-			if (row.kind == AssetKind::ImageSource && (source.retail || !source.entry.empty() || source.native))
+			if (row.kind == AssetKind::ImageSource && (source.install || !source.entry.empty() || source.native))
 				row.kind = AssetKind::Texture;
 			row.made_from = converter ? name : std::string();
 			row.found_in = found_in;
@@ -362,8 +362,8 @@ private:
 		}
 		const ImportSource &source = plan_.rows[row].source;
 		std::string error;
-		if (!source.retail && source.entry.empty()) return read_file_bytes(source.path, out, error);
-		const ImportOrigin *from = origin(source.retail ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
+		if (!source.install && source.entry.empty()) return read_file_bytes(source.path, out, error);
+		const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
 		                                  source.path, error);
 		return from && from->read(source.entry, out);
 	}
@@ -589,7 +589,7 @@ ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_depen
 		std::string error;
 		const ImportOrigin *install = planner.origin(ImportOrigin::Kind::GameInstall, retail_directory, error);
 		if (!install)
-			plan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.retail",
+			plan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.install",
 			                                           error + " The files the import needs are not looked for there."));
 		planner.set_install(install);
 	}

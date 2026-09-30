@@ -23,6 +23,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
@@ -113,7 +114,7 @@ std::string long_style() {
 // table00.bin's first section given strings whose keys and text run long, saved and closed.
 bool fill_strings(ProjectSession &session) {
 	const char *const path = "strings/table00.bin";
-	session.handle(make_request(EditorRequestKind::OpenDocument, path));
+	session.handle(request::open_document(path));
 	Document *table = session.document_for(path);
 	if (!table || table->rows().empty()) return false;
 	const NodeId section = table->rows().front()->id;
@@ -132,9 +133,9 @@ bool fill_strings(ProjectSession &session) {
 		text.value = long_words("A string's text");
 		if (!table->apply(std::vector<Edit>{key, text}, error)) return false;
 	}
-	session.handle(make_request(EditorRequestKind::Save, path));
+	session.handle(request::save(path));
 	const bool saved = !table->dirty();
-	session.handle(make_request(EditorRequestKind::CloseDocument, path));
+	session.handle(request::close_document(path));
 	return saved;
 }
 
@@ -155,7 +156,7 @@ bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &
 	if (!editor_test::write_text(v.project_root + "/" + style->relative_path, long_style()) ||
 	    !editor_test::write_text(v.project_root + "/menus/deep.mnu", deep_menu()))
 		return false;
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	return v.scan.find("table29.bin") && v.scan.find("deep.mnu") && fill_strings(session);
 }
 
@@ -200,17 +201,17 @@ struct Sweep {
 	void open(const char *path, const char *record) {
 		std::vector<std::string> others;
 		for (const auto &document : session.view().documents) others.push_back(document->path());
-		for (const std::string &other : others) session.handle(make_request(EditorRequestKind::CloseDocument, other));
-		session.handle(make_request(EditorRequestKind::OpenDocument, path));
+		for (const std::string &other : others) session.handle(request::close_document(other));
+		session.handle(request::open_document(path));
 		const Document *document = session.document_for(path);
 		NodeAddress address;
 		if (document && record && document->find(record, address)) {
-			EditorRequest select = make_request(EditorRequestKind::SelectRecord, document->path());
-			select.edit.address = address;
+			EditorRequest select = request::select_record(document->path(), {});
+			select.address = address;
 			session.handle(select);
 		} else if (document && !record && !document->rows().empty() && !session.view().selection.row) {
-			EditorRequest select = make_request(EditorRequestKind::SelectRecord, document->path());
-			select.edit.address = {document->rows().front()->id, document->rows().front()->kind, 0};
+			EditorRequest select = request::select_record(document->path(), {});
+			select.address = {document->rows().front()->id, document->rows().front()->kind, 0};
 			session.handle(select);
 		}
 		follow();
@@ -381,7 +382,7 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	ui.button(false);
 	requests = ui.drain();
 	const EditorRequest *move = one(requests, EditorRequestKind::EditRecord);
-	CHECK(move && move->edit.operation == EditOperation::Move, "Outdent raised");
+	CHECK(move && edit_of(*move).operation == EditOperation::Move, "Outdent raised");
 	ui.away();
 }
 
@@ -393,10 +394,10 @@ void reach_last_tab(Sweep &sweep) {
 	for (int i = 0; i < 30; ++i) {
 		char path[32];
 		std::snprintf(path, sizeof(path), "strings/table%02d.bin", i);
-		sweep.session.handle(make_request(EditorRequestKind::OpenDocument, path));
+		sweep.session.handle(request::open_document(path));
 		last = path;
 	}
-	sweep.session.handle(make_request(EditorRequestKind::OpenDocument, "defs/items.def"));
+	sweep.session.handle(request::open_document("defs/items.def"));
 	sweep.follow();
 	ImGuiTabBar *bar = GImGui->TabBars.GetByKey(item_id(Ui::window_id("Document"), {"documents"}));
 	CHECK(bar && bar->WidthAllTabs > bar->BarRect.GetWidth(), "more tabs than the bar shows");
@@ -436,7 +437,7 @@ void test_bounds() {
 	ProjectSession session(platform, preferences);
 	CHECK(bounds_project(session, dir), "the project");
 	FakePreview menu;
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menus/deep.mnu"));
+	session.handle(request::open_document("menus/deep.mnu"));
 	const auto *deep = dynamic_cast<const MnuDocument *>(session.document_for("menus/deep.mnu"));
 	CHECK(deep && !deep->rows().empty() &&
 	              menu.render.configure(*deep, deep->rows().front()->id, menu.files, {}) == MenuPreviewStatus::Ready,

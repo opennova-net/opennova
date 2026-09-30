@@ -31,14 +31,18 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 		                        path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
+	// Pre-1.0, another schema reads as an error with no migration (a schema 1 file named the game
+	// install retail_root): the game install is chosen again, which writes this schema.
 	if (json.get_int("schema_version", -1) != kLocalSettingsSchemaVersion) {
 		error = make_diagnostic(DiagnosticSeverity::Error, "local_settings.schema_version.unsupported",
-		                        path + ": unsupported schema version");
+		                        path + ": unsupported schema version (an older editor wrote it): "
+		                               "choose the project's game install again in the editor's "
+		                               "project settings, or delete the file.");
 		return false;
 	}
 	LocalSettings settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
-	settings.retail_root = json.get_string("retail_root", "");
+	settings.game_install = json.get_string("game_install", "");
 	out = std::move(settings);
 	return true;
 }
@@ -47,7 +51,7 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kLocalSettingsSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
-	json.set("retail_root", io::JsonValue::make_string(settings.retail_root));
+	json.set("game_install", io::JsonValue::make_string(settings.game_install));
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error) ||
 	    !write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {
@@ -70,9 +74,9 @@ bool open_local_settings(const ProjectPaths &paths, const std::string &seed_inst
 		out = LocalSettings();
 		return false;
 	}
-	if (!out.retail_root.empty() || seed_install.empty()) return true;
+	if (!out.game_install.empty() || seed_install.empty()) return true;
 	LocalSettings seeded = out;
-	seeded.retail_root = absolute_install_path(seed_install);
+	seeded.game_install = absolute_install_path(seed_install);
 	if (!save_local_settings(paths, seeded, error)) return false;
 	out = std::move(seeded);
 	return true;

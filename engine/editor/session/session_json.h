@@ -23,10 +23,10 @@ namespace opennova::editor {
 // editor's MCP transport marshals nothing itself, a command line can print the same
 // records, and one ctest pins every token both ways.
 
-// The stable snake_case token of every request kind ("new_project"), edit operation
-// ("set"), pick purpose, unsaved choice, selection mode, finding severity ("error",
-// diagnostic_severity_label's), and Problems scope and grouping. Every enumerator has one;
-// parsing is exact.
+// The stable snake_case token of every request kind ("new_project", its row's in the request
+// table, request_kinds.h), edit operation ("set"), pick purpose, unsaved choice, selection mode,
+// finding severity ("error", diagnostic_severity_label's), and Problems scope and grouping. Every
+// enumerator has one; parsing is exact.
 const char *editor_request_kind_token(EditorRequestKind kind);
 bool editor_request_kind_from_token(const std::string &token, EditorRequestKind &out);
 const char *edit_operation_token(EditOperation operation);
@@ -45,14 +45,16 @@ bool problem_grouping_from_token(const std::string &token, ProblemGrouping &out)
 // Every kind token in enumerator order (a client lists what it may ask for).
 std::vector<std::string> editor_request_kind_tokens();
 
-// A request from its wire form: an object with "kind" and, as the kind needs them, "path",
-// "text", "flag", "purpose", "paths" and "names" (strings), "imports" ([{path, entry,
-// retail, native}]), "edit" ({operation, row, kind, child, parent, field, value, position,
-// coalesce, gesture}), "edits" (an array of edits: a batch on one row), "mode"
-// (select_record: replace, add or toggle) and "unsaved_choice". A JSON number that is whole
-// reads as an integer value, any other as a real; a bool reads as 0 / 1. False with `error`
-// on an unknown kind or token, a wrongly typed member or a malformed edit; `out` is
-// untouched on failure. editor_request_to_json writes what the reader takes back.
+// A request from its wire form (S13 A4): an object with "kind", the kind's token, and the fields
+// its row takes (request_kinds.h: params), each by its token and of its JSON type
+// (request_fields.h): "dir", "path", "edits" ([{operation, row, kind, child, parent, field, value,
+// position, coalesce, gesture}]), "address" ({row, kind, child}), "paste_at" ({row, parent,
+// position}), "imports" ([{path, entry, install, native}]) and the rest. An edit's value that is a
+// whole JSON number reads as an integer, any other number as a real, a bool as 0 / 1. False with
+// `error` on an unknown kind, member or token, a field the kind does not take, a field it must
+// carry left out, a wrongly typed member or a malformed edit; `out` is untouched on failure.
+// editor_request_to_json writes the fields the kind takes that a request carries (those it must
+// carry always), which the reader takes back as they were.
 bool editor_request_from_json(const io::JsonValue &json, EditorRequest &out, std::string &error);
 io::JsonValue editor_request_to_json(const EditorRequest &request);
 

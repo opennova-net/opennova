@@ -13,15 +13,17 @@ namespace opennova::editor {
 // the recent-projects list, the game runtime Play launches, the game install, whether Play runs
 // the build in the game install, and whether an import brings the files the chosen ones need. A
 // project's `.opennova/local.json` overrides the runtime for that project alone, and holds its own
-// game install.
-inline constexpr int kPreferencesSchemaVersion = 1;
+// game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
+// "play_in_install"); pre-1.0 there is no reader for schema 1: such a file reads as an error, the
+// defaults in effect, and the next save writes schema 2 (the user picks the install again).
+inline constexpr int kPreferencesSchemaVersion = 2;
 inline constexpr size_t kRecentProjectsMax = 10;
 
 struct Preferences {
 	std::vector<std::string> recent_projects; // project roots, most recent first
 	std::string runtime_executable;           // "" = the runtime packaged beside the editor
-	std::string retail_directory;             // the game install (Joint Operations), on this machine
-	bool play_retail = false;                 // Play runs the build in the game install
+	std::string game_install;                 // the game install (Joint Operations), on this machine
+	bool play_in_install = false;             // Play runs the build in the game install
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;

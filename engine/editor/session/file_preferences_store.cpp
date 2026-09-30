@@ -31,15 +31,19 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &error) {
 		                        path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
+	// Pre-1.0, another schema reads as an error with no migration (a schema 1 file named the game
+	// install retail_directory): the defaults are in effect and the next save writes this schema.
 	if (json.get_int("schema_version", -1) != kPreferencesSchemaVersion) {
 		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.schema_version.unsupported",
-		                        path + ": unsupported schema version");
+		                        path + ": unsupported schema version (an older editor wrote it): the "
+		                               "editor's settings start again, so choose the game install "
+		                               "again in the project settings.");
 		return false;
 	}
 	Preferences settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
-	settings.retail_directory = json.get_string("retail_directory", "");
-	settings.play_retail = json.get_bool("play_retail", false);
+	settings.game_install = json.get_string("game_install", "");
+	settings.play_in_install = json.get_bool("play_in_install", false);
 	settings.import_dependencies = json.get_bool("import_dependencies", true);
 	if (const io::JsonValue *recent = json.get("recent_projects"); recent && recent->is_array()) {
 		for (const io::JsonValue &item : recent->array) {
@@ -55,8 +59,8 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kPreferencesSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
-	json.set("retail_directory", io::JsonValue::make_string(settings.retail_directory));
-	json.set("play_retail", io::JsonValue::make_bool(settings.play_retail));
+	json.set("game_install", io::JsonValue::make_string(settings.game_install));
+	json.set("play_in_install", io::JsonValue::make_bool(settings.play_in_install));
 	json.set("import_dependencies", io::JsonValue::make_bool(settings.import_dependencies));
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));

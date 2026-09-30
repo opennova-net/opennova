@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <editor/session/request_factories.h>
+
 #include "editor_ui_test_support.h"
 
 #include <imgui.h>
@@ -27,7 +29,7 @@ struct FindProject {
 	NodeAddress item, weapon;
 
 	bool open() {
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Find"));
+		session.handle(request::new_project(dir.file("project"), "Find"));
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		const AssetEntry *items = v.scan.find("items.def");
@@ -41,10 +43,10 @@ struct FindProject {
 		                             "begin \"Third Thing\"\nid 100302\ntype vehicle\nturn_rate 90\nend\n") ||
 		    !editor_test::write_text(v.project_root + "/" + weapons_path, "weapon \"Searchgun\"\nend\n"))
 			return false;
-		session.handle(make_request(EditorRequestKind::Rescan));
-		session.handle(make_request(EditorRequestKind::OpenDocument, weapons_path));
+		session.handle(request::rescan());
+		session.handle(request::open_document(weapons_path));
 		const Document *weapons_document = session.document_for(weapons_path);
-		session.handle(make_request(EditorRequestKind::OpenDocument, items_path));
+		session.handle(request::open_document(items_path));
 		const Document *items_document = session.document_for(items_path);
 		return items_document && weapons_document && items_document->find("100300", item) &&
 		       weapons_document->find("Searchgun", weapon);
@@ -59,7 +61,7 @@ struct FindProject {
 bool goes_to(const std::vector<EditorRequest> &requests, const std::string &path, const std::string &locator,
              const char *field) {
 	const EditorRequest *open = only(requests, EditorRequestKind::OpenDocument);
-	return open && open->path == path && open->text == locator && open->edit.field == field;
+	return open && open->path == path && open->locator == locator && open->field == field;
 }
 
 void press(Ui &ui, ImGuiKey key) {
@@ -106,10 +108,10 @@ void test_find_bar() {
 	NodeAddress second, third;
 	CHECK(items && items->find("100301", second) && items->find("100302", third), "the other items");
 	if (!items) return;
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, project.items_path);
-	edit.edit.address = second;
-	edit.edit.field = "turn_rate";
-	edit.edit.value = int64_t(45);
+	EditorRequest edit = request::edit_record(project.items_path, Edit());
+	edit.edits[0].address = second;
+	edit.edits[0].field = "turn_rate";
+	edit.edits[0].value = int64_t(45);
 	project.session.handle(edit);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("2 matches") != std::string::npos, "two left, none of them shown");

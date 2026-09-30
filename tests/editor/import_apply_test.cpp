@@ -26,6 +26,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 #include "common/retail_paths.h"
@@ -61,17 +62,17 @@ std::string closure_folder(const editor_test::TempProjectDir &dir) {
 
 // The preview of `paths` with the files they need.
 void preview(ProjectSession &session, const std::vector<std::string> &paths) {
-	EditorRequest request = make_request(EditorRequestKind::PreviewImport);
+	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
-	request.flag = true;
+	request.with_dependencies = true;
 	session.handle(request);
 }
 
 // Import of `imports` (the rows kept).
 void import(ProjectSession &session, const std::vector<ImportSource> &imports, bool replace = false) {
-	EditorRequest request = make_request(EditorRequestKind::ImportFiles);
+	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
 	request.imports = imports;
-	request.flag = replace;
+	request.replace = replace;
 	session.handle(request);
 }
 
@@ -227,7 +228,7 @@ static int test_apply_changed() {
 	TEST_EXPECT(!project.session.outcome().done() &&
 	            finding(project.session.outcome(), "import.not_planned", DiagnosticSeverity::Error, "arial99.fnt"));
 	TEST_EXPECT(snapshot(root) == unchanged && view.import_preview.open);
-	project.session.handle(make_request(EditorRequestKind::CancelImport));
+	project.session.handle(request::cancel_import());
 	TEST_EXPECT(!view.import_preview.open);
 	return 0;
 }
@@ -242,7 +243,7 @@ static int test_apply_staging() {
 	TEST_EXPECT(editor_test::write_text(art + "/extra.mnu", screen("EXTRA", window("STATIC", "GO", ""))) &&
 	            editor_test::write_text(art + "/Custom.fnt", "fnt"));
 	TEST_EXPECT(editor_test::write_text(root + "/fonts", "a file where a folder goes"));
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const bool menus = fs::exists(root + "/menus");
 	const auto before = snapshot(root);
 	const ImportResult result = import_assets({{art + "/extra.mnu", {}}, {art + "/Custom.fnt", {}}},
@@ -299,7 +300,7 @@ static int test_apply_reads_the_disk() {
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "GO", font("arial99")))) &&
 	            editor_test::write_text(art + "/arial99.fnt", "fnt") && editor_test::write_text(root + "/fonts/arial99.fnt", "fnt"));
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
 	preview(project.session, {art + "/a.mnu"});
 	TEST_EXPECT(view.import_preview.plan.rows.size() == 1 && view.import_preview.plan.rows[0].name == "a.mnu");
@@ -431,7 +432,7 @@ static int test_apply_cap_keeps_groups() {
 	                                    "event 0 0 0 0x0 0.9 1.7\nevent 0 0 0 0x0 0.9 1.7\n"));
 	paths.push_back(art + "/walk.o3a");
 	const SessionView &view = project.view();
-	EditorRequest request = make_request(EditorRequestKind::PreviewImport);
+	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
 	project.session.handle(request);
 	const ImportPlan &plan = view.import_preview.plan;
@@ -455,7 +456,7 @@ static int test_apply_staging_leftover() {
 	const std::string staging = ProjectPaths::for_root(root).staging_dir;
 	TEST_EXPECT(staging == root + "/.opennova/staging");
 	TEST_EXPECT(editor_test::write_text(staging + "/crashed/menu_style.mns.staged", "left by a crash"));
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
 	for (const AssetEntry &entry : view.scan.entries)
 		TEST_EXPECT(entry.logical_name.find("staged") == std::string::npos && entry.relative_path.find("staging") == std::string::npos);
@@ -478,11 +479,11 @@ static int test_apply_retail_menu() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a retail menu imported with the files it needs)");
 	Project project("opennova_editor_apply_retail");
-	editor_test::set_retail_directory(project.session, install);
+	editor_test::set_game_install(project.session, install);
 	const SessionView &view = project.view();
-	EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
+	EditorRequest listed = request::preview_install_import();
 	listed.names = {"main.mnu", "menu_style.mns"};
-	listed.flag = true;
+	listed.with_dependencies = true;
 	project.session.handle(listed);
 	const ImportPlan plan = view.import_preview.plan;
 	TEST_EXPECT(project.session.outcome().done() && view.import_preview.open && view.import_preview.roots.size() == 2);

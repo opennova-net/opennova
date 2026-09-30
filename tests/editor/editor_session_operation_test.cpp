@@ -17,6 +17,7 @@
 #include <editor/session/editor_preferences.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
@@ -203,7 +204,7 @@ static int test_request_table() {
 	TEST_EXPECT(operation_kind_row(OperationKind::Build).joined_by.has(K::Build) &&
 	            operation_kind_row(OperationKind::Build).joined_by.has(K::Play) &&
 	            !operation_kind_row(OperationKind::Build).joined_by.has(K::Save));
-	for (const K kind : {K::PreviewImport, K::PlanImport, K::PreviewRetailImport, K::SetImportDependencies})
+	for (const K kind : {K::PreviewImport, K::PlanImport, K::PreviewInstallImport, K::SetImportDependencies})
 		TEST_EXPECT(request_kind_row(kind).on_busy == OnBusy::Supersede &&
 		            operation_kind_row(OperationKind::ImportPlan).superseded_by.has(kind));
 	for (size_t k = 0; k < kOperationKindCount; ++k)
@@ -216,7 +217,7 @@ static int test_request_table() {
 		TEST_EXPECT(gate_answer(kind, build) == GateAnswer::Refuse && busy_refuses(kind, build));
 	for (const K kind : {K::EditRecord, K::Undo, K::Redo, K::Cut, K::Paste, K::Copy, K::OpenDocument, K::ReloadDocument,
 	                     K::CloseDocument, K::SelectRecord, K::PreviewImport, K::PlanImport, K::SetImportDependencies,
-	                     K::PreviewRetailImport, K::PreviewRename, K::StopPlay, K::ApplyProjectSettings})
+	                     K::PreviewInstallImport, K::PreviewRename, K::StopPlay, K::ApplyProjectSettings})
 		TEST_EXPECT(gate_answer(kind, build) == GateAnswer::Proceed && !busy_refuses(kind, build));
 	TEST_EXPECT(gate_answer(K::Build, build) == GateAnswer::Join && gate_answer(K::Play, build) == GateAnswer::Join);
 	for (const K kind : {K::NewProject, K::OpenProject, K::CloseProject, K::Quit})
@@ -257,16 +258,16 @@ static int test_gate_is_what_busy_refuses_says() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Every"));
+	session.handle(request::new_project(dir.file("project"), "Every"));
 	editor_test::create_missing_files(session);
 	session.set_poll_budget({0, 16});
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
 		const EditorRequestKind kind = static_cast<EditorRequestKind>(i);
-		if (!v.project_open) session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
-		if (!v.operation.running()) session.handle(make_request(EditorRequestKind::Build));
+		if (!v.project_open) session.handle(request::open_project(dir.file("project")));
+		if (!v.operation.running()) session.handle(request::build());
 		const OperationStatus running = v.operation;
 		TEST_EXPECT(v.project_open && running.running() && running.kind == OperationKind::Build);
-		session.handle(make_request(kind));
+		session.handle(request::of(kind));
 		TEST_EXPECT(agree(kind, running, refused_busy(session)));
 	}
 	for (size_t k = 0; k < kOperationKindCount; ++k) {
@@ -281,7 +282,7 @@ static int test_gate_is_what_busy_refuses_says() {
 				TEST_EXPECT(fresh.start_operation(std::move(operation)) != 0);
 				const OperationStatus running = fresh.view().operation;
 				TEST_EXPECT(running.running() && running.cancellable == cancellable);
-				fresh.handle(make_request(kind));
+				fresh.handle(request::of(kind));
 				TEST_EXPECT(agree(kind, running, refused_busy(fresh)));
 			}
 		}
@@ -299,7 +300,7 @@ static int test_busy_gate() {
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Gate"));
+	session.handle(request::new_project(dir.file("project"), "Gate"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -309,10 +310,10 @@ static int test_busy_gate() {
 	launcher.executable = runtime;
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	session.set_poll_budget({0, 256});
 
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	TEST_EXPECT(session.outcome().done() && v.operation.running() && v.operation.reads == HoldsFiles &&
 	            v.operation.writes == HoldsSlot && v.operation.cancellable);
 	const uint64_t build = v.operation.id;
@@ -321,21 +322,23 @@ static int test_busy_gate() {
 
 	// An open and an edit go on while the build packs; a Save does not.
 	const auto open_items = [&session]() -> Document * {
-		session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+		session.handle(request::open_document("items.def"));
 		Document *document = session.document_for("items.def");
 		return session.outcome().done() && document && !document->rows().empty() ? document : nullptr;
 	};
 	Document *items = open_items();
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, items->path());
-	edit.edit.address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
-	edit.edit.field = "hp";
-	edit.edit.value = int64_t(20);
+	EditorRequest edit = request::edit_record(items->path(), Edit());
+	edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(session.outcome().done() && items->dirty() && v.operation.id == build);
 	for (const EditorRequestKind kind : {EditorRequestKind::Save, EditorRequestKind::SaveAll}) {
-		session.handle(make_request(kind, kind == EditorRequestKind::Save ? items->path() : std::string()));
+		EditorRequest save = request::of(kind);
+		save.path = kind == EditorRequestKind::Save ? items->path() : std::string();
+		session.handle(save);
 		TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
 		            session.outcome().findings[0].code == "operation.busy" &&
 		            session.outcome().findings[0].severity == DiagnosticSeverity::Warning);
@@ -346,57 +349,56 @@ static int test_busy_gate() {
 	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	// The unsaved prompt's Save writes files too: refused, the prompt kept. Its Discard drops the
 	// document, which the build does not read: it goes on.
-	session.handle(make_request(EditorRequestKind::CloseDocument, items->path()));
+	session.handle(request::close_document(items->path()));
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open);
-	EditorRequest answer = make_request(EditorRequestKind::ResolveUnsaved);
-	answer.unsaved_choice = UnsavedChoice::Save;
+	EditorRequest answer = request::resolve_unsaved(UnsavedChoice::Save);
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && items->dirty() &&
 	            session.outcome().findings.size() == 1 && session.outcome().findings[0].code == "operation.busy");
-	answer.unsaved_choice = UnsavedChoice::Discard;
+	answer.choice = UnsavedChoice::Discard;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.unsaved_prompt.open && session.document_for("items.def") == nullptr &&
 	            v.operation.id == build);
 	items = open_items();
 	TEST_EXPECT(items != nullptr && !items->dirty());
 	if (!items) return 1;
-	edit.edit.address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
+	edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
 	session.handle(edit);
 	TEST_EXPECT(session.outcome().done() && items->dirty() && v.operation.id == build);
 
 	// An import's preview reads the files: it goes on beside the build, which is not what it
 	// supersedes; the import it plans writes them: refused.
-	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
+	EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
 	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
 	preview.paths = {dir.file("loose.txt")};
 	session.handle(preview);
 	TEST_EXPECT(session.outcome().done() && v.import_preview.open && v.operation.id == build);
-	session.handle(make_request(EditorRequestKind::ImportFiles));
+	session.handle(request::of(EditorRequestKind::ImportFiles));
 	TEST_EXPECT(!session.outcome().done() && refused_busy(session) && v.operation.id == build);
-	session.handle(make_request(EditorRequestKind::CancelImport));
+	session.handle(request::cancel_import());
 	TEST_EXPECT(!v.import_preview.open);
 
 	// A Build with unsaved edits asks about them first: it would not join a build that packs the
 	// files without them. The prompt's Save waits for the build (refused, the prompt kept).
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open &&
 	            v.unsaved_prompt.action == EditorRequestKind::Build && session.outcome().operation == 0 &&
 	            v.operation.id == build);
-	answer.unsaved_choice = UnsavedChoice::Save;
+	answer.choice = UnsavedChoice::Save;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && items->dirty() &&
 	            session.outcome().findings.size() == 1 && session.outcome().findings[0].code == "operation.busy");
-	answer.unsaved_choice = UnsavedChoice::Cancel;
+	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	TEST_EXPECT(!v.unsaved_prompt.open && v.operation.id == build);
 
 	// The edit undone, nothing is unsaved: a Build joins the build; a Play joins it too and starts
 	// the game when it lands.
-	session.handle(make_request(EditorRequestKind::Undo, items->path()));
+	session.handle(request::undo(items->path()));
 	TEST_EXPECT(!items->dirty());
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == build && v.operation.id == build);
-	session.handle(make_request(EditorRequestKind::Play));
+	session.handle(request::play());
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == build && v.operation.id == build &&
 	            platform.spawns == 0);
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_number("operation", 0.0) == double(build));
@@ -405,58 +407,58 @@ static int test_busy_gate() {
 	TEST_EXPECT(platform.spawns == 1 && v.play_state == PlayState::Running);
 	// With the build done, the edit made again is saved.
 	session.handle(edit);
-	session.handle(make_request(EditorRequestKind::Save, items->path()));
+	session.handle(request::save(items->path()));
 	TEST_EXPECT(session.outcome().done() && !items->dirty());
 	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 20") != std::string::npos);
 
 	// A project's close with unsaved edits asks about them first, the build packing on: a Cancel
 	// keeps the build; the prompt's Save cancels it (the close would), writes the file and closes.
-	session.handle(make_request(EditorRequestKind::StopPlay));
+	session.handle(request::stop_play());
 	session.poll();
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	const uint64_t second = v.operation.id;
 	TEST_EXPECT(second > build && v.operation.running());
 	session.poll();
-	edit.edit.value = int64_t(30);
+	edit.edits[0].value = int64_t(30);
 	session.handle(edit);
 	TEST_EXPECT(items->dirty() && v.operation.id == second);
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && v.project_open && v.operation.id == second);
-	answer.unsaved_choice = UnsavedChoice::Cancel;
+	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	TEST_EXPECT(v.project_open && v.operation.id == second && v.last_operation.id == build);
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open);
-	answer.unsaved_choice = UnsavedChoice::Save;
+	answer.choice = UnsavedChoice::Save;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.project_open && !v.operation.running());
 	TEST_EXPECT(v.last_operation.id == second && v.last_operation.end == OperationEnd::Cancelled);
 	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 30") != std::string::npos);
 
 	// With nothing unsaved a close cancels the build at once: nothing of it is kept.
-	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::open_project(dir.file("project")));
+	session.handle(request::build());
 	const uint64_t third = v.operation.id;
 	TEST_EXPECT(third > second && v.operation.running());
 	session.poll();
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.outcome().done() && !v.project_open && !v.operation.running());
 	TEST_EXPECT(v.last_operation.id == third && v.last_operation.end == OperationEnd::Cancelled);
 
 	// A project switch cancels the build only once its own checks pass: a NewProject where a
 	// project is already, and an OpenProject of a folder that holds none, fail and keep it; one
 	// that goes through cancels it.
-	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::open_project(dir.file("project")));
+	session.handle(request::build());
 	const uint64_t fourth = v.operation.id;
 	TEST_EXPECT(fourth > third && v.operation.running());
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Again"));
+	session.handle(request::new_project(dir.file("project"), "Again"));
 	TEST_EXPECT(!session.outcome().done() && v.project_open && v.document.title == "Gate" && v.operation.id == fourth &&
 	            v.last_operation.id == third);
 	TEST_EXPECT(editor_test::write_text(dir.file("empty/readme.txt"), "no project here"));
-	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("empty")));
+	session.handle(request::open_project(dir.file("empty")));
 	TEST_EXPECT(!session.outcome().done() && v.project_open && v.document.title == "Gate" && v.operation.id == fourth);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("second"), "Second"));
+	session.handle(request::new_project(dir.file("second"), "Second"));
 	TEST_EXPECT(session.outcome().done() && v.project_open && v.document.title == "Second" && !v.operation.running());
 	TEST_EXPECT(v.last_operation.id == fourth && v.last_operation.end == OperationEnd::Cancelled);
 	return 0;
@@ -477,13 +479,13 @@ static int test_uncancellable_operation() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
-	session.handle(make_request(K::NewProject, dir.file("other"), "Other"));
-	session.handle(make_request(K::NewProject, dir.file("project"), "Stubborn"));
+	session.handle(request::new_project(dir.file("other"), "Other"));
+	session.handle(request::new_project(dir.file("project"), "Stubborn"));
 	TEST_EXPECT(v.project_open && v.document.title == "Stubborn");
 	TEST_EXPECT(editor_test::write_text(v.project_root + "/defs/items.def",
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
-	session.handle(make_request(K::Rescan));
-	session.handle(make_request(K::OpenDocument, "items.def"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
@@ -493,8 +495,8 @@ static int test_uncancellable_operation() {
 	rename->can_cancel = false;
 	const uint64_t id = session.start_operation(std::move(owned));
 	TEST_EXPECT(id != 0 && v.operation.id == id && v.operation.kind == OperationKind::RenameApply && !v.operation.cancellable);
-	const EditorRequest switches[] = {make_request(K::CloseProject), make_request(K::OpenProject, dir.file("other")),
-	                                  make_request(K::NewProject, dir.file("third"), "Third"), make_request(K::Quit)};
+	const EditorRequest switches[] = {request::close_project(), request::open_project(dir.file("other")),
+	                                  request::new_project(dir.file("third"), "Third"), request::quit()};
 	for (const EditorRequest &request : switches) {
 		TEST_EXPECT(busy_refuses(request.kind, v.operation));
 		session.handle(request);
@@ -504,7 +506,7 @@ static int test_uncancellable_operation() {
 		            !tally.cancelled);
 	}
 	TEST_EXPECT(!fs::exists(dir.file("third")));
-	session.handle(make_request(K::CancelOperation));
+	session.handle(request::cancel_operation());
 	TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
 	            session.outcome().findings[0].code == "operation.not_cancellable" && v.operation.id == id);
 
@@ -520,38 +522,38 @@ static int test_uncancellable_operation() {
 	}
 	TEST_EXPECT(!fs::exists(dir.file("third")));
 	rename->cancellable_answers = -1;
-	session.handle(make_request(K::CancelOperation));
+	session.handle(request::cancel_operation());
 	TEST_EXPECT(session.outcome().done() && tally.cancelled && !v.operation.running());
 
 	// With unsaved edits, a project's close asks first. The rename that runs meanwhile (it writes
 	// the documents) turned stubborn: the prompt's Save and Discard cannot cancel it for the
 	// close, refused and the prompt kept, the edits with it.
-	EditorRequest edit = make_request(K::EditRecord, items->path());
-	edit.edit.address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
-	edit.edit.field = "hp";
-	edit.edit.value = int64_t(20);
+	EditorRequest edit = request::edit_record(items->path(), Edit());
+	edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(session.outcome().done() && items->dirty());
 	auto again = std::make_unique<FakeOperation>(second, 1000, OperationKind::RenameApply);
 	FakeOperation *held = again.get();
 	const uint64_t next = session.start_operation(std::move(again));
 	TEST_EXPECT(next > id);
-	session.handle(make_request(K::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && v.operation.id == next);
 	held->can_cancel = false;
-	EditorRequest answer = make_request(K::ResolveUnsaved);
+	EditorRequest answer = request::of(EditorRequestKind::ResolveUnsaved);
 	for (const UnsavedChoice choice : {UnsavedChoice::Save, UnsavedChoice::Discard}) {
-		answer.unsaved_choice = choice;
+		answer.choice = choice;
 		session.handle(answer);
 		TEST_EXPECT(session.outcome().unsaved_prompt && refused_busy(session) && v.unsaved_prompt.open);
 		TEST_EXPECT(v.project_open && items->dirty() && v.operation.id == next && !second.cancelled);
 	}
 	std::string text, error;
 	TEST_EXPECT(read_file_text(v.project_root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
-	answer.unsaved_choice = UnsavedChoice::Cancel;
+	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	held->can_cancel = true;
-	session.handle(make_request(K::CancelOperation));
+	session.handle(request::cancel_operation());
 	TEST_EXPECT(!v.unsaved_prompt.open && second.cancelled && !v.operation.running() && items->dirty());
 
 	// A build holds no document, so a Discard drops nothing it reads; but the close it answers
@@ -562,18 +564,18 @@ static int test_uncancellable_operation() {
 	FakeOperation *packing = build.get();
 	const uint64_t building = session.start_operation(std::move(build));
 	TEST_EXPECT(building > next);
-	session.handle(make_request(K::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && v.operation.id == building);
 	packing->can_cancel = false;
 	for (const UnsavedChoice choice : {UnsavedChoice::Discard, UnsavedChoice::Save}) {
-		answer.unsaved_choice = choice;
+		answer.choice = choice;
 		session.handle(answer);
 		TEST_EXPECT(session.outcome().unsaved_prompt && refused_busy(session) && v.unsaved_prompt.open);
 		TEST_EXPECT(v.project_open && session.document_for("items.def") == items && items->dirty() &&
 		            v.operation.id == building && !packed.cancelled);
 	}
 	packing->can_cancel = true;
-	answer.unsaved_choice = UnsavedChoice::Discard;
+	answer.choice = UnsavedChoice::Discard;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.project_open && packed.cancelled && !v.operation.running());
 	TEST_EXPECT(v.last_operation.id == building && v.last_operation.end == OperationEnd::Cancelled);
@@ -591,9 +593,9 @@ static int test_import_plan_superseded() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Supersede"));
+	session.handle(request::new_project(dir.file("project"), "Supersede"));
 	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
-	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
+	EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
 	preview.paths = {dir.file("loose.txt")};
 
 	const uint64_t id = session.start_operation(std::make_unique<FakeOperation>(first, 1000, OperationKind::ImportPlan));
@@ -603,7 +605,7 @@ static int test_import_plan_superseded() {
 	TEST_EXPECT(session.outcome().done() && v.import_preview.open);
 	TEST_EXPECT(first.cancelled && first.destroyed && first.finishes == 0 && !v.operation.running());
 	TEST_EXPECT(v.last_operation.id == id && v.last_operation.end == OperationEnd::Cancelled);
-	session.handle(make_request(EditorRequestKind::CancelImport));
+	session.handle(request::cancel_import());
 	TEST_EXPECT(!v.import_preview.open);
 
 	auto stubborn = std::make_unique<FakeOperation>(second, 1000, OperationKind::ImportPlan);
@@ -632,13 +634,13 @@ static int test_settings_parts_weighed() {
 	Tally tally; // outlives the session, which drops the operation
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Features"));
+	session.handle(request::new_project(dir.file("project"), "Features"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	session.set_poll_budget({0, 256});
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	TEST_EXPECT(v.operation.running() && !busy_refuses(EditorRequestKind::ApplyProjectSettings, v.operation));
-	EditorRequest apply = make_request(EditorRequestKind::ApplyProjectSettings);
+	EditorRequest apply = request::of(EditorRequestKind::ApplyProjectSettings);
 	apply.settings.serial = 9;
 	apply.settings.title = std::string("Renamed");
 	apply.settings.mission = true;
@@ -657,10 +659,10 @@ static int test_settings_parts_weighed() {
 	const uint64_t id = session.start_operation(std::make_unique<FakeOperation>(tally, 1000, OperationKind::Open));
 	TEST_EXPECT(id != 0 && !busy_refuses(EditorRequestKind::ApplyProjectSettings, v.operation));
 	const std::string install = v.retail_directory;
-	EditorRequest held = make_request(EditorRequestKind::ApplyProjectSettings);
+	EditorRequest held = request::of(EditorRequestKind::ApplyProjectSettings);
 	held.settings.serial = 11;
 	held.settings.title = std::string("Held");
-	held.settings.retail_directory = dir.file("install");
+	held.settings.game_install = dir.file("install");
 	held.settings.runtime_executable = dir.file("runtime/opennova.exe");
 	session.handle(held);
 	TEST_EXPECT(v.settings_result.serial == 11 && v.settings_result.failures.size() == 2);
@@ -680,15 +682,15 @@ static int test_refused_edit_is_no_edit() {
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Refused"));
+	session.handle(request::new_project(dir.file("project"), "Refused"));
 	editor_test::create_missing_files(session);
-	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	session.handle(request::open_document("gametext.bin"));
 	Document *table = session.document_for("gametext.bin");
 	TEST_EXPECT(table != nullptr);
 	if (!table) return 1;
-	EditorRequest add = make_request(EditorRequestKind::EditRecord, table->path());
-	add.edit.operation = EditOperation::Add;
-	add.edit.address = {0, table->kind_from_name("section"), 0};
+	EditorRequest add = request::edit_record(table->path(), Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address = {0, table->kind_from_name("section"), 0};
 	session.handle(add);
 	TEST_EXPECT(session.outcome().done() && session.last_edit_ok());
 	const NodeId added = table->last_added();

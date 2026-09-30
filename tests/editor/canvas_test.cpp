@@ -41,6 +41,7 @@
 #include <editor/preview/viewport_overlay.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 #include "common/file_io.h"
@@ -925,11 +926,11 @@ int test_model_canvas() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Canvas Test"));
+	session.handle(request::new_project(dir.file("project"), "Canvas Test"));
 	TEST_EXPECT(editor_test::write_bytes(
 			dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/armory.3di"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("models/armory.3di"));
 	const auto *document =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
 	ModelPreviewModel model;
@@ -941,8 +942,8 @@ int test_model_canvas() {
 	model.set_device_size(width, height);
 	const ModelRow &row = *document->model_row();
 	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, document->path());
-	select.edit.address = point;
+	EditorRequest select = request::select_record(document->path(), {});
+	select.address = point;
 	session.handle(select);
 	ModelCanvas canvas;
 	Recorder out;

@@ -170,8 +170,8 @@ void print_summary(std::FILE *out, const OpenedProject &project) {
 	std::fprintf(out, "runtime: %s\n",
 	             project.local.runtime_executable.empty() ? "(beside the editor)"
 	                                                       : project.local.runtime_executable.c_str());
-	if (!project.local.retail_root.empty())
-		std::fprintf(out, "game install: %s\n", project.local.retail_root.c_str());
+	if (!project.local.game_install.empty())
+		std::fprintf(out, "game install: %s\n", project.local.game_install.c_str());
 	std::map<std::string, int> by_kind;
 	for (const AssetEntry &asset : project.state.scan.entries) ++by_kind[asset_kind_label(asset.kind)];
 	std::fprintf(out, "assets: %zu file(s)\n", project.state.scan.entries.size());
@@ -331,7 +331,7 @@ int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE 
 		ImportSource source;
 		source.path = source_path;
 		source.entry = entry;
-		source.retail = retail;
+		source.install = retail;
 		sources.push_back(source);
 	}
 	if (sources.empty()) {
@@ -350,7 +350,7 @@ int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE 
 		AssetGraph graph;
 		graph.update(project.paths, project.doc, project.state.scan, {});
 		const ImportPlan plan = plan_import(sources, with_dependencies, project.paths, project.doc, project.state.scan,
-		                                    graph, retail ? source_path : project.local.retail_root);
+		                                    graph, retail ? source_path : project.local.game_install);
 		for (const Diagnostic &d : plan.diagnostics) print_diagnostic(err, d);
 		if (dry_run) {
 			print_plan(out, plan);

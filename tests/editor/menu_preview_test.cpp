@@ -25,6 +25,7 @@
 #include <editor/preview/texture_header.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
@@ -84,10 +85,10 @@ double rect_at(const JsonValue &widget, size_t i) {
 }
 
 void set(ProjectSession &session, const Document &document, const NodeAddress &address, const char *field, Value value) {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, document.path());
-	request.edit.address = address;
-	request.edit.field = field;
-	request.edit.value = std::move(value);
+	EditorRequest request = request::edit_record(document.path(), Edit());
+	request.edits[0].address = address;
+	request.edits[0].field = field;
+	request.edits[0].value = std::move(value);
 	session.handle(request);
 }
 
@@ -106,11 +107,11 @@ static int test_headless_preview() {
 	TEST_EXPECT(menu_preview_to_json(menu_preview_snapshot(view, device.model, nullptr, nullptr)).get_string("status", "") ==
 	            "no_device");
 
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Preview Test"));
+	session.handle(request::new_project(dir.file("project"), "Preview Test"));
 	editor_test::create_missing_files(session);
 	device.pump(view);
 	TEST_EXPECT(device.json(view).get_string("status", "") == "no_menu");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu && !menu->rows().empty());
 	NodeAddress main, title, exit;
@@ -128,8 +129,8 @@ static int test_headless_preview() {
 	// out in its font from fonts/.
 	TEST_EXPECT(view.menu_preview.path == menu->path() && view.menu_preview.screen == menu->rows()[0]->id);
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, menu->path());
-	select.edit.address = title;
+	EditorRequest select = request::select_record(menu->path(), {});
+	select.address = title;
 	session.handle(select);
 	JsonValue json = device.json(view);
 	TEST_EXPECT(json.get_string("status", "") == "ready" && json.get_bool("current", false));
@@ -169,12 +170,12 @@ static int test_headless_preview() {
 			TEST_EXPECT(layout_drag_edits(*menu, title, index, device.compiler, start, drag, gesture, edits));
 			TEST_EXPECT(!edits.empty());
 			for (const Edit &edit : edits) TEST_EXPECT(edit.gesture == gesture);
-			EditorRequest request = make_request(EditorRequestKind::EditRecord, menu->path());
+			EditorRequest request = request::edit_record(menu->path(), Edit());
 			request.edits = edits;
 			session.handle(request);
 			TEST_EXPECT(session.last_edit_ok());
 		}
-		session.handle(make_request(EditorRequestKind::EndEdit, menu->path()));
+		session.handle(request::end_edit(menu->path()));
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 		const JsonValue moved_json = device.json(view);
 		const JsonValue *moved = widget_named(moved_json, "TITLE");
@@ -183,7 +184,7 @@ static int test_headless_preview() {
 		Value bottom;
 		TEST_EXPECT(!menu->present(title, "position.bottom")); // its text still sizes it
 		TEST_EXPECT(menu->get(title, "position.top", bottom) && std::get<int64_t>(bottom) == 117);
-		session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+		session.handle(request::undo(menu->path()));
 		TEST_EXPECT(!menu->dirty());
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 		const JsonValue back_json = device.json(view);
@@ -203,7 +204,7 @@ static int test_headless_preview() {
 		const JsonValue dragged_json = device.json(view);
 		const JsonValue *dragged = widget_named(dragged_json, "TITLE");
 		TEST_EXPECT(dragged && rect_at(*dragged, 0) == 16 && rect_at(*dragged, 1) == 200);
-		session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+		session.handle(request::undo(menu->path()));
 		TEST_EXPECT(!menu->dirty());
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 		const MenuPreviewSnapshot shown = menu_preview_snapshot(view, device.model, &device.compiler, &device.state);
@@ -216,7 +217,7 @@ static int test_headless_preview() {
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 		const JsonValue aligned_json = device.json(view);
 		TEST_EXPECT(rect_at(*widget_named(aligned_json, "EXIT"), 0) == rect_at(*widget_named(aligned_json, "TITLE"), 0));
-		session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+		session.handle(request::undo(menu->path()));
 		TEST_EXPECT(!menu->dirty());
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 
@@ -234,7 +235,7 @@ static int test_headless_preview() {
 
 	// An unsaved stylesheet edit shows (the open document stands in for its file), while the
 	// stylesheet is the active document.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style);
 	NodeAddress fg;
@@ -245,7 +246,7 @@ static int test_headless_preview() {
 	TEST_EXPECT(widget_named(device.json(view), "TITLE")->get_string("text_color", "") == "FFFF0000");
 
 	// An edit of a document the screen does not read changes nothing it draws.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items && !items->rows().empty());
 	set(session, *items, {items->rows()[0]->id, items->rows()[0]->kind, 0}, "type", int64_t(0));
@@ -253,7 +254,7 @@ static int test_headless_preview() {
 
 	// The title from a string table: MAIN names menutxt.bin, TITLE's STRING is an id in
 	// its Menu section; an unsaved edit of the table's text shows at once.
-	session.handle(make_request(EditorRequestKind::CreateFile, "menutxt.bin", "strings"));
+	session.handle(request::create_file("menutxt.bin", "strings"));
 	Document *strings = session.document_for("menutxt.bin");
 	TEST_EXPECT(strings);
 	NodeAddress exit_string;
@@ -265,10 +266,10 @@ static int test_headless_preview() {
 				if (strings->get(address, "key", key) && std::get<std::string>(key) == "MM_Exit") exit_string = address;
 			}
 	TEST_EXPECT(exit_string.child != 0);
-	EditorRequest write = make_request(EditorRequestKind::EditRecord, menu->path());
-	write.edit.operation = EditOperation::Write;
-	write.edit.address = main;
-	write.edit.field = "text_rsrc";
+	EditorRequest write = request::edit_record(menu->path(), Edit());
+	write.edits[0].operation = EditOperation::Write;
+	write.edits[0].address = main;
+	write.edits[0].field = "text_rsrc";
 	session.handle(write);
 	set(session, *menu, main, "text_rsrc", std::string("menutxt.bin"));
 	set(session, *menu, title, "string.type", std::string("ID"));
@@ -291,7 +292,7 @@ static int test_headless_preview() {
 	// A table the project has that does not parse: named apart from one it lacks (the
 	// rescan keeps the unsaved menu open as it is).
 	TEST_EXPECT(editor_test::write_text(view.project_root + "/text/broken.bin", "not a table"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(session.document_for("main.mnu") == menu && menu->dirty());
 	set(session, *menu, main, "text_rsrc", std::string("broken.bin"));
 	device.pump(view);
@@ -309,7 +310,7 @@ static int test_headless_preview() {
 	TEST_EXPECT(json.get_string("message", "").find("The game could not read this menu as it stands: ") == 0);
 	TEST_EXPECT(json.get("widgets")->array.empty());
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Keep);
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
 	TEST_EXPECT(device.json(view).get_string("status", "") == "ready");
 
@@ -356,9 +357,8 @@ static int test_headless_preview() {
 	TEST_EXPECT(std::string(menu_preview_state_token(-1)) == "normal");
 
 	// The project closed: nothing to show, and the device drops what it configured.
-	session.handle(make_request(EditorRequestKind::CloseProject));
-	EditorRequest discard = make_request(EditorRequestKind::ResolveUnsaved);
-	discard.unsaved_choice = UnsavedChoice::Discard;
+	session.handle(request::close_project());
+	EditorRequest discard = request::resolve_unsaved(UnsavedChoice::Discard);
 	session.handle(discard);
 	TEST_EXPECT(!session.project_open());
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Clear && device.compiler.widget_count() == 0);

@@ -32,6 +32,7 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/mnu/mnu_schema.h>
 #include <runtime/menu/menu_screen_inputs.h>
@@ -54,10 +55,10 @@ const NodeKind kWindow = node_kind(MenuKind::Window);
 
 void edit(ProjectSession &session, const Document &document, const NodeAddress &address, const char *field,
           Value value) {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, document.path());
-	request.edit.address = address;
-	request.edit.field = field;
-	request.edit.value = std::move(value);
+	EditorRequest request = request::edit_record(document.path(), Edit());
+	request.edits[0].address = address;
+	request.edits[0].field = field;
+	request.edits[0].value = std::move(value);
 	session.handle(request);
 }
 
@@ -102,7 +103,7 @@ static int test_blank_startup() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Render Test"));
+	session.handle(request::new_project(dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.render_check);
@@ -111,7 +112,7 @@ static int test_blank_startup() {
 	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code.c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
 
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(menu);
 	const Node *startup = menu->rows().front().get();
@@ -165,10 +166,10 @@ static int test_blank_startup() {
 	// A note never blocks a build (the missing texture, the graph's error, would).
 	edit(session, *menu, row, "type", std::string("COLOR"));
 	edit(session, *menu, row, "value", std::string("FF0000"));
-	session.handle(make_request(EditorRequestKind::Save, menu->path()));
+	session.handle(request::save(menu->path()));
 	TEST_EXPECT(render_findings(view, "menu.render.text_truncated").size() == 1 &&
 	            render_findings(view, "menu.render.color_transparent").size() == 1);
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	session.run_operations();
 	for (const Diagnostic &d : view.last_build.diagnostics)
 		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code.c_str(), d.message.c_str());
@@ -182,7 +183,7 @@ static int test_render_again_only_when_moved() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Again"));
+	session.handle(request::new_project(dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck &check = *view.render_check;
@@ -190,12 +191,12 @@ static int test_render_again_only_when_moved() {
 	const size_t menus = check.rendered();
 	TEST_EXPECT(menus >= 1);
 	// Opened, the menu's document stands in for its file (a new document state): it renders.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	TEST_EXPECT(check.rendered() == 1);
 	// A rescan with nothing changed on disk keeps the open document: nothing renders.
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(check.rendered() == 0 && session.document_for("main.mnu") == menu);
 	// A validation where nothing a menu reads moved (the project's features refresh the
 	// scan): nothing renders.
@@ -207,7 +208,7 @@ static int test_render_again_only_when_moved() {
 	edit(session, *menu, title, "position.top", int64_t(130));
 	TEST_EXPECT(check.rendered() == 1);
 	// A stylesheet edit reaches every menu (its %VAR% list).
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
 	NodeAddress fg;
 	TEST_EXPECT(style && style->find("DEF_TEXT_FG", fg));
@@ -215,9 +216,8 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(check.rendered() == menus);
 	// Closed with the project (its edits discarded): nothing kept.
 	TEST_EXPECT(check.render("menus/main.mnu", title.row));
-	session.handle(make_request(EditorRequestKind::CloseProject));
-	EditorRequest discard = make_request(EditorRequestKind::ResolveUnsaved);
-	discard.unsaved_choice = UnsavedChoice::Discard;
+	session.handle(request::close_project());
+	EditorRequest discard = request::resolve_unsaved(UnsavedChoice::Discard);
 	session.handle(discard);
 	TEST_EXPECT(!view.project_open && !check.render("menus/main.mnu", title.row));
 	return 0;

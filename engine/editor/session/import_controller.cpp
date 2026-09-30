@@ -23,16 +23,16 @@ void ImportController::preview_files(const EditorRequest &request) {
 	for (ImportSource &source : list_import_sources(request.paths, diagnostics))
 		(source.entry.empty() ? roots : choices).push_back(std::move(source));
 	for (const auto &d : diagnostics) core_.report(d);
-	preview(std::move(choices), std::move(roots), request.flag);
+	preview(std::move(choices), std::move(roots), request.with_dependencies);
 }
 
 void ImportController::plan(const EditorRequest &request) {
 	if (!view_.project_open) return;
 	preview(view_.import_preview.open ? view_.import_preview.choices : std::vector<ImportSource>(), request.imports,
-	        request.flag);
+	        request.with_dependencies);
 }
 
-void ImportController::preview_retail(const EditorRequest &request) {
+void ImportController::preview_install(const EditorRequest &request) {
 	if (!view_.project_open) return;
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportSource> sources = list_retail_import_sources(core_.game_install(), view_.document, diagnostics);
@@ -54,7 +54,7 @@ void ImportController::preview_retail(const EditorRequest &request) {
 	}
 	if (!request.names.empty()) sources.clear();
 	for (const auto &d : diagnostics) core_.report(d);
-	preview(std::move(sources), std::move(named), request.flag);
+	preview(std::move(sources), std::move(named), request.with_dependencies);
 }
 
 void ImportController::cancel() {
@@ -103,10 +103,10 @@ void ImportController::preview(std::vector<ImportSource> choices, std::vector<Im
 // (the view's scan may be older than a change made outside the editor; a scan writes
 // nothing, unlike a refresh, which runs the import pass), resolved by a copy of the asset
 // graph brought up to it (its cache reads again only the files that changed); its findings
-// are the dialog's to show.
+// are the dialog's to show. Every request that plans it validates first (its row's
+// `validates`), so an edit a held pump made reaches the graph it copies.
 void ImportController::plan_preview() {
 	SessionView::ImportPreview &preview = view_.import_preview;
-	core_.problems().validate_pending();
 	if (preview.open) {
 		const AssetScan scan = scan_project_assets(paths_, view_.document);
 		AssetGraph graph = core_.problems().graph();
@@ -136,20 +136,21 @@ void ImportController::plan_preview() {
 
 // The import dialog's "Include the files these need": the editor's preference, written from a
 // copy (a preference that could not be written stays the one in effect, its failure a finding);
-// an open preview is planned again with the flag asked for.
-void ImportController::set_dependencies(bool flag) {
+// an open preview is planned again with the setting asked for.
+void ImportController::set_dependencies(bool with_dependencies) {
 	EditorPreferences &preferences = core_.preferences();
-	if (flag != preferences.values().import_dependencies) {
+	if (with_dependencies != preferences.values().import_dependencies) {
 		Preferences editor = preferences.values();
-		editor.import_dependencies = flag;
+		editor.import_dependencies = with_dependencies;
 		Diagnostic error;
 		if (!preferences.write(editor, error)) core_.report(error);
 	}
 	view_.import_dependencies = preferences.values().import_dependencies;
-	view_.status = flag ? "Imports bring the files the chosen ones need." : "Imports take the chosen files alone.";
+	view_.status = with_dependencies ? "Imports bring the files the chosen ones need."
+	                                 : "Imports take the chosen files alone.";
 	SessionView::ImportPreview &preview = view_.import_preview;
-	if (preview.open && preview.with_dependencies != flag) {
-		preview.with_dependencies = flag;
+	if (preview.open && preview.with_dependencies != with_dependencies) {
+		preview.with_dependencies = with_dependencies;
 		preview.changed = false;
 		plan_preview();
 	}
@@ -195,7 +196,7 @@ void ImportController::import_files(const EditorRequest &request) {
 		core_.touch(ViewConcern::Output);
 		return;
 	}
-	const ImportResult imported = import_assets(request.imports, paths_, view_.document, request.flag);
+	const ImportResult imported = import_assets(request.imports, paths_, view_.document, request.replace);
 	if (!imported.imported.empty()) {
 		// A Rescan: the open documents whose files it replaced read again, then the refresh.
 		core_.documents().reload_changed();
@@ -213,7 +214,7 @@ void ImportController::import_files(const EditorRequest &request) {
 	core_.touch(ViewConcern::Output);
 }
 
-void ImportController::refresh_retail_files() {
+void ImportController::refresh_install_files() {
 	view_.retail_files = view_.project_open ? list_retail_file_names(core_.game_install(), view_.document)
 	                                        : std::vector<std::string>();
 	core_.touch(ViewConcern::Files);
@@ -225,7 +226,7 @@ void ImportController::refresh_retail_files() {
 // every destination is looked at.
 void ImportController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project_open || !request.flag || !documents.documents_dirty()) return;
+	if (!view_.project_open || !request.replace || !documents.documents_dirty()) return;
 	core_.problems().validate_pending();
 	const ImportPlan plan = plan_import(request.imports, false, paths_, view_.document, view_.scan, core_.problems().graph(),
 	                                    core_.game_install(), SIZE_MAX);

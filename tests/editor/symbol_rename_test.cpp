@@ -25,6 +25,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -47,7 +48,7 @@ struct Project {
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
 	explicit Project(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
+		session.handle(request::new_project(dir.file("project"), "Rename"));
 		editor_test::create_missing_files(session);
 	}
 	const SessionView &view() const { return session.view(); }
@@ -65,7 +66,7 @@ struct Project {
 		buffer << in.rdbuf();
 		return buffer.str();
 	}
-	void rescan() { session.handle(make_request(EditorRequestKind::Rescan)); }
+	void rescan() { session.handle(request::rescan()); }
 	// The definition of a name of `kind` in `file` (by its path).
 	const GraphSymbol *defined(ReferenceKind kind, const std::string &name, const std::string &file) const {
 		for (const GraphSymbol *symbol : graph().symbols_named(kind, name))
@@ -73,10 +74,9 @@ struct Project {
 		return nullptr;
 	}
 	EditorRequest request(EditorRequestKind kind, const GraphSymbol &symbol, const std::string &name) const {
-		EditorRequest out = make_request(kind, symbol.file, symbol.locator);
-		out.edit.field = symbol.field;
-		out.edit.value = name;
-		return out;
+		return kind == EditorRequestKind::RenameSymbol
+		               ? request::rename_symbol(symbol.file, symbol.locator, symbol.field, name)
+		               : request::preview_rename(symbol.file, symbol.locator, symbol.field, name);
 	}
 	// The plan of renaming `symbol` to `name`, as the view carries it.
 	const SessionView::RenamePreview &preview(const GraphSymbol &symbol, const std::string &name) {
@@ -198,19 +198,19 @@ static int test_string_key() {
 	                                                                 "<STRING TYPE=\"ID\">SHARED_KEY</STRING>\r\n"))));
 	project.rescan();
 	const std::string table_path = project.path("gametext.bin");
-	project.session.handle(make_request(EditorRequestKind::OpenDocument, table_path));
+	project.session.handle(request::open_document(table_path));
 	Document *table = project.session.document_for(table_path);
 	TEST_EXPECT(table != nullptr);
 	if (!table) return 1;
 	const auto add_key = [&](NodeId section, const char *key) {
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, table->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {section, table->kind_from_name("string"), 0};
+		EditorRequest add = request::edit_record(table->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {section, table->kind_from_name("string"), 0};
 		project.session.handle(add);
-		EditorRequest set = make_request(EditorRequestKind::EditRecord, table->path());
-		set.edit.address = {section, table->kind_from_name("string"), table->last_added()};
-		set.edit.field = "key";
-		set.edit.value = std::string(key);
+		EditorRequest set = request::edit_record(table->path(), Edit());
+		set.edits[0].address = {section, table->kind_from_name("string"), table->last_added()};
+		set.edits[0].field = "key";
+		set.edits[0].value = std::string(key);
 		project.session.handle(set);
 	};
 	NodeId wepdes = 0;
@@ -219,15 +219,15 @@ static int test_string_key() {
 	TEST_EXPECT(wepdes != 0);
 	add_key(wepdes, "SHARED_KEY");
 	{
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, table->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, table->kind_from_name("section"), 0};
+		EditorRequest add = request::edit_record(table->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, table->kind_from_name("section"), 0};
 		project.session.handle(add);
 		const NodeId section = table->last_added();
-		EditorRequest name = make_request(EditorRequestKind::EditRecord, table->path());
-		name.edit.address = {section, table->kind_from_name("section"), 0};
-		name.edit.field = "name";
-		name.edit.value = std::string("menu");
+		EditorRequest name = request::edit_record(table->path(), Edit());
+		name.edits[0].address = {section, table->kind_from_name("section"), 0};
+		name.edits[0].field = "name";
+		name.edits[0].value = std::string("menu");
 		project.session.handle(name);
 		add_key(section, "SHARED_KEY");
 	}
@@ -246,8 +246,7 @@ static int test_string_key() {
 	            project.view().unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
 	            !project.view().unsaved_prompt.can_discard &&
 	            project.view().unsaved_prompt.files == std::vector<std::string>{table_path});
-	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
-	save.unsaved_choice = UnsavedChoice::Save;
+	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
 	project.session.handle(save);
 	TEST_EXPECT(project.session.outcome().done());
 	const AssetGraph &graph = project.graph();
@@ -386,15 +385,15 @@ static int test_saved_use_behind_an_edit() {
 	TEST_EXPECT(project.write(weapons, "weapon \"GUN_A\"\nend\nweapon \"GUN_C\"\nend\n"));
 	TEST_EXPECT(project.write(items, "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"));
 	project.rescan();
-	project.session.handle(make_request(EditorRequestKind::OpenDocument, items));
+	project.session.handle(request::open_document(items));
 	Document *table = project.session.document_for(items);
 	NodeAddress carrier;
 	TEST_EXPECT(table && table->find("100300", carrier));
 	if (!table) return 1;
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, items);
-	edit.edit.address = carrier;
-	edit.edit.field = "primary_weapon";
-	edit.edit.value = std::string("GUN_C");
+	EditorRequest edit = request::edit_record(items, Edit());
+	edit.edits[0].address = carrier;
+	edit.edits[0].field = "primary_weapon";
+	edit.edits[0].value = std::string("GUN_C");
 	project.session.handle(edit);
 	const GraphSymbol *gun = project.defined(ReferenceKind::Weapon, "GUN_A", weapons);
 	TEST_EXPECT(gun && project.graph().users_of(*gun).empty());
@@ -402,8 +401,7 @@ static int test_saved_use_behind_an_edit() {
 	project.session.handle(project.request(EditorRequestKind::RenameSymbol, *gun, "GUN_B"));
 	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
 	            project.view().unsaved_prompt.files == std::vector<std::string>{items});
-	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
-	save.unsaved_choice = UnsavedChoice::Save;
+	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
 	project.session.handle(save);
 	TEST_EXPECT(project.session.outcome().done());
 	TEST_EXPECT(project.read(items).find("GUN_A") == std::string::npos && project.read(items).find("GUN_C") != std::string::npos);
@@ -546,15 +544,15 @@ static int test_open_menu_that_does_not_write() {
 	                                                                 "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%SHADOWED%"
 	                                                                 "</APPEARANCE>\r\n"))));
 	project.rescan();
-	project.session.handle(make_request(EditorRequestKind::OpenDocument, "menus/c.mnu"));
+	project.session.handle(request::open_document("menus/c.mnu"));
 	Document *menu = project.session.document_for("menus/c.mnu");
 	NodeAddress w;
 	TEST_EXPECT(menu && menu->find("W", w));
 	if (!menu) return 1;
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, "menus/c.mnu");
-	edit.edit.address = w;
-	edit.edit.field = "name";
-	edit.edit.value = std::string("W\"Q");
+	EditorRequest edit = request::edit_record("menus/c.mnu", Edit());
+	edit.edits[0].address = w;
+	edit.edits[0].field = "name";
+	edit.edits[0].value = std::string("W\"Q");
 	project.session.handle(edit);
 	TEST_EXPECT(menu->dirty() && !menu->serialize().ok());
 	const GraphSymbol *brand = project.defined(ReferenceKind::StyleVar, "SHADOWED", "menus/brand.mns");

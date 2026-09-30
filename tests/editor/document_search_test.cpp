@@ -15,6 +15,7 @@
 #include <editor/model/field_text.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 #include "common/file_io.h"
@@ -33,7 +34,7 @@ using editor_test::NoProcess;
 // A new project's files, the item and weapon tables replaced, a model, and a clip and its table
 // imported from the Blender add-on's scene text.
 bool make_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Search"));
+	session.handle(request::new_project(dir.file("project"), "Search"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *items = v.scan.find("items.def");
@@ -50,10 +51,10 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	    !editor_test::write_bytes(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
 	    !editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips))
 		return false;
-	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	return v.scan.find("SKIN.adm") && v.scan.find("walk.bad") && v.scan.find("armory.3di");
 }
 
@@ -132,7 +133,7 @@ static int test_each_document_type() {
 		const AssetEntry *entry = view.scan.find(name);
 		TEST_EXPECT(entry != nullptr);
 		if (!entry) continue;
-		session.handle(make_request(EditorRequestKind::OpenDocument, entry->relative_path));
+		session.handle(request::open_document(entry->relative_path));
 		const Document *document = session.document_for(entry->relative_path);
 		TEST_EXPECT(document != nullptr);
 		if (!document) continue;
