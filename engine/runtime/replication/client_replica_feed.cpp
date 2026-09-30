@@ -130,6 +130,13 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	line.sender_slot = rec.sender_slot;
 	line.text = rec.text;
 	post_chat_line(std::move(line));
+	// Channel 13 (local) also tracks its sender's person on the map
+	// [orig: Chat_DispatchToChannel @0x42b9d0 (channel 13), @0x42b9e6..0x42ba09].
+	if (rec.channel == 13) {
+		LocalChatSpeaker speaker;
+		speaker.slot = rec.sender_slot;
+		pending_effect_commands_.push_back(speaker);
+	}
 }
 
 // THE JOIN/LEAVE LANE (S2C 0x32): the record rides to the HUD, which picks

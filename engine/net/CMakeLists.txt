@@ -34,6 +34,8 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/entity_class.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_encode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/visible_players.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/emote_wire.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/session_hello.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/nw_session_framing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/protocol_message.cpp

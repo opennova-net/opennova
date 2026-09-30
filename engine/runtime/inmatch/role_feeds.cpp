@@ -324,18 +324,23 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 			? view.runtime->view().mp_attributes()
 			: view.staged_mp_attributes;
 	ctx.rules_no_friendly_tags = (rules_word & GameConfig::kMpAttribNoFriendlyTag) != 0;
-	// The player walk's slot owner. On the authority the connection table IS
-	// the player-slot table: each link's owned entity, revive window, and
-	// medic-request latch (retail's PlayerSlot +0x24/+0x10/+0x2C).
-	const NapiNPServerCtx *host = view.host;
+	// The player walk's slot owner: the listen client's own S2C 0x4C table,
+	// each entry's slot (retail's PlayerSlot +0x24 entity, +0x10 revive
+	// seconds, +0x2C medic request, the +0x14 / +0x20 label) as its loopback
+	// folds it. [orig: HUD_DrawFriendlyTagsPass @0x5a4507..0x5a4597 over
+	//  g_PlayerSlotPtrTable]
+	const replication::ClientState *client =
+			view.runtime != nullptr ? &view.runtime->state() : nullptr;
 	const world::PlayerSlotLookup authority_slot_lookup =
-			[host](world::EntityHandle entity, world::PlayerSlotFacts &facts) {
-				if (host == nullptr) return false;
-				for (const NapiNPConnection &conn : host->np_protocol.connection_list) {
-					if (conn.link.owned_entity != entity) continue;
-					facts.revive_seconds = static_cast<uint8_t>(
-							std::min<uint32_t>(conn.link.downed_revive_seconds, 0xFFu));
-					facts.medic_request = conn.link.medic_request_active;
+			[client](world::EntityHandle entity, world::PlayerSlotFacts &facts) {
+				if (client == nullptr || entity.pool() != 0) return false;
+				for (const replication::ClientVisiblePlayer &entry : client->visible_players) {
+					const replication::ClientRosterSlot &slot = client->roster[entry.slot];
+					if (!slot.bound || slot.entity_slot != entity.slot()) continue;
+					facts.revive_seconds = slot.downed_revive_seconds;
+					facts.medic_request = slot.medic_request_active;
+					facts.label = replication::roster_tag_label(slot);
+					facts.squad_color = slot.squad_color;
 					return true;
 				}
 				return false;

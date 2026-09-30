@@ -7,8 +7,10 @@
 // and its world, the witnessed selection rules applied here so the embedder
 // only marshals the value.
 // [orig: HUD_DrawMapOverlay @0x5A5F40 pool-3 walk @0x5a7504, pool-4 walk
-//  @0x5a770b; HUD_SetTrackedEntityTarget @0x59D050; Entity_GetDisplayName
-//  @0x59BF70; see docs/interface/hud-re.md]
+//  @0x5a770b; HUD_DrawEntityLabelsAndMarkers @0x5A49E0 loop 1 over the S2C
+//  0x4C player-slot table; HUD_SetTrackedEntityTarget @0x59D050;
+//  Entity_GetDisplayName @0x59BF70; the KOTH ring Minimap_DrawKothZoneRing @0x5974E0; see
+//  docs/interface/hud-re.md]
 
 #include <cstdint>
 #include <string>
@@ -31,6 +33,9 @@ struct MinimapOverlayInputs {
     // The authority's own location table when the replica carries none.
     const std::vector<std::string> *authority_location_names = nullptr;
     hud::GameTextLookup gametext;
+    // The wire handle the local player goes by on a joiner (its S2C 0x4C
+    // entries and decoded rows name it so); kInvalid = the world handle.
+    uint16_t self_handle = 0xFFFF;
 };
 
 // Fills `out` (replaced).

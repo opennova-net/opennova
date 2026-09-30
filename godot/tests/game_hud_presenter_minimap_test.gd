@@ -70,3 +70,17 @@ func test_hud_color_poll_edges_gate_and_chord() -> void:
 		presenter.cycle_hud_color()
 	assert_eq(presenter.hud_color_index(), start,
 			"the test leaves the persisted scheme where it started")
+
+
+# The map's non-bank feed record reaches the presenter with the D-HUD-34
+# producer columns: the bit-5 loop-1 player slots (the S2C 0x4C table) and the
+# KOTH ring's score delta (the S2C 0x16 team rows). A single-player load has
+# no team table, so the delta reads 0; the slot rows are the loopback table's.
+func test_minimap_overlay_record_carries_the_producer_columns() -> void:
+	_staged_dir = HudFixture.stage_root(true)
+	var world := WorldFixture.boot_minimal(self, _staged_dir)
+	assert_true(world.is_loaded())
+	var overlays: HudMapOverlays = world.get_sim().get_hud_minimap_overlays(null)
+	assert_not_null(overlays)
+	assert_eq(overlays.zone_score_delta, 0, "no team table, no delta")
+	assert_true(overlays.player_slot_count >= 0, "the loop-1 slot rows are exposed")

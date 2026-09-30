@@ -185,6 +185,7 @@ Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
 	in.authority_location_names =
 			view.host != nullptr ? &view.host->mission_location_names : nullptr;
 	in.gametext = game_text_lookup(p_gametext);
+	if (runtime_ && runtime_->has_self_handle()) in.self_handle = runtime_->self_handle();
 	opennova::hud::HudMinimapOverlays value;
 	opennova::inmatch::build_minimap_overlays(in, value);
 	out->assign(std::move(value));

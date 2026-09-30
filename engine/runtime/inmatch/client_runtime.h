@@ -615,6 +615,8 @@ private:
 	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
 	// loopback view runs it too (retail's client frame is role-agnostic).
 	void tick_roster_revive_countdown();
+	// Frames the C2S 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queued.
+	void drain_visible_refreshes();
 	// The once-per-62-frames CNetQuality update + level fold that precedes the
 	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
 	// dword_24D1DDC countdown (reload 62) gated is_in_session ->

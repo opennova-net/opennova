@@ -3017,7 +3017,7 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 }
 
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
-// roster slot with an entity and a nonzero window loses one second; the
+// S2C 0x4C table slot with an entity and a nonzero window loses one second; the
 // medic-request latch survives [orig: Client_ProcessNetworkFrame
 // @0x42C27E..0x42C2DA -> PlayerSlot_SetDownedState @0x4348D0]. Both the
 // S2C 0x54 seed and the 0x46 bit-0x0008 seed feed the same slot bytes.
@@ -3035,6 +3035,8 @@ bool run_roster_revive_countdown_ticks_once_per_63_frames() {
 	downed.revive_seconds = 120;
 	downed.medic_request_active = true;
 	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	// The countdown walks the S2C 0x4C table: slot 3 is listed.
+	host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x07, 0x00});
 	host_view.Client_ProcessNetworkFrame();
 	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
 	if (!expect(slot.bound && slot.entity_slot == 7 &&
@@ -5864,8 +5866,9 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
             lines[0].channel == 2 && lines[0].sender_slot == remote.slot(),
             "radio chat resolves macrotext and the 0x0F location-name table")) return false;
     if (!expect(request() == 1 &&
-            runtime.state().radio_target.handle == remote.packed &&
-            runtime.state().radio_target.ticks_remaining == 1860,
+            runtime.state().tracked_target.handle == remote.packed &&
+            runtime.state().tracked_target.ticks_remaining == 1860 &&
+            runtime.state().tracked_target.color == 0xFF80A0FFu,
             "event six arms the ride request and 30-second tracking target")) return false;
     roster.radio_mute_flags = 1;
     runtime.view().apply(s2c::TRACKED_PLAYER_VOICE, {7, uint8_t(remote.slot()), 255, 255});
@@ -5878,6 +5881,118 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
     runtime.apply_received_effects(world);
     return expect(voices.back() == "BM1_RAD_7" && runtime.view().drain_chat_lines().empty() &&
             request() == 0, "chat mute permits radio playback");
+}
+
+
+// S2C 0x2D and a channel-13 chat line set the map's tracked target through
+// HUD_SetTrackedEntityTarget: 496 ticks, white, the snapshot position; the
+// slot's voice-mute bit gates the emote leg, its chat-mute bit the chat leg.
+// [orig: NapiNPClientMsg_HandleEmote @0x427E90 (@0x427f39, @0x427f5b);
+//  Chat_DispatchToChannel @0x42B9CD..0x42BA09; HUD_SetTrackedEntityTarget
+//  @0x59D050]
+bool run_emote_and_local_chat_track_the_speaker(bool replica_only) {
+    inmatch::ClientRuntime runtime("EmoteTrack");
+    runtime.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    w::Entity person;
+    person.item_id = 11; person.has_item_def = true; person.item_type = 3; person.team = 1;
+    world.cached.local_player = world.registry.spawn(0, person);
+    person.position = {12.0f, 34.0f, 5.0f};
+    const auto remote = replica_only ? w::EntityHandle::make(0, 1) : world.registry.spawn(0, person);
+    if (replica_only)
+        runtime.view().apply(s2c::ENTITY_SPAWN_BATCH,
+                make_organic_spawn(remote.packed, "Mate", 12*65536, 34*65536, 5*65536, 0, 1, 1));
+    world.rules.mp_session = true;
+    auto &roster = runtime.view().state().roster[3];
+    roster.bound = true; roster.entity_slot = int16_t(remote.slot()); roster.name = "Mate";
+    auto &target = runtime.view().state().tracked_target;
+
+    runtime.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.handle == remote.packed && target.ticks_remaining == 496 &&
+            target.color == 0xFFFFFFFFu && target.friendly &&
+            target.position[0] == 12 * 65536 && target.serial == 1,
+            "an emote tracks its speaker for 496 ticks in white")) return false;
+    roster.radio_mute_flags = 1;
+    target = {};
+    runtime.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "the voice-mute bit gates the emote")) return false;
+    // The local player's own emote never tracks itself.
+    roster.radio_mute_flags = 0;
+    runtime.view().apply(s2c::EMOTE_BROADCAST,
+            {4, uint8_t(world.cached.local_player.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "the local player is never tracked")) return false;
+
+    ChatBroadcast chat;
+    chat.channel = 13;
+    chat.sender_slot = 3;
+    chat.text = "Mate: here";
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    if (!expect(target.handle == remote.packed && target.ticks_remaining == 496,
+            "a local chat line tracks its sender's person")) return false;
+    target = {};
+    roster.radio_mute_flags = 2;
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "a chat-muted slot tracks nothing")) return false;
+    roster.radio_mute_flags = 0;
+    chat.channel = 1;
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    return expect(target.ticks_remaining == 0, "only channel 13 tracks the sender");
+}
+
+// The listen client's visible-players refreshes ride its loopback: the 0x0F
+// burst member pair {0, 0x5CF7} + 0x23, another slot's 0x4D pair
+// {slot, 0x1CF7} + 0x23, nothing for its own slot; the 0x4C snapshot lands
+// in the table, and the 1 Hz revive countdown walks the table only.
+// [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab; NapiNPClientMsg_HandleSpawnSlot
+//  @0x4317B0; Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+bool run_host_client_refreshes_visible_players() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    auto pull = [&]() {
+        std::vector<ns::Datagram> out;
+        ns::Datagram dg;
+        while (host_loop.host_recv(dg)) out.push_back(dg);
+        return out;
+    };
+    host_loop.host_send(s2c::WORLD_STATE_LOAD, {});
+    host_view.Client_ProcessNetworkFrame();
+    std::vector<ns::Datagram> c2s_out = pull();
+    if (!expect(c2s_out.size() == 2 && c2s_out[0].tag == c2s::PLAYER_SYNC_REQUEST &&
+            c2s_out[0].body == std::vector<uint8_t>({0x00, 0xF7, 0x5C}) &&
+            c2s_out[1].tag == c2s::VISIBLE_PLAYERS_REQUEST && c2s_out[1].body.empty(),
+            "the world-state load queues the 0x22 {0, 0x5CF7} + 0x23 pair")) return false;
+    host_loop.host_send(s2c::SPAWN_SLOT_NOTICE, {3});
+    host_view.Client_ProcessNetworkFrame();
+    c2s_out = pull();
+    if (!expect(c2s_out.size() == 2 && c2s_out[0].tag == c2s::PLAYER_SYNC_REQUEST &&
+            c2s_out[0].body == std::vector<uint8_t>({0x03, 0xF7, 0x1C}) &&
+            c2s_out[1].tag == c2s::VISIBLE_PLAYERS_REQUEST,
+            "another slot's join notice queues its refresh pair")) return false;
+    host_loop.host_send(s2c::SPAWN_SLOT_NOTICE, {0});
+    host_view.Client_ProcessNetworkFrame();
+    if (!expect(pull().empty(), "the own slot's notice queues nothing")) return false;
+
+    auto &state = host_view.view().state();
+    state.roster[3].bound = true;
+    state.roster[3].entity_slot = 4;
+    state.roster[3].downed_revive_seconds = 30;
+    state.roster[5].bound = true;
+    state.roster[5].entity_slot = 6;
+    state.roster[5].downed_revive_seconds = 30;
+    host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x04, 0x00});
+    for (int frame = 0; frame < 63; ++frame) host_view.Client_ProcessNetworkFrame();
+    if (!expect(state.visible_players.size() == 1 && state.visible_players[0].slot == 3,
+            "the snapshot lands in the pointer table")) return false;
+    return expect(state.roster[3].downed_revive_seconds == 29 &&
+            state.roster[5].downed_revive_seconds == 30,
+            "the 1 Hz revive countdown walks the table's slots only");
 }
 
 bool run_contextual_radio_keys_match_retail() {
@@ -6134,6 +6249,9 @@ int main() {
 	const bool ok = run_guided_zero_steer_point_is_stored() &&
 	                run_radio_events_preserve_order_chat_and_mute_state(false) &&
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
+                    run_emote_and_local_chat_track_the_speaker(false) &&
+                    run_emote_and_local_chat_track_the_speaker(true) &&
+                    run_host_client_refreshes_visible_players() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&

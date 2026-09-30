@@ -5,6 +5,7 @@
 #include <runtime/world/occlusion.h>
 #include <runtime/world/entity_registry.h>
 #include <runtime/world/world.h>
+#include <runtime/world/powerup.h>
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
@@ -175,6 +176,51 @@ int main(int argc, char **argv) {
 		powerup.item_attrib = world::kItemAttribPowerup;
 		CHECK(!world::classify_minimap_overlay(powerup, nullptr).visible,
 				"the powerup class ends the walk before the Person branch");
+	}
+	// The supply cells off the powerup.def row at entity+0x2C0, in colour 15:
+	// an hp grant is 16, else allammo 17, else a zero mana is 29 for weapon
+	// -1 or a live weapon.def row; a withdrawn model (a picked-up row counting
+	// down) and a nonzero mana draw nothing.
+	// [orig: Entity_ClassifyForMinimap @0x50FB43..0x50FB9C]
+	{
+		world::World w;
+		w.tables.powerups.loaded = true;
+		w.tables.powerups.rows.resize(5);
+		w.tables.powerups.rows[0].hp = -1;            // med pack
+		w.tables.powerups.rows[1].allammo = true;     // ammo pack
+		w.tables.powerups.rows[2].weapon = -1;        // `weapon all`
+		w.tables.powerups.rows[3].weapon = 2;         // a weapon row
+		w.tables.powerups.rows[4].mana = 25;          // a mana grant
+		w.tables.weapons.entries.resize(3);
+		w.tables.weapons.entries[2].valid = true;
+		world::Entity pack = base_entity();
+		pack.item_attrib = world::kItemAttribPowerup;
+		pack.has_graphic_model = true;
+		const auto classify_row = [&](int32_t index) {
+			pack.powerup_def_index = index;
+			return world::classify_minimap_overlay(pack, &w);
+		};
+		row = classify_row(0);
+		CHECK(row.visible && row.icon == 16 && row.color == 15, "an hp pickup is cell 16");
+		row = classify_row(1);
+		CHECK(row.visible && row.icon == 17 && row.color == 15, "an allammo pickup is cell 17");
+		row = classify_row(2);
+		CHECK(row.visible && row.icon == 29 && row.color == 15, "weapon all is cell 29");
+		row = classify_row(3);
+		CHECK(row.visible && row.icon == 29 && row.color == 15, "a live weapon row is cell 29");
+		w.tables.weapons.entries[2].valid = false;
+		row = classify_row(3);
+		CHECK(!row.visible && row.color == 15,
+				"a missing weapon row draws nothing, still in colour 15");
+		row = classify_row(4);
+		CHECK(!row.visible && row.color == 0x0A, "a mana grant leaves the class iconless");
+		pack.hidden = true;
+		CHECK(!classify_row(0).visible, "a withdrawn model draws nothing");
+		pack.hidden = false;
+		pack.has_graphic_model = false;
+		CHECK(!classify_row(0).visible, "a model-less row draws nothing");
+		pack.has_graphic_model = true;
+		CHECK(!classify_row(-1).visible, "an unbound row draws nothing");
 	}
 
 	entity.item_attrib = world::kItemAttribNoHud;

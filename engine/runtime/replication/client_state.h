@@ -49,6 +49,34 @@ struct ClientRosterSlot {
 	// PlayerSlotTable_Create(.., 9) @0x434bb0]. The kill feed's <ch>..<co>
 	// suffix and the Tab row's label read it.
 	std::string registry_clan;
+	// The squad colour index (slot+0x33) the map's bit-5 loop 1 and the
+	// friendly-tag drawer swap into g_SquadColors. Its one writer is the
+	// client-local CMAP team-list click, (index + 1) % 14; neither the slot
+	// create nor the 0x46 fold touches it [orig: CMap_EntityWidgetHandler
+	// @0x5485d1..0x5485e4; PlayerSlotTable_GetOrInitSlot @0x4346c0 leaves
+	// +0x33].
+	uint8_t squad_color = 0;
+};
+
+// One S2C 0x4C entry of the player-slot pointer table: the roster slot the
+// entry points at (the table keeps the slot pointer, so every reader sees the
+// slot's LIVE fields) and the entity the snapshot named, 0xFFFF where retail
+// resolves a null pointer (the sentinel or a pool nibble past the five
+// pools); the only reader of that entity is the map's own-slot test.
+// [orig: NapiNPClientMsg_0x04C @0x428570 — {entity, slot} pairs @0x42868e /
+//  @0x428695, the handle gates @0x428679..0x42868c]
+struct ClientVisiblePlayer {
+	uint8_t slot = 0;
+	uint16_t entity_handle = 0xFFFF;
+};
+
+// One C2S 0x22 {slot, fields} + C2S 0x23 pair a receive handler queues so the
+// host re-sends the slot's 0x46 row and this client's 0x4C snapshot (the
+// runtime frames and clears them). [orig: NapiNPClientMsg_HandleSpawnSlot
+// @0x431804..0x43183e; NapiNPClientMsg_TeamAssign @0x431acb..0x431b05]
+struct ClientVisiblePlayersRefresh {
+	uint8_t slot = 0;
+	uint16_t fields = 0;
 };
 
 // One S2C 0x6A clan-registry node [orig: the CLinkedList node — netId +0xC,
@@ -1017,16 +1045,31 @@ struct ClientState {
 	// runtime frames and clears them) [orig: CNapiNetwork_QueueReliableMessage
 	// (0x4E, {netId}) @0x43266c].
 	std::vector<uint32_t> pending_clan_walk_requests;
+	// The S2C 0x4C player-slot pointer table, replaced whole by every snapshot
+	// [orig: g_PlayerSlotPtrTable / g_PlayerSlotPtrCount @0xA822D0/D4 — freed
+	//  and zeroed @0x428583..0x4285a1, one entry per snapshot entry @0x428698].
+	std::vector<ClientVisiblePlayer> visible_players;
+	// The 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queue.
+	std::vector<ClientVisiblePlayersRefresh> pending_visible_refreshes;
 	std::vector<std::string> location_names;
-	struct RadioTarget {
+	// The map's tracked target (the retail globals g_HUDTrackedTarget and
+	// dword_2721EBC..dword_2721ED0), set by HUD_SetTrackedEntityTarget from
+	// the S2C 0x6D event-6 radio call, the S2C 0x2D emote and a chat line on
+	// channel 13; the per-tick decrement is the entity update's.
+	// [orig: HUD_SetTrackedEntityTarget @0x59D050 — callers
+	//  NapiNPClientMsg_HandleEntityDeath @0x430de4, NapiNPClientMsg_HandleEmote
+	//  @0x427f5b, Chat_DispatchToChannel @0x42ba09; the decrement sub_590950
+	//  from Entity_UpdateAllEntities @0x4C2221]
+	struct TrackedTarget {
 		uint16_t handle = 0xFFFF;
-		uint32_t ticks_remaining = 0;
-		int32_t position[3] = {};
-		bool friendly = false;
+		uint32_t ticks_remaining = 0; // dword_2721EBC
+		int32_t position[3] = {};     // dword_2721EC0..EC8
+		bool friendly = false;        // byte_2721ECC
+		uint32_t color = 0xFFFFFFFFu; // dword_2721ED0 at the set
 		// Bumps on every set: the map's tracked callout restamps its colour
 		// global then [orig: HUD_SetTrackedEntityTarget @0x59D0EF..0x59D0FF].
 		uint32_t serial = 0;
-	} radio_target;
+	} tracked_target;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

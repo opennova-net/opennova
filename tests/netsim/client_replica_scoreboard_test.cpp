@@ -20,8 +20,12 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/ingame_encode.h>
+#include <net/npwire/emote_wire.h>
+#include <net/npwire/visible_players.h>
 
 #include <string>
+#include <variant>
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -654,6 +658,120 @@ void test_permanent_death_live_count() {
     CHECK(view.state().scoreboard.alive_player_count == 0);
 }
 
+// S2C 0x4C replaces the player-slot pointer table whole; an entry naming a
+// slot the roster has not bound creates it (active, empty); the entry's
+// entity nulls on the sentinel and past the five pools.
+// [orig: NapiNPClientMsg_0x04C @0x428570 — PlayerSlotTable_GetOrInitSlot
+//  @0x428643, the handle gates @0x428679..0x42868c]
+void test_visible_players_fold() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(2, "Belsman", 5));
+	VisiblePlayers v;
+	v.entries.push_back({2, 0x0005});
+	v.entries.push_back({9, 0x0006});
+	v.entries.push_back({4, 0x5001});
+	const uint64_t revision = view.state().revision;
+	view.apply(s2c::VISIBLE_PLAYERS, encode_visible_players(v));
+	const ClientState &st = view.state();
+	CHECK(st.visible_players.size() == 3);
+	if (st.visible_players.size() == 3) {
+		CHECK(st.visible_players[0].slot == 2 && st.visible_players[0].entity_handle == 0x0005);
+		CHECK(st.visible_players[1].slot == 9);
+		CHECK(st.visible_players[2].entity_handle == 0xFFFF); // pool nibble 5
+	}
+	CHECK(st.roster[2].bound && st.roster[2].name == "Belsman");
+	CHECK(st.roster[9].bound && st.roster[9].name.empty() && st.roster[9].entity_slot == -1);
+	CHECK(st.revision != revision);
+	CHECK(view.malformed_bodies() == 0);
+	// The next snapshot replaces the table.
+	v.entries.resize(1);
+	view.apply(s2c::VISIBLE_PLAYERS, encode_visible_players(v));
+	CHECK(view.state().visible_players.size() == 1);
+	// A short body still yields its declared count of zeroed entries.
+	const std::vector<uint8_t> short_body = {0x02};
+	view.apply(s2c::VISIBLE_PLAYERS, short_body);
+	CHECK(view.state().visible_players.size() == 2 && view.malformed_bodies() == 1);
+}
+
+// S2C 0x4D clears the joined slot's downed state; another player's slot
+// queues the C2S 0x22 {slot, 0x1CF7} + 0x23 refresh, the own slot does not.
+// [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
+void test_spawn_slot_notice_fold() {
+	ClientReplicaPipeline view;
+	view.set_local_player_slot(1);
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Other", 4));
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(1, "Me", 2));
+	ClientState &st = view.state();
+	st.roster[3].downed_revive_seconds = 40;
+	st.roster[3].medic_request_active = true;
+	SpawnSlotNotice n;
+	n.slot = 3;
+	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
+	CHECK(st.roster[3].downed_revive_seconds == 0 && !st.roster[3].medic_request_active);
+	CHECK(st.pending_visible_refreshes.size() == 1);
+	if (st.pending_visible_refreshes.size() == 1) {
+		CHECK(st.pending_visible_refreshes[0].slot == 3);
+		CHECK(st.pending_visible_refreshes[0].fields == 0x1CF7);
+	}
+	st.pending_visible_refreshes.clear();
+	n.slot = 1;
+	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
+	CHECK(st.pending_visible_refreshes.empty());
+}
+
+// S2C 0x50 for a player entity queues the team refresh {handle & 0xFF, 4} +
+// 0x23; a non-player entity queues nothing.
+// [orig: NapiNPClientMsg_TeamAssign @0x431a15, @0x431ab2..0x431b05]
+void test_team_assign_refresh() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "Other", 4));
+	TeamAssign assign;
+	assign.entity_handle = 0x0004;
+	assign.team = 2;
+	view.apply(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+	ClientState &st = view.state();
+	CHECK(st.pending_visible_refreshes.size() == 1);
+	if (st.pending_visible_refreshes.size() == 1) {
+		CHECK(st.pending_visible_refreshes[0].slot == 0x04);
+		CHECK(st.pending_visible_refreshes[0].fields == 0x0004);
+	}
+	st.pending_visible_refreshes.clear();
+	assign.entity_handle = 0x1002; // a pool-1 item
+	view.apply(s2c::TEAM_ASSIGN, encode_team_assign(assign));
+	CHECK(st.pending_visible_refreshes.empty());
+}
+
+// S2C 0x2D rides the effect lane for session peers only; a channel-13 chat
+// line queues its sender slot for the tracked target.
+// [orig: NapiNPClientMsg_HandleEmote @0x427E90; Chat_DispatchToChannel @0x42B9CD]
+void test_emote_and_local_chat_effects() {
+	ClientReplicaPipeline view;
+	EmoteBroadcast b;
+	b.emote = 2;
+	b.player_index = 7;
+	view.apply(s2c::EMOTE_BROADCAST, encode_emote_broadcast(b));
+	CHECK(view.drain_effect_commands().empty());
+	view.set_mp_session(true);
+	view.apply(s2c::EMOTE_BROADCAST, encode_emote_broadcast(b));
+	std::vector<ClientEffectCommand> effects = view.drain_effect_commands();
+	CHECK(effects.size() == 1 && std::holds_alternative<EmoteBroadcast>(effects[0]));
+	if (effects.size() == 1 && std::holds_alternative<EmoteBroadcast>(effects[0]))
+		CHECK(std::get<EmoteBroadcast>(effects[0]).player_index == 7);
+	ChatBroadcast chat;
+	chat.channel = 13;
+	chat.sender_slot = 5;
+	chat.text = "near";
+	view.apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+	effects = view.drain_effect_commands();
+	CHECK(effects.size() == 1 && std::holds_alternative<LocalChatSpeaker>(effects[0]));
+	if (effects.size() == 1 && std::holds_alternative<LocalChatSpeaker>(effects[0]))
+		CHECK(std::get<LocalChatSpeaker>(effects[0]).slot == 5);
+	CHECK(view.drain_chat_lines().size() == 1);
+	chat.channel = 1;
+	view.apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+	CHECK(view.drain_effect_commands().empty());
+}
+
 } // namespace
 
 int main() {
@@ -680,6 +798,10 @@ int main() {
 	test_score_delta_sound_fold();
 	test_spawn_wave_status_fold();
 	test_malformed_body_is_rejected();
+	test_visible_players_fold();
+	test_spawn_slot_notice_fold();
+	test_team_assign_refresh();
+	test_emote_and_local_chat_effects();
 	if (failures == 0) std::printf("client_replica_scoreboard_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

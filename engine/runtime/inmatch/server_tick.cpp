@@ -900,6 +900,11 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 			--conn.link.spawn_target_hold_seconds;
 		if (conn.link.downed_revive_seconds != 0)
 			--conn.link.downed_revive_seconds;
+		// The +376 emote cooldown [orig: @0x51e028..0x51e03f].
+		if (conn.link.emote_cooldown_seconds > 0)
+			--conn.link.emote_cooldown_seconds;
+		else if (conn.link.emote_cooldown_seconds < 0)
+			conn.link.emote_cooldown_seconds = 0;
 	}
 }
 

@@ -1,5 +1,7 @@
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_visible_players.h>
+#include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
 
 
@@ -1184,6 +1186,14 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (ProtocolMessage &m : own) replies.push_back(std::move(m));
 				break;
 			}
+			case c2s::EMOTE_REQUEST: { // [orig: NapiNPServerMsg_HandleEmoteRequest @0x501E00]
+				if (world == nullptr) break;
+				EmoteRequest request;
+				decode_emote_request(msg.payload.data(), msg.payload.size(), request);
+				for (ProtocolMessage &m : Server_HandleEmoteRequest(conn, request, roster, *world))
+					replies.push_back(std::move(m));
+				break;
+			}
 			case c2s::CHARATTR_CRC_REPLY:
 				// The host discards the returned checksum and only clears this
 				// player's silence counter. [orig: NapiNPServerMsg_AnimChecksumRequest
@@ -2357,38 +2367,22 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						0x5D, encode_destroy_entity_list(sweep)));
 				break;
 			}
-			case c2s::VISIBLE_PLAYERS_REQUEST: { // §5.33 burst -> S2C 0x4C snapshot.
-				// Reply shape witnessed across the six golden samples:
-				// [u8 count] then count x {u8 playerSlot, u16le entityHandle} —
-				// e.g. `01 01 01 00` (slot 1 -> entity 0x0001, LAN join) and
-				// `02 00 67 00 01 68 00` (slots 0/1 -> 0x67/0x68, co-op join).
-				// Every witnessed record maps a player slot to its own live
-				// entity, and only in-world players appear (the idle host is
-				// absent from the LAN samples). The server-side selection
-				// beyond that is a residual witness — the builder inside
-				// [orig: NapiNPServerMsg_0x023_WeaponOverlayBroadcast @0x514D50] is undecompiled;
-				// list every admitted player with a bound entity.
+			case c2s::VISIBLE_PLAYERS_REQUEST: { // -> S2C 0x4C, the requester only
+				// The requester's visible-players snapshot, the only writer of
+				// its client's player-slot pointer table (docs/interface/hud-re.md
+				// "The MP legs"). [orig: NapiNPServerMsg_0x023_WeaponOverlayBroadcast
+				//  @0x514D50 (authority, the requester's slot, send_mask 32) ->
+				//  NetPacket_SerializeVisiblePlayersSnapshot @0x506320]
 				std::size_t consumed = 0;
 				if (!decode_burst_visible_request(
 						msg.payload.data(), msg.payload.size(), consumed))
 					break;
-				std::vector<uint8_t> snapshot;
-				uint8_t count = 0;
-				snapshot.push_back(0); // count backpatched below
-				for (const NapiNPConnection &c : roster) {
-					if (c.phase < ConnectionPhase::PlayerAdded ||
-					    c.phase >= ConnectionPhase::Goodbye ||
-					    !c.link.owned_entity.valid())
-						continue;
-					snapshot.push_back(c.reply.player_slot);
-					const uint16_t handle = c.link.owned_entity.packed;
-					snapshot.push_back(static_cast<uint8_t>(handle & 0xFFu));
-					snapshot.push_back(static_cast<uint8_t>(handle >> 8));
-					++count;
-				}
-				snapshot[0] = count;
-				replies.push_back(make_protocol_message(
-						s2c::TARGET_ASSIGNMENT, std::move(snapshot)));
+				const bool peer = inputs.server_ctx != nullptr
+						? inputs.server_ctx->is_mp_session_peer != 0
+						: (world != nullptr && world->rules.mp_session_peer);
+				replies.push_back(make_protocol_message(s2c::VISIBLE_PLAYERS,
+						build_visible_players_snapshot(conn, roster, world,
+								config.game_type, peer)));
 				break;
 			}
 			case c2s::LOADOUT_REQUEST: { // §5.33 burst -> S2C 0x4E.

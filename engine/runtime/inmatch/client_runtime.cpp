@@ -354,9 +354,13 @@ void ClientRuntime::advance_zone_timers() {
 }
 
 void ClientRuntime::tick_roster_revive_countdown() {
-	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+	// The walk visits the S2C 0x4C pointer table's slots, in table order
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA — g_PlayerSlotPtrTable
+	//  entry+4 @0x42c29f..0x42c2cb].
 	if (++slot_refresh_frames_ <= 62) return;
-	for (replication::ClientRosterSlot &slot : view_.state().roster) {
+	replication::ClientState &cs = view_.state();
+	for (const replication::ClientVisiblePlayer &entry : cs.visible_players) {
+		replication::ClientRosterSlot &slot = cs.roster[entry.slot];
 		// slot+0x0D active, slot+0x24 entity, slot+0x10 > 0 (unsigned).
 		if (!slot.bound || slot.entity_slot < 0 || slot.downed_revive_seconds == 0)
 			continue;
@@ -366,6 +370,31 @@ void ClientRuntime::tick_roster_revive_countdown() {
 		view_.state().mark_changed();
 	}
 	slot_refresh_frames_ = 0;
+}
+
+void ClientRuntime::drain_visible_refreshes() {
+	// Each queued pair leaves as one reliable C2S 0x22 {slot, fields} then the
+	// empty C2S 0x23 [orig: CNapiNetwork_QueueReliableMessage(0x22, 1, 0, .., 3)
+	//  @0x43181d / @0x431ae4, then (0x23, 1, 0, .., 0) @0x43183e / @0x431b05];
+	// the listen client's pair rides its loopback.
+	std::vector<replication::ClientVisiblePlayersRefresh> &pending =
+			view_.state().pending_visible_refreshes;
+	for (const replication::ClientVisiblePlayersRefresh &r : pending) {
+		std::vector<uint8_t> sync{r.slot, static_cast<uint8_t>(r.fields & 0xFFu),
+				static_cast<uint8_t>(r.fields >> 8)};
+		if (role_ == Role::HostClient) {
+			if (loopback_ == nullptr) continue;
+			loopback_->client_send(c2s::PLAYER_SYNC_REQUEST, std::move(sync));
+			loopback_->client_send(c2s::VISIBLE_PLAYERS_REQUEST, {});
+			continue;
+		}
+		if (joiner_ == nullptr) continue;
+		std::vector<uint8_t> a = joiner_->frame_inner(c2s::PLAYER_SYNC_REQUEST, std::move(sync));
+		if (!a.empty()) framed_send_queue_.push_back(std::move(a));
+		std::vector<uint8_t> b = joiner_->frame_inner(c2s::VISIBLE_PLAYERS_REQUEST, {});
+		if (!b.empty()) framed_send_queue_.push_back(std::move(b));
+	}
+	pending.clear();
 }
 
 std::vector<uint8_t> ClientRuntime::start() {
@@ -761,7 +790,17 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			while (loopback_->client_recv(datagram)) {
 				if (!apply_zone_timer_body(datagram.tag, datagram.body))
 					view_.apply(datagram.tag, datagram.body);
+				// The world-state load's completion burst carries this
+				// client's first player-slot refresh: C2S 0x22 {0, 0x5CF7}
+				// then the 0x23 snapshot request. The burst's other members
+				// (0x28, 0x29, 0x2D, 0x32) are the host self-stream's own
+				// residual. [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab]
+				if (datagram.tag == s2c::WORLD_STATE_LOAD) {
+					loopback_->client_send(c2s::PLAYER_SYNC_REQUEST, {0x00, 0xF7, 0x5C});
+					loopback_->client_send(c2s::VISIBLE_PLAYERS_REQUEST, {});
+				}
 			}
+			drain_visible_refreshes();
 		}
 		// Host authority already spawned every accepted round/refill. Its decoded
 		// listen-client replica pipeline must not retain duplicate visual gameplay
@@ -806,6 +845,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					? joiner_->self_handle()
 					: 0xFFFFu);
 			view_.set_mp_attributes(joiner_->mp_attributes());
+			view_.set_local_player_slot(joiner_->local_player_slot());
 			// JoinerConnection has already allocated sequence numbers for exact
 			// admission packets and retained-session reconstruction. They still
 			// leave through PumpClientProtocolSend: queue their wire images so a
@@ -861,6 +901,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
 			}
 			clan_walk.clear();
+			drain_visible_refreshes();
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.
@@ -973,8 +1014,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
 	if (!preround_active) view_.tick_arms_dip();
 	// [orig: Entity_UpdateAllEntities @0x4C2221 -> sub_590950]
-	if (!preround_active && view_.state().radio_target.ticks_remaining)
-		--view_.state().radio_target.ticks_remaining;
+	if (!preround_active && view_.state().tracked_target.ticks_remaining)
+		--view_.state().tracked_target.ticks_remaining;
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on

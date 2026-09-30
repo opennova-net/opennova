@@ -161,6 +161,13 @@ struct Connection {
 	int32_t armory_reuse_seconds = 0;
 	bool preround_loadout_latch = false;
 
+	// The emote cooldown (whole seconds): a C2S 0x14 emote fans only while it
+	// is zero, and every fan re-arms it to 2; the 1 Hz player maintenance
+	// counts it down (a negative value clamps to zero).
+	// [orig: playerSlot+376 — the gate and the store NapiNPServerMsg_HandleEmoteRequest
+	//  @0x501e55 / @0x501f53; the decrement Server_TickUpdate @0x51e028..0x51e03f]
+	int32_t emote_cooldown_seconds = 0;
+
 	// Consecutive periodic seconds this player has carried a 4091/4093/4095 flag
 	// in CTF / FlagBall / Flag Me; at the host's `flag_reset_seconds` the carry is
 	// broken and the carrier killed. [orig: playerSlot+89872 (slot[22468]) in

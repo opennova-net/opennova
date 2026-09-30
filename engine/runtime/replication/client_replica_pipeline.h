@@ -10,6 +10,7 @@
 #include <variant>
 
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
+#include <net/npwire/emote_wire.h> // EmoteBroadcast (S2C 0x2D)
 
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
@@ -39,8 +40,17 @@ struct EntityDeathEvent {
     int16_t hit_section = 0;
     bool item_state = false;
 };
+// A chat line on channel 13 (local) names its sender's slot: the sender's
+// person becomes the map's tracked target. The slot resolves at the effect
+// pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
+// 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
+// HUD_SetTrackedEntityTarget @0x59D050]
+struct LocalChatSpeaker {
+    uint8_t slot = 0;
+};
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
-        TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent>;
+        TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
+        EmoteBroadcast, LocalChatSpeaker>;
 
 class ClientReplicaPipeline {
 public:
@@ -334,6 +344,10 @@ public:
 	uint16_t viewer_handle() const { return viewer_handle_; }
 	void set_mp_attributes(uint32_t attributes) { mp_attributes_ = attributes; }
 	uint32_t mp_attributes() const { return mp_attributes_; }
+	// This client's own roster slot (retail g_LocalPlayerSlotId): the S2C 0x4D
+	// fold tells its own slot's notice from another's [orig:
+	// NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
+	void set_local_player_slot(uint8_t slot) { local_player_slot_ = slot; }
 
 	// The death screen's spectate writers over the replica rows
 	// (client_replica_spectate.cpp): the local player's own wire handle the
@@ -396,6 +410,11 @@ private:
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
 	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
 	void apply_clan_roster(const std::vector<uint8_t> &body);  // 0x6A (the clan registry)
+	void apply_visible_players(const std::vector<uint8_t> &body); // 0x4C (the slot pointer table)
+	void apply_spawn_slot_notice(const std::vector<uint8_t> &body); // 0x4D (a player joined)
+	// Whether a pool-0 handle is a player entity (the Flags 0x100 class bit):
+	// a decoded Player row, or the entity a bound roster slot drives.
+	bool is_player_entity(uint16_t handle) const;
 	void apply_formatted_game_text(const std::vector<uint8_t> &body); // 0x32 (join/leave lines)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
@@ -464,6 +483,7 @@ private:
 	uint16_t viewer_handle_ = 0xFFFF;
 	uint16_t spectate_local_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
+	uint8_t local_player_slot_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is
 	// zero. Retail also has unrelated process-global consumers that this decoded

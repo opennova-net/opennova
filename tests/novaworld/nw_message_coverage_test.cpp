@@ -21,6 +21,8 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_catalog.h>
+#include <net/npwire/emote_wire.h>
+#include <net/npwire/visible_players.h>
 #include <formats/wac/command.h>
 
 #include <cstdint>
@@ -1889,6 +1891,80 @@ int test_decoded_drift_guard() {
 
 } // namespace
 
+// S2C 0x4C — the visible-players snapshot: [u8 count] + count x {u8 slot, u16
+// handle}. A short body zero-fills and still yields `count` entries.
+// [orig: NapiNPClientMsg_0x04C @0x428570; NetPacket_SerializeVisiblePlayersSnapshot
+//  @0x506320]
+int check_S_4C_visible_players() {
+	VisiblePlayers v;
+	v.entries.push_back({1, 0x0001});
+	v.entries.push_back({7, 0x0068});
+	const std::vector<uint8_t> wire = encode_visible_players(v);
+	const std::vector<uint8_t> expect_bytes = {0x02, 0x01, 0x01, 0x00, 0x07, 0x68, 0x00};
+	EXPECT(wire == expect_bytes);
+	VisiblePlayers out;
+	bool clean = false;
+	decode_visible_players(wire.data(), wire.size(), out, &clean);
+	EXPECT(clean && out.entries.size() == 2);
+	EXPECT(out.entries[1].slot == 7 && out.entries[1].entity_handle == 0x0068);
+	const uint8_t short_body[] = {0x02, 0x03};
+	decode_visible_players(short_body, sizeof(short_body), out, &clean);
+	EXPECT(!clean && out.entries.size() == 2);
+	EXPECT(out.entries[0].slot == 3 && out.entries[0].entity_handle == 0);
+	EXPECT(out.entries[1].slot == 0 && out.entries[1].entity_handle == 0);
+	decode_visible_players(nullptr, 0, out, &clean);
+	EXPECT(!clean && out.entries.empty());
+	cover('S', 0x4C);
+	return 0;
+}
+
+// S2C 0x4D — the join notice [u8 slot]. [orig: NapiNPClientMsg_HandleSpawnSlot
+// @0x4317B0; Server_OnPlayerJoin @0x51a946]
+int check_S_4D_spawn_slot_notice() {
+	SpawnSlotNotice n;
+	n.slot = 5;
+	const std::vector<uint8_t> wire = encode_spawn_slot_notice(n);
+	EXPECT(wire.size() == 1 && wire[0] == 5);
+	SpawnSlotNotice out;
+	decode_spawn_slot_notice(wire.data(), wire.size(), out);
+	EXPECT(out.slot == 5);
+	decode_spawn_slot_notice(nullptr, 0, out);
+	EXPECT(out.slot == 0);
+	cover('S', 0x4D);
+	return 0;
+}
+
+// The emote pair: C2S 0x14 [i16 digit] and S2C 0x2D [u8 emote][u8 pool-0
+// index][u16 0]. [orig: NetPacket_SendEmoteRequest @0x42C120;
+// NapiNPServerMsg_HandleEmoteRequest @0x501E00; NapiNPClientMsg_HandleEmote @0x427E90]
+int check_emote_pair() {
+	EmoteRequest req;
+	req.value = 10;
+	const std::vector<uint8_t> up = encode_emote_request(req);
+	const std::vector<uint8_t> up_bytes = {0x0A, 0x00};
+	EXPECT(up == up_bytes);
+	EmoteRequest req_out;
+	decode_emote_request(up.data(), up.size(), req_out);
+	EXPECT(req_out.value == 10);
+	const uint8_t one[] = {0x03};
+	decode_emote_request(one, sizeof(one), req_out);
+	EXPECT(req_out.value == 3);
+	cover('C', 0x14);
+	EmoteBroadcast b;
+	b.emote = 4;
+	b.player_index = 9;
+	const std::vector<uint8_t> down = encode_emote_broadcast(b);
+	const std::vector<uint8_t> down_bytes = {0x04, 0x09, 0x00, 0x00};
+	EXPECT(down == down_bytes);
+	EmoteBroadcast b_out;
+	decode_emote_broadcast(down.data(), down.size(), b_out);
+	EXPECT(b_out.emote == 4 && b_out.player_index == 9);
+	decode_emote_broadcast(one, sizeof(one), b_out);
+	EXPECT(b_out.emote == 3 && b_out.player_index == 0);
+	cover('S', 0x2D);
+	return 0;
+}
+
 int main() {
 	if (test_retail_dispatch_membership()) return 1;
 	if (test_catalog_consistency()) return 1;
@@ -1970,6 +2046,9 @@ int main() {
 	if (check_S_3F_objective_notification()) return 1;
     if (check_S_6D_tracked_player_voice()) return 1;
     if (check_S_21_explosion_effect()) return 1;
+	if (check_S_4C_visible_players()) return 1;
+	if (check_S_4D_spawn_slot_notice()) return 1;
+	if (check_emote_pair()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

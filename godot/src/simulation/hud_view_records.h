@@ -92,6 +92,8 @@ public:
 	int get_location_name_count() const { return static_cast<int>(value_.location_names.size()); }
 	int get_name_count() const { return static_cast<int>(value_.names.size()); }
 	int get_tracked_ticks() const { return value_.tracked.ticks; }
+	int get_player_slot_count() const { return static_cast<int>(value_.player_slots.size()); }
+	int get_zone_score_delta() const { return value_.zone_score_delta; }
 };
 
 // The vehicle the local player rides, re-rooted from an attached gun child to

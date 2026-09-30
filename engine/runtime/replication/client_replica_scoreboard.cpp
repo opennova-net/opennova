@@ -32,6 +32,8 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/visible_players.h>
+#include <runtime/world/entity.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -271,6 +273,78 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 	// the LIVE slot, so a change to any of them moves ClientState.revision
 	// like the entity rows do (edge-triggered; the team byte bumps above).
 	if (changed) state_.mark_changed();
+}
+
+// S2C 0x4C: the table is freed and rebuilt from the snapshot. An entry names
+// a slot the roster has not bound yet: the slot is created then (active, the
+// fields zeroed), exactly as a first 0x46 would; the entity the entry names
+// is kept for the own-slot test, nulled where retail's resolve fails.
+// [orig: NapiNPClientMsg_0x04C @0x428570 — free/zero @0x428580..0x4285a1,
+//  PlayerSlotTable_GetActiveSlot @0x42862f else PlayerSlotTable_GetOrInitSlot
+//  @0x428643 (the create @0x4346de..0x434719), the handle resolve
+//  @0x428679..0x42868c, the pair stores @0x42868e/@0x428695]
+void ClientReplicaPipeline::apply_visible_players(const std::vector<uint8_t> &body) {
+	VisiblePlayers snapshot;
+	bool clean = false;
+	decode_visible_players(body.data(), body.size(), snapshot, &clean);
+	if (!clean) ++malformed_bodies_;
+	state_.visible_players.clear();
+	state_.visible_players.reserve(snapshot.entries.size());
+	for (const VisiblePlayers::Entry &e : snapshot.entries) {
+		ClientRosterSlot &slot = state_.roster[e.slot];
+		if (!slot.bound) {
+			slot = ClientRosterSlot{};
+			slot.bound = true;
+		}
+		ClientVisiblePlayer entry;
+		entry.slot = e.slot;
+		const world::EntityHandle h{e.entity_handle};
+		entry.entity_handle = (h.valid() && h.pool() < world::kEntityPoolCount)
+				? e.entity_handle : world::EntityHandle::kInvalid;
+		state_.visible_players.push_back(entry);
+	}
+	state_.mark_changed();
+}
+
+// S2C 0x4D: a player joined. Its slot's downed state clears; for another
+// player's slot this client asks for the slot's full 0x46 row and a fresh
+// 0x4C snapshot. The own slot's notice raises tip 22 while the death screen
+// is up and the round runs — the tip system is unported, so that leg does
+// nothing here. [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317B0 —
+//  PlayerSlot_SetDownedState(slot, 0, 0) @0x4317e5, the local-slot test
+//  @0x4317f0, CTipSystem_HandleEvent(22) + dword_24C18F0 = 186
+//  @0x431855..0x431863, the 0x22 {slot, 0x1CF7} @0x43181d and the empty 0x23
+//  @0x43183e]
+void ClientReplicaPipeline::apply_spawn_slot_notice(const std::vector<uint8_t> &body) {
+	SpawnSlotNotice notice;
+	decode_spawn_slot_notice(body.data(), body.size(), notice);
+	ClientRosterSlot &slot = state_.roster[notice.slot];
+	if (slot.bound && (slot.downed_revive_seconds != 0 || slot.medic_request_active)) {
+		slot.downed_revive_seconds = 0;
+		slot.medic_request_active = false;
+		state_.mark_changed();
+	}
+	if (notice.slot == local_player_slot_) return;
+	ClientVisiblePlayersRefresh refresh;
+	refresh.slot = notice.slot;
+	refresh.fields = kSpawnSlotSyncFields;
+	state_.pending_visible_refreshes.push_back(refresh);
+}
+
+// Retail tests the entity's Flags 0x100 player-class bit [orig:
+// NapiNPClientMsg_TeamAssign @0x431a15]; only players carry it, and every
+// player is a pool-0 entity (Entity_SpawnFromAnimSlotProperty @0x43c3e3,
+// the bit @0x43c433). A decoded row carries the class; the listen client's
+// players are its own world entities with no row, and each is its slot's
+// 0x46 entity binding.
+bool ClientReplicaPipeline::is_player_entity(uint16_t handle) const {
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() != 0) return false;
+	if (const ClientEntityState *row = state_.find(handle))
+		if (row->cls == EntityClass::Player) return true;
+	for (const ClientRosterSlot &slot : state_.roster)
+		if (slot.bound && slot.entity_slot == h.slot()) return true;
+	return false;
 }
 
 } // namespace opennova::replication

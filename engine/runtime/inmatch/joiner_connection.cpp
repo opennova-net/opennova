@@ -1493,10 +1493,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// profile side block, that block's own class byte is the wire
 					// class, and the page that class indexes is the kit — so a
 					// joiner pushed across the line submits a kit the new side's
-					// class can legally hold. Still deferred with witnesses in
-					// D-NET-168: the C2S 0x22/0x23 acks (@0x431acb..0x431b05),
-					// Player_InitPlayer(1) @0x431b14 and the minimap NetId
-					// maintenance @0x431b3a..0x431b91.
+					// class can legally hold. The C2S 0x22/0x23 pair that
+					// follows (@0x431acb..0x431b05) is the replica fold's
+					// (ClientReplicaPipeline, S2C 0x50). Still deferred with
+					// witnesses in D-NET-168: Player_InitPlayer(1) @0x431b14
+					// and the minimap NetId maintenance @0x431b3a..0x431b91.
 					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||

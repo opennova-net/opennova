@@ -45,6 +45,8 @@ void HudMapOverlays::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, location_name_count)
 	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, name_count)
 	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, tracked_ticks)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, player_slot_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, zone_score_delta)
 }
 
 // --- VehiclePanelView -------------------------------------------------------

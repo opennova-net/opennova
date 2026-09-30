@@ -161,6 +161,11 @@ void HostRole::drain_host_client_gameplay_requests() {
 		}
 	}
 	if (local == nullptr) return;
+	// The listen client's own roster slot (retail g_LocalPlayerSlotId): its S2C
+	// 0x4D fold tells its own slot's join notice from another's
+	// [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
+	if (state.client_runtime)
+		state.client_runtime->view().set_local_player_slot(local->reply.player_slot);
 	replication::Datagram dg;
 	std::vector<replication::Datagram> deferred;
 	while (state.host_loop.host_recv(dg)) {
@@ -177,17 +182,27 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// are a session peer's QueueReliableMessage(0xD) too); its handler
 		// reads the server context [orig: NapiNPServer_HandleChatMessage
 		// @0x513760].
+		// The listen client's visible-players refreshes (the C2S 0x22 / 0x23
+		// pair its 0x0F / 0x4D / 0x50 handlers queue) and its emote request
+		// ride the same queue [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab;
+		//  NapiNPClientMsg_HandleSpawnSlot @0x43181d / @0x43183e;
+		//  NapiNPClientMsg_TeamAssign @0x431ae4 / @0x431b05;
+		//  NetPacket_SendEmoteRequest @0x42c14c].
 		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
-				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE) {
+				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
+				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
+				dg.tag != c2s::EMOTE_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
-		const bool chat = dg.tag == c2s::CHAT_MESSAGE;
+		// The chat handler and the snapshot builder read the host context.
+		const bool reads_ctx = dg.tag == c2s::CHAT_MESSAGE ||
+				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;
-		if (chat) inputs.server_ctx = &state.host_owner.ctx;
+		if (reads_ctx) inputs.server_ctx = &state.host_owner.ctx;
 		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
 				state.host_owner.ctx.config, *local, messages, state.host_owner.now_tick,
 				state.host_owner.ctx.np_protocol.connection_list, &kernel.world, inputs);

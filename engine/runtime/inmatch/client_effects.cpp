@@ -3,6 +3,7 @@
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
+#include <runtime/hud/hud_minimap.h>
 #include <algorithm>
 #include <cstring>
 #include <cmath>
@@ -101,6 +102,55 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
     return ((int64_t(radius - best) << 16) / radius) != 0;
 }
 
+namespace {
+// The map's tracked target: a live, unhidden entity other than the local
+// player, its timer 62 x its radio seconds while it holds the radio-request
+// latch else 496 ticks, its position snapshot, friendly when on the local
+// team or team 0, the colour palette[3] for a radio request else white.
+// [orig: HUD_SetTrackedEntityTarget @0x59D050 — gates @0x59d05e..0x59d078,
+//  timer @0x59d089..0x59d0a5, snapshot @0x59d0b2..0x59d0c4, friendly
+//  @0x59d0ca..0x59d0e3, colour @0x59d0ef..0x59d0ff]
+void set_tracked_entity_target(replication::ClientState &state, const world::World &world,
+        const world::Entity &entity) {
+    const world::Entity *local = world.registry.get(world.cached.local_player);
+    if (local == nullptr) return;
+    if (((entity.flags | entity.engine_flags) & world::kEntityFlagCarried) != 0) return;
+    if (entity.handle == local->handle) return;
+    auto &target = state.tracked_target;
+    target.handle = entity.handle.packed;
+    target.ticks_remaining = entity.radio_request == 1
+            ? 62u * static_cast<uint32_t>(entity.radio_request_seconds) : 496u;
+    target.position[0] = world::to_fixed(entity.position.x);
+    target.position[1] = world::to_fixed(entity.position.y);
+    target.position[2] = world::to_fixed(entity.position.z);
+    target.friendly = entity.team == local->team || entity.team == 0;
+    target.color = entity.radio_request == 1 ? hud::kHudPaletteLightBlue : 0xFFFFFFFFu;
+    ++target.serial;
+}
+
+// PlayerSlot_IsEntityInGame: the entity's def is a person, type 3
+// [orig: @0x434220..0x434232 — entity+0x20 def, def+0x5C == 3]. A world
+// entity carries its def type; a decoded pool-0 row is an organic, whose
+// items.def rows are persons.
+bool entity_is_person(const ClientRuntime &runtime, const world::World &world,
+        const world::Entity &entity) {
+    if (const auto *row = runtime.state().find(entity.handle.packed))
+        if (world.registry.get(entity.handle) == nullptr)
+            return row->type_id != 0 &&
+                    (row->cls == EntityClass::Player || row->cls == EntityClass::Infantry);
+    return entity.has_item_def && entity.item_type == 3;
+}
+
+// The roster slot driving a raw pool-0 index, the retail PlayerSlot_FindByEntityPtr
+// over the decoded roster.
+const replication::ClientRosterSlot *slot_for_pool0(const replication::ClientState &state,
+        uint8_t index) {
+    for (const auto &slot : state.roster)
+        if (slot.bound && slot.entity_slot == index) return &slot;
+    return nullptr;
+}
+} // namespace
+
 void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
@@ -171,9 +221,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             world::Entity context;
             if (!sound_actor(*this, world, call->player_index, context) || !context.item_id) continue;
             auto *speaker = &context;
-            const replication::ClientRosterSlot *roster = nullptr;
-            for (const auto &slot : state().roster)
-                if (slot.bound && slot.entity_slot == call->player_index) { roster = &slot; break; }
+            const replication::ClientRosterSlot *roster = slot_for_pool0(state(), call->player_index);
             const bool in_zone = game_type() == 0x10010 && in_active_radio_zone(world, *speaker, *this);
             if (roster && !(roster->radio_mute_flags & 2)) {
                 const auto key = world::radio_call_key(world, *speaker, call->event, 6, game_type(), in_zone);
@@ -190,17 +238,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 speaker->radio_request = call->event == 6 ? 1 : 0;
                 if (call->event == 6) {
                     speaker->radio_request_seconds = 30;
-                    const auto *local = world.registry.get(world.cached.local_player);
-                    if (local && local->handle != speaker->handle && !((speaker->flags | speaker->engine_flags) & 1u)) {
-                        auto &target = view_.state().radio_target;
-                        target.handle = speaker->handle.packed;
-                        target.ticks_remaining = 30 * 62;
-                        target.position[0] = world::to_fixed(speaker->position.x);
-                        target.position[1] = world::to_fixed(speaker->position.y);
-                        target.position[2] = world::to_fixed(speaker->position.z);
-                        target.friendly = speaker->team == local->team || speaker->team == 0;
-                        ++target.serial;
-                    }
+                    // [orig: HUD_SetTrackedEntityTarget @0x430de4]
+                    set_tracked_entity_target(view_.state(), world, *speaker);
                 }
                 if (auto *row = view_.state().find(call->player_index)) {
                     row->radio_request = speaker->radio_request;
@@ -210,6 +249,38 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                     entity->radio_request_seconds = speaker->radio_request_seconds;
                 }
             }
+        } else if (const auto *emote = std::get_if<EmoteBroadcast>(&request)) {
+            // A nearby player's emote. Its person's emote state (entity+0x2C8 =
+            // 114 + emote, +0x2C4 = 0, when its anim set carries that state)
+            // and the EMO_ voice through Audio_StartEntityPlayback are the
+            // unported emote presentation (docs/interface/hud-re.md "The MP
+            // legs"); unless its slot's voice-mute bit is set it becomes the
+            // map's tracked target.
+            // [orig: NapiNPClientMsg_HandleEmote @0x427E90 — Pool_GetEntryUnchecked
+            //  @0x427eeb, the ItemTypeIndex gate @0x427ef5, the state write
+            //  @0x427efa..0x427f18, PlayerSlot_FindByEntityPtr @0x427f29, the
+            //  slot+50 bit 0 gate @0x427f39, sub_5BFB00(.., 9, ..) +
+            //  Audio_StartEntityPlayback @0x427f44..0x427f55,
+            //  HUD_SetTrackedEntityTarget @0x427f5b]
+            world::Entity speaker;
+            if (!sound_actor(*this, world, emote->player_index, speaker) || !speaker.item_id) continue;
+            const replication::ClientRosterSlot *roster = slot_for_pool0(state(), emote->player_index);
+            if (roster != nullptr && (roster->radio_mute_flags & 1u) != 0) continue;
+            set_tracked_entity_target(view_.state(), world, speaker);
+        } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
+            // A local-channel line: the sender slot's person, when the slot is
+            // bound and passes the dispatcher's mute gate, becomes the
+            // tracked target. [orig: Chat_DispatchToChannel @0x42B910 — the
+            //  slot gate @0x42b91e..0x42b943 (slot+50 bit 1; the +46 byte
+            //  there is the unfolded 0x46 field 0x1000), slot+0x24
+            //  @0x42b9ee, PlayerSlot_IsEntityInGame (def type 3) @0x42b9fb,
+            //  HUD_SetTrackedEntityTarget @0x42ba09]
+            const replication::ClientRosterSlot &slot = state().roster[chat->slot];
+            if (!slot.bound || (slot.radio_mute_flags & 2u) != 0 || slot.entity_slot < 0) continue;
+            world::Entity speaker;
+            if (!sound_actor(*this, world, static_cast<uint16_t>(slot.entity_slot), speaker)) continue;
+            if (!entity_is_person(*this, world, speaker)) continue;
+            set_tracked_entity_target(view_.state(), world, speaker);
         } else {
             // [orig: NapiNPClientMsg_PlaySoundByName @0x4283A0]
             const auto &command = std::get<PlaySoundCommand>(request);

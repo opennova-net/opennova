@@ -1,6 +1,7 @@
 #include "client_replica_pipeline.h"
 
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/visible_players.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/entity.h>
 
@@ -139,10 +140,37 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::TEAM_ASSIGN: {
 		TeamAssign assign;
 		size_t consumed = 0;
-		if (decode_team_assign(body.data(), body.size(), assign, consumed))
+		if (decode_team_assign(body.data(), body.size(), assign, consumed)) {
 			apply_team_assign(assign.entity_handle, assign.team);
-		else
+			// A player's team change asks for its 0x46 team field and a fresh
+			// 0x4C snapshot; the 0x22 slot byte is the handle's low byte (the
+			// pool-0 index) [orig: NapiNPClientMsg_TeamAssign @0x431a15 (the
+			// player bit), @0x431ab2..0x431b05].
+			if (is_player_entity(assign.entity_handle)) {
+				ClientVisiblePlayersRefresh refresh;
+				refresh.slot = static_cast<uint8_t>(assign.entity_handle & 0xFFu);
+				refresh.fields = kTeamAssignSyncFields;
+				state_.pending_visible_refreshes.push_back(refresh);
+			}
+		} else {
 			++malformed_bodies_;
+		}
+		break;
+	}
+	case s2c::VISIBLE_PLAYERS:
+		apply_visible_players(body);
+		break;
+	case s2c::SPAWN_SLOT_NOTICE:
+		apply_spawn_slot_notice(body);
+		break;
+	case s2c::EMOTE_BROADCAST: {
+		// Session peers only; the body's absent fields read 0.
+		// [orig: NapiNPClientMsg_HandleEmote @0x427E90 — is_mp_session_peer
+		//  @0x427eab, the reads @0x427eca..0x427ee4]
+		if (!mp_session_) break;
+		EmoteBroadcast emote;
+		decode_emote_broadcast(body.data(), body.size(), emote);
+		pending_effect_commands_.push_back(emote);
 		break;
 	}
 	case s2c::EMPTY_SLOT_SWEEP: {
