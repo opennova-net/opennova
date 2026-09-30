@@ -10,10 +10,10 @@ CanvasJoin canvas_join(const CanvasKeys &keys) {
 	return keys.shift ? CanvasJoin::Add : CanvasJoin::Replace;
 }
 
-void CanvasGesture::press(const std::string &path, CanvasPoint at, CanvasRequests &out) {
+void CanvasGesture::press(const CanvasSubject &subject, CanvasPoint at, CanvasRequests &out) {
 	end(out);
 	mode_ = Mode::Press;
-	path_ = path;
+	subject_ = subject;
 	from_ = at;
 }
 
@@ -26,10 +26,10 @@ bool CanvasGesture::move(CanvasPoint at) {
 	return true;
 }
 
-void CanvasGesture::nudge(const std::string &path, CanvasRequests &out) {
+void CanvasGesture::nudge(const CanvasSubject &subject, CanvasRequests &out) {
 	end(out);
 	mode_ = Mode::Nudge;
-	path_ = path;
+	subject_ = subject;
 }
 
 uint64_t CanvasGesture::token() {
@@ -48,18 +48,18 @@ bool CanvasGesture::release(CanvasRequests &out) {
 
 void CanvasGesture::end(CanvasRequests &out) {
 	if (mode_ != Mode::None && sent_)
-		out.end_edit(path_);
+		out.end_edit(subject_.path);
 	mode_ = Mode::None;
 	dragging_ = false;
 	sent_ = false;
 	from_ = CanvasPoint();
 	token_ = 0;
-	path_.clear();
+	subject_ = CanvasSubject();
 }
 
-void CanvasGesture::frame(const std::string &path, CanvasRequests &out) {
+void CanvasGesture::frame(const CanvasSubject &subject, CanvasRequests &out) {
 	drawn_ = true;
-	if (mode_ != Mode::None && path != path_)
+	if (mode_ != Mode::None && subject != subject_)
 		end(out);
 }
 

@@ -7,9 +7,10 @@
 
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/viewport_overlay.h>
-#include <editor/ui/editor_host.h>
 
 namespace opennova::editor {
+
+class EditorHost;
 
 // A canvas's requests raised as the windows raise theirs (editor_requests.h): a record selected,
 // a step's batch, a gesture's end.
@@ -29,21 +30,23 @@ private:
 // its own and the device's item under it never takes the mouse; the kind's hover tip, made only
 // while it shows; the device's picture (the shell's SubViewport texture, drawn as an ImGui item);
 // the kind's overlay shapes over it, clipped to the canvas, coloured by their roles; the cursor the
-// kind asks for; and the zoom and the pan. A picture that fills the canvas (the model's) leaves the
+// kind asks for; the keys the kinds act on (the arrows, Esc, F), read while the canvas's window has
+// the keyboard; and the zoom and the pan. A picture that fills the canvas (the model's) leaves the
 // zoom and the pan to its kind's camera and hands it the wheel and the middle button. A design
 // picture (the menu's 800 x 600) is the canvas's to zoom and scroll: fitted to the canvas at the
 // design's aspect, a scale of the design (Ctrl+wheel steps it about the mouse), or the device's
 // own size, with a margin the handles on its edges stay on; the middle button, or Space with
-// the left, pans it. Each frame begin() lays it out and reads the pointer over the picture
-// (input(), which the kind's canvas takes), draw() paints the shapes and sets the cursor, end()
-// closes it; end_frame() is the workspace's frame bracket.
+// the left, pans it, and a left press on it lasts until the button comes up. Each frame begin()
+// lays the canvas out and reads the keys and the pointer (input(), which the kind's canvas takes),
+// picture() shows the tip and draws the device's picture, draw() paints the shapes and sets the
+// cursor, end() closes it; end_frame() is the workspace's frame bracket.
 class ViewportCanvas {
 public:
 	enum class Zoom : uint8_t { Fill, Fit, Scale, Device };
 	// A design picture's zoom steps (Ctrl+wheel, and the menu pane's Zoom list).
 	static constexpr float kZoomLevels[] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
 	using Device = std::function<void(int width, int height)>;
-	using Tip = std::function<std::string(const CanvasInput &input)>;
+	using Tip = std::function<std::string()>;
 
 	// A picture that fills the canvas (no design size), or a design picture `design_width` x
 	// `design_height`, fitted until the zoom changes.
@@ -55,12 +58,14 @@ public:
 	void set_zoom(Zoom zoom, float scale = 1.0f);
 
 	// The canvas `height` tall across the current window, the device's own size `device_width` x
-	// `device_height` for Zoom::Device; `device` draws the picture at a size as the current item,
-	// `tip` makes the hover tip. False when it does not show (a scrolled child clipped away): no
-	// input then. end() follows either way.
-	bool begin(float height, int device_width, int device_height, const Device &device,
-			const Tip &tip);
+	// `device_height` for Zoom::Device: its surface, and the frame's keys and pointer. False when
+	// it does not show (a scrolled child clipped away): no input then. end() follows either way.
+	bool begin(float height, int device_width, int device_height);
 	const CanvasInput &input() const { return input_; }
+	// After begin(), when it shows: the kind's hover tip on the surface (`tip` made only while it
+	// shows), then the device's picture (`device` draws it at a size as the current item) and its
+	// edge.
+	void picture(const Device &device, const Tip &tip);
 	// The right button clicked on the canvas this frame (not while it pans).
 	bool right_clicked() const { return right_clicked_; }
 	void draw(const OverlayList &shapes, CanvasCursor cursor);

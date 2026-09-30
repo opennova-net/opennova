@@ -11,9 +11,15 @@ namespace opennova::editor {
 
 namespace {
 
-// The document the canvas's gestures edit ("" none).
-std::string document_path(const ModelCanvasFrame &frame) {
-	return frame.document ? frame.document->path() : std::string();
+// What the canvas shows: the model's document (this instance of it), none for a model an
+// animation plays on.
+CanvasSubject subject_of(const ModelCanvasFrame &frame) {
+	CanvasSubject subject;
+	if (frame.document) {
+		subject.path = frame.document->path();
+		subject.identity = frame.document->identity();
+	}
+	return subject;
 }
 
 bool is_selected(const ModelCanvasFrame &frame, const ModelOverlay &overlay) {
@@ -30,10 +36,10 @@ int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
 			in.mouse.x, in.mouse.y, kModelPickSlop);
 }
 
-ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in) {
+ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in, int under) {
 	ModelGrab grab;
 	grab.pan = in.middle || in.keys.shift;
-	grab.pick = model_canvas_under(frame, in);
+	grab.pick = under;
 	if (grab.pan || !frame.current || frame.selected < 0 || frame.document->blocked())
 		return grab;
 	const OrbitCamera &camera = frame.model->camera();
@@ -63,17 +69,18 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 // --- ModelCanvas -----------------------------------------------------------------------------
 
 void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
-	gesture_.frame(document_path(frame), out);
+	gesture_.frame(subject_of(frame), out);
 	if (!gesture_.pressed())
 		grab_ = ModelGrab();
 }
 
-void ModelCanvas::input(const ModelCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out) {
+void ModelCanvas::input(
+		const ModelCanvasFrame &frame, const CanvasInput &in, int under, CanvasRequests &out) {
 	ModelPreviewModel &model = *frame.model;
 	OrbitCamera &camera = model.camera();
 	if (in.pressed) {
-		gesture_.press(document_path(frame), in.mouse, out);
-		grab_ = model_canvas_grab(frame, in);
+		gesture_.press(subject_of(frame), in.screen, out);
+		grab_ = model_canvas_grab(frame, in, under);
 	}
 	if (gesture_.pressed() && !in.down) {
 		// A click on a marker selects its record (while the picture is the document's).
@@ -87,7 +94,7 @@ void ModelCanvas::input(const ModelCanvasFrame &frame, const CanvasInput &in, Ca
 		gesture_.release(out);
 		grab_ = ModelGrab();
 	} else if (gesture_.pressed()) {
-		gesture_.move(in.mouse);
+		gesture_.move(in.screen);
 		if (gesture_.dragging() && grab_.handle) {
 			// The handle follows the pointer (kept where the press took it) in the plane that faces
 			// the eye; each step is planned from the marker as it was pressed.
@@ -109,7 +116,7 @@ void ModelCanvas::input(const ModelCanvasFrame &frame, const CanvasInput &in, Ca
 	}
 	if (in.hovered && in.wheel != 0.0f)
 		camera.dolly(std::pow(kModelWheelDolly, in.wheel));
-	if (in.double_clicked)
+	if (in.double_clicked || (in.keyboard.focused && in.keyboard.frame))
 		frame_selected(frame);
 }
 
@@ -142,12 +149,12 @@ void ModelCanvas::frame_selected(const ModelCanvasFrame &frame) const {
 	model.frame();
 }
 
-OverlayList ModelCanvas::shapes(const ModelCanvasFrame &frame, const CanvasInput &in) const {
+OverlayList ModelCanvas::shapes(
+		const ModelCanvasFrame &frame, const CanvasInput &in, int under) const {
 	OverlayList list;
 	const ModelPreviewModel &model = *frame.model;
 	const OrbitCamera &camera = model.camera();
 	const int width = in.width, height = in.height;
-	const int under = model_canvas_under(frame, in);
 	for (size_t i = 0; i < frame.overlays.size(); ++i) {
 		const ModelOverlay &overlay = frame.overlays[i];
 		float x = 0.0f, y = 0.0f, depth = 0.0f;
@@ -197,11 +204,10 @@ OverlayList ModelCanvas::shapes(const ModelCanvasFrame &frame, const CanvasInput
 	return list;
 }
 
-std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, const CanvasInput &in) const {
-	if (gesture_.dragging())
+std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under) const {
+	if (gesture_.dragging() || under < 0 || size_t(under) >= frame.overlays.size())
 		return std::string();
-	const int under = model_canvas_under(frame, in);
-	return under >= 0 ? frame.overlays[size_t(under)].name : std::string();
+	return frame.overlays[size_t(under)].name;
 }
 
 } // namespace opennova::editor

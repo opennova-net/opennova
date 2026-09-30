@@ -80,6 +80,7 @@ private:
 	void follow_selection_(const MnuDocument &document, const NodeAddress &selected);
 	void toolbar_(const Frame &frame);
 	void draw_canvas_(const Frame &frame, float height);
+	// The clipboard's shortcuts (the arrows and Esc are the canvas's).
 	void keys_(const Frame &frame);
 	// The Arrange items (the toolbar's menu and the canvas's).
 	void arrange_items_(const Frame &frame);

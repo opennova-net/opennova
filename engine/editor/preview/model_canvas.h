@@ -19,7 +19,9 @@ class ModelPreviewModel;
 // reach and a spot's axis, the part pivots when asked), what a press on the picture takes (the
 // selected marker's place or axis tip, whose drag writes its record through model_handle_edits;
 // else a marker a click selects, and a drag that orbits, or pans with the middle button or
-// Shift), and the camera's wheel dolly and framing.
+// Shift), and the camera's wheel dolly and framing. The camera moves in place, through the
+// preview's portable half (ModelPreviewModel::camera), until a viewport's state changes only by
+// a request (V5's SetViewport).
 
 // How far from a marker's pixel a press still takes it, and what a wheel notch dollies.
 inline constexpr float kModelPickSlop = 8.0f;
@@ -52,36 +54,40 @@ struct ModelGrab {
 	ModelOverlay marker; // the marker as pressed
 	CanvasPoint offset; // from the pointer to the handle's pixel
 };
-ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in);
-// The front-most marker within kModelPickSlop of the pointer (-1: none, or not hovered).
+// The front-most marker within kModelPickSlop of the pointer (-1: none, or not hovered): found
+// once a frame, and what the hover ring, the tip and a press read (`under` below).
 int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in);
+ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in, int under);
 
 // The canvas's gestures on the model pane, and what it draws and shows.
 class ModelCanvas {
 public:
 	const CanvasGesture &gesture() const { return gesture_; }
 
-	// The frame's start, while the pane draws its canvas: a gesture begun in another document
-	// ends.
+	// The frame's start, while the pane draws its canvas: a gesture begun on another subject ends
+	// (another model's document, a reload of it; the model shown by an animation has none).
 	void follow(const ModelCanvasFrame &frame, CanvasRequests &out);
-	// The frame's pointer: a press, then each sample of its drag (the handle's record planned
-	// from the marker as pressed, one undo step; or the camera orbited or panned), then its
-	// release (a click selects the marker's record, while the picture is the document's); the
-	// wheel dollies, a double-click frames.
-	void input(const ModelCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out);
+	// The frame's pointer and keys, `under` the marker under the pointer: a press, then each
+	// sample of its drag (the handle's record planned from the marker as pressed, one undo step; or
+	// the camera orbited or panned), then its release (a click selects the marker's record, while
+	// the picture is the document's); the wheel dollies; a double-click, or F while the canvas has
+	// the keyboard, frames.
+	void input(
+			const ModelCanvasFrame &frame, const CanvasInput &in, int under, CanvasRequests &out);
 	// The gesture ends.
 	void end(CanvasRequests &out);
 	// The frame bracket (CanvasGesture::end_frame).
 	void end_frame(CanvasRequests &out);
 	// The camera looks at the selected marker (a light's reach around it, else a share of the
-	// model), else at the whole model (F, a double-click, the toolbar's Frame).
+	// model), else at the whole model (F, a double-click, the toolbar's Frame). It moves the
+	// preview's camera, which the frame's model holds.
 	void frame_selected(const ModelCanvasFrame &frame) const;
 
-	// Over the picture: each marker where the camera puts it, the one under the pointer ringed,
-	// the selected one ringed with its axis tip's handle.
-	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in) const;
-	// The marker under the pointer's name ("" none, or while dragging).
-	std::string hover_tip(const ModelCanvasFrame &frame, const CanvasInput &in) const;
+	// Over the picture: each marker where the camera puts it, the one under the pointer (`under`)
+	// ringed, the selected one ringed with its axis tip's handle.
+	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in, int under) const;
+	// The name of the marker under the pointer ("" none, or while dragging).
+	std::string hover_tip(const ModelCanvasFrame &frame, int under) const;
 
 private:
 	CanvasGesture gesture_;

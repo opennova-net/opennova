@@ -880,14 +880,17 @@ int64_t set_value(const std::vector<Edit> &edits, const char *field) {
 	return -1;
 }
 
-// S13 V2: the canvas on the null backend, a smoke test (its rules are its portable half's,
-// tests/editor/canvas_test.cpp: preview/canvas_gesture, menu_canvas). The menu pane over a fake
+// S13 V2: the canvas through the menu pane on the null backend (its rules are its portable
+// half's, tests/editor/canvas_test.cpp: preview/canvas_gesture, menu_canvas). The pane over a fake
 // device backed by the headless render: Fit at the design's 4:3, then 100% from the toolbar; a
 // click selects what the game's hit test finds; a drag of the selected window is one gesture of
-// Sets on the grid, then its end; Preview closed mid-drag ends the drag once through the
-// workspace's frame bracket, and letting go raises nothing; the held state follows the
-// selection, Checked only where the type has one; the pane hidden behind the model's takes no
-// key; Ctrl+wheel steps the zoom about the mouse; each empty state says why.
+// Sets on the grid, then its end; the arrows through the canvas's key channel (Right a unit, a
+// nudge one gesture while held and ended when let go, Shift+Up 8, the focus taken mid-nudge ending
+// it once); a stale picture maps nothing; the held state follows the selection, Checked only where
+// the type has one; Ctrl+wheel steps the zoom about the mouse; each empty state says why. The
+// gestures' ends when the pane stops drawing, and the pane hidden taking no key, are
+// test_preview_gestures_end's; the several windows, the clipboard's keys and Arrange
+// test_preview_several_windows_ui's.
 void test_preview_canvas_smoke() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_test");
 	auto document = std::make_shared<MnuDocument>();
@@ -946,37 +949,55 @@ void test_preview_canvas_smoke() {
 	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
 	uint64_t gesture = 0;
 	size_t count = 0;
-	const std::vector<Edit> last = batches(requests, gesture, count);
+	std::vector<Edit> last = batches(requests, gesture, count);
 	CHECK(count >= 2 && gesture != 0, "a drag's steps share one gesture");
 	CHECK(set_value(last, "position.left") == 144 && set_value(last, "position.top") == 120,
 			"the last step: moved and snapped on the grid of 8");
 	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit && requests.back().path == document->path(),
 	      "release ends the gesture");
 
-	// Preview closed mid-drag: the workspace's frame bracket ends the drag once, for the menu;
-	// let go and opened again, nothing.
-	devtools::Window *preview = nullptr;
-	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
-		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0)
-			preview = &ui.windows.pass().window(i);
-	CHECK(preview && preview->is_closeable(), "Preview has a close button");
-	if (!preview)
-		return;
-	const ImVec2 held = at(200.0f, 150.0f);
-	ui.mouse(held.x, held.y);
-	ui.button(true);
-	ui.mouse(held.x + 24.0f, held.y);
-	CHECK(only(ui.drain(), EditorRequestKind::EditRecord) != nullptr, "a drag's first step");
-	preview->open = false;
-	ui.frames(2);
+	// The arrows through the canvas's key channel: Right moves BOX a unit, one gesture while held
+	// and its end when let go; Shift+Up moves it 8.
+	auto nudge = [&](ImGuiKey key, bool shift) {
+		if (shift)
+			ui.key(ImGuiMod_Shift, true);
+		ui.key(key, true);
+		ui.key(key, false);
+		if (shift)
+			ui.key(ImGuiMod_Shift, false);
+		return ui.drain();
+	};
+	requests = nudge(ImGuiKey_RightArrow, false);
+	last = batches(requests, gesture, count);
+	CHECK(count == 1 && gesture != 0 && set_value(last, "position.left") == 101 &&
+					set_value(last, "position.right") == 301,
+			"Right moves BOX a unit");
+	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit,
+			"letting go ends the nudge");
+	requests = nudge(ImGuiKey_UpArrow, true);
+	last = batches(requests, gesture, count);
+	CHECK(set_value(last, "position.top") == 92 && set_value(last, "position.bottom") == 192,
+			"Shift+Up moves it 8");
+	// An arrow held while another window takes the focus: the nudge's one end then; let go
+	// after, nothing.
+	ui.key(ImGuiKey_RightArrow, true);
+	CHECK(only(ui.drain(), EditorRequestKind::EditRecord) != nullptr, "a nudge's first step");
+	ui.focus("Document");
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path(),
-			"Preview closed mid-drag: the drag's one end");
-	ui.button(false);
-	ui.frames(2);
-	preview->open = true;
-	ui.frames(3);
-	CHECK(ui.drain().empty(), "let go and opened again: nothing");
+			"the focus taken mid-nudge: its one end");
+	ui.key(ImGuiKey_RightArrow, false);
+	CHECK(ui.drain().empty(), "letting go of the arrow raises nothing");
+	ui.focus("Preview");
+	ui.drain();
+
+	// A picture of another revision maps nothing, through the pane either.
+	fake.stale = true;
+	ui.click(at(500.0f, 350.0f));
+	CHECK(!only(ui.drain(), EditorRequestKind::SelectRecord), "a stale picture selects nothing");
+	requests = drag(at(200.0f, 150.0f), 40.0f, 0.0f);
+	CHECK(!only(requests, EditorRequestKind::EditRecord), "a stale picture drags nothing");
+	fake.stale = false;
 
 	// The held state follows the selection; Checked only where the type has one.
 	ui.focus("Preview");
@@ -994,33 +1015,6 @@ void test_preview_canvas_smoke() {
 	ui.frames(2);
 	CHECK(fake.held.force_window == box.child && !fake.held.checked, "a plain window lets the check go");
 	ui.drain();
-
-	// The menu pane hidden behind the model's (a model the active document): its keys do nothing.
-	auto model = std::make_shared<ModelDocument>();
-	CHECK(model->load(std::string(test_paths_repo_root(__FILE__)) +
-						  "/fixtures/threedi/synth/armory.3di",
-				  "models/armory.3di", AssetKind::Model, "jo", error),
-			"a model");
-	v.documents = { document, model };
-	v.model_preview.path = model->path();
-	v.active_document = model->path();
-	v.revisions.touch(ViewConcern::Documents);
-	v.revisions.touch(ViewConcern::Selection);
-	ui.frames(2);
-	ui.focus("Preview");
-	ui.drain();
-	for (const ImGuiKey key :
-			{ ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_Escape, ImGuiKey_Space }) {
-		ui.key(key, true);
-		ui.key(key, false);
-	}
-	CHECK(ui.drain().empty(), "the hidden menu pane takes no key");
-	v.documents = { document };
-	v.model_preview.path.clear();
-	v.active_document = document->path();
-	v.revisions.touch(ViewConcern::Documents);
-	v.revisions.touch(ViewConcern::Selection);
-	ui.frames(2);
 
 	// Ctrl+wheel over the picture steps the zoom about the mouse: 100% to 150%.
 	const ImVec2 over = at(100.0f, 100.0f);

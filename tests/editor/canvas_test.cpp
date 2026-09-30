@@ -1,12 +1,15 @@
 // S13 V2 (ADR 0046 S13): the Preview's canvas without ImGui. The one gesture machine
-// (preview/canvas_gesture): the drag threshold, one token per gesture, a click told from a drag,
-// and exactly one EndEdit for the document a gesture began in when it ends (let go, lost, the
-// canvas not drawn, another document shown), nothing after. The menu's canvas
-// (preview/menu_canvas) over a screen compiled headless, at 100%: a click selects what the game's
-// hit test finds; BOX dragged by (40, 21) lands on 144/344/120/220 on the grid of 8, its corner
-// with Alt on 313/207; a drag from OTHER selects and moves it; TINY, 12 units across, moves when
-// pressed in its middle and resizes at its corner; the arrows move BOX to 101/301 and, with
-// Shift, 92/192; Esc selects MAIN; a stale picture maps nothing. Several windows: Shift and Ctrl
+// (preview/canvas_gesture): the drag threshold on the screen, one token per gesture, a click told
+// from a drag, and exactly one EndEdit for the document a gesture began in when it ends (let go,
+// lost, the canvas not drawn, another subject shown: another document, a reload of it, another
+// screen of a menu), nothing after. The menu's canvas (preview/menu_canvas) over a screen compiled
+// headless, at 100%: a click selects what the game's hit test finds; BOX dragged by (40, 21) lands
+// on 144/344/120/220 on the grid of 8, its corner with Alt on 313/207; a drag from OTHER selects
+// and moves it; TINY, 12 units across, moves when pressed in its middle and resizes at its corner;
+// a zoom or a refit while the button is down moves nothing (the drag is the pointer's travel on
+// the screen); through the key channel the arrows move BOX to 101/301 and, with Shift, 92/192,
+// the keyboard gone elsewhere ends a nudge, and Esc selects MAIN; a stale picture maps nothing.
+// Several windows: Shift and Ctrl
 // clicks, a drag of a selected window moving both, the arrows moving both, the marquee picking
 // BOX and OTHER (nothing: the screen), the clipboard's rule (a Paste after OTHER at position 2)
 // and Arrange; a press inside a selected window moving the selection. A window a list's part
@@ -14,8 +17,8 @@
 // listed window holding the part). The shapes the canvas draws. The model's canvas
 // (preview/model_canvas) over a real session: F frames the selected marker, a click selects a
 // marker's record, a drag of it is one gesture ended once when its canvas is not drawn, a drag
-// elsewhere orbits and the wheel dollies. What these tests replace ran through the ImGui windows
-// (tests/editor_ui: the preview group keeps one smoke test and the bounds sweep).
+// elsewhere orbits and the wheel dollies, and a press ends when the model's document goes. The
+// panes' wiring of all this is tests/editor_ui's (the preview and workspace groups).
 
 #include <algorithm>
 #include <cmath>
@@ -225,6 +228,7 @@ struct MenuRig {
 	MenuCanvasFrame frame;
 	MenuCanvas canvas;
 	Recorder out;
+	std::vector<NodeAddress> selected; // the session's selected records, which the frame borrows
 
 	bool load(const char *text, const char *path) {
 		Diagnostic error;
@@ -243,8 +247,9 @@ struct MenuRig {
 		frame.current = true;
 		return true;
 	}
-	// The session's selection: `primary` the primary record among `selected`.
-	void select(const NodeAddress &primary, const std::vector<NodeAddress> &selected) {
+	// The session's selection: `primary` the primary record among `records`.
+	void select(const NodeAddress &primary, const std::vector<NodeAddress> &records) {
+		selected = records;
 		menu_canvas_select(frame, primary, selected);
 	}
 	void select(const NodeAddress &record) { select(record, { record }); }
@@ -254,8 +259,20 @@ struct MenuRig {
 		in.width = 800;
 		in.height = 600;
 		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y }; // the picture's corner at the screen's origin
 		in.hovered = true;
 		in.keys = keys;
+		return in;
+	}
+	// A frame of the keyboard over the canvas, which has it: an arrow pressed (-1, 0 or 1 on each
+	// axis), held or not.
+	static CanvasInput keys_at(int arrow_x, int arrow_y, bool held, bool shift = false) {
+		CanvasInput in = at(700.0f, 550.0f);
+		in.keys.shift = shift;
+		in.keyboard.focused = true;
+		in.keyboard.arrow_x = arrow_x;
+		in.keyboard.arrow_y = arrow_y;
+		in.keyboard.arrow_held = held;
 		return in;
 	}
 	void step(const CanvasInput &in) {
@@ -286,17 +303,29 @@ struct MenuRig {
 		step(in);
 		return out.take();
 	}
-	// An arrow pressed (dx, dy), then let go: the pane ends the nudge once no arrow is held.
-	std::vector<Request> nudge(int dx, int dy) {
-		canvas.follow(frame, out);
-		canvas.nudge(frame, dx, dy, out);
-		canvas.follow(frame, out);
-		canvas.end(out);
+	// An arrow pressed (-1, 0 or 1 on each axis), then let go: the key channel's frames.
+	std::vector<Request> nudge(int arrow_x, int arrow_y, bool shift = false) {
+		step(keys_at(arrow_x, arrow_y, true, shift));
+		step(keys_at(0, 0, false, shift));
+		return out.take();
+	}
+	// Esc pressed on the canvas.
+	std::vector<Request> escape() {
+		CanvasInput in = keys_at(0, 0, false);
+		in.keyboard.escape = true;
+		step(in);
 		return out.take();
 	}
 };
 
 // --- the gesture machine -------------------------------------------------------------------
+
+// The subjects the machine's tests draw on: a document, a reload of it, another screen of it,
+// another document.
+const CanvasSubject kMenuA{ "a.mnu", 1, 10 };
+const CanvasSubject kMenuAReloaded{ "a.mnu", 2, 10 };
+const CanvasSubject kMenuAOtherScreen{ "a.mnu", 1, 11 };
+const CanvasSubject kMenuB{ "b.mnu", 3, 10 };
 
 int test_gesture_machine() {
 	Recorder out;
@@ -305,15 +334,18 @@ int test_gesture_machine() {
 			canvas_join(CanvasKeys{ true, false, false }) == CanvasJoin::Add &&
 			canvas_join(CanvasKeys{ false, false, true }) == CanvasJoin::Replace);
 
-	// A press that never moves kDragThreshold is a click, and raises nothing.
-	gesture.press("a.mnu", CanvasPoint{ 10.0f, 10.0f }, out);
-	TEST_EXPECT(gesture.pressed() && !gesture.dragging() && gesture.path() == "a.mnu");
+	// A press that never travels kDragThreshold on the screen is a click, and raises nothing.
+	gesture.press(kMenuA, CanvasPoint{ 10.0f, 10.0f }, out);
+	TEST_EXPECT(gesture.pressed() && !gesture.dragging() && gesture.path() == "a.mnu" &&
+			gesture.subject() == kMenuA);
 	TEST_EXPECT(!gesture.move(CanvasPoint{ 12.0f, 12.0f })); // 2.8 pixels away
+	TEST_EXPECT(gesture.travel(CanvasPoint{ 12.0f, 7.0f }).x == 2.0f &&
+			gesture.travel(CanvasPoint{ 12.0f, 7.0f }).y == -3.0f);
 	TEST_EXPECT(gesture.release(out) && out.take().empty() &&
 			gesture.mode() == CanvasGesture::Mode::None);
 
 	// Past the threshold it is a drag, once; its steps carry one token.
-	gesture.press("a.mnu", CanvasPoint{ 10.0f, 10.0f }, out);
+	gesture.press(kMenuA, CanvasPoint{ 10.0f, 10.0f }, out);
 	TEST_EXPECT(gesture.move(CanvasPoint{ 13.0f, 10.0f }) && gesture.dragging());
 	TEST_EXPECT(!gesture.move(CanvasPoint{ 20.0f, 10.0f }) && gesture.dragging());
 	const uint64_t token = gesture.token();
@@ -322,7 +354,7 @@ int test_gesture_machine() {
 	TEST_EXPECT(!gesture.release(out) && out.take().empty());
 
 	// A step went out: exactly one EndEdit for the document the drag began in, then nothing.
-	gesture.press("a.mnu", CanvasPoint{ 0.0f, 0.0f }, out);
+	gesture.press(kMenuA, CanvasPoint{ 0.0f, 0.0f }, out);
 	gesture.move(CanvasPoint{ 5.0f, 0.0f });
 	TEST_EXPECT(gesture.token() != token); // a new gesture, a new token
 	gesture.sent();
@@ -334,7 +366,7 @@ int test_gesture_machine() {
 	TEST_EXPECT(out.take().empty());
 
 	// Lost mid-drag: the end raised once, and letting go after raises nothing.
-	gesture.press("a.mnu", CanvasPoint{ 0.0f, 0.0f }, out);
+	gesture.press(kMenuA, CanvasPoint{ 0.0f, 0.0f }, out);
 	gesture.move(CanvasPoint{ 5.0f, 0.0f });
 	gesture.sent();
 	gesture.end(out);
@@ -343,21 +375,21 @@ int test_gesture_machine() {
 	TEST_EXPECT(!gesture.release(out) && out.take().empty());
 
 	// A nudge is a gesture too; a press ends it (its end first), one gesture at a time.
-	gesture.nudge("a.mnu", out);
+	gesture.nudge(kMenuA, out);
 	TEST_EXPECT(gesture.nudging() && gesture.token() != 0);
 	gesture.sent();
-	gesture.press("b.mnu", CanvasPoint{ 0.0f, 0.0f }, out);
+	gesture.press(kMenuB, CanvasPoint{ 0.0f, 0.0f }, out);
 	raised = out.take();
 	TEST_EXPECT(raised.size() == 1 && ends_once(raised, "a.mnu") && gesture.pressed() &&
 			gesture.path() == "b.mnu");
 	gesture.end(out);
 	TEST_EXPECT(out.take().empty()); // the press sent nothing
 
-	// The frame bracket: a canvas that draws keeps its gesture, one that does not ends it; one
-	// that draws another document ends the gesture begun in the first.
-	gesture.nudge("a.mnu", out);
+	// The frame bracket: a canvas that draws its subject keeps its gesture, one that does not
+	// draw ends it.
+	gesture.nudge(kMenuA, out);
 	gesture.sent();
-	gesture.frame("a.mnu", out);
+	gesture.frame(kMenuA, out);
 	gesture.end_frame(out);
 	TEST_EXPECT(gesture.nudging() && out.take().empty());
 	gesture.end_frame(out); // a frame it did not draw
@@ -365,12 +397,20 @@ int test_gesture_machine() {
 	TEST_EXPECT(raised.size() == 1 && ends_once(raised, "a.mnu") && !gesture.nudging());
 	gesture.end_frame(out);
 	TEST_EXPECT(out.take().empty());
-	gesture.press("a.mnu", CanvasPoint{ 0.0f, 0.0f }, out);
-	gesture.move(CanvasPoint{ 0.0f, 9.0f });
-	gesture.sent();
-	gesture.frame("b.mnu", out);
-	raised = out.take();
-	TEST_EXPECT(raised.size() == 1 && ends_once(raised, "a.mnu") && !gesture.pressed());
+
+	// A canvas that draws another subject ends the gesture begun on the first, its one end for
+	// the document it began in: another document, a reload of the same path, another screen of
+	// the same menu.
+	for (const CanvasSubject &shown : { kMenuB, kMenuAReloaded, kMenuAOtherScreen }) {
+		gesture.press(kMenuA, CanvasPoint{ 0.0f, 0.0f }, out);
+		gesture.move(CanvasPoint{ 0.0f, 9.0f });
+		gesture.sent();
+		gesture.frame(shown, out);
+		raised = out.take();
+		TEST_EXPECT(raised.size() == 1 && ends_once(raised, "a.mnu") && !gesture.pressed());
+		gesture.frame(shown, out);
+		TEST_EXPECT(out.take().empty());
+	}
 	return 0;
 }
 
@@ -436,25 +476,78 @@ int test_menu_canvas() {
 			set_value(last, "position.bottom") == 128 && set_value(last, "position.left") == -1 &&
 			set_value(last, "position.top") == -1);
 
-	// The arrows nudge the selected window (Shift: 8), one gesture while held, ended when let go.
+	// A zoom about the pointer (Ctrl+wheel) or a refit while the button is down is no travel:
+	// the drag is the pointer's travel on the screen at the press's scale. BOX pressed at
+	// (200, 150) and dragged 40 to the right (Alt: free), then the picture zoomed to 150% about
+	// the pointer (the design point under it, (240, 150), now at picture (360, 225)): the same
+	// rect; 10 more pixels on the screen: 10 more units, not the 175 the picture's coordinates
+	// would say; then refitted to 640 x 480 under the still pointer: nothing more.
 	rig.select(box);
+	const CanvasKeys alt{ false, false, true };
+	CanvasInput in = MenuRig::at(200.0f, 150.0f, alt);
+	in.pressed = in.down = true;
+	rig.step(in);
+	in = MenuRig::at(240.0f, 150.0f, alt);
+	in.down = true;
+	rig.step(in);
+	last = batches(rig.out.take(), gesture, count);
+	TEST_EXPECT(count == 1 && set_value(last, "position.left") == 140 &&
+			set_value(last, "position.right") == 340);
+	CanvasInput zoomed = in;
+	zoomed.width = 1200;
+	zoomed.height = 900;
+	zoomed.mouse = CanvasPoint{ 360.0f, 225.0f };
+	rig.step(zoomed);
+	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 0); // the same rect
+	zoomed.mouse = CanvasPoint{ 375.0f, 225.0f };
+	zoomed.screen = CanvasPoint{ 250.0f, 150.0f };
+	rig.step(zoomed);
+	last = batches(rig.out.take(), gesture, count);
+	TEST_EXPECT(count == 1 && set_value(last, "position.left") == 150 &&
+			set_value(last, "position.right") == 350);
+	CanvasInput refitted = zoomed;
+	refitted.width = 640;
+	refitted.height = 480;
+	refitted.mouse = CanvasPoint{ 200.0f, 120.0f };
+	rig.step(refitted);
+	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 0);
+	refitted.down = false;
+	rig.step(refitted);
+	TEST_EXPECT(ends_once(rig.out.take(), "layout.mnu"));
+
+	// The arrows, through the key channel, nudge the selected window (Shift: 8), one gesture while
+	// one is held, ended when none is.
 	requests = rig.nudge(1, 0);
 	last = batches(requests, gesture, count);
 	TEST_EXPECT(count == 1 && gesture != 0 && set_value(last, "position.left") == 101 &&
 			set_value(last, "position.right") == 301);
 	TEST_EXPECT(ends_once(requests, "layout.mnu"));
-	requests = rig.nudge(0, -kLayoutGrid);
+	requests = rig.nudge(0, -1, true);
 	last = batches(requests, gesture, count);
 	TEST_EXPECT(set_value(last, "position.top") == 92 && set_value(last, "position.bottom") == 192);
+	// Held on while the keyboard goes elsewhere (another window focused): the nudge's one end
+	// then; held and given the keyboard back, nothing until an arrow is pressed again.
+	rig.step(MenuRig::keys_at(1, 0, true));
+	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 1);
+	CanvasInput away = MenuRig::keys_at(0, 0, true);
+	away.keyboard.focused = false;
+	rig.step(away);
+	TEST_EXPECT(ends_once(rig.out.take(), "layout.mnu"));
+	rig.step(MenuRig::keys_at(0, 0, true));
+	TEST_EXPECT(rig.out.take().empty() && !rig.canvas.gesture().nudging());
+	// No arrow reaches a canvas without the keyboard.
+	CanvasInput unfocused = MenuRig::keys_at(1, 0, true);
+	unfocused.keyboard.focused = false;
+	rig.step(unfocused);
+	TEST_EXPECT(rig.out.take().empty());
 
 	// Esc selects what holds the primary.
-	TEST_EXPECT(menu_canvas_escape(rig.frame, rig.out));
-	requests = rig.out.take();
+	requests = rig.escape();
 	TEST_EXPECT((selections(requests) ==
 			std::vector<std::pair<NodeAddress, CanvasJoin>>{ { main, CanvasJoin::Replace } }));
 	// Not the active document (no selection on this screen): Esc is not the canvas's.
 	rig.select(NodeAddress(), {});
-	TEST_EXPECT(!menu_canvas_escape(rig.frame, rig.out) && rig.out.take().empty());
+	TEST_EXPECT(!menu_canvas_escape(rig.frame, rig.out) && rig.escape().empty());
 
 	// A picture of another revision maps nothing: no pick, no drag, no nudge.
 	rig.select(box);
@@ -469,8 +562,8 @@ int test_menu_canvas() {
 
 // The gestures end when the canvas stops drawing, once each, for the menu they began in: hidden
 // (a frame the canvas does not draw: the window closed, collapsed or its tab hidden), switched
-// to the other kind (the model's canvas draws while the menu's does not), another menu shown.
-// Letting go after raises nothing.
+// to the other kind (the model's canvas draws while the menu's does not), another menu shown,
+// another screen of the same menu shown, the same menu reloaded. Letting go after raises nothing.
 int test_menu_gestures_end() {
 	MenuRig rig;
 	TEST_EXPECT(rig.load(kLayoutMenu, "layout.mnu"));
@@ -520,11 +613,10 @@ int test_menu_gestures_end() {
 	// menu's nudge ends once, the model's canvas (no gesture) raises nothing.
 	Recorder model_out;
 	CanvasGesture model_gesture;
-	rig.canvas.follow(rig.frame, rig.out);
-	rig.canvas.nudge(rig.frame, 1, 0, rig.out);
+	rig.step(MenuRig::keys_at(1, 0, true));
 	rig.canvas.end_frame(rig.out);
 	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 1);
-	model_gesture.frame("models/armory.3di", model_out);
+	model_gesture.frame(CanvasSubject{ "models/armory.3di", 7, 0 }, model_out);
 	model_gesture.end_frame(model_out);
 	rig.canvas.end_frame(rig.out);
 	requests = rig.out.take();
@@ -547,6 +639,59 @@ int test_menu_gestures_end() {
 	rig.canvas.follow(shown, rig.out);
 	requests = rig.out.take();
 	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
+
+	// The same menu reloaded mid-drag (another instance at the same path): the drag's end.
+	rig.canvas.follow(rig.frame, rig.out);
+	TEST_EXPECT(start_drag());
+	MnuDocument reloaded;
+	TEST_EXPECT(reloaded.load_bytes(std::vector<uint8_t>(bytes.begin(), bytes.end()), "layout.mnu",
+			AssetKind::Menu, "jo", error));
+	shown.document = &reloaded;
+	shown.screen = reloaded.rows()[0].get();
+	rig.canvas.follow(shown, rig.out);
+	requests = rig.out.take();
+	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
+	TEST_EXPECT(let_go().empty());
+	return 0;
+}
+
+// Another screen of the same menu shown mid-drag (a selection in the tree or the MCP, an undo):
+// the drag begun on the first screen ends, once, for the menu; it never plans against the second.
+int test_menu_screen_switch() {
+	MenuRig rig;
+	const std::string two = std::string(kLayoutMenu) +
+			"<SCREEN>\r\n\t<NAME>SECOND</NAME>\r\n\t<WINDOW type=\"window\" name=\"ALONE\">"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>"
+			"</WINDOW>\r\n</SCREEN>\r\n";
+	TEST_EXPECT(rig.load(two.c_str(), "layout.mnu"));
+	if (!rig.frame.current || rig.document.rows().size() != 2)
+		return 1;
+	rig.select(named(rig.document, "BOX"));
+	CanvasInput in = MenuRig::at(200.0f, 150.0f);
+	in.pressed = in.down = true;
+	rig.step(in);
+	in = MenuRig::at(224.0f, 150.0f);
+	in.down = true;
+	rig.step(in);
+	TEST_EXPECT(count_of(rig.out.take(), Request::Kind::Edits) == 1);
+	MenuCanvasFrame second = rig.frame;
+	second.screen = rig.document.rows()[1].get();
+	second.current = false; // the device configures the second screen on the next pump
+	rig.select(NodeAddress(), {});
+	second.windows.clear();
+	second.indexes.clear();
+	second.primary = NodeAddress();
+	second.primary_index = -1;
+	in = MenuRig::at(260.0f, 150.0f);
+	in.down = true;
+	rig.canvas.follow(second, rig.out);
+	rig.canvas.input(second, in, rig.out);
+	std::vector<Request> requests = rig.out.take();
+	TEST_EXPECT(requests.size() == 1 && ends_once(requests, "layout.mnu"));
+	in.down = false;
+	rig.canvas.follow(second, rig.out);
+	rig.canvas.input(second, in, rig.out);
+	TEST_EXPECT(rig.out.take().empty());
 	return 0;
 }
 
@@ -647,6 +792,9 @@ int test_menu_several_windows() {
 			set_value(last, "position.left", box) == -1 &&
 			set_value(last, "position.left", other) == -1);
 	TEST_EXPECT(selections(requests) == (Selections{ { main, CanvasJoin::Add } }));
+	TEST_EXPECT(ends_once(requests, "layout.mnu"));
+	TEST_EXPECT(
+			requests.size() == 1 + count + 1); // the selection, the steps, the end: nothing else
 	return 0;
 }
 
@@ -801,15 +949,29 @@ int test_model_canvas() {
 		in.width = width;
 		in.height = height;
 		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y };
 		in.hovered = true;
 		return in;
 	};
-
-	// F frames the selected marker.
+	// One frame of the canvas as the pane draws it: the marker under the pointer found once,
+	// then the pointer and the keys.
 	ModelCanvasFrame frame = model_frame(view, model, *document);
+	const auto step = [&](const CanvasInput &in) {
+		canvas.follow(frame, out);
+		canvas.input(frame, in, model_canvas_under(frame, in), out);
+	};
+
+	// F, through the key channel while the canvas has the keyboard, frames the selected marker;
+	// without the keyboard it does nothing.
 	TEST_EXPECT(frame.selected == 0 && frame.selected_kind == ModelOverlayKind::UserPoint);
+	CanvasInput keys = at(20.0f, 20.0f);
+	keys.hovered = false;
+	keys.keyboard.frame = true;
 	model.camera().distance = 40.0f;
-	canvas.frame_selected(frame);
+	step(keys);
+	TEST_EXPECT(model.camera().distance == 40.0f);
+	keys.keyboard.focused = true;
+	step(keys);
 	TEST_EXPECT(model.camera().distance != 40.0f);
 	frame = model_frame(view, model, *document);
 	const ModelOverlay *marker = nullptr;
@@ -823,7 +985,10 @@ int test_model_canvas() {
 
 	// Hovered, the marker is ringed and named; selected, ringed again.
 	CanvasInput in = at(x, y);
-	const OverlayList shapes = canvas.shapes(frame, in);
+	const int under = model_canvas_under(frame, in);
+	TEST_EXPECT(under >= 0 && size_t(under) < frame.overlays.size() &&
+			&frame.overlays[size_t(under)] == marker);
+	const OverlayList shapes = canvas.shapes(frame, in, under);
 	const auto rings = [&](OverlayRole role) {
 		return std::count_if(
 				shapes.shapes.begin(), shapes.shapes.end(), [&](const OverlayShape &shape) {
@@ -831,15 +996,14 @@ int test_model_canvas() {
 				});
 	};
 	TEST_EXPECT(rings(OverlayRole::Hover) == 1 && rings(OverlayRole::Selected) == 1);
-	TEST_EXPECT(canvas.hover_tip(frame, in) == marker->name && !marker->name.empty());
+	TEST_EXPECT(canvas.hover_tip(frame, under) == marker->name && !marker->name.empty());
+	TEST_EXPECT(canvas.hover_tip(frame, -1).empty());
 
 	// A click on the marker selects its record.
 	in.pressed = in.down = true;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	in.pressed = in.down = false;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	std::vector<Request> requests = out.take();
 	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select &&
 			requests[0].record == point && requests[0].path == document->path());
@@ -850,14 +1014,12 @@ int test_model_canvas() {
 	in = at(x, y);
 	in.keys.alt = true;
 	in.pressed = in.down = true;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	in = at(x + 30.0f, y + 10.0f);
 	in.keys.alt = true;
 	in.down = true;
 	in.delta = CanvasPoint{ 30.0f, 10.0f };
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	canvas.end_frame(out);
 	requests = out.take();
 	uint64_t gesture = 0;
@@ -869,8 +1031,7 @@ int test_model_canvas() {
 	requests = out.take();
 	TEST_EXPECT(requests.size() == 1 && ends_once(requests, document->path()));
 	in.down = false;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	canvas.end_frame(out);
 	TEST_EXPECT(out.take().empty());
 
@@ -878,24 +1039,33 @@ int test_model_canvas() {
 	const float yaw = model.camera().yaw, distance = model.camera().distance;
 	in = at(20.0f, 20.0f);
 	in.pressed = in.down = true;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	in = at(70.0f, 20.0f);
 	in.down = true;
 	in.delta = CanvasPoint{ 50.0f, 0.0f };
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	in.down = false;
 	in.delta = CanvasPoint();
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	TEST_EXPECT(model.camera().yaw != yaw && out.take().empty());
 	in = at(70.0f, 20.0f);
 	in.wheel = 1.0f;
-	canvas.follow(frame, out);
-	canvas.input(frame, in, out);
+	step(in);
 	TEST_EXPECT(std::fabs(model.camera().distance - distance * kModelWheelDolly) < 1e-4f &&
 			out.take().empty());
+
+	// A press ends when the model's document goes from the canvas (an animation's rig model
+	// shown, which no document holds): an orbit stops there, raising nothing.
+	in = at(20.0f, 20.0f);
+	in.pressed = in.down = true;
+	step(in);
+	TEST_EXPECT(canvas.gesture().pressed());
+	ModelCanvasFrame rig_model = frame;
+	rig_model.document = nullptr;
+	rig_model.current = false;
+	rig_model.selected = -1;
+	canvas.follow(rig_model, out);
+	TEST_EXPECT(!canvas.gesture().pressed() && out.take().empty());
 	return 0;
 }
 
@@ -907,6 +1077,8 @@ int main() {
 	if (test_menu_canvas() != 0)
 		return 1;
 	if (test_menu_gestures_end() != 0)
+		return 1;
+	if (test_menu_screen_switch() != 0)
 		return 1;
 	if (test_menu_several_windows() != 0)
 		return 1;

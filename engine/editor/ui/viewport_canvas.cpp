@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <editor/session/editor_request.h>
+#include <editor/ui/editor_host.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -177,12 +178,27 @@ void ViewportCanvas::set_zoom(Zoom zoom, float scale) {
 		scale_ = scale;
 }
 
-bool ViewportCanvas::begin(
-		float height, int device_width, int device_height, const Device &device, const Tip &tip) {
+bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	drawn_ = true;
 	right_clicked_ = false;
 	input_ = CanvasInput();
 	const ImGuiIO &io = ImGui::GetIO();
+	// The keys the kinds act on, while the canvas's window (the pane's, its canvas among its
+	// children) has the keyboard and no text field takes it.
+	CanvasKeyboard &keyboard = input_.keyboard;
+	keyboard.focused =
+			ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
+	if (keyboard.focused) {
+		keyboard.arrow_x = (ImGui::IsKeyPressed(ImGuiKey_RightArrow) ? 1 : 0) -
+				(ImGui::IsKeyPressed(ImGuiKey_LeftArrow) ? 1 : 0);
+		keyboard.arrow_y = (ImGui::IsKeyPressed(ImGuiKey_DownArrow) ? 1 : 0) -
+				(ImGui::IsKeyPressed(ImGuiKey_UpArrow) ? 1 : 0);
+		keyboard.arrow_held = ImGui::IsKeyDown(ImGuiKey_LeftArrow) ||
+				ImGui::IsKeyDown(ImGuiKey_RightArrow) || ImGui::IsKeyDown(ImGuiKey_UpArrow) ||
+				ImGui::IsKeyDown(ImGuiKey_DownArrow);
+		keyboard.escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+		keyboard.frame = ImGui::IsKeyPressed(ImGuiKey_F, false);
+	}
 	const bool design = zoom_ != Zoom::Fill;
 	const ImVec2 region(ImGui::GetContentRegionAvail().x, height);
 	// The picture's device size, and where it sits on the canvas.
@@ -247,9 +263,13 @@ bool ViewportCanvas::begin(
 	input_.width = width;
 	input_.height = tall;
 	input_.mouse = CanvasPoint{ mouse.x - origin_.x, mouse.y - origin_.y };
+	input_.screen = CanvasPoint{ mouse.x, mouse.y };
 	input_.delta = CanvasPoint{ io.MouseDelta.x, io.MouseDelta.y };
 	input_.hovered = hovered;
-	input_.down = active;
+	// A left press on a design picture lasts until the button comes up (the canvas may lose the
+	// active item before: a popup, the focus taken); a picture's camera drag while the surface
+	// holds it.
+	input_.down = design ? ImGui::IsMouseDown(ImGuiMouseButton_Left) : active;
 	input_.double_clicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 	input_.keys = CanvasKeys{ io.KeyShift, io.KeyCtrl, io.KeyAlt };
 	if (design) {
@@ -289,16 +309,20 @@ bool ViewportCanvas::begin(
 		input_.wheel = hovered ? io.MouseWheel : 0.0f;
 	}
 	right_clicked_ = hovered && !panning_ && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
-	// The kind's hover tip, on the surface: made only while it shows.
-	if (tip)
-		ui_kit::tooltip_lazy([&] { return tip(input_); });
-	ImGui::SetCursorScreenPos(ImVec2(origin_.x, origin_.y));
-	device(width, tall);
-	// The picture's edge: a design picture's just outside it, on its margin.
-	const float edge = design ? 1.0f : 0.0f;
-	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),
-			ImVec2(origin_.x + float(width) + edge, origin_.y + float(tall) + edge), kFrameColor);
 	return true;
+}
+
+void ViewportCanvas::picture(const Device &device, const Tip &tip) {
+	// The kind's hover tip, on the surface (the item just drawn): made only while it shows.
+	if (tip)
+		ui_kit::tooltip_lazy(tip);
+	ImGui::SetCursorScreenPos(ImVec2(origin_.x, origin_.y));
+	device(input_.width, input_.height);
+	// The picture's edge: a design picture's just outside it, on its margin.
+	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
+	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),
+			ImVec2(origin_.x + float(input_.width) + edge, origin_.y + float(input_.height) + edge),
+			kFrameColor);
 }
 
 void ViewportCanvas::draw(const OverlayList &shapes, CanvasCursor cursor) {

@@ -590,13 +590,14 @@ the asset graph already makes (a name the project lacks is the graph's).
 _Avoid_: preview (the one screen shown), validation (the document types' own checks)
 
 **Canvas**:
-Where the editor draws a preview's picture: it takes every press on the picture and tells a
-click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the
+Where the editor shows a device's picture and takes the pointer and the keys over it: it tells
+a click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the
 shapes its kind makes (outlines, handles, markers, the marquee's box) with the cursor they ask
 for. The kind (the menu's, the model's) says what a press takes, what a drag writes and what is
-drawn; the canvas is the same for every kind.
-_Avoid_: viewport (the device's picture a canvas shows), overlay (one shape drawn on it), view
-(a document's view in the Document window)
+drawn; the canvas is the same for every kind. A viewport is a canvas backed by a device; what
+the device renders is its picture.
+_Avoid_: overlay (one shape drawn over the picture), view (a document's view in the Document
+window), picture (what the device renders, which the canvas shows)
 
 **Gesture**:
 The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held): they

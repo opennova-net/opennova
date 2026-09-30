@@ -2,7 +2,6 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_arrange.h>
-#include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -270,34 +269,22 @@ void MenuPreviewPane::draw() {
 	ImGui::EndChild();
 }
 
-// The keys while the preview has the focus and no text box takes them: the arrows move
-// the selected windows 1 unit (8 with Shift), one undo step while any is held; Esc selects
-// what holds the primary; Ctrl+C / X / V / D copy, cut, paste and duplicate windows.
+// Ctrl+C / X / V / D copy, cut, paste and duplicate windows while the preview has the focus, no
+// text box takes the keys and no press is down, as the menu clipboard's rule says (the arrows and
+// Esc are the canvas's, preview/menu_canvas).
 void MenuPreviewPane::keys_(const Frame &frame) {
 	const ImGuiIO &io = ImGui::GetIO();
 	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
-	const bool held = ImGui::IsKeyDown(ImGuiKey_LeftArrow) || ImGui::IsKeyDown(ImGuiKey_RightArrow) ||
-	                  ImGui::IsKeyDown(ImGuiKey_UpArrow) || ImGui::IsKeyDown(ImGuiKey_DownArrow);
-	if (menu_canvas_.gesture().nudging() && (!held || !focused))
-		menu_canvas_.end(requests_);
-	if (!focused || menu_canvas_.gesture().pressed())
+	if (!focused || menu_canvas_.gesture().pressed() || frame.canvas.document->blocked())
 		return;
-	const MnuDocument &document = *frame.canvas.document;
-	if (!document.blocked()) {
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C)) return clipboard_(frame, EditorRequestKind::Copy);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X)) return clipboard_(frame, EditorRequestKind::Cut);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) return clipboard_(frame, EditorRequestKind::Paste);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D)) return clipboard_(frame, EditorRequestKind::Duplicate);
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && menu_canvas_escape(frame.canvas, requests_))
-		return;
-	const int step = io.KeyShift ? kLayoutGrid : 1;
-	int dx = 0, dy = 0;
-	if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) dx -= step;
-	if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) dx += step;
-	if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) dy -= step;
-	if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) dy += step;
-	menu_canvas_.nudge(frame.canvas, dx, dy, requests_);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C))
+		return clipboard_(frame, EditorRequestKind::Copy);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X))
+		return clipboard_(frame, EditorRequestKind::Cut);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V))
+		return clipboard_(frame, EditorRequestKind::Paste);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D))
+		return clipboard_(frame, EditorRequestKind::Duplicate);
 }
 
 // Copy, Cut, Duplicate and Paste as the menu clipboard's rule says (menu_clipboard).
@@ -333,12 +320,10 @@ void MenuPreviewPane::draw_canvas_(const Frame &frame, float height) {
 	const MenuCanvasFrame &canvas = frame.canvas;
 	const MnuDocument &document = *canvas.document;
 	const MenuPreviewOptions &options = viewport_->options();
-	const bool shows = canvas_.begin(
-			height, options.width, options.height,
-			[this](int width, int tall) { viewport_->draw(width, tall); },
-			[&](const CanvasInput &in) { return menu_canvas_.hover_tip(canvas, in); });
-	if (shows) {
+	if (canvas_.begin(height, options.width, options.height)) {
 		const CanvasInput &in = canvas_.input();
+		canvas_.picture([this](int width, int tall) { viewport_->draw(width, tall); },
+				[&] { return menu_canvas_.hover_tip(canvas, in); });
 		// Where the mouse is on the picture, in design units (the toolbar's readout).
 		const float sx = float(in.width) / float(menu::kMenuDesignWidth);
 		const float sy = float(in.height) / float(menu::kMenuDesignHeight);

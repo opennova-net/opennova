@@ -31,9 +31,13 @@ struct MenuCanvasFrame {
 	const MnuDocument *document = nullptr;
 	const Node *screen = nullptr;
 	NodeAddress record; // the primary record while the menu is the active document (none: not)
-	std::vector<NodeAddress> selected; // and every selected record
+	// Every selected record, the session's, borrowed for the frame (null: none).
+	const std::vector<NodeAddress> *selected = nullptr;
 	NodeAddress primary; // the window of the screen holding the primary record (none: none)
 	std::vector<NodeAddress> windows; // every selected window of the screen, the primary among them
+	// Each of `windows`' pre-order index in the compiled screen (-1: none), and the primary's.
+	std::vector<int> indexes;
+	int primary_index = -1;
 	const menu::MenuFrameCompiler *compiler = nullptr;
 	const menu::MenuFrameState *state = nullptr;
 	bool current = false; // the picture shows the document's revision: only then does it map
@@ -42,8 +46,9 @@ struct MenuCanvasFrame {
 };
 
 // The frame's selection, the session's while the menu is the active document (none while it
-// is not): the primary record `primary`, every selected record, the window of the screen holding
-// the primary, and every selected window of the screen.
+// is not): the primary record `primary`, every selected record (`selected`, which must outlive the
+// frame), the window of the screen holding the primary, every selected window of the screen, and
+// where each sits in the screen's pre-order, each found once a frame.
 void menu_canvas_select(MenuCanvasFrame &frame, const NodeAddress &primary,
 		const std::vector<NodeAddress> &selected);
 // What Copy, Cut, Duplicate and Paste take of the frame's selection: the menu clipboard's one
@@ -117,17 +122,20 @@ class MenuCanvas {
 public:
 	const CanvasGesture &gesture() const { return gesture_; }
 
-	// The frame's start, while the pane draws its canvas: a gesture begun in another menu ends,
-	// and a nudge ends when the selected windows change.
+	// The frame's start, while the pane draws its canvas: a gesture begun on another subject
+	// ends (another menu, a reload of it, another of its screens), and a nudge ends when the
+	// selected windows change.
 	void follow(const MenuCanvasFrame &frame, CanvasRequests &out);
-	// The frame's pointer: a press, then each sample of its drag (a move of the windows it took,
-	// planned from where they began, or the marquee's box), then its release (a click selects
-	// the window the hit test found, joining as Shift or Ctrl say; a marquee selects what its box
-	// touches, the screen when nothing).
+	// The frame's keys and pointer. The keys, while the canvas has the keyboard and no press is
+	// down: Esc selects what holds the primary; an arrow moves the selected windows 1 unit (8
+	// with Shift), one gesture while one is held, ended when none is or the keyboard goes
+	// elsewhere. The pointer: a press, then each sample of its drag (a move of the windows it
+	// took, planned from where they began and by the pointer's travel on the screen, or the
+	// marquee's box), then its release when the left button comes up (a click selects the window
+	// the hit test found, joining as Shift or Ctrl say; a marquee selects what its box touches,
+	// the screen when nothing).
 	void input(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out);
-	// An arrow key: the selected windows moved (dx, dy) more, one gesture while any is held.
-	void nudge(const MenuCanvasFrame &frame, int dx, int dy, CanvasRequests &out);
-	// The gesture ends (the arrow let go, the pane's focus lost).
+	// The gesture ends.
 	void end(CanvasRequests &out);
 	// The frame bracket (CanvasGesture::end_frame).
 	void end_frame(CanvasRequests &out);
@@ -141,6 +149,9 @@ public:
 	std::string hover_tip(const MenuCanvasFrame &frame, const CanvasInput &in) const;
 
 private:
+	void keys_(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out);
+	// The selected windows moved (dx, dy) more, a nudge begun when none is open.
+	void nudge_by_(const MenuCanvasFrame &frame, int dx, int dy, CanvasRequests &out);
 	void move_(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out);
 	void release_(const MenuCanvasFrame &frame, CanvasRequests &out);
 

@@ -290,25 +290,21 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 	if (options != model.options()) model.set_options(options);
 }
 
-// The canvas: the markers where the device drew the model (the camera as it placed it), then the
-// pointer's gestures (an orbit moves the camera the next frame draws with); F frames.
+// The canvas: the marker under the pointer, found once a frame; the markers where the device drew
+// the model (the camera as it placed it), then the pointer's gestures and F (an orbit moves the
+// camera the next frame draws with).
 void ModelPreviewPane::draw_canvas_(const ModelCanvasFrame &frame, float available_height) {
 	model_canvas_.follow(frame, requests_);
-	const bool shows = canvas_.begin(
-			available_height, 0, 0,
-			[this](int width, int height) { viewport_->draw(width, height); },
-			[&](const CanvasInput &in) { return model_canvas_.hover_tip(frame, in); });
-	if (shows) {
+	if (canvas_.begin(available_height, 0, 0)) {
 		const CanvasInput &in = canvas_.input();
-		OverlayList shapes = model_canvas_.shapes(frame, in);
-		model_canvas_.input(frame, in, requests_);
+		const int under = model_canvas_under(frame, in);
+		canvas_.picture([this](int width, int height) { viewport_->draw(width, height); },
+				[&] { return model_canvas_.hover_tip(frame, under); });
+		const OverlayList shapes = model_canvas_.shapes(frame, in, under);
+		model_canvas_.input(frame, in, under, requests_);
 		canvas_.draw(shapes, CanvasCursor::Default);
 	}
 	canvas_.end();
-	const ImGuiIO &io = ImGui::GetIO();
-	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
-	if (focused && ImGui::IsKeyPressed(ImGuiKey_F, false))
-		model_canvas_.frame_selected(frame);
 }
 
 } // namespace opennova::editor

@@ -36,6 +36,17 @@ bool widget_on_picture(const MenuCanvasFrame &frame, int index, float sx, float 
 	return true;
 }
 
+// What the canvas shows: the menu (this instance of it) and its screen.
+CanvasSubject subject_of(const MenuCanvasFrame &frame) {
+	CanvasSubject subject;
+	if (!frame.document)
+		return subject;
+	subject.path = frame.document->path();
+	subject.identity = frame.document->identity();
+	subject.part = frame.screen ? frame.screen->id : 0;
+	return subject;
+}
+
 bool inside(CanvasPoint at, CanvasPoint a, CanvasPoint b) {
 	return at.x >= a.x && at.x < b.x && at.y >= a.y && at.y < b.y;
 }
@@ -91,15 +102,25 @@ std::string rect_text(const mnu::RectEdges &r) {
 
 void menu_canvas_select(MenuCanvasFrame &frame, const NodeAddress &primary,
 		const std::vector<NodeAddress> &selected) {
+	const MnuDocument &document = *frame.document;
 	const NodeId screen = frame.screen ? frame.screen->id : 0;
 	frame.record = primary;
-	frame.selected = selected;
-	frame.primary = window_holding(*frame.document, primary, screen);
-	frame.windows = selected_windows(*frame.document, primary, selected, screen);
+	frame.selected = &selected;
+	frame.primary = window_holding(document, primary, screen);
+	frame.windows = selected_windows(document, primary, selected, screen);
+	frame.indexes.clear();
+	frame.primary_index = -1;
+	for (const NodeAddress &window : frame.windows) {
+		frame.indexes.push_back(document.window_index(window));
+		if (window == frame.primary)
+			frame.primary_index = frame.indexes.back();
+	}
 }
 
 MenuClipboard menu_canvas_clipboard(const MenuCanvasFrame &frame, bool full) {
-	return menu_clipboard(*frame.document, frame.screen->id, frame.record, frame.selected, full);
+	static const std::vector<NodeAddress> kNone;
+	return menu_clipboard(*frame.document, frame.screen->id, frame.record,
+			frame.selected ? *frame.selected : kNone, full);
 }
 
 void menu_picture_rect(
@@ -174,8 +195,9 @@ NodeAddress menu_selected_window_at(
 		const MenuCanvasFrame &frame, CanvasPoint at, float scale_x, float scale_y) {
 	NodeAddress found;
 	int front = -1;
-	for (const NodeAddress &window : frame.windows) {
-		const int index = frame.document->window_index(window);
+	for (size_t i = 0; i < frame.windows.size() && i < frame.indexes.size(); ++i) {
+		const NodeAddress &window = frame.windows[i];
+		const int index = frame.indexes[i];
 		CanvasPoint a, b;
 		if (!widget_on_picture(frame, index, scale_x, scale_y, a, b) || !inside(at, a, b))
 			continue;
@@ -212,9 +234,8 @@ MenuPress menu_canvas_press(const MenuCanvasFrame &frame, const CanvasInput &in)
 		press.marquee = background;
 		return press;
 	}
-	const int primary = frame.primary.child ? document.window_index(frame.primary) : -1;
 	CanvasPoint a, b;
-	if (widget_on_picture(frame, primary, press.scale_x, press.scale_y, a, b) &&
+	if (widget_on_picture(frame, frame.primary_index, press.scale_x, press.scale_y, a, b) &&
 			menu_handle_at(in.mouse, a, b, press.handle)) {
 		press.resize = true;
 		press.window = frame.primary;
@@ -289,7 +310,7 @@ void menu_canvas_arrange(const MenuCanvasFrame &frame, ArrangeOp op, CanvasReque
 // --- MenuCanvas ------------------------------------------------------------------------------
 
 void MenuCanvas::follow(const MenuCanvasFrame &frame, CanvasRequests &out) {
-	gesture_.frame(frame.document ? frame.document->path() : std::string(), out);
+	gesture_.frame(subject_of(frame), out);
 	if (gesture_.nudging() && nudged_ != frame.windows)
 		gesture_.end(out);
 	if (!gesture_.pressed())
@@ -297,8 +318,12 @@ void MenuCanvas::follow(const MenuCanvasFrame &frame, CanvasRequests &out) {
 }
 
 void MenuCanvas::input(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out) {
+	// A nudge lasts while an arrow is held on the canvas that has the keyboard.
+	if (gesture_.nudging() && (!in.keyboard.arrow_held || !in.keyboard.focused))
+		end(out);
+	keys_(frame, in, out);
 	if (in.pressed && !in.middle) {
-		gesture_.press(frame.document->path(), in.mouse, out);
+		gesture_.press(subject_of(frame), in.screen, out);
 		press_ = menu_canvas_press(frame, in);
 	}
 	if (!gesture_.pressed())
@@ -309,6 +334,16 @@ void MenuCanvas::input(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 		move_(frame, in, out);
 }
 
+void MenuCanvas::keys_(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out) {
+	const CanvasKeyboard &keyboard = in.keyboard;
+	if (!keyboard.focused || gesture_.pressed())
+		return;
+	if (keyboard.escape && menu_canvas_escape(frame, out))
+		return;
+	const int step = in.keys.shift ? kLayoutGrid : 1;
+	nudge_by_(frame, keyboard.arrow_x * step, keyboard.arrow_y * step, out);
+}
+
 // One sample of a drag: the marquee's box, or the step from where it began, planned and sent
 // when it moved (the edits of one drag share its token, so the drag is one undo step; a move
 // writes every window it takes in one batch).
@@ -316,7 +351,7 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 	if (!gesture_.dragging()) {
 		if (!press_.window.child && !press_.marquee)
 			return;
-		if (!gesture_.move(in.mouse))
+		if (!gesture_.move(in.screen))
 			return;
 		// The window a drag holds is the primary one (its handles follow it); the others the move
 		// takes stay selected.
@@ -325,12 +360,15 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 					press_.layout.windows.size() > 1 ? CanvasJoin::Add : CanvasJoin::Replace);
 	}
 	if (press_.marquee) {
-		press_.to = CanvasPoint{ in.mouse.x / press_.scale_x, in.mouse.y / press_.scale_y };
+		// The design point under the pointer now, whatever the zoom did since the press.
+		press_.to = CanvasPoint{ in.mouse.x / scale_x_of(in), in.mouse.y / scale_y_of(in) };
 		return;
 	}
-	const CanvasPoint from = gesture_.from();
-	const int dx = int(std::lround((in.mouse.x - from.x) / press_.scale_x));
-	const int dy = int(std::lround((in.mouse.y - from.y) / press_.scale_y));
+	// The pointer's travel on the screen at the press's scale: a zoom, a scroll or a refit while
+	// the button is down moves nothing.
+	const CanvasPoint travel = gesture_.travel(in.screen);
+	const int dx = int(std::lround(travel.x / press_.scale_x));
+	const int dy = int(std::lround(travel.y / press_.scale_y));
 	const int grid = frame.snap && !in.keys.alt ? kLayoutGrid : 0;
 	if (dx == press_.dx && dy == press_.dy && grid == press_.grid)
 		return;
@@ -372,7 +410,7 @@ void MenuCanvas::release_(const MenuCanvasFrame &frame, CanvasRequests &out) {
 	press_ = MenuPress();
 }
 
-void MenuCanvas::nudge(const MenuCanvasFrame &frame, int dx, int dy, CanvasRequests &out) {
+void MenuCanvas::nudge_by_(const MenuCanvasFrame &frame, int dx, int dy, CanvasRequests &out) {
 	if ((!dx && !dy) || gesture_.pressed() || !frame.primary.child || !frame.compiler)
 		return;
 	if (!gesture_.nudging()) {
@@ -381,7 +419,7 @@ void MenuCanvas::nudge(const MenuCanvasFrame &frame, int dx, int dy, CanvasReque
 				!layout_press(*frame.document, frame.primary, LayoutHandle::Move, frame.windows,
 						*frame.compiler, *frame.state, nudge_))
 			return;
-		gesture_.nudge(frame.document->path(), out);
+		gesture_.nudge(subject_of(frame), out);
 		nudged_ = frame.windows;
 		nudge_dx_ = 0;
 		nudge_dy_ = 0;
@@ -412,18 +450,17 @@ OverlayList MenuCanvas::shapes(const MenuCanvasFrame &frame, const CanvasInput &
 	OverlayList list;
 	if (!frame.current)
 		return list; // what the picture maps, only while it is the document's own
-	const MnuDocument &document = *frame.document;
 	const menu::MenuFrameCompiler &compiler = *frame.compiler;
 	const float sx = scale_x_of(in), sy = scale_y_of(in);
 	// A mark on every window that has a note: a small triangle in its top-left corner.
-	std::vector<int> marked;
+	std::vector<char> marked(size_t(std::max(compiler.widget_count(), 0)), 0);
 	for (const menu::MenuFrameNote &note : frame.notes) {
 		mnu::RectEdges rect{};
-		if (note.widget < 0 ||
-				std::find(marked.begin(), marked.end(), note.widget) != marked.end() ||
+		if (note.widget < 0 || size_t(note.widget) >= marked.size() ||
+				marked[size_t(note.widget)] ||
 				!compiler.widget_rect(note.widget, *frame.state, &rect))
 			continue;
-		marked.push_back(note.widget);
+		marked[size_t(note.widget)] = 1;
 		const CanvasPoint corner{ menu::menu_scaled_edge(rect.left, sx),
 			menu::menu_scaled_edge(rect.top, sy) };
 		list.marker(corner, OverlayGlyph::Corner, kNoteMark, OverlayRole::Note);
@@ -435,8 +472,8 @@ OverlayList MenuCanvas::shapes(const MenuCanvasFrame &frame, const CanvasInput &
 	if (widget_on_picture(frame, under, sx, sy, a, b))
 		list.rect(a, b, OverlayRole::Hover);
 	// The other selected windows, outlined thin: a press inside one moves them all.
-	for (const NodeAddress &window : frame.windows) {
-		const int index = window == frame.primary ? -1 : document.window_index(window);
+	for (size_t i = 0; i < frame.windows.size() && i < frame.indexes.size(); ++i) {
+		const int index = frame.windows[i] == frame.primary ? -1 : frame.indexes[i];
 		if (widget_on_picture(frame, index, sx, sy, a, b))
 			list.rect(a, b, OverlayRole::Selected);
 	}
@@ -449,8 +486,7 @@ OverlayList MenuCanvas::shapes(const MenuCanvasFrame &frame, const CanvasInput &
 		list.rect(CanvasPoint{ left, top }, CanvasPoint{ right, bottom }, OverlayRole::Marquee);
 	}
 	// The primary window, on the pixels the game draws its rect on, with its eight handles.
-	const int primary = frame.primary.child ? document.window_index(frame.primary) : -1;
-	if (widget_on_picture(frame, primary, sx, sy, a, b)) {
+	if (widget_on_picture(frame, frame.primary_index, sx, sy, a, b)) {
 		list.rect(a, b, OverlayRole::Selected, 2.0f);
 		for (const LayoutHandle handle : kMenuHandles)
 			list.marker(menu_handle_point(handle, a, b), OverlayGlyph::Square,
@@ -468,9 +504,8 @@ CanvasCursor MenuCanvas::cursor(const MenuCanvasFrame &frame, const CanvasInput 
 	if (idle && menu_selected_window_at(frame, in.mouse, sx, sy).child)
 		cursor = CanvasCursor::Move;
 	// The primary window: the cursor says what a press there does.
-	const int primary = frame.primary.child ? frame.document->window_index(frame.primary) : -1;
 	CanvasPoint a, b;
-	if (!widget_on_picture(frame, primary, sx, sy, a, b))
+	if (!widget_on_picture(frame, frame.primary_index, sx, sy, a, b))
 		return cursor;
 	LayoutHandle handle = LayoutHandle::Move;
 	if (gesture_.pressed() && press_.window == frame.primary)
