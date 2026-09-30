@@ -93,7 +93,7 @@ bool Document::find(const std::string &symbol, NodeAddress &out, const std::stri
 	return false;
 }
 
-ReferenceStatus Document::reference_status(const FieldSchema &field, const Value &value, const SessionView &view,
+ReferenceStatus Document::reference_status(const FieldUse &field, const Value &value, const SessionView &view,
                                            std::string *symbol) const {
 	ReferenceKind kind;
 	std::string name, scope;
@@ -103,13 +103,13 @@ ReferenceStatus Document::reference_status(const FieldSchema &field, const Value
 	}
 	if (symbol) *symbol = name;
 	if (!view.graph) return ReferenceStatus::Unverified;
-	return view.graph->resolve(kind, name, scope, nullptr, field.material_type);
+	return view.graph->resolve(kind, name, scope, nullptr, field.loader_arg);
 }
 
-std::vector<ReferenceChoice> Document::reference_choices(const FieldSchema &field, const SessionView &view) const {
+std::vector<ReferenceChoice> Document::reference_choices(const FieldUse &field, const SessionView &view) const {
 	if (!view.graph || field.reference == ReferenceKind::None) return {};
 	const AssetGraph &graph = *view.graph;
-	std::vector<ReferenceChoice> out = graph.choices(field.reference, field.scope, field.material_type);
+	std::vector<ReferenceChoice> out = graph.choices(field.reference, field.scope, field.loader_arg);
 	// What the value may name instead: a stylesheet variable for a menu's font or texture (the
 	// %NAME% stays in the menu and the stylesheet's value is the file, ADR 0005), a string id
 	// for a text key the editor does not resolve yet; each as this field would reference it, a
@@ -118,48 +118,48 @@ std::vector<ReferenceChoice> Document::reference_choices(const FieldSchema &fiel
 	if (row.also_offers == ReferenceKind::None) return out;
 	const bool checked = row.resolution != ReferenceResolution::Unchecked;
 	for (ReferenceChoice &choice : graph.choices(row.also_offers)) {
-		if (checked) choice.status = graph.resolve(field.reference, choice.name, field.scope, nullptr, field.material_type);
+		if (checked) choice.status = graph.resolve(field.reference, choice.name, field.scope, nullptr, field.loader_arg);
 		out.push_back(std::move(choice));
 	}
 	return out;
 }
 
-bool Document::missing_finding(const NodeAddress &address, const FieldSchema &field, const Value &value,
+bool Document::missing_finding(const NodeAddress &address, const FieldUse &field, const Value &value,
                                const SessionView &view, Diagnostic &out) const {
 	ReferenceKind kind;
 	std::string name, scope;
 	if (!view.graph || !reference_target(field, value, kind, name, scope)) return false;
 	const AssetGraph &graph = *view.graph;
-	if (graph.resolve(kind, name, scope, nullptr, field.material_type) != ReferenceStatus::Missing) return false;
+	if (graph.resolve(kind, name, scope, nullptr, field.loader_arg) != ReferenceStatus::Missing) return false;
 	GraphEdge edge;
 	edge.source = path();
 	edge.record = record_path(address);
 	edge.locator = locator(address);
 	edge.address = address;
-	edge.field = field.id;
+	edge.field = field.schema->id;
 	edge.kind = kind;
 	edge.value = name;
 	edge.scope = scope;
-	edge.material_type = field.material_type;
+	edge.loader_arg = field.loader_arg;
 	if (kind != ReferenceKind::StyleVar && graph_names::is_style_reference(name) && !graph.style_binding(name)) {
 		edge.kind = ReferenceKind::StyleVar;
 		edge.scope.clear();
-		edge.material_type = -1;
+		edge.loader_arg = -1;
 		edge.through = kind;
 	}
 	out = graph.missing_finding(edge);
 	return true;
 }
 
-std::string Document::reference_target_file(const FieldSchema &field, const Value &value, const SessionView &view) const {
+std::string Document::reference_target_file(const FieldUse &field, const Value &value, const SessionView &view) const {
 	ReferenceKind kind;
 	std::string name, scope, file;
 	if (!view.graph || !reference_target(field, value, kind, name, scope)) return std::string();
-	if (view.graph->resolve(kind, name, scope, &file, field.material_type) != ReferenceStatus::Present) return std::string();
+	if (view.graph->resolve(kind, name, scope, &file, field.loader_arg) != ReferenceStatus::Present) return std::string();
 	return file;
 }
 
-std::vector<ReferenceTarget> Document::reference_targets(const FieldSchema &field, const Value &value,
+std::vector<ReferenceTarget> Document::reference_targets(const FieldUse &field, const Value &value,
                                                          const SessionView &view) const {
 	std::vector<ReferenceTarget> out;
 	ReferenceKind kind;
@@ -177,7 +177,7 @@ std::vector<ReferenceTarget> Document::reference_targets(const FieldSchema &fiel
 	if (graph_names::is_style_reference(name))
 		if (const GraphSymbol *binding = graph.style_binding(name)) out.push_back(symbol_target(*binding, view));
 	std::string file;
-	if (graph.resolve(kind, name, scope, &file, field.material_type) == ReferenceStatus::Present)
+	if (graph.resolve(kind, name, scope, &file, field.loader_arg) == ReferenceStatus::Present)
 		out.push_back(file_target(file, view));
 	return out;
 }

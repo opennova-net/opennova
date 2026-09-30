@@ -360,12 +360,12 @@ static int test_fixes() {
 	Diagnostic skin = font;
 	skin.reference = ReferenceKind::Texture;
 	skin.target = "logo.tga";
-	skin.material_type = 0;
+	skin.loader_arg = 0;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
-	skin.material_type = 1;
+	skin.loader_arg = 1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
-	skin.material_type = -1;
+	skin.loader_arg = -1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	// A name the game data lacks with no factory, and a symbol: nothing to do but look.
@@ -691,7 +691,7 @@ static int test_placeholders() {
 	const Diagnostic *skin = missing(ReferenceKind::Texture, "armry.tga");
 	const Diagnostic *logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	const Diagnostic *puff = missing(ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(skin && skin->material_type == 0 && logo && puff && puff->material_type == -1);
+	TEST_EXPECT(skin && skin->loader_arg == 0 && logo && puff && puff->loader_arg == -1);
 	if (!skin || !logo || !puff) return 1;
 	std::vector<ProblemFix> firsts;
 	for (const auto &expected : {std::make_pair(skin, "armry.tga"), std::make_pair(logo, "logo.tga"), std::make_pair(puff, "puff.tga")}) {
@@ -714,7 +714,7 @@ static int test_placeholders() {
 	// None for a model's chunk row (it reads a chunk container), nor for a name no placeholder
 	// is made for (a menu's .png).
 	Diagnostic chunk = *skin;
-	chunk.material_type = 16;
+	chunk.loader_arg = 16;
 	Diagnostic png = *logo;
 	png.target = "badge.png";
 	TEST_EXPECT(fixes_for(chunk, v).empty() && fixes_for(png, v).empty() && !has_fixes(png, v));
@@ -731,22 +731,22 @@ static int test_placeholders() {
 	// as the TGA it is; a diffuse row reads a.tga.pcx as its query, a.tga; a normal map reads no
 	// PCX at all, a height producer no .mdt (renderer::material_texture_source).
 	Diagnostic compound = *skin;
-	compound.material_type = 1;
+	compound.loader_arg = 1;
 	compound.target = "a.tga.pcx";
 	TEST_EXPECT(fixes_for(compound, v).empty());
 	compound.target = "a.pcx.tga";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder a.pcx.tga"}));
-	compound.material_type = 0;
+	compound.loader_arg = 0;
 	compound.target = "a.tga.pcx";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder a.tga"}));
-	compound.material_type = 4;
+	compound.loader_arg = 4;
 	compound.target = "bump.pcx";
 	TEST_EXPECT(fixes_for(compound, v).empty());
 	compound.target = "bump.tga";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder bump.tga"}));
 	compound.target = "bump.mdt";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder bump.mdt"}));
-	compound.material_type = 6;
+	compound.loader_arg = 6;
 	TEST_EXPECT(fixes_for(compound, v).empty());
 	// With the game install holding the menu texture's .dds: Import it first, the placeholder after.
 	const std::string install = dir.file("install");

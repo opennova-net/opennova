@@ -6,6 +6,7 @@
 #include <editor/project/project_files.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -13,14 +14,29 @@
 namespace opennova::editor {
 
 uint64_t next_edit_gesture() {
-	static uint64_t next = 0;
+	static std::atomic<uint64_t> next{0};
 	return ++next;
 }
 
-Document::Document() {
-	static uint64_t next_identity = 0;
-	identity_ = ++next_identity;
-}
+namespace {
+
+std::atomic<uint64_t> g_next_identity{0};
+
+} // namespace
+
+Document::Document() : identity_(++g_next_identity) {}
+
+Document::Document(const Document &other)
+		: identity_(other.identity_), absolute_path_(other.absolute_path_),
+		  relative_path_(other.relative_path_), game_(other.game_), kind_(other.kind_),
+		  rows_(other.rows_), file_state_(other.file_state_), issues_(other.issues_),
+		  blocked_(other.blocked_), wrote_file_(other.wrote_file_),
+		  file_fingerprint_(other.file_fingerprint_), next_id_(other.next_id_),
+		  last_added_(other.last_added_), added_(other.added_),
+		  history_(other.history_, rows_, file_state_), saved_rows_(other.saved_rows_),
+		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_),
+		  snapshot_(true) {}
+
 namespace {
 
 uint64_t fingerprint(const uint8_t *data, size_t size) { return io::fnv1a64_bytes(io::kFnv1a64Offset, data, size); }
@@ -147,13 +163,41 @@ bool Document::placement_in(const Node &row, NodeId child, Placement &out) const
 
 NodeAddress Document::address_of(NodeId id) const {
 	if (!id) return {};
-	for (const auto &row : rows_) {
-		if (row->id == id) return {row->id, row->kind, 0};
-		const RowIndex &index = row_index_of(row);
-		const auto found = index.placements.find(id);
-		if (found != index.placements.end()) return {row->id, found->second.spec.kind, id};
+	if (!addresses_known_ || addresses_revision_ != revision()) {
+		// Every row and every record it holds, once per revision (each row's records through its
+		// own index, kept while the row stands).
+		addresses_.clear();
+		for (const auto &row : rows_) {
+			addresses_[row->id] = {row->id, row->kind, 0};
+			for (const auto &record : row_index_of(row).placements)
+				addresses_[record.first] = {row->id, record.second.spec.kind, record.first};
+		}
+		addresses_known_ = true;
+		addresses_revision_ = revision();
 	}
-	return {};
+	const auto found = addresses_.find(id);
+	return found == addresses_.end() ? NodeAddress() : found->second;
+}
+
+FieldUse Document::field_on(const NodeAddress &address, const FieldSchema &field) const {
+	FieldUse use = field_use(field);
+	refine_field(address, use);
+	use.schema = &field;
+	// A type never makes a read-only field writable.
+	use.read_only = use.read_only || field.read_only;
+	return use;
+}
+
+bool Document::record_choices(const NodeAddress &, const FieldUse &,
+		std::vector<FieldChoice> &) const {
+	return false;
+}
+
+const std::vector<FieldChoice> &Document::choices_on(const NodeAddress &address,
+		const FieldUse &use, std::vector<FieldChoice> &own) const {
+	own.clear();
+	if (use.own_choices && record_choices(address, use, own)) return own;
+	return use.schema->choices;
 }
 
 bool Document::get(const NodeAddress &address, const std::string &field, Value &out) const {
@@ -305,6 +349,7 @@ bool Document::read_source(std::vector<uint8_t> bytes, std::vector<std::shared_p
 
 bool Document::load(const std::string &absolute, const std::string &relative, AssetKind kind,
                     const std::string &game, Diagnostic &error) {
+	if (snapshot_) return fail(error, relative, "document.snapshot", "A snapshot is never loaded.");
 	std::vector<uint8_t> bytes;
 	std::string message;
 	if (!read_file_bytes(absolute, bytes, message)) return fail(error, relative, "document.read", message);
@@ -315,6 +360,7 @@ bool Document::load(const std::string &absolute, const std::string &relative, As
 
 bool Document::load_bytes(const std::vector<uint8_t> &bytes, const std::string &relative, AssetKind kind,
                           const std::string &game, Diagnostic &error) {
+	if (snapshot_) return fail(error, relative, "document.snapshot", "A snapshot is never loaded.");
 	const uint64_t hash = fingerprint(bytes);
 	std::vector<std::shared_ptr<Node>> rows;
 	std::shared_ptr<const FileState> state;
@@ -341,6 +387,8 @@ bool Document::load_bytes(const std::vector<uint8_t> &bytes, const std::string &
 }
 
 bool Document::save(Diagnostic &error) {
+	if (snapshot_)
+		return fail(error, path(), "document.snapshot", "A snapshot is read, never saved.");
 	if (absolute_path_.empty())
 		return fail(error, path(), "document.no_file", "This document was read from bytes, not from a file: it has no file to save to.");
 	const SerializeResult output = serialize();
@@ -469,6 +517,8 @@ bool Document::commit(Change change, const std::string &key, Diagnostic &error) 
 bool Document::apply(const std::vector<Edit> &edits, Diagnostic &error) { return apply(edits, nullptr, error); }
 
 bool Document::apply(const std::vector<Edit> &edits, const FollowEdits &follow, Diagnostic &error) {
+	if (snapshot_)
+		return fail(error, path(), "document.snapshot", "A snapshot is read, never edited.");
 	if (blocked_) return fail(error, path(), "document.parse", "Fix the reported source errors and reload this document before editing.");
 	if (edits.empty()) return true;
 	for (const Edit &edit : edits) {
@@ -763,15 +813,25 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	return true;
 }
 
-void Document::undo() { history_.undo(); }
-void Document::redo() { history_.redo(); }
+void Document::undo() {
+	if (!snapshot_) history_.undo();
+}
+void Document::redo() {
+	if (!snapshot_) history_.redo();
+}
 
 // --- the saved baseline ------------------------------------------------------------------
 
 void Document::set_baseline() {
 	saved_rows_ = rows_;
 	saved_state_ = file_state_;
-	changes_ = ChangeCache();
+	saved_positions_.clear();
+	for (size_t i = 0; i < saved_rows_.size(); ++i) saved_positions_[saved_rows_[i]->id] = i;
+	// Every memo made against the old baseline, or a load's rows, is forgotten (a load starts the
+	// revisions again, so one may name another state).
+	row_changes_.clear();
+	moved_known_ = false;
+	addresses_known_ = false;
 	defined_.reset();
 }
 
@@ -781,9 +841,8 @@ std::shared_ptr<const Node> Document::current_row(NodeId id) const {
 }
 
 std::shared_ptr<const Node> Document::saved_row(NodeId id) const {
-	for (const auto &row : saved_rows_)
-		if (row->id == id) return row;
-	return nullptr;
+	const auto found = saved_positions_.find(id);
+	return found == saved_positions_.end() ? nullptr : saved_rows_[found->second];
 }
 
 bool Document::holds(const std::shared_ptr<const Node> &row, const NodeAddress &address) const {
@@ -811,36 +870,49 @@ bool Document::field_differs(const NodeAddress &address, const FieldSchema &fiel
 	return field.optional && read_present(*now, address, field.id) != read_present(*saved, address, field.id);
 }
 
-Document::ChangeCache &Document::changes() const {
-	if (changes_.revision != revision()) {
-		changes_ = ChangeCache();
-		changes_.revision = revision();
-	}
-	return changes_;
+Document::RowChanges &Document::row_changes(NodeId row, const std::shared_ptr<const Node> &now,
+                                            const std::shared_ptr<const Node> &saved) const {
+	RowChanges &changes = row_changes_[row];
+	if (changes.now != now || changes.saved != saved) changes = RowChanges{now, saved, {}, {}};
+	return changes;
 }
 
 bool Document::field_changed(const NodeAddress &address, const std::string &field) const {
-	std::unordered_map<std::string, bool> &fields = changes().fields[address.child ? address.child : address.row];
+	const std::shared_ptr<const Node> now = current_row(address.row);
+	const std::shared_ptr<const Node> saved = saved_row(address.row);
+	// The baseline's own committed row: nothing in it changed.
+	if (now == saved) return false;
+	const NodeId record = address.child ? address.child : address.row;
+	std::unordered_map<std::string, bool> &fields = row_changes(address.row, now, saved).fields[record];
 	const auto cached = fields.find(field);
 	if (cached != fields.end()) return cached->second;
 	const FieldSchema *schema = field_schema(address.kind, field);
-	const bool changed = schema && field_differs(address, *schema, current_row(address.row), saved_row(address.row));
+	const bool changed = schema && field_differs(address, *schema, now, saved);
 	fields.emplace(field, changed);
 	return changed;
 }
 
 Document::RecordChange Document::record_change(const NodeAddress &address) const {
-	ChangeCache &cache = changes();
+	const std::shared_ptr<const Node> now = current_row(address.row);
+	const std::shared_ptr<const Node> saved = saved_row(address.row);
+	if (!now) return RecordChange::Unchanged; // gone: nothing left to mark
+	// The baseline's own committed row: nothing in it changed, though the row may have moved.
+	if (now == saved) {
+		const bool moved = !address.child && now->kind == address.kind && row_moved(address.row);
+		return moved ? RecordChange::Changed : RecordChange::Unchanged;
+	}
+	std::unordered_map<NodeId, RecordChange> &records =
+			row_changes(address.row, now, saved).records;
 	const NodeId key = address.child ? address.child : address.row;
-	const auto cached = cache.records.find(key);
-	if (cached != cache.records.end()) return cached->second;
-	const RecordChange change = compare_record(address);
-	cache.records.emplace(key, change);
+	const auto cached = records.find(key);
+	if (cached != records.end()) return cached->second;
+	const RecordChange change = compare_record(address, now, saved);
+	records.emplace(key, change);
 	return change;
 }
 
-Document::RecordChange Document::compare_record(const NodeAddress &address) const {
-	const std::shared_ptr<const Node> now = current_row(address.row), saved = saved_row(address.row);
+Document::RecordChange Document::compare_record(const NodeAddress &address,
+		const std::shared_ptr<const Node> &now, const std::shared_ptr<const Node> &saved) const {
 	if (!holds(now, address)) return RecordChange::Unchanged; // gone: nothing left to mark
 	if (!holds(saved, address)) return RecordChange::Added;
 	for (const FieldSchema &field : fields(address.kind))
@@ -855,22 +927,23 @@ Document::RecordChange Document::compare_record(const NodeAddress &address) cons
 }
 
 bool Document::row_moved(NodeId id) const {
-	if (!changes_.rows_compared) {
-		changes_.rows_compared = true;
+	if (!moved_known_ || moved_revision_ != revision()) {
+		moved_known_ = true;
+		moved_revision_ = revision();
+		moved_rows_.clear();
 		// The rows both sides have, in each side's order: a row added or removed moves no other,
 		// a reorder moves each row whose index there differs.
-		std::unordered_set<NodeId> now_ids, saved_ids;
+		std::unordered_set<NodeId> now_ids;
 		for (const auto &row : rows_) now_ids.insert(row->id);
-		for (const auto &row : saved_rows_) saved_ids.insert(row->id);
 		std::vector<NodeId> before, after;
 		for (const auto &row : saved_rows_)
 			if (now_ids.count(row->id)) before.push_back(row->id);
 		for (const auto &row : rows_)
-			if (saved_ids.count(row->id)) after.push_back(row->id);
+			if (saved_positions_.count(row->id)) after.push_back(row->id);
 		for (size_t i = 0; i < after.size() && i < before.size(); ++i)
-			if (after[i] != before[i]) changes_.moved_rows.insert(after[i]);
+			if (after[i] != before[i]) moved_rows_.insert(after[i]);
 	}
-	return changes_.moved_rows.count(id) != 0;
+	return moved_rows_.count(id) != 0;
 }
 
 bool Document::file_state_changed() const { return !same_file_state(file_state_.get(), saved_state_.get()); }

@@ -33,8 +33,8 @@ struct InspectorSection {
 	std::string key;   // the step ("" = the record's general fields); a collection's own: its kind token
 	std::string title; // the heading ("" for the general fields)
 	bool has_toggle = false;
-	FieldSchema toggle;              // the block's yes / no field (has_toggle)
-	std::vector<FieldSchema> fields; // the toggle left out
+	FieldUse toggle;              // the block's yes / no field (has_toggle)
+	std::vector<FieldUse> fields; // the toggle left out
 	std::vector<Document::Collection> collections;
 	bool written = false; // a field in it is written, or a collection holds a record (drawn open)
 };

@@ -361,7 +361,7 @@ static int test_apply_scene_textures() {
 	Diagnostic glow;
 	for (const Diagnostic &d : outcome.findings)
 		if (d.code == "import.texture_not_imported") glow = d;
-	TEST_EXPECT(glow.reference == ReferenceKind::Texture && glow.target == "glow.tga" && glow.material_type >= 0);
+	TEST_EXPECT(glow.reference == ReferenceKind::Texture && glow.target == "glow.tga" && glow.loader_arg >= 0);
 	const std::vector<ProblemFix> fixes = fixes_for(glow, view);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Create a placeholder glow.tga" && fixes[0].bulk);
 	if (fixes.empty()) return 1;

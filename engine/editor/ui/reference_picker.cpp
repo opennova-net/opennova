@@ -39,7 +39,7 @@ ReferencePicker::ListKey ReferencePicker::cache_key(const SessionView &view,
 }
 
 void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
-                              const FieldSchema &field, const Value &value, bool others) {
+                              const FieldUse &field, const Value &value, bool others) {
 	const ListKey key = cache_key(view, document);
 	if (popup.view == &view && popup.key == key) return;
 	popup.view = &view;
@@ -70,7 +70,7 @@ void ReferencePicker::prune(const SessionView &view) {
 		it = open.count(it->first.document) ? std::next(it) : popups_.erase(it);
 }
 
-bool ReferencePicker::draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldSchema &field,
+bool ReferencePicker::draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldUse &field,
                            const Value &value, bool compact, std::string &picked, bool others) {
 	if (ImGui::SmallButton(compact ? "..." : "Pick")) ImGui::OpenPopup("references");
 	hover_tip(reference_row(field.reference).also_offers == ReferenceKind::StyleVar
@@ -184,7 +184,7 @@ bool ReferencePicker::draw_popup(EditorHost &host, Popup &popup, std::string &pi
 	return chosen;
 }
 
-bool ReferencePicker::accept_file(const SessionView &view, const FieldSchema &field, std::string &picked) {
+bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field, std::string &picked) {
 	if (!ImGui::BeginDragDropTarget()) return false;
 	bool dropped = false;
 	// The file looked at before the drop is accepted: one that does not fit is never accepted.
@@ -195,7 +195,7 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldSchema &fi
 		const AssetEntry *entry = nullptr;
 		for (const AssetEntry &candidate : view.scan.entries)
 			if (candidate.relative_path == path) entry = &candidate;
-		if (entry && file_serves_reference(entry->kind, field.reference, field.material_type) &&
+		if (entry && file_serves_reference(entry->kind, field.reference, field.loader_arg) &&
 		    ImGui::AcceptDragDropPayload(kFileDragPayload)) {
 			picked = entry->logical_name;
 			dropped = true;

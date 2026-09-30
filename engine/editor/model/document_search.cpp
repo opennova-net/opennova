@@ -20,22 +20,25 @@ size_t find_text(const std::string &in, const std::string &text, const SearchOpt
 std::vector<DocumentHit> find_in_document(const Document &document, const std::string &text, const SearchOptions &options) {
 	std::vector<DocumentHit> hits;
 	if (text.empty()) return hits;
+	// A record's own choices are the widgets' alone (Document::record_choices): a value naming
+	// one is found as the file writes it (a register's index, not its name).
+	static const std::vector<FieldChoice> none;
 	const auto search = [&](const NodeAddress &address) {
 		for (const FieldSchema &schema : document.fields(address.kind)) {
-			const FieldSchema field = document.field_on(address, schema);
-			if (field.optional && !document.present(address, field.id)) continue;
-			if (field.applies == Applicability::Ignored && !written(document, address, field)) continue;
+			const FieldUse field = document.field_on(address, schema);
+			if (schema.optional && !document.present(address, schema.id)) continue;
+			if (field.applies == Applicability::Ignored && !written(document, address, schema)) continue;
 			Value value;
-			if (!document.get(address, field.id, value)) continue;
+			if (!document.get(address, schema.id, value)) continue;
 			DocumentHit hit;
-			hit.text = field_text(field, value);
+			hit.text = field_text(schema, field.own_choices ? none : schema.choices, value);
 			hit.at = find_text(hit.text, text, options);
 			if (hit.at == std::string::npos) continue;
 			hit.address = address;
 			hit.locator = document.locator(address);
 			hit.record = document.record_path(address);
-			hit.field = field.id;
-			hit.label = field_title(field);
+			hit.field = schema.id;
+			hit.label = field_title(schema);
 			hits.push_back(std::move(hit));
 		}
 	};

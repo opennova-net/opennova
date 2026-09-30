@@ -149,7 +149,12 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 		error = "The owner no longer exists.";
 		return false;
 	}
-	row.places.reset();
+	// Every identity's place made again once the lists changed, whichever way the edit ends: a
+	// later edit of its batch finds its record by them.
+	struct Reindex {
+		ModelRow &row;
+		~Reindex() { index_places(row); }
+	} reindex{row};
 	const size_t index = place.index;
 	switch (static_cast<ModelKind>(edit.address.kind)) {
 	case ModelKind::Material: {

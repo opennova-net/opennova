@@ -48,14 +48,20 @@ public:
 	std::vector<KindSpec> top_kinds() const override { return {}; }
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// An event's trigger word only on a version 1 clip (version 0 events carry none); a
-	// bone's parent chosen among the clip's bones, shown by name.
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
+	// A bone's parent: none (a root), or one of the clip's bones by name.
+	bool record_choices(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &out) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<AnimationDocument>(*this);
+	}
 
 	const ClipRow *clip() const;
 
 protected:
+	// An event's trigger word only on a version 1 clip (version 0 events carry none); a
+	// bone's parent chosen among the clip's bones, shown by name (record_choices).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;

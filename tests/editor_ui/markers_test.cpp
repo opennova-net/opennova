@@ -275,7 +275,7 @@ void test_reveal_field() {
 	CHECK(inspector && inspector->Scroll.y == 0.0f, "the form at its top");
 	const ImGuiTable *before = ImGui::TableFindByID(table_id);
 	CHECK(!before || before->LastFrameActive != GImGui->FrameCount, "its fields not drawn while folded");
-	v.reveal_field = folded->fields.back().id;
+	v.reveal_field = folded->fields.back().schema->id;
 	++v.reveal_serial;
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(4);
@@ -518,7 +518,7 @@ void test_revert_several() {
 	int row = -1;
 	const std::vector<InspectorSection> shared = plan_shared_inspector(*document, {back, title}, "");
 	for (size_t i = 0; !shared.empty() && shared.front().key.empty() && i < shared.front().fields.size(); ++i)
-		if (shared.front().fields[i].id == "hidden") row = int(i);
+		if (shared.front().fields[i].schema->id == "hidden") row = int(i);
 	CHECK(row >= 0, "Hidden is a shared field");
 	ImVec2 at;
 	CHECK(field_name_at(ui, "", row, "BACK: Saved: No", at) && logged_frame(ui).find("TITLE: Saved: No") != std::string::npos,

@@ -142,16 +142,25 @@ const std::vector<FieldSchema> &AnimationDocument::fields(NodeKind kind) const {
 	return kind == kClip ? clip_fields() : kind == kBone ? bone_fields() : kind == kEvent ? event_fields() : none;
 }
 
-FieldSchema AnimationDocument::field_on(const NodeAddress &address, const FieldSchema &field) const {
-	FieldSchema out = field;
+void AnimationDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	const ClipRow *row = clip();
-	if (row && address.kind == kEvent && field.id == "trigger" && row->version == 0) out.applies = Applicability::Ignored;
+	if (row && address.kind == kEvent && use.schema->id == "trigger" && row->version == 0)
+		use.applies = Applicability::Ignored;
 	// A bone's parent by the parent bone's name (the file writes its place): the clip's own bones.
-	if (row && address.kind == kBone && field.id == "parent") {
-		out.choices.push_back({"-1", -1, "None (a root)"});
-		for (size_t i = 0; i < row->bones.size(); ++i) out.choices.push_back({std::to_string(i), int64_t(i), row->bones[i].name});
+	if (row && address.kind == kBone && use.schema->id == "parent") {
+		use.own_choices = true;
+		use.record_owner = {row->id, kClip, 0};
 	}
-	return out;
+}
+
+bool AnimationDocument::record_choices(const NodeAddress &address, const FieldUse &use,
+		std::vector<FieldChoice> &out) const {
+	const ClipRow *row = clip();
+	if (!row || address.kind != kBone || use.schema->id != "parent") return false;
+	out.push_back({"-1", -1, "None (a root)"});
+	for (size_t i = 0; i < row->bones.size(); ++i)
+		out.push_back({std::to_string(i), int64_t(i), row->bones[i].name});
+	return true;
 }
 
 bool AnimationDocument::read(const Node &node, const NodeAddress &address, const std::string &field, Value &out) const {

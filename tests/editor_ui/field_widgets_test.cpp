@@ -91,7 +91,7 @@ void test_choices_of_one_name() {
 	field.type = FieldType::Integer;
 	field.choices = {{"5", 5, "Boat"}, {"6", 6, "Boat"}};
 	Value value = int64_t(0);
-	const auto draw = [&] { widgets::choice(field, value); };
+	const auto draw = [&] { widgets::choice(field, field.choices, value); };
 	widget_frame(draw, 2);
 	const ImGuiID list = ImHashStr("##Combo_00");
 	for (const int index : {1, 0}) {
@@ -152,13 +152,16 @@ void test_group_row() {
 	NullBackend backend;
 	std::vector<FieldSchema> fields = {channel("start.r", "Start red"), channel("start.g", "Start green"),
 	                                   channel("start.b", "Start blue")};
+	// Each as it applies to a record, its schema's own (FieldUse).
+	std::vector<FieldUse> uses;
+	for (const FieldSchema &field : fields) uses.push_back(field_use(field));
 	std::vector<Value> values = {int64_t(10), int64_t(20), int64_t(30)};
 	size_t changed = SIZE_MAX;
 	float top = 0.0f, bottom = 0.0f;
 	const auto draw = [&] {
 		top = ImGui::GetCursorScreenPos().y;
 		size_t at = SIZE_MAX;
-		if (widgets::group(fields, values, at).changed) changed = at;
+		if (widgets::group(uses, values, at).changed) changed = at;
 		bottom = ImGui::GetCursorScreenPos().y;
 	};
 	widget_frame(draw, 2);
@@ -181,10 +184,12 @@ void test_group_row() {
 		position[i].unit = "m";
 		position[i].group = "Position";
 	}
+	std::vector<FieldUse> placed;
+	for (const FieldSchema &field : position) placed.push_back(field_use(field));
 	std::vector<Value> at = {1.0, 2.0, 3.0};
 	const auto place = [&] {
 		size_t which = SIZE_MAX;
-		widgets::group(position, at, which);
+		widgets::group(placed, at, which);
 	};
 	widget_frame(place);
 	CHECK(count_of(logged_widgets(place), "m") == 1, "a unit the members share shows once");
@@ -203,7 +208,7 @@ void test_open_choice() {
 	Value value = std::string("medic");
 	int picks = 0;
 	const auto draw = [&] {
-		if (widgets::choice(field, value).changed) ++picks;
+		if (widgets::choice(field, field.choices, value).changed) ++picks;
 	};
 	widget_frame(draw);
 	ImGui::ActivateItemByID(widget({"##value"}));
@@ -226,7 +231,7 @@ void test_open_choice() {
 	const char *names[] = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
 	for (int i = 0; i < 9; ++i) closed.choices.push_back({names[i], i + 1});
 	Value number = int64_t(1);
-	const auto list = [&] { widgets::choice(closed, number); };
+	const auto list = [&] { widgets::choice(closed, closed.choices, number); };
 	widget_frame(list);
 	ImGui::ActivateItemByID(widget({"##value"}));
 	widget_frame(list, 3);
@@ -248,7 +253,7 @@ void test_open_choice() {
 void test_typed_values() {
 	NullBackend backend;
 	auto typed = [](FieldSchema field, Value value, const char *text) {
-		const auto draw = [&] { widgets::choice(field, value); };
+		const auto draw = [&] { widgets::choice(field, field.choices, value); };
 		widget_frame(draw);
 		ImGui::ActivateItemByID(widget({"##value"}));
 		widget_frame(draw, 3);

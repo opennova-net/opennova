@@ -46,11 +46,8 @@ void quiet_text(const std::string &text, const std::string &tip = std::string())
 // A colour swatch over the value, read and written as the game's AARRGGBB word (the
 // Inspector's HexArgb swatch).
 void color_cell(EditorHost &host, const Document &document, const NodeAddress &address, const std::string &value) {
-	FieldSchema argb;
-	argb.type = FieldType::Text;
-	argb.color = FieldColor::HexArgb;
 	Value picked = value;
-	const field_widgets::Edited change = field_widgets::swatch(argb, picked);
+	const field_widgets::Edited change = field_widgets::swatch(FieldColor::HexArgb, picked);
 	if (change.changed) set(host, document, address, "value", std::move(picked)); // coalesced: one undo step per drag
 	if (change.finished) window_requests::end_edit(host, document.path());
 }
@@ -197,13 +194,13 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 					else image = true;
 				}
 			}
-			FieldSchema value_schema;
+			FieldUse value_schema;
 			for (const FieldSchema &schema : document.fields(kVariable))
 				if (schema.id == "value") value_schema = document.field_on(line, schema);
 			// A font or a texture: picked with the reference picker from the project's files the
 			// kind loads, or a Files row dropped on the value.
 			const bool colour = !frozen && (color || (!font && !image && mnu::color_reads_whole(value)));
-			FieldSchema file = value_schema;
+			FieldUse file = value_schema;
 			file.reference = font || value_schema.reference == ReferenceKind::Font ? ReferenceKind::Font
 			                 : image || value_schema.reference == ReferenceKind::MenuTexture ? ReferenceKind::MenuTexture
 			                                                                                  : ReferenceKind::None;

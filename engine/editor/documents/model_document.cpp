@@ -27,32 +27,34 @@ const KindRow *kind_row(NodeKind kind) {
 	return nullptr;
 }
 
-// Every identity of a row by where it sits, built on first use (a committed row never
-// changes; a clone forgets it before a structural edit).
+// Every identity of a row by where it sits: made when the row is given its identities
+// (for_each_identity) and by each structural edit of a clone (index_places), never inside a
+// const query, so a committed row's places are there and never change.
 const ModelPlaces &places_of(const Node &node) {
-	if (node.kind == node_kind(ModelKind::Model)) {
-		const ModelRow &row = static_cast<const ModelRow &>(node);
-		if (!row.places) {
-			auto made = std::make_shared<ModelPlaces>();
-			for (uint8_t c = 0; c < row.collections.size(); ++c)
-				for (uint32_t i = 0; i < row.collections[c].size(); ++i) (*made)[row.collections[c][i]] = {c, 0, i};
-			for (uint32_t l = 0; l < row.lods.size(); ++l)
-				for (uint32_t i = 0; i < row.lods[l].panm_ids.size(); ++i) (*made)[row.lods[l].panm_ids[i]] = {kPanmSlot, l, i};
-			for (uint32_t m = 0; m < row.materials.size(); ++m)
-				for (uint32_t i = 0; i < row.materials[m].texture_ids.size(); ++i)
-					(*made)[row.materials[m].texture_ids[i]] = {kTextureSlot, m, i};
-			row.places = made;
-		}
-		return *row.places;
+	static const ModelPlaces none;
+	const std::shared_ptr<const ModelPlaces> &places = node.kind == node_kind(ModelKind::Model)
+			? static_cast<const ModelRow &>(node).places
+			: static_cast<const CollisionRow &>(node).places;
+	return places ? *places : none;
+}
+
+void index_places(Node &node) {
+	auto made = std::make_shared<ModelPlaces>();
+	for (uint8_t c = 0; c < node.collections.size(); ++c)
+		for (uint32_t i = 0; i < node.collections[c].size(); ++i)
+			(*made)[node.collections[c][i]] = {c, 0, i};
+	if (node.kind != node_kind(ModelKind::Model)) {
+		static_cast<CollisionRow &>(node).places = made;
+		return;
 	}
-	const CollisionRow &row = static_cast<const CollisionRow &>(node);
-	if (!row.places) {
-		auto made = std::make_shared<ModelPlaces>();
-		for (uint8_t c = 0; c < row.collections.size(); ++c)
-			for (uint32_t i = 0; i < row.collections[c].size(); ++i) (*made)[row.collections[c][i]] = {c, 0, i};
-		row.places = made;
-	}
-	return *row.places;
+	ModelRow &row = static_cast<ModelRow &>(node);
+	for (uint32_t l = 0; l < row.lods.size(); ++l)
+		for (uint32_t i = 0; i < row.lods[l].panm_ids.size(); ++i)
+			(*made)[row.lods[l].panm_ids[i]] = {kPanmSlot, l, i};
+	for (uint32_t m = 0; m < row.materials.size(); ++m)
+		for (uint32_t i = 0; i < row.materials[m].texture_ids.size(); ++i)
+			(*made)[row.materials[m].texture_ids[i]] = {kTextureSlot, m, i};
+	row.places = made;
 }
 
 bool place_of(const Node &row, NodeId id, ModelPlace &out) {
@@ -162,6 +164,12 @@ FieldSchema field_of(const ThreediSchemaField &f) {
 	out.description = f.note;
 	if (f.channel) out.color = FieldColor::Channel;
 	if (f.unverified) out.applies = Applicability::Unverified;
+	// An index (a CTRL register, a part of LOD 0, an MTRX row) takes any other index typed
+	// beside the ones a record offers of its own (ModelDocument::record_choices).
+	const ThreediSchemaReference named = f.reference;
+	if (named == ThreediSchemaReference::Register || named == ThreediSchemaReference::Part ||
+			named == ThreediSchemaReference::Frame)
+		out.open_choices = true;
 	// An integer keeps to the range its record's word holds (threedi_schema_set refuses past it).
 	if (f.type == ThreediSchemaType::Integer && f.min < f.max) {
 		out.ranged = true;
@@ -181,21 +189,31 @@ std::vector<FieldChoice> shader_choices() {
 	return out;
 }
 
-// What an index field names on this record, as its choices (any other index typed too): a
-// CTRL register by its name, a part of LOD 0, an MTRX row (threedi_schema_reference); with
-// the value the table calls none (a part animation's parent 255, a user point's part -1, a
-// frame byte 0). A frame byte offers the MTRX rows wherever its row turns through one (a
-// spinner or Euler row: threedi_schema_reads), whatever it names now, so "none" is no dead
-// end. Only an index the field can hold is offered (a byte-sized parameter takes registers
-// 0..255).
-void index_choices(const ModelRow &row, const ThreediSchemaRecord &record, ThreediSchemaReference ref, FieldSchema &out) {
-	const auto offer = [&](int64_t value, std::string name, std::string label) {
-		if (out.ranged && (double(value) < out.min || double(value) > out.max)) return;
-		out.choices.push_back({std::move(name), value, std::move(label)});
-	};
-	const ThreediSchemaField *schema = threedi_schema_field(record.shape, out.id);
-	if (schema && schema->reference == ThreediSchemaReference::Frame && threedi_schema_reads(record, out.id))
+// What an index field names on this record (threedi_schema_reference, `ref`): a CTRL
+// register, a part of LOD 0 or an MTRX row; a frame byte names the MTRX rows wherever its row
+// turns through one (a spinner or Euler row: threedi_schema_reads), whatever it names now, so
+// "none" is no dead end. None for any other field.
+ThreediSchemaReference index_reference(const ThreediSchemaRecord &record, const std::string &path,
+                                       ThreediSchemaReference ref) {
+	const ThreediSchemaField *schema = threedi_schema_field(record.shape, path);
+	if (schema && schema->reference == ThreediSchemaReference::Frame &&
+			threedi_schema_reads(record, path))
 		ref = ThreediSchemaReference::Frame;
+	const bool index = ref == ThreediSchemaReference::Register ||
+			ref == ThreediSchemaReference::Part || ref == ThreediSchemaReference::Frame;
+	return index ? ref : ThreediSchemaReference::None;
+}
+
+// What an index field names on this record (index_reference), as its choices (any other index
+// typed too): a CTRL register by its name, a part of LOD 0, an MTRX row; with the value the
+// table calls none (a part animation's parent 255, a user point's part -1, a frame byte 0).
+// Only an index the field can hold is offered (a byte-sized parameter takes registers 0..255).
+void index_choices(const ModelRow &row, const ThreediSchemaRecord &record,
+		ThreediSchemaReference ref, const FieldSchema &field, std::vector<FieldChoice> &out) {
+	const auto offer = [&](int64_t value, std::string name, std::string label) {
+		if (field.ranged && (double(value) < field.min || double(value) > field.max)) return;
+		out.push_back({std::move(name), value, std::move(label)});
+	};
 	switch (ref) {
 	case ThreediSchemaReference::Register:
 		for (size_t i = 0; i < row.registers.size(); ++i) offer(int64_t(i), std::to_string(i), row.registers[i].name);
@@ -215,7 +233,6 @@ void index_choices(const ModelRow &row, const ThreediSchemaRecord &record, Three
 		break;
 	default: return;
 	}
-	out.open_choices = true;
 }
 
 const Document::CollectionSpec spec(ModelKind kind, const char *label, const char *name_field, bool fixed,
@@ -240,13 +257,14 @@ ModelRow::ModelRow() {
 std::shared_ptr<Node> ModelRow::clone() const { return std::make_shared<ModelRow>(*this); }
 
 void ModelRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
-	places.reset();
 	for (auto &collection : collections)
 		for (NodeId &id : collection) fn(id);
 	for (ModelLod &lod : lods)
 		for (NodeId &id : lod.panm_ids) fn(id);
 	for (ModelMaterial &material : materials)
 		for (NodeId &id : material.texture_ids) fn(id);
+	// The identities may be new (a load's, a duplicate's): their places made again.
+	model_document_detail::index_places(*this);
 }
 
 CollisionRow::CollisionRow() {
@@ -255,9 +273,9 @@ CollisionRow::CollisionRow() {
 }
 
 void CollisionRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
-	places.reset();
 	for (auto &collection : collections)
 		for (NodeId &id : collection) fn(id);
+	model_document_detail::index_places(*this);
 }
 
 bool is_model_kind(AssetKind kind) { return kind == AssetKind::Model; }
@@ -324,38 +342,60 @@ const std::vector<FieldSchema> &ModelDocument::fields(NodeKind kind) const {
 	return none;
 }
 
-FieldSchema ModelDocument::field_on(const NodeAddress &address, const FieldSchema &field) const {
-	FieldSchema out = field;
+void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	const Node *node = row(address.row);
-	if (!node) return out;
+	if (!node) return;
 	const ThreediSchemaRecord record = record_of(const_cast<Node &>(*node), address);
-	if (!record) return out;
-	const ThreediSchemaField *schema = threedi_schema_field(record.shape, field.id);
-	out.applies = schema && schema->unverified              ? Applicability::Unverified
-	              : threedi_schema_reads(record, field.id) ? Applicability::Reads
-	                                                       : Applicability::Ignored;
-	const ThreediSchemaReference ref = threedi_schema_reference(record, field.id);
-	out.reference = ref == ThreediSchemaReference::Texture ? ReferenceKind::Texture : ReferenceKind::None;
-	if (node->kind == kModel) index_choices(static_cast<const ModelRow &>(*node), record, ref, out);
+	if (!record) return;
+	const std::string &id = use.schema->id;
+	const ThreediSchemaField *schema = threedi_schema_field(record.shape, id);
+	use.applies = schema && schema->unverified        ? Applicability::Unverified
+	              : threedi_schema_reads(record, id) ? Applicability::Reads
+	                                                 : Applicability::Ignored;
+	const ThreediSchemaReference ref = threedi_schema_reference(record, id);
+	use.reference =
+			ref == ThreediSchemaReference::Texture ? ReferenceKind::Texture : ReferenceKind::None;
+	// An index names what the model row holds (record_choices): its registers and frames are
+	// its records, LOD 0's parts are not.
+	if (node->kind == kModel) {
+		const ThreediSchemaReference named = index_reference(record, id, ref);
+		if (named != ThreediSchemaReference::None) {
+			use.own_choices = true;
+			if (named != ThreediSchemaReference::Part) use.record_owner = {node->id, kModel, 0};
+		}
+	}
 	// A texture row's name loads the file its type's loader picks (reference_file_candidates).
-	if (out.reference == ReferenceKind::Texture && record.shape == ThreediSchemaShape::Texture)
-		out.material_type = static_cast<const ThreediMaterialTexture *>(record.data)->type;
+	if (use.reference == ReferenceKind::Texture && record.shape == ThreediSchemaShape::Texture)
+		use.loader_arg = static_cast<const ThreediMaterialTexture *>(record.data)->type;
 	// A user point is looked up on the model an item names by its file (the item's graphic).
-	if (out.defines == ReferenceKind::UserPoint)
-		out.scope = strutil::to_upper(std::filesystem::path(path()).filename().generic_string());
-	return out;
+	if (use.defines == ReferenceKind::UserPoint)
+		use.scope = strutil::to_upper(std::filesystem::path(path()).filename().generic_string());
 }
 
-void ModelDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const {
+bool ModelDocument::record_choices(const NodeAddress &address, const FieldUse &use,
+		std::vector<FieldChoice> &out) const {
+	const Node *node = row(address.row);
+	if (!node || node->kind != kModel) return false;
+	const ThreediSchemaRecord record = record_of(const_cast<Node &>(*node), address);
+	if (!record) return false;
+	const std::string &id = use.schema->id;
+	const ThreediSchemaReference named =
+			index_reference(record, id, threedi_schema_reference(record, id));
+	if (named == ThreediSchemaReference::None) return false;
+	index_choices(static_cast<const ModelRow &>(*node), record, named, *use.schema, out);
+	return true;
+}
+
+void ModelDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	// An item's particle slot finds a user point among the model's first 16 without case: a
 	// later one no lookup reaches [orig: ItemDef_GetBoneMaskByName @ 0x49ea40, the scan end @
 	// 0x49ea73].
 	Placement at;
 	if (address.kind == node_kind(ModelKind::UserPoint) && placement(address, at) &&
 	    at.index >= size_t(THREEDI_USER_POINT_SCAN_LIMIT)) {
-		symbol.inert = true;
-		symbol.inert_reason = "an item's lookup scans the model's first " + std::to_string(THREEDI_USER_POINT_SCAN_LIMIT) +
-		                      " user points only";
+		facts.inert = true;
+		facts.inert_reason = "an item's lookup scans the model's first " +
+				std::to_string(THREEDI_USER_POINT_SCAN_LIMIT) + " user points only";
 	}
 }
 

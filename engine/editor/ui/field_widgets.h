@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/field_use.h>
 #include <editor/model/value.h>
 
 // The controls that edit one value of a field (ADR 0046 S12), each drawing what the field's
@@ -34,35 +35,40 @@ struct Edited {
 // several records, the primary's).
 Edited number(const FieldSchema &field, Value &value, bool unit = true);
 
-// A field with choices: a list of them by name (the token the file writes in each one's
+// A field with choices (the schema's, or the ones its record offers of its own:
+// Document::choices_on): a list of them by name (the token the file writes in each one's
 // tooltip; each item under its index among the choices, so two of one name are two) under a box
 // that narrows it by what is typed (a long list, an open field); an open field takes the typed
 // token itself (Enter, or its line at the top), written as typed.
 // `mixed`: no choice named. `value` a text field's token, a number's value.
-Edited choice(const FieldSchema &field, Value &value, bool mixed = false);
+Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices, Value &value,
+		bool mixed = false);
 
-// A colour field's swatch, a square as high as a control that opens a picker: a HexArgb text
-// (none drawn for a %VAR%, which the stylesheet resolves), written AARRGGBB; a PackedRgb
-// integer, written 0xRRGGBB.
-Edited swatch(const FieldSchema &field, Value &value);
+// A colour field's swatch (`color` the form the field holds a colour in, as it applies to its
+// record), a square as high as a control that opens a picker: a HexArgb text (none drawn for a
+// %VAR%, which the stylesheet resolves), written AARRGGBB; a PackedRgb integer, written
+// 0xRRGGBB.
+Edited swatch(FieldColor color, Value &value);
 // A red / green / blue group's swatch over its three channels (0..255, in that order).
 Edited channel_swatch(std::vector<Value> &values);
 // The width a swatch takes on its line, the gap after it included.
 float swatch_width();
 
-// One value's control by what the field is (a flags field's bits aside: the caller's, which
-// sets each record's own): a yes / no tick, a list of choices, a text (a HexArgb one after
-// its swatch), a number (a PackedRgb one after its swatch). `compact`: a table cell (a text on
-// one line, no unit: its column's heading has it). `mixed`: the targets differ (a text shows
-// empty with a hint, a list names no choice, a number the primary's value).
-Edited value(const FieldSchema &field, Value &value, bool compact, bool mixed = false);
+// One value's control by what the field is as it applies to its record (a flags field's bits
+// aside: the caller's, which sets each record's own): a yes / no tick, a list of `choices` (the
+// schema's, or the record's own: Document::choices_on), a text (a HexArgb one after its swatch),
+// a number (a PackedRgb one after its swatch). `compact`: a table cell (a text on one line, no
+// unit: its column's heading has it). `mixed`: the targets differ (a text shows empty with a
+// hint, a list names no choice, a number the primary's value).
+Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Value &value,
+		bool compact, bool mixed = false);
 
-// The fields of one group on one row, each at its share of the width set (after a swatch for
-// a Channel group), with its name and what it is in its tooltip. `values` in the order of
-// `fields`; `mixed` which of them differ across the records edited (empty: none). When one
-// changed, `changed` is its index and `values[changed]` its value; a swatch's pick changes
-// every channel (`changed` SIZE_MAX).
-Edited group(const std::vector<FieldSchema> &fields, std::vector<Value> &values, size_t &changed,
+// The fields of one group on one row (as they apply to the record, each with its schema's
+// choices), each at its share of the width set (after a swatch for a Channel group), with its
+// name and what it is in its tooltip. `values` in the order of `fields`; `mixed` which of them
+// differ across the records edited (empty: none). When one changed, `changed` is its index and
+// `values[changed]` its value; a swatch's pick changes every channel (`changed` SIZE_MAX).
+Edited group(const std::vector<FieldUse> &fields, std::vector<Value> &values, size_t &changed,
              const std::vector<bool> &mixed = {});
 
 } // namespace opennova::editor::field_widgets

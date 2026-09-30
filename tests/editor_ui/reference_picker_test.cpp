@@ -54,8 +54,8 @@ struct PickerProject {
 	std::string section_of(const char *field) const {
 		const SessionView &v = session.view();
 		for (const InspectorSection &section : plan_inspector(*items, v.selection, v.selection, ""))
-			for (const FieldSchema &schema : section.fields)
-				if (schema.id == field) return section.key;
+			for (const FieldUse &use : section.fields)
+				if (use.schema->id == field) return section.key;
 		return std::string();
 	}
 };
@@ -247,7 +247,7 @@ void test_list_kept() {
 	Ui ui;
 	ui.windows.set_view(&project.session.view());
 	ui.frames(2);
-	FieldSchema graphic;
+	FieldUse graphic;
 	for (const FieldSchema &field : project.items->fields(project.item.kind))
 		if (field.id == "graphic") graphic = project.items->field_on(project.item, field);
 	CHECK(graphic.reference == ReferenceKind::Model, "the model field");

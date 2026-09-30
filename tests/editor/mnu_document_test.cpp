@@ -244,9 +244,12 @@ int validation() {
 	for (const FieldSchema &field : document->fields(kWindow))
 		if (field.id == "font.name") font = &field;
 	TEST_EXPECT(font && font->reference == ReferenceKind::Font);
+	if (!font) return 1;
+	const FieldUse font_use = document->field_on(exit, *font);
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.diagnostics, "reference.missing"));
-	TEST_EXPECT(document->reference_status(*font, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
-	TEST_EXPECT(document->reference_status(*font, std::string("%DEF_FONTNAME_LG%"), view, nullptr) == ReferenceStatus::Present);
+	TEST_EXPECT(document->reference_status(font_use, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
+	TEST_EXPECT(document->reference_status(font_use, std::string("%DEF_FONTNAME_LG%"), view, nullptr) ==
+	            ReferenceStatus::Present);
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.diagnostics, "reference.missing"));
 	// An APPEARANCE's value is a texture when its TYPE is IMAGE (field_on).
 	const NodeAddress row = child_of(*document, exit, "appearance");
@@ -255,7 +258,7 @@ int validation() {
 		if (field.id == "value") value = &field;
 	TEST_EXPECT(value && value->reference == ReferenceKind::None && document->field_on(row, *value).reference == ReferenceKind::None);
 	TEST_EXPECT(edit(image_edits(*document, exit, "missing.tga")) && has_code(view.diagnostics, "reference.missing"));
-	const FieldSchema image = document->field_on(row, *value);
+	const FieldUse image = document->field_on(row, *value);
 	TEST_EXPECT(image.reference == ReferenceKind::MenuTexture);
 	TEST_EXPECT(document->reference_status(image, std::string("missing.tga"), view, nullptr) == ReferenceStatus::Missing);
 	TEST_EXPECT(edit({set(exit, "string.type", std::string("ID")), set(exit, "string.value", std::string("NO_SUCH_ID"))}) &&
@@ -274,7 +277,7 @@ int validation() {
 		                                d.row_id == action.row && d.record_kind == action.kind);
 	TEST_EXPECT(on_the_field);
 	TEST_EXPECT(edit({set(action, "file", std::string("other.mnu"))}));
-	TEST_EXPECT(!document->reference_choices(*font, view).empty()); // the project's fonts
+	TEST_EXPECT(!document->reference_choices(font_use, view).empty()); // the project's fonts
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds, blocked by the missing texture.
 	session.handle(make_request(EditorRequestKind::Build));
@@ -564,6 +567,9 @@ int every_list() {
 	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
 	const NodeAddress item{back.row, menu_kind("items.item"), document.last_added()};
 	TEST_EXPECT(window_of(document, back)->items.present && document.present(item, std::string()));
+	// The committed screen holds its new record's place, made by the edit, not by a query (the
+	// thread confinement, model/document.h).
+	TEST_EXPECT(static_cast<const MenuScreen *>(document.row(item.row))->places().count(item.child) == 1);
 	// ... which a button does not read (flagged, still written).
 	FieldSchema text;
 	for (const FieldSchema &field : document.fields(item.kind))
@@ -1861,7 +1867,7 @@ int colours_and_flags() {
 	auto schema = [&](const NodeAddress &at, const char *id) {
 		for (const FieldSchema &field : document->fields(at.kind))
 			if (field.id == id) return document->field_on(at, field);
-		return FieldSchema();
+		return FieldUse();
 	};
 	for (const char *id : {"font.default_fg", "font.default_bg", "font.mouseover_fg", "font.mouseover_bg", "font.selected_fg",
 	                       "font.selected_bg", "font.disabled_fg", "font.disabled_bg"})
@@ -1875,7 +1881,7 @@ int colours_and_flags() {
 	TEST_EXPECT(document->apply(set(appearance, "type", std::string("IMAGE")), error));
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::None &&
 	            schema(appearance, "value").reference == ReferenceKind::MenuTexture);
-	const FieldSchema flags = schema(appearance, "flags"), cursor = schema(exit, "cursor.flags");
+	const FieldSchema &flags = *schema(appearance, "flags").schema, &cursor = *schema(exit, "cursor.flags").schema;
 	// No text first (the element left out), then the table's 43 tokens.
 	TEST_EXPECT(flags.open_choices && flags.choices.size() == 44 && cursor.open_choices && cursor.choices.size() == 44);
 	TEST_EXPECT(flags.choices[0].name.empty() && flags.choices[0].label == "Not written" && cursor.choices[0].name.empty() &&

@@ -59,13 +59,19 @@ public:
 	std::vector<KindSpec> top_kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// An item's particle slot names a user point of the item's graphic model: the scope is
-	// that model's file, and a record with no graphic names none. An item's vehicle spawn
-	// slots are the bits of the file's registry, each named by its id.
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
+	// An item's vehicle spawn slots: the bits of the file's registry, each named by its id.
+	bool record_choices(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &out) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<DefCatalogDocument>(*this);
+	}
 
 protected:
+	// An item's particle slot names a user point of the item's graphic model: the scope is
+	// that model's file, and a record with no graphic names none. An item's vehicle spawn
+	// slots offer the registry's ids (record_choices).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;

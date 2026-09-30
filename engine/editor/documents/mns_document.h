@@ -54,17 +54,17 @@ public:
 	std::vector<KindSpec> top_kinds() const override;
 	std::vector<Collection> collections(const Node &, const NodeAddress &) const override { return {}; }
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// A variable's value names a font or a texture when its extension says so, on the
-	// definition the game reads of a stylesheet it reads: the graph's edge, the badge and
-	// the picker. An earlier definition of the same name is ignored.
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
 	// The row's own fields (read), and what its place in the document says: its first
 	// line (`line`) and whether a later definition overrides it (`overridden`).
 	bool get(const NodeAddress &address, const std::string &field, Value &out) const override;
-	// A variable's name defines its %NAME%: the definition the game reads carries its value;
-	// an earlier definition of the name, and one past where the game stops reading, are inert.
-	void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const override;
+	// A variable's name defines its %NAME%, on its first line: the definition the game reads
+	// carries its value; an earlier definition of the name, and one past where the game stops
+	// reading, are inert.
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<MnsDocument>(*this);
+	}
 
 	// The rows as the game's reader sees them, rendered and parsed again: the diagnostics
 	// with their current lines, evaluate(), entries().
@@ -81,6 +81,10 @@ public:
 	bool read_by_game() const;
 
 protected:
+	// A variable's value names a font or a texture when its extension says so, on the
+	// definition the game reads of a stylesheet it reads: the graph's edge, the badge and
+	// the picker. An earlier definition of the same name is ignored.
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;

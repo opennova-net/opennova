@@ -50,6 +50,9 @@ public:
 	// A row by its slot's words (animation_key_title), a clip by its file.
 	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<AnimationMapDocument>(*this);
+	}
 	// The table as the engine reads it, rebuilt from the rows.
 	std::vector<adm::AdmEntry> entries() const;
 

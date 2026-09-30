@@ -182,42 +182,42 @@ NodeId MnsDocument::winning_row(const std::string &name) const {
 	return found;
 }
 
-FieldSchema MnsDocument::field_on(const NodeAddress &address, const FieldSchema &schema) const {
-	if (address.kind != kVariable || schema.id != "value") return schema;
+void MnsDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
+	if (address.kind != kVariable || use.schema->id != "value") return;
 	const Node *row = this->row(address.row);
-	if (!row) return schema;
-	FieldSchema out = schema;
+	if (!row) return;
 	if (winning_row(row->name()) != row->id) {
-		out.applies = Applicability::Ignored; // a later definition is the one the game reads
-		return out;
+		use.applies = Applicability::Ignored; // a later definition is the one the game reads
+		return;
 	}
-	if (!read_by_game()) return out;
+	if (!read_by_game()) return;
 	// A value naming a file of a kind a style variable stands for (a font, a menu texture) is a
 	// reference to that file.
-	out.reference = style_value_reference(classify_asset(mns::game_value(style_of(*row).native), nullptr));
-	return out;
+	use.reference =
+			style_value_reference(classify_asset(mns::game_value(style_of(*row).native), nullptr));
 }
 
-void MnsDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const {
+void MnsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	// The definition the game reads of a name is the last, carrying the value the game reads
 	// [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639870]; an earlier one, and one on a line
 	// past the place the game stops reading the file, are defined but never read.
 	const Node *node = row(address.row);
 	if (!node) return;
+	facts.line = size_t(line_of(node->id));
 	Value value;
-	if (get(address, "value", value)) symbol.value = std::get<std::string>(value);
+	if (get(address, "value", value)) facts.value = std::get<std::string>(value);
 	const mns::StyleSheet &sheet = game_sheet();
 	if (winning_row(node->name()) != node->id) {
-		symbol.inert = true;
-		symbol.inert_reason = "the file defines it again below, and the game reads the last";
+		facts.inert = true;
+		facts.inert_reason = "the file defines it again below, and the game reads the last";
 		return;
 	}
 	if (!sheet.has(node->name())) {
-		symbol.inert = true;
-		symbol.inert_reason = "it comes after the place the game stops reading the file";
+		facts.inert = true;
+		facts.inert_reason = "it comes after the place the game stops reading the file";
 		return;
 	}
-	symbol.value = sheet.get(node->name());
+	facts.value = sheet.get(node->name());
 }
 
 const mns::StyleSheet &MnsDocument::game_sheet() const {

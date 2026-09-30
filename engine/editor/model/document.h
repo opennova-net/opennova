@@ -1,5 +1,14 @@
 #pragma once
 
+// Thread confinement (ADR 0046 S13 D2). A Document belongs to the thread that made it: its
+// memos (the rows' record indexes, the answers to what changed since the save, the records by
+// identity, the symbols find reads) fill lazily inside its const queries. Another thread reads a
+// snapshot() instead, a new instance over the same committed rows and file-wide state. That is
+// safe because nothing a committed row holds ever changes: a Node carries no memo filled inside a
+// const query (what a row derives, a model's or a menu screen's places of its identities, is built
+// when the row is made, at parse and by the edit that makes it, before it commits), and the
+// process-wide counters (a document's identity, a gesture's token) are atomic.
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -12,6 +21,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/model/edit_history.h>
+#include <editor/model/field_use.h>
 #include <editor/model/node.h>
 #include <editor/model/value.h>
 
@@ -20,6 +30,17 @@ namespace opennova::editor {
 struct GraphSymbol;
 struct ReferenceChoice;
 struct SessionView;
+
+// What a type's lookup rule makes of one definition (Document::refine_symbol), which the graph
+// puts on the symbol the defining field makes: the value it stands for where it stands for one (a
+// style variable's, as the game reads it); inert, with why in a few words, where no lookup finds
+// it; and the line of the file it is on where the type knows it (0 = none).
+struct SymbolFacts {
+	std::string value;
+	bool inert = false;
+	std::string inert_reason;
+	size_t line = 0;
+};
 
 // Where "Go to" goes (Document::reference_targets, graph/usage_target): a project file, and
 // the record there that defines the name or makes the use (its locator and the field to
@@ -123,8 +144,9 @@ public:
 	bool can_undo() const { return history_.can_undo(); }
 	bool can_redo() const { return history_.can_redo(); }
 	uint64_t revision() const { return history_.revision(); }
-	// This instance, distinct from every other document ever made in the process: a
-	// reload is a new document even at the same revision (the graph caches by it).
+	// This instance, distinct from every other document ever made in the process but its
+	// snapshots, which share it: a reload is a new document even at the same revision (the
+	// graph caches by it).
 	uint64_t identity() const { return identity_; }
 	// True while the source holds input the typed model cannot carry: editing and
 	// saving wait for the source to be corrected and reloaded. Lines the game ignores
@@ -138,7 +160,8 @@ public:
 	// every record it made (a Paste's records, not their descendants).
 	NodeId last_added() const { return last_added_; }
 	const std::vector<NodeId> &last_added_records() const { return added_; }
-	// The address of a row or nested record by identity (kind 0 / row 0 when unknown).
+	// The address of a row or nested record by identity (kind 0 / row 0 when unknown), from a
+	// map of every record made once per revision.
 	NodeAddress address_of(NodeId id) const;
 	const Node *row(NodeId id) const;
 
@@ -183,23 +206,33 @@ public:
 	// Every nested record of a row in pre-order (a record, then what it holds), with its
 	// placement. The default recurses through collections(); a type may walk faster.
 	virtual void walk_records(const Node &row, const RecordVisitor &visit) const;
+	// A kind's fields, in storage that outlives the document (a static table of the type, or
+	// one its type object owns; never a temporary): a record's FieldUse points into it.
 	virtual const std::vector<FieldSchema> &fields(NodeKind kind) const = 0;
-	// A field as it applies to one record: whether the game reads it there, the
-	// reference it makes given the record's other fields, the scope it resolves in, and the
-	// symbol it defines and where a lookup finds that (its scope).
-	virtual FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const {
+	// A field (an entry of fields(address.kind)) as it applies to one record: whether the game
+	// reads it there, the reference it makes given the record's other fields, the scope it
+	// resolves in, the symbol it defines and where a lookup finds that (its scope), what its
+	// loader picks the file by, its colour's form, and whether the record offers choices of its
+	// own. Seeded from the schema, refined by the type (refine_field); read_only never widens.
+	FieldUse field_on(const NodeAddress &address, const FieldSchema &field) const;
+	// The choices a record offers of its own for a field whose use says so (FieldUse::
+	// own_choices: a model's registers by index), made into out; false for none (the default).
+	// The widgets and the JSON ask; the graph's extraction and the find never do.
+	virtual bool record_choices(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &out) const;
+	// The choices a field offers on its record: the record's own where it has them
+	// (record_choices, made into own), else the schema's, not copied.
+	const std::vector<FieldChoice> &choices_on(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &own) const;
+	// What the symbol a record's defining field makes is to the type's lookup rule (the graph
+	// fills its name, file, record, place, field and scope): inert, with why, where no lookup
+	// finds this definition (a stylesheet's earlier definition of a name, a menu's screen a later
+	// one shadows, a string table's later section of a name, a model's user point past the
+	// scan); the value it stands for where it stands for one (a style variable's); its line.
+	// The default: every definition is found.
+	virtual void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 		(void)address;
-		return field;
-	}
-	// The symbol a record's defining field makes (the graph fills its name, file, record,
-	// place, field and scope), as the type's lookup rule sees it: marked inert where no
-	// lookup finds this definition (a stylesheet's earlier definition of a name, a menu's
-	// screen a later one shadows, a string table's later section of a name, a model's user
-	// point past the scan), given the value it stands for where it stands for one (a style
-	// variable's). The default: every definition is found.
-	virtual void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const {
-		(void)address;
-		(void)symbol;
+		(void)facts;
 	}
 	// Whether an optional field is written (`field` "" = whether the record itself is):
 	// read_present over the record's row.
@@ -259,46 +292,56 @@ public:
 	// still that record; an empty address when the baseline has none there or it is gone since.
 	NodeAddress source_address(const std::string &locator) const;
 	// References, answered by the project's asset graph on the view (graph/asset_graph,
-	// defined in graph/reference_resolution.cpp): the badge, the picker's names and the
-	// file "Go to" opens read the same tables the Problems rows come from.
-	ReferenceStatus reference_status(const FieldSchema &field, const Value &value, const SessionView &view,
+	// defined in graph/reference_resolution.cpp), each of a field as it applies to its record
+	// (field_on): the badge, the picker's names and the file "Go to" opens read the same
+	// tables the Problems rows come from.
+	ReferenceStatus reference_status(const FieldUse &field, const Value &value, const SessionView &view,
 	                                 std::string *symbol) const;
-	// What the picker offers a field (as it applies to its record): the names of its kind in its
-	// scope (AssetGraph::choices), then what the value may name instead (a menu's font or texture
-	// a stylesheet variable, ADR 0005; an unchecked text a string id), each with what the field
-	// would reference, set to it.
-	std::vector<ReferenceChoice> reference_choices(const FieldSchema &field, const SessionView &view) const;
+	// What the picker offers a field: the names of its kind in its scope (AssetGraph::choices),
+	// then what the value may name instead (a menu's font or texture a stylesheet variable, ADR
+	// 0005; an unchecked text a string id), each with what the field would reference, set to it.
+	std::vector<ReferenceChoice> reference_choices(const FieldUse &field, const SessionView &view) const;
 	// The finding the graph makes of a record's field whose value resolves to nothing
 	// (AssetGraph::missing_finding), for the fixes Problems offers for it: of the variable itself
 	// where a %NAME% the stylesheets the game reads do not define stands for a file (the graph
 	// reports the variable, never a file of that name), else of the reference, a file named
 	// through a variable by the name its value gives. False when the value resolves or names
 	// nothing.
-	bool missing_finding(const NodeAddress &address, const FieldSchema &field, const Value &value, const SessionView &view,
+	bool missing_finding(const NodeAddress &address, const FieldUse &field, const Value &value, const SessionView &view,
 	                     Diagnostic &out) const;
-	std::string reference_target_file(const FieldSchema &field, const Value &value, const SessionView &view) const;
+	std::string reference_target_file(const FieldUse &field, const Value &value, const SessionView &view) const;
 	// Where "Go to" on a reference goes, as the game's lookup reaches it: a symbol's defining
 	// record (AssetGraph::resolve_symbol: a string id in its own section, a window on its own
 	// screen, a record of this same file included); a file (the file its kind's loader
 	// reads), after the style variable that names it where a %NAME% stands (the definition the
 	// game reads, then the file its value names). None when nothing resolves.
-	std::vector<ReferenceTarget> reference_targets(const FieldSchema &field, const Value &value,
+	std::vector<ReferenceTarget> reference_targets(const FieldUse &field, const Value &value,
 	                                               const SessionView &view) const;
 	virtual SerializeResult serialize() const = 0;
+	// This document as it stands, for another thread (the thread confinement above): a new
+	// instance of its type over the same committed rows and file-wide state, with its identity,
+	// revision, history and saved baseline and none of its memos, which it fills again as it is
+	// read. Read only: an edit, an undo, a redo, a load and a save of it do nothing or are
+	// refused (document.snapshot). A type makes it with its copy constructor over the base's
+	// (return std::make_unique<Type>(*this)).
+	virtual std::unique_ptr<Document> snapshot() const = 0;
+	bool is_snapshot() const { return snapshot_; }
 
 	// --- what changed since the last load or save (the saved baseline) -------------------
 	// The baseline moves only with a load or a save: an undo back to it makes the document
 	// clean again (dirty() is the history's), and these then answer unchanged.
 	// A field changed when its value, or an optional field's presence, differs from the
 	// baseline's; every field of a record the baseline lacks has changed, and a field `read`
-	// answers on neither side (a display field derived from the whole document) never has.
-	// Answered from a cache while the revision and the baseline stand, as record_change is.
+	// answers on neither side (a display field derived from the whole document) never has. A
+	// record whose row is the baseline's own (the same committed row: it never changes) is
+	// unchanged without a field read; another row's answers are kept while the two rows compared
+	// stand, as record_change's are.
 	bool field_changed(const NodeAddress &address, const std::string &field) const;
 	enum class RecordChange { Unchanged, Changed, Added };
 	// Added: the baseline has no such record. Changed: a field of its kind changed, or a
 	// collection it holds lists other records or another order (so a child removed or moved
 	// marks the owner that keeps it), or, for a row, its place among the rows both sides have
-	// moved. Answered from a cache while the revision and the baseline stand.
+	// moved. A record of a row the baseline holds as it is reads no field.
 	RecordChange record_change(const NodeAddress &address) const;
 	// Whether the file-wide state differs from the baseline's (same_file_state).
 	bool file_state_changed() const;
@@ -316,6 +359,18 @@ public:
 	using IdAllocator = std::function<NodeId()>;
 
 protected:
+	// The copy a snapshot is (snapshot()): the same rows, file-wide state, identity, history
+	// and baseline; no memo; read only.
+	Document(const Document &other);
+	Document &operator=(const Document &) = delete;
+	// The type's part of field_on: what the record makes of the field seeded from its schema
+	// (whether the game reads it there, the reference and the scope its other fields decide,
+	// the symbol it defines, what its loader picks the file by, its own choices). The default
+	// keeps the schema's.
+	virtual void refine_field(const NodeAddress &address, FieldUse &use) const {
+		(void)address;
+		(void)use;
+	}
 	// Parse decoded bytes into rows (their identity stores sized, identities left to
 	// the base) and the file-wide state; report the source findings. Everything it makes
 	// goes out through its arguments: Save also parses the text it wrote, for its findings.
@@ -361,7 +416,9 @@ protected:
 	// The file-wide state after the row at `index` is removed (`remaining` rows stay).
 	virtual std::shared_ptr<const FileState> state_after_remove(const std::shared_ptr<const FileState> &state,
 	                                                            size_t remaining) const { (void)remaining; return state; }
-	// Derived fields to refresh after any edit of a row.
+	// Derived fields to refresh after any edit of a row, before it commits: what a row derives
+	// is built here or when the row is made, never inside a const query (the thread
+	// confinement above).
 	virtual void after_edit(Node &row) { (void)row; }
 	// A row a Duplicate made, before it is committed beside the original (rows() still
 	// holds the original): the type may tell the copy apart (a menu names the screen anew,
@@ -410,7 +467,20 @@ private:
 	// baseline's row `saved` (field_changed).
 	bool field_differs(const NodeAddress &address, const FieldSchema &field, const std::shared_ptr<const Node> &now,
 	                   const std::shared_ptr<const Node> &saved) const;
-	RecordChange compare_record(const NodeAddress &address) const;
+	// What changed in a record between its committed row and the baseline's, two different
+	// rows (record_change).
+	RecordChange compare_record(const NodeAddress &address, const std::shared_ptr<const Node> &now,
+			const std::shared_ptr<const Node> &saved) const;
+	// What changed since the baseline in one row: the record and field answers made while its
+	// committed row and the baseline's are these two (both rows kept, so neither address is
+	// reused under the answers), started again when either is another.
+	struct RowChanges {
+		std::shared_ptr<const Node> now, saved;
+		std::unordered_map<NodeId, RecordChange> records;
+		std::unordered_map<NodeId, std::unordered_map<std::string, bool>> fields;
+	};
+	RowChanges &row_changes(NodeId row, const std::shared_ptr<const Node> &now,
+			const std::shared_ptr<const Node> &saved) const;
 	// Whether a row's index among the rows both sides have differs from the baseline's.
 	bool row_moved(NodeId id) const;
 	bool apply_row_edit(const Edit &edit, Diagnostic &error);
@@ -452,21 +522,20 @@ private:
 	EditHistory history_{rows_, file_state_};
 	std::vector<std::shared_ptr<const Node>> saved_rows_;
 	std::shared_ptr<const FileState> saved_state_;
-	// record_change's and field_changed's answers (by the record's identity, then the field's
-	// id) and the rows whose place moved, for one revision of one baseline (set_baseline
-	// starts it again).
-	struct ChangeCache {
-		uint64_t revision = UINT64_MAX;
-		std::unordered_map<NodeId, RecordChange> records;
-		std::unordered_map<NodeId, std::unordered_map<std::string, bool>> fields;
-		bool rows_compared = false;
-		std::unordered_set<NodeId> moved_rows;
-	};
-	// The cache, started again when the revision moved since it was filled.
-	ChangeCache &changes() const;
-	mutable ChangeCache changes_;
-	// The symbols the records define (find's), for one revision of one load (set_baseline
-	// forgets them).
+	// A saved row's index by its identity (set_baseline).
+	std::unordered_map<NodeId, size_t> saved_positions_;
+	bool snapshot_ = false;
+	// The memos (the thread confinement above), each forgotten by set_baseline: what changed in
+	// each row (row_changes); the rows whose place moved, for one revision; every record by
+	// identity (address_of), for one revision; the symbols the records define (find's), for one
+	// revision.
+	mutable std::unordered_map<NodeId, RowChanges> row_changes_;
+	mutable bool moved_known_ = false;
+	mutable uint64_t moved_revision_ = 0;
+	mutable std::unordered_set<NodeId> moved_rows_;
+	mutable bool addresses_known_ = false;
+	mutable uint64_t addresses_revision_ = 0;
+	mutable std::unordered_map<NodeId, NodeAddress> addresses_;
 	mutable std::shared_ptr<const std::vector<GraphSymbol>> defined_;
 	mutable uint64_t defined_revision_ = 0;
 };

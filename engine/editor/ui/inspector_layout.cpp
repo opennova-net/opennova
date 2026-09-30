@@ -67,15 +67,15 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 	for (const FieldSchema &schema : fields) {
 		Value value;
 		if (!document.get(record, schema.id, value)) continue;
-		const FieldSchema field = document.field_on(record, schema);
-		const bool is_written = written(document, record, field);
+		const FieldUse field = document.field_on(record, schema);
+		const bool is_written = written(document, record, schema);
 		const bool shown = field.applies != Applicability::Ignored || is_written;
-		const bool dotted = field.id.find('.') != std::string::npos;
-		const bool toggle = !dotted && groups.count(field.id) && is_yes_no(field);
+		const bool dotted = schema.id.find('.') != std::string::npos;
+		const bool toggle = !dotted && groups.count(schema.id) && is_yes_no(schema);
 		// A field of one step that names no group joins the fields sharing its heading.
-		const std::string key = dotted || toggle ? first_step(field.id) : groups.count(field.id) ? std::string() : field.section;
+		const std::string key = dotted || toggle ? first_step(schema.id) : groups.count(schema.id) ? std::string() : schema.section;
 		InspectorSection &section = key.empty() ? out.front() : group(key);
-		if (section.title.empty() && !field.section.empty()) section.title = field.section;
+		if (section.title.empty() && !schema.section.empty()) section.title = schema.section;
 		if (toggle) {
 			// The block's own field reads as always written; its value says whether the block is.
 			section.has_toggle = shown;
@@ -83,7 +83,7 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 			section.written = section.written || is_written;
 			continue;
 		}
-		if (!shown || !(matches(field.id, filter) || matches(field.label, filter) || matches(field.token, filter))) continue;
+		if (!shown || !(matches(schema.id, filter) || matches(schema.label, filter) || matches(schema.token, filter))) continue;
 		section.fields.push_back(field);
 		section.written = section.written || is_written;
 	}
@@ -139,16 +139,16 @@ std::vector<InspectorSection> plan_shared_inspector(const Document &document, co
 				shared = false;
 				break;
 			}
-			const FieldSchema on = document.field_on(record, schema);
-			shared = on.applies != Applicability::Ignored || written(document, record, on);
+			const FieldUse on = document.field_on(record, schema);
+			shared = on.applies != Applicability::Ignored || written(document, record, schema);
 			if (!shared) break;
 		}
 		if (!shared) continue;
-		const FieldSchema field = document.field_on(primary, schema);
-		if (!(matches(field.id, filter) || matches(field.label, filter) || matches(field.token, filter))) continue;
-		const bool dotted = field.id.find('.') != std::string::npos;
-		const bool toggle = !dotted && groups.count(field.id) && is_yes_no(field);
-		const std::string key = dotted || toggle ? first_step(field.id) : groups.count(field.id) ? std::string() : field.section;
+		const FieldUse field = document.field_on(primary, schema);
+		if (!(matches(schema.id, filter) || matches(schema.label, filter) || matches(schema.token, filter))) continue;
+		const bool dotted = schema.id.find('.') != std::string::npos;
+		const bool toggle = !dotted && groups.count(schema.id) && is_yes_no(schema);
+		const std::string key = dotted || toggle ? first_step(schema.id) : groups.count(schema.id) ? std::string() : schema.section;
 		auto found = placed.find(key);
 		if (!key.empty() && found == placed.end()) {
 			found = placed.emplace(key, out.size()).first;
@@ -156,11 +156,11 @@ std::vector<InspectorSection> plan_shared_inspector(const Document &document, co
 			out.back().key = key;
 		}
 		InspectorSection &section = key.empty() ? out.front() : out[found->second];
-		if (section.title.empty() && !field.section.empty()) section.title = field.section;
+		if (section.title.empty() && !schema.section.empty()) section.title = schema.section;
 		// The block's own switch leads its group.
 		if (toggle) section.fields.insert(section.fields.begin(), field);
 		else section.fields.push_back(field);
-		section.written = section.written || written(document, primary, field);
+		section.written = section.written || written(document, primary, schema);
 	}
 	std::vector<InspectorSection> kept;
 	for (InspectorSection &section : out) {

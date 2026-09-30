@@ -532,13 +532,31 @@ int field_metadata() {
 	if (!row || row->lods.empty() || row->lods[0].panm.empty() || row->materials.empty()) return 1;
 	const NodeId model = row->id;
 	Diagnostic error;
+	// A field as the Inspector shows it on a record: its table's words, what the record makes of
+	// it (FieldUse) and the choices it offers there (Document::choices_on: an index's own), in one.
 	auto schema = [&](const NodeAddress &at, const char *id) {
 		for (const FieldSchema &field : document->fields(at.kind))
-			if (field.id == id) return document->field_on(at, field);
+			if (field.id == id) {
+				const FieldUse use = document->field_on(at, field);
+				FieldSchema out = field;
+				out.applies = use.applies;
+				out.reference = use.reference;
+				out.defines = use.defines;
+				out.scope = use.scope;
+				out.color = use.color;
+				out.read_only = use.read_only;
+				std::vector<FieldChoice> own;
+				out.choices = document->choices_on(at, use, own);
+				return out;
+			}
 		return FieldSchema();
 	};
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kLight, 0}), error));
 	const NodeAddress light{model, kLight, document->last_added()};
+	// Every identity's place is made with the row, never inside a query (the thread confinement,
+	// model/document.h): the committed row holds its new light's, the collision row its own.
+	TEST_EXPECT(document->model_row()->places && document->model_row()->places->count(light.child) == 1 &&
+	            document->collision_row()->places);
 	const FieldSchema x = schema(light, "position.x"), y = schema(light, "position.y");
 	TEST_EXPECT(x.label == "Position X" && y.label == "Position Y" && x.unit == "m" && x.group == "Position" &&
 	            y.group == "Position");

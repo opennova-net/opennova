@@ -419,7 +419,7 @@ bool holds_record(const Document &document, const NodeAddress &address) {
 
 // A field of a record as it applies to it (Document::field_on) and the value it holds; false
 // for a record the document does not hold or a field it does not have.
-bool field_of(const Document &document, const NodeAddress &address, const std::string &id, FieldSchema &field, Value &value) {
+bool field_of(const Document &document, const NodeAddress &address, const std::string &id, FieldUse &field, Value &value) {
 	if (!holds_record(document, address)) return false;
 	for (const FieldSchema &schema : document.fields(address.kind))
 		if (schema.id == id && document.get(address, id, value)) {
@@ -603,7 +603,7 @@ JsonValue diagnostic_to_json(const Diagnostic &d) {
 	if (!d.target.empty()) out.set("target", str(d.target));
 	if (d.reference != ReferenceKind::None) out.set("reference", str(reference_row(d.reference).token));
 	if (!d.scope.empty()) out.set("scope", str(d.scope));
-	if (d.material_type >= 0) out.set("material_type", num(double(d.material_type)));
+	if (d.loader_arg >= 0) out.set("loader_arg", num(double(d.loader_arg)));
 	return out;
 }
 
@@ -929,7 +929,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 			need.set("field", str(row.needed_by.field));
 			need.set("reference", str(reference_row(row.needed_by.reference).token));
 			need.set("name", str(row.needed_by.name));
-			if (row.needed_by.material_type >= 0) need.set("material_type", num(double(row.needed_by.material_type)));
+			if (row.needed_by.loader_arg >= 0) need.set("loader_arg", num(double(row.needed_by.loader_arg)));
 			entry.set("needed_by", std::move(need));
 		}
 		if (found) {
@@ -1096,52 +1096,55 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		out.set("index", num(double(at.index)));
 	}
 	JsonValue fields = JsonValue::make_array();
+	std::vector<FieldChoice> own;
 	for (const FieldSchema &schema : document.fields(address.kind)) {
 		Value value;
 		if (!document.get(address, schema.id, value)) continue;
-		const FieldSchema field = document.field_on(address, schema);
+		const FieldUse field = document.field_on(address, schema);
 		JsonValue entry = JsonValue::make_object();
-		entry.set("id", str(field.id));
-		if (!field.label.empty()) entry.set("label", str(field.label));
-		if (!field.section.empty()) entry.set("section", str(field.section));
-		if (!field.group.empty()) entry.set("group", str(field.group));
-		entry.set("type", str(field_type_token(field.type)));
+		entry.set("id", str(schema.id));
+		if (!schema.label.empty()) entry.set("label", str(schema.label));
+		if (!schema.section.empty()) entry.set("section", str(schema.section));
+		if (!schema.group.empty()) entry.set("group", str(schema.group));
+		entry.set("type", str(field_type_token(schema.type)));
 		entry.set("value", value_to_json(value));
 		// What the format table says of the field: its unit, its note, the key the file writes,
 		// the range it keeps to, how it holds a colour.
-		if (!field.unit.empty()) entry.set("unit", str(field.unit));
-		if (!field.description.empty()) entry.set("description", str(field.description));
-		if (!field.token.empty()) entry.set("token", str(field.token));
-		if (field.ranged) {
-			entry.set("min", num(field.min));
-			entry.set("max", num(field.max));
-			if (field.step > 0.0) entry.set("step", num(field.step));
+		if (!schema.unit.empty()) entry.set("unit", str(schema.unit));
+		if (!schema.description.empty()) entry.set("description", str(schema.description));
+		if (!schema.token.empty()) entry.set("token", str(schema.token));
+		if (schema.ranged) {
+			entry.set("min", num(schema.min));
+			entry.set("max", num(schema.max));
+			if (schema.step > 0.0) entry.set("step", num(schema.step));
 		}
 		if (field.color != FieldColor::None) entry.set("color", str(color_token(field.color)));
-		if (field.width) entry.set("width", num(double(field.width)));
+		if (schema.width) entry.set("width", num(double(schema.width)));
 		if (field.read_only) entry.set("read_only", boolean(true));
-		if (field.flags) entry.set("flags", boolean(true));
-		if (field.optional) {
+		if (schema.flags) entry.set("flags", boolean(true));
+		if (schema.optional) {
 			entry.set("optional", boolean(true));
-			entry.set("present", boolean(document.present(address, field.id)));
+			entry.set("present", boolean(document.present(address, schema.id)));
 		}
 		if (field.applies != Applicability::Reads) entry.set("applies", str(applicability_token(field.applies)));
 		// Changed since the saved baseline: what the saved file holds (null when it lacks the
 		// record), as the Inspector's mark and its tooltip show it.
-		if (document.field_changed(address, field.id)) {
+		if (document.field_changed(address, schema.id)) {
 			entry.set("changed", boolean(true));
 			Value saved;
 			bool written = true;
-			if (document.saved_value(address, field.id, saved, &written)) {
+			if (document.saved_value(address, schema.id, saved, &written)) {
 				entry.set("saved", value_to_json(saved));
-				if (field.optional) entry.set("saved_present", boolean(written));
+				if (schema.optional) entry.set("saved_present", boolean(written));
 			} else {
 				entry.set("saved", JsonValue::make_null());
 			}
 		}
-		if (!field.choices.empty()) {
+		// The choices it offers here: the schema's, or the record's own (a model's registers).
+		const std::vector<FieldChoice> &offered = document.choices_on(address, field, own);
+		if (!offered.empty()) {
 			JsonValue choices = JsonValue::make_array();
-			for (const FieldChoice &choice : field.choices) {
+			for (const FieldChoice &choice : offered) {
 				JsonValue option = JsonValue::make_object();
 				option.set("name", str(choice.name));
 				option.set("value", num(double(choice.value)));
@@ -1150,8 +1153,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 			}
 			entry.set("choices", std::move(choices));
 		}
-		// Open: any value typed, whether or not the record knows any (a model with no registers).
-		if (field.open_choices) entry.set("open_choices", boolean(true));
+		// Open: any value typed, where the field offers choices, whether or not the record knows
+		// any of its own (a model with no registers).
+		if (schema.open_choices && (field.own_choices || !schema.choices.empty()))
+			entry.set("open_choices", boolean(true));
 		if (!field.scope.empty() && (field.reference != ReferenceKind::None || field.defines != ReferenceKind::None))
 			entry.set("scope", str(field.scope));
 		if (field.reference != ReferenceKind::None) {
@@ -1184,7 +1189,7 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!edge.scope.empty()) out.set("scope", str(edge.scope));
 	out.set("rewritable", boolean(edge.rewritable));
 	if (edge.through != ReferenceKind::None) out.set("through", str(reference_row(edge.through).token));
-	if (edge.material_type >= 0) out.set("material_type", num(double(edge.material_type)));
+	if (edge.loader_arg >= 0) out.set("loader_arg", num(double(edge.loader_arg)));
 	std::string file;
 	const ReferenceStatus status = edge.target.empty() ? ReferenceStatus::NotAReference : graph.resolve(edge, &file);
 	out.set("status", str(reference_status_token(status)));
@@ -1212,12 +1217,13 @@ JsonValue graph_symbol_to_json(const GraphSymbol &symbol) {
 	if (!symbol.value.empty()) out.set("value", str(symbol.value));
 	if (symbol.inert) out.set("inert", boolean(true));
 	if (!symbol.inert_reason.empty()) out.set("inert_reason", str(symbol.inert_reason));
+	if (symbol.line) out.set("line", num(double(symbol.line)));
 	return out;
 }
 
 JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address, const std::string &id,
                                     const SessionView &view) {
-	FieldSchema field;
+	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
 	const std::vector<ReferenceChoice> choices = document.reference_choices(field, view);
@@ -1236,7 +1242,7 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("field", str(field.id));
+	out.set("field", str(field.schema->id));
 	out.set("reference", str(reference_row(field.reference).token));
 	if (!field.scope.empty()) out.set("scope", str(field.scope));
 	out.set("count", num(double(choices.size())));
@@ -1246,7 +1252,7 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 
 JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address, const std::string &id,
                                     const SessionView &view) {
-	FieldSchema field;
+	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
 	const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, view);
@@ -1261,7 +1267,7 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("field", str(field.id));
+	out.set("field", str(field.schema->id));
 	out.set("reference", str(reference_row(field.reference).token));
 	out.set("value", value_to_json(value));
 	out.set("count", num(double(targets.size())));

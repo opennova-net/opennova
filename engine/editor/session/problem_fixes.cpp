@@ -218,8 +218,8 @@ bool same_file(const std::string &a, const std::string &b) { return normalized_l
 // lookup reads that name first: texture_candidate_filenames), nor for a name no loader of the
 // reference opens or the factory refuses.
 std::string placeholder_file(const Diagnostic &d) {
-	const bool row = d.reference == ReferenceKind::Texture && d.material_type >= 0;
-	const uint8_t type = row ? renderer::material_texture_runtime_type(static_cast<uint8_t>(d.material_type)) : 0;
+	const bool row = d.reference == ReferenceKind::Texture && d.loader_arg >= 0;
+	const uint8_t type = row ? renderer::material_texture_runtime_type(static_cast<uint8_t>(d.loader_arg)) : 0;
 	if (row && renderer::material_texture_source(d.target, type, {}).reader == renderer::MaterialTextureReader::Chunk)
 		return std::string();
 	std::string reason;
@@ -233,7 +233,7 @@ std::string placeholder_file(const Diagnostic &d) {
 	}
 	std::vector<std::string> names;
 	const auto gather = [&](const std::function<bool(const std::string &)> &exists) {
-		for (const std::string &name : reference_file_candidates(d.reference, d.target, d.material_type, exists))
+		for (const std::string &name : reference_file_candidates(d.reference, d.target, d.loader_arg, exists))
 			if (std::none_of(names.begin(), names.end(), [&](const std::string &held) { return same_file(held, name); }))
 				names.push_back(name);
 	};
@@ -247,7 +247,7 @@ std::string placeholder_file(const Diagnostic &d) {
 			const renderer::MaterialTextureSource source = renderer::material_texture_source(d.target, type, there);
 			if (!same_file(source.file, name) || source.reader != blank_texture_reader(name)) continue;
 		}
-		for (const std::string &opened : reference_file_candidates(d.reference, d.target, d.material_type, there))
+		for (const std::string &opened : reference_file_candidates(d.reference, d.target, d.loader_arg, there))
 			if (same_file(opened, name)) return name;
 	}
 	return std::string();
@@ -282,7 +282,7 @@ void reference_fixes(const Diagnostic &d, const SessionView &view, std::vector<P
 	if (kind == AssetKind::Unknown || d.target.empty()) return;
 	const auto in_game = [&view](const std::string &name) { return !retail_name(view, name).empty(); };
 	std::vector<std::string> names;
-	for (const std::string &name : reference_file_candidates(d.reference, d.target, d.material_type, in_game))
+	for (const std::string &name : reference_file_candidates(d.reference, d.target, d.loader_arg, in_game))
 		if (asset_name_fits_kind(name, kind)) names.push_back(name);
 	for (const std::string &name : names) {
 		const std::string retail = retail_name(view, name);
@@ -339,7 +339,7 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		// fixes, while the project still lacks the file (the finding is the import's, kept to
 		// the next validation, whose graph reports the reference as missing too).
 		if (view.graph &&
-		    view.graph->resolve(d.reference, d.target, d.scope, nullptr, d.material_type) == ReferenceStatus::Missing)
+		    view.graph->resolve(d.reference, d.target, d.scope, nullptr, d.loader_arg) == ReferenceStatus::Missing)
 			reference_fixes(d, view, out);
 	} else if (d.code == "document.conflict" && !d.asset.empty()) {
 		// An open document whose file changed outside the editor: read it again, its unsaved

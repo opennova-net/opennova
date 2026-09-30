@@ -9,7 +9,15 @@
 // were; every field a record defines a name by yields a symbol whose locator names that record,
 // and Document::find resolves its name in a scope only to a definition of its kind and name
 // there (nothing in a scope with none); every reference and definition kind has its
-// reference_kinds row.
+// reference_kinds row. S13 D2 adds what needs no multi-row edit: every record's locator finds it
+// again, and two loads of the file give every record the same identity; an optional field the
+// game reads on its record left out and written again (Clear, Write), a Clear of one left out
+// and a Write of one written no step, the undo giving the bytes back; a real change of a value,
+// the bytes before, after, after its undo and after its redo; the record and the field changed
+// since the save (no other row's record), and the edits that give the field back (revert_edits)
+// giving it its saved value (and the bytes, where the record is then as saved); two coalesced
+// Sets of a field one undo step; and a record copied and pasted where the type copies records,
+// the undo giving the bytes back.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -18,6 +26,7 @@
 #include <variant>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
@@ -35,8 +44,11 @@ namespace {
 
 int g_failures = 0;
 // What was checked, for the summary line: records, fields set to their own value, symbols, and
-// lookups of a name in another scope that defines it too.
+// lookups of a name in another scope that defines it too; optional fields left out and written
+// again, files with a real change and its undo, files whose field took two coalesced Sets, and
+// records pasted.
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
+size_t g_presences = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0;
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -155,17 +167,15 @@ bool labelled(const Document &document, const NodeAddress &address, const FieldS
 void check_schema(const Fixture &fixture, const Document &document, const NodeAddress &address,
                   const FieldSchema &schema) {
 	const std::string where = where_of(fixture, document, address, schema.id);
-	const FieldSchema field = document.field_on(address, schema);
-	check(labelled(document, address, schema) && labelled(document, address, field), where,
-	      "the field carries the label the editor names it by");
+	const FieldUse field = document.field_on(address, schema);
+	check(labelled(document, address, schema), where, "the field carries the label the editor names it by");
 	Value value;
-	check(document.get(address, field.id, value), where, "the field reads");
-	check(field.id == schema.id && field.type == schema.type, where, "field_on keeps the field's id and type");
+	check(document.get(address, schema.id, value), where, "the field reads");
+	check(field.schema == &schema, where, "field_on points at the field's own schema (its id and type)");
 	check(!schema.read_only || field.read_only, where, "field_on never makes a read-only field writable");
-	for (const FieldSchema *f : {&schema, &field})
-		if (f->ranged)
-			check(f->type != FieldType::Text && f->min <= f->max && f->step >= 0.0, where,
-			      "a ranged field is a number whose range runs low to high");
+	if (schema.ranged)
+		check(schema.type != FieldType::Text && schema.min <= schema.max && schema.step >= 0.0, where,
+		      "a ranged field is a number whose range runs low to high");
 	if (field.reference != ReferenceKind::None)
 		check(has_row(field.reference), where, "the kind it references has its reference_kinds row");
 	if (field.defines != ReferenceKind::None)
@@ -179,14 +189,14 @@ void check_set_to_self(const Fixture &fixture, Document &document, const std::ve
                        const std::string &serialized) {
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document.fields(address.kind)) {
-			const FieldSchema field = document.field_on(address, schema);
+			const FieldUse field = document.field_on(address, schema);
 			Value value;
-			if (field.read_only || !document.get(address, field.id, value)) continue;
-			const std::string where = where_of(fixture, document, address, field.id);
+			if (field.read_only || !document.get(address, schema.id, value)) continue;
+			const std::string where = where_of(fixture, document, address, schema.id);
 			Edit edit;
 			edit.operation = EditOperation::Set;
 			edit.address = address;
-			edit.field = field.id;
+			edit.field = schema.id;
 			edit.value = value;
 			Diagnostic error;
 			const bool applied = document.apply(edit, error);
@@ -213,17 +223,17 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 	extract_from_document(document, extracted);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document.fields(address.kind)) {
-			const FieldSchema field = document.field_on(address, schema);
+			const FieldUse field = document.field_on(address, schema);
 			if (field.defines == ReferenceKind::None || field.applies == Applicability::Ignored ||
-			    !document.present(address, field.id))
+			    !document.present(address, schema.id))
 				continue;
-			const std::string where = where_of(fixture, document, address, field.id);
+			const std::string where = where_of(fixture, document, address, schema.id);
 			Value value;
-			const bool read = document.get(address, field.id, value);
+			const bool read = document.get(address, schema.id, value);
 			check(read, where, "a field that defines a name reads");
 			if (!read || !defines_a_name(value)) continue;
 			const auto symbol = std::find_if(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &s) {
-				return s.address == address && s.field == field.id;
+				return s.address == address && s.field == schema.id;
 			});
 			check(symbol != extracted.symbols.end() && symbol->kind == field.defines, where,
 			      "a field that defines a name yields its symbol");
@@ -276,6 +286,214 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 	}
 }
 
+Edit edit_of(EditOperation operation, const NodeAddress &address, const std::string &field, Value value = int64_t(0)) {
+	Edit edit;
+	edit.operation = operation;
+	edit.address = address;
+	edit.field = field;
+	edit.value = std::move(value);
+	return edit;
+}
+
+// Every record's locator finds it again, and a second load of the same bytes gives every record
+// the identity the first gave it (a rename reloads a document and finds its records so).
+void check_places(const DocumentType &type, const Fixture &fixture, const Document &document,
+                  const std::vector<NodeAddress> &records) {
+	for (const NodeAddress &address : records)
+		check(document.address_at(document.locator(address)) == address, where_of(fixture, document, address, ""),
+		      "a record's locator finds it again");
+	std::unique_ptr<Document> twin = type.make();
+	Diagnostic error;
+	const bool loaded = twin->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
+	check(loaded && records_of(*twin) == records, fixture.name, "two loads of the file give the same identities");
+}
+
+// Each writable optional field the game reads on its record left out and written again (Clear,
+// Write), its latent value kept; a Clear of a field left out and a Write of one written no step;
+// the undo giving the bytes back.
+void check_presence(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
+                    const std::string &serialized) {
+	for (const NodeAddress &address : records)
+		for (const FieldSchema &schema : document.fields(address.kind)) {
+			if (!schema.optional || schema.read_only) continue;
+			Value latent;
+			if (document.field_on(address, schema).applies == Applicability::Ignored || !document.get(address, schema.id, latent))
+				continue;
+			const std::string where = where_of(fixture, document, address, schema.id);
+			const bool written = document.present(address, schema.id);
+			const uint64_t revision = document.revision();
+			Diagnostic error;
+			const bool nothing = document.apply(edit_of(written ? EditOperation::Write : EditOperation::Clear, address, schema.id), error);
+			check(nothing && document.revision() == revision, where, "a Write of a written field, a Clear of one left out: no step");
+			if (!document.apply(edit_of(written ? EditOperation::Clear : EditOperation::Write, address, schema.id), error))
+				continue; // the type keeps it as it is here (a block left out)
+			++g_presences;
+			Value kept;
+			check(document.present(address, schema.id) != written && document.get(address, schema.id, kept) && kept == latent,
+			      where, "Clear leaves a field out and Write writes it again, its value kept");
+			check(document.serialize().ok(), where, "a field left out or written again serializes");
+			while (document.can_undo()) document.undo();
+			check(document.present(address, schema.id) == written && document.serialize().text == serialized, where,
+			      "the undo of a Clear or a Write gives the bytes back");
+		}
+}
+
+// Values a field could take instead of `value`, the first ones its choices and range allow:
+// another choice (a flags field's value with another bit), a number one or two either side, a
+// text with a letter more or one less.
+std::vector<Value> alternatives(const FieldSchema &field, const std::vector<FieldChoice> &choices, const Value &value) {
+	std::vector<Value> out;
+	const auto add = [&](Value candidate) {
+		if (!(candidate == value) && std::find(out.begin(), out.end(), candidate) == out.end()) out.push_back(std::move(candidate));
+	};
+	if (const auto *number = std::get_if<int64_t>(&value)) {
+		for (const FieldChoice &choice : choices) add(field.flags ? int64_t(*number ^ choice.value) : choice.value);
+		double lo = field.ranged ? field.min : -1.0e15, hi = field.ranged ? field.max : 1.0e15;
+		if (field.type != FieldType::Integer) lo = std::max(lo, 0.0);
+		if (field.type == FieldType::Byte) hi = std::min(hi, 255.0);
+		for (const int64_t step : {1, 2, -1, -2})
+			if (double(*number + step) >= lo && double(*number + step) <= hi) add(int64_t(*number + step));
+	} else if (const auto *real = std::get_if<double>(&value)) {
+		for (const double step : {1.0, 2.0, -1.0, -2.0})
+			if (!field.ranged || (*real + step >= field.min && *real + step <= field.max)) add(*real + step);
+	} else if (const auto *text = std::get_if<std::string>(&value)) {
+		for (const FieldChoice &choice : choices)
+			if (!opennova::strutil::iequals(choice.name, *text)) add(choice.name);
+		if (!field.width || text->size() + 3 <= field.width) {
+			add(*text + "Q");
+			add(*text + "QZ");
+		}
+		if (!text->empty()) add(text->substr(0, text->size() - 1));
+	}
+	return out;
+}
+
+// The fields a real change may be tried on, as they apply: writable, read by the game there,
+// written, reading a value; with the values they could take instead.
+template <class Try> void each_alternative(Document &document, const std::vector<NodeAddress> &records, Try try_one) {
+	for (const NodeAddress &address : records)
+		for (const FieldSchema &schema : document.fields(address.kind)) {
+			const FieldUse field = document.field_on(address, schema);
+			Value value;
+			if (field.read_only || field.applies == Applicability::Ignored ||
+			    (schema.optional && !document.present(address, schema.id)) || !document.get(address, schema.id, value))
+				continue;
+			std::vector<FieldChoice> own;
+			if (try_one(address, schema, alternatives(schema, document.choices_on(address, field, own), value))) return;
+		}
+}
+
+// A real change of one value: the bytes before, after, after its undo and after its redo; the
+// record and the field changed since the save and no record of another row; revert_edits giving
+// the field its saved value back as one step (and the bytes, when that leaves the record as it
+// was: a field whose Set changes another of its record's, as a def's powerup_def its attrib,
+// keeps that other one changed).
+void check_real_change(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
+                       const std::string &serialized) {
+	bool done = false;
+	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
+	                                        const std::vector<Value> &options) {
+		for (const Value &option : options) {
+			Diagnostic error;
+			if (!document.apply(edit_of(EditOperation::Set, address, schema.id, option), error)) continue;
+			const SerializeResult after = document.serialize();
+			if (!after.ok() || after.text == serialized) {
+				while (document.can_undo()) document.undo();
+				continue;
+			}
+			const std::string where = where_of(fixture, document, address, schema.id);
+			done = true;
+			++g_changes;
+			check(document.dirty() && document.can_undo(), where, "a real change is a step");
+			check(document.field_changed(address, schema.id) && document.record_change(address) == Document::RecordChange::Changed,
+			      where, "the field and its record changed since the save");
+			for (const NodeAddress &other : records)
+				if (other.row != address.row)
+					check(document.record_change(other) == Document::RecordChange::Unchanged, where_of(fixture, document, other, ""),
+					      "a record of another row is unchanged");
+			const std::vector<Edit> back = document.revert_edits(address, schema.id);
+			Value saved, reverted;
+			check(!back.empty() && document.apply(back, error) && !document.field_changed(address, schema.id) &&
+			              document.saved_value(address, schema.id, saved) && document.get(address, schema.id, reverted) &&
+			              reverted == saved,
+			      where, "revert_edits gives the field its saved value back");
+			if (document.record_change(address) == Document::RecordChange::Unchanged)
+				check(document.serialize().text == serialized, where, "a record given back is the bytes the file held");
+			document.undo();
+			check(document.serialize().text == after.text, where, "the revert is one step");
+			document.undo();
+			check(document.serialize().text == serialized && !document.dirty(), where, "the undo of a change gives the bytes back");
+			document.redo();
+			check(document.serialize().text == after.text, where, "its redo gives the change back");
+			while (document.can_undo()) document.undo();
+			return true;
+		}
+		return false;
+	});
+	check(done, fixture.name, "a writable field takes another value");
+}
+
+// Two coalesced Sets of one field (typing): one undo step.
+void check_coalescing(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
+                      const std::string &serialized) {
+	bool done = false;
+	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
+	                                        const std::vector<Value> &options) {
+		std::vector<Value> taken;
+		for (const Value &option : options) {
+			Edit set = edit_of(EditOperation::Set, address, schema.id, option);
+			set.coalesce = true;
+			Diagnostic error;
+			if (!document.apply(set, error)) continue;
+			taken.push_back(option);
+			if (taken.size() == 2) break;
+		}
+		const bool two = taken.size() == 2 && document.serialize().text != serialized;
+		if (two) {
+			document.undo();
+			check(document.serialize().text == serialized && !document.can_undo(),
+			      where_of(fixture, document, address, schema.id), "two coalesced Sets of a field are one step");
+			done = true;
+			++g_coalesced;
+		}
+		while (document.can_undo()) document.undo();
+		return two;
+	});
+	check(done, fixture.name, "a field takes two coalesced Sets");
+}
+
+// A record copied (where the type copies records) and pasted after its own: it is there, of its
+// kind, the text reads back, and the undo gives the bytes back.
+void check_copy_paste(const DocumentType &type, const Fixture &fixture, Document &document,
+                      const std::vector<NodeAddress> &records, const std::string &serialized) {
+	for (const NodeAddress &address : records) {
+		if (!address.child) continue;
+		const std::string payload = document.copy({address});
+		Document::Placement at;
+		if (payload.empty() || !document.placement(address, at)) continue;
+		const std::string where = where_of(fixture, document, address, "");
+		Edit paste = edit_of(EditOperation::Paste, {address.row, address.kind, 0}, std::string(), payload);
+		paste.parent = at.owner.child;
+		Diagnostic error;
+		const bool pasted = document.apply(paste, error);
+		check(pasted, where + " (" + error.message + ")", "a record copied pastes into its owner");
+		if (!pasted) return;
+		++g_pastes;
+		const std::vector<NodeId> made = document.last_added_records();
+		check(!made.empty() && document.address_of(made.front()).kind == address.kind &&
+		              records_of(document).size() > records.size(),
+		      where, "the pasted record is there, of its kind");
+		const SerializeResult text = document.serialize();
+		std::unique_ptr<Document> read = type.make();
+		check(text.ok() && read->load_bytes(text_bytes(text.text), fixture.name, fixture.kind, "jo", error) && !read->blocked(),
+		      where, "what a paste makes serializes and reads back");
+		while (document.can_undo()) document.undo();
+		check(document.serialize().text == serialized && !document.address_of(made.front()).row, where,
+		      "the undo of a paste gives the bytes back");
+		return;
+	}
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture) {
 	std::unique_ptr<Document> document = type.make();
 	Diagnostic error;
@@ -298,10 +516,15 @@ void check_fixture(const DocumentType &type, const Fixture &fixture) {
 		      "parse, serialize, parse again serializes the same bytes and records");
 	}
 
+	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
 	check_symbols(fixture, *document, records);
 	check_set_to_self(fixture, *document, records, first.text);
+	check_presence(fixture, *document, records, first.text);
+	check_real_change(fixture, *document, records, first.text);
+	check_coalescing(fixture, *document, records, first.text);
+	check_copy_paste(type, fixture, *document, records, first.text);
 }
 
 } // namespace
@@ -324,9 +547,13 @@ int main() {
 	for (const Fixture &fixture : files)
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
 	check(g_other_scopes > 0, "the files", "a name defined in two scopes is looked up in the other");
+	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
-		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name)\n",
-		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes);
+		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
+		            "%zu optional fields left out and written again, %zu real changes undone and redone, %zu "
+		            "coalesced, %zu records pasted)\n",
+		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_changes,
+		            g_coalesced, g_pastes);
 	return g_failures == 0 ? 0 : 1;
 }
