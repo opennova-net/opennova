@@ -11,6 +11,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
@@ -25,6 +26,10 @@ namespace opennova::editor {
 using graph_names::is_style_reference;
 using graph_names::key;
 using graph_names::style_variable;
+
+bool references_unread(AssetKind kind, const std::string &file) {
+	return asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+}
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
 	kind_ = kind;
@@ -118,26 +123,6 @@ std::string ImportOrigin::words() const {
 }
 
 namespace {
-
-// The kinds whose files name other files the graph does not read (ADR 0046 S7: not yet
-// extracted): a terrain, a script, the sound banks, and the def tables beyond the catalogs
-// and the avatar table. A file of one is taken; the files it names are not looked for.
-bool references_unread(AssetKind kind) {
-	switch (kind) {
-	case AssetKind::Terrain:
-	case AssetKind::Script:
-	case AssetKind::SoundBank:
-	case AssetKind::WaveBank:
-	case AssetKind::DialogBank:
-	case AssetKind::HudPosDefs:
-	case AssetKind::HudFxDefs:
-	case AssetKind::SoundProfileDefs:
-	case AssetKind::CharAttrDefs:
-	case AssetKind::PowerupDefs:
-	case AssetKind::OtherDefs: return true;
-	default: return false;
-	}
-}
 
 using Exists = std::function<bool(const std::string &)>;
 
@@ -464,12 +449,10 @@ private:
 	void follow(Node &node) {
 		const std::string file = plan_.rows[node.row].name;
 		const AssetKind kind = plan_.rows[node.row].kind;
-		const bool read = graph_reads_file(kind, file);
-		// What it names is not looked for: a kind whose references the graph does not read, or
-		// a file of a kind it reads that it does not read (a mission's .mis).
-		if (references_unread(kind) || (!read && graph_reads_kind(kind)))
-			note(ReferenceKind::None, kind, file);
-		if (!read || !extract(node)) return;
+		// What it names is not looked for: a file of a kind that names files the graph does not
+		// read (a terrain; a mission's .mis, of a kind it reads).
+		if (references_unread(kind, file)) note(ReferenceKind::None, kind, file);
+		if (!graph_reads_file(kind, file) || !extract(node)) return;
 		for (const GraphEdge &edge : node.content.edges) {
 			if (plan_.truncated) return;
 			// A stylesheet value the game does not read (another sheet's, or a definition after

@@ -20,22 +20,36 @@ std::unique_ptr<Document> make_model() { return std::make_unique<ModelDocument>(
 std::unique_ptr<Document> make_animation() { return std::make_unique<AnimationDocument>(); }
 std::unique_ptr<Document> make_animation_map() { return std::make_unique<AnimationMapDocument>(); }
 
-const DocumentType kTypes[] = {
-	{"catalog", is_catalog_kind, make_catalog, validate_catalogs},
-	{"strings", is_strings_kind, make_strings, validate_strings},
-	{"menu", is_menu_kind, make_menu, validate_menus},
-	{"styles", is_style_kind, make_styles, validate_styles},
-	{"model", is_model_kind, make_model, validate_models},
-	{"animation", is_animation_kind, make_animation, validate_animations},
-	{"animation_map", is_animation_map_kind, make_animation_map, validate_animation_maps},
+constexpr DocumentType kTypes[] = {
+	{DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalogs},
+	{DocumentTypeId::Strings, "strings", make_strings, validate_strings},
+	{DocumentTypeId::Menu, "menu", make_menu, validate_menus},
+	{DocumentTypeId::Styles, "styles", make_styles, validate_styles},
+	{DocumentTypeId::Model, "model", make_model, validate_models},
+	{DocumentTypeId::Animation, "animation", make_animation, validate_animations},
+	{DocumentTypeId::AnimationMap, "animation_map", make_animation_map, validate_animation_maps},
 };
+
+// One type per DocumentTypeId past None, in its order.
+constexpr bool types_in_order() {
+	for (size_t i = 0; i < kDocumentTypeCount; ++i)
+		if (static_cast<size_t>(kTypes[i].id) != i + 1) return false;
+	return true;
+}
+
+static_assert(sizeof(kTypes) / sizeof(kTypes[0]) == kDocumentTypeCount,
+              "every DocumentTypeId has exactly one type");
+static_assert(types_in_order(), "the types follow DocumentTypeId's order");
 
 } // namespace
 
+const DocumentType *document_type(DocumentTypeId id) {
+	const size_t index = static_cast<size_t>(id);
+	return index >= 1 && index <= kDocumentTypeCount ? &kTypes[index - 1] : nullptr;
+}
+
 const DocumentType *document_type_for(AssetKind kind) {
-	for (const DocumentType &type : kTypes)
-		if (type.handles(kind)) return &type;
-	return nullptr;
+	return document_type(asset_kind_row(kind).document);
 }
 
 bool is_editable_kind(AssetKind kind) { return document_type_for(kind) != nullptr; }

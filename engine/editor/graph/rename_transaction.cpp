@@ -9,12 +9,12 @@
 #include <system_error>
 #include <variant>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/project/project_files.h>
-#include <editor/project_build/archive_routing.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace fs = std::filesystem;
@@ -145,7 +145,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		                                ": rename the source instead.", asset->relative_path));
 	} else if (!check_project_file_name(paths.root, dir, new_name, asset->kind, problem, message)) {
 		plan.refusals.push_back(refusal(("rename." + problem).c_str(), message, asset->relative_path));
-	} else if (route_asset(asset->kind) != ArchiveSlot::Loose &&
+	} else if (archive_name_limit_binds(asset->kind) &&
 			!logical_name_fits_archive(new_name)) {
 		// check_project_file_name takes Unknown for a kind not decided yet (an import before its
 		// bytes are read); this file's is decided, none the game knows, and the build packs it all
@@ -390,61 +390,6 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 	if (!plan.output_dir.empty() && plan.output_dir != plan.new_output_dir)
 		fs::remove_all(fs::path(paths.root) / plan.output_dir, ec);
 	return true;
-}
-
-std::vector<Edit> plan_symbol_rename(const Document &document, const std::vector<Edit> &edits) {
-	struct Rename {
-		NodeAddress address;
-		ReferenceKind kind = ReferenceKind::None;
-		std::string after;
-	};
-	std::vector<Rename> renames;
-	for (const Edit &edit : edits) {
-		// A record the batch makes (batch_made) has no references to follow yet.
-		if (edit.operation != EditOperation::Set || is_batch_made(edit.address.child)) continue;
-		const auto *after = std::get_if<std::string>(&edit.value);
-		if (!after) continue;
-		for (const FieldSchema &schema : document.fields(edit.address.kind)) {
-			if (schema.id != edit.field || schema.defines == ReferenceKind::None) continue;
-			const ReferenceKind kind = document.field_on(edit.address, schema).defines;
-			Value before;
-			if (kind == ReferenceKind::None || !document.get(edit.address, edit.field, before)) continue;
-			const auto *old = std::get_if<std::string>(&before);
-			// A change of case alone still finds the record (the lookups ignore case). A NAME
-			// cleared is no rename: the references keep the old one and the graph reports them.
-			if (old && !old->empty() && !after->empty() &&
-			    graph_names::symbol_name(kind, *old) != graph_names::symbol_name(kind, *after))
-				renames.push_back({edit.address, kind, *after});
-		}
-	}
-	if (renames.empty()) return {};
-	Extracted extracted;
-	extract_from_document(document, extracted);
-	std::vector<Edit> sites;
-	for (const Rename &rename : renames) {
-		const GraphSymbol *self = nullptr;
-		for (const GraphSymbol &symbol : extracted.symbols)
-			if (symbol.kind == rename.kind && symbol.address == rename.address) self = &symbol;
-		if (!self || self->inert) continue; // no lookup finds it by the old name: nothing does
-		const std::string wanted = graph_names::symbol_name(rename.kind, rename.after);
-		const bool taken = std::any_of(extracted.symbols.begin(), extracted.symbols.end(), [&](const GraphSymbol &other) {
-			return other.kind == rename.kind && other.address != rename.address && other.name == wanted &&
-			       other.scope == self->scope;
-		});
-		if (taken) continue;
-		for (const GraphEdge &edge : extracted.edges) {
-			if (edge.kind != rename.kind || !edge.rewritable || !scope_matches(self->scope, edge.scope) ||
-			    graph_names::symbol_name(edge.kind, edge.value) != self->name)
-				continue;
-			Edit site;
-			site.operation = EditOperation::Set;
-			site.address = edge.address;
-			site.field = edge.field;
-			site.value = rename.after;
-			sites.push_back(std::move(site));
-		}
-	}
-	return sites;
 }
 
 SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGraph &graph, const GraphSymbol &symbol,

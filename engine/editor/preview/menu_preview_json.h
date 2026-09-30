@@ -75,7 +75,8 @@ bool menu_preview_options_from_json(const io::JsonValue &json, MenuPreviewOption
 // pane plans one (selected_windows, layout_press, layout_press_edits): `dx` and `dy` design
 // units from where it is by `handle`, snapped on kLayoutGrid when `snap`, sent to the session
 // as one batch and one undo step. False when the snapshot does not show the document as it is
-// now, the window is not one of its screen's, or the drag writes nothing (no area).
+// now, the window is not one of its screen's, the drag writes nothing (no area), or the session
+// did not take the batch (its outcome not done).
 bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snapshot, NodeId window, LayoutHandle handle,
                        int dx, int dy, bool snap);
 // One arrange of `windows` (windows of the screen the snapshot shows, the first the one the

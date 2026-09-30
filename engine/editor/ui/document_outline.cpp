@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <imgui.h>
@@ -13,7 +14,7 @@ namespace {
 using window_requests::edit;
 using window_requests::select;
 
-void draw_collection(EditorHost &host, const Document &document, const RecordReveal &reveal, NodeId row,
+void draw_collection(Workspace &workspace, const Document &document, const RecordReveal &reveal, NodeId row,
                      const NodeAddress &owner, const Document::Collection &collection);
 
 // A record's name as the windows show it (Document::record_title) and its tooltip: the token
@@ -30,8 +31,8 @@ std::string record_tip(const Document &document, const NodeAddress &address, con
 
 // One record: a leaf, or a node over the collections it holds; marked when it was added or
 // changed since the last save; open while it holds the selection the outline reveals.
-void draw_record(EditorHost &host, const Document &document, const RecordReveal &reveal, const NodeAddress &address) {
-	const SessionView &view = host.view();
+void draw_record(Workspace &workspace, const Document &document, const RecordReveal &reveal, const NodeAddress &address) {
+	const SessionView &view = workspace.view();
 	const std::vector<Document::Collection> held = document.collections_of(address);
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 	if (held.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -47,18 +48,18 @@ void draw_record(EditorHost &host, const Document &document, const RecordReveal 
 	ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
 	ui_kit::tooltip_lazy([&] { return record_tip(document, address, title, change); });
 	if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-		select(host, document, address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
+		select(workspace, document, address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
 	if (!open || held.empty()) return;
 	for (const Document::Collection &collection : held)
-		draw_collection(host, document, reveal, address.row, address, collection);
+		draw_collection(workspace, document, reveal, address.row, address, collection);
 	ImGui::TreePop();
 }
 
-void draw_collection(EditorHost &host, const Document &document, const RecordReveal &reveal, NodeId row,
+void draw_collection(Workspace &workspace, const Document &document, const RecordReveal &reveal, NodeId row,
                      const NodeAddress &owner, const Document::Collection &collection) {
 	const Document::CollectionSpec &spec = collection.spec;
 	const std::string label = std::string(spec.label) + " (" + std::to_string(collection.ids.size()) + ")";
-	ImGui::PushID(spec.kind_name);
+	ImGui::PushID(document.kind_token(spec.kind));
 	ImGui::PushID(static_cast<int>(owner.child ? owner.child : owner.row));
 	reveal.open_collection(owner, spec.kind);
 	const bool open = ImGui::TreeNodeEx("##collection", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
@@ -66,7 +67,7 @@ void draw_collection(EditorHost &host, const Document &document, const RecordRev
 	if (!spec.fixed && (spec.max == 0 || collection.ids.size() < spec.max)) {
 		ImGui::SameLine();
 		if (ImGui::SmallButton("+"))
-			edit(host, document, EditOperation::Add, {row, spec.kind, 0}, SIZE_MAX, owner.child);
+			edit(workspace, document, EditOperation::Add, {row, spec.kind, 0}, SIZE_MAX, owner.child);
 		ui_kit::tooltip("Adds one at the end.");
 	}
 	if (open) {
@@ -80,9 +81,9 @@ void draw_collection(EditorHost &host, const Document &document, const RecordRev
 			if (const int revealed = reveal.index_in(collection.ids); revealed >= 0) clipper.IncludeItemByIndex(revealed);
 			while (clipper.Step())
 				for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-					draw_record(host, document, reveal, address_at(size_t(i)));
+					draw_record(workspace, document, reveal, address_at(size_t(i)));
 		} else {
-			for (size_t i = 0; i < collection.ids.size(); ++i) draw_record(host, document, reveal, address_at(i));
+			for (size_t i = 0; i < collection.ids.size(); ++i) draw_record(workspace, document, reveal, address_at(i));
 		}
 		ImGui::TreePop();
 	}
@@ -90,20 +91,19 @@ void draw_collection(EditorHost &host, const Document &document, const RecordRev
 	ImGui::PopID();
 }
 
-// Whether the file adds rows of `kind` at the top level (Document::top_kinds): those rows are
-// a list like any collection that is not fixed; the others are the file's fixed records.
+// Whether the file adds rows of `kind` at the top level (RecordKindRow::add_label): those rows
+// are a list like any collection that is not fixed; the others are the file's fixed records.
 bool adds_rows_of(const Document &document, NodeKind kind) {
-	for (const Document::KindSpec &spec : document.top_kinds())
-		if (spec.kind == kind) return true;
-	return false;
+	const RecordKindRow *row = document.kind_row(kind);
+	return row && *row->add_label;
 }
 
-// The rows the file adds (one tool per kind, top_kinds: a row at the end of the file), the
+// The rows the file adds (one tool per kind with an add_label: a row at the end of the file), the
 // selected record's name and its tools, Duplicate / Remove / Up / Down, where its list allows
 // them: a nested record's collection, or the rows of a kind the file adds (a collection's +
 // adds a nested one).
-void draw_selection_tools(EditorHost &host, const Document &document) {
-	const NodeAddress selection = host.view().selection;
+void draw_selection_tools(Workspace &workspace, const Document &document) {
+	const NodeAddress selection = workspace.view().selection;
 	Document::Placement at;
 	const bool nested = selection.child != 0 && document.placement(selection, at);
 	size_t row_index = SIZE_MAX;
@@ -129,9 +129,10 @@ void draw_selection_tools(EditorHost &host, const Document &document) {
 			tools.locked = "It is one of the file's own records: none is added, duplicated, removed or moved.";
 	}
 	ui_kit::WrapRow row;
-	for (const Document::KindSpec &spec : document.top_kinds())
-		if (ui_kit::tool(row, spec.label, true, "Adds one at the end of the file.", true))
-			edit(host, document, EditOperation::Add, {0, spec.kind, 0});
+	for (const RecordKindRow &kind : document.kinds())
+		if (*kind.add_label &&
+		    ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file.", true))
+			edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 	if (placed) {
 		const std::string title = document.record_title(selection), name = document.record_name(selection);
 		const std::string shown = ui_kit::fit(title, ImGui::GetFontSize() * 12.0f);
@@ -142,10 +143,10 @@ void draw_selection_tools(EditorHost &host, const Document &document) {
 		ui_kit::tooltip(tip);
 	}
 	switch (ui_kit::row_tools(row, tools)) {
-	case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, selection, at.index + 1); break;
-	case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, selection); break;
-	case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, selection, at.index - 1); break;
-	case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, selection, at.index + 1); break;
+	case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, selection, at.index + 1); break;
+	case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, selection); break;
+	case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, selection, at.index - 1); break;
+	case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, selection, at.index + 1); break;
 	case ui_kit::RowTool::Add:
 	case ui_kit::RowTool::None: break;
 	}
@@ -153,10 +154,10 @@ void draw_selection_tools(EditorHost &host, const Document &document) {
 
 } // namespace
 
-void draw_document_outline(EditorHost &host, const Document &document, RecordReveal &reveal) {
-	reveal.follow(host.view(), document);
+void draw_document_outline(Workspace &workspace, const Document &document, RecordReveal &reveal) {
+	reveal.follow(workspace.view(), document);
 	ImGui::BeginDisabled(document.blocked());
-	draw_selection_tools(host, document);
+	draw_selection_tools(workspace, document);
 	ImGui::Separator();
 	// A deep tree scrolls sideways rather than run past the window.
 	if (ImGui::BeginChild("outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar)) {
@@ -164,7 +165,7 @@ void draw_document_outline(EditorHost &host, const Document &document, RecordRev
 		for (const auto &row : document.rows()) {
 			if (!row) continue;
 			ImGui::PushID(static_cast<int>(row->id));
-			draw_record(host, document, reveal, {row->id, row->kind, 0});
+			draw_record(workspace, document, reveal, {row->id, row->kind, 0});
 			ImGui::PopID();
 		}
 	}

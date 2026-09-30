@@ -379,7 +379,7 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 	for (const Document::Collection &collection : document.collections_of(owner)) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("kind", json_number(double(collection.spec.kind)));
-		entry.set("kind_name", json_string(collection.spec.kind_name));
+		entry.set("kind_name", json_string(document.kind_token(collection.spec.kind)));
 		entry.set("label", json_string(collection.spec.label));
 		if (collection.spec.fixed) entry.set("fixed", boolean(true));
 		if (collection.spec.max) entry.set("max", json_number(double(collection.spec.max)));
@@ -1102,10 +1102,11 @@ JsonValue document_to_json(const Document &document, bool with_rows) {
 	}
 	out.set("issues", std::move(issues));
 	JsonValue kinds = JsonValue::make_array();
-	for (const Document::KindSpec &spec : document.top_kinds()) {
+	for (const RecordKindRow &row : document.kinds()) {
+		if (!*row.add_label) continue;
 		JsonValue entry = JsonValue::make_object();
-		entry.set("kind", json_number(double(spec.kind)));
-		entry.set("label", json_string(spec.label));
+		entry.set("kind", json_number(double(row.kind)));
+		entry.set("label", json_string(row.add_label));
 		kinds.push(std::move(entry));
 	}
 	out.set("top_kinds", std::move(kinds));

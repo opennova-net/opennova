@@ -4,7 +4,7 @@
 #include <string>
 
 #include <editor/model/value.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -19,7 +19,7 @@ public:
 	// Opens when the view's rename_preview asks the new name (its ask_serial moved), the name
 	// typed starting as the preview's.
 	void follow(const SessionView &view);
-	void draw(EditorHost &host);
+	void draw(Workspace &workspace);
 	// The PreviewRename of a name's rename everywhere: the field `field` of the record at
 	// `locator` in `path`, renamed to `name`; `ask` opens the dialog.
 	static EditorRequest preview(const std::string &path, const std::string &locator, const std::string &field,

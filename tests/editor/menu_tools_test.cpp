@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -24,7 +25,9 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_report.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -57,7 +60,7 @@ bool refused_with(const JsonValue &answer, const char *says) {
 // The draw kind and the custom-draw flag of the one column body `owner` holds.
 bool body_draw(const MnuDocument &menu, const NodeAddress &owner, std::string &display, int64_t &custom) {
 	for (const Document::Collection &collection : menu.collections_of(owner)) {
-		if (std::string(collection.spec.kind_name) != "column.body" || collection.ids.size() != 1) continue;
+		if (std::string(menu.kind_token(collection.spec.kind)) != "column.body" || collection.ids.size() != 1) continue;
 		const NodeAddress body = menu.address_of(collection.ids.front());
 		Value value;
 		if (!menu.get(body, "display", value) || !std::holds_alternative<std::string>(value)) return false;
@@ -104,7 +107,8 @@ int list_count(const JsonValue &window, const char *list) {
 static int test_menu_tools() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_tools");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Tools"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -256,6 +260,20 @@ static int test_menu_tools() {
 	TEST_EXPECT(answer.get("outcome") && answer.get("outcome")->get("findings") &&
 	            !answer.get("outcome")->get("findings")->array.empty());
 	TEST_EXPECT(menu->revision() == kept && answer.get("added")->array.empty());
+	// Refused by the session, an operation holding the documents (S13 A2): the batch parsed, its
+	// outcome not done, and it names nothing made, not the records the batch before it made.
+	const std::string duplicate = R"({"edits": [{"op": "duplicate", "id": )" + h + R"(, "as": "copy"}]})";
+	answer = request(session, "", duplicate);
+	TEST_EXPECT(done(answer) && answer.get("made") && id_of(*answer.get("made"), "copy") != 0);
+	const uint64_t copied = menu->revision();
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	answer = request(session, "", duplicate);
+	TEST_EXPECT(answer.get_bool("ok", false) && !done(answer) && menu->revision() == copied);
+	TEST_EXPECT(answer.get("added") && answer.get("added")->array.empty() && answer.get("made") &&
+	            answer.get("made")->object.empty());
+	session.run_operations();
+	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	TEST_EXPECT(menu->revision() == kept);
 
 	// The list op: HELLO's two ACTIONs replaced by one, one undo step; an empty list replaced
 	// by nothing is done with nothing to do.
@@ -264,7 +282,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(done(answer) && answer.get("added") && answer.get("added")->array.size() == 1);
 	std::vector<NodeId> actions;
 	for (const Document::Collection &collection : menu->collections_of(hello))
-		if (std::string(collection.spec.kind_name) == "action") actions = collection.ids;
+		if (std::string(menu->kind_token(collection.spec.kind)) == "action") actions = collection.ids;
 	TEST_EXPECT(actions.size() == 1);
 	if (actions.size() == 1) {
 		const NodeAddress action = menu->address_of(actions.front());
@@ -272,7 +290,7 @@ static int test_menu_tools() {
 	}
 	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
 	for (const Document::Collection &collection : menu->collections_of(hello))
-		if (std::string(collection.spec.kind_name) == "action") actions = collection.ids;
+		if (std::string(menu->kind_token(collection.spec.kind)) == "action") actions = collection.ids;
 	TEST_EXPECT(actions.size() == 2);
 	const uint64_t unchanged = menu->revision();
 	TEST_EXPECT(done(request(session, "", R"({"id": )" + h + R"(, "list": "hotkey", "records": []})")) &&

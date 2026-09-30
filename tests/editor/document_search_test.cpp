@@ -14,7 +14,9 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/model/field_text.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -122,7 +124,8 @@ int check_self_search(const Document &document) {
 static int test_each_document_type() {
 	editor_test::TempProjectDir dir("opennova_document_search");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	TEST_EXPECT(make_project(session, dir));
 	const SessionView &view = session.view();
 	for (const char *name : {"items.def", "weapon.def", "gametext.bin", "main.mnu", "menu_style.mns", "armory.3di",
@@ -160,7 +163,8 @@ static int test_each_document_type() {
 static int test_project_search() {
 	editor_test::TempProjectDir dir("opennova_project_search");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	TEST_EXPECT(make_project(session, dir));
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.graph != nullptr);

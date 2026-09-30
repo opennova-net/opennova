@@ -9,11 +9,11 @@
 #include <base/io/file_time.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
-#include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 
 namespace fs = std::filesystem;
@@ -228,7 +228,7 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 		// The archive's name rules bind only a file the build packs (check_file_name's rule): a
 		// loose kind (a video, a music bank, a config) is copied beside the archives under any
 		// name.
-		const bool packed = route_asset(asset.kind) != ArchiveSlot::Loose;
+		const bool packed = archive_name_limit_binds(asset.kind);
 		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
 			scan.diagnostics.push_back(make_diagnostic(
 			        DiagnosticSeverity::Error, "asset.name.too_long",

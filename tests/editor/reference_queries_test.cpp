@@ -16,6 +16,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 
@@ -57,7 +58,8 @@ bool found_alike(const AssetGraph &graph, const Document &document, const std::s
 static int test_menu_references() {
 	editor_test::TempProjectDir dir("opennova_reference_queries_menu");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Menus"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -142,10 +144,10 @@ static int test_menu_references() {
 	size_t action_files = 0, sounds = 0;
 	for (const GraphEdge *edge : graph.references_of(document->path())) {
 		if (edge->field == "file" && edge->kind == ReferenceKind::Menu) ++action_files;
-		if (edge->field == "file" && edge->kind == ReferenceKind::WaveBank && edge->value == "click.lwf") ++sounds;
+		if (edge->field == "file" && edge->kind == ReferenceKind::SoundBank && edge->value == "click.lwf") ++sounds;
 	}
 	TEST_EXPECT(action_files == 2 && sounds == 1);
-	TEST_EXPECT(graph.resolve(ReferenceKind::WaveBank, "click.lwf") == ReferenceStatus::Missing);
+	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Missing);
 	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Warning));
 	// The font picker: the project's fonts, then the stylesheet's variables, each as the field
 	// would reference it.
@@ -182,7 +184,8 @@ static int test_menu_references() {
 static int test_go_to_targets() {
 	editor_test::TempProjectDir dir("opennova_reference_queries_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -275,7 +278,8 @@ static int test_go_to_targets() {
 static int test_find_definition() {
 	editor_test::TempProjectDir dir("opennova_reference_queries_find");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Find"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

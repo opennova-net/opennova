@@ -218,7 +218,7 @@ bool list_batch_from_json(const Document &document, NodeId owner, const std::str
 	const Document::Collection *collection = nullptr;
 	const std::vector<Document::Collection> collections = document.collections_of(holder);
 	for (const Document::Collection &candidate : collections)
-		if (list == candidate.spec.kind_name) collection = &candidate;
+		if (list == document.kind_token(candidate.spec.kind)) collection = &candidate;
 	if (!collection) {
 		error = document.record_name(holder) + " holds no \"" + list + "\" list.";
 		return false;
@@ -297,7 +297,7 @@ io::JsonValue record_batch_request(ProjectSession &session, const std::string &p
 	JsonValue made = JsonValue::make_object(), added = JsonValue::make_array();
 	// A Rescan never runs inside an edit, so the document is still the one the batch changed.
 	const std::vector<NodeId> &records = document->last_added_records();
-	if (!batch.edits.empty() && session.last_edit_ok() && !batch.made_labels.empty() &&
+	if (!batch.edits.empty() && session.outcome().done() && !batch.made_labels.empty() &&
 	    records.size() == batch.made_labels.size()) {
 		for (size_t i = 0; i < records.size(); ++i) {
 			added.push(JsonValue::make_number(double(records[i])));

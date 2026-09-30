@@ -11,8 +11,6 @@
 #include <memory>
 
 #include <editor/session/editor_request.h>
-#include <editor/session/problem_fixes.h>
-#include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
@@ -24,6 +22,10 @@
 #include "authoring/menu_preview.h"
 #include "authoring/model_preview.h"
 #endif
+
+namespace opennova::editor {
+class FilePreferencesStore;
+} // namespace opennova::editor
 
 namespace godot {
 
@@ -48,8 +50,9 @@ public:
 	void _exit_tree() override;
 	void _process(double p_delta) override;
 
-	// Where the editor keeps its own settings (recent projects, the runtime path);
-	// read when the node enters the tree, so a test points it at a scratch file first.
+	// Where the editor keeps its own settings (recent projects, the runtime path): the file its
+	// preferences store keeps them in (opennova::editor::FilePreferencesStore), read when the
+	// node enters the tree, so a test points it at a scratch file first.
 	void set_settings_path(const String &p_path) { settings_path_ = p_path; }
 	String get_settings_path() const { return settings_path_; }
 	// Godot options handed to the game child before its game flags (a test runs the
@@ -289,6 +292,8 @@ private:
 	void _on_file_selected(const String &p_file);
 	void _on_files_selected(const PackedStringArray &p_files);
 	void _on_picker_canceled();
+	// A free loopback port for the game's MCP endpoint, allocated when the session spawns the game
+	// (the launcher source the session asks, once the build lands).
 	int allocate_mcp_port();
 	opennova::editor::PlayLauncher make_launcher(int p_mcp_port) const;
 	// The OS window's title follows the project and its unsaved files
@@ -296,9 +301,9 @@ private:
 	void apply_window_title();
 
 	std::unique_ptr<ChildProcessPlatform> platform_;
+	// The preferences' store, owned here and outliving the session that reads and writes it.
+	std::unique_ptr<opennova::editor::FilePreferencesStore> preferences_;
 	std::unique_ptr<opennova::editor::ProjectSession> session_;
-	opennova::editor::ProblemQueryCache problems_; // get_problems_json's answer while the view and query stand
-	opennova::editor::ProblemFixCache fixes_;      // and its problems' fixes while the view stands
 #if OPENNOVA_EDITOR_UI
 	std::unique_ptr<opennova::editor::EditorWindows> windows_;
 	std::unique_ptr<MenuPreview> menu_preview_;

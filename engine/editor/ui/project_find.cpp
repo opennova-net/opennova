@@ -1,5 +1,6 @@
 #include "project_find.h"
 
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/ui_kit.h>
@@ -48,8 +49,8 @@ void ProjectFind::open() {
 	ask_ = true;
 }
 
-void ProjectFind::draw(EditorHost &host) {
-	const SessionView &view = host.view();
+void ProjectFind::draw(Workspace &workspace) {
+	const SessionView &view = workspace.view();
 	if (ask_) {
 		ask_ = false;
 		ImGui::OpenPopup(kTitle);
@@ -84,7 +85,7 @@ void ProjectFind::draw(EditorHost &host) {
 	}
 	// Somewhere to go: the modal closes as it goes.
 	const auto go = [&](const ReferenceTarget &target) {
-		window_requests::go_to(host, target);
+		window_requests::go_to(workspace, target);
 		ImGui::CloseCurrentPopup();
 	};
 	if (!text_[0]) ui_kit::empty_state("Type part of a file's name or of a name a file defines.");

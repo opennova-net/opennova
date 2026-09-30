@@ -38,6 +38,17 @@ struct SymbolFacts {
 	size_t line = 0;
 };
 
+// One kind of record a document type holds (ADR 0046 S13 D5): a row of the type's kinds(), from
+// which the base answers what a kind is called, the token it goes by (in a locator, a collection,
+// a batch's add and the editor MCP) and which kinds are the file's own rows.
+struct RecordKindRow {
+	NodeKind kind = 0;
+	const char *token = "";     // "window", "items.item", "carry"
+	const char *label = "";     // "Window", "Carry limit"
+	const char *add_label = ""; // the outline's tool adding a row of it ("Add screen"); "" = none
+	bool top = false;           // a row of the file, not a record nested in one
+};
+
 // An editable file (ADR 0046 d9): the lifecycle every document type shares (load
 // and decode, the change fingerprint, undo/redo, the save checkpoint, the conflict
 // check, the atomic write) over rows a document type parses from and serializes to
@@ -101,24 +112,16 @@ public:
 	bool apply(const Edit &edit, Diagnostic &error);
 	// A batch: every edit changes the same row (Sets, Clears, Writes, and Adds, Duplicates,
 	// Removes, Moves and Pastes inside it), cloned once and committed as one Change, one
-	// undo step; nothing is committed when any edit is refused. A later edit may name a
-	// record an earlier one made (batch_made). A batch whose edits all
-	// coalesce folds with the next batch of the same fields (a drag without a gesture).
-	// Adding, removing or moving rows, and a file-wide value, go one edit at a time.
-	bool apply(const std::vector<Edit> &edits, Diagnostic &error);
-	// The edits that follow from a batch (a record's new name followed into the references
-	// of its file, graph/rename_transaction's plan_symbol_rename), planned over the
-	// document as the batch finds it.
-	using FollowEdits = std::function<std::vector<Edit>(const Document &document, const std::vector<Edit> &edits)>;
-	// A batch and what follows from it as one undo step, undone and redone together: an
-	// edit that follows on the batch's own row joins its batch, the others go in one batch
-	// per row (Sets, Clears, Writes; one the batch makes itself is dropped). A coalesced batch
+	// undo step; nothing is committed when any edit is refused or the type vetoes the change.
+	// A later edit may name a record an earlier one made (batch_made). A batch whose edits all
+	// coalesce folds with the next batch of the same fields (a drag without a gesture); one
 	// continuing its open group (typing) starts again from what the group found, the step
-	// before undone first, so what follows is planned from the group's first state and a
-	// value typed on the way (an empty name, a name another record has) leaves nothing
-	// behind; the whole group stays one step. Nothing is committed when any batch is
-	// refused or the type vetoes any change (a reopened group is put back as it was).
-	bool apply(const std::vector<Edit> &edits, const FollowEdits &follow, Diagnostic &error);
+	// before undone first, so a value typed on the way (an empty image or hotkey, a name)
+	// leaves nothing behind and the whole group stays one step (a refused one puts the group's
+	// step back as it was). Adding, removing or moving rows, and a file-wide value, go one edit
+	// at a time. A record's new name is its own edit: what names it elsewhere, in its file or
+	// another, is Rename everywhere's (graph/rename_transaction, plan_symbol_rename_project).
+	bool apply(const std::vector<Edit> &edits, Diagnostic &error);
 	void undo();
 	void redo();
 	void end_edit_group() { history_.end_edit_group(); }
@@ -156,7 +159,6 @@ public:
 		NodeKind kind = 0;             // the records' kind
 		const char *label = "";        // "Actions"
 		const char *name_field = "";   // the field that names a record ("" = none)
-		const char *kind_name = "";    // the kind's token (kind_from_name, add_record, the MCP, locators)
 		// No Add, Duplicate, Remove or Move: the core refuses each (a model's LODs and collision
 		// records, a clip's bones and frame events).
 		bool fixed = false;
@@ -176,14 +178,16 @@ public:
 	};
 	// A record met by a walk, with its placement. Returning false stops the walk.
 	using RecordVisitor = std::function<bool(const NodeAddress &record, const Placement &at)>;
-	struct KindSpec {
-		NodeKind kind = 0;
-		const char *label = ""; // "Add record", "Add carry limit"
-	};
-	virtual const char *kind_label(NodeKind kind) const = 0;
-	virtual NodeKind kind_from_name(const std::string &name) const = 0; // -1 when unknown
-	virtual bool is_top_kind(NodeKind kind) const = 0;
-	virtual std::vector<KindSpec> top_kinds() const = 0;
+	// Every kind of record the type holds, one row each (RecordKindRow), in storage that outlives
+	// the document (a static table of the type): a kind's label, its token, whether it is a row of
+	// the file and whether the outline adds one. A collection's records are of a kind listed here.
+	virtual const std::vector<RecordKindRow> &kinds() const = 0;
+	// From kinds(): a kind's row (null for one the type does not hold), its label and its token
+	// ("" for none), and the kind a token names (-1 for none).
+	const RecordKindRow *kind_row(NodeKind kind) const;
+	const char *kind_label(NodeKind kind) const;
+	const char *kind_token(NodeKind kind) const;
+	NodeKind kind_from_name(const std::string &token) const;
 	// The collections `owner` holds inside `row` (owner.child == 0: the row's own), in
 	// the order the file writes them; none for a record that holds nothing. `row` may be
 	// an uncommitted clone (the base resolves a batch's later edits against it).
@@ -363,7 +367,10 @@ protected:
 	// descendants). The default refuses.
 	virtual bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                           std::string &error);
-	virtual bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) = 0;
+	// A file-wide value set (Edit SetFileValue: an item table's vehicle spawn registry). The
+	// default refuses: the type has none (document.value).
+	virtual bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit,
+	                            Diagnostic &error);
 	// The file-wide state after the row at `index` is removed (`remaining` rows stay).
 	virtual std::shared_ptr<const FileState> state_after_remove(const std::shared_ptr<const FileState> &state,
 	                                                            size_t remaining) const { (void)remaining; return state; }

@@ -18,8 +18,8 @@ struct Change {
 	size_t before_position = 0, after_position = 0;
 	std::shared_ptr<const FileState> before_state, after_state;
 	uint64_t before_revision = 0, after_revision = 0;
-	// Undone and redone with the change before it: one step over several rows (a name
-	// followed into the other rows of its file, Document::apply's follow).
+	// Undone and redone with the change before it: one step over several rows (a commit of
+	// several changes, the step a batch over several rows makes).
 	bool joined = false;
 };
 

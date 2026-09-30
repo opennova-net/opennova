@@ -1,6 +1,7 @@
 #include "styles_view.h"
 
 #include <editor/documents/mns_document.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
@@ -47,15 +48,15 @@ void quiet_text(const std::string &text, const std::string &tip = std::string())
 
 // A colour swatch over the value, read and written as the game's AARRGGBB word (the
 // Inspector's HexArgb swatch).
-void color_cell(EditorHost &host, const Document &document, const NodeAddress &address, const std::string &value) {
+void color_cell(Workspace &workspace, const Document &document, const NodeAddress &address, const std::string &value) {
 	Value picked = value;
 	const field_widgets::Edited change = field_widgets::swatch(FieldColor::HexArgb, picked);
-	if (change.changed) set(host, document, address, "value", std::move(picked)); // coalesced: one undo step per drag
-	if (change.finished) window_requests::end_edit(host, document.path());
+	if (change.changed) set(workspace, document, address, "value", std::move(picked)); // coalesced: one undo step per drag
+	if (change.finished) window_requests::end_edit(workspace, document.path());
 }
 
 // Who uses a variable: a button with the count, each use one click away.
-void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users) {
+void used_by_cell(Workspace &workspace, const std::vector<const GraphEdge *> &users) {
 	if (users.empty()) {
 		ImGui::TextDisabled("-");
 		return;
@@ -74,7 +75,7 @@ void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users)
 		ImGui::PushID(int(i));
 		const std::string where = edge.source + ": " + (edge.record.empty() ? std::string() : edge.record + " ") + "(" + edge.field + ")";
 		if (ImGui::Selectable(where.c_str()))
-			window_requests::go_to(host, usage_target(host.view().scan, edge));
+			window_requests::go_to(workspace, usage_target(workspace.view().scan, edge));
 		ImGui::PopID();
 	}
 	ImGui::EndPopup();
@@ -82,11 +83,11 @@ void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users)
 
 } // namespace
 
-void StylesView::draw(EditorHost &host, const MnsDocument &document) {
-	const SessionView &view = host.view();
+void StylesView::draw(Workspace &workspace, const MnsDocument &document) {
+	const SessionView &view = workspace.view();
 	reveal_.follow(view, document);
 	findings_.follow(view);
-	draw_document_toolbar(host, document);
+	draw_document_toolbar(workspace, document);
 	ui_kit::empty_state(sheet_status(view, findings_, document));
 	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter names and values", 0.0f, nullptr, false);
 
@@ -112,7 +113,7 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 	                                   : "Adds one at the end of the file: select a line of the table to add after it.";
 	ImGui::BeginDisabled(document.blocked());
 	ui_kit::WrapRow tools_row;
-	if (ui_kit::tool(tools_row, "Add variable", true, where)) edit(host, document, EditOperation::Add, {0, kVariable, 0}, insert_at);
+	if (ui_kit::tool(tools_row, "Add variable", true, where)) edit(workspace, document, EditOperation::Add, {0, kVariable, 0}, insert_at);
 	ui_kit::RowTools tools;
 	tools.add = nullptr;
 	tools.count = listed.size();
@@ -123,10 +124,10 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 		               "continues across other lines.";
 	const NodeAddress address = selected ? NodeAddress{selected->id, selected->kind, 0} : NodeAddress();
 	switch (ui_kit::row_tools(tools_row, tools)) {
-	case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, index + 1); break;
-	case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, address); break;
-	case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, listed[at - 1]); break;
-	case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, listed[at + 1]); break;
+	case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, index + 1); break;
+	case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, address); break;
+	case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, listed[at - 1]); break;
+	case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, listed[at + 1]); break;
 	case ui_kit::RowTool::Add:
 	case ui_kit::RowTool::None: break;
 	}
@@ -178,7 +179,7 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 		const int64_t at = document.get(line, "line", number) ? std::get<int64_t>(number) : 0;
 		const float x = ImGui::GetCursorScreenPos().x;
 		if (ImGui::Selectable((ui_kit::kChangeRoom + std::to_string(at)).c_str(), view.selection.row == row->id))
-			select(host, document, line);
+			select(workspace, document, line);
 		reveal_.scroll_to(line, true);
 		const Document::RecordChange change = document.record_change(line);
 		ui_kit::change_dot(change, x);
@@ -193,28 +194,28 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 			        document.style_value_use(line, view.graph.get(), cache_key(view));
 			std::vector<const GraphEdge *> users;
 			if (use.bound) users = view.graph->referrers_of(ReferenceKind::StyleVar, row->name());
-			text_cell(host, document, line, "name");
-			if (ImGui::IsItemActivated()) select(host, document, line);
+			text_cell(workspace, document, line, "name");
+			if (ImGui::IsItemActivated()) select(workspace, document, line);
 			ImGui::TableNextColumn();
-			text_cell(host, document, line, "value");
-			if (ImGui::IsItemActivated()) select(host, document, line);
+			text_cell(workspace, document, line, "value");
+			if (ImGui::IsItemActivated()) select(workspace, document, line);
 			std::string picked;
 			const bool drops = use.picks && !document.blocked();
 			if (drops && ReferencePicker::accept_file(view, use.file, picked))
-				set(host, document, line, "value", picked, false);
+				set(workspace, document, line, "value", picked, false);
 			ImGui::TableNextColumn();
 			if (use.colour) {
-				color_cell(host, document, line, value);
+				color_cell(workspace, document, line, value);
 			} else if (use.picks) {
 				const FieldUse &file = use.file;
-				if (picker_.draw(host, document, line, file, Value(value), false, picked, false))
-					set(host, document, line, "value", picked, false);
+				if (picker_.draw(workspace, document, line, file, Value(value), false, picked, false))
+					set(workspace, document, line, "value", picked, false);
 			}
 			ImGui::TableNextColumn();
-			text_cell(host, document, line, "comment");
-			if (ImGui::IsItemActivated()) select(host, document, line);
+			text_cell(workspace, document, line, "comment");
+			if (ImGui::IsItemActivated()) select(workspace, document, line);
 			ImGui::TableNextColumn();
-			used_by_cell(host, users);
+			used_by_cell(workspace, users);
 			ImGui::TableNextColumn();
 			if (!use.winner) quiet_text("defined again below: the game reads that one");
 			else if (!read) quiet_text("not read by the game");

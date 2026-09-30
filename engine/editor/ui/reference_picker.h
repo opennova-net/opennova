@@ -9,7 +9,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
 #include <editor/session/problem_fixes.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -32,10 +32,10 @@ class ReferencePicker {
 public:
 	// The button and its popup for `field` (a reference, as it applies to `record`), whose value
 	// is `value`: true when a name was picked this frame, `picked` holding it (the caller sets
-	// it). A fix the footer offers is raised through the host. `others`: the names of what the
+	// it). A fix the footer offers is raised through the workspace. `others`: the names of what the
 	// value may name instead are offered too (the kind's also_offers: a menu's stylesheet
 	// variables); a stylesheet's own value names its file alone.
-	bool draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldUse &field,
+	bool draw(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
 	          const Value &value, bool compact, std::string &picked, bool others = true);
 	// A Files row dropped on the item just drawn (a reference field's value): true when the file is
 	// one a reference of the field's kind loads (file_serves_reference, by the field's loader_arg),
@@ -88,7 +88,7 @@ private:
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	             const FieldUse &field, const Value &value, bool others);
-	bool draw_popup(EditorHost &host, Popup &popup, std::string &picked);
+	bool draw_popup(Workspace &workspace, Popup &popup, std::string &picked);
 	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);
 

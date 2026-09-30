@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-#include <editor/ui/editor_host.h>
+#include <editor/session/session_view.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -25,14 +26,14 @@ namespace opennova::editor {
 // preview stays open. The workspace draws it every frame, whichever window asked for it.
 class ImportDialog {
 public:
-	void draw(EditorHost &host);
+	void draw(Workspace &workspace);
 
 private:
 	void take(const SessionView::ImportPreview &preview);
-	void draw_choices(EditorHost &host, const SessionView::ImportPreview &preview);
-	void draw_plan(EditorHost &host, const SessionView::ImportPreview &preview);
+	void draw_choices(Workspace &workspace, const SessionView::ImportPreview &preview);
+	void draw_plan(Workspace &workspace, const SessionView::ImportPreview &preview);
 	void draw_notes(const SessionView::ImportPreview &preview);
-	void choose(EditorHost &host, const SessionView::ImportPreview &preview);
+	void choose(Workspace &workspace, const SessionView::ImportPreview &preview);
 
 	uint64_t serial_ = 0;       // the plan the checks were taken from
 	std::vector<bool> checked_; // per plan row: taken by the import

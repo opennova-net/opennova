@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -19,12 +20,6 @@ using model_document_detail::place_of;
 using Place = ModelPlace;
 
 namespace model_document_detail {
-
-const KindRow *kind_row(NodeKind kind) {
-	for (const KindRow &row : kKinds)
-		if (node_kind(row.kind) == kind) return &row;
-	return nullptr;
-}
 
 // Every identity of a row by where it sits: made when the row is given its identities
 // (for_each_identity) and by each structural edit of a clone (index_places), never inside a
@@ -119,7 +114,6 @@ bool material_is_drawn(const ModelRow &row, int source) {
 
 using model_document_detail::kPanmSlot;
 using model_document_detail::kTextureSlot;
-using model_document_detail::kind_row;
 using model_document_detail::record_of;
 
 namespace {
@@ -240,7 +234,6 @@ const Document::CollectionSpec spec(ModelKind kind, const char *label, const cha
 	s.kind = node_kind(kind);
 	s.label = label;
 	s.name_field = name_field;
-	s.kind_name = kind_row(node_kind(kind))->token;
 	s.fixed = fixed;
 	s.max = max;
 	return s;
@@ -277,20 +270,21 @@ void CollisionRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
 	model_document_detail::index_places(*this);
 }
 
-bool is_model_kind(AssetKind kind) { return kind == AssetKind::Model; }
-
-const char *ModelDocument::kind_label(NodeKind kind) const {
-	const KindRow *row = kind_row(kind);
-	return row ? row->label : "";
+bool is_model_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::Model;
 }
 
-NodeKind ModelDocument::kind_from_name(const std::string &name) const {
-	for (const KindRow &row : kKinds)
-		if (name == row.token) return node_kind(row.kind);
-	return -1;
+const std::vector<RecordKindRow> &ModelDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = [] {
+		std::vector<RecordKindRow> out;
+		for (const KindRow &row : kKinds) {
+			const NodeKind kind = node_kind(row.kind);
+			out.push_back({kind, row.token, row.label, "", kind == kModel || kind == kCollision});
+		}
+		return out;
+	}();
+	return table;
 }
-
-bool ModelDocument::is_top_kind(NodeKind kind) const { return kind == kModel || kind == kCollision; }
 
 std::vector<Document::Collection> ModelDocument::collections(const Node &node, const NodeAddress &owner) const {
 	if (node.kind == kModel) {
@@ -617,11 +611,6 @@ bool ModelDocument::set_field(Node &node, const NodeAddress &address, const std:
 	threedi_build_material_surface(material, (flags & renderer::MATERIAL_FLAG_GLASS) != 0,
 	                               (flags & renderer::MATERIAL_FLAG_EMISSIVE) != 0);
 	return true;
-}
-
-bool ModelDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "A model has no file-wide values.", path());
-	return false;
 }
 
 bool ModelDocument::accept_change(const Change &change, std::string &error) const {

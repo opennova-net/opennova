@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include <editor/session/project_session.h>
+#include <editor/session/session_core.h>
 
 namespace opennova::editor {
 

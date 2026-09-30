@@ -13,10 +13,9 @@
 
 namespace opennova::editor {
 
-class ProjectSession;
-// What an operation's finish writes through. The session is one class today; S13 A2 gives its
-// state a class of its own (SessionCore) and this alias goes.
-using SessionCore = ProjectSession;
+// What an operation's finish absorbs its work through: the session's core (session_core.h, S13
+// A2), which reaches every part of the session.
+class SessionCore;
 
 // The long jobs the session runs one at a time, a step at a time, so the window that hosts it
 // keeps drawing (ADR 0046 S13 A1). Build has a body; the other kinds are rows already, so the

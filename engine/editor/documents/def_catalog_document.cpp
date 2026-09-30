@@ -1,6 +1,7 @@
 #include "def_catalog_document.h"
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -217,7 +218,7 @@ const char *catalog_name_field(DefRecordKind kind) {
 }
 
 bool is_catalog_kind(AssetKind kind) {
-	return kind == AssetKind::ItemDefs || kind == AssetKind::WeaponDefs || kind == AssetKind::AmmoDefs;
+	return asset_kind_row(kind).document == DocumentTypeId::Catalog;
 }
 
 CatalogRow::CatalogRow(DefRecordKind k) {
@@ -352,7 +353,11 @@ SerializeResult DefCatalogDocument::serialize() const {
 }
 
 std::shared_ptr<Node> DefCatalogDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
-	if (!is_top_kind(kind)) { error = "This catalog cannot add that kind of record."; return nullptr; }
+	const RecordKindRow *top = kind_row(kind);
+	if (!top || !top->top) {
+		error = "This catalog cannot add that kind of record.";
+		return nullptr;
+	}
 	auto row = std::make_shared<CatalogRow>(def_kind(kind));
 	std::string ignored;
 	def_set(row->record(), *def_field(def_kind(kind), catalog_name_field(def_kind(kind))), std::string("New_") + std::to_string(id), ignored);
@@ -460,34 +465,26 @@ void DefCatalogDocument::after_edit(Node &node) {
 	if (auto *p = std::get_if<DefItemDef>(&static_cast<CatalogRow &>(node).data)) update_attachment_slots(*p);
 }
 
-const char *DefCatalogDocument::kind_label(NodeKind kind) const {
-	switch (def_kind(kind)) {
-	case DefRecordKind::Item: return "Item";
-	case DefRecordKind::Weapon: return "Weapon";
-	case DefRecordKind::Ammo: return "Ammo";
-	case DefRecordKind::Action: return "Action";
-	case DefRecordKind::Sight: return "Sight";
-	case DefRecordKind::Attachment: return "Attachment";
-	case DefRecordKind::Effect: return "Effect";
-	case DefRecordKind::Carry: return "Carry limit";
+const std::vector<RecordKindRow> &DefCatalogDocument::kinds() const {
+	static const std::vector<RecordKindRow> items = {
+	        {node_kind(DefRecordKind::Item), "item", "Item", "Add record", true},
+	        {node_kind(DefRecordKind::Attachment), "attachment", "Attachment"},
+	};
+	static const std::vector<RecordKindRow> weapons = {
+	        {node_kind(DefRecordKind::Weapon), "weapon", "Weapon", "Add record", true},
+	        {node_kind(DefRecordKind::Action), "action", "Action"},
+	        {node_kind(DefRecordKind::Sight), "sight", "Sight"},
+	        {node_kind(DefRecordKind::Carry), "carry", "Carry limit", "Add carry limit", true},
+	};
+	static const std::vector<RecordKindRow> ammo = {
+	        {node_kind(DefRecordKind::Ammo), "ammo", "Ammo", "Add record", true},
+	        {node_kind(DefRecordKind::Effect), "effect", "Effect"},
+	};
+	switch (record_kind()) {
+	case DefRecordKind::Item: return items;
+	case DefRecordKind::Weapon: return weapons;
+	default: return ammo;
 	}
-	return "";
-}
-
-NodeKind DefCatalogDocument::kind_from_name(const std::string &name) const {
-	static const char *const names[] = {"item", "weapon", "ammo", "action", "sight", "attachment", "effect", "carry"};
-	for (int i = 0; i < 8; ++i) if (name == names[i]) return i;
-	return -1;
-}
-
-bool DefCatalogDocument::is_top_kind(NodeKind kind) const {
-	return def_kind(kind) == record_kind() || (this->kind() == AssetKind::WeaponDefs && def_kind(kind) == DefRecordKind::Carry);
-}
-
-std::vector<Document::KindSpec> DefCatalogDocument::top_kinds() const {
-	std::vector<KindSpec> kinds{{node_kind(record_kind()), "Add record"}};
-	if (kind() == AssetKind::WeaponDefs) kinds.push_back({node_kind(DefRecordKind::Carry), "Add carry limit"});
-	return kinds;
 }
 
 // A row holds its attachments / actions and sights / effects; nothing nests deeper.
@@ -495,12 +492,16 @@ std::vector<Document::Collection> DefCatalogDocument::collections(const Node &ro
 	if (owner.child) return {};
 	std::vector<CollectionSpec> specs;
 	switch (def_kind(row.kind)) {
-	case DefRecordKind::Item: specs = {{node_kind(DefRecordKind::Attachment), "Attachments", "userpoint", "attachment"}}; break;
-	case DefRecordKind::Weapon:
-		specs = {{node_kind(DefRecordKind::Action), "Actions", "name", "action"},
-		         {node_kind(DefRecordKind::Sight), "Sights", "texture", "sight"}};
+	case DefRecordKind::Item:
+		specs = {{node_kind(DefRecordKind::Attachment), "Attachments", "userpoint"}};
 		break;
-	case DefRecordKind::Ammo: specs = {{node_kind(DefRecordKind::Effect), "Effects", "surface_type", "effect"}}; break;
+	case DefRecordKind::Weapon:
+		specs = {{node_kind(DefRecordKind::Action), "Actions", "name"},
+		         {node_kind(DefRecordKind::Sight), "Sights", "texture"}};
+		break;
+	case DefRecordKind::Ammo:
+		specs = {{node_kind(DefRecordKind::Effect), "Effects", "surface_type"}};
+		break;
 	default: break;
 	}
 	std::vector<Collection> out;

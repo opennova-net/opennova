@@ -5,8 +5,8 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/hash.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
-#include <editor/project_build/archive_routing.h>
 
 namespace opennova::editor {
 
@@ -38,7 +38,7 @@ void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan
 	for (const AssetEntry &asset : scan.entries) {
 		// What the build packs, and nothing else: an import source stays out (its outputs
 		// are in the scan), and so does an archive (the build refuses one), as in plan_build.
-		if (asset.kind == AssetKind::ImageSource || !asset_is_packable(asset)) continue;
+		if (!asset_kind_packed(asset.kind)) continue;
 		files_.emplace(normalized_logical_name(asset.logical_name), Entry{asset.relative_path, asset.size_bytes, asset.modified_ticks});
 	}
 	++generation_;

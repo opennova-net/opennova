@@ -23,7 +23,9 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/ui_kit.h>
@@ -205,7 +207,8 @@ void test_field_marks() {
 void test_outline_marks() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_outline_marks");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
@@ -335,7 +338,8 @@ float scrolled(const char *prefix) {
 void test_reveal_in_views() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_views");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	opennova::rtxt::File table;
@@ -403,7 +407,7 @@ void test_reveal_in_views() {
 	const NodeAddress row{model->rows()[0]->id, model->rows()[0]->kind, 0};
 	NodeAddress point;
 	for (const Document::Collection &collection : model->collections_of(row))
-		if (std::string(collection.spec.kind_name) == "user_point" && !collection.ids.empty())
+		if (std::string(model->kind_token(collection.spec.kind)) == "user_point" && !collection.ids.empty())
 			point = {row.row, collection.spec.kind, collection.ids.back()};
 	CHECK(point.child != 0, "a user point");
 	if (!point.child) return;

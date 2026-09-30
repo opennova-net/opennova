@@ -1,8 +1,10 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "common/test_expect.h"
@@ -88,8 +90,8 @@ static int collections() {
 	// A weapon holds its actions and sights (owner-scoped, S9g); an action holds nothing.
 	const NodeAddress weapon_row{parent, node_kind(DefRecordKind::Weapon), 0};
 	const std::vector<Document::Collection> held = document.collections_of(weapon_row);
-	TEST_EXPECT(held.size() == 2 && std::string(held[0].spec.kind_name) == "action" && held[0].ids == std::vector<NodeId>{child} &&
-	            std::string(held[1].spec.kind_name) == "sight" && held[1].ids.empty());
+	TEST_EXPECT(held.size() == 2 && std::string(document.kind_token(held[0].spec.kind)) == "action" && held[0].ids == std::vector<NodeId>{child} &&
+	            std::string(document.kind_token(held[1].spec.kind)) == "sight" && held[1].ids.empty());
 	Document::Placement at;
 	TEST_EXPECT(document.collections_of(action).empty() && document.placement(action, at) && at.owner == weapon_row);
 	// B5: the only action moved to its own place is no edit.
@@ -127,7 +129,8 @@ static int collections() {
 static int session_gate() {
 	editor_test::TempProjectDir dir("opennova_catalog_session_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
     session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def"));
@@ -227,7 +230,8 @@ static int replaced_action_block() {
 static int go_to_record() {
 	editor_test::TempProjectDir dir("opennova_catalog_goto_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

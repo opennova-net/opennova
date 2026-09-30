@@ -4,7 +4,7 @@
 #include <string>
 
 #include <editor/session/editor_request.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -23,7 +23,7 @@ class ProjectSettingsDialog {
 public:
 	// Opens on the next draw for the view's project, the settings in effect in the fields.
 	void open(const SessionView &view);
-	void draw(EditorHost &host);
+	void draw(Workspace &workspace);
 	// The shell's answer to a Browse... of the dialog: taken while the dialog is open on the
 	// project it asked in (`project_root`, the project open now) for the field it asked for.
 	void set_picked(PickPurpose purpose, const std::string &path, const std::string &project_root);
@@ -37,7 +37,7 @@ private:
 		char runtime[512] = "";
 		bool play_retail = false;
 	};
-	void apply(EditorHost &host);
+	void apply(Workspace &workspace);
 	void close();
 
 	bool open_ = false;       // open, or opening on the next draw

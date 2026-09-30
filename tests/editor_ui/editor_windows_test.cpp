@@ -210,9 +210,11 @@ void test_inspector_plan() {
 
 	const std::vector<InspectorSection> list = plan_inspector(*document, choices, choices, "");
 	const InspectorSection *items = section_of(list, "items");
+	const auto item_rows = [&](const Document::Collection &c) {
+		return std::string(document->kind_token(c.spec.kind)) == "items.item" && c.ids.size() == 2;
+	};
 	CHECK(items && items->has_toggle && has_field(items, "items.multiselect") &&
-	              std::any_of(items->collections.begin(), items->collections.end(),
-	                          [](const Document::Collection &c) { return std::string(c.spec.kind_name) == "items.item" && c.ids.size() == 2; }),
+	              std::any_of(items->collections.begin(), items->collections.end(), item_rows),
 	      "ITEMS: its switch, its fields and its item rows together");
 	const InspectorSection *scrollbar = section_of(list, "scrollbar");
 	CHECK(scrollbar && scrollbar->collections.size() == 1 && scrollbar->collections[0].spec.max == 1 &&
@@ -1988,7 +1990,8 @@ void test_styles_window_ui() {
 void test_styles_lines_listed() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_styles_lines");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
 	const SessionView &v = session.view();
 	CHECK(editor_test::write_text(v.project_root + "/menu_style.mns",
@@ -2088,7 +2091,8 @@ void test_styles_lines_listed() {
 void test_go_to_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2167,7 +2171,8 @@ void test_go_to_ui() {
 void test_numeric_go_to_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_numeric_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Numbers"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2189,7 +2194,7 @@ void test_numeric_go_to_ui() {
 	if (!items || !carrier.row || !gun.row) return;
 	NodeAddress attachment;
 	for (const Document::Collection &collection : items->collections_of(carrier))
-		if (std::string(collection.spec.kind_name) == "attachment" && !collection.ids.empty())
+		if (std::string(items->kind_token(collection.spec.kind)) == "attachment" && !collection.ids.empty())
 			attachment = {carrier.row, collection.spec.kind, collection.ids.front()};
 	CHECK(attachment.child != 0, "the carrier's attachment");
 	if (!attachment.child) return;
@@ -2201,7 +2206,7 @@ void test_numeric_go_to_ui() {
 		for (const FieldUse &field : section.fields)
 			if (field.schema->id == "item_id") form = section.key;
 		for (const Document::Collection &collection : section.collections)
-			if (std::string(collection.spec.kind_name) == "attachment") list = section.key;
+			if (std::string(items->kind_token(collection.spec.kind)) == "attachment") list = section.key;
 	}
 	Ui ui;
 	ui.windows.set_view(&v);

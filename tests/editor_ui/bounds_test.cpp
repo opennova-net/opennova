@@ -22,7 +22,9 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include "common/file_io.h"
@@ -431,7 +433,8 @@ void reach_last_tab(Sweep &sweep) {
 void test_bounds() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_bounds");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(bounds_project(session, dir), "the project");
 	FakePreview menu;
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menus/deep.mnu"));

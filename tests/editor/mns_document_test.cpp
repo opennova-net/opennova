@@ -11,7 +11,9 @@
 #include <editor/documents/mns_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/mns/mns_document.h>
 
 #include "common/retail_paths.h"
@@ -287,7 +289,8 @@ static int test_refusals() {
 static int test_validation() {
 	editor_test::TempProjectDir dir("opennova_styles_validation");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

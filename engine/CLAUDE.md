@@ -36,8 +36,14 @@
     (`project`, `assets`, `requirements`, `blank` (the from-scratch factories),
     `project_build` (the steppable build), `run` (the Play session over the process
     seam), `session` (the one open project and everything the editor does to it:
-    typed requests in, a view out; its wire form, and the record batch the editor MCP
-    names records by), `model` (the neutral editing core, ADR 0046 d9:
+    typed requests in, a view out; `ProjectSession` is a facade over its parts (S13 A2:
+    `SessionCore` the open project, the operation slot, the view and the request's outcome;
+    `DocumentSet` the open documents, their edits and the clipboard; `ProblemsService` the
+    validation and the Problems rows; `PlayController`, `ImportController`,
+    `RenameController`; `UnsavedGuard` the unsaved-changes prompt; `EditorPreferences` over
+    the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
+    its wire form, and the record batch the editor MCP names records by), `model` (the
+    neutral editing core, ADR 0046 d9:
     `Document`, `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
@@ -59,7 +65,8 @@
     canvas's portable half: its one gesture machine, its overlay shapes, and what a press
     on the menu's or the model's picture takes, what a drag writes and what is drawn), `ui`
     (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
-    the only tree besides `runtime/devtools` that may include an ImGui header; the
+    the only tree besides `runtime/devtools` that may include an ImGui header; each window
+    reaches the session through the `Workspace` seam, `ui/workspace.h`; the
     inspector is generic, the per-type views in the Document window's tabs are not)).
     STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
     the engine's own load paths; nothing under the four groups below may include or link it

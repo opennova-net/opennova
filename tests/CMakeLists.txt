@@ -3582,6 +3582,14 @@ target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
 target_include_directories(editor_asset_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_asset_registry COMMAND editor_asset_registry_test)
 
+# The rule the asset kinds' table makes checkable (S13 D5, ADR 0046 S13): every format the
+# runtime's classifier types and every file the required-resources manifest names is a kind the
+# editor knows, with a place in the build.
+add_executable(editor_asset_kinds_test editor/asset_kinds_test.cpp)
+target_link_libraries(editor_asset_kinds_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_kinds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_asset_kinds COMMAND editor_asset_kinds_test)
+
 add_executable(editor_requirements_test editor/requirements_test.cpp)
 target_link_libraries(editor_requirements_test PRIVATE opennova_editor)
 target_include_directories(editor_requirements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3627,6 +3635,25 @@ add_executable(editor_session_operation_test editor/editor_session_operation_tes
 target_link_libraries(editor_session_operation_test PRIVATE opennova_editor)
 target_include_directories(editor_session_operation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session_operation COMMAND editor_session_operation_test)
+
+# The session's parts (S13 A2): the editor's preferences over their store (the memory store's
+# round trip, the file store's settings file byte for byte, a session over each), the open
+# documents' one position rule and remembered selections, and the unsaved-changes prompt driven
+# by the request table's guard column for every request kind.
+add_executable(editor_preferences_test editor/editor_preferences_test.cpp)
+target_link_libraries(editor_preferences_test PRIVATE opennova_editor)
+target_include_directories(editor_preferences_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_preferences COMMAND editor_preferences_test)
+
+add_executable(editor_document_set_test editor/document_set_test.cpp)
+target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
+target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_document_set COMMAND editor_document_set_test)
+
+add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
+target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
+target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_unsaved_guard COMMAND editor_unsaved_guard_test)
 
 # The session's wire form (the editor MCP): request tokens both ways, the view, a
 # document and a record as JSON over a real session.

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/record_reveal.h>
 
 namespace opennova::editor {
@@ -18,12 +18,12 @@ class StringsDocument;
 // inspector's business.
 class StringsView {
 public:
-	void draw(EditorHost &host, const StringsDocument &document);
+	void draw(Workspace &workspace, const StringsDocument &document);
 
 private:
 	// `section` the selected one (its tools; null: none selected, listed only across every
 	// section).
-	void draw_strings(EditorHost &host, const StringsDocument &document, const Node *section);
+	void draw_strings(Workspace &workspace, const StringsDocument &document, const Node *section);
 
 	char filter_[128]{};
 	bool every_section_ = false;

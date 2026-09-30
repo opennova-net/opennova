@@ -15,7 +15,9 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
 
@@ -60,7 +62,8 @@ bool has_section(const std::vector<uint8_t> &bytes, const std::string &section) 
 static int test_names_decode_and_rescan() {
 	editor_test::TempProjectDir dir("opennova_editor_asset_source");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Assets"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -120,7 +123,8 @@ static int test_names_decode_and_rescan() {
 static int test_open_document_stands_in() {
 	editor_test::TempProjectDir dir("opennova_editor_asset_source_open");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Open"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

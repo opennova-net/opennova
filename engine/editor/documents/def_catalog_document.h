@@ -53,10 +53,9 @@ public:
 	const void *record(const NodeAddress &address) const;
 	const std::vector<int> &spawn_ids() const;
 
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override;
-	std::vector<KindSpec> top_kinds() const override;
+	// The file's own kinds: its records (Add record) and what they hold, and a weapon table's carry
+	// limits (Add carry limit), rows of their own.
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
 	// An item's vehicle spawn slots: the bits of the file's registry, each named by its id.

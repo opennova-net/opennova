@@ -41,7 +41,7 @@ inline opennova::editor::NodeAddress child_of(const opennova::editor::Document &
                                               const opennova::editor::NodeAddress &owner, const char *token,
                                               size_t index = 0) {
 	for (const opennova::editor::Document::Collection &collection : document.collections_of(owner))
-		if (std::string(collection.spec.kind_name) == token && index < collection.ids.size())
+		if (std::string(document.kind_token(collection.spec.kind)) == token && index < collection.ids.size())
 			return {owner.row, collection.spec.kind, collection.ids[index]};
 	return {};
 }

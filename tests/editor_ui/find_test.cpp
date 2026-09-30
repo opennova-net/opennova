@@ -22,7 +22,8 @@ namespace {
 struct FindProject {
 	editor_test::TempProjectDir dir{"opennova_editor_ui_find"};
 	NoProcess platform;
-	ProjectSession session{platform, dir.file("settings.json")};
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
 	std::string items_path, weapons_path;
 	NodeAddress item, weapon;
 

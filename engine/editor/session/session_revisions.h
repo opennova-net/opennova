@@ -95,7 +95,7 @@ inline const char *view_concern_token(ViewConcern concern) {
 
 // The view's counters: one per concern, and `any`, which moves with each of them. `any` feeds
 // only the view JSON's "revision" (what a client polls to see that anything moved); no window
-// keys a cache on it. The counters move only through touch: the session's (ProjectSession::
+// keys a cache on it. The counters move only through touch: the session's (SessionCore::
 // touch), a test's hand-made view's; a window holds the view const and never can.
 struct ViewRevisions {
 	uint64_t of(ViewConcern concern) const { return counters_[static_cast<size_t>(concern)]; }

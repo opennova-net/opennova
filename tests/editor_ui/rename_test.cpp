@@ -24,7 +24,8 @@ void serve(ProjectSession &session, const std::vector<EditorRequest> &requests) 
 void test_rename_everywhere_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_rename");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -103,7 +104,8 @@ void test_rename_everywhere_ui() {
 void test_hint_on_a_fallback() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_rename_hint");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Hint"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
