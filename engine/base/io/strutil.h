@@ -6,7 +6,11 @@
 
 #pragma once
 
+#include <cerrno>
+#include <climits>
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -141,6 +145,44 @@ inline bool hex_to_bytes(std::string_view hex, std::vector<uint8_t> &out)
         out.push_back(static_cast<uint8_t>((hi << 4) | lo));
     }
     return true;
+}
+
+// Non-throwing std::stoi / std::stoul / std::stof: the same strtol / strtoul /
+// strtof parse (leading whitespace, optional sign, longest numeric prefix, so
+// "12abc" is 12), with nullopt exactly where the std:: form throws (no digits,
+// or out of range). Parsers use these instead of try/catch around the std::
+// form, which a build without exception catching (the web target) cannot run.
+inline std::optional<int> parse_int(const std::string &s, int base = 10)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const long v = std::strtol(begin, &end, base);
+    if (end == begin || errno == ERANGE || v < INT_MIN || v > INT_MAX)
+        return std::nullopt;
+    return static_cast<int>(v);
+}
+
+inline std::optional<unsigned long> parse_ulong(const std::string &s, int base = 10)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const unsigned long v = std::strtoul(begin, &end, base);
+    if (end == begin || errno == ERANGE)
+        return std::nullopt;
+    return v;
+}
+
+inline std::optional<float> parse_float(const std::string &s)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const float v = std::strtof(begin, &end);
+    if (end == begin || errno == ERANGE)
+        return std::nullopt;
+    return v;
 }
 
 } // namespace strutil

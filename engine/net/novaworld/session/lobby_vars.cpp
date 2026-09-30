@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
-#include <cstdlib> // std::stoi
 #include <string>
 
 namespace opennova {
@@ -303,11 +302,11 @@ bool parse_host_port(const std::string &in, std::string &host, uint16_t &port) {
 		return false;
 	}
 	host = in.substr(0, colon);
-	try {
-		port = static_cast<uint16_t>(std::stoi(in.substr(colon + 1)));
-	} catch (...) {
+	const auto parsed = strutil::parse_int(in.substr(colon + 1));
+	if (!parsed) {
 		return false;
 	}
+	port = static_cast<uint16_t>(*parsed);
 	return true;
 }
 

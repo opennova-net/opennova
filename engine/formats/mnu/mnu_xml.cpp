@@ -44,11 +44,7 @@ bool Node::attr_bool(const std::string &name) const {
 int Node::attr_int(const std::string &name, int default_val) const {
   const Attribute *a = find_attr(name);
   if (!a || a->value.empty()) return default_val;
-  try {
-    return std::stoi(a->value);
-  } catch (...) {
-    return default_val;
-  }
+  return strutil::parse_int(a->value).value_or(default_val);
 }
 
 const Node *Node::find_child(const std::string &tag_name) const {
