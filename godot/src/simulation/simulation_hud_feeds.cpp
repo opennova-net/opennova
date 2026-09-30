@@ -16,6 +16,7 @@
 #include <net/npwire/ingame_message_id.h> // the C2S 0x14 / 0x13 menu-pick tags
 #include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
+#include <runtime/inmatch/server_status_feed.h> // the status page's roster and host facts
 #include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
 #include <runtime/world/script_sounds.h>
 #include <runtime/replication/client_state.h>
@@ -27,6 +28,15 @@ using namespace sim_internal;
 using namespace opennova::def;
 
 namespace godot {
+
+bool Simulation::fill_server_status_page(opennova::hud::ServerStatusPageState &r_page) const {
+	// Only an authority keeps the host context the page reads.
+	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	if (ctx == nullptr) return false;
+	opennova::inmatch::fill_server_status_page(r_page, *ctx,
+			kernel_ != nullptr ? &kernel_->world : nullptr);
+	return true;
+}
 
 Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	// The panel describes the vehicle the local player rides — the attached

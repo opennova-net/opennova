@@ -204,6 +204,14 @@ public:
 	// role's replica runtime (the client quality window's frame-pressure term);
 	// a host also hands it to its server context.
 	virtual void observe_frame_rate(int32_t fps);
+	// The main loop's frame statistics after each frame (the frames drawn in
+	// the last 62 logic updates, the window's CPU share): a host hands them to
+	// its server context, where its status page reads them
+	// (Session::frame_statistics carries the witness).
+	virtual void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {
+		(void)frames_last_second;
+		(void)cpu_percent;
+	}
 	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
 	// run between the world wiring and the system registration [orig:
 	// SinglePlayer_StartMission @0x561af0]: the host stands its session up
@@ -261,6 +269,20 @@ public:
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
+	// The main loop's frame statistics the authority's status page shows:
+	// the frames rendered during the last 62 logic ticks and the CPU share
+	// of the frame-rate window (world::TickAccumulator::cpu_percent).
+	// [orig: dword_24C193C — Game_ProcessMainFrame @0x5267ab..0x5267df counts
+	//  every logic update into dword_24D6130 and at 62 publishes
+	//  dword_24C1938, which GameLoop_RenderFrame @0x521cf9 increments once per
+	//  rendered frame; g_StatsCpuPercent]
+	struct FrameStatistics {
+		int32_t frames_last_second = 0;
+		int32_t cpu_percent = 0;
+	};
+	FrameStatistics frame_statistics() const {
+		return {frames_last_second_, accumulator_.cpu_percent()};
+	}
 
 	TransitionResult configure_role(Role &role);
 	TransitionResult begin_connect();
@@ -302,6 +324,12 @@ private:
 	static constexpr int32_t kStartRebaseFrames = 3;
 	int32_t start_rebase_frames_ = 0;
 	bool rebase_clock_ = false;
+	// [orig: dword_24D6130 (the 62-update countdown), dword_24C1938 (frames
+	//  rendered since), dword_24C193C (the published count) — process-lifetime
+	//  words nothing else resets]
+	int32_t second_update_count_ = 0;
+	int32_t frames_rendered_ = 0;
+	int32_t frames_last_second_ = 0;
 	InputPacket pending_input_;
 	CameraSample latest_camera_;
 	SessionError last_error_;

@@ -294,6 +294,10 @@ void test_tdm_round_wire_and_linger() {
 			"TDM kill limit ends for the killer's team");
 	expect(ctx.round_end_announced && ctx.round_end_linger_ticks == 2790,
 			"TDM announces once and seeds the exact MP linger");
+	// The round tallies the status page shows: one TDM round, one team 1 win
+	// [orig: Server_ProcessRoundEnd @0x516883..0x5168d8].
+	expect(ctx.rounds_played == 1 && ctx.round_wins[0] == 1 && ctx.round_wins[1] == 0,
+			"a TDM round end counts the round and the winner's win");
 	// The producer froze the stream once (stru_C947D8) before the 0x61/0x1D
 	// push; every 0x2B pull cuts from that same byte sequence.
 	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]

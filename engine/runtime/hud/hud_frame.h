@@ -18,6 +18,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass
 #include <runtime/hud/hud_overlay_windows.h>
+#include <runtime/hud/hud_server_status.h> // the server-status page
 #include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
 #include <array>
@@ -929,6 +930,17 @@ struct HudFrameState {
 	// HUD_DrawPausedText @0x59d650 (ex sub_59D650)].
 	bool paused = false;
 	std::string paused_text;
+	// THE QUIT DIALOG (hud_toggles.h HudToggleState::quit_dialog_open): a
+	// stdbox (280, 340)-(744, 428) with gametext Overlays/STROVER_QUITSERVER on
+	// an authority in a session, _QUITCLIENT for a joiner, STROVER5 out of a
+	// session (the embedder resolves it), centred at (512, 364) in the Impact38
+	// slot in g_HUDColors.active. The scene frame's gameplay overlays draw it
+	// below the blank declutter level; the status page draws it unconditionally.
+	// [orig: UI_DrawDisconnectReasonDialog @0x5b8eb0 — from
+	//  HUD_DrawGameplayOverlays @0x5be1ce (the level-3 skip @0x5be185) and
+	//  Server_DrawStatusScreen @0x50b270]
+	bool quit_dialog_open = false;
+	std::string quit_dialog_text;
 	// THE TIP ("MrClippy", tip_system.h): the showing tip and its countdown,
 	// the Tips header and the expanded body the embedder resolved, and the
 	// local player's dead bit. The scene frame draws it after the HUD pass:
@@ -1198,6 +1210,15 @@ public:
 	const MapWindowDraw &compile_death_map(const HudFrameState &state,
 			const DeathMapFrame &frame, const DeathMapFacts &facts, float surface_w,
 			float surface_h);
+	// THE SERVER-STATUS PAGE (hud_server_status.h), drawn INSTEAD of the scene
+	// frame while the authority's status view is up. The page's throttle
+	// decides whether it redraws: false leaves the previous page list in
+	// place (retail presents nothing that frame). `now_ms` is the wall clock
+	// in milliseconds, `window_active` the window's focus.
+	// [orig: Server_DrawStatusScreen @0x50a2d0]
+	bool compile_server_status_page(const HudFrameState &state, const ServerStatusPageState &page,
+			uint32_t now_ms, bool window_active, float surface_w, float surface_h);
+	const HudDrawList &server_status_page_list() const { return status_page_list_; }
 	// The CMAP MAP / ORDERS_MAP window [orig: CMapWindow_HandleEvent event 1
 	// @0x5497f0 -> HUD_BuildMapOverlayView mode 4 @0x5a7e10].
 	const MapWindowDraw &compile_command_map(const HudFrameState &state,
@@ -1279,6 +1300,13 @@ private:
 	// sub_5D2EA0 @0x5d2ea0].
 	void emit_text_at_virtual_pos(const GameFont &slot, float slot_scale, const char *text,
 			int design_x, int design_y, float w, float h, uint32_t argb, int mode);
+	// A draw through HUD_DrawTextAligned: the same integer scaling, then the
+	// half-bright drawer by mode with the caller's flag word (0x100 turns the
+	// inline tags off) [orig: HUD_DrawTextAligned @0x5d3f30 ->
+	// HUD_DrawTextAligned_HalfBright @0x5d2f20].
+	void emit_text_aligned(const GameFont &slot, float slot_scale, const char *text,
+			int design_x, int design_y, float w, float h, uint32_t argb, int mode,
+			uint32_t flags);
 	// The same half-bright drawer pick at a SCREEN point [orig: sub_5D2EA0].
 	void emit_half_bright_text(const GameFont &slot, float slot_scale, const char *text,
 			float screen_x, float screen_y, uint32_t argb, int mode);
@@ -1337,7 +1365,12 @@ private:
 	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
-	void element_chat_input(const HudFrameState &state, float w, float h);
+	// The chat input line at design (50, y): the scene frame's panels pass
+	// y 608, the status page 480.
+	void element_chat_input(const HudFrameState &state, float w, float h, float y = 608.0f);
+	void element_quit_dialog(const HudFrameState &state, float w, float h);
+	void element_server_console_lines(bool mp_session_peer, float w, float h);
+	void element_player_score_list(const ServerStatusPageState &page, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
 	void element_kill_announcement(const HudFrameState &state, float w, float h);
 	void element_end_round_statistics(const HudFrameState &state, float w,
@@ -1416,8 +1449,19 @@ private:
 	std::string silhouette_weapon_;
 	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
 	std::vector<HudMessageLine> chat_lines_;   // the CHAT ring (S2C 0x14)
+	// The CHAT channel's RAW ring beside its display buffer: every posted
+	// line unwrapped and cut at 119 characters, newest last [orig:
+	// Chat_AddMessageChannel1 @0x4985d0 — the shift into byte_B3EA38's slots
+	// and the copy @0x498621]. Only a dedicated host's status page reads it
+	// (HUD_DrawServerConsoleLines).
+	std::vector<HudMessageLine> chat_raw_lines_;
 	HudBriefingPages briefing_pages_;
 	int scoreboard_page_ = 0;
+	// The status page's own state [orig: byte_24C10A0+0x2C, the last draw
+	// stamp; +0x24, the ticker counter 0..31] and its last compiled list.
+	uint32_t status_last_draw_ms_ = 0;
+	int status_ticker_ = 0;
+	HudDrawList status_page_list_;
 };
 
 // The chat word-wrap [orig: HUD_WordWrapText @0x580980]: the whole remaining text

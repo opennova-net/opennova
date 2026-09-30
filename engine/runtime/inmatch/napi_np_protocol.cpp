@@ -806,6 +806,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		conn.server_sk = make_random_session_u32();
 	}
 	conn.phase = ConnectionPhase::Joined;
+	// The connection is up: the new-connection callback counts a login
+	// [orig: CNapiNPConnection_OnStateChange @0x6261c6 ->
+	//  NapiNPServer_HandleNewConnection @0x4c8203].
+	++ctx.total_logins;
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
 	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;

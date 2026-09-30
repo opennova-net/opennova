@@ -277,6 +277,20 @@ public:
 	// binding record 200 + category (ControlsModel.display_text_for_action_code
 	// of 200 + category); each drawn slot takes its recorded def's category's.
 	void set_slot_bar_key_labels(const PackedStringArray &p_labels_by_category);
+	// The quit dialog (engine HudToggleState::quit_dialog_open): its Overlays
+	// text by role (engine hud_server_status.h quit_dialog_text_key).
+	void set_quit_dialog(bool p_open, bool p_in_session, bool p_authority,
+			const Ref<RtxtStringFile> &p_gametext);
+	// THE SERVER-STATUS PAGE (engine hud/hud_server_status.h): while shown it
+	// replaces the whole scene frame — the viewport stops drawing its 3D
+	// world and this overlay draws the page, at most every 200 ms (10 s with
+	// the window unfocused), keeping the last page in between. The roster
+	// and host facts are the authority's (inmatch/server_status_feed.h over
+	// the sim's host context); the Server strings resolve through `gametext`.
+	// The witness is the engine header's.
+	void set_server_status_page(bool p_shown, bool p_score_list_open,
+			const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
+	bool is_server_status_page_shown() const { return server_status_shown_; }
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {
@@ -415,6 +429,9 @@ private:
 	opennova::hud::HudFrameState state_;
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
 	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
+	bool server_status_shown_ = false;                // set_server_status_page
+	bool scene_3d_was_disabled_ = false;              // the viewport's own setting under the page
+	opennova::hud::ServerStatusPageState server_status_page_;
 	// The HUDDECLUT mask table + level (engine hud_declutter carries the
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.
@@ -485,6 +502,10 @@ private:
 	// The gameplay-overlay windows' layer above the big map
 	// (HudDrawList::top_begin).
 	RID top_item_;
+	// The status page's own item, drawn above every child of this control
+	// (the SIGHTS card, the view effects): the page stands in for the whole
+	// scene frame.
+	RID page_item_;
 
 	Vector2 draw_surface_() const;
 	// Restamp state_'s declutter visibility/level from declutter_.
@@ -514,6 +535,7 @@ private:
 	void ensure_flat_material_();
 	void ensure_map_materials_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
+	const opennova::hud::HudDrawList &server_status_page_draw_list_(const Vector2 &p_surface);
 	// One index range per flat kind of a draw list.
 	struct FlatRange {
 		size_t quads_begin = 0, quads_end = 0;
@@ -529,6 +551,7 @@ private:
 	void render_flat_runs_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
 			const FlatRange &p_range);
 	void ensure_top_item_();
+	void ensure_page_item_();
 	// p_big selects the sandwich: the corner map's base rides the control's
 	// own item (under the flat HUD) with its add/top children just above the
 	// flat pass; the big map's whole trio sits above everything flat.

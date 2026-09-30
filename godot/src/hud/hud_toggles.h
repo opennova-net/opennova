@@ -45,6 +45,17 @@ public:
 		EVENT_SCOREBOARD_PAGE_RESET = opennova::hud::hud_toggle_event::kScoreboardPageReset,
 		EVENT_PAUSE_TOGGLED = opennova::hud::hud_toggle_event::kPauseToggled,
 		EVENT_PAUSE_CLEARED = opennova::hud::hud_toggle_event::kPauseCleared,
+		EVENT_SERVER_STATUS_VIEW_TOGGLED = opennova::hud::hud_toggle_event::kServerStatusViewToggled,
+		EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED =
+				opennova::hud::hud_toggle_event::kServerStatusScoreListToggled,
+		EVENT_QUIT_DIALOG_OPENED = opennova::hud::hud_toggle_event::kQuitDialogOpened,
+	};
+	// The special-key legs' result bits (engine hud_special_key).
+	enum SpecialKey {
+		SPECIAL_KEY_CONSUMED = opennova::hud::hud_special_key::kConsumed,
+		SPECIAL_KEY_CHAIN_TAKEN = opennova::hud::hud_special_key::kChainTaken,
+		SPECIAL_KEY_QUIT_CONFIRMED = opennova::hud::hud_special_key::kQuitConfirmed,
+		SPECIAL_KEY_RESTART_QUEUED = opennova::hud::hud_special_key::kRestartQueued,
 	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {
@@ -68,16 +79,30 @@ public:
 		ROW_PAUSE = opennova::hud::kRowPause,
 		ROW_AUDIO_EMOTE = opennova::hud::kRowAudioEmote,
 		ROW_RADIO_MACRO = opennova::hud::kRowRadioMacro,
+		ROW_TOGGLE_SERVER = opennova::hud::kRowToggleServer,
 		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
 	// One frame's poll over the sampled rows (a mask of 1 << Row); returns the
 	// Event bits.
-	// `local_alive` feeds the commander_menu row's dead-player gate.
+	// `local_alive` feeds the commander_menu row's dead-player gate;
+	// `authority` / `mp_session_peer` are the connection mode's two bits (the
+	// ToggleServer row, the map-legend gate and the playerlist reroute).
 	int poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
-			bool p_in_session, bool p_objective_game, bool p_local_alive = true);
+			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
+			bool p_authority = false, bool p_mp_session_peer = false);
 	// The escape action's HUD-window close chain; returns the Event bits.
-	int escape(bool p_in_session, bool p_spawn_gate);
+	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
+	// The session create / destroy's status-view rule (engine
+	// hud_toggles_session_init).
+	void session_init(bool p_in_session, bool p_mp_session_peer);
+	// The special-key handler's quit-dialog leg over one key-down VK; returns
+	// the SpecialKey bits (the yes / no / restart VKs are the gametext
+	// KeyPress letters).
+	int quit_dialog_key(int p_vk, bool p_in_session, int p_yes_vk, int p_no_vk, int p_restart_vk);
+	// The special-key handler's status-page leg: true = the key is consumed.
+	bool server_status_page_key(int p_vk, bool p_in_session, bool p_authority,
+			bool p_mp_session_peer) const;
 	// The catalog config token behind a Row.
 	static String row_token(int p_row);
 	// The respawn / mission init: the overlay windows and the latches clear.
@@ -119,6 +144,11 @@ public:
 	// in-game menu sets it on open and clears it on resume out of a session.
 	bool is_paused() const;
 	void set_paused(bool p_paused);
+	// The authority's server-status view, its score list and the quit dialog
+	// (engine HudToggleState).
+	bool is_server_status_view() const;
+	bool is_server_status_score_list_open() const;
+	bool is_quit_dialog_open() const;
 	// The tip (engine hud/tip_system.h): the drained producer events, the
 	// HUD clock's main frames of countdown, the SP restart's full reset, the
 	// two options and the showing tip for the draw.
@@ -143,3 +173,4 @@ private:
 
 VARIANT_ENUM_CAST(godot::HudToggles::Event);
 VARIANT_ENUM_CAST(godot::HudToggles::Row);
+VARIANT_ENUM_CAST(godot::HudToggles::SpecialKey);

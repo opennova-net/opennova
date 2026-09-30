@@ -1148,6 +1148,13 @@ add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
 add_test(NAME hud_toggles COMMAND hud_toggles_test)
+# The authority's server-status page (hud/hud_server_status.h): the throttle,
+# the roster grid and cells, the score list rows and the page compile with the
+# quit dialog and the console lines [orig: Server_DrawStatusScreen @0x50a2d0].
+add_executable(hud_server_status_test hud/hud_server_status_test.cpp)
+target_link_libraries(hud_server_status_test PRIVATE opennova_runtime)
+target_include_directories(hud_server_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_server_status COMMAND hud_server_status_test)
 
 # The tip system (hud/tip_system.h): the event table, the once-counters and
 # option gates, the countdown / fade / reset, the text keys and expansion, the
@@ -3405,6 +3412,12 @@ target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennov
 target_include_directories(npruntime_host_producers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_producers COMMAND npruntime_host_producers_test)
 
+# The status page's roster and host facts off the host context
+# (inmatch/server_status_feed.h) and the total-logins count.
+add_executable(npruntime_server_status_feed_test npruntime/server_status_feed_test.cpp)
+target_link_libraries(npruntime_server_status_feed_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_status_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_test)
 add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
 target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

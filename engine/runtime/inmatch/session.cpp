@@ -314,6 +314,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		return out;
 	}
 	latch_input(input);
+	// The frame's start stamp, in whole milliseconds like GetTickCount
+	// [orig: Game_MainLoop @0x52b798 / @0x52b7ae (after the frame lock
+	//  @0x52b8d7)].
+	const int64_t frame_start_ms = now_us() / 1000;
 	// A mission-start frame re-based the clock once it had rendered, so this
 	// frame banks only the time since that render [orig: Game_MainLoop
 	// @0x52bac8..0x52bad2].
@@ -325,6 +329,25 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
 	if (role_ != nullptr) role_->observe_frame_rate(accumulator_.average_fps());
 	out = run_ticks(due, input);
+	// The CPU share's inputs: this frame's work from its start stamp to the
+	// end of the drain, and the updates the drain ran [orig: @0x52ba4f;
+	// @0x52ba9b..0x52baa1].
+	accumulator_.record_frame_work(
+			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.ticks_run());
+	// Every logic update counts toward the 62-update second; each second
+	// publishes the frames rendered since [orig: Game_ProcessMainFrame
+	// @0x5267ab..0x5267df], and this frame's render then counts
+	// [orig: GameLoop_RenderFrame @0x521cf9].
+	for (int32_t i = 0; i < out.ticks_run(); ++i) {
+		if (++second_update_count_ >= io::kTicksPerSecondInt) {
+			second_update_count_ -= io::kTicksPerSecondInt;
+			frames_last_second_ = frames_rendered_;
+			frames_rendered_ = 0;
+		}
+	}
+	++frames_rendered_;
+	if (role_ != nullptr)
+		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e].

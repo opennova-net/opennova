@@ -148,6 +148,25 @@ func test_help_legend_and_briefing_windows() -> void:
 	assert_true(shell.is_gameplay_input_active(), "closing a window does not open the menu")
 
 
+# ToggleServer (row 83, `\`) needs a session: a single-player shell never
+# brings the status view up, Tab stays dead and Esc never opens the quit
+# dialog [orig: case 11 @0x49aff1; case 102 @0x49bb2a; the escape tail
+# @0x49b377].
+func test_toggle_server_and_tab_are_dead_out_of_a_session() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	var toggles: HudToggles = hud.toggles()
+	await _tap(KEY_BACKSLASH)
+	assert_false(toggles.is_server_status_view(), "no status view out of a session")
+	assert_false(hud.get_game_hud().is_server_status_page_shown(), "the scene frame stays")
+	await _tap(KEY_TAB)
+	assert_false(toggles.is_scoreboard_open(), "the playerlist action does nothing out of a session")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_quit_dialog_open(), "no quit dialog without the view")
+
+
 func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
 	# Retail H is the secondary `pause` binding (SP-only): it flips the pause
 	# word, which pauses the session in place (no menu); there is no

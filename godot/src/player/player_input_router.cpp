@@ -24,7 +24,10 @@ public:
 	int pressed_key(const char *p_token) const override {
 		return controls_.is_valid() ? controls_->pressed_key_for_token(p_token) : 0;
 	}
+	// A digit the special-key chain already took (the quit dialog's swallow)
+	// reads up here too, so it reaches neither the seat nor the menu picks.
 	bool digit_down(int p_digit) const override {
+		if (controls_.is_valid()) return controls_->is_vk_down(0x30 + p_digit);
 		Input *input = Input::get_singleton();
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));

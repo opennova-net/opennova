@@ -1033,9 +1033,8 @@ public:
 	}
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The NovaWorld GSID the gate's ServerHostResult carried, published by the
-	// in-match host as its 0x81 SUS1; no-op without a host role, empty on pure LAN.
-	void set_novaworld_gsid(const String &p_gsid);
+	// The gate registration's GSID (0x81 SUS1) and AppId (the status page's key); LAN: empty / 0.
+	void set_novaworld_registration(const String &p_gsid, int p_app_id);
 	// The admitted remote joiners as the NovaWorld host's PlayerList sees them
 	// (Server_PlayerAdd's five per-slot vars): one entry per server-side
 	// connection past player admission, keyed by its roster slot. The host's own
@@ -1671,9 +1670,10 @@ public:
 	// (accepted rows minus the spectator trailer, replication::scoreboard_header),
 	// in_game/spectators, game_type, server and mission names.
 	Ref<ScoreboardHeader> get_scoreboard() const;
-	// The native Tab-board handoff (NOT ClassDB-bound; HudOverlay's seam):
-	// inmatch::scoreboard_feed's rows and session facts; false without a runtime.
+	// HudOverlay's native seams (NOT ClassDB-bound; false without their source): the Tab
+	// board (inmatch::scoreboard_feed), the status page (inmatch::fill_server_status_page).
 	bool fill_scoreboard(opennova::hud::HudScoreboardState &r_state) const;
+	bool fill_server_status_page(opennova::hud::ServerStatusPageState &r_page) const;
 	// The mounted-vehicle panel (hud/hud_vehicle_panel.h, world/vehicle_panel_feed.h):
 	// {shown, item_id} — the panel's root vehicle (the attached gun child
 	// re-roots to its parent), whose items.def sid the shell joins to its

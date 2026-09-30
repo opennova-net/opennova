@@ -81,6 +81,29 @@ struct HudToggleState {
 	// escape chain's last leg fades it, the mission start clears the showing
 	// tip and keeps the once-counters (tip_system.h carries the witness).
 	TipSystem tips;
+	// The authority's server-status view: while it is up the embedder draws
+	// the status page INSTEAD of the scene frame (hud_server_status.h). The
+	// ToggleServer row (catalog 83, dispatch 11) flips it on an authority that
+	// is a session peer, in a session; the session create / destroy sets it
+	// for a dedicated host and clears it otherwise.
+	// [orig: g_ServerStatusViewActive (dword_24C1914) — case 11 `xor 1`
+	//  @0x49b018 behind @0x49aff1..0x49b012; Server_InitNewRoundState
+	//  @0x51cb43..0x51cb5d; the render gate GameLoop_RenderFrame
+	//  @0x521cd6..0x521cef]
+	bool server_status_view = false;
+	// The status page's player score list, flipped by the playerlist action
+	// in place of the Tab board and never cleared [orig:
+	// g_ServerStatusScoreListOpen (dword_C94798) — Server_ToggleStatusScoreList
+	// @0x500580, its only writer; read @0x50b278].
+	bool server_status_score_list = false;
+	// The quit dialog: opened only by the escape chain's tail on the view,
+	// closed by its own escape leg, the respawn init, the SP pause row and
+	// the mission start; while it is up the special-key handler takes the
+	// yes / no keys (hud_toggles_quit_dialog_key).
+	// [orig: g_QuitDialogOpen (dword_24C1880) — set @0x49b38f; cleared
+	//  @0x49b295, Game_InitRespawnState @0x499368, case 25 @0x49b534,
+	//  Game_StartMission @0x525b2b]
+	bool quit_dialog_open = false;
 
 	HudKeyEdge huddetail, hudcolor, showhud, dotsize, goals;
 	HudKeyEdge view1st, viewwithgun, viewchase;
@@ -88,6 +111,7 @@ struct HudToggleState {
 	HudKeyEdge friendly_tags, help, helpmap, briefing, verbose;
 	HudKeyEdge commander;
 	HudKeyEdge pause, audio_emote, radio_macro;
+	HudKeyEdge toggle_server;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -127,9 +151,15 @@ struct HudKeyPoll {
 	bool pause = false;          // row 70 pause, dispatch 25
 	bool audio_emote = false;    // row 101 AudioEmote, dispatch 33
 	bool radio_macro = false;    // row 102 RadioMacro, dispatch 54
+	bool toggle_server = false;  // row 83 ToggleServer, dispatch 11
 	bool chorded = false;
 	bool active = false;
 	bool in_session = false;
+	// The connection mode's two bits [orig: g_NapiNPCtx.is_authority /
+	// is_mp_session_peer]: single player and a listen host carry both, a
+	// joiner only the peer bit, a dedicated host only the authority bit.
+	bool authority = false;
+	bool mp_session_peer = false;
 	bool objective_game = false; // g_GameType & kObjectiveBit (0x20000)
 	// The local player is alive: the commander_menu, AudioEmote and
 	// RadioMacro rows carry the binding flag 0x1 the dispatcher tests against
@@ -178,6 +208,16 @@ inline constexpr uint32_t kCommandMapOpened = 0x200000;
 // The player list's open edge zeroed its page: the embedder resets the
 // compiler's page cursor [orig: Scoreboard_TogglePlayerList @0x4244e4].
 inline constexpr uint32_t kScoreboardPageReset = 0x400000;
+// The ToggleServer row flipped the server-status view: the embedder swaps the
+// scene frame for the status page (or back) [orig: case 11 @0x49b018].
+inline constexpr uint32_t kServerStatusViewToggled = 0x2000000;
+// The playerlist action flipped the status page's score list instead of the
+// Tab board [orig: Server_ToggleStatusScoreList @0x500580 from @0x49bb4b /
+// @0x49bb5e].
+inline constexpr uint32_t kServerStatusScoreListToggled = 0x4000000;
+// The escape chain's tail opened the quit dialog on the view (the key is
+// consumed) [orig: @0x49b377..0x49b38f].
+inline constexpr uint32_t kQuitDialogOpened = 0x8000000;
 // The pause row flipped HudToggleState::paused: the embedder applies it to
 // the session pause (and, pausing, the audio stop) [orig: case 25 @0x49b520
 // — Audio_ShutdownChannelsAndDeviceTable @0x49b550 when the word is now set].
@@ -211,6 +251,7 @@ enum HudToggleRow : int {
 	kRowPause,        // 70 pause
 	kRowAudioEmote,   // 101 AudioEmote
 	kRowRadioMacro,   // 102 RadioMacro
+	kRowToggleServer, // 83 ToggleServer
 	kHudToggleRowCount,
 };
 // The row's catalog config token.
@@ -241,11 +282,11 @@ void hud_toggles_death_screen(HudToggleState &state);
 // g_EpilogScreenActive, cleared beside the pause word, is only ever raised
 // while the SP spawn gate holds (the SP round end sets the gate before the
 // epilog cine starts, and a session never runs the epilog), so this chain
-// never sees it; dword_24C1880, the quit dialog, is opened only by this
-// chain's own tail on a server-status view (is_in_session && is_authority &&
-// dword_24C1914), which the port does not have; dword_24C18D0 and
-// dword_B76494 have no reachable setter; the cine editor dword_24C18B8 opens
-// only from its own dialog.
+// never sees it; dword_24C18D0 and dword_B76494 have no reachable setter;
+// the cine editor dword_24C18B8 opens only from its own dialog. The quit
+// dialog closes third, after the voice-macro menus; with none open the tail
+// runs the init keeping the dialog word, then opens the dialog on the
+// authority's server-status view in a session, else the in-game menu.
 // [orig: Input_HandleActionBinding case 18 @0x49b234: the SP spawn-gate
 //  return @0x49b243; the pause/epilog clear @0x49b24f..0x49b261 ->
 //  @0x49b3cd..0x49b3d3; the order D4 @0x49b267, D8 @0x49b27a, 1880
@@ -256,8 +297,63 @@ void hud_toggles_death_screen(HudToggleState &state);
 struct HudEscapeInput {
 	bool in_session = false;
 	bool spawn_gate = false; // [orig: g_SpawnSuccessGate]
+	bool authority = false;  // [orig: g_NapiNPCtx.is_authority]
 };
 uint32_t hud_toggles_escape(HudToggleState &state, const HudEscapeInput &input);
+
+// The session create / destroy's view rule: in a session a dedicated host
+// (an authority that is not a peer) comes up on the status view, every other
+// role and every session end clears it.
+// [orig: Server_InitNewRoundState @0x51cb43..0x51cb5d — callers
+//  CNapiGameSession_BuildAndCreateSession @0x5695b3,
+//  CNapiGameSession_FullDestroy @0x4c9780, SinglePlayer_StartMission
+//  @0x561c23, Game_InitSubsystems @0x4a6d76]
+void hud_toggles_session_init(HudToggleState &state, bool in_session, bool mp_session_peer);
+
+// The special-key handler's quit-dialog leg, the first in its chain: while
+// the dialog is up the YES key runs action 3 (Exit Mission: the embedder
+// plays the PU_EXIT_CONFIRM interface sound, sets the exit reason and drops
+// the connection), the NO key closes it, the RESTART key queues the restart
+// only out of a session, and a digit 1..9 or ':' is taken (its numbered
+// save loads only out of a session). The yes / no / restart keys are the
+// first characters of gametext KeyPress/STRKEYPRESS_YES / _NO / _RESTART as
+// written (defaults 'Y', 'N', 'R' when a string is empty). A key the leg
+// takes is consumed: it never reaches the action rows.
+// While the dialog is up the rest of the chain's exclusive legs (the menus'
+// digits, the round-over keys, the Tab board's and the status page's page
+// keys) are skipped (kChainTaken); its tail (the deploy keys, the help and
+// briefing pages) still runs.
+// [orig: Input_HandleSpecialKeys @0x49c5c0 — @0x49c5df..0x49c6d1; the keys
+//  Input_InitBindingSystem @0x49a58e..0x49a5a2 (the defaults into
+//  dword_B3B73C / 40 / 44), the first-character `movsx` @0x49a5d1;
+//  action 3 = catalog row 77 `exit`, case 3 @0x49af1f..0x49af42; the save
+//  loader sub_439680 @0x4396a0 refuses in a session; the caller
+//  Input_ProcessKeyboardEvents @0x49d2fb skips the binding scan on a take]
+struct HudQuitDialogKeyInput {
+	int vk = 0;
+	int yes_vk = 'Y';
+	int no_vk = 'N';
+	int restart_vk = 'R';
+	bool in_session = false;
+};
+namespace hud_special_key {
+inline constexpr uint32_t kConsumed = 0x1;      // the key never reaches the rows
+inline constexpr uint32_t kChainTaken = 0x2;    // the dialog was up: skip the exclusive legs
+inline constexpr uint32_t kQuitConfirmed = 0x4; // action 3 ran (Exit Mission)
+inline constexpr uint32_t kRestartQueued = 0x8; // event 12, out of a session only
+} // namespace hud_special_key
+uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogKeyInput &input);
+
+// The special-key handler's status-page leg, after the Tab board's page
+// keys: on a dedicated host, or on the authority's view, Enter, PgUp and PgDn
+// step the page cursor and are consumed. The cursor both steppers clamp back
+// to 0 (and the page zeroes before its roster) is not modelled: it never
+// leaves 0, so only the consumption is observable.
+// [orig: Input_HandleSpecialKeys @0x49c960..0x49c9c7; Server_StatusPageNext
+//  @0x4fe840, Debug_DecrementPageIndex @0x4fe860 on g_ServerStatusPage
+//  (dword_C8FC60); the page's zeroing @0x50a43b]
+bool hud_toggles_server_status_page_key(const HudToggleState &state, int vk, bool in_session,
+		bool authority, bool mp_session_peer);
 
 // The tip producers' events, in the order they were raised
 // [orig: CTipSystem_HandleEvent @0x5b6ad0 per call site].

@@ -108,6 +108,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_server_status.cpp       # the authority's status page: roster, score list, throttle
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_server_status.cpp # its compile, the quit dialog and the console lines
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_scoreboard.cpp # its compile element
@@ -400,6 +402,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_overlay_state.cpp        # the 14-tick minimap overlay visits (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
@@ -412,6 +415,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp

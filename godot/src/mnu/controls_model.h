@@ -9,6 +9,8 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/help_screen.h>
 
+#include <array>
+
 namespace godot {
 
 // GDScript-facing wrapper over the portable engine/runtime/controls catalog and
@@ -75,6 +77,13 @@ public:
 	// The chat line's keyboard capture (engine BindingSet::set_keyboard_captured
 	// carries the rule and its witness): no keyboard slot fires while set.
 	void set_keyboard_captured(bool p_captured) { bindings_.set_keyboard_captured(p_captured); }
+	// The special-key handler's take: a key-down it consumed never reaches the
+	// action rows, so every row bound to that key reads it up until the key
+	// is released (engine hud_toggles.h hud_toggles_quit_dialog_key carries
+	// the witness).
+	void consume_key_press(int p_vk);
+	// A VK's held state as the samplers read it (a consumed press reads up).
+	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
 	bool is_keyboard_captured() const { return bindings_.keyboard_captured(); }
 	// The in-game display string of a token's binding — the death screen's
 	// "call a medic" hint formatter (engine controls format_display_string;
@@ -114,8 +123,12 @@ public:
 	static String help_footer();
 
 private:
+	// The physical key state by VK under the special-key takes.
+	bool vk_down_(int p_vk) const;
+
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;
+	mutable std::array<bool, 256> consumed_vks_{};
 };
 
 } // namespace godot

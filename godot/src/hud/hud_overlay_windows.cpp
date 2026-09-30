@@ -9,7 +9,12 @@
 #include "util/string_convert.h"
 
 #include <runtime/controls/binding_set.h>
+#include <runtime/hud/hud_server_status.h>
 #include <runtime/hud/tip_system.h>
+
+#include <utility>
+
+#include <godot_cpp/classes/viewport.hpp>
 
 namespace godot {
 
@@ -69,6 +74,41 @@ void HudOverlay::set_tip(int p_tip, int p_countdown, bool p_local_dead,
 	};
 	opennova::hud::tip_draw_text(p_tip, game_text_lookup(p_gametext), keys, state_.tip_header,
 			state_.tip_body);
+	queue_redraw();
+}
+
+void HudOverlay::set_quit_dialog(bool p_open, bool p_in_session, bool p_authority,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (!p_open && !state_.quit_dialog_open) return;
+	state_.quit_dialog_open = p_open;
+	state_.quit_dialog_text = p_open
+			? opennova::hud::game_text(game_text_lookup(p_gametext), "Overlays",
+					  opennova::hud::quit_dialog_text_key(p_in_session, p_authority), "")
+			: std::string();
+	queue_redraw();
+}
+
+void HudOverlay::set_server_status_page(bool p_shown, bool p_score_list_open,
+		const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
+	// Only an authority draws the page (hud_server_status.h: the render gate
+	// reads the authority bit beside the view word); the fill is its source.
+	opennova::hud::ServerStatusPageState page;
+	const bool shown = p_shown && p_sim.is_valid() && p_sim->fill_server_status_page(page);
+	if (shown != server_status_shown_) {
+		server_status_shown_ = shown;
+		// The scene frame is not drawn while the page stands in for it: the
+		// viewport's 3D world stops rendering (the device leg of retail's
+		// skipped Render_ProcessMainSceneFrame), and comes back as it was.
+		if (Viewport *viewport = get_viewport()) {
+			if (shown) scene_3d_was_disabled_ = viewport->is_3d_disabled();
+			viewport->set_disable_3d(shown || scene_3d_was_disabled_);
+		}
+	}
+	if (!shown) return;
+	server_status_page_ = std::move(page);
+	server_status_page_.score_list_open = p_score_list_open;
+	server_status_page_.text = opennova::hud::server_status_text(
+			game_text_lookup(p_gametext), server_status_page_.game_type);
 	queue_redraw();
 }
 

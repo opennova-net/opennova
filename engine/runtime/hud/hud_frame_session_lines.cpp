@@ -94,6 +94,22 @@ void HudFrameCompiler::emit_text_at_virtual_pos(const GameFont &slot, float slot
 			static_cast<float>(syp), argb, mode);
 }
 
+void HudFrameCompiler::emit_text_aligned(const GameFont &slot, float slot_scale, const char *text,
+		int design_x, int design_y, float w, float h, uint32_t argb, int mode, uint32_t flags) {
+	// [orig: HUD_DrawTextAligned @0x5d3f30 — the same integer pair — then
+	//  HUD_DrawTextAligned_HalfBright @0x5d2f20: modes 0 (left) and 1 (right)
+	//  pass the caller's flag word, whose 0x100 turns the inline tags off
+	//  (HUD_DrawTextLeft_HalfBright @0x5804e1..0x5804e9); mode 2 centres
+	//  without it; any other mode draws nothing]
+	if (mode < 0 || mode > 2) return;
+	const int sxp = virtual_scale(design_x, static_cast<int>(w), 1024);
+	const int syp = virtual_scale(design_y, static_cast<int>(h), 768);
+	uint32_t f = mode == 1 ? kFontAlignRight : (mode == 2 ? kFontAlignCenter : 0u);
+	if (mode != 2 && (flags & kFontTagsDisabled) != 0u) f |= kFontTagsDisabled;
+	emit_slot_text(slot, slot_scale, text, static_cast<float>(sxp), static_cast<float>(syp),
+			half_bright_argb(argb), f);
+}
+
 void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, float h) {
 	// [orig: HUD_DrawGameTimerOverlay @0x59cc80, called unconditionally from
 	//  HUD_RenderAllOverlays @0x5A8499]. The side effect runs FIRST and on every

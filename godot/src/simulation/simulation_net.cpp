@@ -281,9 +281,10 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::set_novaworld_gsid(const String &p_gsid) {
+void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
+		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
 	}
 }
 

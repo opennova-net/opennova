@@ -345,6 +345,11 @@ void HostRole::observe_frame_rate(int32_t fps) {
 	state.host_owner.ctx.stats_avg_fps = fps;
 }
 
+void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {
+	state.host_owner.ctx.stats_frames_last_second = frames_last_second;
+	state.host_owner.ctx.stats_cpu_percent = cpu_percent;
+}
+
 bool HostRole::session_lost(SessionError &error) const {
 	const NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;

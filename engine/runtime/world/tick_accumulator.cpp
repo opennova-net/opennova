@@ -27,9 +27,15 @@ int TickAccumulator::bank(double delta) {
 	++frame_count_;
 	frame_time_sum_ += static_cast<uint32_t>(bank_);
 	if (frame_time_sum_ >= kFrameRateWindowUnits) {
+		// The CPU share first, over the updates the window's drains ran
+		// [orig: @0x52b926..0x52b948 — `shl edi, 4` of max(count, 1)].
+		const uint32_t updates = update_count_ != 0 ? update_count_ : 1u;
+		cpu_percent_ = static_cast<int32_t>(update_ms_ * 100u / (updates * 16u));
 		average_fps_ = static_cast<int32_t>(frame_count_ * kUnitsPerSecond / frame_time_sum_);
 		frame_count_ = 0;
 		frame_time_sum_ = 0;
+		update_count_ = 0;
+		update_ms_ = 0;
 	}
 
 	// Drain 4 ms quanta while at least 4 ms remain; the logic update runs on

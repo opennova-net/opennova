@@ -24,12 +24,13 @@ namespace {
 // Game_InitRespawnStateKeepingToggle @0x4993c0 saves and restores *arg].
 // The map overlay lives in the sim's HudMapControl; the event bit orders
 // that clear from the embedder.
-// The init itself: every HUD window the port models [orig: help @0x49936d,
-// map legend @0x499372, the emotes menu @0x499377, the radio menu @0x49937c,
-// end-round stats @0x499381, briefing @0x499386, map mode @0x499395 (the
-// event bit), message log @0x49939a, objectives @0x49939f, the player list
-// @0x4993ae].
+// The init itself: every HUD window the port models [orig: the quit dialog
+// @0x499368, help @0x49936d, map legend @0x499372, the emotes menu @0x499377,
+// the radio menu @0x49937c, end-round stats @0x499381, briefing @0x499386,
+// map mode @0x499395 (the event bit), message log @0x49939a, objectives
+// @0x49939f, the player list @0x4993ae].
 uint32_t respawn_init(HudToggleState &s, bool in_session) {
+	s.quit_dialog_open = false; // [orig: dword_24C1880 @0x499368]
 	s.help_open = false;
 	s.map_legend_open = false;
 	s.emotes_menu_open = false; // [orig: dword_24C18D4 @0x499377]
@@ -72,6 +73,7 @@ constexpr const char *kRowTokens[kHudToggleRowCount] = {
 	"huddetail", "hudcolor", "showhud", "dotsize", "Goals", "view1st", "viewwithgun",
 	"viewchase", "playerlist_alt", "OldMessages", "ShowScore", "ShowFriendly", "help",
 	"helpmap", "Briefing", "Verbose", "commander_menu", "pause", "AudioEmote", "RadioMacro",
+	"ToggleServer",
 };
 
 } // namespace
@@ -102,6 +104,7 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.pause = down(kRowPause);
 	k.audio_emote = down(kRowAudioEmote);
 	k.radio_macro = down(kRowRadioMacro);
+	k.toggle_server = down(kRowToggleServer);
 }
 
 uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
@@ -179,18 +182,30 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		events |= kGunBitChanged | kGunViewSelected;
 	}
 	if (s.viewchase.step(k.viewchase, k.active, k.chorded)) events |= kThirdPersonSelected;
-	// The Tab player list TOGGLES the panel-visible flag — retail keeps the
-	// board up until the next press; the OPEN edge runs the respawn init
-	// first (the close edge clears only the panel) [orig:
-	// Scoreboard_TogglePlayerList @0x4244c0 from the dispatch case @0x49bb68;
-	// Game_InitRespawnState @0x4244df on the 0 -> 1 edge, then page = 0
-	// @0x4244e4]
-	if (s.playerlist.step(k.playerlist, k.active, k.chorded)) {
-		s.scoreboard_open = !s.scoreboard_open;
-		events |= kScoreboardToggled;
-		if (s.scoreboard_open)
-			events |= respawn_init_keeping(s, &s.scoreboard_open, k.in_session) |
-					kScoreboardPageReset;
+	// The playerlist action (case 102) does nothing out of a session. In one,
+	// the authority's status page takes it — a dedicated host always, a
+	// listen host while its view is up — and flips the page's score list;
+	// everyone else toggles the Tab board: retail keeps the board up until the
+	// next press, and the OPEN edge runs the respawn init first (the close
+	// edge clears only the panel).
+	// [orig: case 102 @0x49bb23 — the session return @0x49bb2a, the peer arm
+	//  @0x49bb30..0x49bb4b, the non-peer arm @0x49bb55..0x49bb5e,
+	//  Server_ToggleStatusScoreList @0x500580; Scoreboard_TogglePlayerList
+	//  @0x4244c0 from @0x49bb68; Game_InitRespawnState @0x4244df on the 0 -> 1
+	//  edge, then page = 0 @0x4244e4]
+	if (s.playerlist.step(k.playerlist, k.active, k.chorded) && k.in_session) {
+		const bool status_page = k.mp_session_peer ? (k.authority && s.server_status_view)
+												   : k.authority;
+		if (status_page) {
+			s.server_status_score_list = !s.server_status_score_list;
+			events |= kServerStatusScoreListToggled;
+		} else {
+			s.scoreboard_open = !s.scoreboard_open;
+			events |= kScoreboardToggled;
+			if (s.scoreboard_open)
+				events |= respawn_init_keeping(s, &s.scoreboard_open, k.in_session) |
+						kScoreboardPageReset;
+		}
 	}
 	// The Recent Messages window, then the respawn init keeping it [orig:
 	// `xor g_ShowMessageLog, 1` @0x49b55a; the wrapper call @0x49b566]
@@ -219,11 +234,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		events |= kHelpToggled | respawn_init_keeping(s, &s.help_open, k.in_session);
 	}
 	// The F12 map legend. Its gate refuses it while the authority's
-	// server-status view is up — a listen host's ToggleServer view, which the
-	// port does not have (docs/interface/hud-re.md D-HUD-31), so the gate never
-	// holds here [orig: case 234 @0x49af8c -- is_authority && dword_24C1914
-	// skips; `xor dword_24C18B4, 1` @0x49afa2; the wrapper @0x49afae]
-	if (s.helpmap.step(k.helpmap, k.active, k.chorded)) {
+	// server-status view is up [orig: case 234 @0x49af8c -- is_authority &&
+	// dword_24C1914 skips @0x49af95; `xor dword_24C18B4, 1` @0x49afa2; the
+	// wrapper @0x49afae]
+	if (s.helpmap.step(k.helpmap, k.active, k.chorded) &&
+			!(k.authority && s.server_status_view)) {
 		s.map_legend_open = !s.map_legend_open;
 		events |= kMapLegendToggled | respawn_init_keeping(s, &s.map_legend_open, k.in_session);
 	}
@@ -243,15 +258,17 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	//  g_CmapScreenOpen = 1 @0x49b928]
 	if (s.commander.step(k.commander_menu, bit0_active && k.local_alive, k.chorded))
 		events |= kCommandMapOpened | respawn_init(s, k.in_session);
-	// The single-player pause: out of a session the word flips; the embedder
-	// applies it to the session and stops the audio when it is now set. The
-	// row's flags (0x05000800) carry no bit 0, so it works while paused.
+	// The single-player pause: out of a session the word flips and the quit
+	// dialog closes; the embedder applies the word to the session and stops
+	// the audio when it is now set. The row's flags (0x05000800) carry no bit
+	// 0, so it works while paused.
 	// [orig: case 25 @0x49b520 — the in-session return @0x49b527, `xor
-	//  dword_A87050, 1` @0x49b52d, dword_24C1880 = 0 @0x49b534 (the quit
-	//  dialog the port does not have), Input_ResetKeyQueue @0x49b53e,
-	//  Audio_ShutdownChannelsAndDeviceTable @0x49b550]
+	//  dword_A87050, 1` @0x49b52d, dword_24C1880 = 0 @0x49b534,
+	//  Input_ResetKeyQueue @0x49b53e, Audio_ShutdownChannelsAndDeviceTable
+	//  @0x49b550]
 	if (s.pause.step(k.pause, k.active, k.chorded) && !k.in_session) {
 		s.paused = !s.paused;
+		s.quit_dialog_open = false;
 		events |= kPauseToggled;
 	}
 	// The F9 emotes and F10 radio menus: flip, then the keeping init (so
@@ -266,6 +283,16 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	if (s.radio_macro.step(k.radio_macro, bit0_active && k.local_alive, k.chorded)) {
 		s.radio_menu_open = !s.radio_menu_open;
 		events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
+	}
+	// ToggleServer: the authority that is also a peer flips its status view,
+	// in a session only. The row's flags (0x04000000) carry no bit 0.
+	// [orig: case 11 @0x49aff1 — is_in_session @0x49aff1, is_authority
+	//  @0x49affe, is_mp_session_peer @0x49b00b, `xor dword_24C1914, 1`
+	//  @0x49b018; catalog row 83, default VK 0xDC]
+	if (s.toggle_server.step(k.toggle_server, k.active, k.chorded) && k.in_session &&
+			k.authority && k.mp_session_peer) {
+		s.server_status_view = !s.server_status_view;
+		events |= kServerStatusViewToggled;
 	}
 	return events;
 }
@@ -287,6 +314,10 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	}
 	if (s.radio_menu_open) { // [orig: dword_24C18D8 @0x49b27a]
 		s.radio_menu_open = false;
+		return kEscapeClosedWindow;
+	}
+	if (s.quit_dialog_open) { // [orig: dword_24C1880 @0x49b28d, the clear @0x49b295]
+		s.quit_dialog_open = false;
 		return kEscapeClosedWindow;
 	}
 	if (s.message_log_open) { // [orig: @0x49b2a0]
@@ -315,9 +346,52 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 		tip_begin_fade(s.tips);
 		return kEscapeClosedWindow;
 	}
-	// None open: the init keeping the quit-dialog word (never set in the
-	// port), then the menu [orig: @0x49b36a; @0x49b3ab..0x49b3be]
-	return kEscapeOpenMenu | respawn_init(s, in.in_session);
+	// None open: the init keeping the quit-dialog word, then on the
+	// authority's status view in a session the dialog opens, else the menu
+	// [orig: Game_InitRespawnStateKeepingToggle(&dword_24C1880) @0x49b36a;
+	//  @0x49b377..0x49b38f; @0x49b39e..0x49b3be]
+	const uint32_t init = respawn_init_keeping(s, &s.quit_dialog_open, in.in_session);
+	if (in.in_session && in.authority && s.server_status_view) {
+		s.quit_dialog_open = true;
+		return kEscapeClosedWindow | kQuitDialogOpened | init;
+	}
+	return kEscapeOpenMenu | init;
+}
+
+void hud_toggles_session_init(HudToggleState &s, bool in_session, bool mp_session_peer) {
+	// [orig: Server_InitNewRoundState @0x51cb43 (is_in_session) .. @0x51cb4b
+	//  (is_mp_session_peer): 1 stored @0x51cb51, a peer or no session clears
+	//  it @0x51cb5d]
+	s.server_status_view = in_session && !mp_session_peer;
+}
+
+uint32_t hud_toggles_quit_dialog_key(HudToggleState &s, const HudQuitDialogKeyInput &in) {
+	using namespace hud_special_key;
+	if (!s.quit_dialog_open) return 0; // [orig: @0x49c5df]
+	if (in.vk == in.yes_vk) {           // [orig: @0x49c5ec -> action 3 @0x49c5fa]
+		return kChainTaken | kConsumed | kQuitConfirmed;
+	}
+	if (in.vk == in.no_vk) { // [orig: @0x49c61d, the clear @0x49c627]
+		s.quit_dialog_open = false;
+		return kChainTaken | kConsumed;
+	}
+	// [orig: @0x49c650..0x49c656 — the restart key queues event 12 only out
+	//  of a session (LABEL_8 @0x49c658)]
+	if (in.vk == in.restart_vk && !in.in_session) return kChainTaken | kConsumed | kRestartQueued;
+	// A digit 1..9 or ':' is taken; the numbered save it names loads only out
+	// of a session [orig: `keyCode - 49 <= 9` @0x49c688; sub_439680 @0x4396a0].
+	if (static_cast<unsigned>(in.vk - '1') <= 9u) return kChainTaken | kConsumed;
+	return kChainTaken;
+}
+
+bool hud_toggles_server_status_page_key(const HudToggleState &s, int vk, bool in_session,
+		bool authority, bool mp_session_peer) {
+	// [orig: the in-session arm @0x49c903; @0x49c960 (!is_mp_session_peer) ||
+	//  @0x49c968 (dword_24C1914) && @0x49c970 (is_authority); VK_RETURN
+	//  @0x49c978, VK_PRIOR @0x49c99f, VK_NEXT @0x49c9c4]
+	if (!in_session) return false;
+	if (mp_session_peer && !(s.server_status_view && authority)) return false;
+	return vk == 0x0D || vk == 0x21 || vk == 0x22;
 }
 
 void hud_toggles_close_voice_menu(HudToggleState &s, bool radio) {
@@ -345,6 +419,10 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	s.briefing_mode = 0;
 	s.emotes_menu_open = false;
 	s.radio_menu_open = false;
+	// A mission start closes the quit dialog [orig: Game_StartMission
+	// @0x525b2b]; the status view and its score list are the session's
+	// (hud_toggles_session_init), not the mission's.
+	s.quit_dialog_open = false;
 	// A mission start zeroes the pause word [orig: Game_StartMission @0x525baa
 	// -> Game_ResetSessionHudState @0x434bd7].
 	s.paused = false;

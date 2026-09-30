@@ -565,7 +565,7 @@ void SessionDrive::stop_nw_host(bool p_from_host_signal) {
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
-		sim->set_novaworld_gsid(String());
+		sim->set_novaworld_registration(String(), 0);
 	}
 	// Gate registration teardown: tells the gate to drop the host row
 	// (ClientStopHosting). From inside one of the node's own signals the stop is
@@ -650,8 +650,9 @@ void SessionDrive::on_nw_host_registered() {
 		return;
 	}
 	// The GSID the service's ServerHostResult carried becomes the in-match host's
-	// 0x81 SUS1 from here on (a pure-LAN host keeps it empty).
-	sim->set_novaworld_gsid(host->get_gsid());
+	// 0x81 SUS1 from here on (a pure-LAN host keeps it empty), and the
+	// registration's AppId the status page's session key.
+	sim->set_novaworld_registration(host->get_gsid(), host->get_app_id());
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds
 	// the player until on_nw_host_player_enter_result answers. The hook resolves

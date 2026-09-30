@@ -124,18 +124,18 @@ void test_showhud_goals_dotsize_and_view_actions() {
 void test_overlay_windows() {
 	HudToggleState s;
 	HudKeyPoll k = keys();
-	// Out of a session (SP): Tab and J on one frame — Tab's open edge runs the
-	// init first, then J's flip closes nothing but the (SP-safe) player list
-	// survives J's init.
+	// Out of a session (SP) the playerlist action does nothing (case 102's
+	// session return @0x49bb2a); J on the same frame still opens its log.
 	k.playerlist = true;
 	k.old_messages = true;
-	CHECK(hud_toggles_poll(s, k) ==
-			(kScoreboardToggled | kScoreboardPageReset | kMessageLogToggled |
-					kOverlayWindowsCleared));
-	CHECK(s.scoreboard_open && s.message_log_open);
+	CHECK(hud_toggles_poll(s, k) == (kMessageLogToggled | kOverlayWindowsCleared));
+	CHECK(!s.scoreboard_open && s.message_log_open);
 	k.playerlist = false;
 	k.old_messages = false;
 	hud_toggles_poll(s, k);
+	// A board left up (the respawn init's player-list clear is a peer's
+	// only): the SP windows below never close it.
+	s.scoreboard_open = true;
 	// G (objectives) closes J's message log and keeps the SP player list.
 	k.goals = true;
 	CHECK(hud_toggles_poll(s, k) == (kObjectivesToggled | kOverlayWindowsCleared));
@@ -505,6 +505,212 @@ void test_escape_pause_and_voice_menus() {
 	CHECK(s.paused);
 }
 
+// ToggleServer (row 83, dispatch 11) flips the status view only on an
+// authority that is also a peer, in a session; the session create / destroy
+// sets it for a dedicated host and clears it otherwise [orig: case 11
+// @0x49aff1..0x49b018; Server_InitNewRoundState @0x51cb43..0x51cb5d].
+void test_toggle_server_row() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowToggleServer), "ToggleServer") == 0);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, 1u << kRowToggleServer);
+	CHECK(rows.toggle_server && !rows.radio_macro);
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	const auto press = [&](const HudKeyPoll &kk) {
+		HudKeyPoll up = kk;
+		up.toggle_server = false;
+		hud_toggles_poll(s, up);
+		HudKeyPoll down = kk;
+		down.toggle_server = true;
+		return hud_toggles_poll(s, down);
+	};
+	// Single player carries both bits but no session: nothing.
+	k.authority = true;
+	k.mp_session_peer = true;
+	CHECK(press(k) == 0);
+	CHECK(!s.server_status_view);
+	// A joiner (peer, no authority): nothing.
+	k.in_session = true;
+	k.authority = false;
+	CHECK(press(k) == 0);
+	// A dedicated host (authority, not a peer): nothing — its view is the
+	// session's.
+	k.authority = true;
+	k.mp_session_peer = false;
+	CHECK(press(k) == 0);
+	// The listen host flips it each press.
+	k.mp_session_peer = true;
+	CHECK(press(k) == kServerStatusViewToggled);
+	CHECK(s.server_status_view);
+	CHECK(press(k) == kServerStatusViewToggled);
+	CHECK(!s.server_status_view);
+	// The session rule.
+	hud_toggles_session_init(s, true, false);
+	CHECK(s.server_status_view);
+	hud_toggles_session_init(s, true, true);
+	CHECK(!s.server_status_view);
+	s.server_status_view = true;
+	hud_toggles_session_init(s, false, false);
+	CHECK(!s.server_status_view);
+	// A mission start leaves the view (it is the session's).
+	s.server_status_view = true;
+	hud_toggles_reset_mission(s);
+	CHECK(s.server_status_view);
+}
+
+// The view's reroutes: the map legend is refused on the authority's view;
+// the playerlist action flips the page's score list instead of the Tab board
+// (a dedicated host's always) [orig: @0x49af8c..0x49af9c; case 102
+// @0x49bb23..0x49bb68].
+void test_server_status_reroutes() {
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	k.in_session = true;
+	k.authority = true;
+	k.mp_session_peer = true;
+	s.server_status_view = true;
+	k.helpmap = true;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	CHECK(!s.map_legend_open);
+	k.helpmap = false;
+	hud_toggles_poll(s, k);
+	k.playerlist = true;
+	CHECK(hud_toggles_poll(s, k) == kServerStatusScoreListToggled);
+	CHECK(s.server_status_score_list && !s.scoreboard_open);
+	k.playerlist = false;
+	hud_toggles_poll(s, k);
+	// The view down: the Tab board again, and the score list stays as it was
+	// (nothing clears it).
+	s.server_status_view = false;
+	k.playerlist = true;
+	CHECK((hud_toggles_poll(s, k) & kScoreboardToggled) != 0);
+	CHECK(s.scoreboard_open && s.server_status_score_list);
+	k.playerlist = false;
+	hud_toggles_poll(s, k);
+	k.helpmap = true;
+	CHECK((hud_toggles_poll(s, k) & kMapLegendToggled) != 0);
+	CHECK(s.map_legend_open);
+	k.helpmap = false;
+	hud_toggles_poll(s, k);
+	// A dedicated host's playerlist is always the score list.
+	HudToggleState d;
+	k.mp_session_peer = false;
+	k.playerlist = true;
+	CHECK(hud_toggles_poll(d, k) == kServerStatusScoreListToggled);
+	CHECK(d.server_status_score_list);
+	// A joiner's is always the Tab board.
+	HudToggleState j;
+	j.server_status_view = true;
+	k.authority = false;
+	k.mp_session_peer = true;
+	CHECK((hud_toggles_poll(j, k) & kScoreboardToggled) != 0);
+	CHECK(j.scoreboard_open);
+}
+
+// The quit dialog: the escape tail opens it on the authority's view in a
+// session (after the init keeping it), its own leg closes it third in the
+// chain, and the respawn init, the SP pause row and the mission start clear
+// it [orig: @0x49b36a..0x49b38f; @0x49b28d; @0x499368; @0x49b534;
+// @0x525b2b].
+void test_quit_dialog_escape_legs() {
+	HudToggleState s;
+	HudEscapeInput in;
+	in.in_session = true;
+	in.authority = true;
+	// No view: the tail opens the in-game menu.
+	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
+	CHECK(!s.quit_dialog_open);
+	s.server_status_view = true;
+	s.help_open = true;
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow); // help first
+	CHECK(hud_toggles_escape(s, in) ==
+			(kEscapeClosedWindow | kQuitDialogOpened | kOverlayWindowsCleared));
+	CHECK(s.quit_dialog_open);
+	// The dialog closes after the voice menus, before the message log.
+	s.radio_menu_open = true;
+	s.message_log_open = true;
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow);
+	CHECK(!s.radio_menu_open && s.quit_dialog_open);
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow);
+	CHECK(!s.quit_dialog_open && s.message_log_open);
+	// A joiner on the view word (unreachable, but the gate is the authority's):
+	// the menu.
+	s.message_log_open = false;
+	in.authority = false;
+	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
+	// Out of a session: the menu.
+	in.authority = true;
+	in.in_session = false;
+	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
+	// The clears: a window action's respawn init, the SP pause row, the
+	// mission start.
+	HudKeyPoll k = keys();
+	s.quit_dialog_open = true;
+	k.help = true;
+	hud_toggles_poll(s, k);
+	CHECK(!s.quit_dialog_open && s.help_open);
+	k.help = false;
+	hud_toggles_poll(s, k);
+	s.quit_dialog_open = true;
+	k.pause = true;
+	CHECK(hud_toggles_poll(s, k) == kPauseToggled);
+	CHECK(!s.quit_dialog_open);
+	k.pause = false;
+	hud_toggles_poll(s, k);
+	s.quit_dialog_open = true;
+	hud_toggles_reset_mission(s);
+	CHECK(!s.quit_dialog_open);
+}
+
+// The special-key legs: the dialog takes Y (action 3), N (close), R only out
+// of a session, digits 1..9 and ':'; the status page's Enter / PgUp / PgDn are
+// consumed on a dedicated host or the authority's view
+// [orig: Input_HandleSpecialKeys @0x49c5df..0x49c6d1, @0x49c960..0x49c9c7].
+void test_special_keys() {
+	using namespace hud_special_key;
+	HudToggleState s;
+	HudQuitDialogKeyInput in;
+	in.in_session = true;
+	in.vk = 'Y';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == 0); // no dialog: the chain goes on
+	s.quit_dialog_open = true;
+	CHECK(hud_toggles_quit_dialog_key(s, in) == (kChainTaken | kConsumed | kQuitConfirmed));
+	CHECK(s.quit_dialog_open); // the exit itself is the embedder's
+	in.vk = '5';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == (kChainTaken | kConsumed));
+	in.vk = ':';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == (kChainTaken | kConsumed));
+	in.vk = '0';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == kChainTaken); // '0' is not in 1..':'
+	in.vk = 'R';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == kChainTaken); // in a session: not taken
+	in.in_session = false;
+	CHECK(hud_toggles_quit_dialog_key(s, in) == (kChainTaken | kConsumed | kRestartQueued));
+	in.vk = 'Q';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == kChainTaken);
+	in.vk = 'N';
+	CHECK(hud_toggles_quit_dialog_key(s, in) == (kChainTaken | kConsumed));
+	CHECK(!s.quit_dialog_open);
+	// Localized keys.
+	s.quit_dialog_open = true;
+	in.yes_vk = 'J';
+	in.vk = 'J';
+	CHECK((hud_toggles_quit_dialog_key(s, in) & kQuitConfirmed) != 0);
+
+	HudToggleState v;
+	// A listen host without the view: nothing.
+	CHECK(!hud_toggles_server_status_page_key(v, 0x0D, true, true, true));
+	v.server_status_view = true;
+	CHECK(hud_toggles_server_status_page_key(v, 0x0D, true, true, true));
+	CHECK(hud_toggles_server_status_page_key(v, 0x21, true, true, true));
+	CHECK(hud_toggles_server_status_page_key(v, 0x22, true, true, true));
+	CHECK(!hud_toggles_server_status_page_key(v, 'T', true, true, true));
+	CHECK(!hud_toggles_server_status_page_key(v, 0x0D, false, true, true)); // no session
+	CHECK(!hud_toggles_server_status_page_key(v, 0x0D, true, false, true)); // a joiner
+	HudToggleState d; // a dedicated host: always, view or not
+	CHECK(hud_toggles_server_status_page_key(d, 0x22, true, true, false));
+}
+
 int main() {
 	test_edge_latch();
 	test_huddetail_cycle_and_shared_key_shadowing();
@@ -520,6 +726,10 @@ int main() {
 	test_pause_row();
 	test_voice_macro_menus();
 	test_escape_pause_and_voice_menus();
+	test_toggle_server_row();
+	test_server_status_reroutes();
+	test_quit_dialog_escape_legs();
+	test_special_keys();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

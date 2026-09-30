@@ -175,6 +175,7 @@ void HudFrameCompiler::reset_runtime_state() {
 	silhouette_weapon_.clear();
 	feed_lines_.clear();
 	chat_lines_.clear();
+	chat_raw_lines_.clear();
 	draw_list_ = HudDrawList{};
 }
 
@@ -183,6 +184,19 @@ void HudFrameCompiler::push_chat_line(const std::string &text, uint32_t argb,
 	// The CHAT display-buffer sink [orig: Chat_AddMessageChannel1 @0x4985d0].
 	if (text.empty()) {
 		return;
+	}
+	// The raw ring first: the whole line cut at 119 characters, with the
+	// caller's colour, into the newest raw slot [orig: the raw shift and the
+	// copy @0x498621, the colour / stamp stores into slot 0 (byte_B3EA38
+	// +0x78 / +0x7C)].
+	{
+		HudMessageLine raw;
+		raw.text = text.substr(0, static_cast<size_t>(kMessageTextMax));
+		raw.color = argb;
+		raw.expire_tick = now_ticks;
+		chat_raw_lines_.push_back(std::move(raw));
+		while (chat_raw_lines_.size() > static_cast<size_t>(kMessageSlotCount))
+			chat_raw_lines_.erase(chat_raw_lines_.begin());
 	}
 	// The wrap: width `x2 - (x1 - 4)` of the chat box, the bold label font AT
 	// ITS NATIVE (design) SIZE, current_x 0; a 0 count (no font) is 1
@@ -644,6 +658,11 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	element_briefing(state, w, h);
 	element_objectives(state, w, h);
 	element_help_screen(state, w, h);
+	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
+	// @0x5be185; UI_DrawDisconnectReasonDialog @0x5be1ce]. Out of a session
+	// it would also draw the save-game list (sub_5B72E0 / sub_5B74B0
+	// @0x5be1dd..0x5be1eb); the dialog only opens in a session.
+	if (state.hud_detail_level != 3) element_quit_dialog(state, w, h);
 }
 
 // docs/interface/hud-re.md (D-HUD-27, D-HUD-30).

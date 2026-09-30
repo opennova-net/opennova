@@ -198,6 +198,13 @@ struct NapiNPServerCtx {
 	// mode-init value, until the first 2 s window closes.
 	// [orig: g_StatsAvgFps; Server_TickUpdate @0x51D7E0..0x51D7E5 -> g_ServerFps]
 	int32_t stats_avg_fps = 0;
+	// The main loop's frames drawn in the last 62 logic updates and the frame
+	// window's CPU share (Session::frame_statistics), handed over after every
+	// frame (HostRole::observe_frame_statistics): the status page's bottom row.
+	// [orig: dword_24C193C; g_StatsCpuPercent — Server_DrawStatusScreen
+	//  @0x50afaf / @0x50b024]
+	int32_t stats_frames_last_second = 0;
+	int32_t stats_cpu_percent = 0;
 	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.
 	// [orig: g_WeaponBroadcastSlotCursor, Server_TickUpdate @0x51DE79]
 	int32_t quality_broadcast_slot_cursor = 0;
@@ -321,6 +328,34 @@ struct NapiNPServerCtx {
 		std::string novaworld_web_url = "127.0.0.1:8080";
 	};
 	ServerKeyMint server_key_mint;
+
+	// The per-registration NovaWorld AppId (CNapiNetwork_RandomizeTimeout's
+	// value, net/napi/session.h make_session_app_id), installed by the
+	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
+	// authority's status page shows it on its NovaWorld server line.
+	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
+	//  by sub_4C4DB0 @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
+	uint32_t novaworld_app_id = 0;
+	// Every connection the host's NapiNP layer brought up since the server
+	// started, the host's own local connection included: the status page's
+	// total logins.
+	// [orig: ctx+0x11A8 — `add` in NapiNPServer_HandleNewConnection
+	//  @0x4c8203, the new-connection callback CNapiNPConnection_OnStateChange
+	//  @0x6261c6 runs when a connection enters state 1; zeroed by the host
+	//  start callback CNapiServer_OnHostStarted (ex
+	//  CNapiServer_OnPlayerDisconnected) @0x4c94f0 that
+	//  NapiNPProtocol_StartServer @0x62b640 runs; read @0x50b0e4]
+	uint32_t total_logins = 0;
+	// The round tallies the status page's team block shows: every round end
+	// of Team Deathmatch, Team KOTH or CTF counts one round and one win for
+	// the winning side 1..4. Only the Reset Game action clears them
+	// (Server_ForceRoundEndAndClearState, catalog row 92 `resetgames`, code
+	// 106, which the port does not dispatch).
+	// [orig: g_TotalRoundsPlayed @0xC8FF1C, g_RoundWinsTeam1..4
+	//  @0xC8FF0C..0xC8FF18 — Server_ProcessRoundEnd @0x516883..0x5168d8; the
+	//  reset @0x5175aa..0x5175be]
+	std::array<int32_t, 4> round_wins{};
+	int32_t rounds_played = 0;
 
 	// The GSID the NovaWorld service returned in ServerHostResult HostCommands,
 	// installed by the shell's NovaWorld host binding once registration

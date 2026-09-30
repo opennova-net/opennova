@@ -24,6 +24,7 @@
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/time.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -286,6 +287,13 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_overlay_panel_windows);
 	ClassDB::bind_method(D_METHOD("set_slot_bar_key_labels", "labels_by_category"),
 			&HudOverlay::set_slot_bar_key_labels);
+	ClassDB::bind_method(D_METHOD("set_quit_dialog", "open", "in_session", "authority", "gametext"),
+			&HudOverlay::set_quit_dialog);
+	ClassDB::bind_method(D_METHOD("set_server_status_page", "shown", "score_list_open",
+								 "gametext", "sim"),
+			&HudOverlay::set_server_status_page);
+	ClassDB::bind_method(D_METHOD("is_server_status_page_shown"),
+			&HudOverlay::is_server_status_page_shown);
 	ClassDB::bind_method(D_METHOD("set_role_facts", "sim", "gametext"),
 			&HudOverlay::set_role_facts);
 	ClassDB::bind_method(D_METHOD("set_weapon_ammo_key", "ammo_bucket", "ammo_class_id"),
@@ -357,11 +365,13 @@ HudOverlay::~HudOverlay() {
 	if (rs != nullptr) {
 		if (additive_item_.is_valid()) rs->free_rid(additive_item_);
 		if (top_item_.is_valid()) rs->free_rid(top_item_);
+		if (page_item_.is_valid()) rs->free_rid(page_item_);
 	}
 	corner_map_.release();
 	big_map_.release();
 	additive_item_ = RID();
 	top_item_ = RID();
+	page_item_ = RID();
 	clear_font_();
 }
 
@@ -1661,6 +1671,18 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 	queue_redraw();
 }
 
+const opennova::hud::HudDrawList &HudOverlay::server_status_page_draw_list_(
+		const Vector2 &p_surface) {
+	// The wall clock and the window's focus the page's throttle reads
+	// (hud_server_status.h server_status_page_due).
+	const uint32_t now_ms = static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec());
+	Window *window = get_window();
+	const bool window_active = window == nullptr || window->has_focus();
+	compiler_.compile_server_status_page(state_, server_status_page_, now_ms, window_active,
+			p_surface.x, p_surface.y);
+	return compiler_.server_status_page_list();
+}
+
 Vector2 HudOverlay::draw_surface_() const {
 	// This overlay is a Control parented to a CanvasLayer, which does not
 	// drive a child Control's layout — its own size can stay (0,0) and every
@@ -1897,6 +1919,11 @@ void HudOverlay::_notification(int p_what) {
 	if (p_what == NOTIFICATION_RESIZED) {
 		queue_redraw();
 	}
+	// A HUD torn down under the status page hands the scene frame back.
+	if (p_what == NOTIFICATION_EXIT_TREE && server_status_shown_) {
+		server_status_shown_ = false;
+		if (Viewport *viewport = get_viewport()) viewport->set_disable_3d(scene_3d_was_disabled_);
+	}
 }
 
 void HudOverlay::_draw() {
@@ -1909,6 +1936,9 @@ void HudOverlay::_draw() {
 	if (top_item_.is_valid()) {
 		rs->canvas_item_clear(top_item_);
 	}
+	if (page_item_.is_valid()) {
+		rs->canvas_item_clear(page_item_);
+	}
 	if (!configured_) {
 		return;
 	}
@@ -1919,14 +1949,28 @@ void HudOverlay::_draw() {
 	const bool timing = draw_timing_enabled_;
 	Time *clock = timing ? Time::get_singleton() : nullptr;
 	const uint64_t t0 = timing ? clock->get_ticks_usec() : 0;
-	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
+	// The authority's status page replaces the scene frame's HUD whole; its
+	// own throttle decides whether this draw recompiles it (set_server_status_page).
+	const HudDrawList &list = server_status_shown_ ? server_status_page_draw_list_(surface)
+												  : compiler_.compile(state_, surface.x, surface.y);
 	const uint64_t t1 = timing ? clock->get_ticks_usec() : 0;
 	if (!flat_material_bound_) {
 		ensure_flat_material_();
 		rs->canvas_item_set_material(get_canvas_item(), flat_material_->get_rid());
 		flat_material_bound_ = true;
 	}
-	render_list_(list);
+	if (server_status_shown_) {
+		ensure_page_item_();
+		FlatRange all;
+		all.quads_end = list.quads.size();
+		all.tris_end = list.tris.size();
+		all.lines_end = list.lines.size();
+		all.glyphs_end = list.glyphs.size();
+		all.underlines_end = list.underlines.size();
+		render_flat_runs_(page_item_, list, all);
+	} else {
+		render_list_(list);
+	}
 	if (timing) {
 		const uint64_t t2 = clock->get_ticks_usec();
 		draw_compile_us_ += static_cast<int64_t>(t1 - t0);
@@ -2017,6 +2061,17 @@ void HudOverlay::ensure_top_item_() {
 	rs->canvas_item_set_draw_index(top_item_, 9);
 	ensure_flat_material_();
 	rs->canvas_item_set_material(top_item_, flat_material_->get_rid());
+}
+
+void HudOverlay::ensure_page_item_() {
+	if (page_item_.is_valid()) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	page_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(page_item_, get_canvas_item());
+	rs->canvas_item_set_z_as_relative_to_parent(page_item_, false);
+	rs->canvas_item_set_z_index(page_item_, RenderingServer::CANVAS_ITEM_Z_MAX);
+	ensure_flat_material_();
+	rs->canvas_item_set_material(page_item_, flat_material_->get_rid());
 }
 
 void HudOverlay::ensure_flat_material_() {

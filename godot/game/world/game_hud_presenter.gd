@@ -19,6 +19,13 @@ const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 ## The commander_menu row fired (the poll ran its gates and the respawn init):
 ## the shell opens the CMAP screen (hud_toggles.h kCommandMapOpened).
 signal command_map_requested
+## The quit dialog's yes key ran the Exit Mission action (engine hud_toggles.h
+## hud_toggles_quit_dialog_key): the shell plays the exit tone and leaves the
+## mission.
+signal quit_confirmed
+## The Exit Mission action's interface tone (the trigger-set registry's
+## PU_EXIT_CONFIRM row; engine hud_toggles.h carries the witness).
+const QUIT_CONFIRM_SOUNDSET := "PU_EXIT_CONFIRM"
 const HudScopeCircleMaskScript := preload("res://game/world/hud_scope_circle_mask.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 
@@ -213,6 +220,9 @@ func teardown() -> void:
 	_pending_hud_messages.clear()
 	Strings.register_table(Strings.TABLE_MISSION, null)
 	_warned_no_player = false
+	# The session's end clears the status view (engine
+	# hud_toggles_session_init: out of a session nothing holds it).
+	_toggles.session_init(false, true)
 
 
 ## The layer every HUD element hangs under (hiding it hides the whole HUD,
@@ -394,6 +404,11 @@ func ensure_game_hud() -> void:
 	# @0x59DD75 from Game_InitNewRound / HUD_InitOverlaySystem]
 	_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
 	_push_showhud_flags()
+	# The session's start applies the status view's rule by role (engine
+	# hud_toggles_session_init: only a dedicated host starts on it).
+	var session_sim: Simulation = _world.get_sim() if _world != null else null
+	if session_sim != null:
+		_toggles.session_init(session_sim.is_mp_session(), _mp_session_peer(session_sim))
 
 
 # The shared F3 frame-stats board (null outside the game shell): while its
@@ -638,12 +653,20 @@ func tick(gameplay_input_active: bool = false) -> void:
 			(rows_down & both_hud_rows) == both_hud_rows and _hud_rows_share_key(),
 			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
 			(sim.get_session_game_type() & GAME_TYPE_OBJECTIVE_BIT) != 0,
-			not bool(sim.is_local_player_dead()))
+			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim))
 	# The window actions' respawn init also closes the sim's map overlay (the
 	# witness rides hud_toggles.h kOverlayWindowsCleared).
 	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
 		sim.request_hud_map_close()
 	_apply_toggle_events(toggle_events)
+	# The quit dialog and the authority's server-status page (engine
+	# hud_toggles.h / hud_server_status.h): while the page is up it stands in
+	# for the whole scene frame.
+	var status_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	_game_hud.set_quit_dialog(_toggles.is_quit_dialog_open(), sim.is_mp_session(),
+			_authority(sim), status_gametext)
+	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
+			_toggles.is_server_status_score_list_open(), status_gametext, sim)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
@@ -1027,15 +1050,74 @@ func handle_chat_key(key: InputEventKey) -> bool:
 	return true
 
 
+## One key-down over live play through the special-key chain (engine
+## hud_toggles.h): the quit dialog's keys first; unless the dialog took the
+## chain, the Tab board's page keys, then the status page's Enter / PgUp /
+## PgDn; then the help and briefing pages. A key a leg takes never reaches
+## the action rows (ControlsModel.consume_key_press); true = consumed.
+func handle_special_key(key: InputEventKey) -> bool:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null:
+		return false
+	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
+	var in_session := sim.is_mp_session()
+	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
+			_key_press_vk("STRKEYPRESS_NO", "N"), _key_press_vk("STRKEYPRESS_RESTART", "R"))
+	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
+		quit_confirmed.emit()
+	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
+		ControlsBindings.model().consume_key_press(vk)
+		return true
+	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
+	var taken := false
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0:
+		if page_key and _game_hud != null and _game_hud.scoreboard_page_key(
+				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
+			taken = true
+		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
+				_mp_session_peer(sim)):
+			taken = true
+	if not taken and page_key:
+		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
+	if taken:
+		ControlsBindings.model().consume_key_press(vk)
+	return taken
+
+
+## The KeyPress gametext key's code: its first character as written, the
+## default letter when the table lacks it or the string is empty (engine
+## hud_toggles.h HudQuitDialogKeyInput carries the witness).
+func _key_press_vk(key: String, fallback: String) -> int:
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	var text := fallback
+	if t != null and t.has_string_in_section("KeyPress", key):
+		var s := t.get_string_in_section("KeyPress", key)
+		if not s.is_empty():
+			text = s
+	return text.unicode_at(0)
+
+
+## The connection mode's two bits by role (engine HudKeyPoll): single player
+## and a listen host carry both, a joiner only the peer bit, a dedicated host
+## only the authority bit.
+static func _authority(sim: Simulation) -> bool:
+	return sim.session_role() != Simulation.ROLE_JOINER
+
+
+static func _mp_session_peer(sim: Simulation) -> bool:
+	return sim.session_role() != Simulation.ROLE_DEDICATED_HOST
+
+
 ## PgUp / PgDn over live play: the Tab board takes them first (in a session
 ## with the board up — the engine's gate), else the open help screen turns its
 ## page, else an open briefing panel turns its page; false = not consumed.
-func handle_page_key(forward: bool) -> bool:
+## `with_board` false skips the board (the special-key chain already ran it).
+func handle_page_key(forward: bool, with_board := true) -> bool:
 	if _game_hud == null:
 		return false
 	var board_sim: Simulation = _world.get_sim() if _world != null else null
-	if _game_hud.scoreboard_page_key(forward, board_sim != null and board_sim.is_mp_session(),
-			_toggles.is_scoreboard_open()):
+	if with_board and _game_hud.scoreboard_page_key(forward,
+			board_sim != null and board_sim.is_mp_session(), _toggles.is_scoreboard_open()):
 		return true
 	if _toggles.is_help_open():
 		ControlsBindings.model().cycle_help_page(forward)
@@ -1055,7 +1137,8 @@ func handle_escape() -> bool:
 	var in_session := sim != null and sim.is_mp_session()
 	# The round-over latch: out of a session it makes Esc a no-op (the
 	# engine's hud_toggles_escape carries the witness).
-	var events := _toggles.escape(in_session, sim != null and sim.is_round_over())
+	var events := _toggles.escape(in_session, sim != null and sim.is_round_over(),
+			sim != null and _authority(sim))
 	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
 		sim.request_hud_map_close()
 	_apply_toggle_events(events)

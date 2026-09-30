@@ -472,6 +472,12 @@ class Match {
     // [orig: Server_BuildAndBroadcastScoreboard @0x50DB92..@0x50DCCE;
     // Server_BuildEndOfRoundScoreboard @0x508FA7/@0x508FB8]
     int32_t team_primary_score(uint8_t team) const;
+    // The team row's hill hold timer, whole seconds (TeamRecord+0x150).
+    // [orig: Game_AccumulateTeamScores @0x508DAD/@0x508DC2; read by
+    // Server_DrawStatusScreen @0x50ae3c / @0x50aeaa]
+    int32_t team_hold_ticks(uint8_t team) const {
+        return team < team_hold_ticks_.size() ? team_hold_ticks_[team] : 0;
+    }
     MatchLiveScoreboard live_scoreboard(World &world);
 
   private:

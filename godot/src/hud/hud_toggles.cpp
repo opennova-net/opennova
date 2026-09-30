@@ -3,7 +3,8 @@
 using namespace godot;
 
 int HudToggles::poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
-		bool p_in_session, bool p_objective_game, bool p_local_alive) {
+		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
+		bool p_mp_session_peer) {
 	opennova::hud::HudKeyPoll keys;
 	opennova::hud::hud_key_poll_set_rows(keys, static_cast<uint32_t>(p_rows_down));
 	keys.rows_share_key = p_rows_share_key;
@@ -12,14 +13,38 @@ int HudToggles::poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, boo
 	keys.in_session = p_in_session;
 	keys.objective_game = p_objective_game;
 	keys.local_alive = p_local_alive;
+	keys.authority = p_authority;
+	keys.mp_session_peer = p_mp_session_peer;
 	return static_cast<int>(opennova::hud::hud_toggles_poll(state_, keys));
 }
 
-int HudToggles::escape(bool p_in_session, bool p_spawn_gate) {
+int HudToggles::escape(bool p_in_session, bool p_spawn_gate, bool p_authority) {
 	opennova::hud::HudEscapeInput input;
 	input.in_session = p_in_session;
 	input.spawn_gate = p_spawn_gate;
+	input.authority = p_authority;
 	return static_cast<int>(opennova::hud::hud_toggles_escape(state_, input));
+}
+
+void HudToggles::session_init(bool p_in_session, bool p_mp_session_peer) {
+	opennova::hud::hud_toggles_session_init(state_, p_in_session, p_mp_session_peer);
+}
+
+int HudToggles::quit_dialog_key(int p_vk, bool p_in_session, int p_yes_vk, int p_no_vk,
+		int p_restart_vk) {
+	opennova::hud::HudQuitDialogKeyInput input;
+	input.vk = p_vk;
+	input.in_session = p_in_session;
+	input.yes_vk = p_yes_vk;
+	input.no_vk = p_no_vk;
+	input.restart_vk = p_restart_vk;
+	return static_cast<int>(opennova::hud::hud_toggles_quit_dialog_key(state_, input));
+}
+
+bool HudToggles::server_status_page_key(int p_vk, bool p_in_session, bool p_authority,
+		bool p_mp_session_peer) const {
+	return opennova::hud::hud_toggles_server_status_page_key(state_, p_vk, p_in_session,
+			p_authority, p_mp_session_peer);
 }
 
 String HudToggles::row_token(int p_row) { return String(opennova::hud::hud_toggle_row_token(p_row)); }
@@ -72,6 +97,11 @@ void HudToggles::close_voice_menu(bool p_radio) {
 	opennova::hud::hud_toggles_close_voice_menu(state_, p_radio);
 }
 bool HudToggles::is_paused() const { return state_.paused; }
+bool HudToggles::is_server_status_view() const { return state_.server_status_view; }
+bool HudToggles::is_server_status_score_list_open() const {
+	return state_.server_status_score_list;
+}
+bool HudToggles::is_quit_dialog_open() const { return state_.quit_dialog_open; }
 void HudToggles::set_paused(bool p_paused) { state_.paused = p_paused; }
 void HudToggles::apply_tip_events(const PackedByteArray &p_events) {
 	opennova::hud::hud_toggles_tip_events(state_, p_events.ptr(),
@@ -91,9 +121,23 @@ bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(s
 
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "rows_share_key", "chorded", "active",
-								 "in_session", "objective_game", "local_alive"),
-			&HudToggles::poll, DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate"), &HudToggles::escape);
+								 "in_session", "objective_game", "local_alive", "authority",
+								 "mp_session_peer"),
+			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("escape", "in_session", "spawn_gate", "authority"),
+			&HudToggles::escape, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),
+			&HudToggles::session_init);
+	ClassDB::bind_method(D_METHOD("quit_dialog_key", "vk", "in_session", "yes_vk", "no_vk",
+								 "restart_vk"),
+			&HudToggles::quit_dialog_key);
+	ClassDB::bind_method(D_METHOD("server_status_page_key", "vk", "in_session", "authority",
+								 "mp_session_peer"),
+			&HudToggles::server_status_page_key);
+	ClassDB::bind_method(D_METHOD("is_server_status_view"), &HudToggles::is_server_status_view);
+	ClassDB::bind_method(D_METHOD("is_server_status_score_list_open"),
+			&HudToggles::is_server_status_score_list_open);
+	ClassDB::bind_method(D_METHOD("is_quit_dialog_open"), &HudToggles::is_quit_dialog_open);
 	ClassDB::bind_static_method("HudToggles", D_METHOD("row_token", "row"), &HudToggles::row_token);
 	ClassDB::bind_method(D_METHOD("reset_mission"), &HudToggles::reset_mission);
 	ClassDB::bind_method(D_METHOD("force_death_screen_hud_detail"),
@@ -158,6 +202,13 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(EVENT_SCOREBOARD_PAGE_RESET);
 	BIND_ENUM_CONSTANT(EVENT_PAUSE_TOGGLED);
 	BIND_ENUM_CONSTANT(EVENT_PAUSE_CLEARED);
+	BIND_ENUM_CONSTANT(EVENT_SERVER_STATUS_VIEW_TOGGLED);
+	BIND_ENUM_CONSTANT(EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED);
+	BIND_ENUM_CONSTANT(EVENT_QUIT_DIALOG_OPENED);
+	BIND_ENUM_CONSTANT(SPECIAL_KEY_CONSUMED);
+	BIND_ENUM_CONSTANT(SPECIAL_KEY_CHAIN_TAKEN);
+	BIND_ENUM_CONSTANT(SPECIAL_KEY_QUIT_CONFIRMED);
+	BIND_ENUM_CONSTANT(SPECIAL_KEY_RESTART_QUEUED);
 	BIND_ENUM_CONSTANT(ROW_HUD_DETAIL);
 	BIND_ENUM_CONSTANT(ROW_HUD_COLOR);
 	BIND_ENUM_CONSTANT(ROW_SHOWHUD);
@@ -178,5 +229,6 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(ROW_PAUSE);
 	BIND_ENUM_CONSTANT(ROW_AUDIO_EMOTE);
 	BIND_ENUM_CONSTANT(ROW_RADIO_MACRO);
+	BIND_ENUM_CONSTANT(ROW_TOGGLE_SERVER);
 	BIND_ENUM_CONSTANT(ROW_COUNT);
 }
