@@ -27,6 +27,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -36,6 +37,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/strings_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
@@ -1983,13 +1985,66 @@ std::vector<const GraphSymbol *> symbols_in(const AssetGraph &graph) {
 	return out;
 }
 
+// What a run of updates has met, which every later comparison asks both graphs about again, so an
+// index entry left under a name, a file or a variable nothing holds any more shows: each edge's
+// kind and target and each symbol's kind and name (the keys of the index's lists), each file's
+// path, each style variable an edge's value names and each (kind, scope, loader argument) a
+// reference was made with; and the texts to search for.
+struct Seen {
+	std::set<std::pair<ReferenceKind, std::string>> names;
+	std::set<std::string> paths;
+	std::set<std::string> variables;
+	std::set<std::tuple<ReferenceKind, std::string, int32_t>> lookups;
+	std::vector<std::string> searches;
+
+	explicit Seen(std::vector<std::string> texts) : searches(std::move(texts)) {}
+	void add(const AssetGraph &graph, const AssetScan &scan) {
+		graph.for_each_edge([this](const GraphEdge &edge) {
+			names.insert({edge.kind, edge.target});
+			if (graph_names::is_style_reference(edge.value))
+				variables.insert(graph_names::style_variable(edge.value));
+			lookups.insert({edge.kind, edge.scope, edge.loader_arg});
+		});
+		graph.for_each_symbol(
+				[this](const GraphSymbol &symbol) { names.insert({symbol.kind, symbol.name}); });
+		for (const AssetEntry &entry : scan.entries) paths.insert(entry.relative_path);
+	}
+};
+
+std::vector<const GraphEdge *> edges_at(
+		const GraphIndex &index, const std::vector<GraphIndex::Ref> &refs) {
+	std::vector<const GraphEdge *> out;
+	for (const GraphIndex::Ref ref : refs) out.push_back(&index.edge(ref));
+	return out;
+}
+
+std::vector<const GraphSymbol *> symbols_at(
+		const GraphIndex &index, const std::vector<GraphIndex::Ref> &refs) {
+	std::vector<const GraphSymbol *> out;
+	for (const GraphIndex::Ref ref : refs) out.push_back(&index.symbol(ref));
+	return out;
+}
+
+bool same_hits(const std::vector<GraphSearchHit> &a, const std::vector<GraphSearchHit> &b) {
+	return a.size() == b.size() &&
+			std::equal(a.begin(), a.end(), b.begin(),
+					[](const GraphSearchHit &x, const GraphSearchHit &y) {
+						return x.name == y.name && x.file == y.file && x.usages == y.usages &&
+								(x.symbol && y.symbol ? same_symbol(*x.symbol, *y.symbol)
+													  : !x.symbol && !y.symbol);
+					});
+}
+
 // Everything a graph holds and answers against a graph built fresh over the same files: every
 // edge (its target) and every symbol (a style variable's inert as the game reads it) in order,
-// the counts, the findings and the missing edges; each edge's resolution and the edges into its
-// target; each file's users, usages and references; each symbol's users, lookup, binding, and the
-// symbols of its name, record and place; each kind's symbols and choices. The first difference,
-// "" for none.
-std::string difference(const AssetGraph &graph, const AssetGraph &fresh, const AssetScan &scan) {
+// the counts, the findings and the missing edges; each edge's resolution; each file's users,
+// usages and references; each symbol's users, lookup, binding, and the symbols of its name, record
+// and place; each kind's symbols and choices. Then, over everything `seen` met in the run (this
+// step's included), the index's own lists: the edges into each name and the symbols of it, each
+// file's users, the edges naming each style variable; the choices each reference's scope and
+// loader argument get; and the searches. The first difference, "" for none.
+std::string difference(
+		const AssetGraph &graph, const AssetGraph &fresh, const AssetScan &scan, Seen &seen) {
 	const std::vector<const GraphEdge *> edges = edges_in(graph), fresh_edges = edges_in(fresh);
 	if (!same_edges(edges, fresh_edges)) return "the edges";
 	const std::vector<const GraphSymbol *> symbols = symbols_in(graph),
@@ -2001,16 +2056,11 @@ std::string difference(const AssetGraph &graph, const AssetGraph &fresh, const A
 	if (!same_edges(graph.missing(), fresh.missing()) ||
 			graph.missing_count() != graph.missing().size())
 		return "the missing edges";
-	std::set<std::pair<ReferenceKind, std::string>> targets;
 	for (size_t i = 0; i < edges.size(); ++i) {
 		std::string file, fresh_file;
 		if (graph.resolve(*edges[i], &file) != fresh.resolve(*fresh_edges[i], &fresh_file) ||
 				file != fresh_file)
 			return "the resolution of " + edges[i]->source + " " + edges[i]->field;
-		if (targets.insert({edges[i]->kind, edges[i]->target}).second &&
-		    !same_edges(graph.referrers_of(edges[i]->kind, edges[i]->target),
-		                fresh.referrers_of(edges[i]->kind, edges[i]->target)))
-			return "the edges into " + edges[i]->target;
 	}
 	for (const AssetEntry &entry : scan.entries) {
 		const std::string &path = entry.relative_path;
@@ -2047,18 +2097,54 @@ std::string difference(const AssetGraph &graph, const AssetGraph &fresh, const A
 		if (!same_choices(graph.choices(kind), fresh.choices(kind)))
 			return std::string("the choices of ") + reference_row(kind).token;
 	}
+	seen.add(graph, scan);
+	seen.add(fresh, scan);
+	const GraphIndex &index = graph.index(), &fresh_index = fresh.index();
+	for (const auto &name : seen.names) {
+		const std::string key = GraphIndex::key_of(name.first, name.second);
+		if (!same_edges(edges_at(index, index.edges_targeting(key)),
+					edges_at(fresh_index, fresh_index.edges_targeting(key))) ||
+				!same_edges(graph.referrers_of(name.first, name.second),
+						fresh.referrers_of(name.first, name.second)))
+			return "the edges into " + name.second;
+		if (!same_symbols(symbols_at(index, index.symbols_named(key)),
+					symbols_at(fresh_index, fresh_index.symbols_named(key))))
+			return "the symbols named " + name.second;
+	}
+	for (const std::string &path : seen.paths) {
+		if (!same_edges(edges_at(index, index.users_of(path)),
+					edges_at(fresh_index, fresh_index.users_of(path))) ||
+				!same_edges(graph.referrers_of_file(path), fresh.referrers_of_file(path)) ||
+				!same_edges(graph.usages_of(path), fresh.usages_of(path)) ||
+				!same_edges(graph.references_of(path), fresh.references_of(path)))
+			return "the users of " + path + ", a file seen before";
+	}
+	for (const std::string &variable : seen.variables)
+		if (!same_edges(edges_at(index, index.edges_through(variable)),
+					edges_at(fresh_index, fresh_index.edges_through(variable))))
+			return "the edges naming %" + variable + "%";
+	for (const auto &lookup : seen.lookups) {
+		const ReferenceKind kind = std::get<0>(lookup);
+		const std::string &scope = std::get<1>(lookup);
+		const int32_t loader_arg = std::get<2>(lookup);
+		if (!same_choices(graph.choices(kind, scope, loader_arg),
+					fresh.choices(kind, scope, loader_arg)))
+			return std::string("the choices of ") + reference_row(kind).token + " in " + scope;
+	}
+	for (const std::string &text : seen.searches)
+		if (!same_hits(graph.search(text), fresh.search(text))) return "the search for " + text;
 	return std::string();
 }
 
 // A graph built fresh over the files (with the same base layer), against `graph`.
 std::string fresh_difference(const AssetGraph &graph, const ProjectPaths &paths,
 		const ProjectDocument &project, const AssetScan &scan,
-		const std::vector<std::shared_ptr<const Document>> &open,
+		const std::vector<std::shared_ptr<const Document>> &open, Seen &seen,
 		const std::shared_ptr<const GraphLayer> &base = nullptr) {
 	AssetGraph fresh;
 	if (base) fresh.set_base(base);
 	fresh.update(paths, project, scan, open);
-	return difference(graph, fresh, scan);
+	return difference(graph, fresh, scan, seen);
 }
 
 // A file written, its last write moved on (so a scan sees it changed whatever the clock's tick).
@@ -2107,12 +2193,17 @@ size_t count_edges(const AssetGraph &graph, const std::function<bool(const Graph
 } // namespace
 
 // An update patches the slots whose reading changed and equals a graph built fresh over the
-// same files after every step (S13 D3): a closed file's reference edited, a stylesheet the game
-// reads after menu_style.mns added, its value changed and taken away, a texture a menu names
-// added, a menu moved to another folder, a second file of a menu's name and the first one gone,
-// a string table gone, an open document edited, undone and closed, a table whose bytes make it
-// another kind, and a mission's .mis added and changed. The generation moves exactly when the
-// graph changed.
+// same files after every step (S13 D3): a closed file's reference edited, taken away and given
+// back; an ammo renamed while other files name both its old and its new name; a string id added
+// to an open table and moved to another section; a stylesheet the game reads after
+// menu_style.mns added, its value changed, a variable of it holding a colour named as a font and
+// then become a font, a variable no stylesheet the game reads defines given a definition in one
+// it never reads, and the stylesheet taken away; a texture a menu names added; a menu moved to
+// another folder and its name's case changed; a second file of a menu's name and the first one
+// gone; a string table gone; an open document's window renamed while an ACTION names each name,
+// undone, its case changed, and the document closed; a table whose bytes make it another kind; a
+// mission that reads, then does not, then is gone; and a mission's .mis added and changed. The
+// generation moves exactly when the graph changed.
 static int test_incremental_equals_fresh() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_incremental");
 	NoProcess platform;
@@ -2127,24 +2218,27 @@ static int test_incremental_equals_fresh() {
 	const AssetEntry *style = scan.find("menu_style.mns");
 	const AssetEntry *items = scan.find("items.def");
 	const AssetEntry *menu = scan.find("main.mnu");
-	TEST_EXPECT(style && items && menu);
-	if (!style || !items || !menu) return 1;
+	const AssetEntry *weapons = scan.find("weapon.def");
+	TEST_EXPECT(style && items && menu && weapons);
+	if (!style || !items || !menu || !weapons) return 1;
 	const std::string style_dir =
 			fs::path(root + "/" + style->relative_path).parent_path().generic_string();
 	// Each place copied: every step scans again, and the scan's entries with it.
 	const std::string items_path = items->relative_path;
 	const std::string items_file = root + "/" + items_path;
 	const std::string menu_path = menu->relative_path;
+	const std::string weapons_file = root + "/" + weapons->relative_path;
 	std::vector<std::shared_ptr<const Document>> open;
 	AssetGraph graph;
 	uint64_t generation = graph.generation();
 	GraphUpdate update;
+	Seen seen({"a", "e", "main", "font", "d3", "wep", "other", "ammo"});
 	// The graph brought to the files: true when it equals a fresh one and its generation moved
 	// exactly when `changes`; the update it made in `update`.
 	const auto step = [&](const char *what, bool changes) {
 		scan = scan_project_assets(paths, project);
 		update = graph.update(paths, project, scan, open);
-		const std::string different = fresh_difference(graph, paths, project, scan, open);
+		const std::string different = fresh_difference(graph, paths, project, scan, open, seen);
 		const bool moved = graph.generation() != generation;
 		generation = graph.generation();
 		if (different.empty() && update.changed == changes && moved == changes) return true;
@@ -2157,9 +2251,11 @@ static int test_incremental_equals_fresh() {
 	};
 	TEST_EXPECT(step("the first update", true));
 	TEST_EXPECT(graph.stats().files_patched == scan.entries.size() &&
-			graph.stats().edges_resolved == graph.edge_count());
+			graph.stats().edges_resolved == graph.edge_count() &&
+			graph.stats().findings_made == graph.missing_count());
 	TEST_EXPECT(step("an update over the same files", false));
-	TEST_EXPECT(graph.stats().files_patched == 0 && graph.stats().edges_resolved == 0);
+	TEST_EXPECT(graph.stats().files_patched == 0 && graph.stats().edges_resolved == 0 &&
+			graph.stats().findings_made == 0);
 	// A closed file's reference edited: a model the project lacks, then an item added naming it.
 	std::string items_text;
 	std::string problem;
@@ -2176,6 +2272,75 @@ static int test_incremental_equals_fresh() {
 			items_text + "\nbegin \"D3\"\nid 100399\ntype building\ngraphic other\nend\n"));
 	TEST_EXPECT(step("the same bytes written again", false));
 	TEST_EXPECT(graph.stats().files_extracted == 1 && graph.stats().files_patched == 0);
+	// Its graphic taken away (the file's one finding gone, nothing else moving), then given back.
+	TEST_EXPECT(
+			rewrite(items_file, items_text + "\nbegin \"D3\"\nid 100399\ntype building\nend\n"));
+	TEST_EXPECT(step("its graphic taken away", true));
+	TEST_EXPECT(graph.stats().findings_made == 0);
+	TEST_EXPECT(rewrite(items_file,
+			items_text + "\nbegin \"D3\"\nid 100399\ntype building\ngraphic other\nend\n"));
+	TEST_EXPECT(step("its graphic given back", true));
+	TEST_EXPECT(graph.stats().findings_made == 1);
+	// A name renamed while other files name both the old and the new one: two weapons' rounds, an
+	// ammo the first names renamed to the name the second names; the weapons' labels, a string id
+	// the table defines nowhere and one it will.
+	std::string weapons_text;
+	TEST_EXPECT(read_file_text(weapons_file, weapons_text, problem));
+	TEST_EXPECT(rewrite(weapons_file,
+			weapons_text +
+					"\nweapon \"D3_A\"\nround_type AMMO_OLD\nloadout_menu_textid WEP_D3\nend\n"
+					"weapon \"D3_B\"\nround_type AMMO_NEW\n"
+					"loadout_menu_textid WEP_NONE_D3\nend\n"));
+	TEST_EXPECT(rewrite(root + "/defs/ammo.def", "ammo AMMO_OLD\nend\n"));
+	TEST_EXPECT(step("two weapons naming an ammo and a name none has", true));
+	TEST_EXPECT(rewrite(root + "/defs/ammo.def", "ammo AMMO_NEW\nend\n"));
+	TEST_EXPECT(step("the ammo renamed to the name the second weapon names", true));
+	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "AMMO_NEW") == ReferenceStatus::Present &&
+			graph.resolve(ReferenceKind::Ammo, "AMMO_OLD") == ReferenceStatus::Missing);
+	// A string id added to the open table's WepDes, which the first weapon's label reads, then
+	// moved to another section; the table closed (the file on disk has neither).
+	if (const AssetEntry *table = scan.find("gametext.bin")) {
+		const std::string table_path = table->relative_path;
+		auto strings = std::make_shared<StringsDocument>();
+		Diagnostic error;
+		TEST_EXPECT(strings->load(root + "/" + table_path, table_path, AssetKind::Strings,
+				project.target_game, error));
+		const NodeKind string_kind = strings->kind_from_name("string");
+		NodeId wepdes = 0, overlays = 0;
+		for (const auto &row : strings->rows()) {
+			if (row->name() == "WepDes") wepdes = row->id;
+			if (row->name() == "Overlays") overlays = row->id;
+		}
+		TEST_EXPECT(wepdes != 0 && overlays != 0);
+		// A string of key WEP_D3 added to a section: its address, or none.
+		const auto add_key = [&](NodeId section) {
+			Edit add;
+			add.operation = EditOperation::Add;
+			add.address = {section, string_kind, 0};
+			if (!strings->apply(add, error)) return NodeAddress{};
+			Edit set;
+			set.operation = EditOperation::Set;
+			set.address = {section, string_kind, strings->last_added()};
+			set.field = "key";
+			set.value = std::string("WEP_D3");
+			return strings->apply(set, error) ? set.address : NodeAddress{};
+		};
+		const NodeAddress added = add_key(wepdes);
+		TEST_EXPECT(added.child != 0);
+		open = {strings};
+		TEST_EXPECT(step("a string id the weapon names added to the open table", true));
+		TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_D3", "GAMETEXT.BIN/WepDes") ==
+				ReferenceStatus::Present);
+		Edit remove;
+		remove.operation = EditOperation::Remove;
+		remove.address = added;
+		TEST_EXPECT(strings->apply(remove, error) && add_key(overlays).child != 0);
+		TEST_EXPECT(step("the string id moved to another section", true));
+		TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_D3", "GAMETEXT.BIN/WepDes") ==
+				ReferenceStatus::Missing);
+		open.clear();
+		TEST_EXPECT(step("the table closed", true));
+	}
 	// brand.mns over menu_style.mns: a later definition wins; a variable of its own.
 	TEST_EXPECT(
 			rewrite(style_dir + "/brand.mns", "DEF_FONTNAME_LG Arial16n.fnt\r\nBRAND_ONLY 1\r\n"));
@@ -2189,6 +2354,26 @@ static int test_incremental_equals_fresh() {
 	TEST_EXPECT(update.bindings == std::vector<std::string>{"DEF_FONTNAME_LG"} && !update.file_set);
 	TEST_EXPECT(rewrite(style_dir + "/other.mns", "DEF_FONTNAME_LG Arial16b.fnt\r\nSTRAY 2\r\n"));
 	TEST_EXPECT(step("a stylesheet the game never reads", true));
+	// A menu naming as its font a variable that holds a colour, and a variable no stylesheet
+	// defines; the colour then a font the project lacks, which the stylesheet's own edge reports
+	// in the menu's place.
+	TEST_EXPECT(rewrite(root + "/d3.mnu",
+			screen("D3",
+					window("STATIC", "COLOURED", font("%D3_VAR%")) +
+							window("STATIC", "UNDEFINED", font("%NOPE_D3%")))));
+	TEST_EXPECT(rewrite(style_dir + "/brand.mns",
+			"DEF_FONTNAME_LG nofont.fnt\r\nBRAND_ONLY 1\r\nD3_VAR FF00FF00\r\n"));
+	TEST_EXPECT(step("a variable holding a colour named as a font", true));
+	TEST_EXPECT(rewrite(style_dir + "/brand.mns",
+			"DEF_FONTNAME_LG nofont.fnt\r\nBRAND_ONLY 1\r\nD3_VAR d3font.fnt\r\n"));
+	TEST_EXPECT(step("the colour become a font", true));
+	TEST_EXPECT(update.bindings == std::vector<std::string>{"D3_VAR"});
+	// The undefined variable defined where the game never reads it: no binding moves, and only its
+	// finding's words change.
+	TEST_EXPECT(rewrite(
+			style_dir + "/other.mns", "DEF_FONTNAME_LG Arial16b.fnt\r\nSTRAY 2\r\nNOPE_D3 1\r\n"));
+	TEST_EXPECT(step("the undefined variable defined in a stylesheet the game never reads", true));
+	TEST_EXPECT(update.bindings.empty() && graph.stats().findings_made == 1);
 	fs::remove(style_dir + "/brand.mns");
 	TEST_EXPECT(step("brand.mns gone", true));
 	// A menu naming a texture the project lacks, then has; a screen of another menu.
@@ -2201,17 +2386,29 @@ static int test_incremental_equals_fresh() {
 	TEST_EXPECT(editor_test::write_text(root + "/textures/logo.tga", "tga"));
 	TEST_EXPECT(step("the texture added", true));
 	TEST_EXPECT(update.file_set && update.files == std::vector<std::string>{"textures/logo.tga"});
-	// A menu moved to another folder: another file at another path.
+	// A menu moved to another folder: another file at another path; then its name's case alone
+	// changed (another path, the same name).
 	fs::create_directories(root + "/moved");
 	fs::rename(root + "/extra.mnu", root + "/moved/extra.mnu");
 	TEST_EXPECT(step("a menu moved", true));
+	fs::rename(root + "/moved/extra.mnu", root + "/moved/extra_d3.tmp");
+	fs::rename(root + "/moved/extra_d3.tmp", root + "/moved/EXTRA.mnu");
+	TEST_EXPECT(step("the menu's name, its case alone changed", true));
+	TEST_EXPECT(update.files == std::vector<std::string>({"moved/EXTRA.mnu", "moved/extra.mnu"}));
 	// A second file of the main menu's name, then the first one gone: the name resolves to the
-	// second, whose screens the JUMP's lookup reads.
-	TEST_EXPECT(rewrite(root + "/zz/main.mnu", screen("STARTUP", window("STATIC", "OTHER"))));
+	// second, whose screens the JUMP's lookup reads, and whose button's ACTIONs name a window of
+	// its screen and a name none has yet.
+	const std::string show = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">";
+	TEST_EXPECT(rewrite(root + "/zz/main.mnu",
+			screen("STARTUP",
+					window("STATIC", "OTHER") +
+							window("BUTTON", "D3_GO",
+									show + "OTHER</ACTION>\r\n" + show + "RENAMED</ACTION>\r\n"))));
 	TEST_EXPECT(step("a second main.mnu", true));
 	fs::remove(root + "/" + menu_path);
 	TEST_EXPECT(step("the first main.mnu gone", true));
-	// A string table gone: the ids it defined, and the table the menus read, no more.
+	// A string table gone: the ids it defined, and the table the menus and the weapons read, no
+	// more (a string id it never defined now names a table the project lacks).
 	if (const AssetEntry *table = scan.find("gametext.bin")) {
 		fs::remove(root + "/" + table->relative_path);
 		TEST_EXPECT(step("gametext.bin gone", true));
@@ -2235,10 +2432,15 @@ static int test_incremental_equals_fresh() {
 		set.field = "name";
 		set.value = std::string("RENAMED");
 		TEST_EXPECT(document->apply(set, error));
-		TEST_EXPECT(step("an open menu's window renamed", true));
+		TEST_EXPECT(step("an open menu's window renamed to the name an ACTION names", true));
 		TEST_EXPECT(update.files == std::vector<std::string>{menu_now});
 		document->undo();
 		TEST_EXPECT(step("the rename undone", true));
+		set.value = std::string("Other");
+		TEST_EXPECT(document->apply(set, error));
+		TEST_EXPECT(step("the window's name, its case alone changed", true));
+		document->undo();
+		TEST_EXPECT(step("that undone", true));
 		open.clear();
 		TEST_EXPECT(step("the menu closed", false));
 	}
@@ -2247,12 +2449,25 @@ static int test_incremental_equals_fresh() {
 		TEST_EXPECT(editor_test::write_bytes(root + "/" + table->relative_path, {1, 2, 3, 4}));
 		TEST_EXPECT(step("a string table become a raw table", true));
 	}
-	// A mission that does not read: a finding of the graph's, gone with the file.
+	// A mission that reads (an item the project has and one it lacks), then does not: its edges
+	// gone and a finding of the graph's in their place, gone with the file.
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		opennova::mission::add_entity(mission, opennova::mission::EntityKind::Item, 100399, {});
+		opennova::mission::add_entity(mission, opennova::mission::EntityKind::Item, 100398, {});
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
+		TEST_EXPECT(editor_test::write_bytes(root + "/missions/broken.bms", bytes));
+	}
+	TEST_EXPECT(step("a mission placing two items", true));
 	TEST_EXPECT(rewrite(root + "/missions/broken.bms", "not a mission"));
-	TEST_EXPECT(step("a mission that does not read", true));
+	TEST_EXPECT(step("the mission no longer reads", true));
 	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 1);
 	fs::remove(root + "/missions/broken.bms");
 	TEST_EXPECT(step("the mission gone", true));
+	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0);
 	// A mission's .mis: its row counts, what it holds is read by nothing.
 	TEST_EXPECT(rewrite(root + "/missions/m1.mis", "; one\n"));
 	TEST_EXPECT(step("a .mis added", true));
@@ -2264,7 +2479,8 @@ static int test_incremental_equals_fresh() {
 // What an update resolves again (S13 D3, GraphStats): one file's edit its own edges alone; a
 // binding's change its own stylesheet's edges and the edges naming the variable; a file added
 // every file edge (and a screen's); a variable gone the edges naming it. missing_count follows
-// each.
+// each, and the findings worded are those of the missing edges resolved again: one edit to a
+// missing reference words one finding.
 static int test_patch_counts() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_counts");
 	Project project(dir.file("project"));
@@ -2284,8 +2500,9 @@ static int test_patch_counts() {
 			"begin \"A\"\nid 100301\ntype building\ngraphic gone\nend\n"));
 	AssetGraph graph;
 	graph.update(project.paths, project.document, project.rescan(), {});
+	Seen seen({"a", "font", "s"});
 	const auto fresh = [&]() {
-		return fresh_difference(graph, project.paths, project.document, project.scan, {});
+		return fresh_difference(graph, project.paths, project.document, project.scan, {}, seen);
 	};
 	TEST_EXPECT(fresh().empty() && graph.missing_count() == graph.missing().size());
 	const size_t missing_at_first = graph.missing_count();
@@ -2297,7 +2514,7 @@ static int test_patch_counts() {
 	TEST_EXPECT(update.changed && update.files == std::vector<std::string>{ "defs/items.def" } &&
 			update.bindings.empty() && !update.file_set);
 	TEST_EXPECT(graph.stats().files_patched == 1 && item_edges > 0 &&
-			graph.stats().edges_resolved == item_edges);
+			graph.stats().edges_resolved == item_edges && graph.stats().findings_made == 1);
 	TEST_EXPECT(fresh().empty() && graph.missing_count() == missing_at_first);
 	// A binding's value changed: menu_style.mns's own edges, and the edges naming %FONT_A% (W1's
 	// font and its variable), not W2's, W3's, W4's or W5's.
@@ -2310,7 +2527,8 @@ static int test_patch_counts() {
 	TEST_EXPECT(update.bindings == std::vector<std::string>{ "FONT_A" } &&
 			update.files == std::vector<std::string>{ "menu_style.mns" });
 	TEST_EXPECT(through_a == 2 && graph.stats().files_patched == 1 &&
-	            graph.stats().edges_resolved == style_edges + through_a);
+	            graph.stats().edges_resolved == style_edges + through_a &&
+	            graph.stats().findings_made == 0);
 	std::string loaded;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%FONT_A%", std::string(), &loaded) ==
 					ReferenceStatus::Present &&
@@ -2331,26 +2549,31 @@ static int test_patch_counts() {
 	TEST_EXPECT(graph.stats().files_patched == 1 && file_edges > 0 &&
 			file_edges < graph.edge_count() && graph.stats().edges_resolved == file_edges);
 	TEST_EXPECT(fresh().empty() && graph.missing_count() == missing_at_first - 1);
+	// The item's model, a file edge still missing, worded again; the texture's finding gone.
+	TEST_EXPECT(graph.stats().findings_made == 1);
 	// A variable gone: its binding's change reaches the edges naming it (the variable missing, its
 	// font through it quiet), and the symbol's own key.
 	TEST_EXPECT(rewrite(project.file("menu_style.mns"), "FONT_A b.fnt\r\nCOLOR_C FF00FF00\r\n"));
 	update = graph.update(project.paths, project.document, project.rescan(), {});
 	TEST_EXPECT(update.bindings == std::vector<std::string>{"FONT_B"});
-	TEST_EXPECT(graph.stats().edges_resolved == graph.references_of("menu_style.mns").size() + 2);
+	TEST_EXPECT(graph.stats().edges_resolved == graph.references_of("menu_style.mns").size() + 2 &&
+			graph.stats().findings_made == 1);
 	TEST_EXPECT(graph.resolve(ReferenceKind::StyleVar, "%FONT_B%") == ReferenceStatus::Missing);
 	TEST_EXPECT(fresh().empty() && graph.missing_count() == missing_at_first);
 	// Nothing changed: nothing resolved.
 	const uint64_t generation = graph.generation();
 	update = graph.update(project.paths, project.document, project.rescan(), {});
 	TEST_EXPECT(!update.changed && update.files.empty() && graph.generation() == generation &&
-			graph.stats().edges_resolved == 0 &&
+			graph.stats().edges_resolved == 0 && graph.stats().findings_made == 0 &&
 			graph.stats().files_reused == project.scan.entries.size() - 3);
 	return 0;
 }
 
 // references_of reads a file's own slot: by its path, or by a logical name the file that name
 // resolves to (the first of it by path), never another file of the name (the trunk's matched every
-// file of the name); a path the project does not have names nothing.
+// file of the name); a path the project does not have names nothing. referrers_of_file and
+// usages_of name a file the same way, the path first: a file at the project's root named by its
+// path is itself, even where another file of its name comes first and takes the references.
 static int test_references_of() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_references_of");
 	Project project(dir.file("project"));
@@ -2378,6 +2601,24 @@ static int test_references_of() {
 	            std::vector<std::string>({"b/main.mnu:b.tga", "b/main.mnu:c.tga"}));
 	TEST_EXPECT(graph.references_of("c/main.mnu").empty() &&
 			graph.references_of("nothing.mnu").empty());
+	TEST_EXPECT(rewrite(
+			project.file("main.mnu"), screen("R", window("STATIC", "R", image("r.tga")))));
+	TEST_EXPECT(rewrite(project.file("c.mnu"),
+			screen("C", window("BUTTON", "GO", go_screen("main.mnu", "S")))));
+	graph.update(project.paths, project.document, project.rescan(), {});
+	TEST_EXPECT(values(graph.references_of("main.mnu")) ==
+			std::vector<std::string>{ "main.mnu:r.tga" });
+	TEST_EXPECT(values(graph.references_of("MAIN.MNU")) ==
+			std::vector<std::string>{ "a/main.mnu:a.tga" });
+	TEST_EXPECT(graph.referrers_of_file("main.mnu").empty() && graph.usages_of("main.mnu").empty());
+	const std::vector<std::string> referrers = values(graph.referrers_of_file("a/main.mnu"));
+	TEST_EXPECT(referrers == std::vector<std::string>{ "c.mnu:main.mnu" } &&
+			values(graph.referrers_of_file("MAIN.MNU")) == referrers);
+	const std::vector<std::string> usages = values(graph.usages_of("a/main.mnu"));
+	TEST_EXPECT(usages == std::vector<std::string>({"c.mnu:main.mnu", "c.mnu:S"}) &&
+			values(graph.usages_of("MAIN.MNU")) == usages);
+	TEST_EXPECT(graph.referrers_of_file("c/main.mnu").empty() &&
+			graph.usages_of("c/main.mnu").empty());
 	return 0;
 }
 
@@ -2401,12 +2642,16 @@ LayerFile layer_file(const std::string &name, AssetKind kind, const std::string 
 // lookup tries the project, then the base, whose files the project has one of the name of are
 // hidden (their names with them); the base resolves what the project lacks, a stylesheet's
 // variables included; it makes no edge and no finding (a reference in it to nothing, a file of it
-// that does not read); choices lists the base's names after the project's, each name once. Set
-// and taken away, and a file added under it, the graph equals a fresh one over the same base.
+// that does not read); choices lists the base's names after the project's, each name once, the
+// names a lookup finds before those none does: a variable the project defines only in a
+// stylesheet the game never reads is the base's live one, and a base stylesheet the game never
+// reads offers its variables inert. Set and taken away, and a file added under it, the graph
+// equals a fresh one over the same base.
 static int test_base_layer() {
 	std::vector<LayerFile> files;
 	files.push_back(layer_file("menu_style.mns", AssetKind::MenuStyle,
-			"DEF_FONTNAME_LG basefont.fnt\r\nBASE_COLOR FF00FF00\r\n"));
+			"DEF_FONTNAME_LG basefont.fnt\r\nBASE_COLOR FF00FF00\r\nBIG FF0000FF\r\n"));
+	files.push_back(layer_file("other.mns", AssetKind::MenuStyle, "STRAY 1\r\n"));
 	files.push_back(layer_file("basefont.fnt", AssetKind::Font, "font"));
 	files.push_back(layer_file("shared.tga", AssetKind::Texture, "tga"));
 	files.push_back(layer_file("onlybase.tga", AssetKind::Texture, "tga"));
@@ -2417,7 +2662,7 @@ static int test_base_layer() {
 	files.push_back(layer_file("SHARED.TGA", AssetKind::Texture, "a second file of the name"));
 	GraphStats built;
 	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(files, "jo", &built);
-	TEST_EXPECT(layer->file_count() == 7 && built.files_extracted == 4 && built.files_failed == 1);
+	TEST_EXPECT(layer->file_count() == 8 && built.files_extracted == 5 && built.files_failed == 1);
 	TEST_EXPECT(layer->file_named("Base.mnu") && !layer->file_named("nothere.tga") &&
 			layer->symbol_count() > 0);
 	TEST_EXPECT(layer->index().edge_count() == 0);
@@ -2436,9 +2681,11 @@ static int test_base_layer() {
 	TEST_EXPECT(rewrite(project.file("menus/menus.mnu"), screen("NEW", window("STATIC", "Y"))));
 	TEST_EXPECT(editor_test::write_text(project.file("textures/shared.tga"), "tga"));
 	TEST_EXPECT(editor_test::write_text(project.file("fonts/project.fnt"), "font"));
+	TEST_EXPECT(rewrite(project.file("extra.mns"), "BIG FF00FF00\r\n"));
 	AssetGraph graph;
 	graph.update(project.paths, project.document, project.rescan(), {});
 	const size_t missing_alone = graph.missing_count();
+	Seen seen({"a", "base", "big", "shared"});
 	TEST_EXPECT(graph.resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") ==
 			ReferenceStatus::Missing);
 	TEST_EXPECT(
@@ -2447,7 +2694,8 @@ static int test_base_layer() {
 	GraphUpdate update = graph.set_base(layer);
 	TEST_EXPECT(update.changed && graph.generation() != before && graph.base() == layer);
 	TEST_EXPECT(graph.stats().edges_resolved == graph.edge_count());
-	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, layer)
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
 					.empty());
 	// The base resolves what the project lacks: a variable of its stylesheet, the font its value
 	// names, a texture, a screen of its menu.
@@ -2497,9 +2745,19 @@ static int test_base_layer() {
 	const std::vector<ReferenceChoice> screens = graph.choices(ReferenceKind::MenuScreen);
 	TEST_EXPECT(screens.size() == 3 && screens[0].name == "HOME" && screens[1].name == "NEW" &&
 	            screens[2].name == "BASESCREEN");
+	// The variables: the base's the game reads, BIG among them though the project's extra.mns
+	// defines it (a stylesheet the game never reads), then the base's other.mns's, inert.
 	const std::vector<ReferenceChoice> variables = graph.choices(ReferenceKind::StyleVar);
-	TEST_EXPECT(variables.size() == 2 && variables[0].name == "%DEF_FONTNAME_LG%" &&
-			variables[0].file == "menu_style.mns");
+	TEST_EXPECT(variables.size() == 4 && variables[0].name == "%DEF_FONTNAME_LG%" &&
+			variables[0].file == "menu_style.mns" && variables[1].name == "%BASE_COLOR%");
+	TEST_EXPECT(variables.size() == 4 && variables[2].name == "%BIG%" &&
+			variables[2].file == "menu_style.mns" && !variables[2].inert &&
+			variables[2].status == ReferenceStatus::Present);
+	TEST_EXPECT(variables.size() == 4 && variables[3].name == "%STRAY%" &&
+			variables[3].file == "other.mns" && variables[3].inert &&
+			variables[3].status == ReferenceStatus::Missing &&
+			variables[3].reason == "the game reads no stylesheet but menu_style.mns and brand.mns");
+	TEST_EXPECT(graph.usages_of("other.mns").empty());
 	// A stylesheet of the project's hides the base's whole: its variables no longer bind.
 	TEST_EXPECT(rewrite(project.file("menu_style.mns"), "PROJECT_ONLY 1\r\n"));
 	update = graph.update(project.paths, project.document, project.rescan(), {});
@@ -2510,17 +2768,84 @@ static int test_base_layer() {
 			ReferenceStatus::Missing);
 	TEST_EXPECT(
 			graph.resolve(ReferenceKind::StyleVar, "%PROJECT_ONLY%") == ReferenceStatus::Present);
-	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, layer)
+	const std::vector<ReferenceChoice> hidden = graph.choices(ReferenceKind::StyleVar);
+	TEST_EXPECT(hidden.size() == 3 && hidden[0].name == "%PROJECT_ONLY%" &&
+			hidden[1].name == "%BIG%" && hidden[1].file == "extra.mns" && hidden[1].inert &&
+			hidden[2].name == "%STRAY%" && hidden[2].inert);
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
 					.empty());
 	fs::remove(project.file("menu_style.mns"));
 	graph.update(project.paths, project.document, project.rescan(), {});
-	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, layer)
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
 					.empty());
 	// Taken away: the graph as it was without it.
 	update = graph.set_base(nullptr);
 	TEST_EXPECT(update.changed && !graph.base() && graph.missing_count() == missing_alone);
-	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}).empty());
+	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, seen)
+					.empty());
 	TEST_EXPECT(!graph.set_base(nullptr).changed);
+	return 0;
+}
+
+// A file added under a base layer (S13 D3) resolves again what its name reaches and no more than
+// any file added does: every file edge (and a screen's) and the edges into the names of the base's
+// file of its name, which it hides (the project's ammo.def hides the base's, whose ammo a weapon's
+// round names); the findings worded are those of the missing edges resolved again and of the
+// string ids, whose words read the file set. Gone again, the base's file shows.
+static int test_base_layer_file_set() {
+	const std::shared_ptr<const GraphLayer> layer = GraphLayer::build(
+			{layer_file("ammo.def", AssetKind::AmmoDefs, "ammo BASE_AMMO\nend\n"),
+					layer_file("weapon.def", AssetKind::WeaponDefs, "weapon \"BASE_GUN\"\nend\n")},
+			"jo");
+	editor_test::TempProjectDir dir("opennova_asset_graph_base_file_set");
+	Project project(dir.file("project"));
+	TEST_EXPECT(project.made);
+	TEST_EXPECT(rewrite(project.file("defs/weapon.def"),
+			"weapon \"GUN_A\"\nround_type BASE_AMMO\nloadout_menu_textid WEP_NONE_D3\nend\n"
+			"weapon \"GUN_B\"\nround_type OTHER_AMMO\nend\n"));
+	TEST_EXPECT(rewrite(project.file("m.mnu"),
+			screen("S",
+					window("STATIC", "W", image("pic.tga")) +
+							window("BUTTON", "GO", go_screen("m.mnu", "S")))));
+	AssetGraph graph;
+	graph.set_base(layer);
+	graph.update(project.paths, project.document, project.rescan(), {});
+	Seen seen({"gun", "ammo"});
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
+					.empty());
+	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "BASE_AMMO") == ReferenceStatus::Present);
+	const size_t missing_before = graph.missing_count();
+	const auto file_set_edges = [&graph]() {
+		return count_edges(graph, [](const GraphEdge &edge) {
+			return reference_row(edge.kind).resolution == ReferenceResolution::File ||
+					edge.kind == ReferenceKind::MenuScreen || edge.source == "defs/ammo.def";
+		});
+	};
+	// The project's ammo.def: the base's hidden, and the round naming its ammo missing.
+	TEST_EXPECT(rewrite(project.file("defs/ammo.def"), "ammo PROJECT_AMMO\nend\n"));
+	GraphUpdate update = graph.update(project.paths, project.document, project.rescan(), {});
+	TEST_EXPECT(update.file_set && update.files == std::vector<std::string>{"defs/ammo.def"});
+	TEST_EXPECT(graph.stats().edges_resolved == file_set_edges() + 1 &&
+			graph.stats().edges_resolved < graph.edge_count());
+	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "BASE_AMMO") == ReferenceStatus::Missing &&
+			graph.missing_count() == missing_before + 1);
+	// The round, the menu's missing texture (a file edge) and the weapon's string id.
+	TEST_EXPECT(graph.stats().findings_made == 3);
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
+					.empty());
+	// Gone again: the base's ammo.def shows, and the round resolves through it.
+	fs::remove(project.file("defs/ammo.def"));
+	update = graph.update(project.paths, project.document, project.rescan(), {});
+	TEST_EXPECT(update.file_set && graph.stats().edges_resolved == file_set_edges() + 1);
+	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "BASE_AMMO") == ReferenceStatus::Present &&
+			graph.missing_count() == missing_before && graph.stats().findings_made == 2);
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
+					.empty());
 	return 0;
 }
 
@@ -2570,14 +2895,19 @@ static int test_retail_incremental() {
 				"edges, %zu symbols, %zu "
 				"missing, read in %.2f s\n",
 			exported, graph.edge_count(), graph.symbol_count(), graph.missing_count(), seconds);
+	Seen seen({"main", "font", "d3"});
 	const auto step = [&](const char *what) {
 		const GraphUpdate update =
 				graph.update(project.paths, project.document, project.rescan(), open);
+		const auto compared = std::chrono::steady_clock::now();
 		const std::string different =
-				fresh_difference(graph, project.paths, project.document, project.scan, open);
-		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu missing%s%s\n", what,
-				graph.stats().files_patched, graph.stats().edges_resolved, graph.edge_count(),
-				graph.missing_count(),
+				fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
+		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu findings worded, %zu "
+					"missing (compared in %.1f s)%s%s\n",
+				what, graph.stats().files_patched, graph.stats().edges_resolved,
+				graph.edge_count(), graph.stats().findings_made, graph.missing_count(),
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - compared)
+						.count(),
 				different.empty() ? "" : "; FAIL, differs from a fresh graph in ",
 				different.c_str());
 		return different.empty() && update.changed;
@@ -2703,7 +3033,9 @@ static int test_retail_base_layer() {
 			ReferenceStatus::Present);
 	TEST_EXPECT(graph.missing_count() == 1 && graph.diagnostics().size() == 1 &&
 	            graph.diagnostics()[0].message.find("not_in_the_install.tga") != std::string::npos);
-	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, layer)
+	Seen seen({"main", "font"});
+	TEST_EXPECT(
+			fresh_difference(graph, project.paths, project.document, project.scan, {}, seen, layer)
 					.empty());
 	return 0;
 }
@@ -2716,6 +3048,7 @@ int main(int argc, char **argv) {
 	failures += test_patch_counts();
 	failures += test_references_of();
 	failures += test_base_layer();
+	failures += test_base_layer_file_set();
 	failures += test_retail_incremental();
 	failures += test_retail_base_layer();
 	failures += test_reference_kind_rows();

@@ -1054,6 +1054,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		graph.set("files_failed", json_number(double(stats.files_failed)));
 		graph.set("files_patched", json_number(double(stats.files_patched)));
 		graph.set("edges_resolved", json_number(double(stats.edges_resolved)));
+		graph.set("findings_made", json_number(double(stats.findings_made)));
 	}
 	out.set("graph", std::move(graph));
 

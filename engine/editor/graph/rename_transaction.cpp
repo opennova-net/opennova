@@ -164,7 +164,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	// site that takes `renamed`, or a refusal.
 	const auto plan_sites = [&](const AssetEntry &target, const std::string &renamed) {
 		std::vector<const GraphEdge *> through_styles;
-		for (const GraphEdge *edge : graph.referrers_of_file(target.logical_name)) {
+		for (const GraphEdge *edge : graph.referrers_of_file(target.relative_path)) {
 			// Of two files of one name, a reference reaches the one the game finds (the scan's
 			// first): renaming the other rewrites none.
 			std::string resolved;

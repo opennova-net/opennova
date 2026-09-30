@@ -70,6 +70,7 @@ struct GraphStats {
 	size_t files_failed = 0;    // unreadable
 	size_t files_patched = 0;   // slots added, gone or read differently (GraphUpdate::files)
 	size_t edges_resolved = 0;  // edges resolved again
+	size_t findings_made = 0;   // missing edges' findings made (missing_finding)
 };
 
 // What an update changed (AssetGraph::update, set_base). `changed`: what the graph holds moved
@@ -92,9 +93,12 @@ public:
 	// changed is patched (its content out of the indexes and in again) and what it reaches is
 	// resolved again: its own edges; the edges into a symbol name whose definitions changed; the
 	// style variables' edges, and the files named through them, when a binding changed; every
-	// File edge (and a screen's, whose lookup asks for its menu file) when the file set changed,
-	// and every edge while a base layer is set. The generation moves exactly when what the graph
-	// holds changed.
+	// File edge (and a screen's, whose lookup asks for its menu file) when the file set changed;
+	// and, when the project's files come to hide a base layer's file of their name or no longer
+	// do, the edges into the names that file defines. A missing edge's finding is worded as it
+	// resolves, and again only when what its words read changed (the definitions of a style
+	// variable's name; which files the project has, for a kind whose row says its words read
+	// them). The generation moves exactly when what the graph holds changed.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
 			const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
@@ -108,8 +112,9 @@ public:
 
 	// The base layer (ADR 0046 d10: a read-only dependency mount; project assets win): a lookup by
 	// name tries the project, then the base, whose files the project has a file of the name of
-	// are hidden; choices offers the base's names after the project's; the base makes no edge and
-	// no finding. Every edge is resolved again, under a new generation; null takes it away.
+	// are hidden; choices offers the base's names after the project's (the names a lookup finds
+	// before the others); the base makes no edge and no finding. Every edge is resolved again,
+	// under a new generation; null takes it away.
 	GraphUpdate set_base(std::shared_ptr<const GraphLayer> base);
 	const std::shared_ptr<const GraphLayer> &base() const { return base_; }
 
@@ -121,20 +126,25 @@ public:
 	// Every symbol of `kind`, inert ones too, in the order the files define them.
 	std::vector<const GraphSymbol *> symbols_of_kind(ReferenceKind kind) const;
 	const GraphStats &stats() const { return stats_; }
+	// The slots and their indexes, read-only (a test comparing two graphs entry by entry).
+	const GraphIndex &index() const { return index_; }
 
-	// The edges out of a file: its slot's, by project-relative path, or by logical name the file
-	// the name resolves to (the first of it by path).
+	// The three queries of a file below name it alike: the project's file at that project-relative
+	// path, as the scan lists it, else, for a name with no folder, the file the name resolves to
+	// (of two files of one name the first by path, else the base layer's). A name that is the path
+	// of a file at the project's root names that file, even where another file of the name comes
+	// first. The edges out of a file (none for a base layer's):
 	std::vector<const GraphEdge *> references_of(const std::string &file) const;
 	// The edges that resolve to a file (any kind that names it).
-	std::vector<const GraphEdge *> referrers_of_file(const std::string &logical_name) const;
+	std::vector<const GraphEdge *> referrers_of_file(const std::string &file) const;
 	// The edges into a symbol of `kind` (indexed by kind and name): with `scope`, the symbol's
 	// own, only the edges whose scope reads it there (scope_matches).
 	std::vector<const GraphEdge *> referrers_of(ReferenceKind kind, const std::string &name,
 	                                            const std::string &scope = std::string()) const;
-	// Who uses a file (by project-relative path or logical name): the edges that resolve to it
-	// (referrers_of_file), then the edges into each symbol it defines that a lookup finds (a
-	// string table's ids, a catalog's names, a stylesheet's variables the game reads, a
-	// menu's screens and windows, a model's user points), each edge once.
+	// Who uses a file: the edges that resolve to it (referrers_of_file), then the edges into each
+	// symbol it defines that a lookup finds (a string table's ids, a catalog's names, a
+	// stylesheet's variables the game reads, a menu's screens and windows, a model's user points),
+	// each edge once.
 	std::vector<const GraphEdge *> usages_of(const std::string &file) const;
 	// The edges whose name reaches exactly this definition (resolve_symbol returns it: never a
 	// definition of the name in another scope, nor one no lookup finds, which has none).
@@ -188,7 +198,10 @@ public:
 	// window's screen, the points of the item's model; a scope of none, every one), each name
 	// once, as the first definition a lookup finds; then, marked inert with the reason, the names
 	// defined only where no lookup finds them; a style variable as its %NAME%, the definition the
-	// game reads. Then the base layer's the same way, the names the project offers left out.
+	// game reads. In each of the two the project's names, then the base layer's the same way, the
+	// names offered before left out: a name the project defines only where no lookup finds it is
+	// the base's live definition when the base has one. A base layer's style variable is inert
+	// unless it is the binding.
 	std::vector<ReferenceChoice> choices(ReferenceKind kind, const std::string &scope = std::string(),
 	                                     int32_t loader_arg = -1) const;
 
@@ -200,7 +213,8 @@ public:
 	// not read), then a warning for each file of a native kind the graph
 	// could not read ("graph.unreadable": its references are not checked; a document
 	// type's own validation reports a file of its kinds that does not load), by path. Both are
-	// kept as the update resolves the edges, never made again by a call.
+	// kept as the update resolves the edges (each finding with its edge), never made again by a
+	// call; the list is gathered again only when a finding in it, or a failure, moved.
 	std::vector<const GraphEdge *> missing() const;
 	size_t missing_count() const { return index_.missing().size(); }
 	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
@@ -241,20 +255,32 @@ private:
 	void drop(uint32_t id, Patch &patch);
 	// The patch resolved: the bindings, the style variables' inert, every edge the patch reaches,
 	// the findings.
-	void resolve_patch(const Patch &patch, GraphUpdate &out);
+	void resolve_patch(Patch &patch, GraphUpdate &out);
 	// The bindings made again from the shell's stylesheets; the names whose binding changed.
 	std::vector<std::string> rebind();
 	// A style variable's inert as the game reads the project (the bindings); true when it moved.
 	bool derive(uint32_t id, uint32_t symbol);
-	// One edge resolved: its target, its status, the file it loads and whether it is missing, each
-	// entry of the index that changed moved.
-	void resolve_edge(Ref ref);
+	// Whether no lookup of the game finds a definition: a style variable's unless it is the binding
+	// (a base layer's keeps only its own file's inert), any other's as the graph keeps it; and why
+	// a style variable's is not read (its own file's reason, else the stylesheets the game reads).
+	bool unread(const GraphSymbol &symbol) const;
+	std::string unread_reason(const GraphSymbol &symbol, bool own_inert,
+	                          const std::string &own_reason) const;
+	// One edge resolved: its target, its status, the file it loads, whether it is missing and its
+	// finding, each entry of the index that changed moved. True when the diagnostics moved: the
+	// edge, resolved before, went in or out of the missing, or its finding changed.
+	bool resolve_edge(Ref ref);
 	bool counts_missing(const GraphSlot &slot, const GraphEdge &edge, const std::string &target,
 	                    ReferenceStatus status) const;
-	void make_diagnostics();
+	// A missing edge's finding worded again; true when it changed.
+	bool reword(Ref ref);
+	// The diagnostics listed again: each missing edge's finding, then the failures by path.
+	void list_diagnostics();
 	std::string resolved_target(const GraphEdge &edge) const;
 	// The file a name resolves to: the project's first of it by path, else the base's.
 	const GraphSlot *file_named(const std::string &key) const;
+	// The file a query names (references_of): the project's at the path, else by the name.
+	const GraphSlot *named_file(const std::string &file) const;
 	// Whether a base layer's file shows: the project has no file of its name.
 	bool base_file_shows(const GraphSlot &slot) const;
 	// The generation: the counter's next value on every construction, copy and assignment (a

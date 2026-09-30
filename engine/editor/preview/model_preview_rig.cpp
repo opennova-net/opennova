@@ -47,11 +47,17 @@ std::shared_ptr<const bad::BadFile> PreviewRigFiles::bone_animation(const std::s
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
                                const std::string &chosen) {
 	PreviewRig rig;
+	// A rig's files go by name, as the game finds them: the scan's first file of the name, which
+	// the graph's queries take by its path.
+	const auto path_of = [&scan](const std::string &name) {
+		const AssetEntry *entry = scan.find(name);
+		return entry ? entry->relative_path : name;
+	};
 	if (kind == AssetKind::AnimationMap) {
 		rig.table = file;
 	} else {
 		rig.clip = file;
-		for (const GraphEdge *edge : graph.referrers_of_file(file))
+		for (const GraphEdge *edge : graph.referrers_of_file(path_of(file)))
 			if (edge->kind == ReferenceKind::Animation) {
 				rig.table = file_of(edge->source);
 				break;
@@ -63,7 +69,7 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 		return rig;
 	}
 	if (rig.table.empty()) return rig;
-	for (const GraphEdge *edge : graph.referrers_of_file(rig.table)) {
+	for (const GraphEdge *edge : graph.referrers_of_file(path_of(rig.table))) {
 		if (edge->kind != ReferenceKind::AnimationMap || edge->field != "anim_def") continue;
 		for (const GraphEdge *graphic : graph.references_of(edge->source)) {
 			if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model) continue;

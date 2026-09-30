@@ -609,7 +609,8 @@ static int test_over_a_session() {
 	TEST_EXPECT(graph_json.get_int("edges", 0) == int64_t(view.graph->edge_count()) &&
 	            graph_json.get_int("missing", -1) == int64_t(view.graph->missing_count()) &&
 	            graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
-	            graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved));
+	            graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
+	            graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
 	TEST_EXPECT(!graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.empty());
 	TEST_EXPECT(graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());

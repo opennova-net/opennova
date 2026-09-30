@@ -178,6 +178,12 @@ struct Row {
 		out.row.missing_message = message;
 		return out;
 	}
+	// What the message says depends on which files the project has.
+	constexpr Row message_reads_files() const {
+		Row out = *this;
+		out.row.message_reads_files = true;
+		return out;
+	}
 	constexpr Row offers(ReferenceKind kind) const {
 		Row out = *this;
 		out.row.also_offers = kind;
@@ -213,6 +219,7 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase)
 	        .scoped(true)
 	        .tolerated(text_id_missing)
+	        .message_reads_files()
 	        .row,
 	// A style variable no stylesheet the game reads defines stays literal.
 	Row(ReferenceKind::StyleVar, "style_var", "the style variable", "style variable")
@@ -255,6 +262,7 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::Animation, "animation", "the clip", "clip")
 	        .loads(AssetKind::Animation, kAnimation)
 	        .tolerated(clip_missing)
+	        .message_reads_files()
 	        .row,
 	// An item's particle slot naming no user point attaches its effect to none.
 	Row(ReferenceKind::UserPoint, "user_point", "the user point", "user point")

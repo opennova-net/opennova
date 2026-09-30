@@ -28,14 +28,16 @@ struct OwnFacts {
 };
 
 // How one edge of a file resolves, as the graph last resolved it: whether it is Present, the file
-// it loads (a File reference that resolves: what "Referenced by" lists it under) and whether it is
-// one of the missing ones. `resolved` false: not resolved since the file was read, so none of its
-// entries is in the index.
+// it loads (a File reference that resolves: what "Referenced by" lists it under), whether it is
+// one of the missing ones and, while it is, its finding (AssetGraph::missing_finding: made as the
+// edge resolves, and again when what its words read changes). `resolved` false: not resolved since
+// the file was read, so none of its entries is in the index.
 struct EdgeResolution {
 	bool resolved = false;
 	ReferenceStatus status = ReferenceStatus::NotAReference;
 	std::string file;
 	bool missing = false;
+	Diagnostic finding;
 };
 
 // One file of the project (ADR 0046 S13 D3), or of a base layer: its row in the scan, what the
