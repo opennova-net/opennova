@@ -118,12 +118,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), and what Problems
-    # shows of its findings and offers to do about them; the finding codes every finding is made
-    # from (S13 A6: the editor's own table and the lookup over it and the types')
+    # imports, renames, the unsaved guard, the preferences over their store), what Problems
+    # shows of its findings and offers to do about them, the request and query tables (S13 A4,
+    # A5) and their wire forms (session_json, view_json), and the finding codes every finding is
+    # made from (S13 A6: the editor's own table and the lookup over it and the types')
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
@@ -141,6 +143,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
     # the documents, the findings, the activity, the dialogs), the events a request posts, and
     # the findings by file and record

@@ -74,8 +74,8 @@ uint64_t next_edit_gesture();
 // Inside one batch (Document::apply), the record an earlier edit of that batch made:
 // batch_made(i) names what the batch's i-th edit added (an Add's record, a Duplicate's
 // copy, a Paste's first record), as a later edit's record (address.child) or owner
-// (parent), so one undo step can add a record and fill it in (the editor MCP's
-// editor_menu edit). Such an edit names the batch's row, or row 0 for "the batch's".
+// (parent), so one undo step can add a record and fill it in (a request's edits in the
+// batch form, record_batch.h). Such an edit names the batch's row, or row 0 for "the batch's".
 // No document hands out such an identity; one naming an edit that made nothing, or
 // that comes later, refuses the batch (document.batch).
 constexpr NodeId kBatchMadeBase = NodeId(1) << 62;

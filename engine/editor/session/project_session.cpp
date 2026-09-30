@@ -2,16 +2,20 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <editor/session/document_set.h>
+#include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_controller.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
+#include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
@@ -72,6 +76,83 @@ bool ProjectSession::handle(const EditorRequest &request) {
 	return served;
 }
 
+io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorRequest *shell) {
+	io::JsonValue answer = io::JsonValue::make_object();
+	std::string error;
+	EditorRequest request;
+	RequestNames names;
+	bool ok = json.is_object();
+	if (!ok) error = "A request is a JSON object.";
+	// A kind the shell serves with a person to answer it (the pickers) never comes through here:
+	// refused by its kind, before its fields are read, naming the fields that carry what it picks.
+	const io::JsonValue *token = ok ? json.get("kind") : nullptr;
+	EditorRequestKind kind = EditorRequestKind::Rescan;
+	if (token && token->is_string() && request_kind_from_token(token->string, kind) &&
+			request_kind_row(kind).served_by == ServedBy::ShellNeedsPerson) {
+		ok = false;
+		error = "The pickers need a person: pass what they pick instead, a project's folder as the "
+				"dir of new_project or open_project, the game install or the runtime as "
+				"settings.game_install or settings.runtime_executable of apply_project_settings, "
+				"files to import as the paths of preview_import.";
+	}
+	// The record document a request's edits are named in: the one its path names, else the active
+	// one (an open document of another kind holds no records to name, S13 D6). A kind that takes
+	// open_first, asking it with nothing open at its path (a fix's edit), is read once before the
+	// document opens, so one refused as it is read asks nothing of the session.
+	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
+			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
+		const std::string path = json.get_string("path", "");
+		const DocumentBase *open = document_base_for(path);
+		if (open && !records_of(*open)) {
+			ok = false;
+			error = open->path() + " holds no records (document.no_records): its edits name none.";
+		} else if (!open && !path.empty() && project_open() &&
+				request_kind_row(kind).params.has(RequestFieldId::OpenFirst) &&
+				json.get_bool("open_first", false)) {
+			RequestNames first;
+			first.unresolved = true;
+			EditorRequest unread;
+			ok = editor_request_from_json(json, unread, error, &first);
+			if (ok)
+				handle(request::open_document(path));
+		}
+		names.document = document_for(path);
+	}
+	ok = ok && editor_request_from_json(json, request, error, &names);
+	bool served = false;
+	if (ok) {
+		served = handle(request);
+		if (!served && shell) *shell = request;
+	}
+	answer.set("ok", io::JsonValue::make_bool(ok));
+	answer.set("served", io::JsonValue::make_bool(served));
+	if (!error.empty()) answer.set("error", io::json_string(error));
+	// What the request came to (`ok` only says it read): the session's outcome, or a plain done
+	// for a kind the shell serves; an edit_record's outcome names what each label made.
+	if (ok) {
+		const ActionOutcome none;
+		const ActionOutcome &outcome = served ? impl_->core.outcome() : none;
+		io::JsonValue came = action_outcome_to_json(outcome);
+		if (request.kind == EditorRequestKind::EditRecord) {
+			io::JsonValue made = io::JsonValue::make_object();
+			if (outcome.done() && outcome.added.size() == names.made_labels.size())
+				for (size_t i = 0; i < outcome.added.size(); ++i)
+					if (!names.made_labels[i].empty())
+						made.set(names.made_labels[i], io::json_number(double(outcome.added[i])));
+			came.set("made", std::move(made));
+		}
+		answer.set("outcome", std::move(came));
+	}
+	answer.set("status", io::json_string(view().activity.status));
+	answer.set("view_revision", io::json_number(double(view().revisions.any())));
+	return answer;
+}
+
+io::JsonValue ProjectSession::query(
+		std::string_view name, const io::JsonValue &args, std::string &error) {
+	return run_query(impl_->core, name, args, error);
+}
+
 void ProjectSession::hold_validation() {
 	impl_->problems.hold();
 }
@@ -119,10 +200,6 @@ uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> opera
 }
 
 // --- what is asked without a request -------------------------------------------------------------
-
-std::string ProjectSession::problems_json(const std::string &query) {
-	return impl_->problems.problems_json(query);
-}
 
 Document *ProjectSession::document_for(const std::string &path) {
 	return impl_->documents.records_for(path);
