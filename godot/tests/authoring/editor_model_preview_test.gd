@@ -115,6 +115,7 @@ func _new_project_with(model: String, name: String) -> bool:
 	out.store_buffer(bytes)
 	out.close()
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	_seam.settle() # a Rescan steps across pumps (S13 A3)
 	return true
 
 
@@ -275,6 +276,7 @@ func test_a_table_plays_on_its_rig() -> void:
 	_write(dir.path_join("project/defs/items.def"),
 			"begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n")
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	_seam.settle() # a Rescan steps across pumps (S13 A3)
 	assert_true(_seam.open_document("anims/SKIN.adm"))
 	var walk: int = _seam.find_record("anim_walk_forward")
 	assert_gt(walk, 0)

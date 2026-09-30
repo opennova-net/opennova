@@ -90,15 +90,31 @@ static func whole_numbers(value: Variant) -> Variant:
 
 # --- the project ----------------------------------------------------------------------------------
 
-## Made and opened: the request went through and the project it made is the one open.
+## The session pumped until no operation runs and the validation after one has ended (S13 A3: an
+## Open, a Rescan, an import or a rename steps across pumps), `timeout_ms` at most.
+func settle(timeout_ms := 120000) -> void:
+	var deadline := Time.get_ticks_msec() + timeout_ms
+	while Time.get_ticks_msec() < deadline:
+		var operation := query("operation")
+		if not bool(operation.get("operation", {}).get("running", false)) \
+				and not bool(operation.get("validation", {}).get("running", false)):
+			return
+		app.call("pump")
+
+
+## Made and opened: the request went through and the project it made is the one open once its
+## Open has run (S13 A3: an operation the pumps step).
 func new_project(dir: String, title: String) -> bool:
-	return done({"kind": "new_project", "dir": dir, "title": title}) and _open_at(dir)
+	var made := done({"kind": "new_project", "dir": dir, "title": title})
+	settle()
+	return made and _open_at(dir)
 
 
 ## Whether the project at `dir` is the one open afterwards (a switch that failed, or that an
-## operation refused, leaves the project open before it open).
+## operation refused, leaves the project open before it open), once its Open has run.
 func open_project(dir: String) -> bool:
 	request({"kind": "open_project", "dir": dir})
+	settle()
 	return _open_at(dir)
 
 

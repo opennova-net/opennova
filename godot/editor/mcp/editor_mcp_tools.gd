@@ -57,9 +57,16 @@ func _tool_editor_query(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	return _answer(name, params)
 
 
-func _tool_editor_request(args: Dictionary, _ctx: McpToolContext) -> Variant:
+## A request raised as the windows raise it. It answers at once, the operation it started or joined
+## named in its outcome (S13 A1, A3: a project opened, a refresh, an import's plan and its write, a
+## rename's commit, a build); `wait` (the tool's, not the request's) awaits that operation's end and
+## the validation after it, frames passing the while, and answers with what it came to (operation:
+## the last_operation block) and the status and view_revision as it left them.
+func _tool_editor_request(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var request := args.duplicate()
 	request.erase("_session_id")
+	var wait := bool(request.get("wait", false))
+	request.erase("wait")
 	# Unsorted: a replace_list record's fields are set in the order written, and JSON.stringify
 	# sorts a Dictionary's keys unless told not to.
 	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request, "", false))))
@@ -67,6 +74,13 @@ func _tool_editor_request(args: Dictionary, _ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("The editor returned an invalid answer.")
 	if not bool(answer.get("ok", false)):
 		return McpToolResult.error(String(answer.get("error", "The request was refused.")))
+	var id := int((answer as Dictionary).get("outcome", {}).get("operation", 0))
+	if wait and id != 0:
+		answer["operation"] = await _operation_end(id, ctx)
+		await _validation_end(ctx)
+		var status := _query("state", {"sections": ["status"]})
+		answer["status"] = String(status.get("status", {}).get("status", answer.get("status", "")))
+		answer["view_revision"] = int(status.get("view_revision", answer.get("view_revision", 0)))
 	return answer
 
 
@@ -395,6 +409,15 @@ func _outcome_error(answer: Variant, what: String) -> McpToolResult:
 	if not findings.is_empty():
 		reason = " (%s: %s)" % [String(findings[0].get("code", "")), String(findings[0].get("message", ""))]
 	return McpToolResult.error("%s did not go through%s." % [what, reason], findings)
+
+
+## Frames until the validation the polls step has ended (S13 A3: the first one after a project
+## opens, above all): the Problems rows are the project's then.
+func _validation_end(ctx: McpToolContext) -> void:
+	while not ctx.cancelled:
+		if not bool(_query("operation").get("validation", {}).get("running", false)):
+			return
+		await ctx.frames(1)
 
 
 ## Frames until the operation `id` ends, the main thread never held: what it came to (the
