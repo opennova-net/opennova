@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include "editor_ui_test_support.h"
@@ -42,10 +43,9 @@ void test_rename_everywhere_ui() {
 	session.handle(request::open_document(weapons_path));
 	const Document *document = session.document_for(weapons_path);
 	NodeAddress gun;
-	CHECK(document && document->find("GUN_A", gun), "the weapon");
+	CHECK(document && find_definition(AssetGraph(), *document, "GUN_A", gun), "the weapon");
 	if (!document || !gun.row) return;
-	EditorRequest select = request::select_record(weapons_path, {});
-	select.address = gun;
+	EditorRequest select = request::select_record(weapons_path, gun);
 	session.handle(select);
 	std::string section;
 	for (const InspectorSection &candidate : plan_inspector(*document, gun, gun, ""))
@@ -125,10 +125,9 @@ void test_hint_on_a_fallback() {
 	session.handle(request::open_document(brand_path));
 	const Document *brand = session.document_for(brand_path);
 	NodeAddress line;
-	CHECK(brand && brand->find("X_COLOR", line), "brand.mns's line");
+	CHECK(brand && find_definition(AssetGraph(), *brand, "X_COLOR", line), "brand.mns's line");
 	if (!brand || !line.row) return;
-	EditorRequest select = request::select_record(brand_path, {});
-	select.address = line;
+	EditorRequest select = request::select_record(brand_path, line);
 	session.handle(select);
 	EditorRequest rename = request::edit_record(brand_path, Edit());
 	rename.edits[0].address = line;

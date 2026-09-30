@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/workspace.h>
@@ -17,7 +18,7 @@
 // their lists share.
 namespace opennova::editor::window_requests {
 
-// Go to a target (Document::reference_targets, usage_target): a file the editor edits opened
+// Go to a target (reference_targets, usage_target): a file the editor edits opened
 // at the record (found by its locator, this same document's too) with its field shown; a file
 // the editor does not edit selected in Files.
 inline void go_to(Workspace &workspace, const ReferenceTarget &target) {

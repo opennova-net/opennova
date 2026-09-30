@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <editor/graph/reference_kinds.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -827,7 +828,8 @@ static int test_over_a_session() {
 	            root_collection.get_string("kind_name", "") == "window" && root_collection.get("records")->array.size() == 1);
 	const JsonValue &main_json = root_collection.get("records")->array.front();
 	NodeAddress title_address, main_address;
-	TEST_EXPECT(document->find("TITLE", title_address) && document->find("MAIN", main_address));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "TITLE", title_address) &&
+			find_definition(AssetGraph(), *document, "MAIN", main_address));
 	TEST_EXPECT(main_json.get_string("name", "") == "MAIN" && uint64_t(main_json.get_number("id", 0)) == main_address.child);
 	const JsonValue *lists = main_json.get("collections");
 	TEST_EXPECT(lists && lists->array.size() == document->collections_of(main_address).size());
@@ -878,6 +880,14 @@ static int test_over_a_session() {
 	TEST_EXPECT(font && font->get_string("reference", "") == "font" && font->get_string("reference_status", "") == "present");
 	TEST_EXPECT(!font->get_string("reference_file", "").empty());
 	TEST_EXPECT(json.get("graph")->get_int("edges", 0) > 0 && json.get("graph")->get_int("symbols", 0) > 0);
+	// What the graph's last update did (S13 D3): its stats' counts, as the stats hold them.
+	const GraphStats &stats = view.graph->stats();
+	const JsonValue graph_json = *session_view_to_json(view).get("graph");
+	TEST_EXPECT(graph_json.get_int("edges", 0) == int64_t(view.graph->edge_count()) &&
+	            graph_json.get_int("missing", -1) == int64_t(view.graph->missing_count()) &&
+	            graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
+	            graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
+	            graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
 	TEST_EXPECT(!graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.empty());
 	TEST_EXPECT(graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());
@@ -960,7 +970,7 @@ static int test_over_a_session() {
 	// EXIT added to it (named by its path: the same document); the view lists both. A
 	// clear through JSON leaves TITLE's left edge out, and the record says so.
 	NodeAddress exit_address;
-	TEST_EXPECT(document->find("EXIT", exit_address));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit_address));
 	auto select_json = [&](const NodeAddress &address, const char *mode) {
 		const std::string path = std::string(mode) == "replace" ? std::string("main.mnu") : document->path();
 		return "{\"kind\":\"select_record\",\"path\":\"" + path + "\",\"mode\":\"" + mode +

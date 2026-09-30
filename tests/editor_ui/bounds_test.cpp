@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -205,13 +206,12 @@ struct Sweep {
 		session.handle(request::open_document(path));
 		const Document *document = session.document_for(path);
 		NodeAddress address;
-		if (document && record && document->find(record, address)) {
-			EditorRequest select = request::select_record(document->path(), {});
-			select.address = address;
+		if (document && record && find_definition(AssetGraph(), *document, record, address)) {
+			EditorRequest select = request::select_record(document->path(), address);
 			session.handle(select);
 		} else if (document && !record && !document->rows().empty() && !session.view().selection.row) {
-			EditorRequest select = request::select_record(document->path(), {});
-			select.address = {document->rows().front()->id, document->rows().front()->kind, 0};
+			EditorRequest select = request::select_record(document->path(),
+					{ document->rows().front()->id, document->rows().front()->kind, 0 });
 			session.handle(select);
 		}
 		follow();

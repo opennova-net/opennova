@@ -8,6 +8,7 @@
 #include <editor/documents/strings_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
@@ -169,9 +170,10 @@ int load_edit_save() {
 	document.undo();
 	TEST_EXPECT(!document.apply(set(hello, "y", int64_t(1)), diagnostic) || true); // the string still exists here
 	NodeAddress found;
-	TEST_EXPECT(document.find("hello", found) && found.child == hello.child);
-	TEST_EXPECT(document.find("wepdes", found) && found.kind == kSection);
-	TEST_EXPECT(!document.find("nowhere", found));
+	TEST_EXPECT(
+			find_definition(AssetGraph(), document, "hello", found) && found.child == hello.child);
+	TEST_EXPECT(find_definition(AssetGraph(), document, "wepdes", found) && found.kind == kSection);
+	TEST_EXPECT(!find_definition(AssetGraph(), document, "nowhere", found));
 	// A string named in a section the table lacks blocks; an ungrouped table only warns.
 	TEST_EXPECT(write_file_atomic(dir.file("ungrouped.bin"), minted_table(false).data(), minted_table(false).size(), error));
 	StringsDocument ungrouped;
@@ -201,22 +203,22 @@ int validation_and_session() {
 	session.handle(add);
 	const NodeId section = document->last_added();
 	TEST_EXPECT(view.selection.row == section && view.selection.kind == kSection);
-	EditorRequest name = request::edit_record(document->path(), Edit());
-	name.edits = {set({section, kSection, 0}, "name", std::string("Custom"))};
+	EditorRequest name = request::edit_record(
+			document->path(), set({ section, kSection, 0 }, "name", std::string("Custom")));
 	session.handle(name);
 	add.edits[0].address = {section, kString, 0};
 	session.handle(add);
 	const NodeId string = document->last_added();
 	TEST_EXPECT(view.selection.row == section && view.selection.child == string && view.selection.kind == kString);
-	EditorRequest key = request::edit_record(document->path(), Edit());
-	key.edits = {set({section, kString, string}, "key", std::string("HELLO"))};
+	EditorRequest key = request::edit_record(
+			document->path(), set({ section, kString, string }, "key", std::string("HELLO")));
 	session.handle(key);
 	// An empty key is an error, a duplicate a warning; Build refuses the dirty document.
 	add.edits[0].address = {section, kString, 0};
 	session.handle(add);
 	const NodeId blank = document->last_added();
-	EditorRequest empty = request::edit_record(document->path(), Edit());
-	empty.edits = {set({section, kString, blank}, "key", std::string(""))};
+	EditorRequest empty = request::edit_record(
+			document->path(), set({ section, kString, blank }, "key", std::string("")));
 	session.handle(empty);
 	bool empty_error = false;
 	for (const Diagnostic &d : view.diagnostics) empty_error |= d.code == "strings.key_empty" && d.child_id == blank;
@@ -251,9 +253,7 @@ int validation_and_session() {
 	const std::vector<const GraphSymbol *> hello = view.graph->symbols_named(ReferenceKind::TextId, "HELLO");
 	TEST_EXPECT(hello.size() == 1 && hello[0]->field == "key");
 	if (hello.size() != 1) return 1;
-	EditorRequest go_to = request::open_document(hello[0]->file, hello[0]->locator);
-	go_to.field = hello[0]->field;
-	session.handle(go_to);
+	session.handle(request::open_document(hello[0]->file, hello[0]->locator, hello[0]->field));
 	document = session.document_for("gametext.bin");
 	TEST_EXPECT(document && view.selection.kind == kString && view.selection.row != 0 && view.reveal_field == "key");
 	TEST_EXPECT(document && text_of(*document, view.selection, "key") == "HELLO");
@@ -276,8 +276,8 @@ int validation_and_session() {
 	add.edits[0].address = {0, kSection, 0};
 	session.handle(add);
 	const NodeId twice = extra->last_added();
-	EditorRequest rename = request::edit_record(extra->path(), Edit());
-	rename.edits = {set({twice, kSection, 0}, "name", std::string(""))};
+	EditorRequest rename = request::edit_record(
+			extra->path(), set({ twice, kSection, 0 }, "name", std::string("")));
 	session.handle(rename);
 	TEST_EXPECT(finding("strings.section_empty", twice) && finding("strings.section_empty", twice)->field == "name");
 	rename.edits = {set({twice, kSection, 0}, "name", std::string("Twice"))};

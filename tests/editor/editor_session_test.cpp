@@ -17,6 +17,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/file_preferences_store.h>
@@ -711,7 +712,8 @@ static int test_outcomes_and_refusals() {
 		            main.position.bottom == 600);
 	}
 	NodeAddress found;
-	TEST_EXPECT(extra && !extra->find("EXIT", found) && !extra->find("STARTUP", found));
+	TEST_EXPECT(extra && !find_definition(AssetGraph(), *extra, "EXIT", found) &&
+			!find_definition(AssetGraph(), *extra, "STARTUP", found));
 	TEST_EXPECT(!has_code(v.diagnostics, "reference.missing"));
 	// The required name still gets its requirement's blank.
 	const AssetEntry *main_menu = v.scan.find("main.mnu");
@@ -722,7 +724,8 @@ static int test_outcomes_and_refusals() {
 		session.handle(request::create_file("main.mnu"));
 		TEST_EXPECT(session.outcome().done());
 		const Document *startup = session.document_for("main.mnu");
-		TEST_EXPECT(startup && startup->find("STARTUP", found) && startup->find("EXIT", found));
+		TEST_EXPECT(startup && find_definition(AssetGraph(), *startup, "STARTUP", found) &&
+				find_definition(AssetGraph(), *startup, "EXIT", found));
 	}
 	return 0;
 }
@@ -836,10 +839,10 @@ static int test_rename_keeps_the_active_document() {
 	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
-	TEST_EXPECT(menu && menu->find("EXIT", exit));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	if (!menu) return 1;
-	EditorRequest image = request::edit_record(menu->path(), Edit());
-	image.edits = menu_test::image_edits(*menu, exit, "logo.tga");
+	EditorRequest image =
+			request::edit_record(menu->path(), menu_test::image_edits(*menu, exit, "logo.tga"));
 	session.handle(image);
 	session.handle(request::save_all());
 	TEST_EXPECT(!menu->dirty());
@@ -878,11 +881,10 @@ static int test_rename_keeps_the_active_document() {
 	// The active file is one the rename reloads: it stays active, and its selection
 	// (an id in the old records) is dropped for its first screen.
 	const Document *startup = session.document_for("main.mnu");
-	TEST_EXPECT(startup && startup->find("EXIT", exit));
+	TEST_EXPECT(startup && find_definition(AssetGraph(), *startup, "EXIT", exit));
 	if (!startup) return 1;
 	const std::string menu_path = startup->path();
-	EditorRequest select_exit = request::select_record(menu_path, {});
-	select_exit.address = exit;
+	EditorRequest select_exit = request::select_record(menu_path, exit);
 	session.handle(select_exit);
 	TEST_EXPECT(v.active_document == menu_path && v.selection == exit);
 	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
@@ -908,11 +910,10 @@ static int test_preview_target() {
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
-	TEST_EXPECT(menu && menu->find("EXIT", exit));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
-	EditorRequest select = request::select_record(menu_path, {});
-	select.address = exit;
+	EditorRequest select = request::select_record(menu_path, exit);
 	session.handle(select);
 	TEST_EXPECT(v.menu_preview.path == menu_path && v.menu_preview.screen == exit.row);
 	// The stylesheet active: the preview stays on the screen.
@@ -1151,11 +1152,12 @@ static int test_validation_cost() {
 	session.handle(request::open_document(menu));
 	Document *menu_document = session.document_for(menu);
 	NodeAddress exit;
-	TEST_EXPECT(menu_document != nullptr && menu_document->find("EXIT", exit));
+	TEST_EXPECT(menu_document != nullptr &&
+			find_definition(AssetGraph(), *menu_document, "EXIT", exit));
 	if (!menu_document) return 1;
 	session.hold_validation();
-	EditorRequest image = request::edit_record(menu_document->path(), Edit());
-	image.edits = menu_test::image_edits(*menu_document, exit, "logo.tga");
+	EditorRequest image = request::edit_record(
+			menu_document->path(), menu_test::image_edits(*menu_document, exit, "logo.tga"));
 	session.handle(image);
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(v.unsaved_prompt.open && v.unsaved_prompt.files == std::vector<std::string>({menu}));
@@ -1531,8 +1533,7 @@ static int test_selection_memory() {
 	ProjectSession &session = project.session;
 	const SessionView &v = session.view();
 	const auto select = [&](const std::string &path, const NodeAddress &address) {
-		EditorRequest request = request::select_record(path, {});
-		request.address = address;
+		EditorRequest request = request::select_record(path, address);
 		session.handle(request);
 	};
 	const auto section = [&](size_t index) -> NodeAddress {
@@ -1553,9 +1554,7 @@ static int test_selection_memory() {
 	            v.selected == std::vector<NodeAddress>{section(2)});
 	// A record named (a Problems row, a Go to) wins over the one kept.
 	session.handle(request::open_document(project.items_path));
-	EditorRequest to_section = request::open_document(project.strings_path);
-	to_section.address = section(4);
-	session.handle(to_section);
+	session.handle(request::open_record(project.strings_path, section(4)));
 	TEST_EXPECT(v.active_document == project.strings_path && v.selection == section(4));
 	// Read again: forgotten (its records have new identities).
 	session.handle(request::reload_document(project.items_path));
@@ -1880,7 +1879,7 @@ static int test_fixes_apply() {
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress main_window;
-	TEST_EXPECT(menu && menu->find("MAIN", main_window));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "MAIN", main_window));
 	if (!menu) return 1;
 	EditorRequest font = request::edit_record(menu->path(), Edit());
 	font.edits[0].address = main_window;
@@ -1897,9 +1896,9 @@ static int test_fixes_apply() {
 	// A menu image the project lacks, a .png the game data has: its Import copies the game's own
 	// file with no import record, so the image resolves as the texture it is.
 	NodeAddress exit;
-	TEST_EXPECT(menu->find("EXIT", exit));
-	EditorRequest image = request::edit_record(menu->path(), Edit());
-	image.edits = menu_test::image_edits(*menu, exit, "splash.png");
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "EXIT", exit));
+	EditorRequest image =
+			request::edit_record(menu->path(), menu_test::image_edits(*menu, exit, "splash.png"));
 	session.handle(image);
 	session.handle(request::save_all()); // an import waits for the edits to be saved
 	TEST_EXPECT(find_fix(v, "reference.missing", "Import splash.png from the game data...", fix));
@@ -2060,13 +2059,12 @@ static int test_menu_first_screen() {
 	            v.selected == std::vector<NodeAddress>{first_row(menu)});
 	TEST_EXPECT(v.menu_preview.path == menu_path && v.menu_preview.screen == first_row(menu).row);
 	const auto select = [&](const NodeAddress &address) {
-		EditorRequest request = request::select_record(menu_path, {});
-		request.address = address;
+		EditorRequest request = request::select_record(menu_path, address);
 		session.handle(request);
 	};
 	// A window selected, another document, back: the window, kept.
 	NodeAddress exit;
-	TEST_EXPECT(menu->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "EXIT", exit));
 	select(exit);
 	session.handle(request::open_document(project.items_path));
 	TEST_EXPECT(v.active_document == project.items_path);
@@ -2080,11 +2078,9 @@ static int test_menu_first_screen() {
 	TEST_EXPECT(v.selection == first_row(menu));
 	// A record named wins.
 	NodeAddress title;
-	TEST_EXPECT(menu->find("TITLE", title));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	session.handle(request::open_document(project.items_path));
-	EditorRequest to_title = request::open_document(menu_path);
-	to_title.address = title;
-	session.handle(to_title);
+	session.handle(request::open_record(menu_path, title));
 	TEST_EXPECT(v.selection == title);
 	// Read again (new records): its first screen, whatever was selected.
 	session.handle(request::reload_document(menu_path));
@@ -2093,7 +2089,7 @@ static int test_menu_first_screen() {
 	if (!menu) return 1;
 	// A rescan keeps it while its file is as it was read (the selection with it), and reads it
 	// again once the file changed outside the editor.
-	TEST_EXPECT(menu->find("TITLE", title));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
 	TEST_EXPECT(session.document_for(menu_path) == menu && v.selection == title);
@@ -2132,8 +2128,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	session.handle(request::save(project.items_path));
-	EditorRequest select = request::select_record(project.items_path, {});
-	select.address = project.marker();
+	EditorRequest select = request::select_record(project.items_path, project.marker());
 	session.handle(select);
 	TEST_EXPECT(!items->dirty() && items->can_undo() && v.selection == project.marker());
 	// The menu changed on disk (a line end added by hand): read again, alone.
@@ -2400,8 +2395,7 @@ static int test_view_revisions() {
 	// A record picked: Selection alone (not which document is active, nor which are open).
 	{
 		const ViewRevisions before = v.revisions;
-		EditorRequest select = request::select_record(items->path(), {});
-		select.address = crate;
+		EditorRequest select = request::select_record(items->path(), crate);
 		session.handle(select);
 		TEST_EXPECT(v.selection == crate);
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Selection}));
@@ -2465,7 +2459,7 @@ static int test_view_revisions() {
 		const ViewRevisions before = v.revisions;
 		const uint64_t open_generation = v.graph->generation();
 		session.handle(request::close_project());
-		TEST_EXPECT(!session.project_open() && v.graph->edges().empty());
+		TEST_EXPECT(!session.project_open() && v.graph->edge_count() == 0);
 		Concerns every;
 		for (size_t i = 0; i < kViewConcernCount; ++i) every.push_back(static_cast<ViewConcern>(i));
 		TEST_EXPECT(moved_since(v, before) == every);

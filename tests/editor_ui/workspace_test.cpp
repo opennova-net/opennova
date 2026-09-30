@@ -30,6 +30,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
@@ -1487,7 +1488,7 @@ void test_preview_follows() {
 	run.open("main.mnu");
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress title;
-	CHECK(menu && menu->find("TITLE", title), "the menu's title");
+	CHECK(menu && find_definition(AssetGraph(), *menu, "TITLE", title), "the menu's title");
 	if (!menu) return;
 	set_field(session, *menu, title, "name", std::string("HEADING"));
 	run.settle();
@@ -1520,8 +1521,8 @@ void test_preview_model_gestures() {
 	if (!armory || !armory->model_row())
 		return;
 	const ModelRow &row = *armory->model_row();
-	EditorRequest select = request::select_record(armory->path(), {});
-	select.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	EditorRequest select = request::select_record(
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();
@@ -1608,8 +1609,8 @@ void test_preview_model_pane_input() {
 	if (!armory || !armory->model_row())
 		return;
 	const ModelRow &row = *armory->model_row();
-	EditorRequest select = request::select_record(armory->path(), {});
-	select.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	EditorRequest select = request::select_record(
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -46,9 +47,8 @@ struct PickerProject {
 		session.handle(request::rescan());
 		session.handle(request::open_document("defs/items.def"));
 		items = session.document_for("defs/items.def");
-		if (!items || !items->find("100300", item)) return false;
-		EditorRequest select = request::select_record(items->path(), {});
-		select.address = item;
+		if (!items || !find_definition(AssetGraph(), *items, "100300", item)) return false;
+		EditorRequest select = request::select_record(items->path(), item);
 		session.handle(select);
 		return v.scan.find("gamma.3di") != nullptr;
 	}
@@ -173,9 +173,8 @@ void test_filters_apart() {
 	// Another record's graphic, in the same place of the form, has a picker of its own: none of
 	// the first item's filter.
 	NodeAddress other;
-	CHECK(project.items->find("100301", other), "the second item");
-	EditorRequest select = request::select_record(project.items->path(), {});
-	select.address = other;
+	CHECK(find_definition(AssetGraph(), *project.items, "100301", other), "the second item");
+	EditorRequest select = request::select_record(project.items->path(), other);
 	project.session.handle(select);
 	ui.frames(3);
 	ui.drain();
@@ -290,7 +289,8 @@ void test_list_kept() {
 	project.session.handle(request::open_document("main.mnu"));
 	const Document *menu = project.session.document_for("main.mnu");
 	NodeAddress title;
-	CHECK(menu && menu->find("TITLE", title), "the start menu's TITLE window");
+	CHECK(menu && find_definition(AssetGraph(), *menu, "TITLE", title),
+			"the start menu's TITLE window");
 	EditorRequest rename = request::edit_record("main.mnu", Edit());
 	rename.edits[0].address = title;
 	rename.edits[0].field = "name";

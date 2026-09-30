@@ -4,7 +4,6 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
-#include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
 
 #include <algorithm>

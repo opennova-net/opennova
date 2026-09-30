@@ -141,8 +141,8 @@ static int session_gate() {
 	session.handle(request::open_document("items.def"));
 	auto *document = session.document_for(); TEST_EXPECT(document);
 	const auto id = document->rows()[0]->id;
-	auto request = request::edit_record(std::string(), Edit());
-	request.edits = {field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string("missing"))};
+	auto request = request::edit_record(std::string(),
+			field({ id, node_kind(DefRecordKind::Item), 0 }, "graphic", std::string("missing")));
 	session.handle(request);
 	// Play packs the files on disk: it waits on the prompt, which lists the edited catalog
 	// and offers no Discard; its Save writes the catalog, then Play builds.
@@ -244,9 +244,7 @@ static int go_to_record() {
 	const GraphSymbol *item = view.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
 	TEST_EXPECT(item && item->field == "id" && !item->locator.empty());
 	if (!item) return 1;
-	EditorRequest open = request::open_document(item->file, item->locator);
-	open.field = item->field;
-	session.handle(open);
+	session.handle(request::open_document(item->file, item->locator, item->field));
 	items = session.document_for("items.def");
 	TEST_EXPECT(items && view.active_document == items->path());
 	TEST_EXPECT(items && view.selection.row == items->rows()[0]->id && view.selection.kind == node_kind(DefRecordKind::Item));

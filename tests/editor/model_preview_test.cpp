@@ -21,6 +21,7 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
@@ -275,8 +276,7 @@ static int test_overlays() {
 }
 
 void apply(ProjectSession &session, const std::string &path, std::vector<Edit> edits) {
-	EditorRequest request = request::edit_record(path, Edit());
-	request.edits = std::move(edits);
+	EditorRequest request = request::edit_record(path, std::move(edits));
 	session.handle(request);
 	session.handle(request::end_edit(path));
 }
@@ -523,9 +523,8 @@ static int test_animation() {
 
 	// The walk row selected: it plays from tick 0, the clock in game ticks.
 	NodeAddress walk;
-	TEST_EXPECT(table->find("anim_walk_forward", walk));
-	EditorRequest select = request::select_record(table->path(), {});
-	select.address = walk;
+	TEST_EXPECT(find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
+	EditorRequest select = request::select_record(table->path(), walk);
 	session.handle(select);
 	model.follow(view);
 	TEST_EXPECT(model.clip_key() == "anim_walk_forward" && model.clip_variant() == 0 && model.clip_ticks() == 0);
@@ -549,8 +548,8 @@ static int test_animation() {
 	Document *clip = session.document_for("anims/walk.bad");
 	TEST_EXPECT(clip && !clip->rows().empty());
 	const Node &clip_row = *clip->rows().front();
-	EditorRequest pick = request::select_record(clip->path(), {});
-	pick.address = {clip_row.id, node_kind(AnimationKind::Event), clip_row.collections[1][3]};
+	EditorRequest pick = request::select_record(clip->path(),
+			{ clip_row.id, node_kind(AnimationKind::Event), clip_row.collections[1][3] });
 	session.handle(pick);
 	model.advance(0.5);
 	model.follow(view);
@@ -652,7 +651,7 @@ static int test_runtime_clips() {
 	session.handle(request::open_document("anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
 	NodeAddress walk;
-	TEST_EXPECT(table && table->find("anim_walk_forward", walk));
+	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
 	const NodeKind clip_kind = node_kind(AnimationMapKind::Clip);
 	EditorRequest select = request::select_record(table->path(), {});
 	size_t at = 0;

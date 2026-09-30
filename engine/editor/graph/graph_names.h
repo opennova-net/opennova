@@ -27,7 +27,7 @@ inline std::string style_variable(const std::string &value) { return upper(mns::
 // space trimmed [orig: CUIScene_SelectNodeByName @ 0x63b6b0; CWnd_FindChildByName @ 0x646850;
 // ItemDef_GetBoneMaskByName @ 0x49ea40, the stricmp @ 0x49ea7b]), an item id as written, any
 // other name as a file name. A name is keyed as given: a style variable's %NAME% spelling is
-// read at the boundary that takes one (style_variable, Document::find).
+// read at the boundary that takes one (style_variable, find_definition).
 inline std::string symbol_name(ReferenceKind kind, const std::string &name) {
 	switch (reference_row(kind).name_case) {
 	case NameCase::NoCase: return upper(name);

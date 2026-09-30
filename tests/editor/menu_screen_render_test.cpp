@@ -27,6 +27,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
@@ -138,7 +139,8 @@ static int test_blank_startup() {
 
 	// TITLE cut to 20 units: its label no longer fits.
 	NodeAddress title, exit;
-	TEST_EXPECT(menu->find("TITLE", title) && menu->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) &&
+			find_definition(AssetGraph(), *menu, "EXIT", exit));
 	edit(session, *menu, title, "position.right", int64_t(20));
 	std::vector<const Diagnostic *> cut = render_findings(view, "menu.render.text_truncated");
 	TEST_EXPECT(cut.size() == 1);
@@ -204,14 +206,14 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(check.rendered() == 0);
 	// The menu edited: it alone renders again.
 	NodeAddress title;
-	TEST_EXPECT(menu->find("TITLE", title));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	edit(session, *menu, title, "position.top", int64_t(130));
 	TEST_EXPECT(check.rendered() == 1);
 	// A stylesheet edit reaches every menu (its %VAR% list).
 	session.handle(request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
 	NodeAddress fg;
-	TEST_EXPECT(style && style->find("DEF_TEXT_FG", fg));
+	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg));
 	edit(session, *style, fg, "value", std::string("FFFF0000"));
 	TEST_EXPECT(check.rendered() == menus);
 	// Closed with the project (its edits discarded): nothing kept.

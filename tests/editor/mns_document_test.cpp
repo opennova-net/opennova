@@ -9,6 +9,7 @@
 // blank menu names, style.unused).
 #include <editor/documents/document_types.h>
 #include <editor/documents/mns_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -142,7 +143,8 @@ static int test_the_shipped_sheet(const std::string &fixture) {
 	TEST_EXPECT(evaluated.success && evaluated.sheet.variables.size() == 12);
 	TEST_EXPECT(evaluated.sheet.variables == opennova::mns::Document::parse(src).evaluate().sheet.variables);
 	NodeAddress fg;
-	TEST_EXPECT(document.find("%def_text_fg%", fg) && text(document, fg, "value") == "FFFFFFFF");
+	TEST_EXPECT(find_definition(AssetGraph(), document, "%def_text_fg%", fg) &&
+			text(document, fg, "value") == "FFFFFFFF");
 	// A value edit changes one line; its undo gives the file back.
 	Diagnostic error;
 	TEST_EXPECT(document.apply(set(fg, "value", std::string("11223344")), error));
@@ -202,7 +204,8 @@ static int test_edits() {
 		MnsDocument document;
 		TEST_EXPECT(load(document, dir, "// c\r\nFOO a\r\nBAR 1\r\nfoo b\r\n"));
 		NodeAddress found;
-		TEST_EXPECT(document.find("FOO", found) && found.row == document.rows()[3]->id); // the one the game reads
+		TEST_EXPECT(find_definition(AssetGraph(), document, "FOO", found) &&
+				found.row == document.rows()[3]->id); // the one the game reads
 		Value overridden;
 		TEST_EXPECT(document.get(row_at(document, 1), "overridden", overridden) && std::get<int64_t>(overridden) == 1);
 		TEST_EXPECT(document.apply(set(row_at(document, 1), "value", std::string("z")), error));
@@ -311,10 +314,10 @@ static int test_validation() {
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress title;
-	TEST_EXPECT(menu && menu->find("TITLE", title));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "TITLE", title));
 	if (!menu) return 1;
-	EditorRequest name_it = request::edit_record(menu->path(), Edit());
-	name_it.edits = {set(title, "font.default_bg", std::string("%TRIM_COLOR%"))};
+	EditorRequest name_it = request::edit_record(
+			menu->path(), set(title, "font.default_bg", std::string("%TRIM_COLOR%")));
 	session.handle(name_it);
 	const std::vector<std::string> left = unused();
 	TEST_EXPECT(left.size() == 5 && std::find(left.begin(), left.end(), "TRIM_COLOR") == left.end());
@@ -350,9 +353,8 @@ static int test_validation() {
 	if (!styles) return 1;
 	TEST_EXPECT(styles->native().evaluate().success && styles->native().evaluate().sheet.get("B") == "2");
 	NodeAddress b;
-	TEST_EXPECT(styles->find("B", b));
-	EditorRequest edit = request::edit_record(brand_path, Edit());
-	edit.edits = {set(b, "value", std::string("3"))};
+	TEST_EXPECT(find_definition(AssetGraph(), *styles, "B", b));
+	EditorRequest edit = request::edit_record(brand_path, set(b, "value", std::string("3")));
 	session.handle(edit);
 	TEST_EXPECT(styles->dirty() && has_code(view.diagnostics, "style.line_ending"));
 	session.handle(request::save_all());

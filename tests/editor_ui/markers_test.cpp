@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -224,9 +225,8 @@ void test_outline_marks() {
 	CHECK(text.find("walk forward") != std::string::npos && text.find("anim_walk_forward") == std::string::npos,
 	      "a row by its slot's words, not its key");
 	NodeAddress walk;
-	CHECK(table->find("anim_walk_forward", walk), "the walk row");
-	EditorRequest pick = request::select_record(table->path(), {});
-	pick.address = walk;
+	CHECK(find_definition(AssetGraph(), *table, "anim_walk_forward", walk), "the walk row");
+	EditorRequest pick = request::select_record(table->path(), walk);
 	session.handle(pick);
 	ui.frames(3);
 	ui.away();
@@ -234,8 +234,8 @@ void test_outline_marks() {
 	CHECK(text.find("anim_walk_forward") == std::string::npos && count_of(text, "walk forward") >= 2,
 	      "selected: the outline and the breadcrumb both by its words");
 	const Node &row = *table->rows().back();
-	EditorRequest key = request::edit_record(table->path(), Edit());
-	key.edits = {set_edit({row.id, row.kind, 0}, "key", std::string("anim_idle_2"))};
+	EditorRequest key = request::edit_record(
+			table->path(), set_edit({ row.id, row.kind, 0 }, "key", std::string("anim_idle_2")));
 	session.handle(key);
 	ui.frames(3);
 	CHECK(drew_mark("Document/outline", Change::Changed) && !drew_mark("Document/outline", Change::Added), "the row changed");
@@ -365,14 +365,14 @@ void test_reveal_in_views() {
 	session.handle(request::open_document(strings_path));
 	const Document *strings = session.document_for(strings_path);
 	NodeAddress first, near, middle, late;
-	CHECK(strings && strings->find("KEY_000", first) && strings->find("KEY_003", near) && strings->find("KEY_100", middle) &&
-	              strings->find("KEY_180", late),
-	      "the keys");
+	CHECK(strings && find_definition(AssetGraph(), *strings, "KEY_000", first) &&
+					find_definition(AssetGraph(), *strings, "KEY_003", near) &&
+					find_definition(AssetGraph(), *strings, "KEY_100", middle) &&
+					find_definition(AssetGraph(), *strings, "KEY_180", late),
+			"the keys");
 	if (!strings || !first.child || !near.child || !middle.child || !late.child) return;
 	const auto go_to = [&](const std::string &path, const std::string &locator, const char *field) {
-		EditorRequest open = request::open_document(path, locator);
-		open.field = field;
-		session.handle(open);
+		session.handle(request::open_document(path, locator, field));
 	};
 	const char *const list = "Document/strings_";
 	go_to(strings_path, strings->locator(first), "key");
@@ -409,8 +409,7 @@ void test_reveal_in_views() {
 			point = {row.row, collection.spec.kind, collection.ids.back()};
 	CHECK(point.child != 0, "a user point");
 	if (!point.child) return;
-	EditorRequest pick = request::select_record(model->path(), {});
-	pick.address = row;
+	EditorRequest pick = request::select_record(model->path(), row);
 	session.handle(pick);
 	ui.frames(4);
 	CHECK(drew_selected("Document/outline"), "the model row selected, its node closed");

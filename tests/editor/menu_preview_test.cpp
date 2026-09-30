@@ -18,6 +18,7 @@
 
 #include <base/io/json.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_preview_json.h>
@@ -115,7 +116,9 @@ static int test_headless_preview() {
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu && !menu->rows().empty());
 	NodeAddress main, title, exit;
-	TEST_EXPECT(menu->find("MAIN", main) && menu->find("TITLE", title) && menu->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "MAIN", main) &&
+			find_definition(AssetGraph(), *menu, "TITLE", title) &&
+			find_definition(AssetGraph(), *menu, "EXIT", exit));
 	// A menu open with none of its screens the preview's: it asks for one.
 	{
 		SessionView unselected = view;
@@ -129,8 +132,7 @@ static int test_headless_preview() {
 	// out in its font from fonts/.
 	TEST_EXPECT(view.menu_preview.path == menu->path() && view.menu_preview.screen == menu->rows()[0]->id);
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
-	EditorRequest select = request::select_record(menu->path(), {});
-	select.address = title;
+	EditorRequest select = request::select_record(menu->path(), title);
 	session.handle(select);
 	JsonValue json = device.json(view);
 	TEST_EXPECT(json.get_string("status", "") == "ready" && json.get_bool("current", false));
@@ -170,8 +172,7 @@ static int test_headless_preview() {
 			TEST_EXPECT(layout_drag_edits(*menu, title, index, device.compiler, start, drag, gesture, edits));
 			TEST_EXPECT(!edits.empty());
 			for (const Edit &edit : edits) TEST_EXPECT(edit.gesture == gesture);
-			EditorRequest request = request::edit_record(menu->path(), Edit());
-			request.edits = edits;
+			EditorRequest request = request::edit_record(menu->path(), edits);
 			session.handle(request);
 			TEST_EXPECT(session.last_edit_ok());
 		}
@@ -239,7 +240,7 @@ static int test_headless_preview() {
 	Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style);
 	NodeAddress fg;
-	TEST_EXPECT(style->find("DEF_TEXT_FG", fg));
+	TEST_EXPECT(find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg));
 	set(session, *style, fg, "value", std::string("FFFF0000"));
 	TEST_EXPECT(style->dirty());
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);

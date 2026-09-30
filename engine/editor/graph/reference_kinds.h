@@ -36,7 +36,7 @@ enum class NameCase {
 };
 
 // How a site writes a name of the kind (the graph keys a name by its NameCase alone; a query
-// that takes a site's spelling reads it back first: Document::find).
+// that takes a site's spelling reads it back first: find_definition).
 enum class NameSpelling {
 	Name,          // the name itself
 	StyleVariable, // the whole value one %NAME% (mns::is_variable_reference)
@@ -66,6 +66,9 @@ struct ReferenceKindRow {
 	// A Warning where the game tolerates the name missing, an Error where it does not.
 	DiagnosticSeverity severity_when_missing = DiagnosticSeverity::Error;
 	ReferenceMissingMessage missing_message = nullptr; // null for a kind the graph never finds missing
+	// The message reads which files the project has (AssetGraph::has_file: a string id's table,
+	// the failsafe clip), so the graph words the kind's findings again when the file set changes.
+	bool message_reads_files = false;
 	// What the picker offers besides the kind's own names: the kind a value may name instead (a
 	// menu's font or texture a stylesheet variable, ADR 0005; an unchecked text a string id).
 	ReferenceKind also_offers = ReferenceKind::None;

@@ -24,6 +24,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
@@ -414,7 +415,7 @@ static int test_fixes() {
 	session.handle(request::open_document("menus/a.mnu"));
 	Document *menu = session.document_for("menus/a.mnu");
 	NodeAddress go;
-	TEST_EXPECT(menu && menu->find("GO", go));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "GO", go));
 	if (!menu) return 1;
 	EditorRequest edit = request::edit_record(menu->path(), Edit());
 	edit.edits[0].address = go;
@@ -896,7 +897,7 @@ static int test_locations_and_fixes() {
 	session.handle(problem_location(*ignored, v).request());
 	const Document *menu = session.document_for("menus/a.mnu");
 	NodeAddress main_window, second_go;
-	TEST_EXPECT(menu && menu->find("MAIN", main_window));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "MAIN", main_window));
 	if (!menu) return 1;
 	for (const Document::Collection &collection : menu->collections_of(main_window))
 		if (std::string(menu->kind_token(collection.spec.kind)) == "window" && collection.ids.size() == 2)
@@ -1034,9 +1035,12 @@ static int test_locations_and_fixes() {
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
 	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
 	session.handle(request::rescan());
-	TEST_EXPECT(std::none_of(v.graph->symbols().begin(), v.graph->symbols().end(), [](const GraphSymbol &symbol) {
-		return symbol.kind == ReferenceKind::Weapon || symbol.kind == ReferenceKind::StyleVar;
-	}));
+	bool any = false;
+	v.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
+		any = any ||
+				(symbol.kind == ReferenceKind::Weapon || symbol.kind == ReferenceKind::StyleVar);
+	});
+	TEST_EXPECT(!any);
 	Diagnostic weapon = style;
 	weapon.reference = ReferenceKind::Weapon;
 	weapon.target = "NOPE";

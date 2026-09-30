@@ -3705,11 +3705,20 @@ if(OPENNOVA_IMGUI)
 endif()
 
 # The asset graph (S7): the extractors, the resolver the badges and Problems share,
-# the memo, and the rename transaction.
+# the per-file slots an update patches (an incremental update equals a fresh build, S13 D3),
+# the base layer, and the rename transaction; its retail legs over the JO install.
 add_executable(editor_asset_graph_test editor/asset_graph_test.cpp)
 target_link_libraries(editor_asset_graph_test PRIVATE opennova_editor)
 target_include_directories(editor_asset_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_asset_graph COMMAND editor_asset_graph_test)
+
+# A document's reference queries (S13 D3, graph/reference_queries): the badge, the missing
+# finding, the picker, where Go to leads, and find_definition over the graph's slot or the
+# document alone.
+add_executable(editor_reference_queries_test editor/reference_queries_test.cpp)
+target_link_libraries(editor_reference_queries_test PRIVATE opennova_editor)
+target_include_directories(editor_reference_queries_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_reference_queries COMMAND editor_reference_queries_test)
 
 # Find (S12 D8): every document type's fields found as the Inspector shows them (a def's number
 # in its written units, a choice by its name, any case unless it must match), and the project's

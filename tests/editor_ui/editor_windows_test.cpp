@@ -37,6 +37,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/model/field_text.h>
 #include <editor/session/problem_query.h>
@@ -2075,8 +2076,7 @@ void test_styles_lines_listed() {
 	// A line selected; a tool pressed, the requests it raised served.
 	const NodeKind variable = node_kind(StyleKind::Variable);
 	const auto select_line = [&](NodeId row) {
-		EditorRequest select = request::select_record(path, {});
-		select.address = {row, variable, 0};
+		EditorRequest select = request::select_record(path, {row, variable, 0});
 		session.handle(select);
 		ui.frames(2);
 		ui.drain();
@@ -2117,10 +2117,7 @@ void test_styles_lines_listed() {
 	for (const Diagnostic &d : v.diagnostics)
 		if (d.code == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
 	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
-	EditorRequest open = request::open_document(location.path);
-	open.address = location.record;
-	open.field = location.field;
-	session.handle(open);
+	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);
 	ui.drain();
 	CHECK(v.selection.row == comment, "the Problems row selects the comment");
@@ -2150,10 +2147,10 @@ void test_go_to_ui() {
 	session.handle(request::open_document("menu_style.mns"));
 	const Document *style = session.document_for("menu_style.mns");
 	NodeAddress large;
-	CHECK(style && style->find("DEF_FONTNAME_LG", large), "the stylesheet's large font");
+	CHECK(style && find_definition(AssetGraph(), *style, "DEF_FONTNAME_LG", large),
+			"the stylesheet's large font");
 	if (!style || !large.row) return;
-	EditorRequest select = request::select_record(style->path(), {});
-	select.address = large;
+	EditorRequest select = request::select_record(style->path(), large);
 	session.handle(select);
 	const std::vector<const GraphEdge *> users = v.graph->referrers_of(ReferenceKind::StyleVar, "DEF_FONTNAME_LG");
 	CHECK(!users.empty() && !users.front()->locator.empty(), "a menu names the large font");
@@ -2176,7 +2173,7 @@ void test_go_to_ui() {
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress main;
-	CHECK(menu && menu->find("MAIN", main), "the menu's MAIN window");
+	CHECK(menu && find_definition(AssetGraph(), *menu, "MAIN", main), "the menu's MAIN window");
 	if (!menu || !main.row) return;
 	select = request::select_record(menu->path(), {});
 	select.address = main;
@@ -2193,7 +2190,7 @@ void test_go_to_ui() {
 		if (schema.id == "font.name") font = menu->field_on(main, schema);
 	Value value;
 	CHECK(menu->get(main, "font.name", value), "the font's value");
-	const std::vector<ReferenceTarget> targets = menu->reference_targets(font, value, v);
+	const std::vector<ReferenceTarget> targets = reference_targets(*v.graph, v.scan, font, value);
 	CHECK(targets.size() == 2 && targets[0].editable && !targets[1].editable, "the variable, then the font file");
 	if (targets.size() != 2) return;
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
@@ -2238,7 +2235,9 @@ void test_numeric_go_to_ui() {
 	session.handle(request::open_document(items_path));
 	const Document *items = session.document_for(items_path);
 	NodeAddress carrier, gun;
-	CHECK(items && items->find("100164", carrier) && items->find("100166", gun), "the two items");
+	CHECK(items && find_definition(AssetGraph(), *items, "100164", carrier) &&
+					find_definition(AssetGraph(), *items, "100166", gun),
+			"the two items");
 	if (!items || !carrier.row || !gun.row) return;
 	NodeAddress attachment;
 	for (const Document::Collection &collection : items->collections_of(carrier))
@@ -2246,8 +2245,7 @@ void test_numeric_go_to_ui() {
 			attachment = {carrier.row, collection.spec.kind, collection.ids.front()};
 	CHECK(attachment.child != 0, "the carrier's attachment");
 	if (!attachment.child) return;
-	EditorRequest select = request::select_record(items_path, {});
-	select.address = attachment;
+	EditorRequest select = request::select_record(items_path, attachment);
 	session.handle(select);
 	std::string form, list;
 	for (const InspectorSection &section : plan_inspector(*items, attachment, carrier, "")) {
