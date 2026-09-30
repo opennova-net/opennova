@@ -7,6 +7,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/project_checks.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
 
@@ -72,7 +73,9 @@ std::vector<std::string> variables_named(const MnuDocument &document) {
 }
 
 // A closed menu as the game would read it now, for its renders: null when it does not load or a
-// source error blocks it (its own findings say why, validate_menu_file).
+// source error blocks it (its own findings say why, validate_menu_file). The check reads only a
+// menu whose own checks read its records (ValidationCache::records_checked), which the same file
+// at the same stamps loads.
 std::shared_ptr<const MnuDocument> read_menu(
 		const ValidationInput &input, const AssetEntry &asset) {
 	auto document = std::make_shared<MnuDocument>();
@@ -309,7 +312,9 @@ void MenuRenderCheck::clear() {
 	rendered_ = 0;
 }
 
-bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &files) {
+bool MenuRenderCheck::update(const ProjectCheckInput &input) {
+	const ValidationInput &validation = input.validation;
+	const FileSource &files = input.files;
 	rendered_ = 0;
 	bool moved = false; // a menu's notes may have changed
 	// The shell's %VAR% list, read again when a stylesheet's stamp moved: the variables that came,
@@ -330,12 +335,12 @@ bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &fil
 		return false;
 	};
 	for (auto &entry : menus_) entry.second.seen = false;
-	for (const AssetEntry &asset : input.scan.entries) {
+	for (const AssetEntry &asset : validation.scan.entries) {
 		if (!is_menu_kind(asset.kind))
 			continue;
 		Menu &kept = menus_[asset.relative_path];
 		kept.seen = true;
-		const auto open = input.open_document(asset);
+		const auto open = validation.open_document(asset);
 		std::shared_ptr<const MnuDocument> document;
 		if (open) {
 			// Open: the document stands in for its file, and the file is read again once it closes.
@@ -345,13 +350,15 @@ bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &fil
 		} else {
 			if (!kept.read || kept.size != asset.size_bytes ||
 					kept.modified != asset.modified_ticks || kept.kind != asset.kind ||
-					kept.game != input.project.target_game) {
+					kept.game != validation.project.target_game) {
 				kept.read = true;
-				kept.closed = read_menu(input, asset);
+				kept.closed = input.cache.records_checked(asset.relative_path)
+						? read_menu(validation, asset)
+						: nullptr;
 				kept.size = asset.size_bytes;
 				kept.modified = asset.modified_ticks;
 				kept.kind = asset.kind;
-				kept.game = input.project.target_game;
+				kept.game = validation.project.target_game;
 			}
 			document = kept.closed;
 		}
@@ -439,6 +446,12 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 		}
 		menu.screens.push_back(std::move(screen));
 	}
+}
+
+std::unique_ptr<ProjectCheck> make_menu_render_check() { return std::make_unique<MenuRenderCheck>(); }
+
+const MenuRenderCheck *menu_render_check(const ProjectChecks *checks) {
+	return checks ? dynamic_cast<const MenuRenderCheck *>(checks->of(DocumentTypeId::Menu)) : nullptr;
 }
 
 const MnuDocument *MenuRenderCheck::document(const std::string &path) const {

@@ -1085,13 +1085,16 @@ String EditorApp::menu_preview_hit_json(double p_x, double p_y) {
 String EditorApp::get_menu_render_json(const String &p_path, int64_t p_screen) const {
 	opennova::editor::MenuPreviewSnapshot none;
 	none.status = opennova::editor::MenuPreviewStatus::NoScreen;
-	if (!session_ || !session_->view().findings.render_check) {
+	const opennova::editor::MenuRenderCheck *render_check = session_
+			? opennova::editor::menu_render_check(session_->view().findings.project_checks.get())
+			: nullptr;
+	if (render_check == nullptr) {
 		none.status = opennova::editor::MenuPreviewStatus::NoProject;
 		return json_text(opennova::editor::menu_preview_to_json(none));
 	}
 	const opennova::editor::SessionView &view = session_->view();
 	const std::string path = opennova::to_std(p_path);
-	const opennova::editor::MenuRenderCheck &check = *view.findings.render_check;
+	const opennova::editor::MenuRenderCheck &check = *render_check;
 	// The open document when the menu is open (its current state), else the file as the
 	// check read it.
 	const opennova::editor::MnuDocument *document = check.document(path);

@@ -664,10 +664,10 @@ _Avoid_: warning (a Problems severity; a note is one only through the render che
 parse note (what the reader leaves out of a file)
 
 **Render check**:
-The editor's headless render of every menu screen of the project with each validation,
-the way the game draws it: its compiler notes that are a consequence the author may not
-mean become Problems rows on their records, never a build's gate and never a finding
-the asset graph already makes (a name the project lacks is the graph's).
+The menu type's project check: the editor's headless render of every menu screen of the
+project with each validation, the way the game draws it: its compiler notes that are a
+consequence the author may not mean become Problems rows on their records, never a build's gate
+and never a finding the asset graph already makes (a name the project lacks is the graph's).
 _Avoid_: preview (the one screen shown), validation (the document types' own checks)
 
 **Use check**:
@@ -677,6 +677,15 @@ makes it from the asset graph after every file's own findings, which its documen
 the file alone.
 _Avoid_: cross-file validation (the use checks are one table, by the kind of file), validation (a
 file's own findings)
+
+**Project check**:
+A document type's own check across the project's files, run with every validation after each
+file's own findings: it reads the files itself, keeps what it made from one validation to the
+next and makes again only what moved, and says whether its findings moved (the menu type's render
+check renders a menu again only when it, a file its screens read or a variable it names changed).
+Its findings are Problems rows after the build's gate, never in it. A use check is the other
+cross-file finding: a function of the asset graph, keeping nothing.
+_Avoid_: use check (stateless, one per kind of file), validation (a file's own findings)
 
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells

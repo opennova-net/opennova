@@ -56,7 +56,10 @@
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
     session and the windows reach a type through, each type's `validate_file` its file's own
     findings from its document alone, which `validation_cache` keeps per file until the file
-    changes, never keeping a closed file's document), `graph` (the asset graph: typed edges from the engine's own
+    changes, never keeping a closed file's document, and its `project_check`, a check of its own
+    across the project's files that keeps state between validations (the menu type's render
+    check), which the row makes and whoever validates keeps, one per type (`project_checks`)),
+    `graph` (the asset graph: typed edges from the engine's own
     parsed records in a slot per file that an update patches, the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
     (a read-only dependency mount's), and the rename transaction; what other files make of what one
@@ -70,8 +73,8 @@
     writes, and what arranging several windows (align, distribute, drawing order) writes; the shell's
     `MenuFrame` is its device; the model preview's portable half: its orbit camera and the
     level the game draws, what it shows and when the device builds again, its JSON; the
-    shell's `ObjectModel` is its device; and the render check: every menu screen compiled headless,
-    its compiler notes as Problems rows, a menu rendered again only when it, a file it read or a
+    shell's `ObjectModel` is its device; and the render check, the menu type's project check:
+    every menu screen compiled headless, its compiler notes as Problems rows, a menu rendered again only when it, a file it read or a
     variable it names changes; a menu's tree and findings as the editor
     MCP's `editor_menu` reads them, and the batch it sends, on the same menu; and the
     canvas's portable half: its one gesture machine, its overlay shapes, and what a press
