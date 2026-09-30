@@ -245,11 +245,13 @@ window.opennovaStage = (function () {
 	// Each pick stages under its own directory; the shell discards a pick
 	// that does not mount.
 	const RETAIL_ROOT = '/retail';
-	// Files an install carries that the engine never opens: executables,
-	// videos (Bink is out of scope), documents, logs and the like.
+	// Files an install carries that the engine never opens: executables and
+	// installers (DirectX's CABs, PunkBuster), videos (Bink is out of scope),
+	// the extras' music and pictures, documents, logs and the like.
 	const SKIPPED_EXTENSIONS = new Set([
-		'exe', 'dll', 'bik', 'pdf', 'log', 'dmp', 'tmp', 'url', 'ico', 'lnk',
-		'msi', 'cab', 'chm', 'htm', 'html', 'rtf', 'doc', 'bmp', 'avi', 'mpg',
+		'exe', 'dll', 'cab', 'msi', 'wiz', 'reg', 'vdf', 'lnk', 'url', 'ico',
+		'bik', 'avi', 'mpg', 'wmv', 'mp3', 'jpg', 'bmp',
+		'pdf', 'chm', 'htm', 'html', 'rtf', 'doc', 'log', 'dmp', 'tmp',
 	]);
 	// The staged copy lives in the tab's memory beside the engine's own heap.
 	const MAX_STAGED_BYTES = 3.5 * 1024 * 1024 * 1024;
