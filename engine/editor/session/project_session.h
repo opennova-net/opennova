@@ -6,6 +6,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/documents/validation_cache.h>
@@ -155,6 +156,9 @@ private:
 	std::string boot_project_; // the project the game was started in: its boot report is that project's
 	std::vector<Diagnostic> play_findings_; // the last Play's own (a nonzero exit), that project's too
 	std::vector<std::shared_ptr<Document>> documents_;
+	// Each open document's instance and whether it has unsaved edits, as the view last listed
+	// them: DocumentSet moves when they differ (update_document_view).
+	std::vector<std::pair<uint64_t, bool>> document_set_;
 	// The selection each open document had when another became active (activate), by path.
 	struct Selection {
 		NodeAddress primary;

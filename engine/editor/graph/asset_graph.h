@@ -132,9 +132,13 @@ public:
 	// references and defines) changes nothing: the edges and symbols stay where they were.
 	void update(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
 	            const std::vector<std::shared_ptr<const Document>> &open);
-	// Moves each time an update changes what the graph holds, and only then: while it stands,
-	// every edge and symbol the graph handed out is where it was (a cache may keep them).
-	uint64_t generation() const { return generation_; }
+	// A value of a process-wide counter: taken anew each time an update changes what the graph
+	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
+	// states of one graph share it. While it stands, every edge and symbol the graph handed out
+	// is where it was (a cache may keep them).
+	uint64_t generation() const { return generation_.value; }
+	// Every file, edge and symbol gone (a project closed), under a new generation.
+	void clear();
 
 	const std::vector<GraphEdge> &edges() const { return edges_; }
 	const std::vector<GraphSymbol> &symbols() const { return symbols_; }
@@ -236,6 +240,18 @@ private:
 	void assemble(const AssetScan &scan);
 	std::string resolved_target(const GraphEdge &edge) const;
 	bool same_files(const AssetScan &scan) const;
+	// The generation: the counter's next value on every construction, copy and assignment (a
+	// copy holds edges and symbols of its own); update() takes another when it assembles.
+	static uint64_t next_generation();
+	struct Generation {
+		uint64_t value = AssetGraph::next_generation();
+		Generation() = default;
+		Generation(const Generation &) {}
+		Generation &operator=(const Generation &) {
+			value = AssetGraph::next_generation();
+			return *this;
+		}
+	};
 
 	std::map<std::string, Extraction> cache_; // by project-relative path
 	std::vector<GraphEdge> edges_;
@@ -250,7 +266,7 @@ private:
 	std::map<std::string, FileRow> files_; // normalized logical name -> the file
 	// The scan's files in its order, as the graph was last assembled over them.
 	std::vector<FileRow> scanned_;
-	uint64_t generation_ = 0;
+	Generation generation_;
 	std::multimap<std::string, size_t> symbol_index_; // kind token + '\n' + name -> symbols_ index
 	std::map<std::pair<std::string, std::string>, std::vector<size_t>> record_symbols_; // (file, record) -> symbols_ indexes
 	std::map<std::string, std::vector<size_t>> file_symbols_; // file -> symbols_ indexes
@@ -320,8 +336,8 @@ void extract_from_document(const Document &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
 // loader decodes them): a document type's through its document (Document::load_bytes), a
 // native kind's through the engine's parser. `name` is what the edges and symbols name
-// the file by (the project-relative path in the graph). True with nothing for a kind the
-// graph does not read.
+// the file by (the project-relative path in the graph). True with nothing for a file the
+// graph does not read (graph_reads_file).
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
@@ -329,5 +345,9 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
                         Extracted &out, Diagnostic &error);
 // True when files of this kind carry references or symbols the graph reads.
 bool graph_reads_kind(AssetKind kind);
+// The same for one file, by its name: false for a mission's .mis, the mission editors' text
+// form, which the mission document will read (the graph reads the .bms the game loads), so
+// the graph skips the file and what it names goes unchecked.
+bool graph_reads_file(AssetKind kind, const std::string &name);
 
 } // namespace opennova::editor

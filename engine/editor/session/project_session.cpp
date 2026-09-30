@@ -277,7 +277,7 @@ bool ProjectSession::open_project(const std::string &dir) {
 }
 
 void ProjectSession::close_project() {
-	*graph_ = AssetGraph();
+	graph_->clear();
 	assets_->clear();
 	render_check_->clear();
 	validation_cache_ = ValidationCache();
@@ -779,6 +779,15 @@ void ProjectSession::update_document_view() {
 	for (const auto &document : documents_) view_.documents.push_back(document);
 	assets_->set_open(view_.documents);
 	touch(ViewConcern::Documents);
+	// Which documents are open, each as read and whether it has unsaved edits: an edit that
+	// leaves its document as unsaved as it was moves Documents alone.
+	std::vector<std::pair<uint64_t, bool>> set;
+	for (const auto &document : documents_)
+		set.emplace_back(document->identity(), document->dirty());
+	if (set != document_set_) {
+		document_set_ = std::move(set);
+		touch(ViewConcern::DocumentSet);
+	}
 }
 
 // The project's findings now, composed as `opennova-project validate` composes them
@@ -1417,6 +1426,7 @@ void ProjectSession::activate(const std::string &path) {
 		if (const Document *document = open(path)) view_.repair_selection(*document, NodeAddress());
 	}
 	select_first_screen();
+	touch(ViewConcern::ActiveDocument); // the caller touches Selection
 }
 
 // A menu made the active document, or read again, with nothing selected shows its first

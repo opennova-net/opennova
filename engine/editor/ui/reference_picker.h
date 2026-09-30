@@ -89,7 +89,7 @@ private:
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	             const FieldUse &field, const Value &value, bool others);
 	bool draw_popup(EditorHost &host, Popup &popup, std::string &picked);
-	// The popups of documents no longer open forgotten, once per change of the open documents.
+	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);
 
 	std::map<Key, Popup> popups_;

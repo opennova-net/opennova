@@ -12,6 +12,7 @@
 #include <variant>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
@@ -258,8 +259,18 @@ void extract_from_document(const Document &document, Extracted &out) {
 
 bool graph_reads_kind(AssetKind kind) { return is_editable_kind(kind) || native_extractor(kind) != nullptr; }
 
+bool graph_reads_file(AssetKind kind, const std::string &name) {
+	// A .mis is a mission too, the mission editors' text form (docs/mission/mis-format-re.md),
+	// which no BMS parse reads.
+	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms"))
+		return false;
+	return graph_reads_kind(kind);
+}
+
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error) {
+	if (!graph_reads_file(kind, name))
+		return true;
 	if (const DocumentType *type = document_type_for(kind)) {
 		std::unique_ptr<Document> document = type->make();
 		if (!document->load_bytes(bytes, name, kind, game, error)) return false;

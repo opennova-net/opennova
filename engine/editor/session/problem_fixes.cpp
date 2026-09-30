@@ -424,7 +424,7 @@ std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes) {
 RevisionKey problem_fix_key(const SessionView &view) {
 	return revision_key(view.revisions,
 			{ViewConcern::Project, ViewConcern::Files, ViewConcern::Findings, ViewConcern::Graph,
-					ViewConcern::Documents, ViewConcern::Preferences});
+					ViewConcern::DocumentSet, ViewConcern::Preferences});
 }
 
 const ProblemFixIndex &ProblemFixCache::follow(const SessionView &view) {

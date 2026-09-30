@@ -460,12 +460,16 @@ private:
 		plan_.rows[row].rivals.push_back(std::move(rival));
 	}
 
-	// A planned file's references (none read for a kind the graph does not read).
+	// A planned file's references (none read for a file the graph does not read).
 	void follow(Node &node) {
 		const std::string file = plan_.rows[node.row].name;
 		const AssetKind kind = plan_.rows[node.row].kind;
-		if (references_unread(kind)) note(ReferenceKind::None, kind, file);
-		if (!graph_reads_kind(kind) || !extract(node)) return;
+		const bool read = graph_reads_file(kind, file);
+		// What it names is not looked for: a kind whose references the graph does not read, or
+		// a file of a kind it reads that it does not read (a mission's .mis).
+		if (references_unread(kind) || (!read && graph_reads_kind(kind)))
+			note(ReferenceKind::None, kind, file);
+		if (!read || !extract(node)) return;
 		for (const GraphEdge &edge : node.content.edges) {
 			if (plan_.truncated) return;
 			// A stylesheet value the game does not read (another sheet's, or a definition after
@@ -528,7 +532,7 @@ private:
 		if (!mine.empty() && !theirs.empty()) add_rival(index, install, theirs);
 		// The bytes are read when the walk reads the file's references.
 		std::vector<uint8_t> bytes;
-		if (graph_reads_kind(plan_.rows[index].kind)) from->read(spelling, bytes);
+		if (graph_reads_file(plan_.rows[index].kind, spelling)) from->read(spelling, bytes);
 		queue(index, from, std::move(bytes));
 	}
 

@@ -13,7 +13,8 @@
 // kept apart; a candidate taken for what it is, not its name; a PNG dependency copied as
 // the game's own and resolving; a bare relative source; a cycle of menus ending; the cap
 // stopping the walk and the selection, a converter's outputs whole or not at all; a symbol,
-// a sound and a terrain listed as not followed; and nothing written anywhere.
+// a sound, a terrain and a mission's .mis listed as not followed; and nothing written
+// anywhere.
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -30,6 +31,7 @@
 #include <editor/session/project_session.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/mission/mission_mis.h>
 #include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
@@ -310,7 +312,8 @@ static int test_plan_cycle_and_cap() {
 
 // What the walk does not follow: a menu's SCREEN target (a symbol) and a def's sound, each
 // kind listed with where it was met first; a terrain a mission names found and taken, its
-// own references not read (listed once by kind).
+// own references not read (listed once by kind); a mission's .mis taken, what it names not
+// looked for (the graph reads the .bms alone), listed by its kind, and no unreadable file.
 static int test_plan_not_followed() {
 	Project project("opennova_editor_plan_not_followed");
 	const std::string art = project.dir.file("art");
@@ -336,6 +339,23 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(target && target->count == 1 && target->first == "a.mnu");
 	const ImportNotFollowed *sound = not_followed(plan, ReferenceKind::Sound);
 	TEST_EXPECT(sound && sound->count == 1 && sound->first == "items.def");
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error, text;
+		TEST_EXPECT(opennova::mission::set_header_string(mission, "terrain", "island", error));
+		TEST_EXPECT(opennova::mission::set_header_string(mission, "environment", "day", error));
+		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
+		TEST_EXPECT(editor_test::write_text(art + "/m.mis", text));
+	}
+	TEST_EXPECT(editor_test::write_text(art + "/day.env", "env"));
+	const ImportPlan text_plan = project.plan({ { art + "/m.mis", {} } });
+	const ImportNotFollowed *mis = not_followed(text_plan, ReferenceKind::None, AssetKind::Mission);
+	TEST_EXPECT(mis && mis->count == 1 && mis->first == "m.mis");
+	TEST_EXPECT(text_plan.rows.size() == 1 && row_named(text_plan, "m.mis") &&
+			row_named(text_plan, "m.mis")->kind == AssetKind::Mission);
+	for (const Diagnostic &d : text_plan.diagnostics)
+		TEST_EXPECT(d.code != "import.unreadable");
 	return 0;
 }
 

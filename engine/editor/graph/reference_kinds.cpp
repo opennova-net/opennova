@@ -1,10 +1,10 @@
 #include <editor/graph/reference_kinds.h>
 
 #include <cstdint>
-#include <filesystem>
 
 #include <base/resource_index/texture_candidates.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/project/project_files.h>
 #include <runtime/anim/rig_files.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_style.h>
@@ -15,8 +15,6 @@ namespace opennova::editor {
 namespace {
 
 using Exists = std::function<bool(const std::string &)>;
-
-std::string basename_of(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
 std::vector<std::string> one(const std::string &file) {
 	return file.empty() ? std::vector<std::string>() : std::vector<std::string>{file};

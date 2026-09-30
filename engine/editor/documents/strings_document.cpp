@@ -2,6 +2,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <editor/documents/source_issue_findings.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
 
@@ -387,19 +388,9 @@ std::vector<Diagnostic> validate_strings(const ValidationInput &input, const Ass
 			findings.push_back(error);
 			continue;
 		}
-		for (const SourceIssue &issue : document->issues()) {
-			auto diagnostic = make_diagnostic(issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-			                                  issue.blocks ? "strings.invalid_input" : "strings.regrouped",
-			                                  issue.message, document->path(), issue.field);
-			diagnostic.record = issue.record;
-			// On the string it names, when the table holds it, wherever it is now (source_address;
-			// a string of a section the table does not have, or one removed since: the file alone).
-			const NodeAddress address = issue.locator.empty() ? NodeAddress() : document->source_address(issue.locator);
-			diagnostic.row_id = address.row;
-			diagnostic.child_id = address.child;
-			diagnostic.record_kind = address.kind;
-			findings.push_back(std::move(diagnostic));
-		}
+		// On the string it names, when the table holds it, wherever it is now (source_address; a
+		// string of a section the table does not have, or one removed since: the file alone).
+		source_issue_findings(*document, "strings.invalid_input", "strings.regrouped", findings);
 		if (document->blocked()) continue;
 		// The sections by the reader's rule (rtxt::File::section_index): a lookup finds the first
 		// section of a name, in any case, so a later one of the name is never read by section (the

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <variant>
 #include <vector>
@@ -15,6 +16,13 @@ namespace opennova::editor {
 using Value = std::variant<int64_t, double, std::string>;
 using NodeId = uint64_t; // the session-local identity of a row or a nested record
 using NodeKind = int;    // a document type's own record-kind vocabulary
+
+// Two values the file would write alike: a real compared bit for bit (a NaN is itself).
+inline bool same_value(const Value &a, const Value &b) {
+	const double *x = std::get_if<double>(&a);
+	const double *y = std::get_if<double>(&b);
+	return x && y ? std::memcmp(x, y, sizeof(double)) == 0 : a == b;
+}
 
 // A row, or a nested record inside a row (`child` set, `kind` the nested kind). `child`
 // names a record at any depth: the document type owns its tree (a menu window inside a

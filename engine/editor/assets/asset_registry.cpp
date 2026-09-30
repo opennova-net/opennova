@@ -7,11 +7,13 @@
 #include <system_error>
 
 #include <base/io/file_time.h>
+#include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 
 namespace fs = std::filesystem;
@@ -29,6 +31,33 @@ bool same_path(const fs::path &a, const fs::path &b) {
 	return ca == cb;
 }
 
+// The entries' order: by key, then by path.
+bool entry_before(const AssetEntry &a, const AssetEntry &b) {
+	if (a.key != b.key) return a.key < b.key;
+	return a.relative_path < b.relative_path;
+}
+
+// Whether the index is the entries' as they are: one path slot per entry and (walked in a
+// debug build) every entry keyed and in order. `entries` is public, so a scan changed after its
+// index() is looked through linearly, with a warning, and never read out of bounds.
+bool index_current(const std::vector<AssetEntry> &entries, size_t indexed) {
+	if (indexed != entries.size()) return false;
+#ifndef NDEBUG
+	for (size_t i = 0; i < entries.size(); ++i) {
+		if (entries[i].key != normalized_logical_name(entries[i].logical_name)) return false;
+		if (i > 0 && entry_before(entries[i], entries[i - 1])) return false;
+	}
+#endif
+	return true;
+}
+
+void stale_index(size_t entries, size_t indexed) {
+	io::logf(io::LogLevel::kWarn,
+			"AssetScan: %zu entries, %zu indexed: its entries changed after index(), which a scan "
+			"made by hand calls again; looked through linearly",
+			entries, indexed);
+}
+
 } // namespace
 
 std::string normalized_logical_name(std::string_view name) {
@@ -44,12 +73,27 @@ bool logical_name_fits_archive(std::string_view name) {
 
 const AssetEntry *AssetScan::find(std::string_view logical_name) const {
 	const std::string key = normalized_logical_name(logical_name);
+	if (!index_current(entries, by_path_.size())) {
+		stale_index(entries.size(), by_path_.size());
+		const AssetEntry *first = nullptr;
+		for (const AssetEntry &entry : entries)
+			if (normalized_logical_name(entry.logical_name) == key &&
+					(!first || entry.relative_path < first->relative_path))
+				first = &entry;
+		return first;
+	}
 	const auto found = std::lower_bound(entries.begin(), entries.end(), key,
 			[](const AssetEntry &entry, const std::string &wanted) { return entry.key < wanted; });
 	return found != entries.end() && found->key == key ? &*found : nullptr;
 }
 
 const AssetEntry *AssetScan::at_path(std::string_view relative_path) const {
+	if (!index_current(entries, by_path_.size())) {
+		stale_index(entries.size(), by_path_.size());
+		for (const AssetEntry &entry : entries)
+			if (entry.relative_path == relative_path) return &entry;
+		return nullptr;
+	}
 	const auto found = std::lower_bound(by_path_.begin(), by_path_.end(), relative_path,
 			[this](size_t index, std::string_view wanted) {
 				return std::string_view(entries[index].relative_path) < wanted;
@@ -60,10 +104,7 @@ const AssetEntry *AssetScan::at_path(std::string_view relative_path) const {
 
 void AssetScan::index() {
 	for (AssetEntry &entry : entries) entry.key = normalized_logical_name(entry.logical_name);
-	std::sort(entries.begin(), entries.end(), [](const AssetEntry &a, const AssetEntry &b) {
-		if (a.key != b.key) return a.key < b.key;
-		return a.relative_path < b.relative_path;
-	});
+	std::sort(entries.begin(), entries.end(), entry_before);
 	by_path_.resize(entries.size());
 	std::iota(by_path_.begin(), by_path_.end(), size_t(0));
 	std::sort(by_path_.begin(), by_path_.end(), [this](size_t a, size_t b) {
@@ -184,14 +225,18 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 
 	for (size_t i = 0; i < scan.entries.size(); ++i) {
 		const AssetEntry &asset = scan.entries[i];
-		if (asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
+		// The archive's name rules bind only a file the build packs (check_file_name's rule): a
+		// loose kind (a video, a music bank, a config) is copied beside the archives under any
+		// name.
+		const bool packed = route_asset(asset.kind) != ArchiveSlot::Loose;
+		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
 			scan.diagnostics.push_back(make_diagnostic(
 			        DiagnosticSeverity::Error, "asset.name.too_long",
 			        "The file name " + asset.logical_name + " is longer than " +
 			                std::to_string(pff::PFF_NAME_SIZE) +
 			                " characters; the game cannot store it in an archive.",
 			        asset.relative_path));
-		} else if (asset.key.empty()) {
+		} else if (packed && asset.key.empty()) {
 			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
 			                                           "The file name is blank once normalized.",
 			                                           asset.relative_path));

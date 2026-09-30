@@ -1,6 +1,7 @@
 // Pins the asset registry (ADR 0046 d6): classification (shared with the runtime
 // catalog, plus the editor-only kinds), the scan's exclusions, the import records (an
-// output that is not there, a record whose source is gone: S9c), and the flat-name rules.
+// output that is not there, a record whose source is gone: S9c), and the flat-name rules
+// (the archives' length limit binding only a kind the build packs: S13 PR0).
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -139,10 +140,14 @@ static int test_scan_exclusions_and_diagnostics() {
 	TEST_EXPECT(editor_test::write_text(paths.root + "/a/Same.tga", "x"));
 	TEST_EXPECT(editor_test::write_text(paths.root + "/b/same.TGA", "y"));                    // duplicate name
 	TEST_EXPECT(editor_test::write_text(paths.root + "/textures/a_much_too_long_name.tga", "x")); // too long
+	// A loose kind is copied beside the archives under any name: no finding.
+	TEST_EXPECT(editor_test::write_text(paths.root + "/video/a_much_too_long_intro.bik", "x"));
 	TEST_EXPECT(editor_test::write_text(paths.root + "/notes/readme.docx", "x"));                // unknown kind
 
 	const AssetScan scan = scan_project_assets(paths, doc);
-	TEST_EXPECT(scan.entries.size() == 9);
+	TEST_EXPECT(scan.entries.size() == 10);
+	TEST_EXPECT(scan.find("a_much_too_long_intro.bik") &&
+			scan.find("a_much_too_long_intro.bik")->kind == AssetKind::Video);
 	TEST_EXPECT(scan.find("MAIN.MNU") != nullptr && scan.find("main.mnu")->kind == AssetKind::Menu);
 	TEST_EXPECT(scan.find("main.mnu")->relative_path == "menus/main.mnu");
 	TEST_EXPECT(scan.find("main.mnu")->size_bytes == 7);
@@ -161,7 +166,8 @@ static int test_scan_exclusions_and_diagnostics() {
 	int duplicates = 0, too_long = 0, unknown = 0, output_missing = 0, orphan = 0, other = 0;
 	for (const Diagnostic &d : scan.diagnostics) {
 		if (d.code == "asset.name.duplicate") ++duplicates;
-		else if (d.code == "asset.name.too_long") ++too_long;
+		else if (d.code == "asset.name.too_long" && d.asset == "textures/a_much_too_long_name.tga")
+			++too_long;
 		else if (d.code == "asset.kind.unknown") ++unknown;
 		else if (d.code == "import.output_missing" && d.asset == "ui/logo.png" && d.severity == DiagnosticSeverity::Warning) ++output_missing;
 		else if (d.code == "import.orphan_record" && d.asset == "ui/gone.png.import" && d.severity == DiagnosticSeverity::Warning) ++orphan;
@@ -200,7 +206,10 @@ static int test_scan_exclusions_and_diagnostics() {
 
 // The scan's lookups over a scan made by hand: 2,000 files named in the reverse of their order,
 // indexed (keyed, sorted, their paths indexed), each found by name and by path, in a copy of the
-// scan too (the index holds places, not addresses); what it lacks, none.
+// scan too (the index holds places, not addresses); what it lacks, none. Its entries changed
+// after index(): a file pushed is found by its name and its path, and a thousand erased are
+// found no more while the others still are, nothing read past the entries (the lookups walk
+// them until index() runs again).
 static int test_lookups() {
 	AssetScan scan;
 	for (int i = 1999; i >= 0; --i) {
@@ -225,6 +234,23 @@ static int test_lookups() {
 	TEST_EXPECT(!scan.find("f2000.def") && !scan.find("") && !scan.find("f0000.de"));
 	TEST_EXPECT(!scan.at_path("defs/f0000.def") && !scan.at_path("defs/odd/f0000.def"));
 	TEST_EXPECT(!scan.at_path(""));
+	AssetScan changed = scan;
+	AssetEntry late;
+	late.logical_name = "Late.def";
+	late.relative_path = "defs/late/Late.def";
+	late.kind = AssetKind::ItemDefs;
+	changed.entries.push_back(late);
+	TEST_EXPECT(changed.find("late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.at_path("defs/late/Late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.find("f0005.def") && changed.at_path("defs/odd/f0005.def"));
+	changed.entries.erase(changed.entries.begin(), changed.entries.begin() + 1000);
+	TEST_EXPECT(!changed.find("f0000.def") && !changed.at_path("defs/even/f0000.def"));
+	TEST_EXPECT(changed.find("f1999.def") && changed.at_path("defs/odd/f1999.def"));
+	TEST_EXPECT(changed.find("late.def") && changed.at_path("defs/late/Late.def"));
+	changed.index();
+	TEST_EXPECT(sorted_by_key(changed) && changed.entries.size() == 1001);
+	const AssetEntry *late_entry = changed.at_path("defs/late/Late.def");
+	TEST_EXPECT(late_entry && changed.find("LATE.DEF") == late_entry);
 	return 0;
 }
 
