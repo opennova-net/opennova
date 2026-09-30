@@ -30,7 +30,6 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
-#include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
 #include <editor/project/project_document.h>
 #include <editor/session/project_session.h>
@@ -1311,19 +1310,15 @@ std::string lowered(std::string text) {
 }
 
 // The Preview window over a real session as the shell drives it: after each frame the
-// requests the windows raised go to the session (kept, for a test to take) and the model
-// pane's device follows the view.
+// requests the windows raised go to the session and the model pane's device follows the view.
 struct PreviewRun {
 	ProjectSession &session;
 	ModelDevice &device;
 	Ui &ui;
-	std::vector<EditorRequest> raised;
 
 	void pump() {
-		for (const EditorRequest &request : ui.drain()) {
-			raised.push_back(request);
+		for (const EditorRequest &request : ui.drain())
 			session.handle(request);
-		}
 		device.held.follow(session.view());
 	}
 	void settle() {
@@ -1339,11 +1334,6 @@ struct PreviewRun {
 		settle();
 		return lowered(logged_frame(ui));
 	}
-	std::vector<EditorRequest> take() {
-		std::vector<EditorRequest> out;
-		out.swap(raised);
-		return out;
-	}
 	// The Preview window's line, hovered: its tooltip in the frame's text.
 	std::string header_tooltip() {
 		const ImGuiWindow *preview = ImGui::FindWindowByName("Preview");
@@ -1354,12 +1344,6 @@ struct PreviewRun {
 		return text;
 	}
 };
-
-size_t count_of_kind(const std::vector<EditorRequest> &requests, EditorRequestKind kind) {
-	size_t count = 0;
-	for (const EditorRequest &request : requests) count += request.kind == kind ? 1 : 0;
-	return count;
-}
 
 // One field of a document set through the session, as the Inspector sets it.
 void set_field(ProjectSession &session, const Document &document, const NodeAddress &address, const char *field, Value value) {
@@ -1388,7 +1372,7 @@ void test_preview_follows() {
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{session, device, ui, {}};
+	PreviewRun run{ session, device, ui };
 	const char *const kNothing = "open a menu, a model or an animation to preview it.";
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing to preview: what to open");
@@ -1459,86 +1443,6 @@ void test_preview_follows() {
 	      "an unsaved menu: its line says so");
 }
 
-// The model pane's gestures over a real session: F frames the selected marker while the pane
-// shows and does nothing to its camera while the menu pane shows; a drag of the selected
-// marker ends once, for the model, when the menu becomes the active document mid-drag, and
-// letting go raises nothing.
-void test_preview_model_gestures() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_gestures");
-	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
-	CHECK(preview_project(session, dir), "the preview project");
-	const SessionView &v = session.view();
-	ModelDevice device;
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{session, device, ui, {}};
-	run.open("main.mnu");
-	run.open("models/armory.3di");
-	const auto *armory = dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
-	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready, "armory previewed");
-	if (!armory || !armory->model_row()) return;
-	const ModelRow &row = *armory->model_row();
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, armory->path());
-	select.edit.address = {row.id, node_kind(ModelKind::UserPoint), row.collections[3][0]};
-	session.handle(select);
-	ui.focus("Preview");
-	run.settle();
-
-	// F: the selected marker framed while the pane shows; nothing while the menu's shows.
-	const auto press_f = [&]() {
-		ui.key(ImGuiKey_F, true);
-		ui.key(ImGuiKey_F, false);
-		run.pump();
-	};
-	device.held.camera().distance = 40.0f;
-	press_f();
-	CHECK(device.held.camera().distance != 40.0f, "F frames the selected marker");
-	run.open("main.mnu");
-	ui.focus("Preview");
-	device.held.camera().distance = 40.0f;
-	press_f();
-	CHECK(device.held.camera().distance == 40.0f, "the model pane hidden: F leaves its camera");
-
-	// A drag of the selected marker (Alt: placed freely), the menu made active mid-drag.
-	run.open("models/armory.3di");
-	ui.focus("Preview");
-	run.settle();
-	press_f(); // the marker framed, in the middle of the picture
-	run.settle();
-	run.take();
-	const ModelOverlay *marker = nullptr;
-	const std::vector<ModelOverlay> overlays = device.held.overlays();
-	for (const ModelOverlay &overlay : overlays)
-		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0) marker = &overlay;
-	float x = 0.0f, y = 0.0f;
-	CHECK(marker && device.held.camera().project(marker->at, device.held.device_width(), device.held.device_height(), x, y),
-	      "the marker on the picture");
-	if (!marker) return;
-	const ImVec2 at(device.origin.x + x, device.origin.y + y);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
-	ui.mouse(at.x, at.y);
-	ui.button(true);
-	ui.mouse(at.x + 30.0f, at.y + 10.0f);
-	run.pump();
-	std::vector<EditorRequest> requests = run.take();
-	const EditorRequest *step = only(requests, EditorRequestKind::EditRecord);
-	CHECK(step && step->path == armory->path() && count_of_kind(requests, EditorRequestKind::EndEdit) == 0,
-	      "the drag's first step");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
-	run.settle();
-	requests = run.take();
-	const EditorRequest *end = only(requests, EditorRequestKind::EndEdit);
-	CHECK(end && end->path == armory->path() && count_of_kind(requests, EditorRequestKind::EditRecord) == 0,
-	      "the menu made active mid-drag: the drag's one end, for the model");
-	ui.mouse(at.x + 60.0f, at.y + 20.0f);
-	ui.button(false);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
-	run.settle();
-	CHECK(run.take().empty(), "letting go raises nothing");
-}
-
 // The OS window's title: the product, the project's name before it, a bullet while a file has
 // unsaved changes.
 void test_window_title() {
@@ -1571,7 +1475,6 @@ void run_workspace_tests() {
 	test_import_dialog();
 	test_import_dialog_problem_root();
 	test_preview_follows();
-	test_preview_model_gestures();
 	test_window_title();
 }
 

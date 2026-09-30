@@ -226,8 +226,8 @@ void EditorWindows::begin_frame() {
 }
 
 void EditorWindows::end_frame() {
-	// Preview not drawn this frame (closed, collapsed, its tab hidden): its gestures end,
-	// before what waits on the files as saved.
+	// A Preview canvas not drawn this frame (the other pane shown, the window closed, collapsed
+	// or its tab hidden): its gesture ends, before what waits on the files as saved.
 	if (preview_window_) preview_window_->end_frame();
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));

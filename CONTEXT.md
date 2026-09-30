@@ -589,9 +589,19 @@ mean become Problems rows on their records, never a build's gate and never a fin
 the asset graph already makes (a name the project lacks is the graph's).
 _Avoid_: preview (the one screen shown), validation (the document types' own checks)
 
+**Canvas**:
+Where the editor draws a preview's picture: it takes every press on the picture and tells a
+click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the
+shapes its kind makes (outlines, handles, markers, the marquee's box) with the cursor they ask
+for. The kind (the menu's, the model's) says what a press takes, what a drag writes and what is
+drawn; the canvas is the same for every kind.
+_Avoid_: viewport (the device's picture a canvas shows), overlay (one shape drawn on it), view
+(a document's view in the Document window)
+
 **Gesture**:
-The edits one continuous action makes (a drag of a handle): they carry one token and fold
-into one undo step on their row until it ends, and the Problems wait for that end.
+The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held): they
+carry one token and fold into one undo step on their row until it ends (let go, or the canvas
+stops drawing it: one end, for the document it began in), and the Problems wait for that end.
 _Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
 
 **Batch**:

@@ -1,11 +1,9 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-
-#include <editor/preview/model_handle_edit.h>
+#include <editor/preview/model_canvas.h>
 #include <editor/preview/model_preview_state.h>
 #include <editor/ui/editor_host.h>
+#include <editor/ui/viewport_canvas.h>
 
 namespace opennova::editor {
 
@@ -28,10 +26,11 @@ public:
 	virtual void draw(int device_width, int device_height) = 0;
 };
 
-// The model preview, the Preview window's model pane (ADR 0046 S10p3, S11d): the model the
-// view previews as the game draws it, rebuilt on every edit of what it draws, at the level
-// the game would pick at the camera's distance (Auto) or a level held; its CTRL registers
-// held at a value; when there is nothing to draw it says why. Over the picture it marks
+// The model preview, the Preview window's model pane (ADR 0046 S10p3, S11d, S13 V2): the
+// model the view previews as the game draws it, rebuilt on every edit of what it draws, at the
+// level the game would pick at the camera's distance (Auto) or a level held; its CTRL registers
+// held at a value; when there is nothing to draw it says why. A toolbar and a clip's timeline
+// around one canvas (ui/viewport_canvas over preview/model_canvas). Over the picture it marks
 // the user points (and their Z axes), the lights (their reach, a spot's axis) and, when
 // asked, the part pivots, each where the game puts it on the posed model; a click on a
 // marker selects its record, the selected record's marker is ringed. A drag of the
@@ -47,43 +46,30 @@ public:
 // click on one seeks there and selects the event in the clip's document.
 class ModelPreviewPane {
 public:
-	explicit ModelPreviewPane(EditorHost &host) : host_(host) {}
+	explicit ModelPreviewPane(EditorHost &host) : host_(host), requests_(host) {}
 	void set_viewport(ModelPreviewViewport *viewport) { viewport_ = viewport; }
 	// Into the current window, below the Preview window's line naming the model.
 	void draw();
-	// The Preview window shows the other pane: a drag in progress ends, a marker's gesture's
-	// end raised.
-	void end_gestures() { end_press_(); }
+	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw
+	// this frame (the menu pane shown, the window closed or hidden, nothing to show) ends its
+	// drag, a marker's end raised once for the model it began in.
+	void end_frame() {
+		model_canvas_.end_frame(requests_);
+		canvas_.end_frame();
+	}
 
 private:
-	// The left or middle button down on the canvas, and the drag it becomes.
-	struct Press {
-		bool active = false;
-		bool pan = false;      // the middle button, or Shift with the left
-		bool dragging = false; // moved past the threshold: the camera or a handle moves, nothing is picked
-		float x = 0.0f, y = 0.0f;
-		int pick = -1; // the marker under the press
-		// On the selected marker or its axis tip: the drag moves its record instead.
-		bool handle = false;
-		ModelHandle which = ModelHandle::Place;
-		ModelOverlay marker;              // the marker as pressed
-		float offset_x = 0.0f, offset_y = 0.0f; // from the mouse to the handle's pixel
-		uint64_t gesture = 0;
-		bool sent = false; // a step of the drag went out
-		std::string path;
-	};
-	void toolbar_(ModelPreviewModel &model);
+	void toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame);
 	void registers_(ModelPreviewModel &model);
-	void canvas_(ModelPreviewModel &model, float available_height);
+	void draw_canvas_(const ModelCanvasFrame &frame, float available_height);
 	void rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model);
 	void timeline_(ModelPreviewModel &model);
-	void frame_(ModelPreviewModel &model);
-	// The press let go (or lost): a handle drag that sent a step ends its gesture.
-	void end_press_();
 
 	EditorHost &host_;
 	ModelPreviewViewport *viewport_ = nullptr;
-	Press press_;
+	ViewportCanvas canvas_;
+	ModelCanvas model_canvas_;
+	CanvasWindowRequests requests_;
 	int snap_ = 2; // kModelHandleSnaps: 1/16 m
 };
 

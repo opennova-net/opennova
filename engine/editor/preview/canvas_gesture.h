@@ -1,0 +1,120 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include <editor/model/edit.h>
+
+namespace opennova::editor {
+
+// The pixels a press moves from where it began before it is a drag; less is a click.
+inline constexpr float kDragThreshold = 3.0f;
+
+// A point on a canvas's picture: the device's pixels from its top-left corner.
+struct CanvasPoint {
+	float x = 0.0f;
+	float y = 0.0f;
+};
+
+// The modifier keys held: a press joins the selection by them, Alt places freely.
+struct CanvasKeys {
+	bool shift = false;
+	bool ctrl = false;
+	bool alt = false;
+};
+
+// How a click or a box joins the selection: Ctrl adds or drops a record, Shift adds it, a
+// plain press replaces the selection.
+enum class CanvasJoin : uint8_t { Replace, Add, Toggle };
+CanvasJoin canvas_join(const CanvasKeys &keys);
+
+// One frame of the pointer over a canvas's picture: the editor's canvas reads it from Dear
+// ImGui (ui/viewport_canvas), a test writes it.
+struct CanvasInput {
+	// The picture's size, device pixels.
+	int width = 0;
+	int height = 0;
+	CanvasPoint mouse; // the pointer, in the picture's pixels
+	CanvasPoint delta; // how far it moved since the last frame
+	bool hovered = false; // over the canvas, nothing in front of it
+	// The canvas pans its picture itself: a design picture's middle button, or Space.
+	bool panning = false;
+	// A button went down on the canvas this frame (the left one, or the middle one), and
+	// whether it is still down.
+	bool pressed = false;
+	bool middle = false;
+	bool down = false;
+	bool double_clicked = false; // the left button clicked twice
+	float wheel = 0.0f; // the wheel's notches the canvas leaves to its kind
+	CanvasKeys keys;
+};
+
+// What a canvas asks of the session: the editor's windows raise each as a window request
+// (ui/viewport_canvas), a test records them.
+class CanvasRequests {
+public:
+	virtual ~CanvasRequests() = default;
+	// `record` of the document at `path` selected, joining the selection as `join` says.
+	virtual void select(const std::string &path, const NodeAddress &record, CanvasJoin join) = 0;
+	// One batch on one row of the document at `path`: a step of a gesture (its edits carry the
+	// gesture's token) or an arrange.
+	virtual void edits(const std::string &path, std::vector<Edit> batch) = 0;
+	// The gesture's edits end (EndEdit): its steps are one undo step.
+	virtual void end_edit(const std::string &path) = 0;
+};
+
+// The one gesture machine of a canvas (ADR 0046 S13 V2): a button pressed on the picture,
+// which becomes a drag once it moves kDragThreshold from where it began, or an arrow key held
+// (a nudge). The steps it sends carry one token (next_edit_gesture), so a gesture is one undo
+// step, and when it ends (let go, lost, the canvas not drawn, another document shown) its end
+// is raised once, for the document it began in, when a step went out; nothing after. One
+// gesture at a time: a press ends a nudge, a nudge waits for the button.
+class CanvasGesture {
+public:
+	enum class Mode : uint8_t { None, Press, Nudge };
+
+	Mode mode() const { return mode_; }
+	bool pressed() const { return mode_ == Mode::Press; }
+	bool nudging() const { return mode_ == Mode::Nudge; }
+	// The press moved past the threshold.
+	bool dragging() const { return dragging_; }
+	// Where the press began.
+	CanvasPoint from() const { return from_; }
+	// The document the gesture began in ("" none).
+	const std::string &path() const { return path_; }
+
+	// A button pressed at `at` over the document at `path`; the gesture that was open ends.
+	void press(const std::string &path, CanvasPoint at, CanvasRequests &out);
+	// The pointer at `at` while the button is down: true on the sample that makes the press a
+	// drag.
+	bool move(CanvasPoint at);
+	// An arrow key held over the document at `path`: a nudge; the gesture that was open ends.
+	void nudge(const std::string &path, CanvasRequests &out);
+	// The token the gesture's steps carry, made at the first ask.
+	uint64_t token();
+	// A step went out: the gesture's end is raised when it ends.
+	void sent() { sent_ = true; }
+	// The button let go: true for a click (a press that never became a drag). The gesture ends.
+	bool release(CanvasRequests &out);
+	// The gesture ends: its end raised once, for its document, when a step went out.
+	void end(CanvasRequests &out);
+
+	// The frame bracket. frame(): the canvas draws this frame, showing the document at `path`
+	// (a gesture begun in another document ends). end_frame(), after every frame's windows: a
+	// canvas that did not draw (hidden, closed, the other pane shown, nothing to show) ends its
+	// gesture.
+	void frame(const std::string &path, CanvasRequests &out);
+	void end_frame(CanvasRequests &out);
+
+private:
+	Mode mode_ = Mode::None;
+	bool dragging_ = false;
+	bool sent_ = false;
+	bool drawn_ = false;
+	CanvasPoint from_;
+	uint64_t token_ = 0;
+	std::string path_;
+};
+
+} // namespace opennova::editor

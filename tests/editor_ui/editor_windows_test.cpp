@@ -6,12 +6,11 @@
 // ignored-and-left-out fields hidden); then, driven through the real windows, a click on a
 // tree row in the menu's Document tab selects it (Ctrl+click toggles), a drag drops a window
 // inside, before or after another, the toolbar's buttons and Ctrl+C / X / V raise their
-// requests, and the inspector's tables add, move and edit rows in place. S9k1: the Preview
-// window's menu pane over a fake device backed by the headless render: a click selects, a
-// drag of a window or a handle is one gesture of Sets then its end (a small window's middle
-// a move), the arrows nudge, Esc selects the parent, a stale picture maps nothing, the zoom,
-// the held state, the empty states; a drag or a nudge ends once when the pane stops drawing
-// (the model pane shown, Preview closed) and the hidden pane takes no key. S11a: a frame's
+// requests, and the inspector's tables add, move and edit rows in place. S9k1, S13 V2: the
+// Preview window's menu pane over a fake device backed by the headless render, one smoke test
+// of its canvas (a click, a drag, Preview closed mid-drag, the held state, the pane hidden
+// taking no key, Ctrl+wheel, the empty states); the canvas's rules are
+// tests/editor/canvas_test.cpp's. S11a: a frame's
 // Save goes after the frame's edits, and the save
 // shortcuts work while a text field has the keyboard. S11c: the Problems window, pressed
 // with the mouse where a user presses (the filters, the grouping and folding, the fixes and
@@ -830,7 +829,7 @@ void test_actions_after_edits() {
 	ui.drain();
 }
 
-// --- S9k1: the preview window's canvas --------------------------------------------------
+// --- S9k1, S13 V2: the preview window's canvas ------------------------------------------
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu =
@@ -876,11 +875,15 @@ int64_t set_value(const std::vector<Edit> &edits, const char *field) {
 	return -1;
 }
 
-// The canvas through the window: a click selects what the game's hit test finds, a drag of
-// the selected window and of a corner handle writes its POSITION as Sets sharing one
-// gesture then ends it, the arrows nudge, Esc selects the parent, a stale picture maps
-// nothing; the zoom; the state options follow the selection; each empty state says why.
-void test_preview_window_ui() {
+// S13 V2: the canvas on the null backend, a smoke test (its rules are its portable half's,
+// tests/editor/canvas_test.cpp: preview/canvas_gesture, menu_canvas). The menu pane over a fake
+// device backed by the headless render: Fit at the design's 4:3, then 100% from the toolbar; a
+// click selects what the game's hit test finds; a drag of the selected window is one gesture of
+// Sets on the grid, then its end; Preview closed mid-drag ends the drag once through the
+// workspace's frame bracket, and letting go raises nothing; the held state follows the
+// selection, Checked only where the type has one; the pane hidden behind the model's takes no
+// key; Ctrl+wheel steps the zoom about the mouse; each empty state says why.
+void test_preview_canvas_smoke() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_test");
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
@@ -909,15 +912,9 @@ void test_preview_window_ui() {
 	ui.frames(2);
 	CHECK(fake.width == 800 && fake.height == 600, "100%");
 	ui.drain();
-	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
+	const NodeAddress box = named(*document, "BOX"), other = named(*document, "OTHER");
 	auto at = [&](float x, float y) {
 		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
-	};
-	auto click = [&](ImVec2 p) {
-		ui.mouse(p.x, p.y);
-		ui.button(true);
-		ui.button(false);
-		return ui.drain();
 	};
 	// A drag from `from` by (dx, dy) design units in steps, released there.
 	auto drag = [&](ImVec2 from, float dx, float dy) {
@@ -931,88 +928,53 @@ void test_preview_window_ui() {
 	};
 
 	// A click selects the window the game's hit test finds.
-	std::vector<EditorRequest> requests = click(at(200.0f, 150.0f));
+	ui.click(at(200.0f, 150.0f));
+	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *picked = only(requests, EditorRequestKind::SelectRecord);
 	CHECK(picked && picked->edit.address == box && picked->select_mode == SelectMode::Replace, "a click selects BOX");
 	CHECK(!only(requests, EditorRequestKind::EditRecord), "a click edits nothing");
 
-	// BOX selected: dragged by (40, 20), snapped: one gesture of Sets, then its end.
+	// BOX selected: dragged by (40, 21), snapped: one gesture of Sets, then its end.
 	select_in(v, box);
 	ui.frames(2);
 	ui.drain();
 	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
 	uint64_t gesture = 0;
 	size_t count = 0;
-	std::vector<Edit> last = batches(requests, gesture, count);
+	const std::vector<Edit> last = batches(requests, gesture, count);
 	CHECK(count >= 2 && gesture != 0, "a drag's steps share one gesture");
-	CHECK(set_value(last, "position.left") == 144 && set_value(last, "position.right") == 344 &&
-	              set_value(last, "position.top") == 120 && set_value(last, "position.bottom") == 220,
-	      "the last step: moved and snapped on the grid of 8");
+	CHECK(set_value(last, "position.left") == 144 && set_value(last, "position.top") == 120,
+			"the last step: moved and snapped on the grid of 8");
 	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit && requests.back().path == document->path(),
 	      "release ends the gesture");
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "the selected window moves without a new selection");
 
-	// Its bottom-right handle, Alt held: resized, not snapped.
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
-	requests = drag(at(300.0f, 200.0f), 13.0f, 7.0f);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
-	ui.frames();
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.right") == 313 && set_value(last, "position.bottom") == 207 &&
-	              set_value(last, "position.left") == -1 && set_value(last, "position.top") == -1,
-	      "a corner handle resizes its two edges");
-
-	// A drag that starts on another window selects it and moves it.
-	requests = drag(at(500.0f, 350.0f), -8.0f, 0.0f);
-	const EditorRequest *took = only(requests, EditorRequestKind::SelectRecord);
-	last = batches(requests, gesture, count);
-	CHECK(took && took->edit.address == other && set_value(last, "position.left") == 392, "OTHER picked and moved");
-
-	// A window 12 pixels across: pressed in its middle it moves (every point of it is within
-	// a handle's reach of a corner, so the handles keep out of its middle); its corner still
-	// resizes it.
-	const NodeAddress tiny = named(*document, "TINY");
-	select_in(v, tiny);
+	// Preview closed mid-drag: the workspace's frame bracket ends the drag once, for the menu;
+	// let go and opened again, nothing.
+	devtools::Window *preview = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0)
+			preview = &ui.windows.pass().window(i);
+	CHECK(preview && preview->is_closeable(), "Preview has a close button");
+	if (!preview)
+		return;
+	const ImVec2 held = at(200.0f, 150.0f);
+	ui.mouse(held.x, held.y);
+	ui.button(true);
+	ui.mouse(held.x + 24.0f, held.y);
+	CHECK(only(ui.drain(), EditorRequestKind::EditRecord) != nullptr, "a drag's first step");
+	preview->open = false;
 	ui.frames(2);
-	ui.drain();
-	requests = drag(at(606.0f, 110.0f), 16.0f, 0.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.left") == 616 && set_value(last, "position.right") == 628 &&
-	              set_value(last, "position.top") == -1 && set_value(last, "position.bottom") == -1,
-	      "the middle of a small window moves it, its size kept");
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "the selected small window moves without a new selection");
-	requests = drag(at(612.0f, 116.0f), 12.0f, 12.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_value(last, "position.right") == 624 && set_value(last, "position.bottom") == 128 &&
-	              set_value(last, "position.left") == -1 && set_value(last, "position.top") == -1,
-	      "a small window's corner still resizes it");
-	select_in(v, box);
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path(),
+			"Preview closed mid-drag: the drag's one end");
+	ui.button(false);
 	ui.frames(2);
-	ui.drain();
-
-	// The arrows nudge the selected window (Shift: 8), one gesture while held.
-	auto nudge = [&](ImGuiKey key, bool shift) {
-		if (shift) ui.key(ImGuiMod_Shift, true);
-		ui.key(key, true);
-		ui.key(key, false);
-		if (shift) ui.key(ImGuiMod_Shift, false);
-		return ui.drain();
-	};
-	requests = nudge(ImGuiKey_RightArrow, false);
-	last = batches(requests, gesture, count);
-	CHECK(count == 1 && gesture != 0 && set_value(last, "position.left") == 101 && set_value(last, "position.right") == 301,
-	      "Right moves BOX a unit");
-	CHECK(requests.back().kind == EditorRequestKind::EndEdit, "letting go ends the nudge");
-	requests = nudge(ImGuiKey_UpArrow, true);
-	last = batches(requests, gesture, count);
-	CHECK(set_value(last, "position.top") == 92 && set_value(last, "position.bottom") == 192, "Shift+Up moves it 8");
-
-	// Esc selects what holds it.
-	requests = nudge(ImGuiKey_Escape, false);
-	const EditorRequest *parent = only(requests, EditorRequestKind::SelectRecord);
-	CHECK(parent && parent->edit.address == main, "Esc selects MAIN");
+	preview->open = true;
+	ui.frames(3);
+	CHECK(ui.drain().empty(), "let go and opened again: nothing");
 
 	// The held state follows the selection; Checked only where the type has one.
+	ui.focus("Preview");
 	MenuPreviewOptions options;
 	options.force_state = opennova::menu::kStateMouseover;
 	options.force_window = box.child;
@@ -1028,27 +990,40 @@ void test_preview_window_ui() {
 	CHECK(fake.held.force_window == box.child && !fake.held.checked, "a plain window lets the check go");
 	ui.drain();
 
-	// A picture of another revision maps nothing.
-	fake.stale = true;
-	requests = click(at(500.0f, 350.0f));
-	CHECK(!only(requests, EditorRequestKind::SelectRecord), "a stale picture selects nothing");
-	requests = drag(at(200.0f, 150.0f), 40.0f, 0.0f);
-	CHECK(!only(requests, EditorRequestKind::EditRecord), "a stale picture drags nothing");
-	fake.stale = false;
-
-	// The zoom: 200% from the toolbar; Ctrl+wheel over the picture to the next level.
-	ui.activate(item_id(preview_id, {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"200%"}));
+	// The menu pane hidden behind the model's (a model the active document): its keys do nothing.
+	auto model = std::make_shared<ModelDocument>();
+	CHECK(model->load(std::string(test_paths_repo_root(__FILE__)) +
+						  "/fixtures/threedi/synth/armory.3di",
+				  "models/armory.3di", AssetKind::Model, "jo", error),
+			"a model");
+	v.documents = { document, model };
+	v.model_preview.path = model->path();
+	v.active_document = model->path();
+	++v.revision;
 	ui.frames(2);
-	CHECK(fake.width == 1600 && fake.height == 1200, "200%");
-	const ImVec2 inside_canvas(ImGui::FindWindowByName("Preview")->Pos.x + 40.0f, fake.origin.y + 40.0f);
-	ui.mouse(inside_canvas.x, inside_canvas.y);
+	ui.focus("Preview");
+	ui.drain();
+	for (const ImGuiKey key :
+			{ ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_Escape, ImGuiKey_Space }) {
+		ui.key(key, true);
+		ui.key(key, false);
+	}
+	CHECK(ui.drain().empty(), "the hidden menu pane takes no key");
+	v.documents = { document };
+	v.model_preview.path.clear();
+	v.active_document = document->path();
+	++v.revision;
+	ui.frames(2);
+
+	// Ctrl+wheel over the picture steps the zoom about the mouse: 100% to 150%.
+	const ImVec2 over = at(100.0f, 100.0f);
+	ui.mouse(over.x, over.y);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
 	ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
 	ui.frames(2);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
 	ui.frames(2);
-	CHECK(fake.width == 2400 && fake.height == 1800, "Ctrl+wheel zooms in to 300%");
+	CHECK(fake.width == 1200 && fake.height == 900, "Ctrl+wheel zooms in to 150%");
 	ui.drain();
 
 	// Each empty state says why.
@@ -1064,302 +1039,6 @@ void test_preview_window_ui() {
 	ui.windows.set_menu_preview_viewport(nullptr);
 	CHECK(logged_frame(ui).find("No preview renderer is attached.") != std::string::npos, "no device");
 	CHECK(ui.windows.pending_requests() == 0, "the empty states raise nothing");
-}
-
-// S11d: a gesture the menu pane began ends once, for the menu it began in, whenever the pane
-// stops drawing mid-gesture: the model pane shown (a model made the active document) during
-// a drag or a held nudge, and Preview closed during either (the workspace's frame bracket
-// ends what a window the pass skipped left open); after that, letting go raises nothing.
-// The pane not drawn takes no key: with the model pane shown, an arrow, Esc and Space raise
-// nothing.
-void test_preview_gestures_end() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_gestures_test");
-	auto document = std::make_shared<MnuDocument>();
-	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
-	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
-	auto model = std::make_shared<ModelDocument>();
-	CHECK(model->load(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di", "models/armory.3di",
-	                  AssetKind::Model, "jo", error),
-	      "a model");
-	if (document->rows().empty()) return;
-	const Node &screen = *document->rows()[0];
-	FakePreview fake;
-	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
-	SessionView v = menu_view(document);
-	v.menu_preview.path = document->path();
-	v.menu_preview.screen = screen.id;
-	select_in(v, named(*document, "BOX"));
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_menu_preview_viewport(&fake);
-	ui.frames(6);
-	ui.focus("Preview");
-	ui.activate(item_id(item_id(Ui::window_id("Preview"), {"menu"}), {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
-	ui.frames(2);
-	ui.drain();
-	devtools::Window *preview = nullptr;
-	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
-		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview = &ui.windows.pass().window(i);
-	CHECK(preview && preview->is_closeable(), "Preview has a close button");
-	if (!preview) return;
-	// The model the active document, or the menu again.
-	const auto show_model = [&](bool on) {
-		v.documents = on ? std::vector<std::shared_ptr<const Document>>{document, model}
-		                 : std::vector<std::shared_ptr<const Document>>{document};
-		v.model_preview.path = on ? model->path() : std::string();
-		v.active_document = on ? model->path() : document->path();
-		++v.revision;
-		ui.frames(2);
-	};
-	// Exactly one request, the menu's gesture's end.
-	const auto one_end = [&](const std::vector<EditorRequest> &requests) {
-		return one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path();
-	};
-	const ImVec2 box(fake.origin.x + 200.0f, fake.origin.y + 150.0f); // BOX at 100%
-	const auto start_drag = [&]() {
-		ui.mouse(box.x, box.y);
-		ui.button(true);
-		ui.mouse(box.x + 24.0f, box.y);
-		return only(ui.drain(), EditorRequestKind::EditRecord) != nullptr;
-	};
-	const auto start_nudge = [&]() {
-		ui.key(ImGuiKey_RightArrow, true);
-		return only(ui.drain(), EditorRequestKind::EditRecord) != nullptr;
-	};
-
-	// The model shown mid-drag, then mid-nudge.
-	CHECK(start_drag(), "a drag's first step");
-	show_model(true);
-	CHECK(one_end(ui.drain()), "the model shown mid-drag: the drag's one end");
-	ui.button(false);
-	ui.frames(2);
-	CHECK(ui.drain().empty(), "letting go raises nothing");
-	show_model(false);
-	ui.focus("Preview");
-	ui.drain();
-	CHECK(start_nudge(), "a nudge's first step");
-	show_model(true);
-	CHECK(one_end(ui.drain()), "the model shown mid-nudge: the nudge's one end");
-	ui.key(ImGuiKey_RightArrow, false);
-	ui.frames(2);
-	CHECK(ui.drain().empty(), "letting go of the arrow raises nothing");
-	show_model(false);
-
-	// Preview closed mid-drag, then mid-nudge: the frame bracket ends each once.
-	ui.focus("Preview");
-	ui.drain();
-	CHECK(start_drag(), "a drag's first step");
-	preview->open = false;
-	ui.frames(2);
-	CHECK(one_end(ui.drain()), "Preview closed mid-drag: the drag's one end");
-	ui.button(false);
-	ui.frames(2);
-	preview->open = true;
-	ui.frames(3);
-	CHECK(ui.drain().empty(), "let go and opened again: nothing");
-	ui.focus("Preview");
-	ui.drain();
-	CHECK(start_nudge(), "a nudge's first step");
-	preview->open = false;
-	ui.frames(2);
-	CHECK(one_end(ui.drain()), "Preview closed mid-nudge: the nudge's one end");
-	ui.key(ImGuiKey_RightArrow, false);
-	preview->open = true;
-	ui.frames(3);
-	CHECK(ui.drain().empty(), "let go and opened again: nothing");
-
-	// The menu pane hidden behind the model's: its keys do nothing.
-	show_model(true);
-	ui.focus("Preview");
-	ui.drain();
-	for (const ImGuiKey key : {ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_Escape, ImGuiKey_Space}) {
-		ui.key(key, true);
-		ui.key(key, false);
-	}
-	CHECK(ui.drain().empty(), "the hidden menu pane takes no key");
-}
-
-// S9k2: several windows on the canvas. Shift+click adds a window, Ctrl+click toggles one; a
-// drag from the screen's background selects what its box touches (none: the screen); a
-// drag of a selected window moves every selected one in one batch per step, one gesture;
-// the arrows nudge them all; Ctrl+C / X / V / D; the toolbar's Arrange aligns them.
-void test_preview_several_windows_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_multi_test");
-	auto document = std::make_shared<MnuDocument>();
-	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
-	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
-	if (document->rows().empty()) return;
-	const Node &screen = *document->rows()[0];
-	FakePreview fake;
-	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
-	SessionView v = menu_view(document);
-	v.menu_preview.path = document->path();
-	v.menu_preview.screen = screen.id;
-	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
-	select_in(v, box);
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_menu_preview_viewport(&fake);
-	ui.frames(6);
-	ui.focus("Preview");
-	const ImGuiID preview_id = item_id(Ui::window_id("Preview"), {"menu"}); // the menu pane's scope
-	ui.activate(item_id(preview_id, {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
-	ui.frames(2);
-	ui.drain();
-	auto at = [&](float x, float y) {
-		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
-	};
-	auto click = [&](ImVec2 p, ImGuiKey modifier) {
-		ui.mouse(p.x, p.y);
-		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, true);
-		ui.button(true);
-		ui.button(false);
-		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, false);
-		ui.frames();
-		return ui.drain();
-	};
-	auto drag = [&](ImVec2 from, float dx, float dy) {
-		ui.mouse(from.x, from.y);
-		ui.button(true);
-		for (int step = 1; step <= 4; ++step) ui.mouse(from.x + dx * float(step) / 4.0f, from.y + dy * float(step) / 4.0f);
-		ui.button(false);
-		ui.frames();
-		return ui.drain();
-	};
-	auto selections = [&](const std::vector<EditorRequest> &requests) {
-		std::vector<std::pair<NodeAddress, SelectMode>> out;
-		for (const EditorRequest &request : requests)
-			if (request.kind == EditorRequestKind::SelectRecord) out.emplace_back(request.edit.address, request.select_mode);
-		return out;
-	};
-	// Where the batch sets one window's field (-1: it does not).
-	auto set_on = [](const std::vector<Edit> &edits, const NodeAddress &window, const char *field) -> int64_t {
-		for (const Edit &edit : edits)
-			if (edit.operation == EditOperation::Set && edit.address == window && edit.field == field)
-				return std::get<int64_t>(edit.value);
-		return -1;
-	};
-
-	// Shift+click adds OTHER; Ctrl+click toggles BOX; neither edits.
-	std::vector<EditorRequest> requests = click(at(500.0f, 350.0f), ImGuiMod_Shift);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{other, SelectMode::Add}}) &&
-	              !only(requests, EditorRequestKind::EditRecord),
-	      "Shift+click adds a window");
-	requests = click(at(200.0f, 150.0f), ImGuiMod_Ctrl);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Toggle}}) &&
-	              !only(requests, EditorRequestKind::EditRecord),
-	      "Ctrl+click toggles a window");
-
-	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
-	v.selection = other;
-	v.selected = {box, other};
-	++v.revision;
-	ui.frames(2);
-	ui.drain();
-	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
-	uint64_t gesture = 0;
-	size_t count = 0;
-	std::vector<Edit> last = batches(requests, gesture, count);
-	CHECK(count >= 2 && gesture != 0, "the steps share one gesture");
-	CHECK(set_on(last, box, "position.left") == 144 && set_on(last, box, "position.top") == 120 &&
-	              set_on(last, other, "position.left") == 444 && set_on(last, other, "position.right") == 644 &&
-	              set_on(last, other, "position.top") == 320,
-	      "one batch moves both windows by BOX's snapped step");
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Add}}),
-	      "the window dragged becomes the primary, the other stays selected");
-	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit, "release ends the gesture");
-
-	// The arrows move both.
-	ui.key(ImGuiKey_RightArrow, true);
-	ui.key(ImGuiKey_RightArrow, false);
-	requests = ui.drain();
-	last = batches(requests, gesture, count);
-	CHECK(count == 1 && set_on(last, box, "position.left") == 101 && set_on(last, other, "position.left") == 401,
-	      "Right moves every selected window a unit");
-
-	// A drag from MAIN's empty part (a root window not selected) selects what the box touches.
-	requests = drag(at(50.0f, 500.0f), 400.0f, -390.0f);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Replace},
-	                                                                              {other, SelectMode::Add}}) &&
-	              !only(requests, EditorRequestKind::EditRecord),
-	      "the marquee selects BOX and OTHER, not TINY or MAIN");
-	requests = drag(at(20.0f, 500.0f), 40.0f, 60.0f);
-	const NodeAddress screen_address{screen.id, node_kind(MenuKind::Screen), 0};
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{screen_address, SelectMode::Replace}}),
-	      "a box over nothing selects the screen");
-	requests = click(at(20.0f, 500.0f), ImGuiKey_None);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Replace}}),
-	      "a click on the background still selects it");
-
-	// The clipboard keys.
-	auto chord = [&](ImGuiKey key) {
-		ui.key(ImGuiMod_Ctrl, true);
-		ui.key(key, true);
-		ui.key(key, false);
-		ui.key(ImGuiMod_Ctrl, false);
-		return ui.drain();
-	};
-	CHECK(only(chord(ImGuiKey_C), EditorRequestKind::Copy) != nullptr, "Ctrl+C copies");
-	CHECK(only(chord(ImGuiKey_X), EditorRequestKind::Cut) != nullptr, "Ctrl+X cuts");
-	CHECK(only(chord(ImGuiKey_D), EditorRequestKind::Duplicate) != nullptr, "Ctrl+D duplicates");
-	CHECK(!only(chord(ImGuiKey_V), EditorRequestKind::Paste), "nothing to paste while the clipboard is empty");
-	v.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
-	ui.frames();
-	requests = chord(ImGuiKey_V);
-	const EditorRequest *paste = only(requests, EditorRequestKind::Paste);
-	CHECK(paste && paste->edit.address.row == screen.id && paste->edit.parent == main.child && paste->edit.position == 2,
-	      "Ctrl+V pastes after the primary window (OTHER)");
-	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
-	// window's list row) the preview raises none of them, as the menu view does not.
-	v.selected = {screen_address, box, other};
-	++v.revision;
-	ui.frames(2);
-	ui.drain();
-	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) && !only(chord(ImGuiKey_X), EditorRequestKind::Cut) &&
-	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
-	      "the screen selected with the windows: no Copy, Cut or Duplicate");
-	v.selected = {box, other};
-	++v.revision;
-	ui.frames(2);
-	ui.drain();
-
-	// Arrange from the toolbar: BOX's left edge to the primary OTHER's, one batch.
-	ui.activate(item_id(preview_id, {"Arrange"}));
-	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Align left edges"));
-	requests = ui.drain();
-	const EditorRequest *aligned = only(requests, EditorRequestKind::EditRecord);
-	CHECK(aligned && set_on(aligned->edits, box, "position.left") == 400 && set_on(aligned->edits, box, "position.right") == 600 &&
-	              set_on(aligned->edits, other, "position.left") == -1,
-	      "Align left edges: BOX to OTHER's left, one batch");
-	ui.activate(item_id(preview_id, {"Arrange"}));
-	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Bring to front"));
-	requests = ui.drain();
-	const EditorRequest *front = only(requests, EditorRequestKind::EditRecord);
-	const NodeAddress tiny = named(*document, "TINY");
-	CHECK(front && front->edits.size() == 1 && front->edits[0].operation == EditOperation::Move &&
-	              front->edits[0].address == tiny && front->edits[0].position == 0,
-	      "Bring to front of BOX and OTHER: one Move, TINY before them");
-
-	// MAIN and OTHER selected, OTHER the primary: a press on BOX (not selected, but inside
-	// MAIN's rect) is a press inside a selected window, so the drag moves MAIN (OTHER rides
-	// inside it), and MAIN becomes the primary with OTHER still selected.
-	v.selection = other;
-	v.selected = {main, other};
-	++v.revision;
-	ui.frames(2);
-	ui.drain();
-	requests = drag(at(200.0f, 150.0f), 16.0f, 8.0f);
-	last = batches(requests, gesture, count);
-	CHECK(gesture != 0 && set_on(last, main, "position.left") == 16 && set_on(last, main, "position.top") == 8 &&
-	              set_on(last, box, "position.left") == -1 && set_on(last, other, "position.left") == -1,
-	      "a press on a window inside a selected one moves the selection");
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Add}}),
-	      "the selected window pressed in becomes the primary, the other stays selected");
-	CHECK(ui.windows.pending_requests() == 0, "nothing else");
 }
 
 // --- S11c: the Problems window ------------------------------------------------------------
@@ -2270,9 +1949,7 @@ void run_inspector_tests() {
 	test_numeric_go_to_ui();
 }
 void run_preview_tests() {
-	test_preview_window_ui();
-	test_preview_gestures_end();
-	test_preview_several_windows_ui();
+	test_preview_canvas_smoke();
 }
 void run_styles_tests() {
 	test_styles_window_ui();

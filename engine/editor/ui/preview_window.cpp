@@ -44,12 +44,8 @@ PreviewFamily preview_family(const SessionView &view, PreviewFamily last) {
 }
 
 void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	drawn_ = true;
 	const SessionView &view = host_.view();
 	const PreviewFamily family = preview_family(view, shown_);
-	// The pane not shown lets go of what a press or a key began on it.
-	if (family != PreviewFamily::Menu) menu_.end_gestures();
-	if (family != PreviewFamily::Model) model_.end_gestures();
 	if (family == PreviewFamily::None) {
 		ui_kit::empty_state("Open a menu, a model or an animation to preview it.");
 		return;
@@ -63,12 +59,10 @@ void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	ImGui::PopID();
 }
 
+// The pane not shown, or not drawn at all, lets go of what a press or a key began on it.
 void PreviewWindow::end_frame() {
-	if (!drawn_) {
-		menu_.end_gestures();
-		model_.end_gestures();
-	}
-	drawn_ = false;
+	menu_.end_frame();
+	model_.end_frame();
 }
 
 // "main.mnu - STARTUP", "skinned.3di" or "walk.bad on skinned.3di", cut to the width the

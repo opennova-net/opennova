@@ -53,8 +53,10 @@
     `MenuFrame` is its device; the model preview's portable half: its orbit camera and the
     level the game draws, what it shows and when the device builds again, its JSON; the
     shell's `ObjectModel` is its device; and the render check: every menu screen compiled headless,
-    its compiler notes as Problems rows; and a menu's tree and findings as the editor
-    MCP's `editor_menu` reads them, and the batch it sends, on the same menu), `ui`
+    its compiler notes as Problems rows; a menu's tree and findings as the editor
+    MCP's `editor_menu` reads them, and the batch it sends, on the same menu; and the
+    canvas's portable half: its one gesture machine, its overlay shapes, and what a press
+    on the menu's or the model's picture takes, what a drag writes and what is drawn), `ui`
     (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
     the only tree besides `runtime/devtools` that may include an ImGui header; the
     inspector is generic, the per-type views in the Document window's tabs are not)).
