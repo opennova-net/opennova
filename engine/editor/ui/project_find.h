@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/ui/editor_host.h>
 
 namespace opennova::editor {

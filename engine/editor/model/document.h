@@ -2,7 +2,7 @@
 
 // Thread confinement (ADR 0046 S13 D2). A Document belongs to the thread that made it: its
 // memos (the rows' record indexes, the answers to what changed since the save, the records by
-// identity, the symbols find reads) fill lazily inside its const queries. Another thread reads a
+// identity) fill lazily inside its const queries. Another thread reads a
 // snapshot() instead, a new instance over the same committed rows and file-wide state. That is
 // safe because nothing a committed row holds ever changes: a Node carries no memo filled inside a
 // const query (what a row derives, a model's or a menu screen's places of its identities, is built
@@ -27,10 +27,6 @@
 
 namespace opennova::editor {
 
-struct GraphSymbol;
-struct ReferenceChoice;
-struct SessionView;
-
 // What a type's lookup rule makes of one definition (Document::refine_symbol), which the graph
 // puts on the symbol the defining field makes: the value it stands for where it stands for one (a
 // style variable's, as the game reads it); inert, with why in a few words, where no lookup finds
@@ -40,17 +36,6 @@ struct SymbolFacts {
 	bool inert = false;
 	std::string inert_reason;
 	size_t line = 0;
-};
-
-// Where "Go to" goes (Document::reference_targets, graph/usage_target): a project file, and
-// the record there that defines the name or makes the use (its locator and the field to
-// show), or the file itself.
-struct ReferenceTarget {
-	std::string label;     // what a choice among several says ("style variable X in menu_style.mns")
-	std::string file;      // project-relative
-	std::string locator;   // the record there (Document::locator); "" = the file itself
-	std::string field;     // the field to show there
-	bool editable = false; // the editor opens the file's kind; else Files shows the file
 };
 
 // An editable file (ADR 0046 d9): the lifecycle every document type shares (load
@@ -241,17 +226,6 @@ public:
 	// A field of a record as it stands: read over its row. A type adds here what it derives
 	// from the whole document rather than the row (a stylesheet line's number).
 	virtual bool get(const NodeAddress &address, const std::string &field, Value &out) const;
-	// Find a record by the symbol another document names it with (a name, an id; a style
-	// variable's NAME or its %NAME%): of the symbols the records define (their defining
-	// fields, as the kind compares names) that `scope` matches (scope_matches:
-	// "GAMETEXT.BIN/WepDes" a key of that section, "MAIN.MNU/STARTUP" a window of that screen;
-	// "" any), the first a lookup finds, a row's before a nested record's (a menu's screen before
-	// a window of the name). With a scope nothing else: a definition no lookup finds there (a
-	// shadowed section's key) is not found. With none, else the first defined where no lookup
-	// looks, else the first record of that name (record_name, without case: an animation
-	// table's slot, a clip's bone). Defined in graph/reference_resolution.cpp, over the symbols
-	// the graph's extraction reads from the document, once per revision.
-	bool find(const std::string &symbol, NodeAddress &out, const std::string &scope = std::string()) const;
 	// The clipboard seam: the records as this type's payload text, which a Paste of the
 	// same type takes back ("" = these records cannot be copied, the default).
 	virtual std::string copy(const std::vector<NodeAddress> &records) const {
@@ -292,32 +266,6 @@ public:
 	// which is the saved baseline), as it stands now by the identity it keeps: moved since, it is
 	// still that record; an empty address when the baseline has none there or it is gone since.
 	NodeAddress source_address(const std::string &locator) const;
-	// References, answered by the project's asset graph on the view (graph/asset_graph,
-	// defined in graph/reference_resolution.cpp), each of a field as it applies to its record
-	// (field_on): the badge, the picker's names and the file "Go to" opens read the same
-	// tables the Problems rows come from.
-	ReferenceStatus reference_status(const FieldUse &field, const Value &value, const SessionView &view,
-	                                 std::string *symbol) const;
-	// What the picker offers a field: the names of its kind in its scope (AssetGraph::choices),
-	// then what the value may name instead (a menu's font or texture a stylesheet variable, ADR
-	// 0005; an unchecked text a string id), each with what the field would reference, set to it.
-	std::vector<ReferenceChoice> reference_choices(const FieldUse &field, const SessionView &view) const;
-	// The finding the graph makes of a record's field whose value resolves to nothing
-	// (AssetGraph::missing_finding), for the fixes Problems offers for it: of the variable itself
-	// where a %NAME% the stylesheets the game reads do not define stands for a file (the graph
-	// reports the variable, never a file of that name), else of the reference, a file named
-	// through a variable by the name its value gives. False when the value resolves or names
-	// nothing.
-	bool missing_finding(const NodeAddress &address, const FieldUse &field, const Value &value, const SessionView &view,
-	                     Diagnostic &out) const;
-	std::string reference_target_file(const FieldUse &field, const Value &value, const SessionView &view) const;
-	// Where "Go to" on a reference goes, as the game's lookup reaches it: a symbol's defining
-	// record (AssetGraph::resolve_symbol: a string id in its own section, a window on its own
-	// screen, a record of this same file included); a file (the file its kind's loader
-	// reads), after the style variable that names it where a %NAME% stands (the definition the
-	// game reads, then the file its value names). None when nothing resolves.
-	std::vector<ReferenceTarget> reference_targets(const FieldUse &field, const Value &value,
-	                                               const SessionView &view) const;
 	virtual SerializeResult serialize() const = 0;
 	// This document as it stands, for another thread (the thread confinement above): a new
 	// instance of its type over the same committed rows and file-wide state, with its identity,
@@ -538,8 +486,7 @@ private:
 	// The memos (the thread confinement above), each forgotten by set_baseline: what changed in
 	// each row (row_changes); the rows whose place moved, for one revision; every record's row by
 	// identity and the committed version of each row it indexed (index_records), brought to a
-	// revision a changed row at a time; the symbols the records define (find's), for one
-	// revision.
+	// revision a changed row at a time.
 	mutable std::unordered_map<NodeId, RowChanges> row_changes_;
 	mutable bool moved_known_ = false;
 	mutable uint64_t moved_revision_ = 0;
@@ -548,8 +495,6 @@ private:
 	mutable uint64_t records_revision_ = 0;
 	mutable std::unordered_map<NodeId, NodeId> record_rows_;
 	mutable std::unordered_map<NodeId, std::shared_ptr<const Node>> indexed_rows_;
-	mutable std::shared_ptr<const std::vector<GraphSymbol>> defined_;
-	mutable uint64_t defined_revision_ = 0;
 };
 
 } // namespace opennova::editor

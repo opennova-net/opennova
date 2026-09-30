@@ -22,6 +22,7 @@
 
 #include <base/io/json.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_report.h>
 #include <editor/session/project_session.h>
 
@@ -143,7 +144,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
 	NodeAddress main;
-	TEST_EXPECT(menu->find("MAIN", main));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "MAIN", main));
 	const std::string m = std::to_string(main.child);
 	const uint64_t before = menu->revision();
 	JsonValue answer = request(session, "main.mnu", R"({"edits": [
@@ -174,7 +175,8 @@ static int test_menu_tools() {
 	const JsonValue *made = answer.get("made");
 	TEST_EXPECT(made && made->object.size() == 6 && answer.get("added") && answer.get("added")->array.size() == 6);
 	NodeAddress hello, choices, show;
-	TEST_EXPECT(menu->find("HELLO", hello) && menu->find("CHOICES", choices));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO", hello) &&
+			find_definition(AssetGraph(), *menu, "CHOICES", choices));
 	TEST_EXPECT(made && id_of(*made, "hello") == hello.child && id_of(*made, "list") == choices.child);
 	show = menu->address_of(NodeId(made ? id_of(*made, "show") : 0));
 	Value value;
@@ -206,9 +208,11 @@ static int test_menu_tools() {
 	// One undo step takes the whole batch.
 	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
 	NodeAddress gone;
-	TEST_EXPECT(!menu->find("HELLO", gone) && !menu->find("CHOICES", gone) && !menu->dirty());
+	TEST_EXPECT(!find_definition(AssetGraph(), *menu, "HELLO", gone) &&
+			!find_definition(AssetGraph(), *menu, "CHOICES", gone) && !menu->dirty());
 	session.handle(make_request(EditorRequestKind::Redo, menu->path()));
-	TEST_EXPECT(menu->find("HELLO", hello) && menu->find("CHOICES", choices) && menu->dirty());
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO", hello) &&
+			find_definition(AssetGraph(), *menu, "CHOICES", choices) && menu->dirty());
 	const uint64_t after = menu->revision();
 	TEST_EXPECT(after != before);
 
@@ -219,11 +223,13 @@ static int test_menu_tools() {
 	TEST_EXPECT(done(answer));
 	NodeAddress copy;
 	Document::Placement at, original;
-	TEST_EXPECT(menu->find("HELLO_TWO", copy) && menu->placement(copy, at) && menu->placement(hello, original) &&
-	            at.index == original.index + 1 && at.owner == original.owner);
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO_TWO", copy) &&
+			menu->placement(copy, at) && menu->placement(hello, original) &&
+			at.index == original.index + 1 && at.owner == original.owner);
 	TEST_EXPECT(answer.get("made") && id_of(*answer.get("made"), "copy") == copy.child);
 	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(!menu->find("HELLO_TWO", copy) && menu->revision() == after);
+	TEST_EXPECT(
+			!find_definition(AssetGraph(), *menu, "HELLO_TWO", copy) && menu->revision() == after);
 
 	// Refused before the session sees it.
 	const uint64_t kept = menu->revision();
@@ -316,7 +322,8 @@ static int test_menu_tools() {
 	TEST_EXPECT(done(request(session, "", R"({"edits": [{"op": "set", "id": )" + h +
 	                                               R"(, "field": "name", "value": "HELLO_AGAIN"}]})")));
 	NodeAddress again;
-	TEST_EXPECT(menu->find("HELLO_AGAIN", again) && again == hello && style->revision() == style_before && !style->dirty());
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO_AGAIN", again) && again == hello &&
+			style->revision() == style_before && !style->dirty());
 	TEST_EXPECT(refused_with(request(session, "menu_style.mns", R"({"edits": [{"op": "set", "id": )" + h +
 	                                                                  R"(, "field": "name", "value": "X"}]})"),
 	                         "No menu"));

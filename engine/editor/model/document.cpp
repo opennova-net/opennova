@@ -862,7 +862,6 @@ void Document::set_baseline() {
 	records_known_ = false;
 	record_rows_.clear();
 	indexed_rows_.clear();
-	defined_.reset();
 }
 
 std::shared_ptr<const Node> Document::current_row(NodeId id) const {

@@ -21,6 +21,7 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
@@ -507,7 +508,7 @@ static int test_animation() {
 
 	// The walk row selected: it plays from tick 0, the clock in game ticks.
 	NodeAddress walk;
-	TEST_EXPECT(table->find("anim_walk_forward", walk));
+	TEST_EXPECT(find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, table->path());
 	select.edit.address = walk;
 	session.handle(select);
@@ -635,7 +636,7 @@ static int test_runtime_clips() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
 	NodeAddress walk;
-	TEST_EXPECT(table && table->find("anim_walk_forward", walk));
+	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
 	const NodeKind clip_kind = node_kind(AnimationMapKind::Clip);
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, table->path());
 	size_t at = 0;

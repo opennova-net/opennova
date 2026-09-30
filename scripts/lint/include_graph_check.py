@@ -41,6 +41,16 @@ in the path is what makes the layering visible, so this check reads it:
      pass is the one dev-tools surface (previously the containment was a
      single CMake PRIVATE keyword). The engine's own `<runtime/devtools/
      imgui_abi.h>` seam is a group-qualified engine include, not an ImGui one.
+  7. EDITOR RANK (ADR 0046 S13 D3) — inside engine/editor the editing model,
+     the document types, the asset graph, the session and the windows are
+     ranked model < documents < graph < session < ui: a ranked library
+     includes only its own rank and below. graph/reference_kinds.h is a seam
+     header any library may include (what a reference kind is, which the
+     model's field schema names), like the terrain_query headers. The other
+     editor libraries stay unranked. The upward includes the tree still makes
+     are listed (EDITOR_RANK_ALLOWED), each with the slice that removes it; an
+     entry the tree no longer makes is itself a violation, so the list only
+     shrinks.
 
 Modes:
   (default)   report violations; exit 0
@@ -111,6 +121,20 @@ SEAM_TREE_EXTRA_HEADERS = {
     "engine/runtime/mission": {"runtime/terrain_query/terrain_field_build.h"},
 }
 
+# Rule 7: the editor's rank (ADR 0046 S13 D3).
+EDITOR_RANK = {"model": 0, "documents": 1, "graph": 2, "session": 3, "ui": 4}
+EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h"}
+# (includer, included header): the upward includes the tree still makes.
+EDITOR_RANK_ALLOWED = {
+    # DocumentType::validate takes the project's graph; S13 D4's per-file
+    # validate_file(const Document &) takes none.
+    ("engine/editor/documents/document_types.h", "editor/graph/asset_graph.h"),
+    # MnsDocument::style_value_use reads a variable's uses from the graph (S13
+    # V1; S13 V3 moves it under field_on) and validate_styles its bindings
+    # (S13 D4 moves the stylesheet's use checks into graph/use_checks).
+    ("engine/editor/documents/mns_document.h", "editor/graph/asset_graph.h"),
+}
+
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
 # Rule 6: Dear ImGui stays behind the engine's dev-tools pass (ADR 0042 d6).
@@ -178,11 +202,20 @@ def allowed(tree: str, group: str, lib: str) -> bool:
     return any(g == group and (l is None or l == lib) for g, l in ALLOWED[tree])
 
 
+def editor_lib(rel: Path) -> str | None:
+    """The ranked editor library an engine/editor source belongs to, or None."""
+    parts = rel.parts
+    if len(parts) > 3 and parts[0] == "engine" and parts[1] == "editor" and parts[2] in EDITOR_RANK:
+        return parts[2]
+    return None
+
+
 def scan() -> tuple[list[str], int]:
     libs = engine_libs()
     all_libs = set().union(*libs.values())
     violations: list[str] = []
     files = source_files()
+    rank_allowed_seen: set[tuple[str, str]] = set()
     for rel in files:
         posix = rel.as_posix()
         try:
@@ -195,6 +228,7 @@ def scan() -> tuple[list[str], int]:
         tree = includer_tree(rel)
         net_agnostic = tree == "runtime" and len(rel.parts) > 3 and \
                 rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
+        editor_from = editor_lib(rel)
         for lineno, line in enumerate(text.splitlines(), 1):
             m = INCLUDE_LINE.match(line)
             if not m:
@@ -237,11 +271,22 @@ def scan() -> tuple[list[str], int]:
                 if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and \
                         inc not in TERRAIN_QUERY_HEADERS and inc not in seam_extra:
                     violations.append(f"[terrain-seam] {where}")
+                if editor_from and group == "editor" and lib in EDITOR_RANK and \
+                        EDITOR_RANK[lib] > EDITOR_RANK[editor_from] and inc not in EDITOR_SEAM_HEADERS:
+                    if (posix, inc) in EDITOR_RANK_ALLOWED:
+                        rank_allowed_seen.add((posix, inc))
+                    else:
+                        violations.append(
+                                f"[editor-rank] {where} (engine/editor/{editor_from} may not include "
+                                f"editor/{lib}: model < documents < graph < session < ui; ADR 0046 S13 D3)")
                 continue
             if first in all_libs:
                 if quote == '"' and any((r / inc).is_file() for r in local_roots(rel)):
                     continue  # a local, binding, or test-root include
                 violations.append(f"[unqualified] {where} (engine headers are <group/lib/file.h>)")
+    for includer, header in sorted(EDITOR_RANK_ALLOWED - rank_allowed_seen):
+        violations.append(f"[editor-rank] {includer} no longer includes {header}: drop its "
+                          f"EDITOR_RANK_ALLOWED entry")
     for name in sorted(GROUPS):
         if (REPO / "godot" / "src" / name).exists():
             violations.append(f"[binding-root] godot/src/{name}/ is named like an engine group")
@@ -269,7 +314,8 @@ def main() -> int:
               "net-agnostic; inmatch/replication/wac/mission/world reach terrain only "
               "through runtime/terrain_query's seam headers (ADR 0020); nothing under "
               "engine/, apps/ or tests/ includes godot; imgui headers stay under "
-              "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6).")
+              "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6); inside "
+              "engine/editor, model < documents < graph < session < ui (ADR 0046 S13 D3).")
         return 1
     return 0
 

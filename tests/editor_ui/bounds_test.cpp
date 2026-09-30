@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/project_session.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
@@ -202,7 +203,7 @@ struct Sweep {
 		session.handle(make_request(EditorRequestKind::OpenDocument, path));
 		const Document *document = session.document_for(path);
 		NodeAddress address;
-		if (document && record && document->find(record, address)) {
+		if (document && record && find_definition(AssetGraph(), *document, record, address)) {
 			EditorRequest select = make_request(EditorRequestKind::SelectRecord, document->path());
 			select.edit.address = address;
 			session.handle(select);

@@ -4,7 +4,6 @@
 #include <cstring>
 
 #include <base/io/strutil.h>
-#include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>

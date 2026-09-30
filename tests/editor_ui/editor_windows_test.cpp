@@ -37,6 +37,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/model/field_text.h>
 #include <editor/session/problem_query.h>
@@ -2094,7 +2095,8 @@ void test_go_to_ui() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
 	const Document *style = session.document_for("menu_style.mns");
 	NodeAddress large;
-	CHECK(style && style->find("DEF_FONTNAME_LG", large), "the stylesheet's large font");
+	CHECK(style && find_definition(AssetGraph(), *style, "DEF_FONTNAME_LG", large),
+			"the stylesheet's large font");
 	if (!style || !large.row) return;
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, style->path());
 	select.edit.address = large;
@@ -2120,7 +2122,7 @@ void test_go_to_ui() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress main;
-	CHECK(menu && menu->find("MAIN", main), "the menu's MAIN window");
+	CHECK(menu && find_definition(AssetGraph(), *menu, "MAIN", main), "the menu's MAIN window");
 	if (!menu || !main.row) return;
 	select = make_request(EditorRequestKind::SelectRecord, menu->path());
 	select.edit.address = main;
@@ -2137,7 +2139,7 @@ void test_go_to_ui() {
 		if (schema.id == "font.name") font = menu->field_on(main, schema);
 	Value value;
 	CHECK(menu->get(main, "font.name", value), "the font's value");
-	const std::vector<ReferenceTarget> targets = menu->reference_targets(font, value, v);
+	const std::vector<ReferenceTarget> targets = reference_targets(*v.graph, v.scan, font, value);
 	CHECK(targets.size() == 2 && targets[0].editable && !targets[1].editable, "the variable, then the font file");
 	if (targets.size() != 2) return;
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
@@ -2181,7 +2183,9 @@ void test_numeric_go_to_ui() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, items_path));
 	const Document *items = session.document_for(items_path);
 	NodeAddress carrier, gun;
-	CHECK(items && items->find("100164", carrier) && items->find("100166", gun), "the two items");
+	CHECK(items && find_definition(AssetGraph(), *items, "100164", carrier) &&
+					find_definition(AssetGraph(), *items, "100166", gun),
+			"the two items");
 	if (!items || !carrier.row || !gun.row) return;
 	NodeAddress attachment;
 	for (const Document::Collection &collection : items->collections_of(carrier))

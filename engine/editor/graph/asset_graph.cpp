@@ -4,12 +4,15 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <editor/documents/document_types.h>
+#include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/project/project_files.h>
 #include <runtime/menu/menu_style.h>
-#include <runtime/menu/menu_text_tables.h>
 #include <runtime/renderer/material_texture.h>
 
 namespace opennova::editor {
@@ -21,6 +24,7 @@ using graph_names::key;
 using graph_names::style_variable;
 using graph_names::symbol_name;
 using graph_names::upper;
+using Ref = GraphIndex::Ref;
 
 // A file the graph could not read: the reason, and that its references go unchecked.
 Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
@@ -30,42 +34,95 @@ Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
 	                       reason + " The references in it are not checked.", asset.relative_path);
 }
 
-std::string symbol_key(ReferenceKind kind, const std::string &name) {
-	return std::string(reference_row(kind).token) + '\n' + name;
-}
-
-bool same_edge(const GraphEdge &a, const GraphEdge &b) {
+// An edge as its file's reading makes it: every field but the target, which its resolution sets.
+bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
-			a.value == b.value && a.target == b.target && a.scope == b.scope &&
-			a.rewritable == b.rewritable && a.through == b.through &&
-			a.loader_arg == b.loader_arg;
+			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
+			a.through == b.through && a.loader_arg == b.loader_arg;
 }
 
-bool same_symbol(const GraphSymbol &a, const GraphSymbol &b) {
+// A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
+// facts, where the graph publishes the game's reading of a style variable).
+bool same_reading(
+		const GraphSymbol &a, bool a_inert, const std::string &a_reason, const GraphSymbol &b) {
 	return a.kind == b.kind && a.name == b.name && a.display == b.display && a.value == b.value &&
 			a.file == b.file && a.record == b.record && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.scope == b.scope &&
-			a.inert == b.inert && a.inert_reason == b.inert_reason && a.line == b.line;
+			a_inert == b.inert && a_reason == b.inert_reason && a.line == b.line;
 }
 
-// What one file references and defines, read again, is what it was.
-bool same_extracted(const Extracted &a, const Extracted &b) {
-	return a.edges.size() == b.edges.size() && a.symbols.size() == b.symbols.size() &&
-			std::equal(a.edges.begin(), a.edges.end(), b.edges.begin(), same_edge) &&
-			std::equal(a.symbols.begin(), a.symbols.end(), b.symbols.begin(), same_symbol);
+// A slot's reading, and another: the same edges, symbols and outcome.
+bool reads_the_same(
+		const GraphSlot &slot, const Extracted &content, bool ok, const Diagnostic &failure) {
+	if (slot.ok != ok || slot.failure != failure || slot.edges.size() != content.edges.size() ||
+	    slot.symbols.size() != content.symbols.size())
+		return false;
+	for (size_t i = 0; i < slot.edges.size(); ++i)
+		if (!same_reading(slot.edges[i], content.edges[i])) return false;
+	for (size_t i = 0; i < slot.symbols.size(); ++i)
+		if (!same_reading(
+					slot.symbols[i], slot.own_inert(i), slot.own_reason(i), content.symbols[i]))
+			return false;
+	return true;
+}
+
+// The names whose definitions differ between a file's reading and the one that replaces it
+// (`now`; none for a file gone), keyed kind + name, of the kinds whose references resolve against
+// the symbols (a style variable's resolve against the bindings): each name whose list of
+// definitions in the file is not the same.
+void changed_names(
+		const GraphSlot &slot, const std::vector<GraphSymbol> &now, std::set<std::string> &out) {
+	std::unordered_map<std::string, std::pair<std::vector<size_t>, std::vector<size_t>>> by_key;
+	const auto resolves_by_symbols = [](const GraphSymbol &symbol) {
+		return reference_row(symbol.kind).resolution == ReferenceResolution::Symbol;
+	};
+	const auto key_of = [](const GraphSymbol &symbol) {
+		return GraphIndex::key_of(symbol.kind, symbol.name);
+	};
+	for (size_t i = 0; i < slot.symbols.size(); ++i)
+		if (resolves_by_symbols(slot.symbols[i]))
+			by_key[key_of(slot.symbols[i])].first.push_back(i);
+	for (size_t i = 0; i < now.size(); ++i)
+		if (resolves_by_symbols(now[i])) by_key[key_of(now[i])].second.push_back(i);
+	for (const auto &entry : by_key) {
+		const std::vector<size_t> &before = entry.second.first, &after = entry.second.second;
+		bool same = before.size() == after.size();
+		for (size_t i = 0; same && i < before.size(); ++i)
+			same = same_reading(slot.symbols[before[i]], slot.own_inert(before[i]),
+					slot.own_reason(before[i]), now[after[i]]);
+		if (!same) out.insert(entry.first);
+	}
+}
+
+// An edge whose resolution reads the file set: a file reference, and a screen's (its lookup asks
+// whether its menu file is one).
+bool reads_file_set(const GraphEdge &edge) {
+	return reference_row(edge.kind).resolution == ReferenceResolution::File ||
+			edge.kind == ReferenceKind::MenuScreen;
 }
 
 } // namespace
 
-std::string menu_text_scope(const std::string &table) {
-	return upper(basename_of(table)) + "/" + menu::kMenuTextSection;
-}
+// What an update's reading of the files changed.
+struct AssetGraph::Patch {
+	std::vector<uint32_t> slots;       // read again with another result: their content replaced
+	std::set<std::string> symbol_keys; // kind + name of a symbol kind whose definitions changed
+	std::vector<std::string> files;    // the files added, gone, retyped or read differently
+	bool file_set = false;             // a file added, gone or of another kind
+	bool base = false;                 // another base layer: everything resolves again
+};
 
-std::string menu_screen_scope(const std::string &menu_file) { return upper(basename_of(menu_file)); }
-
-std::string menu_window_scope(const std::string &menu_file, const std::string &screen) {
-	return menu_screen_scope(menu_file) + "/" + upper(screen);
+bool scope_matches(const std::string &symbol_scope, const std::string &reference_scope) {
+	if (reference_scope.empty()) return true;
+	const size_t symbol_slash = symbol_scope.find('/');
+	const size_t reference_slash = reference_scope.find('/');
+	const std::string symbol_table = symbol_scope.substr(0, symbol_slash);
+	const std::string reference_table = reference_scope.substr(0, reference_slash);
+	if (reference_table.empty() || upper(symbol_table) != upper(reference_table)) return false;
+	if (reference_slash == std::string::npos) return true;
+	const std::string symbol_section = symbol_slash == std::string::npos ? std::string() : symbol_scope.substr(symbol_slash + 1);
+	return upper(symbol_section) == upper(reference_scope.substr(reference_slash + 1));
 }
 
 std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int32_t loader_arg,
@@ -90,79 +147,361 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	return renderer::material_texture_source(std::string(), type, {}).reader == renderer::MaterialTextureReader::Chunk;
 }
 
-bool scope_matches(const std::string &symbol_scope, const std::string &reference_scope) {
-	if (reference_scope.empty()) return true;
-	const size_t symbol_slash = symbol_scope.find('/');
-	const size_t reference_slash = reference_scope.find('/');
-	const std::string symbol_table = symbol_scope.substr(0, symbol_slash);
-	const std::string reference_table = reference_scope.substr(0, reference_slash);
-	if (reference_table.empty() || upper(symbol_table) != upper(reference_table)) return false;
-	if (reference_slash == std::string::npos) return true;
-	const std::string symbol_section = symbol_slash == std::string::npos ? std::string() : symbol_scope.substr(symbol_slash + 1);
-	return upper(symbol_section) == upper(reference_scope.substr(reference_slash + 1));
-}
-
-void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                        const std::vector<std::shared_ptr<const Document>> &open) {
+GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &project,
+		const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open) {
 	stats_ = GraphStats();
-	std::map<std::string, Extraction> next;
-	// Whether what the files reference and define moved: a file read again whose edges, symbols
-	// or failure differ, a file the graph did not read before, or one it no longer reads.
-	bool moved = false;
-	using Cached = std::map<std::string, Extraction>::const_iterator;
-	const auto read_again = [&moved, this](Cached cached, const Extraction &entry) {
-		moved = moved || cached == cache_.end() || cached->second.ok != entry.ok ||
-				cached->second.failure != entry.failure ||
-				!same_extracted(cached->second.content, entry.content);
-	};
+	Patch patch;
+	std::unordered_map<std::string, const Document *> documents;
+	for (const auto &document : open)
+		if (document) documents[document->path()] = document.get();
+	std::unordered_set<uint32_t> listed;
+	listed.reserve(scan.entries.size());
 	for (const AssetEntry &asset : scan.entries) {
-		// A file the graph does not read (a mission's .mis) holds no extraction; its row still
-		// counts (same_files), so one added or gone assembles again.
-		if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
-		const Document *document = nullptr;
-		for (const auto &candidate : open)
-			if (candidate && candidate->path() == asset.relative_path) document = candidate.get();
-		auto cached = cache_.find(asset.relative_path);
-		Extraction entry;
-		if (document) {
-			if (cached != cache_.end() && cached->second.open && cached->second.identity == document->identity() &&
-			    cached->second.revision == document->revision()) {
-				entry = std::move(cached->second);
-				++stats_.files_reused;
-			} else {
-				entry.open = true;
-				entry.identity = document->identity();
-				entry.revision = document->revision();
-				extract_from_document(*document, entry.content);
-				++stats_.files_extracted;
-				read_again(cached, entry);
-			}
-		} else if (cached != cache_.end() && !cached->second.open && cached->second.size == asset.size_bytes &&
-		           cached->second.modified == asset.modified_ticks) {
-			entry = std::move(cached->second);
-			++stats_.files_reused;
-		} else {
-			entry.size = asset.size_bytes;
-			entry.modified = asset.modified_ticks;
-			Diagnostic error;
-			entry.ok = extract_from_asset(paths, project, asset, entry.content, error);
-			if (!entry.ok) {
-				++stats_.files_failed;
-				// A document type's validation reports a file of its kinds that does not load.
-				if (!is_editable_kind(asset.kind)) entry.failure = unreadable(asset, error);
-			}
-			++stats_.files_extracted;
-			read_again(cached, entry);
+		uint32_t id = index_.find(asset.relative_path);
+		// Another name at a path is another file.
+		if (id != GraphIndex::kNone && index_.slot(id).logical_name != asset.logical_name) {
+			drop(id, patch);
+			id = GraphIndex::kNone;
 		}
-		next[asset.relative_path] = std::move(entry);
+		bool retyped = false;
+		if (id == GraphIndex::kNone) {
+			id = index_.add(
+					asset.relative_path, asset.logical_name, key(asset.logical_name), asset.kind);
+			patch.file_set = true;
+			patch.files.push_back(asset.relative_path);
+		} else if (index_.slot(id).kind != asset.kind) {
+			index_.slot(id).kind = asset.kind;
+			retyped = true;
+			patch.file_set = true;
+			patch.files.push_back(asset.relative_path);
+		}
+		listed.insert(id);
+		GraphSlot &slot = index_.slot(id);
+		// A file the graph does not read (a mission's .mis) holds nothing; its row still counts
+		// (the file set), so one added or gone reaches the edges that could name it.
+		if (!graph_reads_file(asset.kind, asset.logical_name)) {
+			if (slot.read) {
+				slot.read = slot.open = false;
+				take(id, Extracted(), true, Diagnostic(), patch);
+			}
+			continue;
+		}
+		const auto found = documents.find(asset.relative_path);
+		const Document *document = found == documents.end() ? nullptr : found->second;
+		if (document) {
+			if (!retyped && slot.read && slot.open && slot.identity == document->identity() &&
+			    slot.revision == document->revision()) {
+				++stats_.files_reused;
+				continue;
+			}
+			Extracted content;
+			extract_from_document(*document, content);
+			++stats_.files_extracted;
+			slot.read = slot.open = true;
+			slot.identity = document->identity();
+			slot.revision = document->revision();
+			slot.size = 0;
+			slot.modified = 0;
+			take(id, std::move(content), true, Diagnostic(), patch);
+			continue;
+		}
+		if (!retyped && slot.read && !slot.open && slot.size == asset.size_bytes &&
+				slot.modified == asset.modified_ticks) {
+			++stats_.files_reused;
+			continue;
+		}
+		Extracted content;
+		Diagnostic error, failure;
+		const bool ok = extract_from_asset(paths, project, asset, content, error);
+		if (!ok) {
+			++stats_.files_failed;
+			// A document type's validation reports a file of its kinds that does not load.
+			if (!is_editable_kind(asset.kind)) failure = unreadable(asset, error);
+		}
+		++stats_.files_extracted;
+		slot.read = true;
+		slot.open = false;
+		slot.identity = slot.revision = 0;
+		slot.size = asset.size_bytes;
+		slot.modified = asset.modified_ticks;
+		take(id, std::move(content), ok, failure, patch);
 	}
-	moved = moved || next.size() != cache_.size();
-	cache_ = std::move(next);
+	std::vector<uint32_t> gone;
+	index_.for_each_slot([&](uint32_t id) {
+		if (!listed.count(id)) gone.push_back(id);
+	});
+	for (const uint32_t id : gone) drop(id, patch);
+	std::sort(patch.files.begin(), patch.files.end());
+	patch.files.erase(std::unique(patch.files.begin(), patch.files.end()), patch.files.end());
+	stats_.files_patched = patch.files.size();
+	GraphUpdate out;
+	out.files = patch.files;
+	out.file_set = patch.file_set;
 	// Everything the graph holds is made from the files' rows and what each one read: when
 	// neither moved it stays as it is, every edge and symbol where it was.
-	if (!moved && same_files(scan)) return;
-	assemble(scan);
+	if (patch.files.empty()) return out;
+	resolve_patch(patch, out);
 	generation_.value = next_generation();
+	out.changed = true;
+	return out;
+}
+
+void AssetGraph::take(
+		uint32_t id, Extracted content, bool ok, const Diagnostic &failure, Patch &patch) {
+	GraphSlot &slot = index_.slot(id);
+	if (reads_the_same(slot, content, ok, failure)) return;
+	changed_names(slot, content.symbols, patch.symbol_keys);
+	index_.erase_content(id);
+	slot.edges = std::move(content.edges);
+	slot.symbols = std::move(content.symbols);
+	slot.ok = ok;
+	slot.failure = failure;
+	// A style variable's own inert and why, kept apart from what the graph publishes (derive).
+	slot.own.clear();
+	if (std::any_of(slot.symbols.begin(), slot.symbols.end(),
+				[](const GraphSymbol &symbol) { return symbol.kind == ReferenceKind::StyleVar; })) {
+		slot.own.reserve(slot.symbols.size());
+		for (const GraphSymbol &symbol : slot.symbols)
+			slot.own.push_back({symbol.inert, symbol.inert_reason});
+	}
+	index_.insert_content(id);
+	patch.slots.push_back(id);
+	patch.files.push_back(slot.path);
+}
+
+void AssetGraph::drop(uint32_t id, Patch &patch) {
+	const GraphSlot &slot = index_.slot(id);
+	changed_names(slot, {}, patch.symbol_keys);
+	patch.files.push_back(slot.path);
+	patch.file_set = true;
+	index_.erase_content(id);
+	index_.remove(id);
+}
+
+void AssetGraph::resolve_patch(const Patch &patch, GraphUpdate &out) {
+	// The definitions the game reads, then each style variable's inert as it reads them: a file
+	// read again all of its own, every other only those of a name whose binding changed (whose own
+	// value edges then count as missing, or not, again).
+	out.bindings = rebind();
+	std::vector<Ref> work;
+	const std::unordered_set<uint32_t> read_again(patch.slots.begin(), patch.slots.end());
+	const auto derive_slot = [this](uint32_t id) {
+		for (uint32_t i = 0; i < index_.slot(id).symbols.size(); ++i) derive(id, i);
+	};
+	if (patch.base) index_.for_each_slot(derive_slot);
+	else
+		for (const uint32_t id : patch.slots) derive_slot(id);
+	if (!patch.base)
+		for (const std::string &name : out.bindings)
+			for (const Ref ref :
+					index_.symbols_named(GraphIndex::key_of(ReferenceKind::StyleVar, name))) {
+				if (read_again.count(ref.slot) || !derive(ref.slot, ref.index)) continue;
+				const GraphSlot &slot = index_.slot(ref.slot);
+				const auto at = slot.edges_at.find(slot.symbols[ref.index].locator);
+				if (at != slot.edges_at.end())
+					for (const uint32_t edge : at->second) work.push_back({ref.slot, edge});
+			}
+	// What resolves again: every edge of a file read again; with another file set every edge its
+	// lookup reads the files for, and every edge at all while a base layer's files may show or hide
+	// (or the base changed); the edges into a name whose definitions changed; the edges naming a
+	// style variable whose binding changed.
+	const bool every_edge = patch.base || (patch.file_set && base_);
+	if (every_edge || patch.file_set) {
+		index_.for_each_slot([&](uint32_t id) {
+			const GraphSlot &slot = index_.slot(id);
+			const bool all = every_edge || read_again.count(id);
+			for (uint32_t i = 0; i < slot.edges.size(); ++i)
+				if (all || reads_file_set(slot.edges[i])) work.push_back({id, i});
+		});
+	} else {
+		for (const uint32_t id : patch.slots)
+			for (uint32_t i = 0; i < index_.slot(id).edges.size(); ++i) work.push_back({id, i});
+	}
+	for (const std::string &name_key : patch.symbol_keys)
+		for (const Ref ref : index_.edges_targeting(name_key)) work.push_back(ref);
+	for (const std::string &name : out.bindings)
+		for (const Ref ref : index_.edges_through(name)) work.push_back(ref);
+	std::sort(work.begin(), work.end(), [this](Ref a, Ref b) { return index_.before(a, b); });
+	work.erase(std::unique(work.begin(), work.end(),
+	                       [](Ref a, Ref b) { return a.slot == b.slot && a.index == b.index; }),
+	           work.end());
+	for (const Ref ref : work) resolve_edge(ref);
+	make_diagnostics();
+}
+
+std::vector<std::string> AssetGraph::rebind() {
+	// The variables the game reads: menu_style.mns, then brand.mns onto the same list, a
+	// later definition winning [orig: Menu_InitShellResources @ 0x552500 (menu_style.mns @
+	// 0x552604, brand.mns @ 0x552616)]. A stylesheet by any other name is never read. Each is the
+	// project's file of the name when it has one (project assets win), else the base layer's.
+	std::map<std::string, Binding> next;
+	for (const menu::ShellStylesheet &sheet : menu::kShellStylesheets) {
+		const std::string sheet_key = key(sheet.name);
+		const GraphIndex *index = &index_;
+		bool base = false;
+		uint32_t id = index_.first_named(sheet_key);
+		if (id == GraphIndex::kNone && base_) {
+			index = &base_->index();
+			base = true;
+			id = index->first_named(sheet_key);
+		}
+		if (id == GraphIndex::kNone || index->slot(id).kind != AssetKind::MenuStyle) continue;
+		const GraphSlot &slot = index->slot(id);
+		for (uint32_t i = 0; i < slot.symbols.size(); ++i) {
+			const GraphSymbol &symbol = slot.symbols[i];
+			if (symbol.kind != ReferenceKind::StyleVar || slot.own_inert(i)) continue;
+			Binding binding;
+			binding.base = base;
+			binding.symbol = {id, i};
+			binding.file = symbol.file;
+			binding.value = symbol.value;
+			// Its own value edges (the font or texture its value names): a menu naming that file
+			// through the variable is reported there, once.
+			const auto at = slot.edges_at.find(symbol.locator);
+			if (at != slot.edges_at.end())
+				for (const uint32_t e : at->second) {
+					const GraphEdge &edge = slot.edges[e];
+					if (edge.field == "value" &&
+							reference_row(edge.kind).resolution == ReferenceResolution::File &&
+							std::find(binding.value_kinds.begin(), binding.value_kinds.end(),
+									edge.kind) == binding.value_kinds.end())
+						binding.value_kinds.push_back(edge.kind);
+				}
+			std::sort(binding.value_kinds.begin(), binding.value_kinds.end());
+			next[symbol.name] = std::move(binding);
+		}
+	}
+	std::vector<std::string> changed;
+	auto was = bindings_.begin();
+	auto now = next.begin();
+	while (was != bindings_.end() || now != next.end()) {
+		if (now == next.end() || (was != bindings_.end() && was->first < now->first)) {
+			changed.push_back(was->first);
+			++was;
+		} else if (was == bindings_.end() || now->first < was->first) {
+			changed.push_back(now->first);
+			++now;
+		} else {
+			if (!was->second.same(now->second)) changed.push_back(now->first);
+			++was;
+			++now;
+		}
+	}
+	bindings_ = std::move(next);
+	return changed;
+}
+
+bool AssetGraph::derive(uint32_t id, uint32_t index) {
+	GraphSlot &slot = index_.slot(id);
+	GraphSymbol &symbol = slot.symbols[index];
+	if (symbol.kind != ReferenceKind::StyleVar) return false;
+	const auto binding = bindings_.find(symbol.name);
+	const bool read = binding != bindings_.end() && !binding->second.base &&
+			binding->second.symbol.slot == id && binding->second.symbol.index == index;
+	// Why the game does not read it: its stylesheet's own reason (MnsDocument::refine_symbol),
+	// else the file is none the game reads, else the one it reads defines the name again.
+	std::string reason = slot.own_reason(index);
+	if (!read && !slot.own_inert(index)) {
+		if (!menu::is_shell_stylesheet(basename_of(symbol.file)))
+			reason = "the game reads no stylesheet but menu_style.mns and brand.mns";
+		else if (binding != bindings_.end())
+			reason = binding->second.file + " defines it again, which the game reads after";
+		else
+			reason = "the game does not read it";
+	}
+	const bool moved = symbol.inert == read;
+	symbol.inert = !read;
+	symbol.inert_reason = std::move(reason);
+	return moved;
+}
+
+void AssetGraph::resolve_edge(Ref ref) {
+	GraphSlot &slot = index_.slot(ref.slot);
+	GraphEdge &edge = slot.edges[ref.index];
+	const EdgeResolution was = slot.resolutions[ref.index];
+	const std::string target = resolved_target(edge);
+	EdgeResolution now;
+	now.resolved = true;
+	std::string file;
+	now.status = target.empty() ? ReferenceStatus::NotAReference : resolve(edge, &file);
+	if (now.status == ReferenceStatus::Present &&
+			reference_row(edge.kind).resolution == ReferenceResolution::File)
+		now.file = file;
+	now.missing = counts_missing(slot, edge, target, now.status);
+	// Each entry of the index moves only when it changed.
+	if (!was.resolved || target != edge.target) {
+		if (was.resolved) index_.remove_target(GraphIndex::key_of(edge.kind, edge.target), ref);
+		edge.target = target;
+		index_.add_target(GraphIndex::key_of(edge.kind, edge.target), ref);
+	}
+	if (!was.resolved || now.file != was.file) {
+		if (was.resolved && !was.file.empty()) index_.remove_user(was.file, ref);
+		if (!now.file.empty()) index_.add_user(now.file, ref);
+	}
+	if (!was.resolved || now.missing != was.missing) {
+		if (was.resolved && was.missing) index_.remove_missing(ref);
+		if (now.missing) index_.add_missing(ref);
+	}
+	slot.resolutions[ref.index] = std::move(now);
+	++stats_.edges_resolved;
+}
+
+bool AssetGraph::counts_missing(const GraphSlot &slot, const GraphEdge &edge,
+		const std::string &target, ReferenceStatus status) const {
+	if (target.empty() || status != ReferenceStatus::Missing) return false;
+	const bool file = reference_row(edge.kind).resolution == ReferenceResolution::File;
+	// A file named through a variable no stylesheet the game reads defines: the variable's own
+	// edge reports it.
+	if (file && is_style_reference(target)) return false;
+	// A file named through a variable whose value names a file of the same kind: the
+	// stylesheet's own edge reports it, once, where it is defined. A kind that does not
+	// match (a font variable used as an image) is reported here.
+	if (file && is_style_reference(edge.value)) {
+		const auto binding = bindings_.find(style_variable(edge.value));
+		if (binding != bindings_.end() &&
+				std::find(binding->second.value_kinds.begin(), binding->second.value_kinds.end(),
+						edge.kind) != binding->second.value_kinds.end())
+			return false;
+	}
+	// A stylesheet value the game never reads (a definition brand.mns replaces [orig:
+	// NapiConfigMap_ParseKeyValueBuffer @ 0x639e09], one after the place the game stops reading
+	// the file) loads no file.
+	if (edge.field == "value") {
+		const auto at = slot.symbols_at.find(edge.locator);
+		if (at != slot.symbols_at.end())
+			for (const uint32_t s : at->second)
+				if (slot.symbols[s].kind == ReferenceKind::StyleVar && slot.symbols[s].inert)
+					return false;
+	}
+	return true;
+}
+
+void AssetGraph::make_diagnostics() {
+	diagnostics_.clear();
+	diagnostics_.reserve(index_.missing().size());
+	for (const Ref ref : index_.missing())
+		diagnostics_.push_back(missing_finding(index_.edge(ref)));
+	std::vector<const GraphSlot *> failed;
+	index_.for_each_slot([&](uint32_t id) {
+		const GraphSlot &slot = index_.slot(id);
+		if (!slot.ok && !slot.failure.code.empty()) failed.push_back(&slot);
+	});
+	std::sort(failed.begin(), failed.end(),
+			[](const GraphSlot *a, const GraphSlot *b) { return a->path < b->path; });
+	for (const GraphSlot *slot : failed) diagnostics_.push_back(slot->failure);
+}
+
+GraphUpdate AssetGraph::set_base(std::shared_ptr<const GraphLayer> base) {
+	GraphUpdate out;
+	if (base == base_) return out;
+	base_ = std::move(base);
+	stats_ = GraphStats();
+	Patch patch;
+	patch.base = true;
+	resolve_patch(patch, out);
+	generation_.value = next_generation();
+	out.changed = true;
+	return out;
 }
 
 uint64_t AssetGraph::next_generation() {
@@ -174,100 +513,36 @@ void AssetGraph::clear() {
 	*this = AssetGraph(); // the assignment takes the generation anew
 }
 
-bool AssetGraph::same_files(const AssetScan &scan) const {
-	if (scan.entries.size() != scanned_.size()) return false;
-	for (size_t i = 0; i < scanned_.size(); ++i) {
-		const AssetEntry &asset = scan.entries[i];
-		const FileRow &row = scanned_[i];
-		if (asset.relative_path != row.path || asset.logical_name != row.logical_name ||
-				asset.kind != row.kind)
-			return false;
-	}
-	return true;
+void AssetGraph::for_each_edge(const std::function<void(const GraphEdge &)> &visit) const {
+	index_.for_each_slot([&](uint32_t id) {
+		for (const GraphEdge &edge : index_.slot(id).edges) visit(edge);
+	});
 }
 
-void AssetGraph::assemble(const AssetScan &scan) {
-	files_.clear();
-	scanned_.clear();
-	for (const AssetEntry &asset : scan.entries) {
-		FileRow row;
-		row.path = asset.relative_path;
-		row.logical_name = asset.logical_name;
-		row.kind = asset.kind;
-		scanned_.push_back(row);
-		files_.emplace(key(asset.logical_name), std::move(row));
-	}
-	edges_.clear();
-	symbols_.clear();
-	symbol_index_.clear();
-	record_symbols_.clear();
-	file_symbols_.clear();
-	file_users_.reset();
-	edge_index_.clear();
-	style_bindings_.clear();
-	style_value_edges_.clear();
-	inert_style_values_.clear();
-	for (const AssetEntry &asset : scan.entries) {
-		const auto cached = cache_.find(asset.relative_path);
-		if (cached == cache_.end()) continue;
-		for (const GraphSymbol &symbol : cached->second.content.symbols) {
-			symbol_index_.emplace(symbol_key(symbol.kind, symbol.name), symbols_.size());
-			record_symbols_[{symbol.file, symbol.record}].push_back(symbols_.size());
-			file_symbols_[symbol.file].push_back(symbols_.size());
-			symbols_.push_back(symbol);
-		}
-	}
-	// The variables the game reads: menu_style.mns, then brand.mns onto the same list, a
-	// later definition winning [orig: Menu_InitShellResources @ 0x552500 (menu_style.mns @
-	// 0x552604, brand.mns @ 0x552616)]. A stylesheet by any other name is never read.
-	for (const menu::ShellStylesheet &sheet : menu::kShellStylesheets) {
-		const auto file = files_.find(key(sheet.name));
-		if (file == files_.end() || file->second.kind != AssetKind::MenuStyle) continue;
-		for (size_t i = 0; i < symbols_.size(); ++i) {
-			const GraphSymbol &symbol = symbols_[i];
-			if (symbol.kind == ReferenceKind::StyleVar && symbol.file == file->second.path && !symbol.inert)
-				style_bindings_[symbol.name] = i;
-		}
-	}
-	for (size_t i = 0; i < symbols_.size(); ++i) {
-		GraphSymbol &symbol = symbols_[i];
-		if (symbol.kind != ReferenceKind::StyleVar) continue;
-		const auto binding = style_bindings_.find(symbol.name);
-		const bool read = binding != style_bindings_.end() && binding->second == i;
-		// Why the game does not read it: its stylesheet's own reason (MnsDocument::refine_symbol),
-		// else the file is none the game reads, else the one it reads defines the name again.
-		if (!read && !symbol.inert)
-			symbol.inert_reason = !menu::is_shell_stylesheet(basename_of(symbol.file))
-			                              ? "the game reads no stylesheet but menu_style.mns and brand.mns"
-			                      : binding != style_bindings_.end()
-			                              ? symbols_[binding->second].file + " defines it again, which the game reads after"
-			                              : "the game does not read it";
-		symbol.inert = !read;
-		if (symbol.inert) inert_style_values_.insert({symbol.file, symbol.locator});
-	}
-	for (const AssetEntry &asset : scan.entries) {
-		const auto cached = cache_.find(asset.relative_path);
-		if (cached == cache_.end()) continue;
-		for (const GraphEdge &edge : cached->second.content.edges) {
-			edges_.push_back(edge);
-			edges_.back().target = resolved_target(edges_.back());
-			edge_index_.emplace(symbol_key(edge.kind, edges_.back().target), edges_.size() - 1);
-		}
-	}
-	// A binding's own value edges (the font or texture its value names): a menu naming
-	// that file through the variable is reported there, once.
-	for (const auto &binding : style_bindings_) {
-		const GraphSymbol &symbol = symbols_[binding.second];
-		for (const GraphEdge &edge : edges_)
-			if (edge.source == symbol.file && edge.locator == symbol.locator && edge.field == "value" &&
-			    reference_row(edge.kind).resolution == ReferenceResolution::File)
-				style_value_edges_.insert({binding.first, edge.kind});
-	}
+void AssetGraph::for_each_symbol(const std::function<void(const GraphSymbol &)> &visit) const {
+	index_.for_each_slot([&](uint32_t id) {
+		for (const GraphSymbol &symbol : index_.slot(id).symbols) visit(symbol);
+	});
+}
+
+const GraphSlot *AssetGraph::file_named(const std::string &name_key) const {
+	const uint32_t id = index_.first_named(name_key);
+	if (id != GraphIndex::kNone) return &index_.slot(id);
+	if (!base_) return nullptr;
+	const uint32_t base = base_->index().first_named(name_key);
+	return base == GraphIndex::kNone ? nullptr : &base_->index().slot(base);
+}
+
+bool AssetGraph::base_file_shows(const GraphSlot &slot) const {
+	return index_.first_named(slot.key) == GraphIndex::kNone;
 }
 
 const GraphSymbol *AssetGraph::style_binding(const std::string &name) const {
-	const auto found = style_bindings_.find(style_variable(name));
-	return found == style_bindings_.end() ? nullptr : &symbols_[found->second];
+	const auto found = bindings_.find(style_variable(name));
+	if (found == bindings_.end()) return nullptr;
+	const Binding &binding = found->second;
+	if (!binding.base) return &index_.symbol(binding.symbol);
+	return base_ ? &base_->index().symbol(binding.symbol) : nullptr;
 }
 
 // The name an edge looks up: a style variable's value where one stands, normalized
@@ -313,8 +588,8 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 		// A screen's own lookup, which no column describes: of a menu file the project does
 		// not have, that file's own edge says so.
 		if (kind == ReferenceKind::MenuScreen) {
-			const auto file = files_.find(key(scope));
-			if (file == files_.end() || file->second.kind != AssetKind::Menu) return ReferenceStatus::Unverified;
+			const GraphSlot *file = file_named(key(scope));
+			if (!file || file->kind != AssetKind::Menu) return ReferenceStatus::Unverified;
 		}
 		if (const GraphSymbol *symbol = resolve_symbol(kind, name, scope)) {
 			if (file_out) *file_out = symbol->file;
@@ -332,15 +607,16 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 	}
 	const std::string resolved = resolve_style(name);
 	if (is_style_reference(resolved)) return ReferenceStatus::Missing;
-	// The first name the kind's loader reads that the project has as a file it can load.
-	const auto loadable = [this, kind, loader_arg](const std::string &file) -> const FileRow * {
-		const auto found = files_.find(key(file));
-		if (found == files_.end() || !file_serves_reference(found->second.kind, kind, loader_arg)) return nullptr;
-		return &found->second;
+	// The first name the kind's loader reads that the project (else the base) has as a file it can
+	// load.
+	const auto loadable = [this, kind, loader_arg](const std::string &file) -> const GraphSlot * {
+		const GraphSlot *found = file_named(key(file));
+		if (!found || !file_serves_reference(found->kind, kind, loader_arg)) return nullptr;
+		return found;
 	};
 	const auto exists = [&loadable](const std::string &file) { return loadable(file) != nullptr; };
 	for (const std::string &candidate : reference_file_candidates(kind, resolved, loader_arg, exists)) {
-		const FileRow *found = loadable(candidate);
+		const GraphSlot *found = loadable(candidate);
 		if (!found) continue;
 		if (file_out) *file_out = found->path;
 		return ReferenceStatus::Present;
@@ -352,10 +628,18 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 	const ReferenceResolution resolution = reference_row(kind).resolution;
 	if (resolution == ReferenceResolution::StyleVariable) return style_binding(name);
 	if (resolution != ReferenceResolution::Symbol) return nullptr;
-	const auto range = symbol_index_.equal_range(symbol_key(kind, symbol_name(kind, name)));
-	for (auto it = range.first; it != range.second; ++it) {
-		const GraphSymbol &symbol = symbols_[it->second];
+	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name));
+	for (const Ref ref : index_.symbols_named(name_key)) {
+		const GraphSymbol &symbol = index_.symbol(ref);
 		if (!symbol.inert && scope_matches(symbol.scope, scope)) return &symbol;
+	}
+	if (!base_) return nullptr;
+	const GraphIndex &base = base_->index();
+	for (const Ref ref : base.symbols_named(name_key)) {
+		const GraphSymbol &symbol = base.symbol(ref);
+		if (base_file_shows(base.slot(ref.slot)) && !symbol.inert &&
+				scope_matches(symbol.scope, scope))
+			return &symbol;
 	}
 	return nullptr;
 }
@@ -364,19 +648,32 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 	std::vector<ReferenceChoice> out;
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution == ReferenceResolution::File) {
-		for (const auto &entry : files_) {
-			if (!file_serves_reference(entry.second.kind, kind, loader_arg)) continue;
-			ReferenceChoice choice;
-			choice.name = entry.second.logical_name;
-			choice.kind = kind;
-			choice.file = entry.second.path;
-			choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
-			out.push_back(std::move(choice));
-		}
+		// Each name once, the file it resolves to (the first of it by path); the base's files the
+		// project has none of the name of after the project's.
+		const auto offer_files = [&](const GraphIndex &index, bool base) {
+			const std::string *last = nullptr;
+			index.for_each_slot([&](uint32_t id) {
+				const GraphSlot &slot = index.slot(id);
+				if (last && *last == slot.key) return;
+				last = &slot.key;
+				if ((base && !base_file_shows(slot)) ||
+						!file_serves_reference(slot.kind, kind, loader_arg))
+					return;
+				ReferenceChoice choice;
+				choice.name = slot.logical_name;
+				choice.kind = kind;
+				choice.file = slot.path;
+				choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
+				out.push_back(std::move(choice));
+			});
+		};
+		offer_files(index_, false);
+		if (base_) offer_files(base_->index(), true);
 		return out;
 	}
 	if (!row.names_symbol()) return out;
-	// Each name once: the definition a lookup finds, else (inert) the first defined.
+	// Each name once: the definition a lookup finds, else (inert) the first defined; the base's
+	// names after the project's.
 	std::set<std::string> offered;
 	const auto offer = [&](const GraphSymbol &symbol) {
 		if (!offered.insert(symbol.name).second) return;
@@ -391,46 +688,48 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 		choice.reason = symbol.inert_reason;
 		out.push_back(std::move(choice));
 	};
-	for (const bool inert : {false, true})
-		for (const GraphSymbol &symbol : symbols_)
-			if (symbol.kind == kind && symbol.inert == inert && (!row.picker_scoped || scope_matches(symbol.scope, scope)))
-				offer(symbol);
+	const auto offer_symbols = [&](const GraphIndex &index, bool base) {
+		for (const bool inert : {false, true})
+			for (const Ref ref : index.symbols_of_kind(kind)) {
+				const GraphSymbol &symbol = index.symbol(ref);
+				if (base && !base_file_shows(index.slot(ref.slot))) continue;
+				if (symbol.inert == inert &&
+						(!row.picker_scoped || scope_matches(symbol.scope, scope)))
+					offer(symbol);
+			}
+	};
+	offer_symbols(index_, false);
+	if (base_) offer_symbols(base_->index(), true);
 	return out;
 }
 
 std::vector<const GraphEdge *> AssetGraph::references_of(const std::string &file) const {
 	std::vector<const GraphEdge *> out;
-	const std::string wanted = key(basename_of(file));
-	for (const GraphEdge &edge : edges_)
-		if (edge.source == file || key(basename_of(edge.source)) == wanted) out.push_back(&edge);
+	uint32_t id = index_.find(file);
+	// A logical name: the file it resolves to.
+	if (id == GraphIndex::kNone && file.find('/') == std::string::npos)
+		id = index_.first_named(key(file));
+	if (id == GraphIndex::kNone) return out;
+	const GraphSlot &slot = index_.slot(id);
+	out.reserve(slot.edges.size());
+	for (const GraphEdge &edge : slot.edges) out.push_back(&edge);
 	return out;
 }
 
 std::vector<const GraphEdge *> AssetGraph::referrers_of_file(const std::string &logical_name) const {
 	std::vector<const GraphEdge *> out;
-	const auto file = files_.find(key(basename_of(logical_name)));
-	if (file == files_.end()) return out;
-	if (!file_users_) {
-		file_users_ = std::make_shared<std::map<std::string, std::vector<size_t>>>();
-		for (size_t i = 0; i < edges_.size(); ++i) {
-			const GraphEdge &edge = edges_[i];
-			if (reference_row(edge.kind).resolution != ReferenceResolution::File || edge.target.empty()) continue;
-			std::string resolved;
-			if (resolve(edge, &resolved) == ReferenceStatus::Present) (*file_users_)[resolved].push_back(i);
-		}
-	}
-	const auto users = file_users_->find(file->second.path);
-	if (users != file_users_->end())
-		for (const size_t index : users->second) out.push_back(&edges_[index]);
+	const GraphSlot *file = file_named(key(basename_of(logical_name)));
+	if (!file) return out;
+	for (const Ref ref : index_.users_of(file->path)) out.push_back(&index_.edge(ref));
 	return out;
 }
 
 std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, const std::string &name,
                                                         const std::string &scope) const {
 	std::vector<const GraphEdge *> out;
-	const auto range = edge_index_.equal_range(symbol_key(kind, symbol_name(kind, name)));
-	for (auto it = range.first; it != range.second; ++it) {
-		const GraphEdge &edge = edges_[it->second];
+	for (const Ref ref :
+			index_.edges_targeting(GraphIndex::key_of(kind, symbol_name(kind, name)))) {
+		const GraphEdge &edge = index_.edge(ref);
 		if (!scope.empty() && !scope_matches(scope, edge.scope)) continue;
 		out.push_back(&edge);
 	}
@@ -439,15 +738,12 @@ std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, cons
 
 std::vector<const GraphEdge *> AssetGraph::usages_of(const std::string &file) const {
 	std::vector<const GraphEdge *> out = referrers_of_file(file);
-	const auto row = files_.find(key(basename_of(file)));
-	if (row == files_.end()) return out;
+	const GraphSlot *slot = file_named(key(basename_of(file)));
+	if (!slot) return out;
 	// An edge using two of its symbols (a string id of no scope, a key two sections define) is
 	// listed once, where it is met first.
 	std::set<const GraphEdge *> listed(out.begin(), out.end());
-	const auto defined = file_symbols_.find(row->second.path);
-	if (defined == file_symbols_.end()) return out;
-	for (const size_t index : defined->second) {
-		const GraphSymbol &symbol = symbols_[index];
+	for (const GraphSymbol &symbol : slot->symbols) {
 		if (symbol.inert) continue;
 		for (const GraphEdge *edge : referrers_of(symbol.kind, symbol.name, symbol.scope))
 			if (listed.insert(edge).second) out.push_back(edge);
@@ -464,11 +760,37 @@ std::vector<const GraphEdge *> AssetGraph::users_of(const GraphSymbol &symbol) c
 }
 
 const GraphSymbol *AssetGraph::symbol_at(const std::string &file, const std::string &locator, const std::string &field) const {
-	const auto defined = file_symbols_.find(file);
-	if (defined == file_symbols_.end() || field.empty()) return nullptr;
-	for (const size_t index : defined->second)
-		if (symbols_[index].locator == locator && symbols_[index].field == field) return &symbols_[index];
+	const uint32_t id = index_.find(file);
+	if (id == GraphIndex::kNone || field.empty()) return nullptr;
+	const GraphSlot &slot = index_.slot(id);
+	const auto at = slot.symbols_at.find(locator);
+	if (at == slot.symbols_at.end()) return nullptr;
+	for (const uint32_t index : at->second)
+		if (slot.symbols[index].field == field) return &slot.symbols[index];
 	return nullptr;
+}
+
+std::vector<const GraphSymbol *> AssetGraph::symbols_of(const std::string &file, const std::string &record) const {
+	std::vector<const GraphSymbol *> out;
+	const uint32_t id = index_.find(file);
+	if (id == GraphIndex::kNone) return out;
+	const GraphSlot &slot = index_.slot(id);
+	const auto found = slot.symbols_in.find(record);
+	if (found != slot.symbols_in.end())
+		for (const uint32_t index : found->second) out.push_back(&slot.symbols[index]);
+	return out;
+}
+
+bool AssetGraph::for_each_definition(const Document &document,
+		const std::function<void(const GraphSymbol &symbol, bool inert)> &visit) const {
+	const uint32_t id = index_.find(document.path());
+	if (id == GraphIndex::kNone) return false;
+	const GraphSlot &slot = index_.slot(id);
+	if (!slot.read || !slot.open || slot.identity != document.identity() ||
+			slot.revision != document.revision())
+		return false;
+	for (size_t i = 0; i < slot.symbols.size(); ++i) visit(slot.symbols[i], slot.own_inert(i));
+	return true;
 }
 
 std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
@@ -476,75 +798,58 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	if (text.empty()) return hits;
 	const std::string wanted = upper(text);
 	const auto holds = [&wanted](const std::string &name) { return upper(name).find(wanted) != std::string::npos; };
-	for (const auto &entry : files_) {
-		if (!holds(entry.second.logical_name)) continue;
+	// A name's file once: the one it resolves to.
+	const std::string *last = nullptr;
+	index_.for_each_slot([&](uint32_t id) {
+		const GraphSlot &slot = index_.slot(id);
+		if (last && *last == slot.key) return;
+		last = &slot.key;
+		if (!holds(slot.logical_name)) return;
 		GraphSearchHit hit;
-		hit.name = entry.second.logical_name;
-		hit.file = entry.second.path;
-		hit.usages = usages_of(entry.second.path).size();
+		hit.name = slot.logical_name;
+		hit.file = slot.path;
+		hit.usages = usages_of(slot.path).size();
 		hits.push_back(std::move(hit));
-	}
-	for (const GraphSymbol &symbol : symbols_) {
-		if (!holds(symbol.display)) continue;
+	});
+	for_each_symbol([&](const GraphSymbol &symbol) {
+		if (!holds(symbol.display)) return;
 		GraphSearchHit hit;
 		hit.symbol = &symbol;
 		hit.name = symbol.display;
 		hit.file = symbol.file;
 		hit.usages = users_of(symbol).size();
 		hits.push_back(std::move(hit));
-	}
+	});
 	return hits;
 }
 
 std::vector<const GraphSymbol *> AssetGraph::symbols_of_kind(ReferenceKind kind) const {
-	// The index's keys of a kind start with its token and a newline; its symbols listed in the
-	// order the files define them (the index's order is the name's).
-	const std::string prefix = symbol_key(kind, std::string());
-	std::vector<size_t> indexes;
-	for (auto it = symbol_index_.lower_bound(prefix);
-			it != symbol_index_.end() && it->first.compare(0, prefix.size(), prefix) == 0; ++it)
-		indexes.push_back(it->second);
-	std::sort(indexes.begin(), indexes.end());
+	const std::vector<Ref> &refs = index_.symbols_of_kind(kind);
 	std::vector<const GraphSymbol *> out;
-	out.reserve(indexes.size());
-	for (const size_t index : indexes) out.push_back(&symbols_[index]);
+	out.reserve(refs.size());
+	for (const Ref ref : refs) out.push_back(&index_.symbol(ref));
 	return out;
 }
 
 std::vector<const GraphSymbol *> AssetGraph::symbols_named(ReferenceKind kind, const std::string &name) const {
 	std::vector<const GraphSymbol *> out;
-	const auto range = symbol_index_.equal_range(symbol_key(kind, symbol_name(kind, name)));
-	for (auto it = range.first; it != range.second; ++it) out.push_back(&symbols_[it->second]);
+	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name));
+	for (const Ref ref : index_.symbols_named(name_key)) out.push_back(&index_.symbol(ref));
+	if (!base_) return out;
+	const GraphIndex &base = base_->index();
+	for (const Ref ref : base.symbols_named(name_key))
+		if (base_file_shows(base.slot(ref.slot))) out.push_back(&base.symbol(ref));
 	return out;
 }
 
-bool AssetGraph::has_file(const std::string &name) const { return files_.count(key(basename_of(name))) != 0; }
-
-std::vector<const GraphSymbol *> AssetGraph::symbols_of(const std::string &file, const std::string &record) const {
-	std::vector<const GraphSymbol *> out;
-	const auto found = record_symbols_.find({file, record});
-	if (found != record_symbols_.end())
-		for (const size_t index : found->second) out.push_back(&symbols_[index]);
-	return out;
+bool AssetGraph::has_file(const std::string &name) const {
+	return file_named(key(basename_of(name))) != nullptr;
 }
 
 std::vector<const GraphEdge *> AssetGraph::missing() const {
 	std::vector<const GraphEdge *> out;
-	for (const GraphEdge &edge : edges_) {
-		if (edge.target.empty()) continue;
-		const bool file = reference_row(edge.kind).resolution == ReferenceResolution::File;
-		if (file && is_style_reference(edge.target)) continue;
-		// A file named through a variable whose value names a file of the same kind: the
-		// stylesheet's own edge reports it, once, where it is defined. A kind that does not
-		// match (a font variable used as an image) is reported here.
-		if (file && is_style_reference(edge.value) && style_value_edges_.count({style_variable(edge.value), edge.kind}))
-			continue;
-		// A stylesheet value the game never reads (a definition brand.mns replaces [orig:
-		// NapiConfigMap_ParseKeyValueBuffer @ 0x639e09], one after the place the game stops reading
-		// the file) loads no file.
-		if (edge.field == "value" && inert_style_values_.count({edge.source, edge.locator})) continue;
-		if (resolve(edge) == ReferenceStatus::Missing) out.push_back(&edge);
-	}
+	out.reserve(index_.missing().size());
+	for (const Ref ref : index_.missing()) out.push_back(&index_.edge(ref));
 	return out;
 }
 
@@ -568,14 +873,6 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	d.scope = edge.scope;
 	d.loader_arg = edge.loader_arg;
 	return d;
-}
-
-std::vector<Diagnostic> AssetGraph::diagnostics() const {
-	std::vector<Diagnostic> findings;
-	for (const GraphEdge *edge : missing()) findings.push_back(missing_finding(*edge));
-	for (const auto &entry : cache_)
-		if (!entry.second.ok && !entry.second.failure.code.empty()) findings.push_back(entry.second.failure);
-	return findings;
 }
 
 } // namespace opennova::editor

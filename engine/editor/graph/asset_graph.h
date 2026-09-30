@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <functional>
 #include <map>
-#include <set>
 #include <memory>
 #include <string>
 #include <utility>
@@ -12,6 +11,8 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/graph_edge.h>
+#include <editor/graph/graph_index.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
@@ -20,7 +21,7 @@
 
 namespace opennova::editor {
 
-struct SessionView;
+class GraphLayer;
 
 // The asset graph (ADR 0046 d10, S7): every cross-reference the project's files carry,
 // extracted from the engine's own parsed records, as typed edges from a source file
@@ -31,70 +32,19 @@ struct SessionView;
 // a particle effect, a menu screen or window by NAME) against the symbols the files
 // define. The graph is the one
 // resolver: the inspector's badges, the Problems rows, the pickers, "find references"
-// and the rename transaction all read it. Files whose size and modified time did not
-// change keep their last extraction; an open document stands in for its file.
-
-struct GraphEdge {
-	std::string source;   // the referencing file, project-relative
-	std::string record;   // the record inside it, every name from the row down ("" = the file itself)
-	std::string locator;  // a document record's place, stable across a reload (Document::locator)
-	NodeAddress address;  // the record's address in the document the edge was read from
-	std::string field;    // the field id, or a native format's slot ("material[2].texture[0]")
-	ReferenceKind kind = ReferenceKind::None;
-	std::string value;    // the reference as written
-	std::string target;   // what is looked up: the value after a style variable resolved, normalized
-	// A string id's table and section ("GAMETEXT.BIN/WepDes", a menu's "MENUTXT.BIN/menu";
-	// "/menu" names no table: the window reads none); "" = any table.
-	std::string scope;
-	bool rewritable = false; // the source is a document type and the field is in its schema
-	// On a style variable edge: what the variable's value must name there (a font, a menu
-	// texture), None where it stands for a colour.
-	ReferenceKind through = ReferenceKind::None;
-	// What the reference's loader picks the one file the name loads by, as its kind's row reads
-	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type); -1 for
-	// none.
-	int32_t loader_arg = -1;
-};
-
-// A name a file defines that other files may reference: a document's field whose field_on
-// says it defines one (FieldUse::defines; what the type's lookup makes of it,
-// Document::refine_symbol), or a native file's name.
-struct GraphSymbol {
-	ReferenceKind kind = ReferenceKind::None;
-	std::string name;    // normalized
-	std::string display; // as defined
-	std::string value;   // a style variable's value
-	std::string file;    // the defining file, project-relative
-	std::string record;  // the defining record, every name from the row down ("" = the file itself)
-	std::string locator; // a document record's place, stable across a reload (Document::locator)
-	NodeAddress address; // the defining record in the document it was read from
-	std::string field;   // the field that defines it ("" for a native file's)
-	// Where a lookup finds it: a string id's "TABLE.BIN/Section"; a menu screen's menu file
-	// ("MAIN.MNU"); a menu window's menu file and screen ("MAIN.MNU/STARTUP"); a user point's
-	// model file ("GUN.3DI").
-	std::string scope;
-	// Defined, but not what the game reads: a style variable of a stylesheet the game does
-	// not load, one defined again later in its file (the game reads the last), one menu_style.mns
-	// defines and brand.mns defines again, one on a line after the place the game stops reading
-	// its file; a string id in a later section of a name the table already has (a lookup reads
-	// the first [orig: TextResource_FindEntryBySectionAndKey @ 0x75d250]); a menu screen or
-	// window no by-name lookup returns (MnuDocument::lookup_names: an earlier screen of a name,
-	// a later window of a name, one under a window with no NAME or on a screen a later one
-	// shadows); a model's user point past the first 16 an item's lookup scans.
-	bool inert = false;
-	// Why no lookup finds it, in a few words (the picker's, the find's), when it is inert.
-	std::string inert_reason;
-	// The line of its file it is defined on, where its type knows it (a stylesheet variable's
-	// first line); 0 for none.
-	size_t line = 0;
-};
+// and the rename transaction all read it. Each project file has a slot (graph_index.h) holding
+// what the graph read from it and how each of its edges resolves; an update reads again only the
+// files whose size and last write, or open document, changed (an open document stands in for its
+// file) and patches only the slots whose reading changed, resolving again only what those changes
+// reach (S13 D3). A base layer (graph_layer.h, a mounted install's files) answers the names the
+// project does not have.
 
 // A name a reference may be given (the picker's rows, AssetGraph::choices): what a pick sets
 // the field to, where it is defined, and what the reference would then be.
 struct ReferenceChoice {
 	std::string name; // a symbol as defined, a style variable as its %NAME%, a file by its logical name
 	ReferenceKind kind = ReferenceKind::None; // what it names: the reference's kind, or one it also offers
-	std::string file;   // the defining file, or the file itself (project-relative)
+	std::string file;   // the defining file, or the file itself (a base layer's by its name)
 	std::string record; // the defining record ("" for a file)
 	// The reference set to it, in its scope: Present, or Missing where the lookup would not
 	// reach it there (a string id of another section, a menu texture whose loader reads
@@ -113,40 +63,67 @@ struct GraphSearchHit {
 	size_t usages = 0;  // the file's usages (usages_of), or the symbol's users (users_of)
 };
 
+// What the last update (or set_base) did.
 struct GraphStats {
-	size_t files_extracted = 0; // re-read on the last update
+	size_t files_extracted = 0; // read again
 	size_t files_reused = 0;    // unchanged since the previous update
-	size_t files_failed = 0;    // unreadable on the last update
+	size_t files_failed = 0;    // unreadable
+	size_t files_patched = 0;   // slots added, gone or read differently (GraphUpdate::files)
+	size_t edges_resolved = 0;  // edges resolved again
 };
 
-// What one file references and defines.
-struct Extracted {
-	std::vector<GraphEdge> edges;
-	std::vector<GraphSymbol> symbols;
+// What an update changed (AssetGraph::update, set_base). `changed`: what the graph holds moved
+// (a new generation). `files`: the files whose slots were added, removed or read differently,
+// project-relative. `bindings`: the style variables whose binding (the definition the game reads:
+// its file or its value, or the kinds of the files its own value edges name) changed, upper case
+// as the graph keys them. `file_set`: a file added, gone, or of another kind.
+struct GraphUpdate {
+	bool changed = false;
+	std::vector<std::string> files;
+	std::vector<std::string> bindings;
+	bool file_set = false;
 };
 
 class AssetGraph {
 public:
-	// Rebuild over the scan; the open documents stand in for their files. An update that finds
-	// the files as they were (their rows in the scan's order, and what each file the graph reads
-	// references and defines) changes nothing: the edges and symbols stay where they were.
-	void update(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-	            const std::vector<std::shared_ptr<const Document>> &open);
+	// Brings the graph to the scan; the open documents stand in for their files. Each file of the
+	// scan has a slot: one whose row and reading are as they were keeps everything, a file read
+	// again with the same result (a rewrite of the same bytes) included. A slot whose reading
+	// changed is patched (its content out of the indexes and in again) and what it reaches is
+	// resolved again: its own edges; the edges into a symbol name whose definitions changed; the
+	// style variables' edges, and the files named through them, when a binding changed; every
+	// File edge (and a screen's, whose lookup asks for its menu file) when the file set changed,
+	// and every edge while a base layer is set. The generation moves exactly when what the graph
+	// holds changed.
+	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
+			const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
 	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out
 	// is where it was (a cache may keep them).
 	uint64_t generation() const { return generation_.value; }
-	// Every file, edge and symbol gone (a project closed), under a new generation.
+	// Every file, edge and symbol gone (a project closed), its base layer too, under a new
+	// generation.
 	void clear();
 
-	const std::vector<GraphEdge> &edges() const { return edges_; }
-	const std::vector<GraphSymbol> &symbols() const { return symbols_; }
+	// The base layer (ADR 0046 d10: a read-only dependency mount; project assets win): a lookup by
+	// name tries the project, then the base, whose files the project has a file of the name of
+	// are hidden; choices offers the base's names after the project's; the base makes no edge and
+	// no finding. Every edge is resolved again, under a new generation; null takes it away.
+	GraphUpdate set_base(std::shared_ptr<const GraphLayer> base);
+	const std::shared_ptr<const GraphLayer> &base() const { return base_; }
+
+	// The project's edges and symbols, in the files' order (the scan's), then each file's own.
+	void for_each_edge(const std::function<void(const GraphEdge &)> &visit) const;
+	void for_each_symbol(const std::function<void(const GraphSymbol &)> &visit) const;
+	size_t edge_count() const { return index_.edge_count(); }
+	size_t symbol_count() const { return index_.symbol_count(); }
 	// Every symbol of `kind`, inert ones too, in the order the files define them.
 	std::vector<const GraphSymbol *> symbols_of_kind(ReferenceKind kind) const;
 	const GraphStats &stats() const { return stats_; }
 
-	// The edges out of a file, by project-relative path or logical name.
+	// The edges out of a file: its slot's, by project-relative path, or by logical name the file
+	// the name resolves to (the first of it by path).
 	std::vector<const GraphEdge *> references_of(const std::string &file) const;
 	// The edges that resolve to a file (any kind that names it).
 	std::vector<const GraphEdge *> referrers_of_file(const std::string &logical_name) const;
@@ -172,11 +149,17 @@ public:
 	// The symbols a record defines (its file and record, as the edges name them): indexed, a
 	// string table defining one per key.
 	std::vector<const GraphSymbol *> symbols_of(const std::string &file, const std::string &record) const;
+	// The definitions the graph read from `document` when its slot is current for it (the same
+	// instance at the same revision: find_definition's reuse), each with its inert as the
+	// document's own lookup makes it (a stylesheet's earlier definition of a name), not the game's
+	// reading of the project; false, visiting nothing, when the slot is not.
+	bool for_each_definition(const Document &document,
+			const std::function<void(const GraphSymbol &symbol, bool inert)> &visit) const;
 
 	// Where a name of `kind` resolves. `file_out` receives the project-relative path of
-	// the file it names or the file defining the symbol. A file resolves to the file its
-	// kind's loader reads (reference_file_candidates, by `loader_arg`: a model's texture
-	// row's type).
+	// the file it names or the file defining the symbol (a base layer's file by its name). A file
+	// resolves to the file its kind's loader reads (reference_file_candidates, by `loader_arg`: a
+	// model's texture row's type).
 	ReferenceStatus resolve(ReferenceKind kind, const std::string &name, const std::string &scope = std::string(),
 	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
@@ -185,7 +168,8 @@ public:
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
 	// compares names, that `scope` matches (scope_matches: a string id in its table and
-	// section, a window on its screen) and a lookup finds; null for none, and for a file kind.
+	// section, a window on its screen) and a lookup finds, the project's before the base's; null
+	// for none, and for a file kind.
 	const GraphSymbol *resolve_symbol(ReferenceKind kind, const std::string &name,
 	                                  const std::string &scope = std::string()) const;
 	// A menu-style %NAME% through the stylesheets the game reads: its value, or the input
@@ -193,55 +177,88 @@ public:
 	std::string resolve_style(const std::string &value) const;
 	// The definition the game reads for a style variable ("NAME" or "%NAME%"): brand.mns
 	// over menu_style.mns, the last definition in each [orig: Menu_InitShellResources @
-	// 0x552500]; null when neither defines it where the game reads.
+	// 0x552500], each the project's file of that name, else the base's; null when neither defines
+	// it where the game reads.
 	const GraphSymbol *style_binding(const std::string &name) const;
 	// The names a reference of `kind` in `scope` may be given (the pickers), each with where it
 	// is defined and what the reference would then be (resolve, by `loader_arg`: a model's
 	// texture row's type): the project's files its loader can read; the symbols of the kind,
 	// only those the scope matches where the kind's picker narrows (scope_matches: a string id's
 	// table and section, the screens of a SCREEN ACTION's file, the windows of the acting
-	// window's screen, the points of the item's model; a scope of none, every one), each name once, as the first definition a lookup finds; then, marked
-	// inert with the reason, the names defined only where no lookup finds them; a style
-	// variable as its %NAME%, the definition the game reads.
+	// window's screen, the points of the item's model; a scope of none, every one), each name
+	// once, as the first definition a lookup finds; then, marked inert with the reason, the names
+	// defined only where no lookup finds them; a style variable as its %NAME%, the definition the
+	// game reads. Then the base layer's the same way, the names the project offers left out.
 	std::vector<ReferenceChoice> choices(ReferenceKind kind, const std::string &scope = std::string(),
 	                                     int32_t loader_arg = -1) const;
 
-	// Every verifiable edge whose target is missing, and the same as findings
+	// Every verifiable edge whose target is missing, in the files' order, and the same as findings
 	// ("reference.missing": an error, or a warning for what the game tolerates: a style
 	// variable, a string id, a menu's sound bank or credits file, the screen or window an
 	// ACTION names; a file a menu names through a style variable is reported
 	// once, where the stylesheet names it, and never for a stylesheet value the game does
 	// not read), then a warning for each file of a native kind the graph
 	// could not read ("graph.unreadable": its references are not checked; a document
-	// type's own validation reports a file of its kinds that does not load).
+	// type's own validation reports a file of its kinds that does not load), by path. Both are
+	// kept as the update resolves the edges, never made again by a call.
 	std::vector<const GraphEdge *> missing() const;
-	std::vector<Diagnostic> diagnostics() const;
+	size_t missing_count() const { return index_.missing().size(); }
+	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
 	// The "reference.missing" finding about an edge nothing resolves (diagnostics' row, which a
 	// picker builds for a field's value too, for the fixes Problems would offer).
 	Diagnostic missing_finding(const GraphEdge &edge) const;
 
-	// Whether the project has a file of this name (its logical name, or a path's file name).
+	// Whether the project, or its base layer, has a file of this name (its logical name, or a
+	// path's file name).
 	bool has_file(const std::string &name) const;
 	// Every symbol of `kind` named `name` (compared as the kind compares names), inert ones
-	// too, in the order the files define them.
+	// too, in the order the files define them, the project's then the base's.
 	std::vector<const GraphSymbol *> symbols_named(ReferenceKind kind, const std::string &name) const;
 
 private:
-	struct Extraction {
-		uint64_t size = 0;
-		int64_t modified = 0;
-		uint64_t identity = 0; // the open document's instance
-		uint64_t revision = 0;
-		bool open = false;
-		bool ok = true;
-		Diagnostic failure; // the graph.unreadable warning (no code when a validator reports it)
-		Extracted content;
+	using Ref = GraphIndex::Ref;
+	// What an update's reading of the files changed, which the resolution that follows reaches.
+	struct Patch;
+	// The definition the game reads of a style variable: the project's stylesheet's, or the
+	// base layer's; its file and value, and the kinds of the files its own value edges name (a
+	// menu's reference to a file through it is reported where the stylesheet names the file). Two
+	// bindings of a name are the same to what they reach when those are: a line moved in its file
+	// changes no edge naming the variable.
+	struct Binding {
+		bool base = false;
+		Ref symbol;
+		std::string file, value;
+		std::vector<ReferenceKind> value_kinds;
+		bool same(const Binding &other) const {
+			return base == other.base && file == other.file && value == other.value &&
+					value_kinds == other.value_kinds;
+		}
 	};
-	void assemble(const AssetScan &scan);
+
+	// A slot's reading replaced (the slot patched), or left as it was when it reads the same.
+	void take(uint32_t id, Extracted content, bool ok, const Diagnostic &failure, Patch &patch);
+	// A slot gone (its file no longer listed, or another file at its path).
+	void drop(uint32_t id, Patch &patch);
+	// The patch resolved: the bindings, the style variables' inert, every edge the patch reaches,
+	// the findings.
+	void resolve_patch(const Patch &patch, GraphUpdate &out);
+	// The bindings made again from the shell's stylesheets; the names whose binding changed.
+	std::vector<std::string> rebind();
+	// A style variable's inert as the game reads the project (the bindings); true when it moved.
+	bool derive(uint32_t id, uint32_t symbol);
+	// One edge resolved: its target, its status, the file it loads and whether it is missing, each
+	// entry of the index that changed moved.
+	void resolve_edge(Ref ref);
+	bool counts_missing(const GraphSlot &slot, const GraphEdge &edge, const std::string &target,
+	                    ReferenceStatus status) const;
+	void make_diagnostics();
 	std::string resolved_target(const GraphEdge &edge) const;
-	bool same_files(const AssetScan &scan) const;
+	// The file a name resolves to: the project's first of it by path, else the base's.
+	const GraphSlot *file_named(const std::string &key) const;
+	// Whether a base layer's file shows: the project has no file of its name.
+	bool base_file_shows(const GraphSlot &slot) const;
 	// The generation: the counter's next value on every construction, copy and assignment (a
-	// copy holds edges and symbols of its own); update() takes another when it assembles.
+	// copy holds edges and symbols of its own); update() takes another when it changes anything.
 	static uint64_t next_generation();
 	struct Generation {
 		uint64_t value = AssetGraph::next_generation();
@@ -253,44 +270,19 @@ private:
 		}
 	};
 
-	std::map<std::string, Extraction> cache_; // by project-relative path
-	std::vector<GraphEdge> edges_;
-	std::vector<GraphSymbol> symbols_;
-	std::map<std::string, size_t> style_bindings_; // upper-case name -> symbols_ index of what the game reads
-	// (name, kind) of each binding's value edges (a font or texture a variable names).
-	std::set<std::pair<std::string, ReferenceKind>> style_value_edges_;
-	// (file, locator) of each style variable the game does not read (GraphSymbol::inert):
-	// the file its value names is never loaded through it.
-	std::set<std::pair<std::string, std::string>> inert_style_values_;
-	struct FileRow { std::string path; std::string logical_name; AssetKind kind = AssetKind::Unknown; };
-	std::map<std::string, FileRow> files_; // normalized logical name -> the file
-	// The scan's files in its order, as the graph was last assembled over them.
-	std::vector<FileRow> scanned_;
-	Generation generation_;
-	std::multimap<std::string, size_t> symbol_index_; // kind token + '\n' + name -> symbols_ index
-	std::map<std::pair<std::string, std::string>, std::vector<size_t>> record_symbols_; // (file, record) -> symbols_ indexes
-	std::map<std::string, std::vector<size_t>> file_symbols_; // file -> symbols_ indexes
-	// The file edges that resolve to each file (by its path), made on the first ask after an
-	// update (resolving every file edge once), which referrers_of_file reads.
-	mutable std::shared_ptr<std::map<std::string, std::vector<size_t>>> file_users_;
-	std::multimap<std::string, size_t> edge_index_; // kind token + '\n' + target -> edges_ index
+	GraphIndex index_;
+	std::shared_ptr<const GraphLayer> base_;
+	std::map<std::string, Binding> bindings_; // upper-case name -> the definition the game reads
+	std::vector<Diagnostic> diagnostics_;
 	GraphStats stats_;
+	Generation generation_;
 };
 
-// The scope a menu's string id resolves in: the "menu" section of the table its window
-// reads (menu::window_text_rsrc; "" = none, so the scope matches no symbol and the game
-// shows the id) [orig: CUIStringTable_LookupString @ 0x6527c0].
-std::string menu_text_scope(const std::string &table);
 // True when a string id a table defines in section `symbol_scope` ("TABLE.BIN/Section")
 // is the one a reference scoped `reference_scope` reads: the same table (the flat file
 // name, without case), and the same section when the reference names one ("" = any
 // table).
 bool scope_matches(const std::string &symbol_scope, const std::string &reference_scope);
-// The scope a menu screen resolves in: its menu file's flat name, upper case ("MAIN.MNU").
-std::string menu_screen_scope(const std::string &menu_file);
-// The scope a menu window resolves in: its menu file and its screen's NAME, upper case
-// ("MAIN.MNU/STARTUP"). Screens of one name share it: the lookup finds the later one.
-std::string menu_window_scope(const std::string &menu_file, const std::string &screen);
 
 // The file names a reference of a file kind to `name` loads, in the order the game probes
 // them: the file is the first of them `exists` has (the graph asks the project, as the
@@ -321,13 +313,6 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 // (empty, NONE, NULL, a literal where a style variable could stand).
 bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &kind, std::string &name,
                       std::string &scope);
-// Where "Go to" on a use goes: the record of the edge's file that makes it (its locator, the
-// field shown), opened when the editor edits the file's kind, else the file shown in Files.
-ReferenceTarget usage_target(const GraphEdge &edge, const SessionView &view);
-// Where "Go to" on a definition goes: the record that defines a symbol (at its defining field),
-// and a file itself; opened, or shown in Files, as usage_target.
-ReferenceTarget symbol_target(const GraphSymbol &symbol, const SessionView &view);
-ReferenceTarget file_target(const std::string &file, const SessionView &view);
 
 // What a document references and defines, through its schema: every field's reference as it
 // applies to its record (Document::field_on), and a symbol for every field field_on says

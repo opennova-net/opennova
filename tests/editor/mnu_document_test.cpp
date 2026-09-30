@@ -15,6 +15,7 @@
 // blocks the menu and the build.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
 #include <base/vfs/vfs.h>
@@ -131,10 +132,12 @@ int structure_and_save() {
 	TEST_EXPECT(screen().name() == "STARTUP");
 	TEST_EXPECT(window_names(*document, screen()) == std::vector<std::string>({"MAIN", "TITLE", "EXIT"}));
 	NodeAddress title;
-	TEST_EXPECT(document->find("title", title) && title.kind == kWindow && document->window_index(title) == 1);
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "title", title) && title.kind == kWindow &&
+			document->window_index(title) == 1);
 	TEST_EXPECT(depth_of(*document, title) == 1 && sibling_place(*document, title).first == 0);
 	NodeAddress startup;
-	TEST_EXPECT(document->find("STARTUP", startup) && startup.kind == kScreen);
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "STARTUP", startup) &&
+			startup.kind == kScreen);
 	TEST_EXPECT(text_of(*document, title, "string.value") == "John Smith" && text_of(*document, title, "type") == "static");
 	TEST_EXPECT(text_of(*document, title, "string.justify") == "CENTER" && text_of(*document, title, "position.top") == "120");
 	const NodeAddress root{screen().id, kWindow, document->window_at(screen(), 0)};
@@ -204,8 +207,10 @@ int structure_and_save() {
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error) && document->rows().size() == 2);
 	TEST_EXPECT(document->collections_of({document->rows()[1]->id, kScreen, 0})[0].ids.size() == 1);
 	NodeAddress exit, elsewhere;
-	TEST_EXPECT(document->find("EXIT", exit, menu_window_scope(document->path(), document->rows()[0]->name())));
-	TEST_EXPECT(!document->find("EXIT", elsewhere, menu_window_scope(document->path(), document->rows()[1]->name())));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit,
+			menu_window_scope(document->path(), document->rows()[0]->name())));
+	TEST_EXPECT(!find_definition(AssetGraph(), *document, "EXIT", elsewhere,
+			menu_window_scope(document->path(), document->rows()[1]->name())));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu", document->locator(exit)));
 	TEST_EXPECT(view.selection == exit && window_of(*document, view.selection)->name == "EXIT");
 	return 0;
@@ -224,7 +229,7 @@ int validation() {
 	TEST_EXPECT(view.graph && view.graph->resolve(ReferenceKind::StyleVar, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
 	TEST_EXPECT(view.graph->resolve_style("%DEF_FONTNAME_LG%") != "%DEF_FONTNAME_LG%");
 	NodeAddress exit;
-	TEST_EXPECT(document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto edit = [&](const std::vector<Edit> &edits) {
 		EditorRequest request = make_request(EditorRequestKind::EditRecord, document->path());
 		request.edits = edits;
@@ -240,8 +245,9 @@ int validation() {
 	if (!font) return 1;
 	const FieldUse font_use = document->field_on(exit, *font);
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.diagnostics, "reference.missing"));
-	TEST_EXPECT(document->reference_status(font_use, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
-	TEST_EXPECT(document->reference_status(font_use, std::string("%DEF_FONTNAME_LG%"), view, nullptr) ==
+	TEST_EXPECT(reference_status(*view.graph, font_use, std::string("%NOPE%")) ==
+			ReferenceStatus::Missing);
+	TEST_EXPECT(reference_status(*view.graph, font_use, std::string("%DEF_FONTNAME_LG%")) ==
 	            ReferenceStatus::Present);
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.diagnostics, "reference.missing"));
 	// An APPEARANCE's value is a texture when its TYPE is IMAGE (field_on).
@@ -253,7 +259,8 @@ int validation() {
 	TEST_EXPECT(edit(image_edits(*document, exit, "missing.tga")) && has_code(view.diagnostics, "reference.missing"));
 	const FieldUse image = document->field_on(row, *value);
 	TEST_EXPECT(image.reference == ReferenceKind::MenuTexture);
-	TEST_EXPECT(document->reference_status(image, std::string("missing.tga"), view, nullptr) == ReferenceStatus::Missing);
+	TEST_EXPECT(reference_status(*view.graph, image, std::string("missing.tga")) ==
+			ReferenceStatus::Missing);
 	TEST_EXPECT(edit({set(exit, "string.type", std::string("ID")), set(exit, "string.value", std::string("NO_SUCH_ID"))}) &&
 	            has_code(view.diagnostics, "reference.missing"));
 	// An ACTION: a new row is POP_SCREEN; a SCREEN action names a menu file.
@@ -270,7 +277,7 @@ int validation() {
 		                                d.row_id == action.row && d.record_kind == action.kind);
 	TEST_EXPECT(on_the_field);
 	TEST_EXPECT(edit({set(action, "file", std::string("other.mnu"))}));
-	TEST_EXPECT(!document->reference_choices(font_use, view).empty()); // the project's fonts
+	TEST_EXPECT(!reference_choices(*view.graph, font_use).empty()); // the project's fonts
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds, blocked by the missing texture.
 	session.handle(make_request(EditorRequestKind::Build));
@@ -301,7 +308,8 @@ int windows_at_depth() {
 	TEST_EXPECT(document && !document->dirty());
 	auto screen = [&]() -> const Node & { return *document->rows()[0]; };
 	NodeAddress title, exit;
-	TEST_EXPECT(document->find("TITLE", title) && document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "TITLE", title) &&
+			find_definition(AssetGraph(), *document, "EXIT", exit));
 	const NodeAddress root{screen().id, kWindow, document->window_at(screen(), 0)};
 	const NodeAddress screen_address{screen().id, kScreen, 0};
 	// The screen holds its root windows; a window its lists in file order, its child
@@ -499,8 +507,10 @@ int every_list() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path) && document.identities_match());
 	NodeAddress back, main, spin, results;
-	TEST_EXPECT(document.find("BACK", back) && document.find("MAIN", main) && document.find("SPIN", spin) &&
-	            document.find("RESULTS", results));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back) &&
+			find_definition(AssetGraph(), document, "MAIN", main) &&
+			find_definition(AssetGraph(), document, "SPIN", spin) &&
+			find_definition(AssetGraph(), document, "RESULTS", results));
 	const std::string original = document.serialize().text;
 	Diagnostic error;
 	for (const Document::Collection &collection : document.collections_of(back)) {
@@ -591,7 +601,7 @@ int every_list() {
 	MnuDocument reloaded;
 	TEST_EXPECT(load(reloaded, path) && reloaded.serialize().text == document.serialize().text);
 	NodeAddress results_again;
-	TEST_EXPECT(reloaded.find("RESULTS", results_again));
+	TEST_EXPECT(find_definition(AssetGraph(), reloaded, "RESULTS", results_again));
 	TEST_EXPECT(text_of(reloaded, child_of(reloaded, child_of(reloaded, results_again, "items.row"), "item", 1), "text") ==
 	            "y.tga");
 	return 0;
@@ -606,7 +616,7 @@ int defaults_survive() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back;
-	TEST_EXPECT(document.find("BACK", back));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back));
 	Diagnostic error;
 	for (const Document::Collection &collection : document.collections_of(back))
 		if (collection.ids.empty())
@@ -676,7 +686,8 @@ int copy_and_paste() {
 	TEST_EXPECT(document);
 	const SessionView &view = session.view();
 	NodeAddress title, exit;
-	TEST_EXPECT(document->find("TITLE", title) && document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "TITLE", title) &&
+			find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto select = [&](const NodeAddress &address, SelectMode mode) {
 		EditorRequest request = make_request(EditorRequestKind::SelectRecord, document->path());
 		request.edit.address = address;
@@ -728,8 +739,9 @@ int copy_and_paste() {
 	const NodeId extra_root = extra->window_at(*extra->rows()[0], 0);
 	TEST_EXPECT(paste_into(*extra, extra_root, SIZE_MAX));
 	NodeAddress pasted;
-	TEST_EXPECT(extra->find("EXIT", pasted) && extra->ancestors(pasted).back().child == extra_root &&
-	            text_of(*extra, pasted, "string.value") == "Exit" && extra->identities_match());
+	TEST_EXPECT(find_definition(AssetGraph(), *extra, "EXIT", pasted) &&
+			extra->ancestors(pasted).back().child == extra_root &&
+			text_of(*extra, pasted, "string.value") == "Exit" && extra->identities_match());
 	// Cut: a copy, then one Remove of the selection.
 	select(title, SelectMode::Replace);
 	session.handle(make_request(EditorRequestKind::Cut, document->path()));
@@ -758,7 +770,9 @@ int duplicate_selection() {
 	const SessionView &view = session.view();
 	const std::string original = document->serialize().text;
 	NodeAddress main, title, exit;
-	TEST_EXPECT(document->find("MAIN", main) && document->find("TITLE", title) && document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "MAIN", main) &&
+			find_definition(AssetGraph(), *document, "TITLE", title) &&
+			find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto select = [&](const NodeAddress &address, SelectMode mode) {
 		EditorRequest request = make_request(EditorRequestKind::SelectRecord, document->path());
 		request.edit.address = address;
@@ -824,7 +838,8 @@ int copy_between_encodings() {
 	MnuDocument from, to;
 	TEST_EXPECT(load(from, code_page) && load(to, unicode));
 	NodeAddress cafe, main;
-	TEST_EXPECT(from.find("CAFE", cafe) && to.find("MAIN", main));
+	TEST_EXPECT(find_definition(AssetGraph(), from, "CAFE", cafe) &&
+			find_definition(AssetGraph(), to, "MAIN", main));
 	const std::string payload = from.copy({cafe});
 	TEST_EXPECT(!payload.empty() && payload.find("Caf\xC3\xA9") != std::string::npos);
 	Edit paste = op(EditOperation::Paste, {main.row, kWindow, 0}, main.child, 0);
@@ -832,14 +847,16 @@ int copy_between_encodings() {
 	Diagnostic error;
 	TEST_EXPECT(to.apply(paste, error));
 	NodeAddress copied;
-	TEST_EXPECT(to.find("CAFE", copied) && text_of(to, copied, "string.value") == "Caf\xC3\xA9");
+	TEST_EXPECT(find_definition(AssetGraph(), to, "CAFE", copied) &&
+	            text_of(to, copied, "string.value") == "Caf\xC3\xA9");
 	// And back into the code-page menu's roots, as its own byte (its name taken there).
 	const std::string back = to.copy({copied});
 	Edit again = op(EditOperation::Paste, {from.rows()[0]->id, kWindow, 0}, 0, 0);
 	again.value = back;
 	TEST_EXPECT(from.apply(again, error));
 	NodeAddress returned;
-	TEST_EXPECT(from.find("CAFE2", returned) && text_of(from, returned, "string.value") == "Caf\xE9" &&
+	TEST_EXPECT(find_definition(AssetGraph(), from, "CAFE2", returned) &&
+	            text_of(from, returned, "string.value") == "Caf\xE9" &&
 	            depth_of(from, returned) == 0 && from.window_index(returned) == 0);
 	// A character the code page cannot hold refuses the paste.
 	Edit foreign = again;
@@ -858,7 +875,9 @@ int copy_selection_shapes() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress results, caption, spin;
-	TEST_EXPECT(document.find("RESULTS", results) && document.find("CAPTION", caption) && document.find("SPIN", spin));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "RESULTS", results) &&
+			find_definition(AssetGraph(), document, "CAPTION", caption) &&
+			find_definition(AssetGraph(), document, "SPIN", spin));
 	const std::string alone = document.copy({results});
 	TEST_EXPECT(!alone.empty() && document.copy({results, caption}) == alone && document.copy({caption, results}) == alone);
 	Diagnostic error;
@@ -890,7 +909,8 @@ int duplicate_screen() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back;
-	TEST_EXPECT(document.find("BACK", back)); // the original's places are built
+	TEST_EXPECT(find_definition(
+			AssetGraph(), document, "BACK", back)); // the original's places are built
 	Diagnostic error;
 	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, {document.rows()[0]->id, kScreen, 0}, 0, 1), error));
 	TEST_EXPECT(document.rows().size() == 2 && document.identities_match());
@@ -905,7 +925,7 @@ int duplicate_screen() {
 	            document.address_at(document.locator(hotkey)) == hotkey);
 	TEST_EXPECT(document.apply(set(root, "name", std::string("COPY")), error));
 	NodeAddress found;
-	TEST_EXPECT(document.find("COPY", found) && found == root);
+	TEST_EXPECT(find_definition(AssetGraph(), document, "COPY", found) && found == root);
 	TEST_EXPECT(document.apply(op(EditOperation::Add, {second().id, kWindow, 0}, root.child), error) &&
 	            document.ancestors({second().id, kWindow, document.last_added()}).back() == root && document.identities_match());
 	TEST_EXPECT(text_of(document, back, "name") == "BACK" && text_of(document, root, "name") == "COPY");
@@ -925,7 +945,7 @@ int typed_add_and_screen_copy() {
 	const std::string original = document.serialize().text;
 	const NodeId row = document.rows()[0]->id;
 	NodeAddress main;
-	TEST_EXPECT(document.find("MAIN", main));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "MAIN", main));
 	Diagnostic error;
 	Edit add = op(EditOperation::Add, {row, kWindow, 0}, main.child);
 	add.field = "type";
@@ -1002,7 +1022,8 @@ int nested_lists() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back, results;
-	TEST_EXPECT(document.find("BACK", back) && document.find("RESULTS", results));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back) &&
+			find_definition(AssetGraph(), document, "RESULTS", results));
 	const std::string original = document.serialize().text;
 	Diagnostic error;
 	auto step = [&](const Edit &edit) { return document.apply(edit, error) && document.identities_match(); };
@@ -1070,7 +1091,8 @@ int shipped_shape_edits() {
 	const Node &row = *document.rows()[0];
 	const NodeAddress screen{row.id, kScreen, 0};
 	NodeAddress root, back;
-	TEST_EXPECT(document.find("MAIN", root) && document.find("BACK", back));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "MAIN", root) &&
+			find_definition(AssetGraph(), document, "BACK", back));
 	auto appearances = [&]() { return window_of(document, back)->appearances; };
 	auto hotkeys = [&]() { return window_of(document, back)->hotkeys; };
 	Diagnostic error;
@@ -1148,7 +1170,7 @@ int typed_clear_and_retype() {
 	MnuDocument document;
 	TEST_EXPECT(load(document, path));
 	NodeAddress back;
-	TEST_EXPECT(document.find("BACK", back));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back));
 	const NodeAddress image = child_of(document, back, "appearance", 3);
 	const NodeAddress escape = child_of(document, back, "hotkey");
 	auto appearances = [&]() { return window_of(document, back)->appearances; };
@@ -1253,7 +1275,7 @@ int parse_notes() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, "moved.mnu"));
 	Document *moved = session.document_for("moved.mnu");
 	NodeAddress b;
-	TEST_EXPECT(moved && moved->find("B", b) && b.child != 0);
+	TEST_EXPECT(moved && find_definition(AssetGraph(), *moved, "B", b) && b.child != 0);
 	if (!moved || !b.child) return 1;
 	const auto on_b = [&]() {
 		const Diagnostic *d = finding("moved.mnu", "menu.ignored_input");
@@ -1291,7 +1313,7 @@ int blank_menu_edits() {
 	const NodeAddress screen{row.id, kScreen, 0};
 	const NodeAddress root{row.id, kWindow, document->window_at(row, 0)};
 	NodeAddress exit;
-	TEST_EXPECT(document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit));
 	Diagnostic error;
 
 	// B5: EXIT is the last of MAIN's two children; Down (and a Move to where it is)
@@ -1801,7 +1823,8 @@ int changes_since_save() {
 	const NodeAddress screen_address{screen.id, kScreen, 0};
 	const NodeAddress root{screen.id, kWindow, document->window_at(screen, 0)};
 	NodeAddress exit, title;
-	TEST_EXPECT(document->find("EXIT", exit) && document->find("TITLE", title));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit) &&
+			find_definition(AssetGraph(), *document, "TITLE", title));
 	Diagnostic error;
 	const std::string saved_text = text_of(*document, title, "string.value");
 	TEST_EXPECT(document->apply(set(title, "string.value", std::string("Another title")), error));
@@ -1856,7 +1879,7 @@ int colours_and_flags() {
 	TEST_EXPECT(document);
 	if (!document) return 1;
 	NodeAddress exit;
-	TEST_EXPECT(document->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto schema = [&](const NodeAddress &at, const char *id) {
 		for (const FieldSchema &field : document->fields(at.kind))
 			if (field.id == id) return document->field_on(at, field);

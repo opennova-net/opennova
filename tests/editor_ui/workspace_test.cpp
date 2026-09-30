@@ -30,6 +30,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
@@ -1481,7 +1482,7 @@ void test_preview_follows() {
 	run.open("main.mnu");
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress title;
-	CHECK(menu && menu->find("TITLE", title), "the menu's title");
+	CHECK(menu && find_definition(AssetGraph(), *menu, "TITLE", title), "the menu's title");
 	if (!menu) return;
 	set_field(session, *menu, title, "name", std::string("HEADING"));
 	run.settle();

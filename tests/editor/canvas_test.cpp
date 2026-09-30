@@ -32,6 +32,7 @@
 #include <base/vfs/file_source.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/menu_canvas.h>
 #include <editor/preview/menu_screen_render.h>
@@ -204,7 +205,7 @@ struct NoFiles final : opennova::FileSource {
 
 NodeAddress named(const Document &document, const char *name) {
 	NodeAddress address;
-	document.find(name, address);
+	find_definition(AssetGraph(), document, name, address);
 	return address;
 }
 

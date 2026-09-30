@@ -41,10 +41,10 @@ inline bool operator!=(const NodeAddress &a, const NodeAddress &b) { return !(a 
 enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 
 // What a field names outside its own record. A document type resolves each kind
-// against the project (Document::reference_status). What each kind is to the graph (its
-// token, words, where it resolves, how names compare, what a missing one means) is its row
-// in graph/reference_kinds: a new kind is one value here and one row there, UserPoint staying
-// the last.
+// against the project (reference_status, graph/reference_queries). What each kind is to the graph
+// (its token, words, where it resolves, how names compare, what a missing one means) is its row in
+// graph/reference_kinds: a new kind is one value here and one row there, UserPoint staying the
+// last.
 enum class ReferenceKind {
 	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
 	OtherText, // a text key the editor does not resolve yet

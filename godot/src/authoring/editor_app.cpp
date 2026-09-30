@@ -16,6 +16,7 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_preview_json.h>
@@ -725,8 +726,12 @@ String EditorApp::get_record_name(int64_t p_id) const {
 }
 int64_t EditorApp::find_record(const String &p_symbol, const String &p_scope) const {
 	const auto *document = session_ ? session_->document_for() : nullptr;
+	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
 	NodeAddress address;
-	if (!document || !document->find(opennova::to_std(p_symbol), address, opennova::to_std(p_scope))) return 0;
+	if (!document || !graph ||
+	    !opennova::editor::find_definition(*graph, *document, opennova::to_std(p_symbol), address,
+	                                       opennova::to_std(p_scope)))
+		return 0;
 	return identity_of(address);
 }
 bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view().unsaved_prompt.open; }
@@ -1019,8 +1024,13 @@ String EditorApp::get_symbols_json(const String &p_kind) const {
 	const bool filtered = !p_kind.is_empty();
 	if (!graph || (filtered && !opennova::editor::reference_kind_from_token(opennova::to_std(p_kind), kind))) return String("[]");
 	opennova::io::JsonValue out = opennova::io::JsonValue::make_array();
-	for (const opennova::editor::GraphSymbol &symbol : graph->symbols())
-		if (!filtered || symbol.kind == kind) out.push(opennova::editor::graph_symbol_to_json(symbol));
+	if (filtered)
+		for (const opennova::editor::GraphSymbol *symbol : graph->symbols_of_kind(kind))
+			out.push(opennova::editor::graph_symbol_to_json(*symbol));
+	else
+		graph->for_each_symbol([&out](const opennova::editor::GraphSymbol &symbol) {
+			out.push(opennova::editor::graph_symbol_to_json(symbol));
+		});
 	return json_text(out);
 }
 String EditorApp::get_menu_preview_json() {

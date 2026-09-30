@@ -5,10 +5,9 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/source_issue_findings.h>
-#include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
 #include <runtime/menu/menu_screen_inputs.h>
+#include <runtime/menu/menu_text_tables.h>
 
 #include <algorithm>
 #include <cctype>
@@ -619,6 +618,18 @@ void MenuScreen::index_places() {
 }
 
 bool is_menu_kind(AssetKind kind) { return kind == AssetKind::Menu; }
+
+std::string menu_text_scope(const std::string &table) {
+	return strutil::to_upper(basename_of(table)) + "/" + menu::kMenuTextSection;
+}
+
+std::string menu_screen_scope(const std::string &menu_file) {
+	return strutil::to_upper(basename_of(menu_file));
+}
+
+std::string menu_window_scope(const std::string &menu_file, const std::string &screen) {
+	return menu_screen_scope(menu_file) + "/" + strutil::to_upper(screen);
+}
 
 // --- the declarations ------------------------------------------------------------------
 

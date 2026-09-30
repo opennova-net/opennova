@@ -36,7 +36,7 @@ enum class NameCase {
 };
 
 // How a site writes a name of the kind (the graph keys a name by its NameCase alone; a query
-// that takes a site's spelling reads it back first: Document::find).
+// that takes a site's spelling reads it back first: find_definition).
 enum class NameSpelling {
 	Name,          // the name itself
 	StyleVariable, // the whole value one %NAME% (mns::is_variable_reference)

@@ -7,8 +7,9 @@
 // the same id and type as the record's field_on gives it, and field_on never makes a read-only
 // field writable; a writable field set to the value it reads leaves the serialized bytes as they
 // were; every field a record defines a name by yields a symbol whose locator names that record,
-// and Document::find resolves its name in a scope only to a definition of its kind and name
-// there (nothing in a scope with none); every reference and definition kind has its
+// and find_definition resolves its name in a scope only to a definition of its kind and name
+// there (nothing in a scope with none), the same over the document alone and over a graph whose
+// slot is current for it (S13 D3); every reference and definition kind has its
 // reference_kinds row. S13 D2 adds what needs no multi-row edit: every record's locator finds it
 // again, and two loads of the file give every record the same identity; an optional field the
 // game reads on its record left out and written again (Clear, Write), a Clear of one left out
@@ -39,6 +40,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
 #include <formats/def/def_schema.h>
 
@@ -239,10 +241,33 @@ const char *const kNoScope = "CONTRACT_NO_SUCH_SCOPE";
 // name that a lookup reaches there: in its own scope this record, or the one of its name there a
 // lookup finds first; in another scope of that kind's definitions the one there, or nothing where
 // none is; in a scope no definition names nothing. A definition no lookup finds is still found,
-// by its name alone, to a definition of its kind and name.
+// by its name alone, to a definition of its kind and name. Each find answers alike over the
+// document alone and over a graph whose slot is current for it (the document's snapshot open in a
+// graph of its one file), which it then reads the definitions from.
 void check_symbols(const Fixture &fixture, const Document &document, const std::vector<NodeAddress> &records) {
 	Extracted extracted;
 	extract_from_document(document, extracted);
+	AssetGraph slotted;
+	AssetScan scan;
+	AssetEntry entry;
+	entry.logical_name = fixture.name;
+	entry.relative_path = document.path();
+	entry.kind = document.kind();
+	scan.entries.push_back(entry);
+	scan.index();
+	slotted.update(ProjectPaths::for_root("."), ProjectDocument(), scan,
+			{ std::shared_ptr<const Document>(document.snapshot()) });
+	check(slotted.for_each_definition(document, [](const GraphSymbol &, bool) {}), fixture.name,
+	      "a graph holding the document's snapshot has a slot current for the document");
+	const auto find = [&](const std::string &where, const std::string &name, NodeAddress &found,
+	                      const std::string &scope) {
+		NodeAddress by_slot;
+		const bool alone = find_definition(AssetGraph(), document, name, found, scope);
+		const bool read = find_definition(slotted, document, name, by_slot, scope);
+		check(read == alone && (!alone || by_slot == found), where,
+				"find answers alike over the graph's slot");
+		return alone;
+	};
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document.fields(address.kind)) {
 			const FieldUse field = document.field_on(address, schema);
@@ -274,8 +299,9 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 		      where, "a symbol's locator names its defining record");
 		NodeAddress found;
 		if (symbol.inert) {
-			check(document.find(symbol.display, found) && defined_as(symbol, found, false, std::string()), where,
-			      "find resolves a name no lookup reaches by the name alone");
+			check(find(where, symbol.display, found, std::string()) &&
+							defined_as(symbol, found, false, std::string()),
+					where, "find resolves a name no lookup reaches by the name alone");
 			continue;
 		}
 		// Its own scope, every other scope a definition of its kind has here, and one none has.
@@ -290,8 +316,8 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 				return !other.inert && other.kind == symbol.kind && other.name == symbol.name &&
 				       scope_matches(other.scope, scope);
 			});
-			const bool resolved = document.find(symbol.display, found, scope);
 			const std::string in = where + " in '" + scope + "'";
+			const bool resolved = find(in, symbol.display, found, scope);
 			if (!there) {
 				check(!resolved, in, "find resolves a name in a scope that does not define it to nothing");
 				continue;

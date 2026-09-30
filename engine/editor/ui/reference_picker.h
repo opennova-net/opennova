@@ -19,7 +19,7 @@ inline constexpr const char *kFileDragPayload = "opennova.file";
 // The reference picker (ADR 0046 S12): the one widget that picks the name a reference field
 // holds, in the Inspector's rows, its tables' cells and the stylesheet view. Its button (Pick,
 // or "..." in a table cell) opens a popup listing what the field may name (the graph's choices
-// in the field's scope, Document::reference_choices): each name with where it is defined and,
+// in the field's scope, reference_choices): each name with where it is defined and,
 // where the field would not reach it, what it would be (Missing); the names defined only where
 // no lookup of the game finds them are behind "Show unreachable", each with why. Typing narrows
 // the list, the arrows move through it, Enter picks, Escape closes. While the field's value is

@@ -73,7 +73,8 @@ void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users)
 		const GraphEdge &edge = *users[i];
 		ImGui::PushID(int(i));
 		const std::string where = edge.source + ": " + (edge.record.empty() ? std::string() : edge.record + " ") + "(" + edge.field + ")";
-		if (ImGui::Selectable(where.c_str())) window_requests::go_to(host, usage_target(edge, host.view()));
+		if (ImGui::Selectable(where.c_str()))
+			window_requests::go_to(host, usage_target(host.view().scan, edge));
 		ImGui::PopID();
 	}
 	ImGui::EndPopup();

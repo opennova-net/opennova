@@ -5,6 +5,7 @@
 // Escape closes the bar. Ctrl+Shift+F opens Find in project: a weapon's name finds its symbol,
 // whose Go to leads to the record defining it and whose opened list leads to the item using it;
 // going anywhere closes the modal.
+#include <editor/graph/reference_queries.h>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -45,8 +46,9 @@ struct FindProject {
 		const Document *weapons_document = session.document_for(weapons_path);
 		session.handle(make_request(EditorRequestKind::OpenDocument, items_path));
 		const Document *items_document = session.document_for(items_path);
-		return items_document && weapons_document && items_document->find("100300", item) &&
-		       weapons_document->find("Searchgun", weapon);
+		return items_document && weapons_document &&
+				find_definition(AssetGraph(), *items_document, "100300", item) &&
+				find_definition(AssetGraph(), *weapons_document, "Searchgun", weapon);
 	}
 	std::string locator(const std::string &path, const NodeAddress &address) {
 		const Document *document = session.document_for(path);
@@ -103,7 +105,9 @@ void test_find_bar() {
 	// The hit shown stops matching: the bar is on none, and the next is the one after it.
 	Document *items = project.session.document_for(project.items_path);
 	NodeAddress second, third;
-	CHECK(items && items->find("100301", second) && items->find("100302", third), "the other items");
+	CHECK(items && find_definition(AssetGraph(), *items, "100301", second) &&
+					find_definition(AssetGraph(), *items, "100302", third),
+			"the other items");
 	if (!items) return;
 	EditorRequest edit = make_request(EditorRequestKind::EditRecord, project.items_path);
 	edit.edit.address = second;
