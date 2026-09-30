@@ -145,11 +145,22 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 	return answer;
 }
 
+RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query) {
+	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings});
+	if (query.scope == ProblemScope::ActiveFile)
+		key = key | revision_key(view.revisions, {ViewConcern::ActiveDocument});
+	if (query.scope == ProblemScope::OpenFiles)
+		key = key | revision_key(view.revisions, {ViewConcern::DocumentSet});
+	if (query.fixable) key = key | problem_fix_key(view);
+	return key;
+}
+
 const ProblemAnswer &ProblemQueryCache::answer(const ProblemQuery &query, const SessionView &view) {
-	if (view_ != &view || revision_ != view.revision || query_ != query) {
+	const RevisionKey key = problem_query_key(view, query);
+	if (view_ != &view || key_ != key || query_ != query) {
 		answer_ = answer_problems(query, view);
 		view_ = &view;
-		revision_ = view.revision;
+		key_ = key;
 		query_ = query;
 	}
 	return answer_;
@@ -157,16 +168,13 @@ const ProblemAnswer &ProblemQueryCache::answer(const ProblemQuery &query, const 
 
 ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView &view) {
 	ProblemLocation location;
-	if (diagnostic.asset.empty()) return location;
-	for (const AssetEntry &entry : view.scan.entries) {
-		if (entry.relative_path != diagnostic.asset) continue;
-		location.path = entry.relative_path;
-		location.in_files = !is_editable_kind(entry.kind) || about_the_file(diagnostic.code);
-		if (!location.in_files && diagnostic.row_id) {
-			location.record = {diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
-			location.field = diagnostic.field;
-		}
-		break;
+	const AssetEntry *entry = view.scan.at_path(diagnostic.asset);
+	if (!entry) return location;
+	location.path = entry->relative_path;
+	location.in_files = !is_editable_kind(entry->kind) || about_the_file(diagnostic.code);
+	if (!location.in_files && diagnostic.row_id) {
+		location.record = {diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
+		location.field = diagnostic.field;
 	}
 	return location;
 }

@@ -13,6 +13,7 @@
 // reference kinds' table (D1), a symbol per defining field with its place (D2), and where Go
 // to leads and who uses a file (D3).
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -2011,9 +2012,97 @@ static int test_rename_keeps_loader_spelling() {
 	return 0;
 }
 
+// S13 D1: an update that finds the files as they were (their rows in the scan, what each read
+// references and defines) changes nothing: the generation stands and every edge and symbol stays
+// where it was, a file read again whose content is the same included. One whose files moved
+// assembles again. A generation is a process-wide counter's value: no two graphs, a copy or a
+// cleared graph share one. The symbols of a kind come in the order the files define them.
+static int test_generation() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_generation");
+	const std::string root = dir.file("G");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "G", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string items = root + "/defs/items.def";
+	const std::string text = "begin \"A\"\nid 100301\ntype building\ngraphic gone\nend\n"
+	                         "begin \"B\"\nid 100300\ntype building\nend\n";
+	TEST_EXPECT(editor_test::write_text(items, text));
+	AssetScan scan = scan_project_assets(paths, doc);
+	AssetGraph graph;
+	const uint64_t fresh = graph.generation();
+	graph.update(paths, doc, scan, {});
+	const uint64_t assembled = graph.generation();
+	TEST_EXPECT(assembled != fresh && !graph.edges().empty() && !graph.symbols().empty());
+	const GraphEdge *edge = &graph.edges().front();
+	const GraphSymbol *symbol = &graph.symbols().front();
+	const auto kept = [&graph, assembled, edge, symbol] {
+		return graph.generation() == assembled && &graph.edges().front() == edge &&
+				&graph.symbols().front() == symbol;
+	};
+	graph.update(paths, doc, scan, {});
+	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused == 1);
+	TEST_EXPECT(kept());
+	// The same bytes written again: read again, and still the graph as it was.
+	TEST_EXPECT(editor_test::write_text(items, text));
+	std::error_code ec;
+	fs::last_write_time(items, fs::last_write_time(items, ec) + std::chrono::seconds(5), ec);
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	TEST_EXPECT(graph.stats().files_extracted == 1);
+	TEST_EXPECT(kept());
+	// Another file in the project (a model the item may name): the rows moved.
+	TEST_EXPECT(editor_test::write_text(root + "/models/gone.3di", "x"));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	const uint64_t grown = graph.generation();
+	TEST_EXPECT(grown != assembled && grown != fresh);
+	// What a file references changed: assembled again.
+	const std::string other = "begin \"A\"\nid 100301\ntype building\ngraphic other\nend\n"
+	                          "begin \"B\"\nid 100300\ntype building\nend\n";
+	TEST_EXPECT(editor_test::write_text(items, other));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	const uint64_t changed = graph.generation();
+	TEST_EXPECT(changed != grown && changed != assembled && changed != fresh);
+	// A file the graph does not read (a mission's .mis, S13 PR0): its row counts, so one added
+	// assembles again, while what it holds is read by nothing, so a change to it keeps the graph.
+	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; one\n"));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	const uint64_t with_mis = graph.generation();
+	TEST_EXPECT(with_mis != changed && graph.stats().files_extracted == 0);
+	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; two, a longer line\n"));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	TEST_EXPECT(graph.generation() == with_mis && graph.stats().files_extracted == 0);
+	// The item ids in the order the file defines them (by name, 100300 would lead).
+	const std::vector<const GraphSymbol *> ids = graph.symbols_of_kind(ReferenceKind::Item);
+	TEST_EXPECT(ids.size() == 2 && ids[0]->name == "100301" && ids[1]->name == "100300");
+	TEST_EXPECT(graph.symbols_of_kind(ReferenceKind::Weapon).empty());
+	// Two graphs, a copy and a cleared graph: each a generation of its own, never one seen before.
+	std::set<uint64_t> seen = {fresh, assembled, grown, changed, with_mis};
+	AssetGraph another;
+	TEST_EXPECT(seen.insert(another.generation()).second);
+	const AssetGraph copy = graph;
+	TEST_EXPECT(seen.insert(copy.generation()).second);
+	TEST_EXPECT(copy.edges().size() == graph.edges().size());
+	graph.clear();
+	TEST_EXPECT(seen.insert(graph.generation()).second);
+	TEST_EXPECT(graph.edges().empty() && graph.symbols().empty());
+	another.clear();
+	TEST_EXPECT(seen.insert(another.generation()).second);
+	// Emptied, the graph reads the files again as a new one would.
+	graph.update(paths, doc, scan, {});
+	TEST_EXPECT(seen.insert(graph.generation()).second);
+	TEST_EXPECT(graph.symbols_of_kind(ReferenceKind::Item).size() == 2);
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
+	failures += test_generation();
 	failures += test_reference_kind_rows();
 	failures += test_reference_file_candidates();
 	failures += test_model_texture_references();

@@ -3,6 +3,7 @@
 #include <editor/assets/asset_import.h>
 #include <editor/model/document.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/session_revisions.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -26,10 +27,11 @@ class MenuRenderCheck;
 
 // Everything the editor's windows draw (ADR 0046 d10): the records in. The session owns
 // one and rewrites it as the project changes; the windows read it by const reference
-// every frame and never reach into the session. `revision` bumps on every change so a
-// window can cache derived text until it moves.
+// every frame and never reach into the session. `revisions` counts the changes of each
+// concern (session_revisions.h), so a window keeps what it derives until a concern it reads
+// moves.
 struct SessionView {
-	uint64_t revision = 0;
+	ViewRevisions revisions;
 
 	std::vector<std::shared_ptr<const Document>> documents;
 	std::string active_document;

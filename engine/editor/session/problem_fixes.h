@@ -84,26 +84,33 @@ std::vector<ProblemFix> bulk_fixes_for(const Diagnostic &diagnostic, const Sessi
 // role, one game-data import list naming every file, and every other request once.
 std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes);
 
-// The fixes of a view's findings, kept while its revision stands: the window asks for the
-// rows it shows every frame and the editor MCP for a page on every call, and a Use fix
-// plans a rename (the graph's edges walked, the name checked on the disk). The revision
-// moves with everything a fix reads (the findings, the files, the open documents, the game
-// install's files); the view's index is found once for it.
+// What the fixes of a view's findings read, as a cache's key (session_revisions.h): the
+// findings; the project (open, its folder); the files (the scan, the requirements, the game
+// install's file names); the graph (where a symbol belongs, a Use fix's rename); which
+// documents are open and unsaved (a Reload, a Rewrite's unsaved edits: DocumentSet, which an
+// edit that leaves a document as unsaved as it was does not move); the editor's settings (an
+// Import's dependencies).
+RevisionKey problem_fix_key(const SessionView &view);
+
+// The fixes of a view's findings, kept while what they read stands (problem_fix_key): the
+// window asks for the rows it shows every frame and the editor MCP for a page on every call,
+// and a Use fix plans a rename (the graph's edges walked, the name checked on the disk). The
+// view's index is found once for it.
 class ProblemFixCache {
 public:
 	// The fixes of view.diagnostics[index] (fixes_for).
 	const std::vector<ProblemFix> &fixes(const SessionView &view, size_t index);
 	// Its bulk fixes (bulk_fixes_for: cheap, not kept).
 	std::vector<ProblemFix> bulk(const SessionView &view, size_t index);
-	// How many findings' fixes it holds for the revision it keeps (each planned once).
+	// How many findings' fixes it holds for the key it keeps (each planned once).
 	size_t size() const { return fixes_.size(); }
 
 private:
-	// Forgets what it keeps when the view or its revision moved; the view's index.
+	// Forgets what it keeps when the view or its key moved; the view's index.
 	const ProblemFixIndex &follow(const SessionView &view);
 
 	const SessionView *view_ = nullptr;
-	uint64_t revision_ = 0;
+	RevisionKey key_;
 	std::unique_ptr<ProblemFixIndex> index_;
 	std::map<size_t, std::vector<ProblemFix>> fixes_;
 };

@@ -187,6 +187,13 @@ void disabled_wrapped(const std::string &text) {
 
 float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f; }
 
+// What the window makes of the view reads: the answer (problem_query_key), each finding's key,
+// the Fix alls and a confirmation's proposal (what the fixes read, the project's among them:
+// problem_fix_key).
+RevisionKey cache_key(const SessionView &view, const ProblemQuery &query) {
+	return problem_query_key(view, query) | problem_fix_key(view);
+}
+
 } // namespace
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -234,9 +241,10 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 // all and the summary's, made again when the revision, the query or the folded groups move.
 const ProblemAnswer &ProblemsWindow::refresh(const SessionView &view) {
 	const ProblemAnswer &answer = answers_.answer(query_, view);
-	if (!stale_ && view_ == &view && revision_ == view.revision && refreshed_ == query_) return answer;
+	const RevisionKey key = cache_key(view, query_);
+	if (!stale_ && view_ == &view && key_ == key && refreshed_ == query_) return answer;
 	view_ = &view;
-	revision_ = view.revision;
+	key_ = key;
 	refreshed_ = query_;
 	stale_ = false;
 	keys_.clear();
@@ -498,10 +506,10 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 		ImGui::EndPopup();
 		return;
 	}
-	if (shown_view_ != &view || shown_revision_ != view.revision) {
+	if (shown_view_ != &view || shown_key_ != cache_key(view, query_)) {
 		Proposal now = propose(view, confirm_);
 		shown_view_ = &view;
-		shown_revision_ = view.revision;
+		shown_key_ = cache_key(view, query_);
 		const auto signatures = [](const Proposal &proposal) {
 			std::vector<std::string> out;
 			for (const EditorRequest &request : proposal.requests) out.push_back(signature(request));
@@ -627,7 +635,7 @@ void ProblemsWindow::ask(const SessionView &view, Confirmation confirmation) {
 	confirm_ = std::move(confirmation);
 	shown_ = propose(view, confirm_);
 	shown_view_ = &view;
-	shown_revision_ = view.revision;
+	shown_key_ = cache_key(view, query_);
 	++shown_version_;
 	shown_changed_ = false;
 	open_confirm_ = true;
