@@ -19,6 +19,7 @@ namespace godot {
 	X(int64_t, quads_wire, 0)                      \
 	X(int64_t, quads_textured, 0)                  \
 	X(int64_t, quads_additive, 0)                  \
+	X(int64_t, quads_stage2, 0)                    \
 	X(int64_t, tris, 0)                            \
 	X(int64_t, lines, 0)                           \
 	X(int64_t, glyphs, 0)                          \

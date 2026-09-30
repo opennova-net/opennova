@@ -8,6 +8,7 @@
 #include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
 #include <net/npwire/protocol_message.h>  // ProtocolMessage
 #include <net/npwire/session_hello.h>     // DisconnectEvent
+#include <net/npwire/session_vars.h>      // SessionVars (the 0x60 server-info list)
 
 #include <cstddef>
 #include <cstdint>
@@ -55,10 +56,6 @@
 // [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730;
 // NapiNP_GetLocalConnectionId @0x4C6D40]. The owner pumps bytes; no socket I/O here.
 namespace opennova::inmatch {
-
-// The server-info VarList walk for EXP_FANFARE (u16, 0 when absent)
-// [orig: Client_ParseServerSessionVariables @0x520440, store @0x520478].
-uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len);
 
 enum class TerrainTilState : uint8_t {
 	Absent = 0,
@@ -559,11 +556,14 @@ public:
 	// The authenticated session (retail g_NapiNPCtx.is_in_session): Driving
 	// or InMatch — a dead player re-entering the deploy flow is still in it.
 	bool in_session() const { return phase_ == Phase::Driving || phase_ == Phase::InMatch; }
-	// The host VarList's EXP_FANFARE u16 (lo byte = the KILLTONE threshold, hi
-	// byte = the HEADSHOTTONE threshold) landed from the reassembled S2C 0x60
-	// server-info transfer [orig: Client_ParseServerSessionVariables @0x520440,
-	// the store @0x520478 -> g_SessionVarExpFanfare @0x24d5a10]. 0 = unset.
-	uint16_t exp_fanfare() const { return exp_fanfare_; }
+	// The host's session-variable list parsed from the reassembled S2C 0x60
+	// server-info transfer (npwire/session_vars.h): the server name and
+	// mission title the Tab board's header reads, and the EXP_FANFARE u16 (lo
+	// byte = the KILLTONE threshold, hi byte = the HEADSHOTTONE threshold)
+	// [orig: Client_ParseServerSessionVariables @0x5202f0, the store @0x520478
+	// -> g_SessionVarExpFanfare @0x24d5a10]. Empty / 0 until the transfer lands.
+	const SessionVars &session_vars() const { return session_vars_; }
+	uint16_t exp_fanfare() const { return session_vars_.exp_fanfare; }
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	// The server-assigned team latched from the S2C 0x04 tail byte, and re-latched by the
@@ -803,7 +803,7 @@ private:
 	uint32_t mission_metadata_total_size_ = 0;
 	uint32_t server_info_transfer_id_ = 0;
 	std::vector<uint8_t> server_info_bytes_;
-	uint16_t exp_fanfare_ = 0;
+	SessionVars session_vars_;
 	// The 0x64 block's [36, 48) window (the player-cap, game-type and mpattrib
 	// dwords) assembled across chunk boundaries; mask bit i = byte i received.
 	std::array<uint8_t, 12> mission_metadata_fixed_bytes_{};

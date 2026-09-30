@@ -72,8 +72,8 @@ std::string feed_actor_name(const ClientState &state, uint16_t index,
 
 
 // The Tab-board header as the shell needs it: the projection's counts plus
-// the session game type and names (joiner-decoded, empty on a host until the
-// host sessionvars are plumbed, D-HUD-24). One value the embedder fills; its
+// the session game type and names (the role's session variables,
+// inmatch::scoreboard_session_vars). One value the embedder fills; its
 // Godot record wraps it by value (ADR 0043 d10).
 struct ClientScoreboardSession {
 	ClientScoreboardHeader header;

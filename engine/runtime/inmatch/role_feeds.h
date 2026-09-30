@@ -15,6 +15,7 @@
 #include <runtime/hud/hud_frame.h> // HudSessionState
 #include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
 #include <runtime/hud/hud_map_view.h> // DeathMapFacts
+#include <net/npwire/session_vars.h> // SessionVars
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/friendly_tags.h>
@@ -86,6 +87,18 @@ hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 //  @0x423d64; HUD_DrawGameScoreOverlay @0x423060 — the team table
 //  @0x4232c5.., the carrier dword_A860C4 @0x423944..0x4239ee]
 void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out);
+
+// THE SESSION VARIABLES this client's HUD reads (the Tab board header's
+// server and mission rungs): a joiner's parse of the host's S2C 0x60 stream;
+// on the authority its own serializer's copies, which a listen host (a
+// session peer) then re-parses from its own stream, so the same caps apply;
+// empty on the bare local role.
+// [orig: Game_StartMission @0x5247d3..0x5247eb -> Game_SerializeMissionInfoToDataStream
+//  @0x523620 (the authority's copies); the peer's self-parse
+//  SaveFile_SendAndWaitForServerAck @0x5204c4..0x5204f5 ->
+//  Client_ParseServerSessionVariables @0x5202f0; the reader
+//  HUD_GetLoadingScreenTextByGameType @0x51f408 / @0x51f46b]
+SessionVars scoreboard_session_vars(const RoleView &view);
 
 // THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
 // screen and round-over latches off the replica, the session (a joiner's

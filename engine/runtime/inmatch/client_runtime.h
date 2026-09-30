@@ -479,6 +479,11 @@ public:
 	uint32_t session_max_players() const { return joiner_ ? joiner_->session_max_players() : 0; }
 	const std::string &server_name() const;
 	const std::string &mission_name() const;
+	// The joined session's variable list off the S2C 0x60 server-info transfer
+	// (JoinerConnection::session_vars); empty on the host's own view, whose
+	// copies come from its own serializer (role_feeds.h
+	// scoreboard_session_vars).
+	const SessionVars &session_vars() const;
 	const std::string &map_file() const;
 	const std::string &expansion() const;
 	const std::string &last_error() const;

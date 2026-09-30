@@ -25,6 +25,7 @@
 #include <net/npwire/ingame_decode.h>   // decode_entity_packet_sub_header / decode_player_extended_uplink
 #include <net/npwire/ingame_encode.h>   // encode_player_sync / encode_player_list (§5.1)
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/session_vars.h>     // the 0x60 server-info stream
 #include <net/npwire/replication_model.h> // PlayerReplicationState (POD) — the reply builders' input
 
 #include <runtime/world/entity.h> // world::Entity / EntityHandle — team @entity+344 read through owned_entity
@@ -271,19 +272,6 @@ void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
 	out.push_back(0);
 }
 
-void append_kv(std::vector<uint8_t> &out, const char *name, const void *data, uint32_t len) {
-	const size_t nlen = std::strlen(name);
-	out.insert(out.end(), name, name + nlen);
-	out.push_back(0);
-	append_u32_le(out, len);
-	const auto *bytes = static_cast<const uint8_t *>(data);
-	out.insert(out.end(), bytes, bytes + len);
-}
-
-void append_string_kv(std::vector<uint8_t> &out, const char *name, const std::string &value) {
-	append_kv(out, name, value.c_str(), static_cast<uint32_t>(value.size() + 1));
-}
-
 bool is_default_ash_session_config(const GameConfig &cfg) {
 	return cfg.mission_name == "AS - Dormant Volcano Isle" && cfg.mission_file == "ASH_I5A.BMS";
 }
@@ -376,36 +364,12 @@ uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live
 	return token == live_transfer_id ? offset : 0u;
 }
 
-// tag=0x60 chunked server-info KV transfer. [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350]
+// tag=0x60 chunked server-info KV transfer: the authority's session-variable
+// stream (host_session_vars). [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350;
+// the stream Game_SerializeMissionInfoToDataStream @0x523620]
 std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg, uint32_t transfer_id,
                                              uint32_t offset) {
-	std::vector<uint8_t> info_body;
-	append_string_kv(info_body, "SERVERNAME", cfg.server_name);
-	// Retail's Game_SerializeMissionInfoToDataStream @0x523620 substitutes the
-	// map filename only for the stock Co-op selector. Objective/waypoint Co-op
-	// (bit 0x20000) and every other mode retain MissionText's display title.
-	const bool uses_coop_filename = game_type::is_stock_coop(cfg.game_type);
-	append_string_kv(
-			info_body,
-			"MISSIONNAME",
-			uses_coop_filename ? cfg.mission_file : cfg.mission_name);
-	uint8_t gametype_le[4] = {
-			static_cast<uint8_t>(cfg.game_type & 0xFFu),
-			static_cast<uint8_t>((cfg.game_type >> 8) & 0xFFu),
-			static_cast<uint8_t>((cfg.game_type >> 16) & 0xFFu),
-			static_cast<uint8_t>((cfg.game_type >> 24) & 0xFFu),
-	};
-	append_kv(info_body, "GAMETYPE", gametype_le, 4);
-	append_string_kv(info_body, "CUSTOMTEXT", cfg.custom_text);
-	append_string_kv(info_body, "MISSIONFILENAME", cfg.mission_file);
-	// score.ini's EXP_FANFARE lo/hi thresholds: the joiner arms its kill /
-	// headshot score tones only when the lo byte is nonzero and lo < hi, so a
-	// {0,0} silences every tone [orig: Game_SerializeMissionInfoToDataStream
-	// @0x523620 writes word_24C1170; NapiNPClientMsg_ScoreDeltaSound @0x42A0B0].
-	const uint8_t exp_fanfare[] = {
-			static_cast<uint8_t>(cfg.exp_fanfare & 0xFFu),
-			static_cast<uint8_t>((cfg.exp_fanfare >> 8) & 0xFFu)};
-	append_kv(info_body, "EXP_FANFARE", exp_fanfare, 2);
+	const std::vector<uint8_t> info_body = encode_session_vars(host_session_vars(cfg));
 	return build_transfer_chunk(transfer_id, info_body.data(),
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
@@ -450,13 +414,12 @@ std::vector<uint8_t> build_tag1a_tick(uint32_t now_tick) {
 // tag=0x16 PLAYER-LIST. [orig: NapiNPClientMsg_PlayerList @0x42FAE0] Enumerates the LIVE player roster — the
 // host loopback (slot 0) + each spawned joiner (slot 1+) — so a joining client sees ITS OWN slot and can
 // bind its local player (golden: 0x16 grows 31 B [host only] -> 39 B [host + joiner] right before the
-// joiner deploys). `roster` is the connection_list; `fallback` covers the World-less/test path (no bound
-// players -> a single default entry). The wire SERIALIZE lives in encode_player_list (novaworld); this is
-// just the inmatch-side roster walk (it reads NapiNPConnection, which novaworld cannot) that builds the
-// entry list.
+// joiner deploys). `roster` is the connection_list; with no in-game player the list carries zero rows,
+// which empties every recipient's board [orig: the row loop over an empty pair list @0x50da54..0x50da62;
+// the client's unconditional apply @0x42fb46]. The wire SERIALIZE lives in encode_player_list (npwire);
+// this is just the inmatch-side roster walk (it reads NapiNPConnection) that builds the entry list.
 std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	                                    const std::vector<NapiNPConnection> &roster,
-                                        const PlayerReplicationState &fallback,
                                         world::World *world) {
 	PlayerListFrame frame;
 	world::MatchLiveScoreboard scoreboard;
@@ -496,6 +459,12 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		row.slot = c.reply.player_slot;
 		row.team = team;
 		row.spectator = c.link.spectator;
+		// The status word goes out only to a recipient whose slot+96481 byte is
+		// set, and nothing in JO writes that byte (the 2026-08-30 image-wide
+		// sweep, net-re "The slot hide bytes"): every host-sent status word is 0,
+		// whatever the row's slot+448 holds.
+		// [orig: NetPacket_SerializeScoreboard0x16 @0x504bd4..0x504bde]
+		row.status_flags = 0;
 		if (world != nullptr) {
 			if (const world::MatchPlayer *player =
 					world->match.player(c.link.owned_entity)) {
@@ -545,12 +514,6 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	}
 	for (const ScoredPlayerListEntry &entry : rows)
 		frame.players.push_back(entry.row);
-	if (frame.players.empty()) {
-		PlayerListEntry row;
-		row.slot = fallback.player_slot;
-		row.team = fallback.team;
-		frame.players.push_back(row);
-	}
 	frame.teams.resize(size_t(frame.team_count) + 1);
 	for (size_t team = 1; team < frame.teams.size(); ++team) {
 		const world::MatchLiveTeamScore &source = scoreboard.teams[team];
@@ -559,8 +522,20 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		frame.teams[team].koth_hold = source.alive_players;
 		frame.teams[team].ctf_flag = source.authored_objectives;
 	}
-	frame.in_game_count = static_cast<uint8_t>(
-			std::min<size_t>(frame.players.size(), 0xFFu));
+	// The in-game count is its own slot walk, not the row count: every active
+	// slot past its load (slot+100579 clear), the host's own slot (+5) counted
+	// only by a session peer — a dedicated host carries no own connection
+	// here, so the walk reduces to the in-match test.
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50dd5b..0x50dda9 ->
+	//  packet dword 1031, serialized as the trailer's first byte @0x504cda]
+	frame.in_game_count = static_cast<uint8_t>(std::min<size_t>(
+			static_cast<size_t>(std::count_if(roster.begin(), roster.end(),
+					[](const NapiNPConnection &c) { return is_in_match(c); })),
+			0xFFu));
+	// The spectator count rides the row loop: each emitted row whose spectator
+	// latch (slot+100567) is set, the same byte the row's bit 0 carries
+	// beside the slot team (slot+416) << 1.
+	// [orig: @0x50dace..0x50db0c; the row byte (latch & 1) + 2 * team @0x504c30]
 	frame.spectator_count = static_cast<uint8_t>(std::min<size_t>(
 			std::count_if(rows.begin(), rows.end(),
 					[](const ScoredPlayerListEntry &entry) {
@@ -806,6 +781,30 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 }
 
 } // namespace
+
+// The authority's session variables as its serializer writes them: the
+// configured server name; the mission title, or the map filename for the
+// stock Co-op selector (objective/waypoint Co-op, bit 0x20000, and every other
+// mode keep MissionText's display title); the game type; the custom text; the
+// map file; score.ini's EXP_FANFARE lo/hi thresholds (the joiner arms its
+// kill / headshot tones only when lo is nonzero and lo < hi, so {0,0}
+// silences them).
+// [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- SERVERNAME
+//  <- g_ServerNameStr @0x5236b1, MISSIONNAME the coop arm @0x523758 else
+//  [info]/title @0x5237df, GAMETYPE @0x5238c7, CUSTOMTEXT @0x523914,
+//  MISSIONFILENAME @0x5239a6, EXP_FANFARE word_24C1170 @0x523a39;
+//  NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+SessionVars host_session_vars(const GameConfig &cfg) {
+	SessionVars vars;
+	vars.server_name = cfg.server_name;
+	vars.mission_name =
+			game_type::is_stock_coop(cfg.game_type) ? cfg.mission_file : cfg.mission_name;
+	vars.game_type = cfg.game_type;
+	vars.custom_text = cfg.custom_text;
+	vars.mission_file = cfg.mission_file;
+	vars.exp_fanfare = cfg.exp_fanfare;
+	return vars;
+}
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
@@ -2435,12 +2434,8 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 ProtocolMessage build_player_list_message(const GameConfig &config,
                                           const std::vector<NapiNPConnection> &roster,
                                           world::World *world) {
-	// `fallback` only matters for an empty roster (World-less path); a real host always has >=1 bound
-	// player, so the enumerated roster wins. Build a minimal fallback rep from the config.
-	PlayerReplicationState fallback;
-	fallback.player_name = config.player_name;
 	ProtocolMessage message = make_protocol_message(
-			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, fallback, world));
+			s2c::PLAYER_LIST, build_reply_tag_16(config, roster, world));
 	message.reliable = false; // Server_BuildAndBroadcastScoreboard @0x50DE00 userParam=1
 	return message;
 }

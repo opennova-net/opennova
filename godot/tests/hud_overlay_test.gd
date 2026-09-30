@@ -685,6 +685,35 @@ func test_message_log_lists_expired_lines() -> void:
 			"Closing the window hides the history again.")
 
 
+# The stdbox border pieces bind the boxtile camo as a second texture stage the
+# flat HUD material combines, screen-anchored; the fill does not
+# [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
+#  the pieces @0x56b902; HUD_DrawTexturedQuad_0 @0x56b3e0].
+func test_stdbox_pieces_carry_the_camo_stage() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"HUDCHATTEXT 142 , 711",
+	]), PackedStringArray(["border.tga", "boxtile.tga"]),
+			{"border.tga": Vector2i(128, 128), "boxtile.tga": Vector2i(64, 64)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	hud.set_player_state(50, 1.0, 0, 80.0)
+	assert_eq(hud.get_draw_list_stats().quads_stage2, 0, "No box, no camo stage.")
+	hud.set_message_log_title("")
+	hud.set_message_log_shown(true)
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads_stage2, 8,
+			"The untitled box's eight border pieces carry the camo stage.")
+	assert_gt(stats.quads_textured, 8, "The wrap-tiled fill draws beside them.")
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The two-stage pieces render safely.")
+	hud.set_message_log_shown(false)
+	assert_eq(hud.get_draw_list_stats().quads_stage2, 0)
+
+
 # The AAS zone status panel's device seam: the anchor + atlases load through
 # the real VFS path, a null Simulation leaves no zone rows (nothing draws),
 # and hiding clears the state [orig: HUD_DrawZoneStatusPanel @0x5a2480 draws

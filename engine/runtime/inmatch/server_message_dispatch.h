@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_vars.h>
 
 #include <runtime/inmatch/game_config.h> // inmatch::GameConfig — the reactive reply handlers read it
 #include <runtime/inmatch/napi_np_connection.h>
@@ -129,6 +130,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       std::vector<NapiNPConnection> &roster,
                                                       world::World *world,
                                                       const ServerDispatchInputs &inputs = {});
+
+// The authority's session variables, the S2C 0x60 server-info stream's content
+// (npwire/session_vars.h) and, re-parsed, a listen host's own g_SessionVar*
+// copies. [orig: Game_SerializeMissionInfoToDataStream @0x523620]
+SessionVars host_session_vars(const GameConfig &cfg);
 
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the

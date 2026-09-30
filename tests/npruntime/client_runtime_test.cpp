@@ -44,6 +44,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/npwire/session_vars.h>
 #include <net/novacrypto/crc32.h>
 
 #include <runtime/world/ai.h>
@@ -3111,7 +3112,7 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 }
 
 // The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
-// ladder reads [orig: Client_ParseServerSessionVariables @0x520440 -> @0x520478].
+// ladder reads [orig: Client_ParseServerSessionVariables @0x5202f0 -> @0x520478].
 bool run_session_vars_exp_fanfare_walk() {
 	auto kv = [](std::vector<uint8_t> &out, const char *key, std::vector<uint8_t> value) {
 		for (const char *p = key; *p; ++p) out.push_back(uint8_t(*p));
@@ -3121,22 +3122,25 @@ bool run_session_vars_exp_fanfare_walk() {
 		out.push_back(uint8_t(n >> 16)); out.push_back(uint8_t(n >> 24));
 		out.insert(out.end(), value.begin(), value.end());
 	};
+	const auto fanfare = [](const std::vector<uint8_t> &stream) {
+		SessionVars vars;
+		decode_session_vars(stream.data(), stream.size(), vars);
+		return vars.exp_fanfare;
+	};
 	std::vector<uint8_t> body;
 	kv(body, "SERVERNAME", {'b', 'i', 'g', 'g', 'y', 0});
 	kv(body, "GAMETYPE", {0x20, 0x00, 0x03, 0x00});
 	kv(body, "EXP_FANFARE", {5, 20});
 	kv(body, "MISSIONFILENAME", {'x', 0});
-	if (!expect(inmatch::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
+	if (!expect(fanfare(body) == 0x1405,
 	            "exp_fanfare: lo byte 5 / hi byte 20 land as the u16"))
 		return false;
 	std::vector<uint8_t> absent;
 	kv(absent, "SERVERNAME", {'b', 0});
-	if (!expect(inmatch::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
-	            "exp_fanfare: an absent key reads 0"))
+	if (!expect(fanfare(absent) == 0, "exp_fanfare: an absent key reads 0"))
 		return false;
 	std::vector<uint8_t> truncated(body.begin(), body.begin() + 20);
-	return expect(inmatch::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
-	              "exp_fanfare: a truncated stream fails closed");
+	return expect(fanfare(truncated) == 0, "exp_fanfare: a truncated stream fails closed");
 }
 
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {

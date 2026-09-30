@@ -2948,6 +2948,14 @@ target_link_libraries(nw_ingame_encode_test PRIVATE opennova_net)
 target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
 
+# The session-variable list (npwire/session_vars.h): the 0x60 server-info
+# stream and the client parse [orig: Game_SerializeMissionInfoToDataStream
+# @0x523620; Client_ParseServerSessionVariables @0x5202f0].
+add_executable(session_vars_test novaworld/session_vars_test.cpp)
+target_link_libraries(session_vars_test PRIVATE opennova_net)
+target_include_directories(session_vars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session_vars COMMAND session_vars_test)
+
 # NET-0 tier-1 byte-stability gate (docs/maturity-program.md): FNV-1a64 vectors
 # over a deterministic synthetic corpus through every in-match encoder. Catches
 # SYMMETRIC codec changes the encode<->decode round-trip cannot see; vectors

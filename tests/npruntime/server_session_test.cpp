@@ -185,6 +185,67 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 	return true;
 }
 
+// The host's 0x16 rows, status words and trailer counts: no fallback row (an
+// empty pair list sends zero rows), every status word 0 (the recipient gate
+// slot+96481 is never set), the spectator bit and count off the latch, and
+// the in-game count as its own slot walk.
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row loop
+//  @0x50da54..0x50db21, the in-game walk @0x50dd5b..0x50dda9;
+//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30]
+bool check_host_scoreboard_status_and_counts() {
+	opennova::inmatch::GameConfig config;
+	opennova::PlayerList empty;
+	{
+		const opennova::ProtocolMessage message =
+				opennova::inmatch::build_player_list_message(config, {}, nullptr);
+		if (!expect(opennova::decode_player_list(
+		                    message.payload.data(), message.payload.size(), empty) &&
+		                    empty.players.empty() && empty.in_game_count == 0 &&
+		                    empty.spectator_count == 0,
+		            "no in-game player: zero rows and a zero trailer, no fallback row"))
+			return false;
+	}
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(3);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+	}
+	roster[0].link.owned_entity = spawn_player(1);
+	roster[1].link.owned_entity = spawn_player(0);
+	roster[1].link.spectator = true;
+	// roster[2] is in game but binds no entity: counted, not a row.
+	const opennova::ProtocolMessage message =
+			opennova::inmatch::build_player_list_message(config, roster, &world);
+	opennova::PlayerList list;
+	if (!expect(opennova::decode_player_list(
+	                    message.payload.data(), message.payload.size(), list),
+	            "host 0x16 decodes"))
+		return false;
+	if (!expect(list.players.size() == 2 && list.in_game_count == 3 &&
+	                    list.spectator_count == 1,
+	            "the in-game count walks the slots; the spectator count rides the rows"))
+		return false;
+	bool status_zero = true;
+	uint8_t spectator_flags = 0xFF;
+	for (const opennova::PlayerListRow &row : list.players) {
+		status_zero = status_zero && row.status_flags == 0;
+		if (row.slot_id == 1) spectator_flags = row.flags;
+	}
+	return expect(status_zero, "every host-sent status word is 0") &&
+	       expect(spectator_flags == 0x01,
+	              "the spectator row carries bit 0 over its zeroed team");
+}
+
 void add_retail_game_environment(opennova::ClientAuth &auth) {
 	for (const auto &field : {
 			std::pair{"BT", "0"},
@@ -4367,6 +4428,7 @@ int main() {
 	ok = check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() && ok;
 	ok = check_scoreboard_message_is_transient() && ok;
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
+	ok = check_host_scoreboard_status_and_counts() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
 	ok = check_script_change_reaches_the_same_frame() && ok;

@@ -441,6 +441,14 @@ private:
 	// the water plane. This material keeps that comparison in the raster pass.
 	Ref<Shader> minimap_water_shader_;
 	Ref<ShaderMaterial> minimap_water_material_;
+	// The flat HUD items' material: the default canvas draw plus the second
+	// texture stage a HudQuad::texture2 quad carries (the stdbox border
+	// pieces' screen-anchored camo). Both flat items (this control's own and
+	// the top-layer child) carry it so a stage-1 quad keeps its place in the
+	// kind-grouped submission.
+	Ref<Shader> flat_shader_;
+	Ref<ShaderMaterial> flat_material_;
+	bool flat_material_bound_ = false;
 	// The spinmap sandwich: the retail terrain draws twice (base + additive
 	// x4-stage resubmission), so the second pass and everything the map
 	// layers above it ride pinned-order child items (hud_map_pass_renderer.h).
@@ -479,6 +487,7 @@ private:
 	void push_label_fonts_(const opennova::hud::HudLabelFontChoice &p_choice);
 	void ensure_additive_item_();
 	void ensure_minimap_water_material_();
+	void ensure_flat_material_();
 	void ensure_map_materials_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
 	// One index range per flat kind of a draw list.

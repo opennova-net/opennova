@@ -1608,6 +1608,37 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
 	CHECK(full_tiles > 0, "the interior contains full-period tiles");
 
+	// The pieces' second texture stage: with the boxtile camo loaded every
+	// border piece carries it at the camo's own dims (the screen-anchored UV1
+	// divisors) and the fill carries none; without the camo's dims nothing
+	// does. [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
+	//  applied for the pieces @0x56b902; the style floats @0x56b357/@0x56b361]
+	for (const HudQuad &q : wide)
+		CHECK(q.texture2 == opennova::hud::kHudTexNone,
+				"no second stage while the camo's dims are unknown");
+	layout.box_tile_w = 256;
+	layout.box_tile_h = 128;
+	compiler.update_layout(layout);
+	{
+		int pieces = 0;
+		bool pieces_ok = true;
+		bool fill_ok = true;
+		for (const HudQuad &q : box_quads(1600.0f, 1200.0f)) {
+			const bool fill_cell = q.u0 > 3.0f * kCell - 0.01f;
+			if (fill_cell) {
+				if (q.texture2 != opennova::hud::kHudTexNone) fill_ok = false;
+				continue;
+			}
+			++pieces;
+			if (q.texture2 != opennova::hud::kHudTexBoxTile || q.stage2_w != 256.0f ||
+					q.stage2_h != 128.0f)
+				pieces_ok = false;
+		}
+		CHECK(pieces == 8, "the untitled box draws eight border pieces");
+		CHECK(pieces_ok, "every border piece binds the camo stage at its own dims");
+		CHECK(fill_ok, "the fill rides its own single-texture material");
+	}
+
 	// The TITLED top row: a title swaps the top edge for the row-3 cells —
 	// the stub, the title bar stretched to the measured gap, the end cap —
 	// and the plain top edge resumes after [orig: the outTechnique arm
@@ -1639,6 +1670,13 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(saw_stub && saw_bar && saw_cap,
 			"the titled top row draws the row-3 stub/bar/cap cells");
 	CHECK(!saw_plain_tl, "the plain (0,0) corner cell yields to the titled row");
+	{
+		int camo_pieces = 0;
+		for (const HudQuad &q : titled)
+			if (q.u0 < 3.0f * kCell - 0.01f && q.texture2 == opennova::hud::kHudTexBoxTile)
+				++camo_pieces;
+		CHECK(camo_pieces == 10, "the titled row's ten pieces all bind the camo stage");
+	}
 	state.scoreboard.title.clear();
 }
 

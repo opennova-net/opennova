@@ -1107,11 +1107,12 @@ Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
 	opennova::replication::ClientScoreboardSession v;
 	v.header = opennova::replication::scoreboard_header(runtime_->state());
 	// The drawer branches on the session game type (retail reads g_GameType
-	// @0x423acb); the header's session strings ride along — joiner-decoded,
-	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
+	// @0x423acb); the header's session strings are the role's session
+	// variables (inmatch/role_feeds.h scoreboard_session_vars).
 	v.game_type = runtime_->game_type();
-	v.server_name = runtime_->server_name();
-	v.mission_name = runtime_->mission_name();
+	const opennova::SessionVars vars = opennova::inmatch::scoreboard_session_vars(role_view());
+	v.server_name = vars.server_name;
+	v.mission_name = vars.mission_name;
 	out->assign(v);
 	return out;
 }

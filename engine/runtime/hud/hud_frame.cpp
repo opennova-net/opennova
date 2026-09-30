@@ -1923,17 +1923,23 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 // This is its OWN geometry, NOT the menu frame's model
 // (CUIElement_DrawFrame @0x64a210), where the pieces OVERHANG the rect.
 //
-// What binds where, and the one recorded divergence (D-HUD-24):
+// What binds where:
 //  - The BORDER PIECES bind border x boxtile — one combined material
 //    [orig: CGfxTexture_Create (ex sub_676EA0)(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
-//    applied for the piece pass @0x56b902]. Stage 1 is MODULATE(CURRENT,
-//    TEXTURE1) with a SCREEN-ANCHORED UV1 = (screen_px + 0.5)/boxtile_dim
+//    applied for the piece pass @0x56b902]. Its preferred permutation runs
+//    stage 0 MODULATE2X(TEXTURE, DIFFUSE) and stage 1 MODULATE2X(CURRENT,
+//    TEXTURE1), alpha MODULATE(TEXTURE, DIFFUSE) then MODULATE(CURRENT,
+//    TEXTURE1) — the device's tex op is MODULATE2X because
+//    GfxDevice_Modulate2XEnabled is always set [orig:
+//    RenderState_FindBestTextureFormatPermutation @0x6820c0, the two-stage
+//    search @0x682a24..0x682c9f; RenderState_DecodeModeColorStage @0x681080
+//    (0x600 / 0xF00, tex_blend_op @0x6810ff)] — so a piece reads
+//    saturate(2 x border x camo) at the stencil's alpha, the camo sampled
+//    SCREEN-ANCHORED and wrap-addressed: UV1 = (screen_px + 0.5)/boxtile_dim
 //    [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 — the dest-derived second UV pair
 //    @0x56b560-0x56b592; the divisors are the boxtile TGA's own w/h, stored
-//    into the style @0x56b357/@0x56b361]. We bind the raw stencil instead,
-//    so the pieces read plain where retail reads camo — recorded, not
-//    unknown; it needs a second texture stage this quad stream does not
-//    carry yet.
+//    into the style @0x56b357/@0x56b361]. Each piece quad carries that
+//    second stage (HudQuad::texture2) and the device leg combines it.
 //  - The FILL does NOT ride that combine: with the registration's zero
 //    fourth arg the drawer takes the plain path — the extracted cell's own
 //    single-texture material, one wrap-addressed quad whose UV is
@@ -1974,6 +1980,15 @@ void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
 	const float dh = crop_bottom ? (y1 - y0) * kBoxBottomCrop : (y1 - y0);
 	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color,
 			kHudTexBoxBorder);
+	// The combined material's second stage: the boxtile camo at its own
+	// dims, screen-anchored [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 with the
+	// style's boxtile w/h @0x56b97a..0x56bcbb].
+	if (layout_.box_tile_w > 0 && layout_.box_tile_h > 0) {
+		HudQuad &piece = draw_list_.quads.back();
+		piece.texture2 = kHudTexBoxTile;
+		piece.stage2_w = static_cast<float>(layout_.box_tile_w);
+		piece.stage2_h = static_cast<float>(layout_.box_tile_h);
+	}
 }
 
 void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,

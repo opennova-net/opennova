@@ -122,6 +122,11 @@ const std::string &ClientRuntime::mission_name() const {
 	return joiner_ ? joiner_->mission_name() : empty_runtime_string();
 }
 
+const SessionVars &ClientRuntime::session_vars() const {
+	static const SessionVars kNone;
+	return joiner_ ? joiner_->session_vars() : kNone;
+}
+
 const std::string &ClientRuntime::map_file() const {
 	return joiner_ ? joiner_->map_file() : empty_runtime_string();
 }

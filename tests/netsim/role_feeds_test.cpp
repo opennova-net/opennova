@@ -8,6 +8,7 @@
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
@@ -51,6 +52,34 @@ int main() {
 		std::vector<EntityLightingChange> changes;
 		sun.collect(bare, step, {}, {}, 5, changes);
 		CHECK(changes.empty() && sun.last_by_wire.size() == 1 && sun.layout_revision_seen == -1);
+	}
+
+	// The Tab board header's session variables: none on the bare role; the
+	// authority's serializer copies, re-parsed through the client caps on a
+	// session peer (a listen host); the stock Co-op selector names the map file.
+	// [orig: Game_SerializeMissionInfoToDataStream @0x523620;
+	//  SaveFile_SendAndWaitForServerAck @0x5204c4..0x5204f5;
+	//  Client_ParseServerSessionVariables @0x5203b5 / @0x5203e0]
+	{
+		CHECK(scoreboard_session_vars(RoleView{}).server_name.empty());
+		NapiNPServerCtx host;
+		host.config.server_name = std::string(40, 'S');
+		host.config.mission_name = "Dormant Volcano Isle";
+		host.config.mission_file = "ASH_I5A.BMS";
+		host.config.game_type = 0x10010;
+		RoleView view;
+		view.host = &host;
+		host.is_mp_session_peer = 0;
+		SessionVars vars = scoreboard_session_vars(view);
+		CHECK(vars.server_name.size() == 40 && vars.mission_name == "Dormant Volcano Isle");
+		host.is_mp_session_peer = 1;
+		vars = scoreboard_session_vars(view);
+		CHECK(vars.server_name == std::string(31, 'S') &&
+				vars.mission_name == "Dormant Volcano Isle" && vars.game_type == 0x10010);
+		host.config.game_type = 0x10020;
+		CHECK(scoreboard_session_vars(view).mission_name == "ASH_I5A.BMS");
+		host.config.game_type = 0x30020;
+		CHECK(scoreboard_session_vars(view).mission_name == "Dormant Volcano Isle");
 	}
 
 	// A joiner's view: the 0x1D header + 0x56 board folded into its replica state.

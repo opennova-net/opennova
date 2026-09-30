@@ -169,6 +169,22 @@ struct HudQuad {
 	int32_t texture = kHudTexNone;
 	bool filled = true;    // false = 1px wireframe rect
 	bool additive = false; // SIGHTS add-blend rows
+	// A second texture stage (kHudTexNone = none): the quad's colour is
+	// saturate(2 * stage0 * texture2) and its alpha stage0.a * texture2.a --
+	// MODULATE2X(CURRENT, TEXTURE) colour, MODULATE(CURRENT, TEXTURE) alpha --
+	// with texture2 sampled SCREEN-ANCHORED and wrap-addressed: UV1 =
+	// (screen_px + 0.5) / stage2 at each corner, i.e. surface pixel i shows
+	// texel i mod stage2 (the half pixel is D3D9's pixel-centre rule; a
+	// raster whose pixel centres sit at i + 0.5 samples the same texel at
+	// px / stage2). Only the stdbox border pieces carry one.
+	// [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 -- UV1 @0x56b560..0x56b5a7 over
+	//  the stage dims passed in; the 0x651 two-texture material's preferred
+	//  permutation RenderState_FindBestTextureFormatPermutation @0x6820c0 --
+	//  stage 1 colour RenderState_DecodeModeColorStage(0xF00) @0x682b5a,
+	//  alpha RenderState_DecodeModeAlphaStage(0xF0) @0x682b2b]
+	int32_t texture2 = kHudTexNone;
+	float stage2_w = 0.0f;
+	float stage2_h = 0.0f;
 };
 
 // One textured triangle (the crosshair's tapered arm strips)
@@ -310,6 +326,11 @@ struct HudLayout {
 	// is a quarter of it), the same texture-derived rule the icon strips use.
 	bool box_texture_valid = false;
 	int box_tex_w = 0;
+	// The boxtile camo's own dims, the border pieces' second-stage UV
+	// divisors [orig: stored into the style as floats @0x56b357 / @0x56b361,
+	// passed to HUD_DrawTexturedQuad_0 for every piece @0x56b97a..0x56bcbb].
+	int box_tile_w = 0;
+	int box_tile_h = 0;
 	bool net_icon_texture_valid = false;
 	// The AAS zone status panel: the LFP_FLAGS anchor (the panel's right edge
 	// and its row base) and the three team-icon atlases + the two tile slots

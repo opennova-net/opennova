@@ -95,6 +95,48 @@ void fragment() {
 }
 )";
 
+// The flat HUD items' shader. A quad with a second texture stage arrives as a
+// triangle pair whose UV.x carries a +8 flag (flat HUD UVs stay inside
+// [0, ~1.01]); its vertex() strips the flag and derives the stage-1 UV from
+// the surface position -- UV1 = (screen_px + 0.5) / stage dims in retail's
+// D3D9 raster, whose pixel centres sit on the integers; here pixel centres
+// sit at +0.5, so px / stage dims samples the same texel -- and fragment()
+// applies MODULATE2X(CURRENT, TEXTURE1) to the colour and MODULATE(CURRENT,
+// TEXTURE1) to the alpha, the stage-1 texture wrap-addressed. Every other
+// command keeps the default COLOR (vertex colour x TEXTURE). The witness
+// rides the engine's HudQuad::texture2 (runtime/hud/hud_frame.h).
+constexpr const char *kHudFlatShader = R"(
+shader_type canvas_item;
+render_mode unshaded, blend_mix;
+
+uniform sampler2D stage1_texture : repeat_enable, filter_nearest;
+uniform vec2 stage1_inv_size = vec2(0.0);
+
+varying flat float stage1_on;
+varying vec2 stage1_uv;
+
+void vertex() {
+	stage1_on = 0.0;
+	stage1_uv = vec2(0.0);
+	if (UV.x >= 4.0) {
+		UV.x -= 8.0;
+		stage1_on = 1.0;
+		stage1_uv = VERTEX * stage1_inv_size;
+	}
+}
+
+void fragment() {
+	if (stage1_on > 0.5) {
+		vec4 camo = texture(stage1_texture, stage1_uv);
+		COLOR.rgb = min(COLOR.rgb * camo.rgb * 2.0, vec3(1.0));
+		COLOR.a *= camo.a;
+	}
+}
+)";
+
+// The +8 UV flag a second-stage quad's vertices carry into kHudFlatShader.
+constexpr float kStage1UvFlag = 8.0f;
+
 } // namespace
 
 int HudOverlay::hud_color_index_default() { return opennova::hud::kHudColorIndexDefault; }
@@ -542,15 +584,18 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	{
 		// The Tab board's stdbox atlases + the connection-icon strip. Absent
 		// files simply leave the board unframed rather than failing the HUD.
-		// The drawer samples only the border atlas today (the fill's brush
-		// cell lives inside it); boxtile.tga stays registered for the
-		// recorded border-x-camo combine residual, and the valid gate still
+		// The fill samples the border atlas's brush cell; boxtile.tga is the
+		// pieces' second texture stage (HudQuad::texture2), and the valid gate
 		// requires it because retail's style ctor draws NOTHING without the
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
 		const Ref<Texture2D> border = load_hud_texture_("border.tga");
 		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
+		// The camo's own dims divide the pieces' screen-anchored second UV
+		// (HudLayout::box_tile_w/h carries the witness).
+		layout_.box_tile_w = brush.is_valid() ? brush->get_width() : 0;
+		layout_.box_tile_h = brush.is_valid() ? brush->get_height() : 0;
 		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
@@ -1582,6 +1627,7 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	int64_t quads_wire = 0;
 	int64_t quads_textured = 0;
 	int64_t quads_additive = 0;
+	int64_t quads_stage2 = 0;
 	int64_t tris = 0;
 	int64_t lines = 0;
 	int64_t glyphs = 0;
@@ -1618,6 +1664,9 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 			if (quad.additive) {
 				++quads_additive;
 			}
+			if (quad.texture2 != opennova::hud::kHudTexNone) {
+				++quads_stage2;
+			}
 		}
 		tris = static_cast<int64_t>(list.tris.size());
 		lines = static_cast<int64_t>(list.lines.size());
@@ -1645,6 +1694,7 @@ Ref<HudDrawListStats> HudOverlay::get_draw_list_stats() {
 	out->set_quads_wire(quads_wire);
 	out->set_quads_textured(quads_textured);
 	out->set_quads_additive(quads_additive);
+	out->set_quads_stage2(quads_stage2);
 	out->set_tris(tris);
 	out->set_lines(lines);
 	out->set_glyphs(glyphs);
@@ -1803,6 +1853,11 @@ void HudOverlay::_draw() {
 	const uint64_t t0 = timing ? clock->get_ticks_usec() : 0;
 	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
 	const uint64_t t1 = timing ? clock->get_ticks_usec() : 0;
+	if (!flat_material_bound_) {
+		ensure_flat_material_();
+		rs->canvas_item_set_material(get_canvas_item(), flat_material_->get_rid());
+		flat_material_bound_ = true;
+	}
 	render_list_(list);
 	if (timing) {
 		const uint64_t t2 = clock->get_ticks_usec();
@@ -1873,6 +1928,16 @@ void HudOverlay::ensure_top_item_() {
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
 	// Above the big-map sandwich (draw indices 5..8).
 	rs->canvas_item_set_draw_index(top_item_, 9);
+	ensure_flat_material_();
+	rs->canvas_item_set_material(top_item_, flat_material_->get_rid());
+}
+
+void HudOverlay::ensure_flat_material_() {
+	if (flat_material_.is_valid()) return;
+	flat_shader_.instantiate();
+	flat_shader_->set_code(kHudFlatShader);
+	flat_material_.instantiate();
+	flat_material_->set_shader(flat_shader_);
 }
 
 void HudOverlay::render_flat_runs_(const RID &p_item, const HudDrawList &p_list,
@@ -1924,6 +1989,35 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 		Ref<Texture2D> tex;
 		if (quad.texture >= 0 && quad.texture < kTextureSlots) {
 			tex = textures_[static_cast<size_t>(quad.texture)];
+		}
+		// A second texture stage: the flagged triangle pair kHudFlatShader
+		// combines, the stage-1 texture and its divisors bound on the item's
+		// material (every such quad names the same stage, the boxtile camo).
+		if (quad.texture2 >= 0 && quad.texture2 < kTextureSlots && tex.is_valid() &&
+				quad.stage2_w > 0.0f && quad.stage2_h > 0.0f &&
+				textures_[static_cast<size_t>(quad.texture2)].is_valid()) {
+			ensure_flat_material_();
+			flat_material_->set_shader_parameter("stage1_texture",
+					textures_[static_cast<size_t>(quad.texture2)]);
+			flat_material_->set_shader_parameter("stage1_inv_size",
+					Vector2(1.0f / quad.stage2_w, 1.0f / quad.stage2_h));
+			const Vector2 corners[4] = { Vector2(quad.x0, quad.y0), Vector2(quad.x1, quad.y0),
+				Vector2(quad.x1, quad.y1), Vector2(quad.x0, quad.y1) };
+			const Vector2 uvs[4] = { Vector2(quad.u0 + kStage1UvFlag, quad.v0),
+				Vector2(quad.u1 + kStage1UvFlag, quad.v0), Vector2(quad.u1 + kStage1UvFlag, quad.v1),
+				Vector2(quad.u0 + kStage1UvFlag, quad.v1) };
+			PackedVector2Array points, uv;
+			PackedColorArray colors;
+			PackedInt32Array indices;
+			for (int corner = 0; corner < 4; ++corner) {
+				points.push_back(corners[corner]);
+				uv.push_back(uvs[corner]);
+				colors.push_back(color);
+			}
+			for (int index : { 0, 1, 2, 0, 2, 3 }) indices.push_back(index);
+			rs->canvas_item_add_triangle_array(p_item, indices, points, colors, uv,
+					PackedInt32Array(), PackedFloat32Array(), tex->get_rid());
+			continue;
 		}
 		if (quad.additive) {
 			// Per-command blend modes do not exist on a CanvasItem: additive
