@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include <editor/assets/project_asset_source.h>
 #include <editor/session/view/session_view.h>
 
 #include "env/mission_environment.h"

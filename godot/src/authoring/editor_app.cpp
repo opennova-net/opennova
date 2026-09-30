@@ -25,6 +25,8 @@
 #include <editor/preview/menu_report.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_json.h>
+#include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/session_json.h>
