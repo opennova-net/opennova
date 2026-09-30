@@ -37,11 +37,14 @@ bool draw(const char *id, char *buffer, size_t size, ImGuiInputTextFlags flags, 
 	return ImGui::InputText(id, buffer, size, flags, callback, user);
 }
 
-} // namespace
-
+// The bytes a box over a text of `size` bytes holds with a field `width` wide (the terminator
+// included): the width, or the text and its terminator where the text is longer; 0 for a width
+// of 0 (the box grows with what is typed).
 size_t capacity(size_t size, size_t width) {
 	return width ? std::max(width, size + 1) : 0;
 }
+
+} // namespace
 
 bool edit(const char *id, std::string &text, size_t width, const Box &box) {
 	const ImGuiInputTextFlags flags = box.enter_returns ? ImGuiInputTextFlags_EnterReturnsTrue : 0;

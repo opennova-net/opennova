@@ -6,9 +6,6 @@
 
 namespace opennova::editor {
 
-class Document;
-struct OutlineLine;
-
 // What an outline view of a type is (its DocumentViewRow's make): its mode, the heading of the
 // master column (master and detail: the rows' words, "Sections"), and the hook of a type whose
 // files hold file-wide values a list shows after its rows (null: none).
@@ -43,8 +40,6 @@ public:
 
 	void draw(Workspace &workspace, const DocumentBase &document) override;
 	void rebind(const DocumentBase &document) override;
-
-	const OutlineModel &model() const { return model_; }
 
 private:
 	void draw_list(Workspace &workspace, const Document &document);

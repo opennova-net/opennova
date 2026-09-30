@@ -105,8 +105,8 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 	}
 }
 
-// Every tree node and collapsing header of the window "Tab" open, as a click leaves them: the
-// sections a type's view folds (an item table's vehicle spawn registry).
+// The section a view folds set open in the window "Tab"'s own state, as a click leaves it: the
+// outline's file-wide values (an item table's vehicle spawn registry).
 void unfold() {
 	ImGuiWindow *tab = ImGui::FindWindowByName("Tab");
 	if (!tab) return;

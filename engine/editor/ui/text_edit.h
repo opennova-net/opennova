@@ -34,11 +34,6 @@ struct Box {
 // it.
 bool edit(const char *id, std::string &text, size_t width, const Box &box = Box());
 
-// The bytes a box over a text of `size` bytes holds with a field `width` wide (the terminator
-// included): the width, or the text and its terminator where the text is longer; 0 for a width
-// of 0 (the box grows with what is typed).
-size_t capacity(size_t size, size_t width);
-
 // A record's text field edited in place as a table's cell (a string table's key and text, a
 // stylesheet's name, value and comment): the whole cell (its column's header names the field: the
 // box's id is "##<field>"), over the field's value (edit above: the whole of it), `lines` lines
