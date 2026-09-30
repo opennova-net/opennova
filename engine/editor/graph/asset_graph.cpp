@@ -1,6 +1,7 @@
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -161,7 +162,16 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 	// neither moved it stays as it is, every edge and symbol where it was.
 	if (!moved && same_files(scan)) return;
 	assemble(scan);
-	++generation_;
+	generation_.value = next_generation();
+}
+
+uint64_t AssetGraph::next_generation() {
+	static std::atomic<uint64_t> next{1};
+	return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+void AssetGraph::clear() {
+	*this = AssetGraph(); // the assignment takes the generation anew
 }
 
 bool AssetGraph::same_files(const AssetScan &scan) const {

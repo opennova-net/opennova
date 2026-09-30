@@ -200,7 +200,10 @@ static int test_scan_exclusions_and_diagnostics() {
 
 // The scan's lookups over a scan made by hand: 2,000 files named in the reverse of their order,
 // indexed (keyed, sorted, their paths indexed), each found by name and by path, in a copy of the
-// scan too (the index holds places, not addresses); what it lacks, none.
+// scan too (the index holds places, not addresses); what it lacks, none. Its entries changed
+// after index(): a file pushed is found by its name and its path, and a thousand erased are
+// found no more while the others still are, nothing read past the entries (the lookups walk
+// them until index() runs again).
 static int test_lookups() {
 	AssetScan scan;
 	for (int i = 1999; i >= 0; --i) {
@@ -225,6 +228,23 @@ static int test_lookups() {
 	TEST_EXPECT(!scan.find("f2000.def") && !scan.find("") && !scan.find("f0000.de"));
 	TEST_EXPECT(!scan.at_path("defs/f0000.def") && !scan.at_path("defs/odd/f0000.def"));
 	TEST_EXPECT(!scan.at_path(""));
+	AssetScan changed = scan;
+	AssetEntry late;
+	late.logical_name = "Late.def";
+	late.relative_path = "defs/late/Late.def";
+	late.kind = AssetKind::ItemDefs;
+	changed.entries.push_back(late);
+	TEST_EXPECT(changed.find("late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.at_path("defs/late/Late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.find("f0005.def") && changed.at_path("defs/odd/f0005.def"));
+	changed.entries.erase(changed.entries.begin(), changed.entries.begin() + 1000);
+	TEST_EXPECT(!changed.find("f0000.def") && !changed.at_path("defs/even/f0000.def"));
+	TEST_EXPECT(changed.find("f1999.def") && changed.at_path("defs/odd/f1999.def"));
+	TEST_EXPECT(changed.find("late.def") && changed.at_path("defs/late/Late.def"));
+	changed.index();
+	TEST_EXPECT(sorted_by_key(changed) && changed.entries.size() == 1001);
+	const AssetEntry *late_entry = changed.at_path("defs/late/Late.def");
+	TEST_EXPECT(late_entry && changed.find("LATE.DEF") == late_entry);
 	return 0;
 }
 

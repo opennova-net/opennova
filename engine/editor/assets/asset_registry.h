@@ -34,7 +34,8 @@ struct AssetScan {
 	const AssetEntry *at_path(std::string_view relative_path) const;
 	// Keys each entry, sorts the entries by key then path, and indexes their paths: what
 	// scan_project_assets does with the files it found. A scan made by hand calls it before it
-	// is read, and again after its entries change.
+	// is read, and again after its entries change; until it does, the two lookups walk the
+	// entries (a warning on the log sink says so) and never read past them.
 	void index();
 
 private:

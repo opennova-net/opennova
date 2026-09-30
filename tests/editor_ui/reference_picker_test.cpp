@@ -238,8 +238,9 @@ void test_missing_value_fixes() {
 
 // S13 D1: a popup's list (the graph's choices, a missing value's finding and its fixes) is made
 // when it opens and kept while what it reads stands: a line of Output and the status line leave
-// it; an edit of its document, or a file the graph gains, make it again. A picker of the test's
-// own, on the item's model field, in a window of its own.
+// it; an edit of its document, an edit of another that changes what the graph holds (the files
+// as they were), or a file the graph gains, make it again. A picker of the test's own, on the
+// item's model field, in a window of its own.
 void test_list_kept() {
 	PickerProject project;
 	CHECK(project.open(), "the item table's project");
@@ -280,6 +281,28 @@ void test_list_kept() {
 	project.session.handle(set);
 	draw(false);
 	CHECK(picker.lists_made() == 2, "its document edited: the list made again");
+	// The start menu's TITLE window renamed: a name it defines, so the graph moves, while the
+	// files, the project, the settings and the item table stand.
+	const ViewRevisions before = project.session.view().revisions;
+	const uint64_t revision = project.items->revision();
+	project.session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	const Document *menu = project.session.document_for("main.mnu");
+	NodeAddress title;
+	CHECK(menu && menu->find("TITLE", title), "the start menu's TITLE window");
+	EditorRequest rename = make_request(EditorRequestKind::EditRecord, "main.mnu");
+	rename.edit.address = title;
+	rename.edit.field = "name";
+	rename.edit.value = std::string("HEADING");
+	project.session.handle(rename);
+	const ViewRevisions &after = project.session.view().revisions;
+	CHECK(after.of(ViewConcern::Graph) != before.of(ViewConcern::Graph), "the graph moved");
+	CHECK(after.of(ViewConcern::Files) == before.of(ViewConcern::Files) &&
+			after.of(ViewConcern::Project) == before.of(ViewConcern::Project) &&
+			after.of(ViewConcern::Preferences) == before.of(ViewConcern::Preferences) &&
+			project.items->revision() == revision,
+			"nothing else the list reads moved");
+	draw(false);
+	CHECK(picker.lists_made() == 3, "the graph moved: the list made again");
 	const std::string repo = test_paths_repo_root(__FILE__);
 	CHECK(editor_test::write_bytes(project.session.view().project_root + "/models/delta.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
@@ -287,7 +310,7 @@ void test_list_kept() {
 	project.session.handle(make_request(EditorRequestKind::Rescan));
 	draw(false);
 	draw(false);
-	CHECK(picker.lists_made() == 3, "a model the graph gains: the list made again");
+	CHECK(picker.lists_made() == 4, "a model the graph gains: the list made again");
 	ImGui::ClosePopupsExceptModals();
 	draw(false);
 }
