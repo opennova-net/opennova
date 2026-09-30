@@ -652,8 +652,9 @@ entities, windows of several screens). The primary is one of them, the one selec
 the one a marquee names: the inspector's form, the preview's handles and the place a new or
 pasted record goes follow it, and an arrange aligns the others to it. Several records of one
 kind share one form in the inspector, where a change sets every one of them in one undo step.
-Each open document keeps its own while another is active, and every change of one takes a
-serial no selection had before.
+Each open document keeps its own while another is active; every change of one, and every one put
+back, takes a serial no selection had before. A record the document does not hold is never
+selected, and the copies a Duplicate makes are selected with the primary's copy the primary.
 _Avoid_: focus (the keyboard's), active (the active document, not a record)
 
 **Arrange**:

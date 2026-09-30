@@ -13,13 +13,17 @@ namespace opennova::editor {
 
 class Document;
 
+// Whether `document` has the record `address` names, of the kind it says: a row, or a record a row
+// holds.
+bool has_record(const Document &document, const NodeAddress &address);
+
 // The records selected in one document (ADR 0046 S13 D7): any records of any of its rows (a marquee
 // over a mission's entities, windows of several screens of a menu), one of them the primary (the
 // Inspector's form, the preview's handles and the place a new or pasted record goes follow it; an
 // arrange aligns the others to it), and a serial that takes a value no selection had before with
-// every change, so whoever keeps what it made of a selection compares one number. The view's
-// selection is the active document's (DocumentsView); an open document keeps its own while another
-// is active (DocumentSet).
+// every change and every selection put back (restore), so whoever keeps what it made of a
+// selection compares one number. The view's selection is the active document's (DocumentsView);
+// an open document keeps its own while another is active (DocumentSet).
 struct Selection {
 	std::string document; // the path of the document the records are in ("" = none)
 	NodeAddress primary; // one of `records`; empty when none is selected
@@ -44,6 +48,11 @@ struct Selection {
 	// one that another of them holds left out (a window, not the ACTIONs made with it), the first
 	// the primary.
 	void select_added(const Document &document);
+	// `address`, one of the records, the primary (nothing when it is not selected).
+	void make_primary(const NodeAddress &address);
+	// `kept` put back (a document made active again, a selection kept through a reload): its
+	// document, primary and records, under a serial no selection had.
+	void restore(const Selection &kept);
 	// After an edit, an undo or a redo of `document`: the selected records it no longer has drop
 	// out; a primary that is gone gives way to `owner` (the owner it had before the edit) when that
 	// is still there, else to the last record still selected. `changes` (the document's changes

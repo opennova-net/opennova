@@ -14,7 +14,12 @@
 // the top, the file-wide state and records' fields, undone and redone byte for byte; 500 rows
 // of 5,000 edited in one batch cloned once each; a gesture folding over every row it changes;
 // the history's steps and what changed since a state; its budget; the selection (Selection)
-// over any rows, repaired asking only for the rows a step touched. S11a: the saved baseline and what
+// over any rows, repaired asking only for the rows a step touched. S13 D7's second review: a row
+// moved is the row the step moves, never one it passed; what a batch made and removed again is
+// neither listed nor named, and an edit naming such a row is refused as one naming any removed
+// row; a Duplicate naming no place puts its copy right after its record as the batch left it;
+// after_edit once per row a batch changes; the budget counting the file-wide state and each fold's
+// revision; a change handed back unchanged no step. S11a: the saved baseline and what
 // changed since it (a field, a record, the file-wide state, the edits that give a field
 // back), and the canonical rewrite. S11f: a document read from bytes alone has the rows a
 // file's load gives and no file to save to. S13 D6: a change the type makes in C++ (an Apply
@@ -96,6 +101,7 @@ struct FakeGroup : Node {
 struct FakeState : FileState {
 	std::string note;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<FakeState>(*this); }
+	size_t footprint() const override { return sizeof(FakeState) + footprint_of(note); }
 };
 
 // A row's group, whichever row it is (the committed one, a clone, the saved baseline's).
@@ -167,6 +173,9 @@ bool read_records(std::istream &in, int base, std::vector<FakeItem> &items, std:
 // a leaf added to it with a fresh identity, the file's note; each left empty changes nothing.
 struct FakeChange : EditPayload {
 	std::string name, leaf, note;
+	// The file-wide state handed back as a copy that changes nothing (a type that copies before it
+	// looks): the document keeps what it had.
+	bool copy_unchanged = false;
 	const char *token() const override { return "fake.change"; }
 };
 
@@ -522,6 +531,7 @@ protected:
 			return false;
 		}
 		changed = false;
+		if (change->copy_unchanged) return copy_unchanged(state);
 		if (!change->name.empty() && change->name != item->name) {
 			item->name = change->name;
 			changed = true;
@@ -543,6 +553,10 @@ protected:
 			error = "A name or a leaf needs its item.";
 			return false;
 		}
+		if (change->copy_unchanged) {
+			changed = false;
+			return copy_unchanged(state);
+		}
 		return set_note(state, change->note, changed, error);
 	}
 	// The note set in a copy of `state` when it differs ("" leaves it).
@@ -556,9 +570,16 @@ protected:
 		state = note;
 		return true;
 	}
+	static bool copy_unchanged(std::shared_ptr<const FileState> &state) {
+		const auto *now = static_cast<const FakeState *>(state.get());
+		state = now ? std::make_shared<FakeState>(*now) : std::make_shared<FakeState>();
+		return true;
+	}
+	void after_edit(Node &) override { ++after_edits; }
 
 public:
 	std::function<bool(const EditStep &)> veto; // false refuses the step (unset: every step is accepted)
+	size_t after_edits = 0;                     // after_edit's calls
 	const std::string &game_name() const { return game(); }
 
 private:
@@ -1972,6 +1993,12 @@ static int test_apply_payload() {
 	            error.code == "document.payload");
 	TEST_EXPECT(!document.apply({set(fake.x, "name", std::string("zz")), other}, error) &&
 	            error.code == "document.payload");
+	// A change handed back as a copy that changes nothing, naming no row or a record: no step (the
+	// state is kept only when the change changes something, S13 D7's second review).
+	auto unchanged = fake_change("");
+	unchanged->copy_unchanged = true;
+	TEST_EXPECT(document.apply(apply({}, unchanged), error) && document.revision() == revision);
+	TEST_EXPECT(document.apply(apply(fake.a1, unchanged), error) && document.revision() == revision);
 	TEST_EXPECT(!document.apply(apply({}, fake_change("name")), error) &&
 	            error.code == "document.payload" &&
 	            error.message == "A name or a leaf needs its item.");
@@ -2235,7 +2262,8 @@ static int test_multi_row_batches() {
 		++swapped;
 		footprints += made[i]->footprint() + found[i]->footprint();
 	}
-	TEST_EXPECT(swapped == kTouched && document.history_bytes() == footprints);
+	TEST_EXPECT(swapped == kTouched &&
+	            document.history_bytes() == footprints + EditHistory::mark_bytes(kTouched));
 	document.undo();
 	TEST_EXPECT(document.rows() == found && !document.can_undo() && document.serialize().text == text);
 	document.redo();
@@ -2455,7 +2483,7 @@ static int test_history_budget() {
 	TEST_EXPECT(document.load(dir.file("heavy.txt"), "heavy.txt", AssetKind::Unknown, "jo", error));
 	const NodeAddress a{document.rows()[0]->id, kLine, 0};
 	const uint64_t load = document.load_generation(), start = document.revision();
-	const size_t per_step = 2 * document.rows()[0]->footprint();
+	const size_t per_step = 2 * document.rows()[0]->footprint() + EditHistory::mark_bytes(1);
 	const size_t kept = budget / per_step;
 	TEST_EXPECT(kept >= 1 && kept < 10);
 	for (int64_t i = 0; i < 10; ++i) TEST_EXPECT(document.apply(set(a, "weight", 100 + i), error));
@@ -2478,6 +2506,181 @@ static int test_history_budget() {
 	document.undo();
 	TEST_EXPECT(!document.can_undo() && document.get(a, "weight", weight) && std::get<int64_t>(weight) == 1 && document.dirty());
 	g_line_heft = 0;
+	return 0;
+}
+
+// A row moved marks itself moved, never a row it passed (S13 D7's second review: of two
+// neighbours a longest run kept in order may keep either, and a stylesheet's veto refused a line
+// moved down past an #if line as the #if line's own move): alpha down one place past beta is
+// alpha's move alone, beta down past gamma beta's alone, each undone to the rows found; a row
+// moved and moved back in one batch is no step.
+static int test_moved_row_marked() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	Edit gamma = make(EditOperation::Add, {0, kGroup, 0});
+	gamma.field = "name";
+	gamma.value = std::string("gamma");
+	TEST_EXPECT(document.apply(gamma, error) && document.rows().size() == 3);
+	const std::string three = document.serialize().text;
+	std::vector<EditStep> seen;
+	document.veto = [&](const EditStep &step) {
+		seen.push_back(step);
+		return true;
+	};
+	const auto moved = [](const EditStep &step) {
+		std::vector<NodeId> ids;
+		for (const RowSwap &swap : step.swaps)
+			if (swap.moved) ids.push_back(swap.id());
+		return ids;
+	};
+	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.alpha, 0, 1), error));
+	TEST_EXPECT(seen.size() == 1 && seen[0].swaps.size() == 1 && moved(seen[0]) == std::vector<NodeId>{fake.alpha.row});
+	TEST_EXPECT(document.rows()[1]->id == fake.alpha.row);
+	document.undo();
+	TEST_EXPECT(document.serialize().text == three);
+	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 2), error));
+	TEST_EXPECT(seen.size() == 2 && seen[1].swaps.size() == 1 && moved(seen[1]) == std::vector<NodeId>{fake.beta.row});
+	document.undo();
+	TEST_EXPECT(document.serialize().text == three);
+	const uint64_t revision = document.revision();
+	TEST_EXPECT(document.apply({make(EditOperation::Move, fake.alpha, 0, 2), make(EditOperation::Move, fake.alpha, 0, 0)}, error));
+	TEST_EXPECT(document.revision() == revision && seen.size() == 2 && document.serialize().text == three);
+	document.veto = nullptr;
+	return 0;
+}
+
+// What a batch makes and removes again (S13 D7's second review): an edit naming a row its batch
+// made and removed is refused as one naming any removed row (document.batch), nothing committed; a
+// row made and removed is neither listed (last_added_records) nor named by its edit (last_made),
+// the one made beside it both; a record made in a row and removed leaves nothing listed.
+static int test_made_then_removed() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	const auto group = [](const char *name) {
+		Edit add = make(EditOperation::Add, {0, kGroup, 0});
+		add.field = "name";
+		add.value = std::string(name);
+		return add;
+	};
+	const NodeAddress first_made{batch_made(0), kGroup, 0};
+	TEST_EXPECT(!document.apply({group("s"), make(EditOperation::Remove, first_made), set(first_made, "name", std::string("late"))},
+	                            error) &&
+	            error.code == "document.batch");
+	TEST_EXPECT(document.rows().size() == 2 && !document.can_undo() && document.serialize().text == fake.original);
+	TEST_EXPECT(document.apply({group("s"), group("t"), make(EditOperation::Remove, first_made), set(fake.a1, "name", std::string("A1"))},
+	                           error));
+	TEST_EXPECT(document.rows().size() == 3 && document.rows()[2]->name() == "t");
+	const NodeId t = document.rows()[2]->id;
+	TEST_EXPECT(document.last_added_records() == std::vector<NodeId>{t} && document.last_added() == t);
+	TEST_EXPECT(document.last_made() == std::vector<NodeId>({0, t, 0, 0}));
+	TEST_EXPECT(document.apply({make(EditOperation::Add, {fake.alpha.row, kItem, 0}),
+	                            make(EditOperation::Remove, {fake.alpha.row, kItem, batch_made(0)}),
+	                            set(fake.a1, "name", std::string("A2"))},
+	                           error));
+	TEST_EXPECT(document.last_added_records().empty() && document.last_added() == 0 &&
+	            document.last_made() == std::vector<NodeId>({0, 0, 0}));
+	return 0;
+}
+
+// A Duplicate naming no place puts its copy right after its record as the edits before it left it
+// (S13 D7's second review: the batch form had placed it by the rows before the batch): after a
+// group added at the top, beta's copy right after beta, and the added group's copy right after
+// it; after an item put first in alpha, a1's copy right after a1 (not at the end).
+static int test_duplicate_in_place() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	Edit top = make(EditOperation::Add, {0, kGroup, 0}, 0, 0);
+	top.field = "name";
+	top.value = std::string("top");
+	TEST_EXPECT(document.apply({top, make(EditOperation::Duplicate, fake.beta), make(EditOperation::Duplicate, {batch_made(0), kGroup, 0})},
+	                           error));
+	const std::vector<NodeId> &made = document.last_made();
+	TEST_EXPECT(made.size() == 3 && document.rows().size() == 5);
+	if (made.size() != 3 || document.rows().size() != 5) return 1;
+	TEST_EXPECT(document.rows()[0]->id == made[0] && document.rows()[1]->id == made[2] &&
+	            document.rows()[2]->id == fake.alpha.row && document.rows()[3]->id == fake.beta.row &&
+	            document.rows()[4]->id == made[1]);
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original);
+	TEST_EXPECT(document.apply({make(EditOperation::Add, {fake.alpha.row, kItem, 0}, 0, 0), make(EditOperation::Duplicate, fake.a1)},
+	                           error));
+	const std::vector<Document::Collection> items = document.collections_of(fake.alpha);
+	std::vector<NodeId> order;
+	for (const Document::Collection &collection : items)
+		if (collection.spec.kind == kItem) order = collection.ids;
+	TEST_EXPECT(document.last_made().size() == 2 &&
+	            order == std::vector<NodeId>({document.last_made()[0], fake.a1.child, document.last_made()[1], fake.a2.child}));
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original);
+	return 0;
+}
+
+// after_edit, the type's refresh of what a row derives, runs once for each row a batch changed or
+// added, however many of its edits touch the row (S13 D7's second review): Sets on a1 and x (both
+// alpha's) and on b1 and a group added, three calls; a Set of the value a field holds, none.
+static int test_after_edit_once_per_row() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	document.after_edits = 0;
+	TEST_EXPECT(document.apply({set(fake.a1, "name", std::string("A")), set(fake.x, "name", std::string("X")),
+	                            set(fake.b1, "name", std::string("B")), make(EditOperation::Add, {0, kGroup, 0})},
+	                           error));
+	TEST_EXPECT(document.after_edits == 3);
+	document.after_edits = 0;
+	TEST_EXPECT(document.apply(set(fake.a1, "name", std::string("A")), error) && document.after_edits == 0);
+	return 0;
+}
+
+// The budget counts what a step keeps besides its rows (S13 D7's second review): the file-wide
+// state's two versions where a step changes it (a thousand notes: each step its two states and its
+// one revision, where the rows alone had counted nothing), and each revision a fold took into a step
+// with the rows it changed (a gesture's fifty folds over a hundred lines: each fold's mark).
+static int test_history_counts_state_and_folds() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	size_t expected = 0;
+	for (int i = 0; i < 1000; ++i) {
+		const FileState *before = document.file_state();
+		const size_t was = before ? before->footprint() : 0;
+		Edit note;
+		note.operation = EditOperation::SetFileValue;
+		note.value = "n" + std::to_string(i);
+		TEST_EXPECT(document.apply(note, error));
+		expected += was + document.file_state()->footprint() + EditHistory::mark_bytes(0);
+	}
+	TEST_EXPECT(document.history_bytes() == expected && expected > 1000 * sizeof(FakeState));
+
+	constexpr size_t kLines = 100, kFolds = 50;
+	std::string text;
+	for (size_t i = 0; i < kLines; ++i) text += "L line" + std::to_string(i) + " " + std::to_string(i) + " TAG1\n";
+	FlatDocument flat;
+	TEST_EXPECT(flat.load_bytes(bytes_of(text), "lines.txt", AssetKind::Unknown, "jo", error));
+	const uint64_t gesture = next_edit_gesture();
+	const auto drag = [&](int64_t to) {
+		std::vector<Edit> edits;
+		for (const auto &row : flat.rows()) {
+			Edit edit = set({row->id, kLine, 0}, "weight", to);
+			edit.gesture = gesture;
+			edits.push_back(edit);
+		}
+		return flat.apply(edits, error);
+	};
+	TEST_EXPECT(drag(-1));
+	const size_t first = flat.history_bytes();
+	for (size_t k = 0; k < kFolds; ++k) TEST_EXPECT(drag(-2 - int64_t(k)));
+	TEST_EXPECT(flat.can_undo() && flat.history_bytes() == first + kFolds * EditHistory::mark_bytes(kLines));
+	flat.undo();
+	TEST_EXPECT(!flat.can_undo() && flat.serialize().text == text);
 	return 0;
 }
 
@@ -2509,6 +2712,11 @@ int main() {
 	failures += test_gesture_across_rows();
 	failures += test_changes_since();
 	failures += test_history_budget();
+	failures += test_moved_row_marked();
+	failures += test_made_then_removed();
+	failures += test_duplicate_in_place();
+	failures += test_after_edit_once_per_row();
+	failures += test_history_counts_state_and_folds();
 	if (failures == 0) std::printf("editor_document_core: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

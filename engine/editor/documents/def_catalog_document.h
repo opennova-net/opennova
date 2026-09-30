@@ -44,6 +44,7 @@ struct CatalogRow : Node {
 struct ItemsFileState : FileState {
 	std::vector<int> spawn_ids;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<ItemsFileState>(*this); }
+	size_t footprint() const override { return sizeof(ItemsFileState) + footprint_of(spawn_ids); }
 };
 
 class DefCatalogDocument : public Document {

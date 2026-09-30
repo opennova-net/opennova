@@ -44,8 +44,7 @@ struct MenuScreen : Node {
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return screen.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
-	// The screen's windows, all they hold, and their identities (the places a clone shares are not
-	// its own).
+	// The screen's windows, all they hold, their identities and their places.
 	size_t footprint() const override;
 
 	// Where each identity sits: the root's index, then each list and index down to it. Made
@@ -91,6 +90,7 @@ struct MenuLookupName {
 struct MenuFileState : FileState {
 	mnu::SourceEncoding source_encoding = mnu::SourceEncoding::CodePage;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<MenuFileState>(*this); }
+	size_t footprint() const override { return sizeof(MenuFileState); }
 };
 
 class MnuDocument : public Document {

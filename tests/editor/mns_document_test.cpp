@@ -270,6 +270,20 @@ static int test_refusals() {
 		TEST_EXPECT(text(document, foo, "value") == "new");
 		TEST_EXPECT(document.native().evaluate().sheet.get("FOO") == "new");
 	}
+	// A variable moved down past an #if line (S13 D7's second review): the variable is the row the
+	// step moves, so the #if line stays where it is and the move is taken (the game reads the
+	// variable inside the switched-on block), undone to the bytes.
+	{
+		const std::string src = "A 1\r\nB 2\r\n#if 1\r\nC 3\r\n#endif\r\n";
+		MnsDocument document;
+		TEST_EXPECT(load(document, dir, src));
+		TEST_EXPECT(document.frozen(*document.rows()[2]));
+		TEST_EXPECT(document.apply(structural(EditOperation::Move, row_at(document, 1), 2), error));
+		TEST_EXPECT(saved(document) == "A 1\r\n#if 1\r\nB 2\r\nC 3\r\n#endif\r\n");
+		TEST_EXPECT(document.native().evaluate().sheet.get("B") == "2");
+		document.undo();
+		TEST_EXPECT(saved(document) == src);
+	}
 	// A refused change keeps last_added and the history as they were.
 	{
 		MnsDocument document;

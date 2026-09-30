@@ -63,6 +63,9 @@ struct StyleFileState : FileState {
 	int line_end_line = 0;
 	std::string line_end_message;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<StyleFileState>(*this); }
+	size_t footprint() const override {
+		return sizeof(StyleFileState) + footprint_of(line_end_message);
+	}
 };
 
 class MnsDocument : public Document {

@@ -11,6 +11,9 @@ namespace {
 size_t footprint(const std::shared_ptr<const Node> &row) {
 	return row ? row->footprint() : 0;
 }
+size_t footprint(const std::shared_ptr<const FileState> &state) {
+	return state ? state->footprint() : 0;
+}
 size_t swap_bytes(const RowSwap &swap) {
 	return footprint(swap.before) + footprint(swap.after);
 }
@@ -87,6 +90,21 @@ void apply_step(
 		if (at < rows.size())
 			rows[at] = forward ? swap.after : swap.before;
 	}
+}
+
+size_t EditHistory::mark_bytes(size_t rows) {
+	return sizeof(Mark) + rows * sizeof(NodeId);
+}
+
+size_t EditHistory::bytes_of(const Entry &entry) {
+	size_t bytes = 0;
+	for (const RowSwap &swap : entry.step.swaps)
+		bytes += swap_bytes(swap);
+	if (entry.step.before_state != entry.step.after_state)
+		bytes += footprint(entry.step.before_state) + footprint(entry.step.after_state);
+	for (const Mark &mark : entry.marks)
+		bytes += mark_bytes(mark.rows.size());
+	return bytes;
 }
 
 void EditHistory::reset() {
@@ -166,9 +184,7 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		last.step.after_state = step.after_state;
 		last.after_revision = revision;
 		last.marks.push_back(std::move(mark));
-		last.bytes = 0;
-		for (const RowSwap &swap : last.step.swaps)
-			last.bytes += swap_bytes(swap);
+		last.bytes = bytes_of(last);
 		bytes_ += last.bytes;
 	} else {
 		Entry entry;
@@ -177,9 +193,8 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		entry.marks = std::move(carried);
 		entry.marks.push_back(std::move(mark));
 		entry.changes_rows = changes_rows;
-		for (const RowSwap &swap : step.swaps)
-			entry.bytes += swap_bytes(swap);
 		entry.step = std::move(step);
+		entry.bytes = bytes_of(entry);
 		bytes_ += entry.bytes;
 		steps_.push_back(std::move(entry));
 		++cursor_;

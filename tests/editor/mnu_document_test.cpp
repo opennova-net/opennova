@@ -789,14 +789,15 @@ int duplicate_selection() {
 	};
 	select(NodeAddress(), SelectMode::Replace);
 	TEST_EXPECT(!duplicate() && document->serialize().text == original);
-	// EXIT then TITLE: each copy after its own original.
+	// EXIT then TITLE: each copy after its own original, the copies selected in the order their
+	// originals were, the primary's copy the primary.
 	select(exit, SelectMode::Replace);
 	select(title, SelectMode::Add);
 	TEST_EXPECT(duplicate());
 	const Node *screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) == std::vector<std::string>({"MAIN", "TITLE", "TITLE2", "EXIT", "EXIT2"}));
-	TEST_EXPECT(view.documents.selection.records.size() == 2 && window_of(*document, view.documents.selection.records[0])->name == "TITLE2" &&
-	            window_of(*document, view.documents.selection.records[1])->name == "EXIT2" &&
+	TEST_EXPECT(view.documents.selection.records.size() == 2 && window_of(*document, view.documents.selection.records[0])->name == "EXIT2" &&
+	            window_of(*document, view.documents.selection.records[1])->name == "TITLE2" &&
 	            window_of(*document, view.documents.selection.primary)->name == "TITLE2");
 	TEST_EXPECT(undo());
 	// MAIN with TITLE inside it: MAIN once, with everything it holds, after itself among the roots.
@@ -964,6 +965,18 @@ int typed_add_and_screen_copy() {
 	TEST_EXPECT(window_names(document, *document.rows()[1]) == window_names(document, *document.rows()[0]));
 	TEST_EXPECT(document.identities_match());
 	document.undo();
+	document.undo();
+	TEST_EXPECT(document.serialize().text == original && !document.dirty());
+	// The two copies in one batch (S13 D7): the second is named beside the first, as the batch left
+	// the rows (prepare_duplicate), and two new screens take two names.
+	TEST_EXPECT(document.apply({op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 1),
+	                            op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 2)},
+	                           error));
+	TEST_EXPECT(document.rows().size() == 3 && document.rows()[1]->name() == "OPTIONS2" &&
+	            document.rows()[2]->name() == "OPTIONS3" && document.identities_match());
+	document.undo();
+	TEST_EXPECT(document.apply({op(EditOperation::Add, {0, kScreen, 0}), op(EditOperation::Add, {0, kScreen, 0})}, error));
+	TEST_EXPECT(document.rows().size() == 3 && document.rows()[1]->name() != document.rows()[2]->name());
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original && !document.dirty());
 	return 0;

@@ -131,16 +131,16 @@ JsonValue documents_section(const SessionView &view) {
 }
 
 // The selection in the active document (S13 D7: records of any of its rows): the primary record,
-// every selected one, and the clipboard's size. Its serial stays in the process: a client reads the
-// Selection concern's stamp (since).
+// its records (every selected one, the word select_record's field takes), and the clipboard's size.
+// Its serial stays in the process: a client reads the Selection concern's stamp (since).
 JsonValue selection_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("document", json_string(view.documents.active));
 	out.set("primary", address_to_json(view.documents.selection.primary));
-	JsonValue selected = JsonValue::make_array();
+	JsonValue records = JsonValue::make_array();
 	for (const NodeAddress &address : view.documents.selection.records)
-		selected.push(address_to_json(address));
-	out.set("selected", std::move(selected));
+		records.push(address_to_json(address));
+	out.set("records", std::move(records));
 	out.set("clipboard_bytes", json_number(double(view.documents.clipboard.size())));
 	return out;
 }
@@ -338,7 +338,7 @@ constexpr ViewSectionRow kSections[] = {
 			"documents query answers each whole) and the active one." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
 			"The selection in the active document, over any of its rows: its primary record and "
-			"every selected one ({row, kind, child}), and the clipboard's size." },
+			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
 			"The operation that runs (a build: done and total in its unit, cancellable, what it "
 			"reads and writes), what the last one came to and the last build." },

@@ -63,7 +63,7 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
 	if (active_open) {
 		documents.activate(active);
-		if (keep_selection) view_.documents.selection = kept;
+		if (keep_selection) view_.documents.selection.restore(kept);
 		else view_.documents.selection.select_only(active, NodeAddress());
 		documents.select_first_screen();
 	}
@@ -192,7 +192,7 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 	for (const std::string &path : reload) documents.open_document(request::reload_document(path));
 	if (!active.empty() && documents.document_for(active)) {
 		documents.activate(active);
-		if (keep_selection) view_.documents.selection = kept;
+		if (keep_selection) view_.documents.selection.restore(kept);
 		else view_.documents.selection.select_only(active, NodeAddress());
 		// The renamed definition selected again where it was, its field shown.
 		if (!keep_selection && active == plan.file)

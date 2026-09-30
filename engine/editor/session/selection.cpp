@@ -12,8 +12,13 @@ namespace {
 
 std::atomic<uint64_t> g_next_serial{ 0 };
 
-// True while the document has the record the address names, of that kind.
-bool record_exists(const Document &document, const NodeAddress &address) {
+bool among(const std::vector<NodeId> &sorted, NodeId id) {
+	return std::binary_search(sorted.begin(), sorted.end(), id);
+}
+
+} // namespace
+
+bool has_record(const Document &document, const NodeAddress &address) {
 	if (!address.row)
 		return false;
 	if (!address.child) {
@@ -22,12 +27,6 @@ bool record_exists(const Document &document, const NodeAddress &address) {
 	}
 	return document.address_of(address.child) == address;
 }
-
-bool among(const std::vector<NodeId> &sorted, NodeId id) {
-	return std::binary_search(sorted.begin(), sorted.end(), id);
-}
-
-} // namespace
 
 void Selection::changed() {
 	serial = ++g_next_serial;
@@ -96,6 +95,18 @@ void Selection::select_added(const Document &made_in) {
 	changed();
 }
 
+void Selection::make_primary(const NodeAddress &address) {
+	if (address == primary || !holds(address))
+		return;
+	primary = address;
+	changed();
+}
+
+void Selection::restore(const Selection &kept) {
+	*this = kept;
+	changed();
+}
+
 size_t Selection::repair(
 		const Document &edited, const ChangeSet *changes, const NodeAddress &owner) {
 	if (edited.path() != document)
@@ -104,7 +115,7 @@ size_t Selection::repair(
 	size_t asked = 0;
 	const auto exists = [&](const NodeAddress &address) {
 		++asked;
-		return record_exists(edited, address);
+		return has_record(edited, address);
 	};
 	std::vector<NodeAddress> kept;
 	kept.reserve(records.size());

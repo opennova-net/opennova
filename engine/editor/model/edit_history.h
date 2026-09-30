@@ -42,9 +42,9 @@ struct EditStep {
 // place.
 void apply_step(std::vector<std::shared_ptr<const Node>> &rows, const EditStep &step, bool forward);
 
-// What a history keeps (ADR 0046 S13 D7): at most `bytes` of rows (each step's rows' footprints,
-// before and after), the oldest steps given up first, and never fewer than `min_steps` steps (the
-// last step always undoes, however large).
+// What a history keeps (ADR 0046 S13 D7): at most `bytes` of steps (EditHistory::bytes), the
+// oldest steps given up first, and never fewer than `min_steps` steps (the last step always
+// undoes, however large).
 struct HistoryBudget {
 	size_t bytes = size_t(64) << 20;
 	size_t min_steps = 1;
@@ -104,10 +104,14 @@ public:
 	bool dirty() const { return revision_ != saved_revision_; }
 	uint64_t revision() const { return revision_; }
 	// What the steps hold: their rows' footprints, before and after (a version two steps share is
-	// counted in each); and how many steps it keeps, to undo and to redo.
+	// counted in each), the file-wide state's two versions where a step changes it, and each
+	// revision a step took with the rows it names (mark_bytes: its own and each fold's); and how
+	// many steps it keeps, to undo and to redo.
 	size_t bytes() const { return bytes_; }
 	size_t steps() const { return steps_.size(); }
 	const HistoryBudget &budget() const { return budget_; }
+	// What a step's record of one revision it took costs, naming `rows` rows.
+	static size_t mark_bytes(size_t rows);
 	// The rows that changed from the state `revision` to the one the history is at, walking the
 	// steps between (undone or redone); a state a fold took into a step answers the rows the step's
 	// later folds changed. Empty for the state it is at. False when it holds no such state: one of
@@ -142,6 +146,8 @@ private:
 	void forget_redo();
 	// The oldest steps given up while the history is past its budget.
 	void trim();
+	// What a step keeps (bytes()).
+	static size_t bytes_of(const Entry &entry);
 
 	std::vector<std::shared_ptr<const Node>> &rows_;
 	std::shared_ptr<const FileState> &state_;

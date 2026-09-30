@@ -5,7 +5,9 @@
 // the rows; a row selected takes a Paste into itself, at its end); the selection each open
 // document keeps while another is active (the primary and every selected record given back, a
 // document read again or closed keeping none); and a selection over several rows (S13 D7), whose
-// Duplicate and whose removal are one step each.
+// Duplicate and whose removal are one step each, the primary's copy the primary; records the
+// document does not hold never selected; and the Selection concern moving with the selection
+// alone.
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -200,11 +202,29 @@ static int test_selection_over_rows() {
 	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {other}));
 	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({other, title}) && v.documents.selection.primary == title);
 
+	// Duplicate: the copies selected, the copy of the primary the primary (the preview stays on its
+	// screen), whichever screen it is on.
 	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
-	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({menus.at("0/window:0/window:1"), menus.at("1/window:0/window:1")}) &&
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({menus.at("1/window:0/window:1"), menus.at("0/window:0/window:1")}) &&
 	            v.documents.selection.primary == menus.at("0/window:0/window:1"));
 	menus.session.handle(request::undo(menus.menu().path()));
 	TEST_EXPECT(menus.menu().serialize().text == two);
+	menus.session.handle(request::select_record("main.mnu", other, SelectMode::Replace, {title}));
+	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
+	TEST_EXPECT(v.documents.selection.primary == menus.at("1/window:0/window:1") && v.documents.selection.records.size() == 2);
+	menus.session.handle(request::undo(menus.menu().path()));
+	TEST_EXPECT(menus.menu().serialize().text == two);
+
+	// Records the document does not hold are left out as they are named (S13 D7's second review:
+	// the repair after an edit asks only about the rows it changed): a stale identity, one named as
+	// another kind; a primary it does not hold gives way to the first known.
+	const NodeAddress stale{title.row, title.kind, 999999}, as_screen{other.row, 0, other.child};
+	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {stale, as_screen}));
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({title}) && v.documents.selection.primary == title);
+	menus.session.handle(request::select_record("main.mnu", stale, SelectMode::Replace, {other}));
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({other}) && v.documents.selection.primary == other);
+	menus.session.handle(request::select_record("main.mnu", stale, SelectMode::Add));
+	TEST_EXPECT(v.documents.selection.records.empty() && !v.documents.selection.primary.row);
 
 	// Cut: the menu copies windows of one screen only, so nothing is cut.
 	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {other}));
@@ -222,11 +242,41 @@ static int test_selection_over_rows() {
 	return 0;
 }
 
+// The Selection concern moves when the selection does, and only then (S13 D7's second review: after
+// an edit, an undo and a redo, the touch waits on the selection's serial): a change of a selected
+// window's text, its undo and its redo leave the selection and its concern as they were; the
+// window's removal moves both, the window's owner selected.
+static int test_selection_concern() {
+	Menus menus("opennova_editor_document_set_concern");
+	const SessionView &v = menus.view();
+	const NodeAddress title = menus.at(kTitle);
+	menus.select(title);
+	const uint64_t before = v.revisions.of(ViewConcern::Selection);
+	Edit text;
+	text.address = title;
+	text.field = "string.value";
+	text.value = std::string("Renamed");
+	menus.session.handle(request::edit_record("main.mnu", text));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.revisions.of(ViewConcern::Selection) == before);
+	menus.session.handle(request::undo(menus.menu().path()));
+	menus.session.handle(request::redo(menus.menu().path()));
+	TEST_EXPECT(v.revisions.of(ViewConcern::Selection) == before && v.documents.selection.primary == title &&
+	            v.documents.selection.records == std::vector<NodeAddress>({title}));
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = title;
+	menus.session.handle(request::edit_record("main.mnu", remove));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.revisions.of(ViewConcern::Selection) != before &&
+	            v.documents.selection.primary == menus.at(kMain));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paste_and_duplicate_agree();
 	failures += test_remembered_selections();
 	failures += test_selection_over_rows();
+	failures += test_selection_concern();
 	if (failures == 0) std::printf("editor_document_set: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

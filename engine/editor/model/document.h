@@ -106,8 +106,9 @@ public:
 	bool can_undo() const override { return history_.can_undo(); }
 	bool can_redo() const override { return history_.can_redo(); }
 	uint64_t revision() const override { return history_.revision(); }
-	// What the history holds: its steps' rows' footprints (Node::footprint), under the history's
-	// budget (HistoryBudget: past it the oldest steps are given up, never the last one).
+	// What the history holds: its steps' rows' and file-wide states' footprints (Node::footprint,
+	// FileState::footprint) and the revisions each step took (EditHistory::bytes), under the
+	// history's budget (HistoryBudget: past it the oldest steps are given up, never the last one).
 	size_t history_bytes() const override { return history_.bytes(); }
 	// The rows added, removed and changed, whether rows moved among the others and whether the
 	// file-wide state changed, from the state (load_generation, revision) to this one (RowChanges,
@@ -119,11 +120,15 @@ public:
 
 	const std::vector<std::shared_ptr<const Node>> &rows() const { return rows_; }
 	const FileState *file_state() const { return file_state_.get(); }
-	// What the last batch that made records made: its first, and every one in its edits' order (the
-	// rows and records added, the copies a Duplicate made, the rows and records a Paste made; not
-	// what they hold).
+	// What the last batch that made records made and kept: its first, and every one in its edits'
+	// order (the rows and records added, the copies a Duplicate made, the rows and records a Paste
+	// made; not what they hold, and none a later edit of the batch removed).
 	NodeId last_added() const { return last_added_; }
 	const std::vector<NodeId> &last_added_records() const { return added_; }
+	// What each edit of that batch made, by the edit's index: the record batch_made(i) names (an
+	// Add's, a Duplicate's copy, a Paste's first); 0 for an edit that made nothing, or whose record
+	// a later edit of the batch removed.
+	const std::vector<NodeId> &last_made() const { return made_; }
 	// The address of a row or nested record by identity (kind 0 / row 0 when unknown): its row
 	// from an index of every record's row (index_records), its place from that row's own index.
 	NodeAddress address_of(NodeId id) const;
@@ -467,9 +472,10 @@ private:
 	// Sets folds with the next one of the same fields; "" folds with nothing.
 	static std::string step_key(const std::vector<Edit> &edits, bool &builds);
 	// A batch's edits applied to `staged` in order, nothing committed: false, with `error`, at the
-	// first one refused; `added` receives what each edit made, in order (last_added_records).
-	bool stage_edits(const std::vector<Edit> &edits, StagedRows &staged, std::vector<NodeId> &added,
-	                 Diagnostic &error);
+	// first one refused; `made` receives what each edit made by its index (last_made), `added`
+	// every record made, in order (last_added_records).
+	bool stage_edits(const std::vector<Edit> &edits, StagedRows &staged, std::vector<NodeId> &made,
+	                 std::vector<NodeId> &added, Diagnostic &error);
 	// A row's index among the rows by its identity (rows().size() when it has none), through an
 	// index checked on every hit and made again when stale (a row added, removed or moved since),
 	// so a query over every record of a large table stays linear.
@@ -479,7 +485,7 @@ private:
 	std::vector<std::shared_ptr<const Node>> rows_;
 	std::shared_ptr<const FileState> file_state_;
 	NodeId next_id_ = 1, last_added_ = 0;
-	std::vector<NodeId> added_;
+	std::vector<NodeId> added_, made_;
 	mutable std::unordered_map<const Node *, RowIndex> indexes_;
 	mutable std::unordered_map<NodeId, size_t> row_positions_; // row_index's
 	EditHistory history_{rows_, file_state_};

@@ -17,6 +17,7 @@ uint64_t next_edit_gesture() {
 Document::Document(const Document &other)
 		: DocumentBase(other), rows_(other.rows_), file_state_(other.file_state_),
 		  next_id_(other.next_id_), last_added_(other.last_added_), added_(other.added_),
+		  made_(other.made_),
 		  history_(other.history_, rows_, file_state_), saved_rows_(other.saved_rows_),
 		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_) {}
 
@@ -406,7 +407,7 @@ bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	rows_.clear(); file_state_.reset();
 	indexes_.clear();
 	history_.reset();
-	next_id_ = 1; last_added_ = 0; added_.clear();
+	next_id_ = 1; last_added_ = 0; added_.clear(); made_.clear();
 	for (auto &row : rows) {
 		row->id = allocate_id();
 		assign_ids(*row);
@@ -437,8 +438,8 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		return false;
 	};
 	StagedRows staged(rows_, file_state_, [this](NodeId id) { return row_index(id); });
-	std::vector<NodeId> added;
-	if (!stage_edits(edits, staged, added, error)) return refused();
+	std::vector<NodeId> made, added;
+	if (!stage_edits(edits, staged, made, added, error)) return refused();
 	staged.for_each_changed([this](Node &row) { after_edit(row); });
 	EditStep step = staged.step();
 	if (step.empty()) {
@@ -456,8 +457,20 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	}
 	history_.commit(std::move(step), key);
 	if (!added.empty()) {
+		// What the batch made and kept: a row or a record a later edit of it removed is gone (so is
+		// what a removed record held), and the edit that made it names nothing.
+		const bool removes = std::any_of(edits.begin(), edits.end(), [](const Edit &edit) {
+			return edit.operation == EditOperation::Remove;
+		});
+		if (removes) {
+			const auto gone = [this](NodeId id) { return id && !address_of(id).row; };
+			for (NodeId &id : made)
+				if (gone(id)) id = 0;
+			added.erase(std::remove_if(added.begin(), added.end(), gone), added.end());
+		}
 		added_ = std::move(added);
-		last_added_ = added_.front();
+		made_ = std::move(made);
+		last_added_ = added_.empty() ? 0 : added_.front();
 	}
 	return true;
 }
@@ -481,7 +494,8 @@ std::string Document::step_key(const std::vector<Edit> &edits, bool &builds) {
 }
 
 bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
-                           std::vector<NodeId> &added, Diagnostic &error) {
+                           std::vector<NodeId> &made_by_edit, std::vector<NodeId> &added,
+                           Diagnostic &error) {
 	const IdAllocator allocate = [this] { return allocate_id(); };
 	// A refusal: `code` in `words`, on `field` where it names one.
 	const auto refuse = [&](const char *code, const std::string &words,
@@ -549,9 +563,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		if (edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child) {
 			if (!edit.payload)
 				return refuse("document.payload", "This change carries nothing to apply.");
+			// The type's change to the state as the batch left it, kept only when it changes
+			// something: a copy handed back unchanged is no step.
+			std::shared_ptr<const FileState> state = staged.state();
 			bool changes = true;
-			if (!apply_file_payload(staged.state(), *edit.payload, changes, message))
+			if (!apply_file_payload(state, *edit.payload, changes, message))
 				return refuse("document.payload", said("This document does not take that change."));
+			if (changes) staged.state() = std::move(state);
 			continue;
 		}
 
@@ -627,7 +645,10 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				assign_ids(*copy);
 				prepare_duplicate(*copy, staged.rows());
 				const NodeId id = copy->id;
-				staged.insert(std::move(copy), edit.position);
+				// Right after the row as the batch has left it, where the edit names no place.
+				const size_t position =
+				        edit.position == SIZE_MAX ? staged.index_of(row_id) + 1 : edit.position;
+				staged.insert(std::move(copy), position);
 				made[i] = {id, id};
 				added.push_back(id);
 			} else {
@@ -707,11 +728,12 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			// left them; one that changes nothing is nothing, as a Set of the value held.
 			if (!edit.payload)
 				return refuse("document.payload", "This change carries nothing to apply.");
+			std::shared_ptr<const FileState> state = staged.state();
 			bool changes = true;
-			if (!apply_payload(*updated, address, *edit.payload, staged.state(), allocate, changes,
-			                   message))
+			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
 				return refuse("document.payload", said("This document does not take that change."));
 			if (!changes) continue;
+			staged.state() = std::move(state);
 			break;
 		}
 		case EditOperation::Clear:
@@ -767,6 +789,10 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			if (at.spec.fixed)
 				return fixed(at.spec.label, at.owner.kind, "it stays where it is.");
 			hook.parent = at.owner.child;
+			// A copy goes right after its record as the batch has left it, where the edit names no
+			// place.
+			if (edit.operation == EditOperation::Duplicate && hook.position == SIZE_MAX)
+				hook.position = at.index + 1;
 			if (edit.operation == EditOperation::Move) {
 				NodeAddress destination = at.owner;
 				if (edit.parent && !owner_of(edit.parent, destination)) {
@@ -811,6 +837,8 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		staged.mark_changed(row_id);
 		if (structural(edit.operation)) staged.mark_reshaped(row_id);
 	}
+	made_by_edit.assign(edits.size(), 0);
+	for (size_t i = 0; i < edits.size(); ++i) made_by_edit[i] = made[i].id;
 	return true;
 }
 

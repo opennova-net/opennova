@@ -18,10 +18,10 @@ namespace opennova::editor {
 // makes named by its label as a record is.
 struct RecordBatch {
 	std::vector<Edit> edits;
-	// One per edit that makes a record (an add, a duplicate, and each add of a replace_list), in
-	// order: the label it gave with `as` ("" for none). The records the batch made are then the
-	// request's outcome's `added` (Document::last_added_records()), in the same order.
-	std::vector<std::string> made_labels;
+	// One per edit, by its index: the label it gave with `as` ("" for none, and for every edit but
+	// an add or a duplicate). The request's outcome names what each label's edit made
+	// (Document::last_made()).
+	std::vector<std::string> labels;
 };
 
 // What a batch's edits are: changes of records (edit_record), or the fields whose saved value
@@ -37,7 +37,8 @@ enum class RecordBatchForm { Edits, Fields };
 // file-wide field); `kind` an add's record kind token ("window", "action"); `parent` an add's owner
 // (a record, a label, or a row's own identity; none adds a row) and a move's destination;
 // `position` an index in the owner's collection (an add goes at the end, a duplicate right after
-// its record, a move needs one); `coalesce` a set that folds into the one before on its field
+// its record as the edits before it left it, a move needs one); `coalesce` a set that folds into
+// the one before on its field
 // (typing); `gesture` edits that fold into one undo step until end_edit (a drag); a replace_list's
 // `list` (a collection's kind token: "action", "sound", "items.item") of the record `id` replaced
 // by `records` ([{field: value, ...}], each added at the end with its fields set in the order
@@ -47,8 +48,7 @@ enum class RecordBatchForm { Edits, Fields };
 // request acts on; with none, an edit naming a record or a kind is refused. `resolve` false: a
 // first read before the document opens (RequestNames::unresolved): a record's identity is read as
 // a whole number and not looked for in `names` (a blank of the type, which names kinds alone), a
-// replaced list's records and a duplicate's place wait for the read after it opens, and `out` is
-// no batch to apply.
+// replaced list's records wait for the read after it opens, and `out` is no batch to apply.
 bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
 		RecordBatch &out, std::string &error, bool resolve = true);
 

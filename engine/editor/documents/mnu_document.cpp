@@ -588,23 +588,112 @@ MenuScreen::MenuScreen() { kind = kScreen; }
 
 namespace {
 
-// What a window holds of its own beyond its object: its words, its lists, its children and its
-// parts (each window it holds counted whole).
-size_t window_content(const mnu::Window &window) {
+// What a menu's records hold beyond their objects (MenuScreen::footprint): each word, and each
+// list's elements with what each holds. Declared first: an element holds elements, a window
+// windows.
+size_t content(const std::string &text) { return footprint_of(text); }
+size_t content(const mnu::Appearance &appearance);
+size_t content(const mnu::Sound &sound);
+size_t content(const mnu::Action &action);
+size_t content(const mnu::Item &item);
+size_t content(const mnu::TableRow &row);
+size_t content(const mnu::TableHeader &header);
+size_t content(const mnu::TableBody &body);
+size_t content(const mnu::TableSubst &substitution);
+size_t content(const mnu::Hotkey &hotkey);
+size_t content(const mnu::ElementAttribute &attribute);
+size_t content(const mnu::Element &element);
+size_t content(const mnu::Window &window);
+
+// A list's elements, and what each holds.
+template <class T> size_t list_content(const std::vector<T> &items) {
+	size_t bytes = footprint_of(items);
+	for (const T &item : items) bytes += content(item);
+	return bytes;
+}
+
+size_t content(const mnu::Appearance &appearance) {
+	return footprint_of(appearance.state) + footprint_of(appearance.type) +
+	       footprint_of(appearance.value) + footprint_of(appearance.flags);
+}
+
+size_t content(const mnu::Sound &sound) {
+	return footprint_of(sound.state) + footprint_of(sound.trigger) + footprint_of(sound.file);
+}
+
+size_t content(const mnu::Action &action) {
+	return footprint_of(action.type) + footprint_of(action.state) + footprint_of(action.file) +
+	       footprint_of(action.field) + footprint_of(action.field_attr) +
+	       footprint_of(action.test) + footprint_of(action.target);
+}
+
+size_t content(const mnu::Item &item) {
+	return footprint_of(item.type) + footprint_of(item.value) + footprint_of(item.text) +
+	       footprint_of(item.justify) + footprint_of(item.vjustify);
+}
+
+size_t content(const mnu::TableRow &row) { return list_content(row.cells); }
+
+size_t content(const mnu::TableHeader &header) {
+	return footprint_of(header.justify) + footprint_of(header.vjustify) +
+	       footprint_of(header.sort) + footprint_of(header.type) + footprint_of(header.text);
+}
+
+size_t content(const mnu::TableBody &body) {
+	return footprint_of(body.justify) + footprint_of(body.vjustify) + footprint_of(body.display) +
+	       footprint_of(body.bitmap_flags);
+}
+
+size_t content(const mnu::TableSubst &substitution) {
+	return footprint_of(substitution.value) + footprint_of(substitution.file);
+}
+
+size_t content(const mnu::Hotkey &hotkey) { return footprint_of(hotkey.value); }
+
+size_t content(const mnu::ElementAttribute &attribute) {
+	return footprint_of(attribute.name) + footprint_of(attribute.value);
+}
+
+size_t content(const mnu::Element &element) {
+	return footprint_of(element.tag) + list_content(element.attributes) +
+	       footprint_of(element.text) + list_content(element.children);
+}
+
+// A window: its words, its lists, its STRING, TOGGLE_STRING, FONT, FRAME, CURSOR, ITEMS and table,
+// its children and its parts (each window it holds counted whole).
+size_t content(const mnu::Window &window) {
 	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) +
 	               footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
-	               footprint_of(window.private_data) + footprint_of(window.appearances) +
-	               footprint_of(window.sounds) + footprint_of(window.actions) +
-	               footprint_of(window.datasources) + footprint_of(window.hotkeys) +
-	               footprint_of(window.shuttle) + footprint_of(window.scrollup) +
-	               footprint_of(window.scrolldown) + footprint_of(window.extras) +
-	               footprint_of(window.extra_attributes) + footprint_of(window.children);
-	for (const std::string &source : window.datasources) bytes += footprint_of(source);
-	for (const mnu::Window &child : window.children) bytes += window_content(child);
+	               footprint_of(window.private_data);
+	bytes += list_content(window.appearances) + list_content(window.sounds) +
+	         list_content(window.actions) + list_content(window.datasources) +
+	         list_content(window.hotkeys) + list_content(window.shuttle) +
+	         list_content(window.scrollup) + list_content(window.scrolldown) +
+	         list_content(window.extras) + list_content(window.extra_attributes) +
+	         list_content(window.children);
+	const mnu::String &label = window.string_data;
+	bytes += footprint_of(label.type) + footprint_of(label.justify) +
+	         footprint_of(label.vjustify) + footprint_of(label.value);
+	bytes += footprint_of(window.toggle_string.type) + footprint_of(window.toggle_string.value);
+	const mnu::Font &font = window.font;
+	for (const std::string *text :
+	     {&font.name, &font.default_fg, &font.default_bg, &font.mouseover_fg, &font.mouseover_bg,
+	      &font.selected_fg, &font.selected_bg, &font.disabled_fg, &font.disabled_bg})
+		bytes += footprint_of(*text);
+	bytes += footprint_of(window.frame.stencil) + footprint_of(window.frame.brush) +
+	         footprint_of(window.frame.monogram);
+	bytes += footprint_of(window.cursor.file) + footprint_of(window.cursor.flags);
+	const mnu::Items &items = window.items;
+	bytes += footprint_of(items.justify) + footprint_of(items.vjustify) +
+	         list_content(items.appearances) + list_content(items.items) +
+	         list_content(items.rows);
+	const mnu::TableColumn &column = window.table_data.column;
+	bytes += list_content(column.headers) + list_content(column.bodies) +
+	         list_content(column.substitutions) + footprint_of(column.primary_sort_token);
 	for (const mnu::WindowPart *part :
 	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
 		if (const mnu::Window *held = part->latent())
-			bytes += sizeof(mnu::Window) + window_content(*held);
+			bytes += sizeof(mnu::Window) + content(*held);
 	return bytes;
 }
 
@@ -621,9 +710,12 @@ size_t ids_content(const RecordIds &ids) {
 
 size_t MenuScreen::footprint() const {
 	size_t bytes = sizeof(MenuScreen) + collections_footprint() + footprint_of(screen.name) +
-	               footprint_of(screen.roots) + footprint_of(roots);
-	for (const mnu::Window &root : screen.roots) bytes += window_content(root);
+	               list_content(screen.roots) + footprint_of(roots);
 	for (const RecordIds &root : roots) bytes += ids_content(root);
+	if (places_) {
+		bytes += footprint_of(*places_);
+		for (const auto &place : *places_) bytes += footprint_of(place.second);
+	}
 	return bytes;
 }
 

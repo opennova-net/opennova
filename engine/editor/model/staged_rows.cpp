@@ -131,12 +131,11 @@ void StagedRows::remove(NodeId id) {
 		return;
 	list_.erase(list_.begin() + std::ptrdiff_t(index));
 	const auto touched = touched_.find(id);
-	const bool added = touched != touched_.end() && touched->second.added;
 	if (touched != touched_.end())
 		touched_.erase(touched);
-	// A row the batch added and removed again leaves nothing behind.
-	if (!added)
-		removed_.insert(id);
+	// A row the batch added and removed again leaves nothing behind in the step (it removes only
+	// committed rows); a later edit naming it is refused as one naming any removed row is.
+	removed_.insert(id);
 	shaped_ = true;
 	positions_known_ = false;
 }
@@ -152,6 +151,7 @@ bool StagedRows::move(NodeId id, size_t position) {
 	std::shared_ptr<const Node> row = list_[index];
 	list_.erase(list_.begin() + std::ptrdiff_t(index));
 	list_.insert(list_.begin() + std::ptrdiff_t(target), std::move(row));
+	moved_.insert(id);
 	shaped_ = true;
 	positions_known_ = false;
 	return true;
@@ -206,12 +206,23 @@ EditStep StagedRows::step() const {
 	for (size_t from = 0; from < committed_.size(); ++from)
 		if (removed_.count(committed_[from]->id))
 			step.swaps.push_back(RowSwap{ committed_[from], nullptr, from, 0, false });
-	// The rows kept on the longest run in their committed order stay in place; each other one
-	// moved.
-	const std::vector<size_t> run = longest_ascending(kept_from);
-	std::vector<bool> in_order(kept_from.size(), false);
-	for (const size_t i : run)
-		in_order[i] = true;
+	// The rows that moved: none when every row kept stands in its committed order (a row moved and
+	// moved back); else each row move() moved, never a row it passed (a variable moved down past a
+	// stylesheet's #if line moves, the #if line stays where it is), and of the others, which a move
+	// leaves in their order, any off the longest run kept in order.
+	std::vector<bool> in_order(kept_from.size(), true);
+	if (!std::is_sorted(kept_from.begin(), kept_from.end())) {
+		std::vector<size_t> others, keys;
+		for (size_t i = 0; i < kept_from.size(); ++i) {
+			in_order[i] = false;
+			if (moved_.count(list_[kept_at[i]]->id))
+				continue;
+			others.push_back(i);
+			keys.push_back(kept_from[i]);
+		}
+		for (const size_t k : longest_ascending(keys))
+			in_order[others[k]] = true;
+	}
 	for (size_t i = 0; i < kept_from.size(); ++i) {
 		const std::shared_ptr<const Node> &before = committed_[kept_from[i]];
 		const std::shared_ptr<const Node> after = version(before->id, before);

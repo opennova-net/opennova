@@ -76,7 +76,7 @@ struct ModelRow : Node {
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return header.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
-	// Its tables and part animations (the base, and the places a clone shares, are not its own).
+	// Its tables, part animations and places (the base is not its own).
 	size_t footprint() const override;
 };
 
@@ -85,7 +85,8 @@ struct CollisionRow : Node {
 	std::vector<threedi::ThreediBoundingVolume> volumes;
 	std::vector<threedi::ThreediCollisionFace> faces;
 	std::vector<threedi::ThreediOcclusionObject> occlusion;
-	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records.
+	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records. Its places as a model
+	// row's.
 	std::shared_ptr<const ModelPlaces> places;
 
 	CollisionRow();

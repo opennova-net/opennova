@@ -254,12 +254,14 @@ size_t ModelRow::footprint() const {
 	               footprint_of(registers) + footprint_of(frames);
 	for (const ModelLod &lod : lods) bytes += footprint_of(lod.panm) + footprint_of(lod.panm_ids);
 	for (const ModelMaterial &material : materials) bytes += footprint_of(material.texture_ids);
+	if (places) bytes += footprint_of(*places);
 	return bytes;
 }
 
 size_t CollisionRow::footprint() const {
 	return sizeof(CollisionRow) + collections_footprint() + footprint_of(sections) +
-	       footprint_of(volumes) + footprint_of(faces) + footprint_of(occlusion);
+	       footprint_of(volumes) + footprint_of(faces) + footprint_of(occlusion) +
+	       (places ? footprint_of(*places) : 0);
 }
 
 void ModelRow::for_each_identity(const std::function<void(NodeId &)> &fn) {

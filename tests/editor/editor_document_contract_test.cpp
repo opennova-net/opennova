@@ -40,7 +40,9 @@
 // the type's own), what serializes reading back with the record kept (a record the writer takes
 // only once filled in counted as waiting), a Remove giving the owner the records it held, and each
 // undo the bytes. S13 D7 adds the batch over several rows: every row's footprint at least its own
-// object; a real change of two rows in one batch one step (the history holding its rows' bytes,
+// object (its row type's, which the contract names), and a row whose text field takes a longer
+// text larger by at least the text it gained (each writable text field of each record kind once);
+// a real change of two rows in one batch one step (the history holding its rows' bytes,
 // what changed since the state before it those two rows), undone to the bytes and redone to the
 // bytes it made, and the same two Sets as a gesture's two batches one step; and a batch mixing a
 // record's Set with the rows' own edits (a row of each kind the outline adds, the last row
@@ -61,8 +63,14 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/documents/animation_document.h>
+#include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mns_document.h>
+#include <editor/documents/mnu_document.h>
+#include <editor/documents/model_document.h>
+#include <editor/documents/strings_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
@@ -90,8 +98,9 @@ size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
 size_t g_foreign = 0, g_row_adds = 0, g_record_adds = 0, g_adds_waiting = 0, g_adds_refused = 0;
 size_t g_findings = 0;
-// S13 D7: files whose two rows took one batch and one gesture, and mixed batches taken and refused.
-size_t g_multi_rows = 0, g_mixed = 0, g_mixed_waiting = 0, g_mixed_refused = 0;
+// S13 D7: files whose two rows took one batch and one gesture, and mixed batches taken and refused;
+// text fields whose longer text grew their row's footprint.
+size_t g_multi_rows = 0, g_mixed = 0, g_mixed_waiting = 0, g_mixed_refused = 0, g_grown = 0;
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
@@ -100,7 +109,36 @@ struct TypeCounts {
 	size_t optional = 0, presences = 0;
 	size_t findings = 0; // what validate_file made over the type's files
 	size_t multi_rows = 0, mixed = 0, mixed_refused = 0; // S13 D7's batches over several rows
+	size_t grown = 0; // text fields whose longer text grew their row's footprint
 };
+
+// Each row type and the size of its own object (S13 D7): a row's footprint is at least that. A row
+// of a type this table does not name fails, so a new document type names its rows here.
+struct RowObject {
+	const std::type_info *type;
+	size_t size;
+};
+const RowObject kRowObjects[] = {
+        {&typeid(CatalogRow), sizeof(CatalogRow)}, {&typeid(StringsSection), sizeof(StringsSection)},
+        {&typeid(MenuScreen), sizeof(MenuScreen)}, {&typeid(StyleRow), sizeof(StyleRow)},
+        {&typeid(ModelRow), sizeof(ModelRow)},     {&typeid(CollisionRow), sizeof(CollisionRow)},
+        {&typeid(ClipRow), sizeof(ClipRow)},       {&typeid(AnimationMapRow), sizeof(AnimationMapRow)},
+};
+// The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
+// clip's bone table, a def catalog's records): a longer text grows no row of theirs. Every other
+// type's rows hold their text as strings, which a longer text makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog"};
+bool fixed_text(const DocumentType &type) {
+	for (const char *name : kFixedText)
+		if (std::string(name) == type.name) return true;
+	return false;
+}
+
+size_t row_object(const Node &row) {
+	for (const RowObject &entry : kRowObjects)
+		if (*entry.type == typeid(row)) return entry.size;
+	return 0;
+}
 
 // What each type's files ask of the presence clause and what the type does, as ADR 0046 S13 D2
 // states them: every one left out and written again. A type not named has none. A change of a
@@ -917,8 +955,41 @@ void check_adds(const DocumentType &type, const Fixture &fixture, Document &docu
 void check_multi_row(const DocumentType &type, const Fixture &fixture, Document &document,
                      const std::vector<NodeAddress> &records, const std::string &serialized, TypeCounts &counts) {
 	for (const auto &row : document.rows())
-		check(row->footprint() >= sizeof(Node), where_of(fixture, document, {row->id, row->kind, 0}, ""),
-		      "a row's footprint is at least its own object");
+		check(row_object(*row) && row->footprint() >= row_object(*row),
+		      where_of(fixture, document, {row->id, row->kind, 0}, ""),
+		      "a row's footprint is at least its own object, of a row type the contract names");
+	// A longer text grows its row's footprint by at least what it gained: each writable text field
+	// of each record kind once, set to the longest text its width takes where that is longer than
+	// what it holds (a field that refuses it, or keeps it otherwise, is passed over), undone after;
+	// but for a type whose rows keep their text in fixed-length records (kFixedText).
+	std::set<std::pair<NodeKind, std::string>> asked;
+	for (const NodeAddress &address : records)
+		for (const FieldSchema &schema : document.fields(address.kind)) {
+			if (fixed_text(type) || schema.type != FieldType::Text ||
+			    !asked.insert({address.kind, schema.id}).second)
+				continue;
+			Value before;
+			if (document.field_on(address, schema).read_only || !document.get(address, schema.id, before) ||
+			    !std::holds_alternative<std::string>(before))
+				continue;
+			const std::string longer(schema.width ? schema.width - 1 : 4096, 'W');
+			const size_t held = std::get<std::string>(before).size();
+			if (longer.size() <= held) continue;
+			const size_t was = document.row(address.row)->footprint();
+			Diagnostic error;
+			if (!document.apply(edit_of(EditOperation::Set, address, schema.id, longer), error)) continue;
+			Value now;
+			const bool kept = document.get(address, schema.id, now) && now == Value(longer);
+			const size_t is = document.row(address.row)->footprint();
+			while (document.can_undo()) document.undo();
+			if (!kept) continue;
+			check(is >= was + longer.size() - held, where_of(fixture, document, address, schema.id),
+			      "a row whose text grows has a footprint larger by at least the text it gained");
+			++g_grown;
+			++counts.grown;
+		}
+	check(document.serialize().text == serialized && !document.dirty(), fixture.name,
+	      "the longer texts undone give the bytes back");
 	std::map<NodeId, Edit> real_sets; // the first Set of each row that changes the bytes, by row
 	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
 	                                        const std::vector<Value> &options) {
@@ -1096,10 +1167,12 @@ int main() {
 			if (std::string(pin.type) == type->name) pinned = pin;
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
+		check(fixed_text(*type) || counts.grown > 0, type->name, "a longer text grows a row of the type");
 		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings; %zu files' two "
-		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule\n",
+		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule; %zu text fields' "
+		            "longer text grew their row\n",
 		            type->name, counts.optional, counts.presences, counts.findings, counts.multi_rows, counts.mixed,
-		            counts.mixed_refused);
+		            counts.mixed_refused, counts.grown);
 	}
 	for (const Fixture &fixture : files)
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
@@ -1107,6 +1180,7 @@ int main() {
 	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
 	check(g_multi_rows > 0 && g_mixed > 0 && g_mixed_refused > 0, "the files",
 	      "two rows change in one batch, a batch of rows and records is taken, and one refused by a type's rule");
+	check(g_grown > 0, "the files", "a longer text grows its row's footprint");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
@@ -1115,10 +1189,10 @@ int main() {
 		            "changes refused, %zu rows and %zu records added (%zu waiting for values, "
 		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, %zu files' "
 		            "two rows in one batch and one gesture, %zu batches of rows and records taken (%zu waiting for "
-		            "values) and %zu refused by a type's rule)\n",
+		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
 		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
 		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_multi_rows, g_mixed,
-		            g_mixed_waiting, g_mixed_refused);
+		            g_mixed_waiting, g_mixed_refused, g_grown);
 	return g_failures == 0 ? 0 : 1;
 }

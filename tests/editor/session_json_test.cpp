@@ -272,7 +272,7 @@ static int test_request_round_trip() {
 	            back.edits[0].field == "string.value" && std::get<std::string>(back.edits[0].value) == "Hello" &&
 	            back.edits[0].coalesce && back.edits[0].position == SIZE_MAX && back.edits[0].parent == 0 &&
 	            back.edits[0].gesture == 0);
-	TEST_EXPECT(names.made_labels.empty());
+	TEST_EXPECT(names.labels == std::vector<std::string>({""}));
 
 	// An owner, a gesture, a batch and a selection mode.
 	Edit move, left, clear;
@@ -331,7 +331,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(edits->array[4].get_string("op", "") == "set_file_value" && !edits->array[4].get("id") &&
 	            edits->array[4].get_string("field", "") == "encoding");
 	TEST_EXPECT(editor_request_from_json(labelled_json, back, error, &names) && back == labelled);
-	TEST_EXPECT(names.made_labels == std::vector<std::string>({"edit0", "", ""}));
+	TEST_EXPECT(names.labels == std::vector<std::string>({"edit0", "", "", "", ""}));
 	// A label given by a client: read as the edit it names, and the label kept for the outcome.
 	const std::string by_label = "{\"kind\":\"edit_record\",\"path\":\"" + path +
 	                             "\",\"edits\":[{\"op\":\"add\",\"kind\":\"window\",\"parent\":" +
@@ -339,7 +339,7 @@ static int test_request_round_trip() {
 	                                                               "\"field\":\"name\",\"value\":\"HELLO\"}]}";
 	TEST_EXPECT(parse(by_label.c_str(), parsed) && editor_request_from_json(parsed, back, error, &names));
 	TEST_EXPECT(back.edits.size() == 2 && back.edits[0] == add && back.edits[1] == named &&
-	            names.made_labels == std::vector<std::string>({"w"}));
+	            names.labels == std::vector<std::string>({"w", ""}));
 	// A row a batch makes (S13 D7): a screen added, named through its label as a row, a window put
 	// in it. The writer labels the add, whose row the later edits name; read back, the batch applies
 	// as one step making the screen and its window.
@@ -365,6 +365,26 @@ static int test_request_round_trip() {
 	            menu.rows().back()->name() == "EXTRA" && menu.last_added_records().size() == 2);
 	open.session.handle(request::undo(path));
 	TEST_EXPECT(menu.rows().size() == screens);
+	// A row's copy named by its label (S13 D7's second review): the copy is a row of its own, so a
+	// Set naming the label, written and read back as it was, applies to the copy; a duplicate naming
+	// no place reads back naming none, and the core puts the copy right after its record.
+	Edit copy_screen, name_copy;
+	copy_screen.operation = EditOperation::Duplicate;
+	copy_screen.address = {menu.rows()[0]->id, screen, 0};
+	name_copy.address = {0, screen, batch_made(0)};
+	name_copy.field = "name";
+	name_copy.value = std::string("COPIED");
+	const EditorRequest copy_request = request::edit_record(path, std::vector<Edit>{copy_screen, name_copy});
+	const JsonValue copy_json = editor_request_to_json(copy_request, &menu);
+	const JsonValue *copy_edits = copy_json.get("edits");
+	TEST_EXPECT(copy_edits && copy_edits->array.size() == 2 && !copy_edits->array[0].get("position") &&
+	            copy_edits->array[0].get_string("as", "") == "edit0" && copy_edits->array[1].get_string("id", "") == "edit0");
+	TEST_EXPECT(editor_request_from_json(copy_json, back, error, &names) && back == copy_request &&
+	            names.labels == std::vector<std::string>({"edit0", ""}));
+	open.session.handle(back);
+	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 && menu.rows()[1]->name() == "COPIED");
+	open.session.handle(request::undo(path));
+	TEST_EXPECT(menu.rows().size() == screens);
 	// A Paste has no batch form (the paste request carries the clipboard): written by its op, which
 	// the reader refuses.
 	Edit paste;
@@ -388,6 +408,11 @@ static int test_request_round_trip() {
 	            back.records[1] == NodeAddress({9, 1, 12}));
 	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":[{\"row\":2},{\"rows\":3}]}", back)
 	                    .find("records[1]") != std::string::npos);
+	// A member's value refused by its place too (S13 D7's second review).
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":[{\"row\":2},{\"row\":\"x\"}]}", back) ==
+	            "\"records[1].row\" must be a record identity.");
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1,\"child\":-1}}", back) ==
+	            "\"address.child\" must be a record identity.");
 	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":{\"row\":2}}", back)
 	                    .find("records") != std::string::npos);
 	// A Paste's place: its row, its owner and its index; none named, after the selection.
@@ -1289,7 +1314,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(section(ViewSection::Documents).get_string("active", "") == document->path());
 	const JsonValue selection = section(ViewSection::Selection);
 	TEST_EXPECT(selection.get_string("document", "") == document->path() && selection.get("reveal_field") == nullptr);
-	TEST_EXPECT(selection.get("selected") && selection.get("selected")->array.size() == 2 &&
+	TEST_EXPECT(selection.get("records") && selection.get("records")->array.size() == 2 &&
 	            uint64_t(selection.get("primary")->get_number("child", 0)) == exit_address.child);
 	TEST_EXPECT(selection.get_int("clipboard_bytes", -1) == 0);
 	// A marquee through JSON (S13 D7): the records named with it, the primary the one named, the
@@ -1304,7 +1329,7 @@ static int test_over_a_session() {
 	const uint64_t selection_stamp = view.revisions.of(ViewConcern::Selection);
 	TEST_EXPECT(request_error(marquee_json.c_str(), request).empty() && session.handle(request));
 	const JsonValue marqueed = section(ViewSection::Selection);
-	TEST_EXPECT(marqueed.get("selected") && marqueed.get("selected")->array.size() == 3 &&
+	TEST_EXPECT(marqueed.get("records") && marqueed.get("records")->array.size() == 3 &&
 	            uint64_t(marqueed.get("primary")->get_number("child", 0)) == exit_address.child &&
 	            view.revisions.of(ViewConcern::Selection) != selection_stamp);
 	const std::string clear = "{\"kind\":\"edit_record\",\"edits\":[{\"op\":\"clear\",\"id\":" + title_id +

@@ -89,7 +89,7 @@ void DocumentSet::activate(const std::string &path) {
 	selection.select_only(path, NodeAddress());
 	const auto kept = remembered_.find(path);
 	if (kept != remembered_.end()) {
-		selection = kept->second;
+		selection.restore(kept->second);
 		remembered_.erase(kept);
 		if (const DocumentBase *document = open_at(path))
 			if (const Document *records = records_of(*document))
@@ -337,14 +337,23 @@ void DocumentSet::close_document(const std::string &requested) {
 
 // The document's own path, however the request named it (a logical name included), so a
 // selection joined by path stays in one document; records of another document make it the
-// active one, the records named its selection.
+// active one, the records named its selection. Only the records the document has are selected:
+// one it does not hold, or of another kind than named, is left out (a repair after an edit asks
+// only about the rows the edit changed).
 void DocumentSet::select_record(const EditorRequest &request) {
 	const DocumentBase *document = document_for(request.path);
 	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
 	const bool elsewhere = path != view_.documents.active;
 	if (elsewhere) activate(path);
-	view_.documents.selection.select(path, request.address, request.records,
-	                                 elsewhere ? SelectMode::Replace : request.mode);
+	const Document *records = document ? records_of(*document) : nullptr;
+	const auto held = [records](const NodeAddress &address) {
+		return records && has_record(*records, address);
+	};
+	std::vector<NodeAddress> others;
+	for (const NodeAddress &address : request.records)
+		if (held(address)) others.push_back(address);
+	view_.documents.selection.select(path, held(request.address) ? request.address : NodeAddress(),
+	                                 others, elsewhere ? SelectMode::Replace : request.mode);
 	core_.touch(ViewConcern::Selection);
 }
 
@@ -606,10 +615,14 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 		       edit.operation == EditOperation::Paste;
 		gesture = gesture || edit.gesture != 0;
 	}
-	if (adds && document.revision() != before) {
-		if (records) core_.outcome().added = records->last_added_records();
-		activate(document.path()); // what an edit adds is selected, in its own document
-		if (records) view_.documents.selection.select_added(*records);
+	// What the batch made and kept is selected, in its own document; a batch that kept nothing it
+	// made repairs the selection as any other edit does.
+	const bool made = adds && records && document.revision() != before;
+	if (made) core_.outcome().made = records->last_made();
+	if (made && !records->last_added_records().empty()) {
+		core_.outcome().added = records->last_added_records();
+		activate(document.path());
+		view_.documents.selection.select_added(*records);
 	} else if (document.revision() != before) {
 		repair_selection(document, generation, before, owner);
 	}
@@ -682,8 +695,9 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 }
 
 // Each selected record (a record inside another selected one goes with it) copied right
-// after itself (the one position rule, position_after), rows and nested records of any rows
-// in one batch, one step.
+// after itself as the copies before it left its list (Edit::position's default for a Duplicate),
+// rows and nested records of any rows in one batch, one step; the copies are selected, the copy
+// of the primary (or of the record holding it) the primary, so the preview stays where it was.
 void DocumentSet::duplicate_records(Document &document) {
 	last_edit_ok_ = false;
 	const std::vector<NodeAddress> records =
@@ -692,49 +706,29 @@ void DocumentSet::duplicate_records(Document &document) {
 	                : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now("document.duplicate", "Select the records to duplicate first.", document.path());
-	// In document order: the rows among the rows, the records in their owner's collection. A copy
-	// lands after its original, so the originals after it in the same list shift by the copies made
-	// before them.
-	struct Item {
-		NodeAddress record;
-		NodeAddress owner; // the owner; none for a row (the rows are one list)
-		NodeKind kind = -1; // the collection's kind; -1 for a row
-		size_t index = 0;
-	};
-	std::vector<Item> items;
-	for (const NodeAddress &record : records) {
-		Item item{record, {}, -1, 0};
-		NodeId parent = 0;
-		if (!position_after(document, record, parent, item.index))
-			return core_.refuse_now("document.selection", "The selected record no longer exists.", document.path());
-		Document::Placement at;
-		if (record.child && document.placement(record, at)) {
-			item.owner = at.owner;
-			item.kind = at.spec.kind;
-		}
-		items.push_back(item);
-	}
-	std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
-		if (a.owner.row != b.owner.row) return a.owner.row < b.owner.row;
-		if (a.owner.child != b.owner.child) return a.owner.child < b.owner.child;
-		if (a.kind != b.kind) return a.kind < b.kind;
-		return a.index < b.index;
-	});
+	std::vector<NodeAddress> around = document.ancestors(view_.documents.selection.primary);
+	around.push_back(view_.documents.selection.primary);
+	size_t primary_edit = SIZE_MAX;
 	std::vector<Edit> edits;
-	for (size_t i = 0; i < items.size(); ++i) {
-		size_t before = 0; // copies already made in this record's list, ahead of it
-		for (size_t j = 0; j < i; ++j)
-			before += items[j].owner == items[i].owner && items[j].kind == items[i].kind;
+	for (const NodeAddress &record : records) {
+		if (!has_record(document, record))
+			return core_.refuse_now("document.selection", "The selected record no longer exists.", document.path());
+		if (std::find(around.begin(), around.end(), record) != around.end())
+			primary_edit = edits.size();
 		Edit edit;
 		edit.operation = EditOperation::Duplicate;
-		edit.address = items[i].record;
-		edit.position = items[i].index + before;
+		edit.address = record;
 		edits.push_back(edit);
 	}
-	if (apply_edits(document, edits))
-		view_.activity.status =
-		        edits.size() == 1 ? std::string("Duplicated a record.")
-		                          : "Duplicated " + std::to_string(edits.size()) + " record(s).";
+	if (!apply_edits(document, edits)) return;
+	const std::vector<NodeId> &made = document.last_made();
+	if (primary_edit < made.size() && made[primary_edit]) {
+		view_.documents.selection.make_primary(document.address_of(made[primary_edit]));
+		core_.touch(ViewConcern::Selection);
+	}
+	view_.activity.status = edits.size() == 1
+	                                ? std::string("Duplicated a record.")
+	                                : "Duplicated " + std::to_string(edits.size()) + " record(s).";
 }
 
 } // namespace opennova::editor

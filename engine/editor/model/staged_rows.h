@@ -35,7 +35,7 @@ public:
 	// document never had, or one the batch removed).
 	size_t index_of(NodeId id) const;
 	const Node *find(NodeId id) const;
-	// A committed row an earlier edit of the batch removed.
+	// A row an earlier edit of the batch removed: a committed one, or one the batch added.
 	bool removed(NodeId id) const { return removed_.count(id) != 0; }
 	// The row `id` to edit: its clone, made on the batch's first touch of it (a row the batch adds
 	// is its own); null for a row the batch does not have.
@@ -51,15 +51,16 @@ public:
 	void insert(std::shared_ptr<Node> row, size_t position);
 	void remove(NodeId id);
 	// The row `id` to `position` among the others (the last when past it); false when it is there.
+	// The step takes the rows moved here for the ones that moved.
 	bool move(NodeId id, size_t position);
 	// The file-wide state as the batch leaves it (an edit replaces it with a changed copy).
 	std::shared_ptr<const FileState> &state() { return state_; }
 	// Each row an edit changed, touched or added: what the document's type refreshes before the
 	// step (Document::after_edit).
 	void for_each_changed(const std::function<void(Node &)> &fn);
-	// The step from the committed rows to these: a row removed, a row added, a row moved (the
-	// fewest the new order needs: those off the longest run of rows kept in their order), and a row
-	// changed in place; sorted by the rows' identities.
+	// The step from the committed rows to these: a row removed, a row added, a row moved (each row
+	// move() moved, unless every row kept stands in its committed order again), and a row changed
+	// in place; sorted by the rows' identities.
 	EditStep step() const;
 
 private:
@@ -75,6 +76,7 @@ private:
 	std::shared_ptr<const FileState> state_before_, state_;
 	std::unordered_map<NodeId, Touched> touched_;
 	std::unordered_set<NodeId> removed_;
+	std::unordered_set<NodeId> moved_; // the rows move() moved
 	mutable std::vector<std::shared_ptr<const Node>> list_;
 	mutable bool listed_ = false; // list_ is the staged order (made on the first ask of it)
 	bool shaped_ = false; // a row was added, removed or moved: the order is list_'s own
