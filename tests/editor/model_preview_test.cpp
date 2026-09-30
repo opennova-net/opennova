@@ -18,6 +18,7 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
@@ -30,7 +31,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_o3d_read.h>
 #include <runtime/anim/adm_root_motion.h>
@@ -97,7 +98,7 @@ static int test_status_and_builds() {
 	// The open model, as it would save.
 	session.handle(request::open_document("models/armory.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
-	TEST_EXPECT(document && view.model_preview.path == "models/armory.3di");
+	TEST_EXPECT(document && view.documents.previews.model.path == "models/armory.3di");
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild);
 	TEST_EXPECT(model.builds() == 1 && model.model() && model.follow(view) == ModelPreviewAction::Keep);
 	JsonValue shown = json(view, model);
@@ -141,7 +142,7 @@ static int test_status_and_builds() {
 	TEST_EXPECT(shown.get("options")->get("ctrl")->get("HEAT")->number == 5.0);
 
 	// A texture the build read (or looked for) changes: it builds again.
-	auto files = std::make_shared<StampedFiles>(view.assets);
+	auto files = std::make_shared<StampedFiles>(view.findings.assets);
 	std::vector<uint8_t> bytes;
 	TEST_EXPECT(!files->read("preview_skin.tga", bytes) && files->read_names().size() == 1);
 	model.built(files);
@@ -153,7 +154,7 @@ static int test_status_and_builds() {
 	// Saved and closed: nothing to show.
 	session.handle(request::save_all());
 	session.handle(request::close_document("models/armory.3di"));
-	TEST_EXPECT(view.model_preview.path.empty());
+	TEST_EXPECT(view.documents.previews.model.path.empty());
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Clear);
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_model" && !model.model());
 	return 0;
@@ -503,8 +504,8 @@ static int test_animation() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
-	TEST_EXPECT(view.scan.find("skinned.3di") && view.scan.find("SKIN.adm") && view.scan.find("walk.bad"));
-	TEST_EXPECT(editor_test::write_text(view.project_root + "/defs/items.def",
+	TEST_EXPECT(view.project.scan->find("skinned.3di") && view.project.scan->find("SKIN.adm") && view.project.scan->find("walk.bad"));
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
 	session.handle(request::rescan());
@@ -512,7 +513,7 @@ static int test_animation() {
 	// The table plays on the item's graphic.
 	session.handle(request::open_document("anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
-	TEST_EXPECT(table && view.model_preview.path == "anims/SKIN.adm");
+	TEST_EXPECT(table && view.documents.previews.model.path == "anims/SKIN.adm");
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild);
 	JsonValue shown = json(view, model);
 	TEST_EXPECT(shown.get_string("status", "") == "ready" && shown.get_string("path", "") == "anims/SKIN.adm");
@@ -540,7 +541,7 @@ static int test_animation() {
 
 	// The clip plays on the table that names it, as the row that names it.
 	session.handle(request::open_document("anims/walk.bad"));
-	TEST_EXPECT(view.model_preview.path == "anims/walk.bad");
+	TEST_EXPECT(view.documents.previews.model.path == "anims/walk.bad");
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::Ready && strutil_iequals(model.rig().table, "SKIN.adm"));
 	TEST_EXPECT(model.clip_key() == "anim_walk_forward" && model.skeleton());
@@ -558,7 +559,7 @@ static int test_animation() {
 	TEST_EXPECT(model.clip_ticks() == model.tick_of_frame(3));
 
 	// No item pairs a table: no rig, until a model is chosen.
-	TEST_EXPECT(editor_test::write_text(view.project_root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
 	session.handle(request::rescan());
 	session.handle(request::open_document("anims/SKIN.adm"));
 	model.follow(view);
@@ -642,7 +643,7 @@ static int test_runtime_clips() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}}};
 	session.handle(import);
-	TEST_EXPECT(view.scan.find("SKIN.adm") && view.scan.find("STEP.adm") && view.scan.find("step.bad"));
+	TEST_EXPECT(view.project.scan->find("SKIN.adm") && view.project.scan->find("STEP.adm") && view.project.scan->find("step.bad"));
 	ModelPreviewOptions chosen = model.options();
 	chosen.rig_model = "skinned.3di";
 	model.set_options(chosen);
@@ -703,7 +704,7 @@ static int test_runtime_clips() {
 	TEST_EXPECT(model.clip_key() == "anim_idle" && model.clip_variant() == 0 && !model.clip_loops());
 	const std::vector<PreviewClipEvent> events = model.clip_events();
 	opennova::ResourceIndex index;
-	TEST_EXPECT(index.scan(view.project_root + "/anims"));
+	TEST_EXPECT(index.scan(view.project.root + "/anims"));
 	opennova::assets::AssetStore store{&index};
 	opennova::anim::AdmRootMotion motion;
 	const int adm = motion.register_adm(&store, "STEP.adm");

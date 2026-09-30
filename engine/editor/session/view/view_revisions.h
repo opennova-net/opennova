@@ -11,38 +11,44 @@ namespace opennova::editor {
 // What in the session's view a change is about (ADR 0046 S13 D1). Each concern has its own
 // counter (ViewRevisions), so a window keys what it derives on the concerns it reads and keeps
 // it while they stand: a line of the game's log moves Output alone, and the files, the
-// findings and the graph a window drew from stay as they were.
+// findings and the graph a window drew from stay as they were. Since S13 V4 each concern is
+// about one sub-view of the view (session_view.h), named first below; SessionView's one
+// `revisions` counts them all, so a cache's key names concerns, never sub-views.
 enum class ViewConcern : uint8_t {
-	// Whether a project is open, its folder and its project document; quit_requested.
+	// ProjectView: whether a project is open, its folder and its project document; and
+	// DialogsView's quit_requested.
 	Project,
-	// The scan, the requirements, the imports and the game install's file names.
+	// ProjectView: the scan, the requirements, the imports and the game install's file names.
 	Files,
-	// The Problems rows: moves only when the rows the session composed differ.
+	// FindingsView: the Problems rows; moves only when the rows the session composed differ.
 	Findings,
-	// What the asset graph holds: moves only when its update changed it (its generation).
+	// FindingsView: what the asset graph holds; moves only when its update changed it (its
+	// generation).
 	Graph,
-	// The open documents, what they hold and their history.
+	// DocumentsView: the open documents, what they hold and their history.
 	Documents,
-	// The active document, the selected records, what the previews follow, a field or a file
-	// asked to be shown, and the clipboard.
+	// DocumentsView: the active document, the selected records, what the previews follow and
+	// the clipboard; a record's field or a file asked to be shown (the RevealRecord and
+	// RevealFile view events).
 	Selection,
-	// The Output lines and the status line: what the editor said.
+	// ActivityView: the Output lines and the status line, what the editor said.
 	Output,
-	// The build: running, its steps, the last build.
+	// ActivityView: the running operation (a build: its steps), the last one, the last build.
 	Operation,
-	// The game Play started: its state, process, port, exit and boot report.
+	// ActivityView: the game Play started: its state, process, port, exit and boot report.
 	Run,
-	// The unsaved-changes prompt, the import preview, the rename preview, the settings' result.
+	// DialogsView: the unsaved-changes prompt, the import preview, the rename preview; and
+	// ProjectView's settings result (the AskRename, SettingsApplied and ImportPlanned events).
 	Dialogs,
-	// The editor's settings: the recent projects, the game install, the runtime, the import
-	// setting.
+	// ProjectView: the editor's settings: the recent projects, the game install, the runtime,
+	// the import setting.
 	Preferences,
-	// Which documents are open and whether each has unsaved edits: moves when a document opens,
-	// closes, is read again, or goes from saved to unsaved or back; never for an edit that
-	// leaves it as it was there (Documents moves with every edit).
+	// DocumentsView: which documents are open and whether each has unsaved edits; moves when a
+	// document opens, closes, is read again, or goes from saved to unsaved or back; never for
+	// an edit that leaves it as it was there (Documents moves with every edit).
 	DocumentSet,
-	// Which document is the active one: moves only when another becomes it (Selection moves
-	// with every record picked in it).
+	// DocumentsView: which document is the active one; moves only when another becomes it
+	// (Selection moves with every record picked in it).
 	ActiveDocument,
 	kCount,
 };

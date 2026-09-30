@@ -14,7 +14,7 @@
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -107,26 +107,34 @@ struct SessionJsonOptions {
 	// from `import_offset`, `import_limit` entries at most; their counts say how many there are.
 	size_t import_offset = 0;
 	size_t import_limit = 200;
+	// The first event to include, by its seq (ViewEvents; 0: from the oldest held), and how many:
+	// a cursor kept from the last page's next_cursor neither skips nor repeats one.
+	uint64_t event_cursor = 0;
+	size_t event_limit = ViewEvents::kKept;
 };
 
 // The view: revision (moves with any change: ViewRevisions::any), revisions (each concern's
-// counter by its token, session_revisions.h: a client waits on the concern it reads), status,
+// counter by its token, view_revisions.h: a client waits on the concern it reads), status,
 // the unsaved-changes prompt ({open}, and while it is open the
 // waiting request's kind token as `action`, its `target`, the `files` it lists and
 // `can_discard`), project (its `files`: every file the scan lists, with its kind and whether
 // the editor opens it), requirements (rows included), documents (their paths, kinds,
-// dirtiness), the selection (the primary, every selected record, and `reveal_field` with its
-// `reveal_serial` while a request asked for one of its fields), the clipboard's size, the
+// dirtiness), the selection (the primary and every selected record), the clipboard's size, the
 // operation (operation_status_to_json) and the last one's outcome (`last_operation`), the build
-// and play blocks,
+// and play blocks, what the last settings' Apply could not write (`settings_result`),
 // the import state (the dialog: its `choices` and `roots` as a request's imports take them,
 // the plan's importable `rows` with their source, destination, needed_by, found_in,
 // selected, problem and rivals, the `not_found` rows, each of the four lists a page from
 // `offset` with its count, then `not_followed`, `truncated` and the plan's findings; the
 // editor's `import_dependencies` setting; the project's imported sources), the problem
-// counts, the recent projects and a page of the output lines by absolute index ({first, next,
-// cursor, next_cursor, lines}).
+// counts, the recent projects, a page of the output lines by absolute index ({first, next,
+// cursor, next_cursor, lines}) and a page of the events by seq ({first, next, cursor,
+// next_cursor, items}, each view_event_to_json's).
 io::JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions &options = {});
+// A view event (view_events.h): {seq, kind (its token: reveal_record, reveal_file, ask_rename,
+// settings_applied, import_planned)} and, as the kind sets them, `path`, `address` (the record's
+// {row, kind, child}), `field`, `flag` (only when true) and `tag` (only when not 0).
+io::JsonValue view_event_to_json(const ViewEvent &event);
 // The operation that runs: {running}, and while one does its id, kind token, label, done, total,
 // unit token (bytes, files, steps), cancellable and holds (tokens: files, documents, project).
 io::JsonValue operation_status_to_json(const OperationStatus &status);

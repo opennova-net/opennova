@@ -10,7 +10,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/session/editor_request.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -84,7 +84,7 @@ std::vector<ProblemFix> bulk_fixes_for(const Diagnostic &diagnostic, const Sessi
 // role, one game-data import list naming every file, and every other request once.
 std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes);
 
-// What the fixes of a view's findings read, as a cache's key (session_revisions.h): the
+// What the fixes of a view's findings read, as a cache's key (view_revisions.h): the
 // findings; the project (open, its folder); the files (the scan, the requirements, the game
 // install's file names); the graph (where a symbol belongs, a Use fix's rename); which
 // documents are open and unsaved (a Reload, a Rewrite's unsaved edits: DocumentSet, which an
@@ -98,7 +98,7 @@ RevisionKey problem_fix_key(const SessionView &view);
 // view's index is found once for it.
 class ProblemFixCache {
 public:
-	// The fixes of view.diagnostics[index] (fixes_for).
+	// The fixes of view.findings.diagnostics[index] (fixes_for).
 	const std::vector<ProblemFix> &fixes(const SessionView &view, size_t index);
 	// Its bulk fixes (bulk_fixes_for: cheap, not kept).
 	std::vector<ProblemFix> bulk(const SessionView &view, size_t index);

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <string>
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <imgui.h>
@@ -36,7 +36,7 @@ void draw_record(Workspace &workspace, const Document &document, const RecordRev
 	const std::vector<Document::Collection> held = document.collections_of(address);
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 	if (held.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-	if (holds(view.selected, address)) flags |= ImGuiTreeNodeFlags_Selected;
+	if (holds(view.documents.selected, address)) flags |= ImGuiTreeNodeFlags_Selected;
 	const std::string title = document.record_title(address);
 	const std::string label = ui_kit::kChangeRoom + title;
 	const float x = ImGui::GetCursorScreenPos().x;
@@ -103,7 +103,7 @@ bool adds_rows_of(const Document &document, NodeKind kind) {
 // them: a nested record's collection, or the rows of a kind the file adds (a collection's +
 // adds a nested one).
 void draw_selection_tools(Workspace &workspace, const Document &document) {
-	const NodeAddress selection = workspace.view().selection;
+	const NodeAddress selection = workspace.view().documents.selection;
 	Document::Placement at;
 	const bool nested = selection.child != 0 && document.placement(selection, at);
 	size_t row_index = SIZE_MAX;

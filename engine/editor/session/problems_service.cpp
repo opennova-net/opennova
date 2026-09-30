@@ -13,9 +13,9 @@ namespace opennova::editor {
 
 ProblemsService::ProblemsService(SessionCore &core) :
 		core_(core), view_(core.view()), render_check_(std::make_shared<MenuRenderCheck>()) {
-	view_.graph = graph_;
-	view_.assets = assets_;
-	view_.render_check = render_check_;
+	view_.findings.graph = graph_;
+	view_.findings.assets = assets_;
+	view_.findings.render_check = render_check_;
 }
 
 // The project's findings now, composed as `opennova-project validate` composes them
@@ -42,7 +42,7 @@ void ProblemsService::compose(bool keep_reported) {
 	const uint64_t graph_generation = graph_->generation();
 	const std::vector<Diagnostic> open = core_.documents().findings();
 	ProjectFindings findings = compose_project_findings(
-	        {core_.paths(), view_.document, view_.scan, view_.requirements, view_.documents, view_.boot_missing,
+	        {core_.paths(), *view_.project.document, *view_.project.scan, *view_.project.requirements, view_.documents.open, view_.activity.boot_missing,
 	         play_findings_, open, build_findings_},
 	        *graph_, validation_cache_, *render_check_, *assets_);
 	document_findings_ = std::move(findings.documents);
@@ -56,15 +56,15 @@ void ProblemsService::compose(bool keep_reported) {
 				findings.rows.push_back(reported.finding);
 		}
 	reported_.clear();
-	if (findings.rows != view_.diagnostics) {
-		view_.diagnostics = std::move(findings.rows);
+	if (findings.rows != view_.findings.diagnostics) {
+		view_.findings.diagnostics = std::move(findings.rows);
 		core_.touch(ViewConcern::Findings);
 	}
 	if (graph_->generation() != graph_generation) core_.touch(ViewConcern::Graph);
 }
 
 void ProblemsService::add_reported(const Diagnostic &d) {
-	view_.diagnostics.push_back(d);
+	view_.findings.diagnostics.push_back(d);
 	reported_.push_back({d, validation_due_});
 	core_.touch(ViewConcern::Findings);
 }

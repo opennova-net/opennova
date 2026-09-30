@@ -1,49 +1,10 @@
 #pragma once
-#include <cstdint>
-#include <string>
-#include <vector>
 
-#include <editor/documents/mnu_clipboard.h>
-#include <editor/preview/menu_canvas.h>
-#include <editor/preview/menu_preview_state.h>
-#include <editor/session/editor_request.h>
-#include <editor/ui/workspace.h>
-#include <editor/ui/viewport_canvas.h>
-#include <runtime/menu/menu_frame.h>
+#include <memory>
 
 namespace opennova::editor {
 
-class MnuDocument;
-
-// The only seam between the engine-owned menu pane and a rendering device (ADR 0046 d11,
-// the GameViewport pattern): the shell renders the previewed screen through the runtime's
-// own MenuFrame into an offscreen viewport and draws it into the pane; engine-only runs
-// leave it null. Picking, outlines and drags read the configured compiler, so they are
-// the game's own hit test and rects.
-class MenuPreviewViewport {
-public:
-	virtual ~MenuPreviewViewport() = default;
-	// What the device shows, and why not (`detail`: the status's detail).
-	virtual MenuPreviewStatus status(std::string *detail) const = 0;
-	// The files the screen names that the project does not have, each once.
-	virtual const std::vector<std::string> &missing() const = 0;
-	// The files the screen names that the project has but that did not load (a font or
-	// string table that does not parse, a texture that does not decode), each once.
-	virtual const std::vector<std::string> &unreadable() const = 0;
-	// Size the offscreen viewport to the device size and draw its texture as the current
-	// ImGui item (it renders on the frames it is drawn).
-	virtual void draw(int device_width, int device_height) = 0;
-	// How it draws the screen (every window shown, one window held in a state): they apply
-	// after every configure, and a change configures again.
-	virtual void set_options(const MenuPreviewOptions &options) = 0;
-	virtual const MenuPreviewOptions &options() const = 0;
-	// The configured compiler and its frame state; null unless ready.
-	virtual const menu::MenuFrameCompiler *compiler() const = 0;
-	virtual const menu::MenuFrameState *frame_state() const = 0;
-	// The document revision the picture shows: an index maps to a record only while it is
-	// the document's own.
-	virtual uint64_t shown_revision() const = 0;
-};
+class Workspace;
 
 // The menu preview, the Preview window's menu pane (ADR 0046 S6c, S9j, S9k1, S9k2, S11d, S13 V2):
 // the selected screen of the menu the view previews as the game draws it, refreshed on every
@@ -58,10 +19,16 @@ public:
 // resizes the primary, a drag of a selected window moves every selected one (one undo step per
 // drag), as do the arrow keys; Esc selects the primary's parent; Ctrl+C / X / V / D copy, cut,
 // paste and duplicate windows, also from the right-click menu; the middle button or Space pans,
-// Ctrl+wheel zooms about the mouse.
+// Ctrl+wheel zooms about the mouse. What it holds (its canvas, the menu's half of it, the
+// toolbar's settings) is its own, behind a pointer, so this header names none of the preview's
+// or the canvas's types (S13 V4); the device it draws through is the Shell's
+// (preview/menu_preview_viewport.h, the workspace's devices).
 class MenuPreviewPane {
 public:
 	explicit MenuPreviewPane(Workspace &workspace);
+	~MenuPreviewPane();
+	MenuPreviewPane(const MenuPreviewPane &) = delete;
+	MenuPreviewPane &operator=(const MenuPreviewPane &) = delete;
 	// Into the current window, below the Preview window's line naming the screen.
 	void draw();
 	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw
@@ -70,35 +37,8 @@ public:
 	void end_frame();
 
 private:
-	// What the pane draws this frame: what its canvas maps, and what the clipboard takes.
-	struct Frame {
-		MenuCanvasFrame canvas;
-		MenuClipboard clipboard;
-	};
-
-	void follow_selection_(const MnuDocument &document, const NodeAddress &selected);
-	void toolbar_(const Frame &frame);
-	void draw_canvas_(const Frame &frame, float height);
-	// The clipboard's shortcuts (the arrows and Esc are the canvas's).
-	void keys_(const Frame &frame);
-	// The Arrange items (the toolbar's menu and the canvas's).
-	void arrange_items_(const Frame &frame);
-	// Copy, Cut, Paste or Duplicate the selected windows (the keys and the canvas's menu).
-	void clipboard_(const Frame &frame, EditorRequestKind kind);
-
-	// The Shell's menu device (the workspace's devices), null for none.
-	MenuPreviewViewport *viewport() const { return workspace_.devices().menu; }
-
-	Workspace &workspace_;
-	ViewportCanvas canvas_;
-	MenuCanvas menu_canvas_;
-	CanvasWindowRequests requests_;
-	bool snap_ = true;
-	NodeId followed_ = 0; // the selected window the held state last followed
-	// The mouse over the picture in design units, from the last canvas pass (the toolbar's
-	// readout).
-	bool mouse_on_picture_ = false;
-	int mouse_design_x_ = 0, mouse_design_y_ = 0;
+	class Impl;
+	std::unique_ptr<Impl> impl_;
 };
 
 } // namespace opennova::editor

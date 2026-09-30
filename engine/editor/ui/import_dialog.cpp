@@ -8,10 +8,11 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/import/import_plan.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -94,7 +95,10 @@ void not_followed_line(const ImportPlan &plan) {
 
 void ImportDialog::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
-	const SessionView::ImportPreview &preview = v.import_preview;
+	const DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	// A plan made since the dialog last drew (an ImportPlanned event): its checks are taken again.
+	for (const ViewEvent &event : events_.take())
+		retake_ = retake_ || event.kind == ViewEventKind::ImportPlanned;
 	// A new preview starts clean; one an Import found changed keeps what was asked of it. A
 	// preview that stays open (an Import the session refused, or that waits on the unsaved
 	// prompt) keeps its checks, its filter and Replace existing files.
@@ -103,13 +107,13 @@ void ImportDialog::draw(Workspace &workspace) {
 			filter_[0] = '\0';
 			replace_existing_ = false;
 		}
-		serial_ = 0;
+		retake_ = true;
 	}
 	previewing_ = preview.open;
 	// The unsaved prompt an Import raised (it writes over a file with unsaved edits) takes the
 	// dialog's place until it is answered: both are modals at the top level, where opening one
 	// closes the other.
-	if (v.unsaved_prompt.open) return;
+	if (v.dialogs.unsaved_prompt.open) return;
 	if (preview.open && !ImGui::IsPopupOpen("Import files")) ImGui::OpenPopup("Import files");
 	const float em = ImGui::GetFontSize();
 	ImGui::SetNextWindowSize(ImVec2(em * 64.0f, em * 41.0f), ImGuiCond_FirstUseEver);
@@ -119,7 +123,8 @@ void ImportDialog::draw(Workspace &workspace) {
 		ImGui::EndPopup();
 		return;
 	}
-	if (preview.serial != serial_ || checked_.size() != preview.plan.rows.size() || chosen_.size() != preview.choices.size())
+	if (retake_ || checked_.size() != preview.plan->rows.size() ||
+			chosen_.size() != preview.choices.size())
 		take(preview);
 	if (preview.changed) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
@@ -146,7 +151,7 @@ void ImportDialog::draw(Workspace &workspace) {
 		if (!checked_[i]) continue;
 		++count;
 		if (blocked.empty() && i < why_not_.size() && !why_not_[i].empty())
-			blocked = preview.plan.rows[i].name + " cannot be imported: " + why_not_[i] +
+			blocked = preview.plan->rows[i].name + " cannot be imported: " + why_not_[i] +
 			          " Uncheck it to import the rest.";
 	}
 	// Unsaved edits hold nothing here: an import that would write over an edited file asks to
@@ -166,7 +171,7 @@ void ImportDialog::draw(Workspace &workspace) {
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
 		std::vector<ImportSource> imports;
 		for (size_t i = 0; i < checked_.size(); ++i) {
-			const ImportSource &source = preview.plan.rows[i].source;
+			const ImportSource &source = preview.plan->rows[i].source;
 			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
 				imports.push_back(source);
 		}
@@ -183,9 +188,9 @@ void ImportDialog::draw(Workspace &workspace) {
 
 // The checks of a new plan: each row the plan takes (a chosen file whatever its problem, a
 // dependency only when the project can take it); each choice among the files chosen.
-void ImportDialog::take(const SessionView::ImportPreview &preview) {
-	serial_ = preview.serial;
-	const ImportPlan &plan = preview.plan;
+void ImportDialog::take(const DialogsView::ImportPreview &preview) {
+	retake_ = false;
+	const ImportPlan &plan = *preview.plan;
 	why_not_.assign(plan.rows.size(), std::string());
 	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = cannot_take(plan, i);
 	checked_.assign(plan.rows.size(), false);
@@ -199,7 +204,7 @@ void ImportDialog::take(const SessionView::ImportPreview &preview) {
 
 // The files chosen, planned again: the chosen ones that are not in the list, then those
 // checked in it.
-void ImportDialog::choose(Workspace &workspace, const SessionView::ImportPreview &preview) {
+void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	EditorRequest request = request::plan_import({}, preview.with_dependencies);
 	for (const ImportSource &root : preview.roots)
 		if (std::find(preview.choices.begin(), preview.choices.end(), root) == preview.choices.end())
@@ -210,7 +215,7 @@ void ImportDialog::choose(Workspace &workspace, const SessionView::ImportPreview
 }
 
 // A listing's files to choose from, with a filter: each change plans the import again.
-void ImportDialog::draw_choices(Workspace &workspace, const SessionView::ImportPreview &preview) {
+void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	const ImportSource &first = preview.choices.front();
 	const std::string from =
 	        first.install ? std::string("the game data") : "the archive " + basename_of(first.path);
@@ -270,8 +275,8 @@ void ImportDialog::draw_choices(Workspace &workspace, const SessionView::ImportP
 }
 
 // "Include the files these need", then the rows: the chosen files first, then what they need.
-void ImportDialog::draw_plan(Workspace &workspace, const SessionView::ImportPreview &preview) {
-	const ImportPlan &plan = preview.plan;
+void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPreview &preview) {
+	const ImportPlan &plan = *preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
 	for (size_t i = 0; i < plan.rows.size(); ++i) {
@@ -357,8 +362,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const SessionView::ImportPrev
 
 // Under the rows: the files not found, the ones found in more than one place, what is not
 // followed, the cap, and what could not be read.
-void ImportDialog::draw_notes(const SessionView::ImportPreview &preview) {
-	const ImportPlan &plan = preview.plan;
+void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
+	const ImportPlan &plan = *preview.plan;
 	std::vector<const ImportPlanRow *> missing;
 	for (const ImportPlanRow &row : plan.rows)
 		if (row.state == State::NotFound) missing.push_back(&row);

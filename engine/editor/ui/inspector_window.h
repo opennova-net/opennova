@@ -3,9 +3,10 @@
 #include <vector>
 
 #include <editor/model/document.h>
-#include <editor/session/findings_index.h>
+#include <editor/session/view/findings_index.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/reference_picker.h>
+#include <editor/ui/view_event_mailbox.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
@@ -33,8 +34,9 @@ namespace opennova::editor {
 // row's context menu), each row marked when it was added or changed since the last save; a
 // collection whose records hold too much for a table lists them by name. The record's
 // Problems rows close the panel, each naming the field it is about. A field a request asks
-// to show (the view's reveal_field: a Problems row's) is scrolled to and lit a moment, each
-// time it is asked (reveal_serial). With several records of one kind selected (S9k2) it
+// to show (a RevealRecord view event: a Problems row's, a Go to's) is scrolled to and lit a
+// moment, each time it is asked, when the Inspector next draws the record the event names (an
+// event held while it does not draw). With several records of one kind selected (S9k2) it
 // shows the fields they share instead, each marked where they differ, and a change sets
 // every one of them in one undo step.
 class InspectorWindow : public devtools::Window {
@@ -44,6 +46,20 @@ public:
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::Right; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &, uint64_t) override;
+	// A RevealRecord held until the Inspector draws, with what it was sent against: the
+	// selection's revision and the identity of the document it names (Document::identity).
+	// Taken, it shows nothing once the selection has moved since (off its record and back too:
+	// the view's one reveal went with the first move) or its document was read again, its
+	// records numbered anew (closed and opened, reloaded).
+	struct HeldReveal {
+		ViewEvent event;
+		uint64_t selection = 0;
+		uint64_t document = 0;
+	};
+	// A RevealRecord event, held until the Inspector draws.
+	void receive(const ViewEvent &event);
+	// The events it holds until it draws.
+	const ViewEventMailbox<HeldReveal> &events() const { return events_; }
 
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
@@ -52,10 +68,11 @@ private:
 	ReferencePicker picker_;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	char filter_[128]{};
-	// The field the view last asked to show, on its record: the ask's serial and the document
-	// it was in (another ask of either shows it again); whether the form still has to scroll to
-	// it, and when it was asked (its row's light fades from then).
-	uint64_t reveal_serial_ = 0;
+	// The RevealRecord events held until it draws, then the field the last one asked to show, on
+	// its record and in the document it was in (the selection moving off either lets it go);
+	// whether the form still has to scroll to it, and when it was asked (its row's light fades
+	// from then).
+	ViewEventMailbox<HeldReveal> events_;
 	uint64_t reveal_document_ = 0;
 	NodeAddress reveal_record_;
 	std::string reveal_field_;

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include <editor/session/findings_index.h>
+#include <editor/session/view/findings_index.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/reference_picker.h>
@@ -27,10 +27,12 @@ class MnsDocument;
 class StylesView {
 public:
 	void draw(Workspace &workspace, const MnsDocument &document);
+	// A RevealRecord event for its document: the next draw shows the selection again.
+	void reveal_again() { reveal_.ask(); }
 
 private:
 	// What the view keeps the document's answers by (style_value_use's graph key): the graph's
-	// counter (session_revisions.h: the menus' uses of a definition); the document keys them by
+	// counter (view_revisions.h: the menus' uses of a definition); the document keys them by
 	// its own revision too.
 	static uint64_t cache_key(const SessionView &view) {
 		return view.revisions.of(ViewConcern::Graph);

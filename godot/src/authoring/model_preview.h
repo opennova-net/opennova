@@ -11,11 +11,14 @@
 
 #include <editor/preview/model_preview_json.h>
 #include <editor/preview/model_preview_state.h>
-#include <editor/session/session_view.h>
-#include <editor/ui/model_preview_pane.h>
+#include <editor/preview/model_preview_viewport.h>
 
 #include "object/object_data.h"
 #include "object/object_model.h"
+
+namespace opennova::editor {
+struct SessionView;
+}
 
 namespace godot {
 

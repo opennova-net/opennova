@@ -2,24 +2,24 @@
 
 #include <algorithm>
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include <imgui.h>
 
 namespace opennova::editor {
 
 void RecordReveal::follow(const SessionView &view, const Document &document) {
-	moved_ = document.identity() != document_ || view.selection != seen_ || view.reveal_serial != serial_;
+	moved_ = document.identity() != document_ || view.documents.selection != seen_ || asked_;
 	document_ = document.identity();
-	seen_ = view.selection;
-	serial_ = view.reveal_serial;
+	seen_ = view.documents.selection;
+	asked_ = false;
 	if (!moved_) return;
 	path_.clear();
 	// The selection is the active document's.
-	moved_ = view.selection.row != 0 && view.active_document == document.path();
+	moved_ = view.documents.selection.row != 0 && view.documents.active == document.path();
 	if (!moved_) return;
-	path_ = document.ancestors(view.selection);
-	path_.push_back(view.selection);
+	path_ = document.ancestors(view.documents.selection);
+	path_.push_back(view.documents.selection);
 }
 
 bool RecordReveal::holds(const NodeAddress &record) const {

@@ -43,7 +43,7 @@ void serve_forget_recent(SessionCore &core, const EditorRequest &request) {
 // Only what changed outside the editor is read again: an open document whose file holds what it
 // was read from keeps its records, its history and its selection.
 void serve_rescan(SessionCore &core, const EditorRequest &) {
-	if (!core.view().project_open)
+	if (!core.view().project.open)
 		return;
 	core.documents().reload_changed();
 	core.refresh();
@@ -67,15 +67,15 @@ void serve_cancel_import(SessionCore &core, const EditorRequest &) {
 	core.imports().cancel();
 }
 void serve_create_missing(SessionCore &core, const EditorRequest &request) {
-	if (core.view().project_open)
+	if (core.view().project.open)
 		core.create_missing(request.roles);
 }
 void serve_build(SessionCore &core, const EditorRequest &) {
-	if (core.view().project_open)
+	if (core.view().project.open)
 		core.start_build(false);
 }
 void serve_play(SessionCore &core, const EditorRequest &) {
-	if (core.view().project_open)
+	if (core.view().project.open)
 		core.start_build(true);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
@@ -271,17 +271,17 @@ constexpr RequestKindRow kRows[] = {
 			.holds(kFiles, kFilesAndDocuments)
 			.acts_on_saved()
 			.row,
-	// The settings dialog waits on its result, so a settings change is never refused whole: each of
-	// its parts is weighed against the running operation inside, a refused part a failure its
-	// result carries back (SessionCore::apply_project_settings).
+	// The settings dialog waits on its answer, so a settings change is never refused whole: each
+	// of its parts is weighed against the running operation inside, a refused part a failure the
+	// view's settings_result lists and its settings_applied event flags
+	// (SessionCore::apply_project_settings).
 	Request(K::ApplyProjectSettings, "apply_project_settings", serve_apply_project_settings,
 			"The settings set, each one left out as it is: the project's name and features "
 			"(project.opennova), the game install (the project's .opennova/local.json, and the "
 			"editor's, where a project naming none starts), the runtime and Play in the game "
-			"install "
-			"(the editor's); the view's settings_result carries the serial back with what could "
-			"not "
-			"be written.")
+			"install (the editor's); its settings_applied view event carries the serial back, "
+			"flagged when a setting could not be written, and the view's settings_result lists "
+			"what could not be.")
 			.takes(request_params({ F::Settings }))
 			.row,
 	// An import's preview plans in place today, reading the graph. When S13 A3 makes the plan an
@@ -367,15 +367,15 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::OpenDocument, "open_document", serve_open_document,
 			"The document at path opened, or made active, with the record at locator (a Go to) or "
-			"at address selected and its field shown.")
+			"at address selected and its field shown (a RevealRecord view event).")
 			.takes(request_params({}, { F::Path, F::Locator, F::Field, F::Address }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,
 	Request(K::ShowInFiles, "show_in_files", serve_show_in_files,
-			"Files selects the project file path and scrolls to it, a file the editor does not "
-			"open "
-			"included; ask_name: and asks its new name (Rename...).")
+			"Files selects the project file path and scrolls to it (a RevealFile view event), a "
+			"file the editor does not open included; ask_name: and asks its new name "
+			"(Rename...).")
 			.takes(request_params({ F::Path }, { F::AskName }))
 			.row,
 	Request(K::ReloadDocument, "reload_document", serve_open_document,
@@ -514,8 +514,7 @@ constexpr RequestKindRow kRows[] = {
 			"name the record at locator of path defines in field renamed everywhere to new_name, "
 			"or, "
 			"with no field, the file path renamed to new_name; ask_name: the Rename everywhere "
-			"dialog "
-			"opens.")
+			"dialog opens (an AskRename view event).")
 			.takes(request_params({ F::Path }, { F::Locator, F::Field, F::NewName, F::AskName }))
 			.holds(kFiles, kNone)
 			.validates()
@@ -679,7 +678,7 @@ void join_operation(SessionCore &core, const EditorRequest &request) {
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;
 	if (request.kind == EditorRequestKind::Play) {
-		core.view().status = "Building, then playing...";
+		core.view().activity.status = "Building, then playing...";
 		core.note("Play starts the game when the build lands.");
 	}
 }

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/assets/asset_import.h>
+#include <editor/assets/import_source.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 
@@ -95,8 +95,8 @@ enum class SelectMode { Replace, Add, Toggle };
 // project's (its name and features, written to project.opennova, which needs a project
 // open) and the editor's (the game install, the runtime Play runs, Play in the game
 // install, written to the editor's settings). Only what differs from the value in effect
-// is written. `serial` names the application: the view's settings_result carries it back
-// with what could not be written.
+// is written. `serial` names the application: the SettingsApplied view event carries it back
+// (its tag), the view's settings_result what could not be written.
 struct ProjectSettingsChange {
 	uint64_t serial = 0;
 	std::optional<std::string> title;

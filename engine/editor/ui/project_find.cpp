@@ -1,6 +1,6 @@
 #include "project_find.h"
 
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/ui_kit.h>
@@ -35,11 +35,11 @@ const std::vector<ProjectFind::Usage> &ProjectFind::usages(const SessionView &vi
 	if (found != usages_.end()) return found->second;
 	std::vector<Usage> out;
 	const GraphSearchHit &result = hits_[hit];
-	for (const GraphEdge *edge : result.symbol ? view.graph->users_of(*result.symbol) : view.graph->usages_of(result.file)) {
+	for (const GraphEdge *edge : result.symbol ? view.findings.graph->users_of(*result.symbol) : view.findings.graph->usages_of(result.file)) {
 		Usage use;
 		use.line = edge->source + ": " + (edge->record.empty() ? "" : edge->record + " - ") + edge_field_title(view, *edge);
 		use.tip = use.line + "\n" + edge->field + " = " + edge->value;
-		use.target = usage_target(view.scan, *edge);
+		use.target = usage_target(*view.project.scan, *edge);
 		out.push_back(std::move(use));
 	}
 	return usages_.emplace(hit, std::move(out)).first->second;
@@ -59,7 +59,7 @@ void ProjectFind::draw(Workspace &workspace) {
 	ImGui::SetNextWindowSize(ImVec2(em * 40.0f, em * 30.0f), ImGuiCond_Appearing);
 	bool open = true;
 	if (!ImGui::BeginPopupModal(kTitle, &open)) return;
-	if (!view.project_open || !view.graph) {
+	if (!view.project.open || !view.findings.graph) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -80,7 +80,7 @@ void ProjectFind::draw(Workspace &workspace) {
 		view_ = &view;
 		key_ = cache_key(view);
 		searched_ = text_;
-		hits_ = view.graph->search(searched_);
+		hits_ = view.findings.graph->search(searched_);
 		usages_.clear();
 	}
 	// Somewhere to go: the modal closes as it goes.
@@ -110,8 +110,8 @@ void ProjectFind::draw(Workspace &workspace) {
 		ui_kit::tooltip(tip);
 		ImGui::SameLine(right - ui_kit::button_width("Go to"));
 		if (ImGui::SmallButton("Go to"))
-			go(hit.symbol ? symbol_target(view.scan, *hit.symbol)
-						  : file_target(view.scan, hit.file));
+			go(hit.symbol ? symbol_target(*view.project.scan, *hit.symbol)
+						  : file_target(*view.project.scan, hit.file));
 		ui_kit::tooltip(hit.symbol ? "Open the record that defines it." : "Open the file, or show it in Files.");
 		if (expanded) {
 			// Its uses, made once while the hits stand, the rows out of sight not drawn.

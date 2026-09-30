@@ -5,6 +5,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
+#include <editor/session/view/session_view.h>
+
 namespace godot {
 
 MenuPreview::MenuPreview(Node &owner) :
@@ -38,7 +40,7 @@ void MenuPreview::refresh(const opennova::editor::SessionView &view) {
 		return;
 	}
 	// The frame borrows the file source until its next configure.
-	assets_ = view.assets;
+	assets_ = view.findings.assets;
 	// Every configure is a first load of its textures: no earlier menu's first load fixes
 	// a band height here.
 	frame_->reset_loads();
