@@ -43,7 +43,7 @@ int usage(std::FILE *err, const char *why) {
 	             "       opennova-project create-missing <dir> [--role <token>]\n"
 	             "       opennova-project import <dir> <source> [--entry <name>]... [--replace]\n"
 	             "                               [--with-dependencies] [--dry-run]\n"
-	             "       opennova-project import <dir> --retail <game install> --entry <name>... [--replace]\n"
+	             "       opennova-project import <dir> --install <game install> --entry <name>... [--replace]\n"
 	             "                               [--with-dependencies] [--dry-run]\n"
 	             "       opennova-project reimport <dir> [--force] [--source <path>]\n"
 	             "       opennova-project build <dir> [--out <dir>]\n"
@@ -55,7 +55,7 @@ int usage(std::FILE *err, const char *why) {
 	             "                  the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
 	             "                  set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
 	             "                  --with-dependencies also copies the files they need, found beside them\n"
-	             "                  or in the game install (the --retail one, else the project's), 1000\n"
+	             "                  or in the game install (the --install one, else the project's), 1000\n"
 	             "                  files at most; an .o3d's textures come only with --with-dependencies;\n"
 	             "                  --dry-run prints the plan and writes nothing (no import pass either)\n"
 	             "  reimport        run the import pass now; --force imports again every source (or the\n"
@@ -130,11 +130,16 @@ bool open_settings(const std::string &dir, OpenedProject &project, std::FILE *er
 		return false;
 	}
 	// The command line has no machine setting to seed a project's install from: it reads the
-	// one the project names (the editor's, once the editor has opened or set it).
-	if (!open_local_settings(project.paths, std::string(), project.local, error)) {
-		report_error(err, error);
+	// one the project names (the editor's, once the editor has opened or set it). A local.json of
+	// another schema is set aside with a warning, and the command goes on as for a project with
+	// none.
+	Diagnostic finding;
+	if (!open_local_settings(project.paths, std::string(), project.local, finding)) {
+		report_error(err, finding);
 		return false;
 	}
+	if (!finding.code.empty())
+		print_diagnostic(err, finding);
 	return true;
 }
 
@@ -170,8 +175,8 @@ void print_summary(std::FILE *out, const OpenedProject &project) {
 	std::fprintf(out, "runtime: %s\n",
 	             project.local.runtime_executable.empty() ? "(beside the editor)"
 	                                                       : project.local.runtime_executable.c_str());
-	if (!project.local.retail_root.empty())
-		std::fprintf(out, "game install: %s\n", project.local.retail_root.c_str());
+	if (!project.local.game_install.empty())
+		std::fprintf(out, "game install: %s\n", project.local.game_install.c_str());
 	std::map<std::string, int> by_kind;
 	for (const AssetEntry &asset : project.state.scan.entries) ++by_kind[asset_kind_label(asset.kind)];
 	std::fprintf(out, "assets: %zu file(s)\n", project.state.scan.entries.size());
@@ -314,8 +319,8 @@ int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE 
 	if (argc < 3) return usage(err, "import needs a project directory and a source file");
 	std::vector<ImportSource> sources;
 	bool replace = false, with_dependencies = false, dry_run = false;
-	const bool retail = std::string(argv[2]) == "--retail";
-	std::string source_path = retail ? std::string() : argv[2];
+	const bool install = std::string(argv[2]) == "--install";
+	std::string source_path = install ? std::string() : argv[2];
 	std::vector<std::string> entries;
 	for (int i = 3; i < argc; ++i) {
 		const std::string arg = argv[i];
@@ -323,19 +328,19 @@ int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE 
 		else if (arg == "--with-dependencies") with_dependencies = true;
 		else if (arg == "--dry-run") dry_run = true;
 		else if (arg == "--entry" && i + 1 < argc) entries.push_back(argv[++i]);
-		else if (retail && source_path.empty() && !arg.empty() && arg[0] != '-') source_path = arg; // the game install
+		else if (install && source_path.empty() && !arg.empty() && arg[0] != '-') source_path = arg; // the game install
 		else return usage(err, ("unknown or incomplete import option " + arg).c_str());
 	}
-	if (retail && source_path.empty()) return usage(err, "--retail needs the game install folder");
+	if (install && source_path.empty()) return usage(err, "--install needs the game install folder");
 	for (const std::string &entry : entries) {
 		ImportSource source;
 		source.path = source_path;
 		source.entry = entry;
-		source.retail = retail;
+		source.install = install;
 		sources.push_back(source);
 	}
 	if (sources.empty()) {
-		if (retail) return usage(err, "choose the game's files with --entry <name> (repeat for more files)");
+		if (install) return usage(err, "choose the game's files with --entry <name> (repeat for more files)");
 		if (opennova::strutil::ends_with_icase(argv[2], ".pff"))
 			return usage(err, "choose PFF members with --entry <name> (repeat for more files)");
 		sources.push_back({argv[2], {}});
@@ -350,7 +355,7 @@ int command_import(int argc, const char *const *argv, std::FILE *out, std::FILE 
 		AssetGraph graph;
 		graph.update(project.paths, project.doc, project.state.scan, {});
 		const ImportPlan plan = plan_import(sources, with_dependencies, project.paths, project.doc, project.state.scan,
-		                                    graph, retail ? source_path : project.local.retail_root);
+		                                    graph, install ? source_path : project.local.game_install);
 		for (const Diagnostic &d : plan.diagnostics) print_diagnostic(err, d);
 		if (dry_run) {
 			print_plan(out, plan);

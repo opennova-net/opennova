@@ -33,6 +33,7 @@
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
@@ -250,7 +251,7 @@ static int test_fixes() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Fixes"));
+	session.handle(request::new_project(dir.file("project"), "Fixes"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
 	blank.logical_name = "spare.bin";
@@ -259,7 +260,7 @@ static int test_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/menus/a.mnu", kMenuA) && editor_test::write_text(root + "/menus/b.mnu", kMenuB));
 	TEST_EXPECT(editor_test::write_text(root + "/art/splash.tga", "tga") && editor_test::write_text(root + "/art/splash.pcx", "pcx"));
 	TEST_EXPECT(editor_test::write_text(root + "/foo.bin", "raw bytes")); // a .bin that is no string table
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 
 	// A required file with a factory, and no game data: Create it (placeholder content, with
 	// the others in a Fix all), or Use a string table of the project as it (never in bulk),
@@ -272,17 +273,17 @@ static int test_fixes() {
 	            std::vector<std::string>({"Create gameerr.bin", "Use other.bin as gameerr.bin", "Use spare.bin as gameerr.bin"}));
 	if (fixes.size() != 3) return 1;
 	TEST_EXPECT(fixes[0].bulk && fixes[0].request.kind == EditorRequestKind::CreateMissing &&
-	            fixes[0].request.names == std::vector<std::string>({"gameerr"}));
+	            fixes[0].request.roles == std::vector<std::string>({"gameerr"}));
 	// Every fix acts on the files: its detail says Undo cannot take it back.
 	TEST_EXPECT(fixes[0].detail.find("placeholder") != std::string::npos &&
 	            fixes[0].detail.find(kNotUndoable) != std::string::npos);
 	TEST_EXPECT(!fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::AssignRequirement &&
-	            fixes[1].request.text == "gameerr" && fixes[1].request.path == "strings/other.bin");
+	            fixes[1].request.role == "gameerr" && fixes[1].request.path == "strings/other.bin");
 	TEST_EXPECT(fixes[1].detail == "Renames other.bin to gameerr.bin; nothing refers to it. It cannot be undone with Undo.");
 	TEST_EXPECT(has_fixes(*gameerr, v));
 	// With the game data it has, Import from it too (the import dialog on that one file, planned
 	// with the files it needs as the editor's setting says).
-	editor_test::set_retail_directory(session, install);
+	editor_test::set_game_install(session, install);
 	gameerr = requirement_finding(v, "requirement.missing", "gameerr");
 	TEST_EXPECT(gameerr != nullptr);
 	if (!gameerr) return 1;
@@ -290,8 +291,8 @@ static int test_fixes() {
 	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Create gameerr.bin", "Import gameerr.bin from the game data...",
 	                                                          "Use other.bin as gameerr.bin", "Use spare.bin as gameerr.bin"}));
 	if (fixes.size() != 4) return 1;
-	TEST_EXPECT(fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::PreviewRetailImport &&
-	            fixes[1].request.names == std::vector<std::string>({"gameerr.bin"}) && fixes[1].request.flag);
+	TEST_EXPECT(fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::PreviewInstallImport &&
+	            fixes[1].request.names == std::vector<std::string>({"gameerr.bin"}) && fixes[1].request.with_dependencies);
 	TEST_EXPECT(fixes[1].detail.find(kNotUndoable) != std::string::npos);
 	// A required file without a factory (missions on: cmap.mnu): no Create; each menu to use
 	// says what its rename rewrites (b.mnu: the ACTION of a.mnu that names it).
@@ -323,8 +324,7 @@ static int test_fixes() {
 	boot.target = "gameerr.bin";
 	gameerr = requirement_finding(v, "requirement.missing", "gameerr");
 	TEST_EXPECT(gameerr && labels_of(fixes_for(boot, v)) == labels_of(fixes_for(*gameerr, v)));
-	EditorRequest create = make_request(EditorRequestKind::CreateMissing);
-	create.names = {"gameerr"};
+	EditorRequest create = request::create_missing({"gameerr"});
 	session.handle(create);
 	TEST_EXPECT(session.outcome().done() && fixes_for(boot, v).empty() && !has_fixes(boot, v));
 	Diagnostic unknown = boot;
@@ -342,7 +342,7 @@ static int test_fixes() {
 	if (fixes.size() != 2) return 1;
 	TEST_EXPECT(fixes[0].bulk && fixes[0].request.names == std::vector<std::string>({"Custom.fnt"}));
 	TEST_EXPECT(!fixes[1].bulk && fixes[1].request.kind == EditorRequestKind::CreateFile &&
-	            fixes[1].request.path == "Custom.fnt" && fixes[1].request.text == "font");
+	            fixes[1].request.path == "Custom.fnt" && fixes[1].request.file_kind == "font");
 	TEST_EXPECT(fixes[1].detail.find(kNotUndoable) != std::string::npos);
 	// A menu texture: the .dds its .tga falls back to, then (S11h) a placeholder as its .tga.
 	Diagnostic texture = font;
@@ -399,7 +399,7 @@ static int test_fixes() {
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Import logo.png again" && fixes[0].bulk);
 	if (fixes.size() != 1) return 1;
 	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::Reimport && fixes[0].request.path == "art/logo.png" &&
-	            fixes[0].request.flag && fixes[0].detail.find(kNotUndoable) != std::string::npos);
+	            fixes[0].request.force && fixes[0].detail.find(kNotUndoable) != std::string::npos);
 	// Input a rewrite drops or normalizes: Rewrite the file (a Save of it), saying what goes.
 	for (const char *code :
 	     {"style.line_ending", "catalog.ignored_input", "menu.ignored_input", "animation_map.ignored_input", "strings.regrouped"}) {
@@ -412,15 +412,15 @@ static int test_fixes() {
 		            fixes[0].detail.find(kNotUndoable) != std::string::npos);
 	}
 	// Open with unsaved edits, the rewrite saves them too, and says so.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menus/a.mnu"));
+	session.handle(request::open_document("menus/a.mnu"));
 	Document *menu = session.document_for("menus/a.mnu");
 	NodeAddress go;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "GO", go));
 	if (!menu) return 1;
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, menu->path());
-	edit.edit.address = go;
-	edit.edit.field = "position.left";
-	edit.edit.value = int64_t(20);
+	EditorRequest edit = request::edit_record(menu->path(), Edit());
+	edit.edits[0].address = go;
+	edit.edits[0].field = "position.left";
+	edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(menu->dirty());
 	const Diagnostic ending = make_diagnostic(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/a.mnu");
@@ -442,8 +442,8 @@ static int test_fixes() {
 	}
 	TEST_EXPECT(bulk_seen > 0);
 	// No project, no fixes.
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::undo(menu->path()));
+	session.handle(request::close_project());
 	TEST_EXPECT(fixes_for(font, v).empty() && fixes_for(boot, v).empty());
 	return 0;
 }
@@ -499,27 +499,22 @@ static int test_fix_cache() {
 // that never runs in bulk is left out.
 static int test_merge() {
 	const auto fix = [](EditorRequest request, bool bulk) { return ProblemFix{"", "", std::move(request), bulk}; };
-	EditorRequest menu = make_request(EditorRequestKind::CreateMissing);
-	menu.names = {"main_menu"};
-	EditorRequest text = make_request(EditorRequestKind::CreateMissing);
-	text.names = {"gametext", "main_menu"};
-	EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
-	listed.names = {"MAIN.MNU"};
-	EditorRequest fonts = make_request(EditorRequestKind::PreviewRetailImport);
-	fonts.names = {"Arial14b.fnt"};
-	EditorRequest again = make_request(EditorRequestKind::Reimport, "art/logo.png");
-	again.flag = true;
+	const EditorRequest menu = request::create_missing({"main_menu"});
+	const EditorRequest text = request::create_missing({"gametext", "main_menu"});
+	const EditorRequest listed = request::preview_install_import({"MAIN.MNU"});
+	const EditorRequest fonts = request::preview_install_import({"Arial14b.fnt"});
+	const EditorRequest again = request::reimport("art/logo.png", true);
 	const std::vector<ProblemFix> fixes = {
-		fix(make_request(EditorRequestKind::Save, "defs/items.def"), true),
+		fix(request::save("defs/items.def"), true),
 		fix(menu, true),
 		fix(listed, true),
-		fix(make_request(EditorRequestKind::AssignRequirement, "menus/a.mnu", "main_menu"), false),
+		fix(request::assign_requirement("main_menu", "menus/a.mnu"), false),
 		fix(text, true),
-		fix(make_request(EditorRequestKind::Save, "defs/items.def"), true),
+		fix(request::save("defs/items.def"), true),
 		fix(again, true),
 		fix(fonts, true),
-		fix(make_request(EditorRequestKind::Save, "menus/menu_style.mns"), true),
-		fix(make_request(EditorRequestKind::CreateFile, "Custom.fnt", "font"), false),
+		fix(request::save("menus/menu_style.mns"), true),
+		fix(request::create_file("Custom.fnt", "font"), false),
 		fix(again, true),
 	};
 	const std::vector<EditorRequest> merged = merge_fixes(fixes);
@@ -527,10 +522,10 @@ static int test_merge() {
 	if (merged.size() != 5) return 1;
 	TEST_EXPECT(merged[0].kind == EditorRequestKind::Save && merged[0].path == "defs/items.def");
 	TEST_EXPECT(merged[1].kind == EditorRequestKind::CreateMissing &&
-	            merged[1].names == std::vector<std::string>({"main_menu", "gametext"}));
-	TEST_EXPECT(merged[2].kind == EditorRequestKind::PreviewRetailImport &&
+	            merged[1].roles == std::vector<std::string>({"main_menu", "gametext"}));
+	TEST_EXPECT(merged[2].kind == EditorRequestKind::PreviewInstallImport &&
 	            merged[2].names == std::vector<std::string>({"MAIN.MNU", "Arial14b.fnt"}));
-	TEST_EXPECT(merged[3].kind == EditorRequestKind::Reimport && merged[3].path == "art/logo.png" && merged[3].flag);
+	TEST_EXPECT(merged[3].kind == EditorRequestKind::Reimport && merged[3].path == "art/logo.png" && merged[3].force);
 	TEST_EXPECT(merged[4].kind == EditorRequestKind::Save && merged[4].path == "menus/menu_style.mns");
 	TEST_EXPECT(merge_fixes({}).empty() && merge_fixes({fix(menu, false)}).empty());
 	return 0;
@@ -566,7 +561,7 @@ static int test_location() {
 	            !opened.in_files);
 	const EditorRequest open = opened.request();
 	TEST_EXPECT(open.kind == EditorRequestKind::OpenDocument && open.path == "defs/items.def" &&
-	            open.edit.address == (NodeAddress{4, 2, 0}) && open.edit.field == "type");
+	            open.address == (NodeAddress{4, 2, 0}) && open.field == "type" && open.locator.empty());
 	const ProblemLocation file = problem_location(make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
 	                                                              "An unknown key.", "defs/items.def", "subtype"),
 	                                              view);
@@ -577,7 +572,7 @@ static int test_location() {
 	for (const char *asset : {"fonts/Arial14b.fnt", "art/logo.png"}) {
 		const ProblemLocation shown = problem_location(make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
 		TEST_EXPECT(shown.path == asset && shown.in_files && shown.request().kind == EditorRequestKind::ShowInFiles &&
-		            shown.request().path == asset && !shown.request().flag);
+		            shown.request().path == asset && !shown.request().ask_name);
 	}
 	for (const char *code : {"asset.name.too_long", "asset.name.duplicate", "build.name_unstorable", "build.archive_in_project"}) {
 		Diagnostic named = catalog;
@@ -671,7 +666,7 @@ static int test_placeholders() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Placeholders"));
+	session.handle(request::new_project(dir.file("project"), "Placeholders"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
 	// armory.3di names armry.tga on a diffuse row (type 0); c.mnu an image, fx.ptl a graphic.
@@ -687,7 +682,7 @@ static int test_placeholders() {
 	                                    "\t</WINDOW>\r\n</SCREEN>\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n"
 	                                                      "\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : v.diagnostics)
 			if (d.code == "reference.missing" && d.reference == kind && d.target == target) return &d;
@@ -704,7 +699,7 @@ static int test_placeholders() {
 		TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({std::string("Create a placeholder ") + expected.second}));
 		if (fixes.size() != 1) return 1;
 		TEST_EXPECT(fixes[0].bulk && fixes[0].request.kind == EditorRequestKind::CreateFile &&
-		            fixes[0].request.path == expected.second && fixes[0].request.text == "texture");
+		            fixes[0].request.path == expected.second && fixes[0].request.file_kind == "texture");
 		TEST_EXPECT(fixes[0].detail.find("the checkerboard the game draws for a missing texture") != std::string::npos &&
 		            fixes[0].detail.find(kNotUndoable) != std::string::npos);
 		TEST_EXPECT(labels_of(bulk_fixes_for(*expected.first, v)) == labels_of(fixes) && has_fixes(*expected.first, v));
@@ -760,7 +755,7 @@ static int test_placeholders() {
 	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
-	editor_test::set_retail_directory(session, install);
+	editor_test::set_game_install(session, install);
 	logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	TEST_EXPECT(logo && labels_of(fixes_for(*logo, v)) ==
 	                            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
@@ -840,9 +835,9 @@ static int test_locations_and_fixes() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Places"));
+	session.handle(request::new_project(dir.file("project"), "Places"));
 	editor_test::create_missing_files(session);
-	editor_test::set_retail_directory(session, install);
+	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
 	const AssetEntry *items_entry = v.scan.find("items.def");
@@ -887,7 +882,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/art/a_name_too_long_for_archives.tga", "tga"));
 	TEST_EXPECT(editor_test::write_text(root + "/art/twin.tga", "tga") && editor_test::write_text(root + "/other/twin.tga", "tga"));
 	TEST_EXPECT(editor_test::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
 		for (const Diagnostic &d : v.diagnostics)
 			if (d.code == code && d.asset == asset) return &d;
@@ -932,7 +927,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(session.outcome().done() && adm && adm->dirty() && adm->rows().size() == 2);
 	if (!adm) return 1;
 	TEST_EXPECT(adm->record_name(v.selection) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
-	session.handle(make_request(EditorRequestKind::Undo, adm->path()));
+	session.handle(request::undo(adm->path()));
 	TEST_EXPECT(!adm->dirty() && finding_in("animation_map.no_reset", adm->path()));
 
 	// A catalog's name finding: on the field that names the later item (the name compared
@@ -959,14 +954,14 @@ static int test_locations_and_fixes() {
 	fixes = fixes_for(*too_long, v);
 	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Rename a_name_too_long_for_archives.tga..."}));
 	if (fixes.size() != 1) return 1;
-	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::ShowInFiles && fixes[0].request.flag &&
+	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::ShowInFiles && fixes[0].request.ask_name &&
 	            fixes[0].request.path == long_path && !fixes[0].bulk);
 	const uint64_t serial = v.reveal_file_serial;
 	session.handle(fixes[0].request);
 	TEST_EXPECT(session.outcome().done() && v.reveal_file == long_path && v.reveal_file_rename && v.reveal_file_serial == serial + 1);
-	session.handle(make_request(EditorRequestKind::ShowInFiles, "a_name_too_long_for_archives.tga"));
+	session.handle(request::show_in_files("a_name_too_long_for_archives.tga"));
 	TEST_EXPECT(v.reveal_file == long_path && !v.reveal_file_rename && v.reveal_file_serial == serial + 2);
-	session.handle(make_request(EditorRequestKind::ShowInFiles, "nowhere.tga"));
+	session.handle(request::show_in_files("nowhere.tga"));
 	TEST_EXPECT(!session.outcome().done() && v.reveal_file_serial == serial + 2);
 	const Diagnostic unstorable =
 	        make_diagnostic(DiagnosticSeverity::Error, "build.name_unstorable", "The name is too long.", long_path);
@@ -987,7 +982,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(first_plan.ok() && first_plan.sites.size() == 1 && first_plan.sites[0].file == "menus/c.mnu");
 	const RenamePlan second_plan = plan_rename(paths, v.scan, *v.graph, twin, "twin2.tga");
 	TEST_EXPECT(second_plan.ok() && second_plan.path == twin && second_plan.sites.empty());
-	session.handle(make_request(EditorRequestKind::RenameAsset, twin, "twin2.tga"));
+	session.handle(request::rename_asset(twin, "twin2.tga"));
 	const std::string moved = (fs::path(twin).parent_path() / "twin2.tga").generic_string();
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/" + moved) && !fs::exists(root + "/" + twin));
 	TEST_EXPECT(fs::exists(root + "/art/twin.tga") &&
@@ -1006,7 +1001,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Import gameerr.bin from the game data...", "Rename gameerr.bin..."}));
 	if (fixes.size() != 2) return 1;
 	TEST_EXPECT(fixes[1].request.kind == EditorRequestKind::ShowInFiles && fixes[1].request.path == gameerr_path &&
-	            fixes[1].request.flag);
+	            fixes[1].request.ask_name);
 
 	// A missing symbol: the file where it belongs, opened (a style variable's stylesheet, the
 	// menu a screen is looked up in, the table a string id's scope names); none for a string
@@ -1039,7 +1034,7 @@ static int test_locations_and_fixes() {
 	if (!weapons) return 1;
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
 	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	bool any = false;
 	v.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
 		any = any ||

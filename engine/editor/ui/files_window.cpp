@@ -11,6 +11,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
@@ -114,7 +115,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
 	if ((create || enter) && ready) {
-		workspace.request(make_request(EditorRequestKind::CreateFile, name_, asset_kind_token(kind_)));
+		workspace.request(request::create_file(name_, asset_kind_token(kind_)));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();
@@ -280,30 +281,22 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 	if (importing) {
 		const bool picks = view.allows(EditorRequestKind::PreviewImport);
 		ImGui::BeginDisabled(!picks);
-		if (ImGui::Selectable("Files...") && picks) {
-			EditorRequest pick = make_request(EditorRequestKind::PickFile);
-			pick.purpose = PickPurpose::ImportFiles;
-			workspace_.request(pick);
-		}
+		if (ImGui::Selectable("Files...") && picks)
+			workspace_.request(request::pick_file(PickPurpose::ImportFiles));
 		ImGui::EndDisabled();
 		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
-		const bool game_data = !view.retail_directory.empty() && view.allows(EditorRequestKind::PreviewRetailImport);
+		const bool game_data =
+		        !view.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
 		ImGui::BeginDisabled(!game_data);
-		if (ImGui::Selectable("From the game data...") && game_data) {
-			EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
-			listed.flag = view.import_dependencies;
-			workspace_.request(listed);
-		}
+		if (ImGui::Selectable("From the game data...") && game_data)
+			workspace_.request(request::preview_install_import({}, view.import_dependencies));
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!view.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
 		const bool reimports = !view.imports.empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);
-		if (ImGui::Selectable("Reimport all") && reimports) {
-			EditorRequest all = make_request(EditorRequestKind::Reimport);
-			all.flag = true;
-			workspace_.request(all);
-		}
+		if (ImGui::Selectable("Reimport all") && reimports)
+			workspace_.request(request::reimport(std::string(), true));
 		ImGui::EndDisabled();
 		ui_kit::tooltip(view.imports.empty() ? "No file of the project is imported from a source."
 		                                     : "Run every importer again (" + std::to_string(view.imports.size()) +
@@ -341,7 +334,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			ImGui::PushID(static_cast<int>(i));
 			ImGui::BeginDisabled(present || !creates);
 			if (ImGui::Selectable(resource->name) && !present && creates)
-				workspace_.request(make_request(EditorRequestKind::CreateFile, resource->name, asset_kind_token(factory.kind)));
+				workspace_.request(request::create_file(resource->name, asset_kind_token(factory.kind)));
 			ImGui::EndDisabled();
 			ui_kit::tooltip(present ? std::string("The project has it.") : makes(factory));
 			ImGui::PopID();
@@ -349,7 +342,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndCombo();
 	}
 	if (ui_kit::tool(row, "Refresh", view.allows(EditorRequestKind::Rescan), "Read the project's folder again."))
-		workspace_.request(make_request(EditorRequestKind::Rescan));
+		workspace_.request(request::rescan());
 }
 
 // A folder's folders, each a node open until folded, then its files.
@@ -386,7 +379,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		selected_ = entry.relative_path;
 		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && is_editable_kind(entry.kind) &&
 		    view.allows(EditorRequestKind::OpenDocument))
-			workspace_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
+			workspace_.request(request::open_document(entry.relative_path));
 	}
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
 	// (ReferencePicker::accept_file).
@@ -451,7 +444,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	selected_ = entry.relative_path;
 	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
 	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
-		workspace_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
+		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	if (ImGui::MenuItem("References...", nullptr, false, view.graph != nullptr) && view.graph) {
@@ -460,13 +453,11 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	}
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
-		workspace_.request(make_request(EditorRequestKind::RevealPath, (fs::path(view.project_root) / entry.relative_path).generic_string()));
+		workspace_.request(request::reveal_path((fs::path(view.project_root) / entry.relative_path).generic_string()));
 	const bool reimports = view.allows(EditorRequestKind::Reimport);
-	if (entry.kind == AssetKind::ImageSource && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports) {
-		EditorRequest one = make_request(EditorRequestKind::Reimport, entry.relative_path);
-		one.flag = true;
-		workspace_.request(one);
-	}
+	const bool source = entry.kind == AssetKind::ImageSource;
+	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
+		workspace_.request(request::reimport(entry.relative_path, true));
 	ImGui::EndPopup();
 }
 
@@ -502,9 +493,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	// busy gate takes the plan; a rename, which writes the files, waits for a build).
 	if (changed && previewed_ != rename_ && view.allows(EditorRequestKind::PreviewRename)) {
 		previewed_ = rename_;
-		EditorRequest preview = make_request(EditorRequestKind::PreviewRename, entry->relative_path);
-		preview.edit.value = previewed_;
-		workspace_.request(std::move(preview));
+		workspace_.request(request::preview_file_rename(entry->relative_path, previewed_));
 	}
 	const SessionView::RenamePreview &plan = view.rename_preview;
 	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == rename_) {
@@ -533,7 +522,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	ui_kit::tooltip(allowed ? "Every file naming it is rewritten, or the rename is refused (Problems says why)."
 	                        : "A rename rewrites the project's files: it waits for the running operation.");
 	if ((rename || enter) && changed && allowed) {
-		workspace_.request(make_request(EditorRequestKind::RenameAsset, entry->relative_path, rename_));
+		workspace_.request(request::rename_asset(entry->relative_path, rename_));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();

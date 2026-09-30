@@ -181,7 +181,7 @@ int test_keys() {
 	const std::string main_key = list.key(1);
 	const ProblemFix create_main = list.fixes(v, 1).front();
 	TEST_EXPECT(create_main.request.kind == EditorRequestKind::CreateMissing &&
-	            create_main.request.names == Words({"main_menu"}));
+	            create_main.request.roles == Words({"main_menu"}));
 	ProblemsList::PressLatch latch;
 	TEST_EXPECT(!latch.released_on(list.fix_id(v, 1, create_main), true, false, false)); // pressed
 
@@ -241,7 +241,7 @@ int test_fix_changes() {
 	v.revisions.touch(ViewConcern::Files); // the findings stand
 	list.refresh(v);
 	const ProblemFix import = list.fixes(v, kilo).front();
-	TEST_EXPECT(import.request.kind == EditorRequestKind::PreviewRetailImport &&
+	TEST_EXPECT(import.request.kind == EditorRequestKind::PreviewInstallImport &&
 	            import.request.names == Words({"Custom.fnt"}));
 	// The same finding, another request: another id (the Create's own id stands).
 	const std::string now = list.fix_id(v, kilo, import);
@@ -296,7 +296,7 @@ int test_proposals() {
 	const ProblemsList::Proposal &required = list.group_fixes(0);
 	TEST_EXPECT(required.findings == 2 && required.requests.size() == 1 &&
 	            required.requests[0].kind == EditorRequestKind::CreateMissing &&
-	            required.requests[0].names == Words({"gametext", "main_menu"}));
+	            required.requests[0].roles == Words({"gametext", "main_menu"}));
 	TEST_EXPECT(required.lines ==
 	            Words({"Create 2 files: gametext.bin, main.mnu. They start as placeholder "
 	                   "content, to replace with your own.",
@@ -320,9 +320,9 @@ int test_proposals() {
 	const ProblemsList::Proposal create =
 	        list.propose(v, list.required_fix(v, EditorRequestKind::CreateMissing));
 	TEST_EXPECT(create.requests.size() == 1 &&
-	            create.requests[0].names == Words({"gametext", "main_menu"}));
+	            create.requests[0].roles == Words({"gametext", "main_menu"}));
 	const ProblemsList::Proposal import =
-	        list.propose(v, list.required_fix(v, EditorRequestKind::PreviewRetailImport));
+	        list.propose(v, list.required_fix(v, EditorRequestKind::PreviewInstallImport));
 	TEST_EXPECT(import.requests.size() == 1 && import.requests[0].names == Words({"cmap.mnu"}) &&
 	            import.lines.front().rfind("Import cmap.mnu from the game data", 0) == 0);
 
@@ -339,7 +339,7 @@ int test_proposals() {
 	TEST_EXPECT(rename.requests.size() == 1 &&
 	            rename.requests[0].kind == EditorRequestKind::AssignRequirement &&
 	            rename.requests[0].path == "strings/spare.bin" &&
-	            rename.requests[0].text == "gametext");
+	            rename.requests[0].role == "gametext");
 
 	// Two textures the project lacks: their placeholders in one line, a CreateFile each.
 	SessionView textures;
@@ -364,7 +364,7 @@ int test_proposals() {
 	                             "with your own art.");
 	TEST_EXPECT(made.requests.size() == 2 &&
 	            made.requests[0].kind == EditorRequestKind::CreateFile &&
-	            made.requests[0].path == "skin.tga" && made.requests[0].text == "texture" &&
+	            made.requests[0].path == "skin.tga" && made.requests[0].file_kind == "texture" &&
 	            made.requests[1].path == "puff.tga");
 
 	// No Rewrite of a file that does not serialize; Only fixable: the finding a fix is offered for.
@@ -414,7 +414,7 @@ int test_confirmation() {
 	                    "Create gametext.bin. It starts as placeholder content, to replace with "
 	                    "your own." &&
 	            list.shown().requests.size() == 1 &&
-	            list.shown().requests[0].names == Words({"gametext"}));
+	            list.shown().requests[0].roles == Words({"gametext"}));
 	// Released on the new version, pressed on the old: nothing; a key's Enter: applied.
 	TEST_EXPECT(!apply.released_on(std::to_string(list.version()), false, true, true));
 	TEST_EXPECT(apply.released_on(std::to_string(list.version()), true, true, false));

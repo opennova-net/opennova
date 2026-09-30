@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/session/problem_fixes.h>
+#include <editor/session/request_factories.h>
 
 namespace opennova::editor {
 
@@ -181,11 +182,8 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 }
 
 EditorRequest ProblemLocation::request() const {
-	if (in_files) return make_request(EditorRequestKind::ShowInFiles, path);
-	EditorRequest open = make_request(EditorRequestKind::OpenDocument, path);
-	open.edit.address = record;
-	open.edit.field = field;
-	return open;
+	if (in_files) return request::show_in_files(path);
+	return request::open_record(path, record, field);
 }
 
 } // namespace opennova::editor

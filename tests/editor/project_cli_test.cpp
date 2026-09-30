@@ -22,6 +22,7 @@
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/pff/pff.h>
 
@@ -89,14 +90,16 @@ static int test_usage_errors() {
 	TEST_EXPECT(run({"status"}) == 2);
 	TEST_EXPECT(run({"validate"}) == 2);
 	TEST_EXPECT(run({"--help"}) == 2);
-	// `--retail` names the game install before or after its entries; an `--entry` is never
-	// taken for it.
+	// `--install` names the game install before or after its entries; an `--entry` is never
+	// taken for it, and `--retail` (its name before S13 A4) is no option.
 	editor_test::TempProjectDir dir("opennova_project_cli_usage");
 	std::string text;
-	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--retail", "--entry", "items.def"}, text) == 2);
-	TEST_EXPECT(text.find("--retail needs the game install folder") != std::string::npos);
-	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--retail", "game", "--entry"}, text) == 2);
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--install", "--entry", "items.def"}, text) == 2);
+	TEST_EXPECT(text.find("--install needs the game install folder") != std::string::npos);
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--install", "game", "--entry"}, text) == 2);
 	TEST_EXPECT(text.find("incomplete import option --entry") != std::string::npos);
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "import", "p", "--retail", "game" }, text) == 2);
+	TEST_EXPECT(text.find("unknown or incomplete import option game") != std::string::npos);
 	return 0;
 }
 
@@ -427,7 +430,7 @@ static int test_validate_matches_the_editor() {
 	NoProcess platform;
 	opennova::editor::MemoryPreferencesStore preferences;
 	opennova::editor::ProjectSession session(platform, preferences);
-	session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, root));
+	session.handle(opennova::editor::request::open_project(root));
 	std::vector<std::string> shown;
 	bool render_note = false;
 	for (const opennova::editor::Diagnostic &d : session.view().diagnostics) {
@@ -473,13 +476,13 @@ static int test_one_game_install() {
 	{
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
-		session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, root));
+		session.handle(opennova::editor::request::open_project(root));
 		TEST_EXPECT(session.project_open() && session.view().retail_directory.empty());
 		opennova::editor::EditorRequest apply =
-		        opennova::editor::make_request(opennova::editor::EditorRequestKind::ApplyProjectSettings);
+		        opennova::editor::request::of(opennova::editor::EditorRequestKind::ApplyProjectSettings);
 		fs::current_path(dir.path, ec);
 		TEST_EXPECT(!ec);
-		apply.settings.retail_directory = "art/../Joint Ops"; // from the editor's working directory
+		apply.settings.game_install = "art/../Joint Ops"; // from the editor's working directory
 		session.handle(apply);
 		TEST_EXPECT(session.view().retail_directory == install && session.view().settings_result.failures.empty());
 	}
@@ -500,10 +503,53 @@ static int test_one_game_install() {
 	{
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
-		session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, other));
+		session.handle(opennova::editor::request::open_project(other));
 		TEST_EXPECT(session.project_open() && session.view().retail_directory == install);
 	}
 	TEST_EXPECT(run_capture(capture, {"status", other}, text) == 0 && has("game install: " + install + "\n"));
+	return 0;
+}
+
+// S13 A4: a project's local.json an older editor wrote (schema 1, the install under retail_root)
+// is set aside, never refused: opennova-project goes on with the warning naming what it held,
+// the editor opens the project (the outcome done) with that one warning, and the next write (the
+// install chosen again in the project settings) makes a new file, which the command line then
+// reads with nothing to say.
+static int test_older_local_settings() {
+	editor_test::TempProjectDir dir("opennova_editor_project_cli_older_local");
+	const std::string root = dir.file("Older");
+	TEST_EXPECT(run({ "new", root, "--title", "Older" }) == 0);
+	const std::string install = dir.file("Joint Ops");
+	const std::string local = opennova::editor::ProjectPaths::for_root(root).local_settings_file;
+	TEST_EXPECT(editor_test::write_text(local,
+			"{\"retail_root\": \"" + install +
+					"\", \"runtime_executable\": \"\", \"schema_version\": 1}\n"));
+	std::string text;
+	const auto warned = [&text, &install]() {
+		return text.find("local_settings.schema_version.unsupported") != std::string::npos &&
+				text.find("retail_root \"" + install + "\"") != std::string::npos;
+	};
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "status", root }, text) == 0 && warned());
+	NoProcess platform;
+	opennova::editor::MemoryPreferencesStore preferences;
+	opennova::editor::ProjectSession session(platform, preferences);
+	session.handle(opennova::editor::request::open_project(root));
+	size_t warnings = 0;
+	for (const opennova::editor::Diagnostic &d : session.outcome().findings)
+		warnings += d.code == "local_settings.schema_version.unsupported" &&
+				d.severity == opennova::editor::DiagnosticSeverity::Warning;
+	TEST_EXPECT(session.project_open() && session.outcome().done() && warnings == 1 &&
+			session.view().retail_directory.empty());
+	opennova::editor::ProjectSettingsChange change;
+	change.game_install = install;
+	session.handle(opennova::editor::request::apply_project_settings(change));
+	std::string written, io_error;
+	TEST_EXPECT(opennova::editor::read_file_text(local, written, io_error) &&
+			written.find("\"schema_version\": 2") != std::string::npos &&
+			written.find("\"game_install\": \"" + install + "\"") != std::string::npos &&
+			written.find("retail") == std::string::npos);
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "status", root }, text) == 0 && !warned() &&
+			text.find("local_settings") == std::string::npos);
 	return 0;
 }
 
@@ -513,6 +559,7 @@ int main() {
 	failures += test_new_status_validate();
 	failures += test_validate_matches_the_editor();
 	failures += test_one_game_install();
+	failures += test_older_local_settings();
 	failures += test_imports();
 	failures += test_import_with_dependencies();
 	failures += test_dry_run_writes_nothing();

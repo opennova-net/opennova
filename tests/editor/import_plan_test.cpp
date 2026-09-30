@@ -33,6 +33,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -78,7 +79,7 @@ static int test_plan_folder() {
 	Project project("opennova_editor_plan_folder");
 	const std::string root = project.root();
 	TEST_EXPECT(editor_test::write_text(root + "/fonts/have.fnt", "fnt"));
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
 	                                                                    window("STATIC", "KEEP", font("have")))));
@@ -95,7 +96,7 @@ static int test_plan_folder() {
 	const ImportPlanRow *arial = row_named(plan, "arial99.fnt");
 	TEST_EXPECT(arial && arial->state == State::Found && arial->selected && arial->kind == AssetKind::Font &&
 	            arial->destination == "fonts/arial99.fnt" && arial->found_in == "the folder " + art &&
-	            arial->source.path == art + "/arial99.fnt" && arial->source.entry.empty() && !arial->source.retail &&
+	            arial->source.path == art + "/arial99.fnt" && arial->source.entry.empty() && !arial->source.install &&
 	            arial->source.native && !menu->source.native);
 	TEST_EXPECT(arial && arial->needed_by.file == "a.mnu" && arial->needed_by.record == "A/GO" &&
 	            arial->needed_by.field == "font.name" && arial->needed_by.reference == ReferenceKind::Font &&
@@ -161,7 +162,7 @@ static int test_plan_archive() {
 	for (const char *name : {"second.mnu", "tex.pcx"}) {
 		const ImportPlanRow *row = row_named(plan, name);
 		TEST_EXPECT(row && row->state == State::Found && row->selected && row->found_in == "the archive " + archive &&
-		            row->source.path == archive && row->source.entry == name && !row->source.retail);
+		            row->source.path == archive && row->source.entry == name && !row->source.install);
 	}
 	const ImportPlanRow *second = row_named(plan, "second.mnu");
 	const ImportPlanRow *tex = row_named(plan, "tex.pcx");
@@ -201,12 +202,12 @@ static int test_plan_game_install() {
 	TEST_EXPECT(snapshot(project.dir.path) == before);
 	TEST_EXPECT(plan.diagnostics.empty() && plan.rows.size() == 5);
 	const ImportPlanRow *arial = row_named(plan, "arial99.fnt");
-	TEST_EXPECT(arial && arial->state == State::Found && arial->found_in == "the game install" && arial->source.retail &&
+	TEST_EXPECT(arial && arial->state == State::Found && arial->found_in == "the game install" && arial->source.install &&
 	            arial->source.path == install && arial->source.entry == "arial99.fnt" && arial->rivals.empty());
 	const ImportPlanRow *logo = row_named(plan, "logo.tga");
 	TEST_EXPECT(logo && logo->state == State::Found && logo->found_in == "the folder " + art && logo->rivals.size() == 1);
 	TEST_EXPECT(logo && logo->rivals[0].found_in == "the game install" && logo->rivals[0].name == "logo.tga" &&
-	            logo->rivals[0].source.retail && logo->rivals[0].differs);
+	            logo->rivals[0].source.install && logo->rivals[0].differs);
 	const ImportPlanRow *shared = row_named(plan, "shared.pcx");
 	TEST_EXPECT(shared && shared->found_in == "the folder " + art && shared->rivals.size() == 1 && !shared->rivals[0].differs);
 	const ImportPlanRow *gone = row_named(plan, "nowhere.tga");
@@ -223,14 +224,14 @@ static int test_plan_game_install() {
 	ImportSource retail;
 	retail.path = install;
 	retail.entry = "retail.mnu";
-	retail.retail = true;
+	retail.install = true;
 	const ImportPlan from_install = project.plan({retail}, true, install);
 	TEST_EXPECT(from_install.rows.size() == 3 && from_install.rows[0].found_in == "the game install");
 	const ImportPlanRow *installed = row_named(from_install, "logo.tga");
 	TEST_EXPECT(installed && installed->found_in == "the game install" && installed->rivals.empty());
 	// An install that does not mount: said, the folder still searched.
 	const ImportPlan unmounted = project.plan({{art + "/a.mnu", {}}}, true, project.dir.file("nowhere"));
-	TEST_EXPECT(has_code(unmounted.diagnostics, "import.retail") && !has_error(unmounted.diagnostics));
+	TEST_EXPECT(has_code(unmounted.diagnostics, "import.install") && !has_error(unmounted.diagnostics));
 	const ImportPlanRow *folder_logo = row_named(unmounted, "logo.tga");
 	const ImportPlanRow *no_font = row_named(unmounted, "arial99");
 	TEST_EXPECT(folder_logo && folder_logo->state == State::Found && no_font && no_font->state == State::NotFound);
@@ -461,7 +462,7 @@ static int test_plan_material_sources() {
 	const std::string root = project.root();
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), project.view().document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 3);
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
 	size_t resolved = 0;
 	for (const GraphEdge *edge : view.graph->references_of("models/relief.3di"))
@@ -487,7 +488,7 @@ static int test_plan_stylesheets() {
 	const std::string root = project.root();
 	TEST_EXPECT(editor_test::write_text(root + "/menus/menu_style.mns", "FONT_X old.fnt\r\nVAR_Y gone.fnt\r\n") &&
 	            editor_test::write_text(root + "/menus/brand.mns", "FONT_X brand.fnt\r\n"));
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/menu_style.mns", "FONT_X base.fnt\r\n"));
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "X", font("%FONT_X%")) +
@@ -572,7 +573,7 @@ static int test_plan_native_png() {
 	const std::string root = project.root();
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), project.view().document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 2);
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
 	const AssetEntry *png = view.scan.find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));

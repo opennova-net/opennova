@@ -10,6 +10,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 
 #include "editor/menu_test_support.h"
 
@@ -36,10 +37,7 @@ inline std::vector<editor::ReferenceTarget> targets_of(const editor::Document &d
 // A Go to served as the Inspector raises it (window_requests::go_to): the file opened at the
 // record by its locator, its field shown.
 inline void go_to(editor::ProjectSession &session, const editor::ReferenceTarget &target) {
-	editor::EditorRequest open = editor::make_request(
-			editor::EditorRequestKind::OpenDocument, target.file, target.locator);
-	open.edit.field = target.field;
-	session.handle(open);
+	session.handle(editor::request::open_document(target.file, target.locator, target.field));
 }
 
 inline bool has_missing(const std::vector<editor::Diagnostic> &diagnostics,
@@ -59,32 +57,28 @@ inline const editor::Diagnostic *missing_of(const std::vector<editor::Diagnostic
 
 inline void edit_window(editor::ProjectSession &session, const editor::Document &document,
 		const editor::NodeAddress &address, const char *field, editor::Value value) {
-	editor::EditorRequest request =
-			editor::make_request(editor::EditorRequestKind::EditRecord, document.path());
-	request.edit.address = address;
-	request.edit.field = field;
-	request.edit.value = std::move(value);
-	session.handle(request);
+	editor::Edit edit;
+	edit.address = address;
+	edit.field = field;
+	edit.value = std::move(value);
+	session.handle(editor::request::edit_record(document.path(), std::move(edit)));
 }
 
 // A window's first APPEARANCE row made an image of `texture` (one batch).
 inline void set_image(editor::ProjectSession &session, const editor::Document &document,
                       const editor::NodeAddress &window, const std::string &texture) {
-	editor::EditorRequest request =
-			editor::make_request(editor::EditorRequestKind::EditRecord, document.path());
-	request.edits = menu_test::image_edits(document, window, texture);
-	session.handle(request);
+	session.handle(editor::request::edit_record(
+			document.path(), menu_test::image_edits(document, window, texture)));
 }
 
 // A new record of `token` inside `owner`: its address.
 inline editor::NodeAddress add_record(editor::ProjectSession &session,
 		const editor::Document &document, const editor::NodeAddress &owner, const char *token) {
-	editor::EditorRequest request =
-			editor::make_request(editor::EditorRequestKind::EditRecord, document.path());
-	request.edit.operation = editor::EditOperation::Add;
-	request.edit.address = {owner.row, document.kind_from_name(token), 0};
-	request.edit.parent = owner.child;
-	session.handle(request);
+	editor::Edit add;
+	add.operation = editor::EditOperation::Add;
+	add.address = {owner.row, document.kind_from_name(token), 0};
+	add.parent = owner.child;
+	session.handle(editor::request::edit_record(document.path(), std::move(add)));
 	return document.address_of(document.last_added());
 }
 

@@ -476,6 +476,15 @@ database.
 _Avoid_: workspace (the editor's windows, not the data), mod (an expansion-type project is a
 project kind), game directory (the runtime's mounted root)
 
+**Game install**:
+The folder of an installed NovaLogic game (Joint Operations) that a project imports from and
+plays in, mounted as a stock launch mounts it (the boot archives, no `/d`). Each project names
+its own in `.opennova/local.json` (`game_install`); the editor keeps the one last chosen, where
+a project naming none starts. Its files are copied into a project on request (Import from the
+game data), never redistributed; Play in the game install runs a build there.
+_Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
+dir (the runtime's `--resource-dir`, which may be a build)
+
 **Logical name**:
 The flat, case-insensitive name the engine resolves an asset by (`main.mnu`,
 `items.def`), at most 16 bytes as a PFF entry. A project asset's identity; its path in
@@ -545,6 +554,13 @@ _Avoid_: configuration (its kind before it had its own), score config
 A `.npj` or `.npz`: the mission editor's project for a mission, which the game's mission list
 scans for beside the `.bms` files.
 _Avoid_: mission (the `.bms` the game loads), map pack
+
+**Request**:
+What a window, the Shell or the editor MCP asks of the editor's session: a kind, one row of the
+request table (`session/request_kinds`: its token, who serves it, the fields it takes, what it
+reads and writes, what the unsaved-changes prompt guards of it), and the fields that kind takes,
+each meaning one thing whatever the kind (`dir`, `path`, `locator`, `edits`, `new_name`...).
+_Avoid_: command (the command line's verbs), message, action (a menu's ACTION is a record)
 
 **Request outcome**:
 What one editor request came to: done, or not (refused, did not finish, or waiting on

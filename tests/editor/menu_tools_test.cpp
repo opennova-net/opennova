@@ -27,6 +27,7 @@
 #include <editor/preview/menu_report.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 #include "common/test_expect.h"
@@ -47,7 +48,7 @@ JsonValue parse(const std::string &text) {
 	return out;
 }
 
-JsonValue request(ProjectSession &session, const std::string &path, const std::string &json) {
+JsonValue batch(ProjectSession &session, const std::string &path, const std::string &json) {
 	return menu_edit_request(session, path, parse(json));
 }
 
@@ -109,7 +110,7 @@ static int test_menu_tools() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Tools"));
+	session.handle(request::new_project(dir.file("project"), "Tools"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 
@@ -132,18 +133,18 @@ static int test_menu_tools() {
 
 	// No menu previewed and the stylesheet active: a pathless edit names no menu, nor does a
 	// path naming the stylesheet, and neither asks anything of it.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style && view.active_document == style->path() && view.menu_preview.path.empty());
 	if (!style) return 1;
 	const uint64_t style_revision = style->revision();
 	const std::string rename_first = R"({"edits": [{"op": "set", "id": 1, "field": "name", "value": "RENAMED"}]})";
-	TEST_EXPECT(refused_with(request(session, "", rename_first), "No menu is previewed"));
-	TEST_EXPECT(refused_with(request(session, "menu_style.mns", rename_first), "No menu 'menu_style.mns'"));
+	TEST_EXPECT(refused_with(batch(session, "", rename_first), "No menu is previewed"));
+	TEST_EXPECT(refused_with(batch(session, "menu_style.mns", rename_first), "No menu 'menu_style.mns'"));
 	TEST_EXPECT(menu_tree_to_json(view, "").is_null() && style->revision() == style_revision);
 
 	// The batch: a button and a list added and filled in by label, one undo step.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
@@ -151,7 +152,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "MAIN", main));
 	const std::string m = std::to_string(main.child);
 	const uint64_t before = menu->revision();
-	JsonValue answer = request(session, "main.mnu", R"({"edits": [
+	JsonValue answer = batch(session, "main.mnu", R"({"edits": [
 		{"op": "add", "kind": "window", "parent": )" + m + R"(, "as": "hello"},
 		{"op": "set", "id": "hello", "field": "name", "value": "HELLO"},
 		{"op": "set", "id": "hello", "field": "type", "value": "BUTTON"},
@@ -210,11 +211,11 @@ static int test_menu_tools() {
 	TEST_EXPECT(rect_edge(*choices_json, 3, "local") == 520);
 
 	// One undo step takes the whole batch.
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
 	NodeAddress gone;
 	TEST_EXPECT(!find_definition(AssetGraph(), *menu, "HELLO", gone) &&
 			!find_definition(AssetGraph(), *menu, "CHOICES", gone) && !menu->dirty());
-	session.handle(make_request(EditorRequestKind::Redo, menu->path()));
+	session.handle(request::redo(menu->path()));
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO", hello) &&
 			find_definition(AssetGraph(), *menu, "CHOICES", choices) && menu->dirty());
 	const uint64_t after = menu->revision();
@@ -222,7 +223,7 @@ static int test_menu_tools() {
 
 	// A record duplicated and renamed by its label: right after the original.
 	const std::string h = std::to_string(hello.child);
-	answer = request(session, "", R"({"edits": [{"op": "duplicate", "id": )" + h + R"(, "as": "copy"},
+	answer = batch(session, "", R"({"edits": [{"op": "duplicate", "id": )" + h + R"(, "as": "copy"},
 		{"op": "set", "id": "copy", "field": "name", "value": "HELLO_TWO"}]})");
 	TEST_EXPECT(done(answer));
 	NodeAddress copy;
@@ -231,14 +232,14 @@ static int test_menu_tools() {
 			menu->placement(copy, at) && menu->placement(hello, original) &&
 			at.index == original.index + 1 && at.owner == original.owner);
 	TEST_EXPECT(answer.get("made") && id_of(*answer.get("made"), "copy") == copy.child);
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(
 			!find_definition(AssetGraph(), *menu, "HELLO_TWO", copy) && menu->revision() == after);
 
 	// Refused before the session sees it.
 	const uint64_t kept = menu->revision();
 	const auto refused = [&](const std::string &json, const char *says) {
-		return refused_with(request(session, "", json), says);
+		return refused_with(batch(session, "", json), says);
 	};
 	TEST_EXPECT(refused(R"({"edits": [{"op": "set", "id": "nobody", "field": "name", "value": "X"}]})", "nobody"));
 	TEST_EXPECT(refused(R"({"edits": [{"op": "add", "kind": "gizmo", "parent": )" + m + "}]}", "gizmo"));
@@ -254,7 +255,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(refused(R"({"id": )" + h + R"(, "list": "gizmos", "records": []})", "gizmos"));
 	TEST_EXPECT(refused(R"({"id": )" + h + R"(, "list": "action"})", "records"));
 	// Refused by the document: nothing committed, the reason in the outcome.
-	answer = request(session, "", R"({"edits": [{"op": "add", "kind": "window", "parent": )" + m +
+	answer = batch(session, "", R"({"edits": [{"op": "add", "kind": "window", "parent": )" + m +
 	                                      R"(, "as": "x"}, {"op": "set", "id": "x", "field": "no_such_field", "value": 1}]})");
 	TEST_EXPECT(answer.get_bool("ok", false) && !done(answer));
 	TEST_EXPECT(answer.get("outcome") && answer.get("outcome")->get("findings") &&
@@ -263,21 +264,21 @@ static int test_menu_tools() {
 	// Refused by the session, an operation holding the documents (S13 A2): the batch parsed, its
 	// outcome not done, and it names nothing made, not the records the batch before it made.
 	const std::string duplicate = R"({"edits": [{"op": "duplicate", "id": )" + h + R"(, "as": "copy"}]})";
-	answer = request(session, "", duplicate);
+	answer = batch(session, "", duplicate);
 	TEST_EXPECT(done(answer) && answer.get("made") && id_of(*answer.get("made"), "copy") != 0);
 	const uint64_t copied = menu->revision();
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
-	answer = request(session, "", duplicate);
+	answer = batch(session, "", duplicate);
 	TEST_EXPECT(answer.get_bool("ok", false) && !done(answer) && menu->revision() == copied);
 	TEST_EXPECT(answer.get("added") && answer.get("added")->array.empty() && answer.get("made") &&
 	            answer.get("made")->object.empty());
 	session.run_operations();
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(menu->revision() == kept);
 
 	// The list op: HELLO's two ACTIONs replaced by one, one undo step; an empty list replaced
 	// by nothing is done with nothing to do.
-	answer = request(session, "", R"({"id": )" + h +
+	answer = batch(session, "", R"({"id": )" + h +
 	                                      R"(, "list": "action", "records": [{"type": "WINDOW", "state": "HIDE", "target": "TITLE"}]})");
 	TEST_EXPECT(done(answer) && answer.get("added") && answer.get("added")->array.size() == 1);
 	std::vector<NodeId> actions;
@@ -288,30 +289,30 @@ static int test_menu_tools() {
 		const NodeAddress action = menu->address_of(actions.front());
 		TEST_EXPECT(menu->get(action, "state", value) && std::get<std::string>(value) == "HIDE");
 	}
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
 	for (const Document::Collection &collection : menu->collections_of(hello))
 		if (std::string(menu->kind_token(collection.spec.kind)) == "action") actions = collection.ids;
 	TEST_EXPECT(actions.size() == 2);
 	const uint64_t unchanged = menu->revision();
-	TEST_EXPECT(done(request(session, "", R"({"id": )" + h + R"(, "list": "hotkey", "records": []})")) &&
+	TEST_EXPECT(done(batch(session, "", R"({"id": )" + h + R"(, "list": "hotkey", "records": []})")) &&
 	            menu->revision() == unchanged);
 	// A record's fields in the order written: a body's draw kind, then its flag cleared,
 	// leaves no draw kind; the flag cleared first, then the kind, leaves the kind.
 	std::string display;
 	int64_t custom = -1;
-	TEST_EXPECT(done(request(session, "", R"({"id": )" + h +
+	TEST_EXPECT(done(batch(session, "", R"({"id": )" + h +
 	                                          R"(, "list": "column.body", "records": [{"display": "CUSTOM_DRAW", "custom_draw": 0}]})")));
 	TEST_EXPECT(body_draw(*menu, hello, display, custom) && display.empty() && custom == 0);
-	TEST_EXPECT(done(request(session, "", R"({"id": )" + h +
+	TEST_EXPECT(done(batch(session, "", R"({"id": )" + h +
 	                                          R"(, "list": "column.body", "records": [{"custom_draw": 0, "display": "CUSTOM_DRAW"}]})")));
 	TEST_EXPECT(body_draw(*menu, hello, display, custom) && display == "CUSTOM_DRAW" && custom == 1);
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	session.handle(request::undo(menu->path()));
+	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(!body_draw(*menu, hello, display, custom) && menu->revision() == unchanged);
 
 	// The findings: HELLO's label cut short (the render check's) beside the sound bank the
 	// project lacks (the graph's), each with its source; every screen's notes.
-	TEST_EXPECT(done(request(session, "", R"({"edits": [{"op": "set", "id": )" + h +
+	TEST_EXPECT(done(batch(session, "", R"({"edits": [{"op": "set", "id": )" + h +
 	                                               R"(, "field": "position.right", "value": 350}]})")));
 	const JsonValue findings = menu_findings_to_json(view, "main.mnu");
 	TEST_EXPECT(findings.is_object() && findings.get_string("path", "") == menu->path());
@@ -332,17 +333,17 @@ static int test_menu_tools() {
 	// The menu previewed and the stylesheet active: a pathless tree and a pathless edit find
 	// the one menu, so the edit of an id the tree gave lands on it, not on the stylesheet's
 	// record of that id.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::open_document("menu_style.mns"));
 	TEST_EXPECT(view.active_document == style->path() && view.menu_preview.path == menu->path());
 	TEST_EXPECT(menu_tree_to_json(view, "").get_string("path", "") == menu->path() &&
 	            menu_findings_to_json(view, "").get_string("path", "") == menu->path());
 	const uint64_t style_before = style->revision();
-	TEST_EXPECT(done(request(session, "", R"({"edits": [{"op": "set", "id": )" + h +
+	TEST_EXPECT(done(batch(session, "", R"({"edits": [{"op": "set", "id": )" + h +
 	                                               R"(, "field": "name", "value": "HELLO_AGAIN"}]})")));
 	NodeAddress again;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "HELLO_AGAIN", again) && again == hello &&
 			style->revision() == style_before && !style->dirty());
-	TEST_EXPECT(refused_with(request(session, "menu_style.mns", R"({"edits": [{"op": "set", "id": )" + h +
+	TEST_EXPECT(refused_with(batch(session, "menu_style.mns", R"({"edits": [{"op": "set", "id": )" + h +
 	                                                                  R"(, "field": "name", "value": "X"}]})"),
 	                         "No menu"));
 	return 0;
