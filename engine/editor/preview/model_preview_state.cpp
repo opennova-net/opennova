@@ -215,7 +215,7 @@ ModelPreviewAction ModelPreviewModel::follow(const SessionView &view) {
 	}
 	const Document *document = nullptr;
 	for (const auto &open : view.documents.open)
-		if (open && open->path() == view.documents.previews.model.path) document = open.get();
+		if (open && open->path() == view.documents.previews.model.path) document = records_of(*open);
 	if (const auto *model = dynamic_cast<const ModelDocument *>(document)) return follow_model_(view, *model);
 	if (document && (is_animation_kind(document->kind()) || is_animation_map_kind(document->kind())))
 		return follow_animation_(view, *document);

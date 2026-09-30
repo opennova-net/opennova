@@ -424,9 +424,34 @@ static int test_changes_since_save() {
 	return 0;
 }
 
+// S13 D6: a load in place starts the revisions again at 0 and the rows' identities from 1, so the
+// stylesheet's own memos (the sheet the game reads, what a line's value is used as) key on the load
+// generation as well: FOO a colour, then the file loaded again in place with FOO a font's file, at
+// the same revision and on the same row identity, answers from the new file.
+static int test_load_in_place() {
+	editor_test::TempProjectDir dir("opennova_styles_load_in_place");
+	MnsDocument document;
+	TEST_EXPECT(load(document, dir, "FOO FFFF0000\r\n"));
+	const NodeAddress foo = row_at(document, 0);
+	SymbolFacts colour;
+	document.refine_symbol(foo, colour);
+	TEST_EXPECT(colour.value == "FFFF0000" && !colour.inert &&
+	            document.style_value_use(foo, nullptr, 0).colour);
+	const uint64_t generation = document.load_generation();
+	TEST_EXPECT(load(document, dir, "FOO arial.fnt\r\n"));
+	TEST_EXPECT(document.revision() == 0 && document.load_generation() != generation &&
+	            row_at(document, 0) == foo);
+	SymbolFacts font;
+	document.refine_symbol(foo, font);
+	TEST_EXPECT(font.value == "arial.fnt" && !document.style_value_use(foo, nullptr, 0).colour);
+	std::printf("test_load_in_place passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
+	failures += test_load_in_place();
 	failures += test_byte_identity();
 	failures += test_edits();
 	failures += test_refusals();

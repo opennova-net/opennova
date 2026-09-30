@@ -40,6 +40,7 @@ constexpr Token<EditOperation> kOperationTokens[] = {
 	{EditOperation::Move, "move"},
 	{EditOperation::Paste, "paste"},
 	{EditOperation::SetFileValue, "set_file_value"},
+	{EditOperation::Apply, "apply"},
 };
 
 constexpr Token<SelectMode> kSelectModeTokens[] = {
@@ -331,11 +332,12 @@ RecordBatchForm batch_form(EditorRequestKind kind) {
 
 // A blank record document of the type that opens `path` (its kinds' tokens, no records): what a
 // request's edits name their kinds in when no document it acts on is open (a fix's edit, whose
-// document opens first). Null for a path no document type opens.
+// document opens first). Null for a path no document type opens, or one whose documents hold no
+// records (S13 D6).
 std::unique_ptr<Document> blank_names(const std::string &path) {
 	if (path.empty()) return nullptr;
 	const DocumentType *type = document_type_for(asset_kind_for_name(basename_of(path)));
-	return type && type->make ? type->make() : nullptr;
+	return type && type->make ? records_of(type->make()) : nullptr;
 }
 
 // --- a request's fields (request_fields.h): each read and written by its row's JSON type ---------
@@ -845,21 +847,25 @@ JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
 	return out;
 }
 
-JsonValue document_to_json(const Document &document, const JsonPage *page) {
+JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
+	// The record document's rows and records where it is one; the lifecycle alone for another kind.
+	const Document *records = records_of(base);
 	JsonValue out = JsonValue::make_object();
-	out.set("path", json_string(document.path()));
-	out.set("kind", json_string(asset_kind_token(document.kind())));
-	out.set("dirty", boolean(document.dirty()));
-	out.set("file_state_changed", boolean(document.file_state_changed()));
-	out.set("blocked", boolean(document.blocked()));
-	out.set("revision", json_number(double(document.revision())));
-	out.set("can_undo", boolean(document.can_undo()));
-	out.set("can_redo", boolean(document.can_redo()));
-	out.set("ignored_lines", json_number(double(document.ignored_lines())));
-	out.set("row_count", json_number(double(document.rows().size())));
-	out.set("last_added", json_number(double(document.last_added())));
+	out.set("path", json_string(base.path()));
+	out.set("kind", json_string(asset_kind_token(base.kind())));
+	out.set("dirty", boolean(base.dirty()));
+	if (records) out.set("file_state_changed", boolean(records->file_state_changed()));
+	out.set("blocked", boolean(base.blocked()));
+	out.set("revision", json_number(double(base.revision())));
+	out.set("can_undo", boolean(base.can_undo()));
+	out.set("can_redo", boolean(base.can_redo()));
+	out.set("ignored_lines", json_number(double(base.ignored_lines())));
+	if (records) {
+		out.set("row_count", json_number(double(records->rows().size())));
+		out.set("last_added", json_number(double(records->last_added())));
+	}
 	JsonValue issues = JsonValue::make_array();
-	for (const SourceIssue &issue : document.issues()) {
+	for (const SourceIssue &issue : base.issues()) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("blocks", boolean(issue.blocks));
 		entry.set("line", json_number(double(issue.line)));
@@ -869,6 +875,8 @@ JsonValue document_to_json(const Document &document, const JsonPage *page) {
 		issues.push(std::move(entry));
 	}
 	out.set("issues", std::move(issues));
+	if (!records) return out;
+	const Document &document = *records;
 	JsonValue kinds = JsonValue::make_array();
 	for (const RecordKindRow &row : document.kinds()) {
 		if (!*row.add_label) continue;

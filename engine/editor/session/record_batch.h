@@ -40,8 +40,9 @@ enum class RecordBatchForm { Edits, Fields };
 // `list` (a collection's kind token: "action", "sound", "items.item") of the record `id` replaced
 // by `records` ([{field: value, ...}], each added at the end with its fields set in the order
 // written). Fields: {id, field}. Strict: an unknown op, member, label, identity or kind is refused
-// with the reason, and nothing is read. `names` is the record document the request acts on; with
-// none, an edit naming a record or a kind is refused.
+// with the reason, and nothing is read; so are an apply (its change is made in C++ by its document
+// type, Edit::payload, S13 D6), a `payload` and a paste. `names` is the record document the
+// request acts on; with none, an edit naming a record or a kind is refused.
 bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
 		RecordBatch &out, std::string &error);
 
@@ -49,7 +50,9 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 // its identity (one an earlier edit of the batch makes by a label, "edit<i>", the edit that makes
 // it giving it with `as`), an add's kind by its token in `names` ("" without it), a record added
 // straight into a row naming the row's identity as its `parent`. A Paste has no batch form (the
-// paste request carries the clipboard): written as op "paste", which the reader refuses.
+// paste request carries the clipboard): written as op "paste", which the reader refuses; nor
+// has an Apply (S13 D6), written as op "apply" with its record and its payload's token, which
+// the reader refuses too.
 io::JsonValue record_batch_to_json(
 		const std::vector<Edit> &edits, const Document *names, RecordBatchForm form);
 

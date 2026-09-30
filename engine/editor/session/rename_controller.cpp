@@ -46,7 +46,7 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	const std::vector<NodeAddress> selected = view_.documents.selected;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	// A refused commit leaves the file where it was: its open document stays.
-	Document *renamed = ok ? documents.document_for(plan.path) : nullptr;
+	DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
 	if (renamed) {
 		const std::string renamed_path = renamed->path();
 		const bool was_active = renamed_path == active;
@@ -136,8 +136,10 @@ void RenameController::preview(const EditorRequest &request) {
 		// What each file's own type makes of it, as the commit would (open documents as they
 		// stand): a site its document refuses is a refusal here too.
 		if (plan.ok()) {
-			const std::vector<std::shared_ptr<Document>> &documents = core_.documents().documents();
-			std::vector<std::shared_ptr<const Document>> open(documents.begin(), documents.end());
+			const std::vector<std::shared_ptr<DocumentBase>> &documents =
+			        core_.documents().documents();
+			std::vector<std::shared_ptr<const DocumentBase>> open(documents.begin(),
+			                                                      documents.end());
 			check_symbol_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, open, plan.refusals);
 		}
 		preview.symbol = true;
@@ -196,7 +198,7 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 		if (keep_selection) view_.documents.selected = selected;
 		// The renamed definition selected again where it was, its field shown.
 		if (!keep_selection && active == plan.file)
-			if (Document *defining = documents.document_for(active)) view_.documents.select_only(defining->address_at(plan.locator));
+			if (Document *defining = documents.records_for(active)) view_.documents.select_only(defining->address_at(plan.locator));
 		documents.select_first_screen();
 	}
 	for (const Diagnostic &d : findings) core_.report(d);

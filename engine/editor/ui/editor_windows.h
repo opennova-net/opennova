@@ -97,10 +97,10 @@ public:
 
 private:
 	void draw_file_menu(const SessionView &v);
-	void draw_edit_menu(const SessionView &v, const Document *document);
+	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
 	void draw_build_menu(const SessionView &v);
 	void draw_new_project();
-	void shortcuts(const SessionView &v, const Document *document);
+	void shortcuts(const SessionView &v, const DocumentBase *document);
 
 	void dispatch_events();
 

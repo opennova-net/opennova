@@ -50,7 +50,7 @@ public:
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<AnimationDocument>(*this);
 	}
 

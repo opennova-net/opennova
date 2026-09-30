@@ -73,7 +73,7 @@ void DocumentsView::update_previews() {
 	const Document *menu = nullptr;
 	bool model_open = false;
 	for (const auto &document : open) {
-		if (document && document->path() == previews.menu.path) menu = document.get();
+		if (document && document->path() == previews.menu.path) menu = records_of(*document);
 		model_open = model_open || (document && document->path() == previews.model.path);
 	}
 	if (!menu || !menu->row(previews.menu.screen)) previews.menu = MenuPreviewTarget();

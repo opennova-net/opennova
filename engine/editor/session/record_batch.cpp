@@ -155,7 +155,7 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	}
 	if (!members_known(json,
 				{ "op", "id", "parent", "kind", "field", "value", "position", "as", "coalesce",
-						"gesture", "list", "records" },
+						"gesture", "list", "records", "payload" },
 				reader.place, reader.error))
 		return false;
 	const JsonValue *op_json = json.get("op");
@@ -164,10 +164,20 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	const std::string op = op_json->string;
 	const bool replaces_list = op == "replace_list";
 	Edit edit;
-	if (!replaces_list &&
-			(!edit_operation_from_token(op, edit.operation) ||
-					edit.operation == EditOperation::Paste))
+	if (!replaces_list && !edit_operation_from_token(op, edit.operation))
 		return reader.refuse("unknown edit op \"" + op + "\" (" + kOps + ").");
+	// Operations the core knows that a batch does not send: an apply's change is made in C++ by its
+	// document type (Edit::payload, S13 D6), which JSON cannot carry; a paste pastes the clipboard
+	// (the paste request).
+	if (!replaces_list && edit.operation == EditOperation::Apply)
+		return reader.refuse("an apply edit carries a change its document type makes in C++: a "
+							 "batch cannot send one.");
+	if (!replaces_list && edit.operation == EditOperation::Paste)
+		return reader.refuse(std::string("a batch takes no \"paste\" edit (") + kOps +
+				"): the paste request pastes the clipboard.");
+	if (json.get("payload"))
+		return reader.refuse("\"payload\" names a change a document type makes in C++; the "
+							 "editor's JSON cannot carry one.");
 	const bool adds = !replaces_list && edit.operation == EditOperation::Add;
 	const bool file_wide = !replaces_list && edit.operation == EditOperation::SetFileValue;
 	const bool makes = adds || (!replaces_list && edit.operation == EditOperation::Duplicate);
@@ -369,6 +379,14 @@ io::JsonValue record_batch_to_json(
 					entry.set("parent", name(edit.address.row));
 				break;
 			case EditOperation::SetFileValue:
+				break;
+			case EditOperation::Apply:
+				// Its change is made in C++ (Edit::payload, S13 D6): the record it applies to and
+				// the payload's token, which the reader refuses.
+				if (const NodeId id = identity_of(edit.address))
+					entry.set("id", name(id));
+				if (edit.payload)
+					entry.set("payload", io::json_string(edit.payload->token()));
 				break;
 			default:
 				entry.set("id", name(identity_of(edit.address)));

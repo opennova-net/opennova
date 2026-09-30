@@ -186,12 +186,24 @@ std::string no_document(const std::string &path) {
 	return path.empty() ? std::string("no document is open.") : "no open document " + path + ".";
 }
 
-// The open document `args` names ("" the active one), or null with `error`.
-Document *document_of(const QueryContext &context, const QueryArgs &args, std::string &error) {
+// The open document `args` names ("" the active one), of any kind (S13 D6), or null with `error`.
+const DocumentBase *open_document_of(
+		const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const std::string path = args.text("path");
-	Document *document = context.core.documents().document_for(path);
+	const DocumentBase *document = context.core.documents().document_for(path);
 	if (!document)
 		error = no_document(path);
+	return document;
+}
+
+// The open record document `args` names, or null with `error`: none is open there, or the one
+// open is of another kind, which holds no records (S13 D6).
+const Document *document_of(
+		const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const DocumentBase *open = open_document_of(context, args, error);
+	const Document *document = open ? records_of(*open) : nullptr;
+	if (open && !document)
+		error = open->path() + " holds no records (document.no_records).";
 	return document;
 }
 
@@ -294,7 +306,7 @@ JsonValue answer_files(const QueryContext &context, const QueryArgs &args, std::
 
 JsonValue answer_documents(const QueryContext &context, const QueryArgs &args, std::string &) {
 	const SessionView &view = context.core.view();
-	std::vector<const Document *> open;
+	std::vector<const DocumentBase *> open;
 	for (const auto &document : view.documents.open)
 		if (document)
 			open.push_back(document.get());
@@ -310,7 +322,7 @@ JsonValue answer_documents(const QueryContext &context, const QueryArgs &args, s
 }
 
 JsonValue answer_document(const QueryContext &context, const QueryArgs &args, std::string &error) {
-	const Document *document = document_of(context, args, error);
+	const DocumentBase *document = open_document_of(context, args, error);
 	if (!document)
 		return JsonValue::make_null();
 	const JsonPage page = page_of(args);
@@ -652,19 +664,20 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Documents, "documents", answer_documents, kPageParams, C::Documents,
 			"The active document and a page of the open documents, each's lifecycle state: path, "
-			"kind, dirty, file_state_changed, blocked, revision, can_undo, can_redo, "
-			"ignored_lines, row_count, last_added, its source issues and the kinds of row its "
-			"outline adds (top_kinds).")
+			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
+			"issues; a record document's also file_state_changed, row_count, last_added and the "
+			"kinds of row its outline adds (top_kinds).")
 			.pages("documents")
 			.row,
 	Query(K::Document, "document", answer_document, kDocumentParams, C::Documents,
-			"One open document's lifecycle state (as the documents query gives it) and a page of "
-			"its rows, each with its id, kind, name, change since the save (unchanged, changed, "
-			"added) and the collections it holds, their records at every depth.")
+			"One open document's lifecycle state (as the documents query gives it) and, for a "
+			"record document, a page of its rows, each with its id, kind, name, change since the "
+			"save (unchanged, changed, added) and the collections it holds, their records at "
+			"every depth.")
 			.pages("rows")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, C::Documents,
-			"One record of an open document, by its id or by the symbol it defines: its id, "
+			"One record of an open record document, by its id or by the symbol it defines: its id, "
 			"address (row, kind, child), name, path, locator, change since the save, owner and "
 			"index, every field as it applies to it (value, label, unit, range, choices, whether "
 			"an optional one is present, a reference's status, what it defines, and a changed "

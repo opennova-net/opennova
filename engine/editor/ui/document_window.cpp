@@ -27,7 +27,7 @@ void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// The events of a document no longer open go with it.
 	for (auto held = events_.begin(); held != events_.end();) {
 		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
-				[&](const std::shared_ptr<const Document> &document) {
+				[&](const std::shared_ptr<const DocumentBase> &document) {
 					return document->path() == held->first;
 				});
 		held = open ? std::next(held) : events_.erase(held);
@@ -76,15 +76,17 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// active document's (a tab a click just showed waits the frame its OpenDocument takes).
 		// The find bar first: its Ctrl+F comes before the view's own filters'.
 		if (path == view.documents.active) {
-			draw_find(*document);
-			// The RevealRecord events its document was sent, taken as its view draws: the view
-			// shows the selection again.
-			const auto held = events_.find(path);
-			if (held != events_.end() && held->second.held()) {
-				held->second.take();
-				reveal_again(*document);
+			if (const Document *records = records_of(*document)) {
+				draw_find(*records);
+				// The RevealRecord events its document was sent, taken as its view draws: the
+				// view shows the selection again.
+				const auto held = events_.find(path);
+				if (held != events_.end() && held->second.held()) {
+					held->second.take();
+					reveal_again(*records);
+				}
+				draw_view(*records);
 			}
-			draw_view(*document);
 		}
 		ImGui::EndTabItem();
 	}

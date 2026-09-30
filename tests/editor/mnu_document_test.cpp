@@ -2005,9 +2005,44 @@ int colours_and_flags() {
 	return 0;
 }
 
+// S13 D6: a load in place starts the revisions again at 0 and gives the rows their identities from
+// 1 again, so the menu's own memos (the menu the game would read were it saved, the names no
+// lookup returns) key on the load generation as well: two screens named A (the first shadowed),
+// then the file loaded again in place as A and B, at the same revision and with the same row
+// identities, answer from the new file.
+int memos_follow_a_load_in_place() {
+	editor_test::TempProjectDir dir("opennova_menu_load_in_place");
+	const std::string path = dir.file("twice.mnu");
+	const auto screen = [](const char *name) {
+		return std::string("<SCREEN>\r\n\t<NAME>") + name +
+		       "</NAME>\r\n\t<WINDOW type=\"window\" name=\"MAIN\">"
+		       "<POSITION><LEFT>0</LEFT></POSITION></WINDOW>\r\n</SCREEN>\r\n";
+	};
+	TEST_EXPECT(editor_test::write_text(path, screen("A") + screen("A")));
+	MnuDocument document;
+	TEST_EXPECT(load(document, path) && document.rows().size() == 2);
+	const NodeAddress first{document.rows()[0]->id, kScreen, 0};
+	SymbolFacts shadowed;
+	document.refine_symbol(first, shadowed);
+	std::shared_ptr<const mnu::Document> image = document.saved_image();
+	TEST_EXPECT(shadowed.inert && image && image->screens.size() == 2 &&
+	            image->screens[1].name == "A");
+	const uint64_t generation = document.load_generation();
+	TEST_EXPECT(editor_test::write_text(path, screen("A") + screen("B")));
+	TEST_EXPECT(load(document, path) && document.revision() == 0 &&
+	            document.load_generation() != generation);
+	TEST_EXPECT(document.rows().size() == 2 && document.rows()[0]->id == first.row);
+	SymbolFacts found;
+	document.refine_symbol(first, found);
+	image = document.saved_image();
+	TEST_EXPECT(!found.inert && image && image->screens.size() == 2 &&
+	            image->screens[1].name == "B");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	return colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
+	return memos_follow_a_load_in_place() || colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
 	       window_index_matches_the_compiler() || copy_and_paste() || duplicate_selection() || copy_between_encodings() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||
 	       nested_lists() || shipped_shape_edits() ||

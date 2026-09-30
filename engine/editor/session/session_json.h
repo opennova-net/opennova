@@ -117,13 +117,14 @@ io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &ans
 // `operation` names the operation it started or joined (0: none); `added` the records its edits
 // made, in order (an edit_record's adds and duplicates, a paste's, a duplicate's copies).
 io::JsonValue action_outcome_to_json(const ActionOutcome &outcome);
-// A document: its lifecycle state (with file_state_changed: its file-wide state differs from
-// the saved baseline's), the source issues and, with a page of rows (`rows`: `count` the rows,
-// set_page's), each row of the page with its collections (kind, kind token, label, fixed) and
-// their records (identities, names), each row and record with its change since the saved
+// A document: its lifecycle state and the source issues; for a record document (as_records) also
+// file_state_changed (its file-wide state differs from the saved baseline's), its row count, the
+// last record added and the kinds its outline adds, and, with a page of rows (`rows`: `count` the
+// rows, set_page's), each row of the page with its collections (kind, kind token, label, fixed)
+// and their records (identities, names), each row and record with its change since the saved
 // baseline (Document::record_change: unchanged, changed, added) and the collections it holds in
 // turn.
-io::JsonValue document_to_json(const Document &document, const JsonPage *rows = nullptr);
+io::JsonValue document_to_json(const DocumentBase &document, const JsonPage *rows = nullptr);
 // A record: its address, name, path and locator, its change since the saved baseline
 // (unchanged, changed, added), its owner and index there, every field of its kind as it
 // applies to this record (Document::field_on) with the value, the choices, whether an

@@ -584,6 +584,17 @@ requests it raises, and the devices its previews draw through. The Shell (`Edito
 the requests into the session and hands the devices in (`ui/workspace.h`).
 _Avoid_: host, editor host (host is the game host alone), UI (too broad), project (the data)
 
+**Document**:
+A file open in the editor: read as the game's loader reads it, changed through its own undo
+history, and written back over the file only while the file still holds what it was read from.
+That lifecycle is every document's (the base); what a document holds is its kind's. A record
+document holds rows of records, each edit naming a record and one of its fields (the def
+catalogs, string tables, menus, stylesheets, models, clips and animation tables); a document of
+another kind (a terrain's raster, a script's text) holds its own content and takes the changes
+its type makes (an Apply edit's payload).
+_Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
+project file by its logical name)
+
 **View event**:
 A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
 until the window it is for has had it: show a record's field (a Problems row, a Go to), show a

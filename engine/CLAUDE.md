@@ -53,7 +53,8 @@
     the activity and the dialogs, and the events a request posts for one window to take once)),
     `model` (the
     neutral editing core, ADR 0046 d9:
-    `Document`, `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
+    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the

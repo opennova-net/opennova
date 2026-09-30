@@ -95,15 +95,20 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"settings.game_install or settings.runtime_executable of apply_project_settings, "
 				"files to import as the paths of preview_import.";
 	}
-	// The document a request's edits are named in: the one its path names, else the active one,
-	// opened first when the request asks it to be and it is not open (a fix's edit).
+	// The record document a request's edits are named in: the one its path names, else the active
+	// one, opened first when the request asks it to be and nothing is open there (a fix's edit);
+	// an open document of another kind holds no records to name (S13 D6).
 	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
 		const std::string path = json.get_string("path", "");
-		if (!document_for(path) && !path.empty() && json.get_bool("open_first", false) &&
+		if (!document_base_for(path) && !path.empty() && json.get_bool("open_first", false) &&
 				project_open())
 			handle(request::open_document(path));
 		names.document = document_for(path);
+		if (const DocumentBase *open = names.document ? nullptr : document_base_for(path)) {
+			ok = false;
+			error = open->path() + " holds no records (document.no_records): its edits name none.";
+		}
 	}
 	ok = ok && editor_request_from_json(json, request, error, &names);
 	bool served = false;
@@ -189,6 +194,10 @@ uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> opera
 // --- what is asked without a request -------------------------------------------------------------
 
 Document *ProjectSession::document_for(const std::string &path) {
+	return impl_->documents.records_for(path);
+}
+
+DocumentBase *ProjectSession::document_base_for(const std::string &path) {
 	return impl_->documents.document_for(path);
 }
 

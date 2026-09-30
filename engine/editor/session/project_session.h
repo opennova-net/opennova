@@ -12,6 +12,7 @@
 namespace opennova::editor {
 
 class Document;
+class DocumentBase;
 class PreferencesStore;
 class SessionOperation;
 struct PollBudget;
@@ -53,8 +54,10 @@ public:
 	bool handle(const EditorRequest &request);
 	// A request in its wire form (S13 A5; the editor MCP's editor_request, the Shell's
 	// request_json): read by session_json's editor_request_from_json, its edits named in the
-	// document it acts on (the one its path names, else the active one; opened first when it asks,
-	// open_first, and is not open), then handled. The answer: {ok (it read), served, error?,
+	// record document it acts on (the one its path names, else the active one; opened first when
+	// it asks, open_first, and nothing is open there; a document of another kind open there holds
+	// no records to name, S13 D6, and the request is refused as it is read), then handled. The
+	// answer: {ok (it read), served, error?,
 	// outcome (action_outcome_to_json: what it came to, with the records its edits made, `added`,
 	// and for an edit_record `made`, each label its batch gave to the record it named), status,
 	// revision (the view's any)}. A shell row is not served here: `shell`, when given, receives it
@@ -97,7 +100,12 @@ public:
 	// reads or writes what a build does not).
 	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
 
+	// The open record document at `path` (project-relative, or a logical name), "" the active one:
+	// null when none is open there, or the one open is not a record document (as_records). What
+	// asks only the lifecycle (whether a file is open or unsaved, its JSON, the end of its edit
+	// group) takes document_base_for, the open document of any kind (S13 D6).
 	Document *document_for(const std::string &path = {});
+	DocumentBase *document_base_for(const std::string &path = {});
 	bool documents_dirty() const;
 	bool project_open() const;
 	// What the last validation read: the closed files it loaded and reused.

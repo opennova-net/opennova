@@ -62,7 +62,9 @@ public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &game) {
 		assets_->set_scan(root, scan, game);
 	}
-	void set_open(const std::vector<std::shared_ptr<const Document>> &documents) { assets_->set_open(documents); }
+	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &documents) {
+		assets_->set_open(documents);
+	}
 	// The last build's own findings, Problems rows until the next build starts or the project closes.
 	void set_build_findings(std::vector<Diagnostic> findings) { build_findings_ = std::move(findings); }
 	void clear_build_findings() { build_findings_.clear(); }
@@ -112,7 +114,7 @@ private:
 	std::vector<Reported> reported_;        // reported since the last validation
 	bool validation_due_ = false;           // an edit since the last validation
 	bool validation_held_ = false;          // a pump holds validation until its poll
-	ProblemQueryCache query_cache_;         // problems_json's answer while the view and query stand
+	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands
 };
 

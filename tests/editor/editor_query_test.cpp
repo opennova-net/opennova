@@ -755,7 +755,18 @@ static int test_menu_reads_and_batches() {
 			"unknown record kind \"gizmo\""));
 	TEST_EXPECT(refused(R"([{"op": "set", "id": 999999, "field": "name", "value": "X"}])",
 			"edits[0]: no record 999999"));
-	TEST_EXPECT(refused(R"([{"op": "teleport", "id": )" + h + "}]", "teleport"));
+	TEST_EXPECT(refused(
+			R"([{"op": "teleport", "id": )" + h + "}]", "edits[0]: unknown edit op \"teleport\""));
+	// Operations the core knows that a batch does not send (S13 D6), each named as such: an apply
+	// (its change is made in C++), a payload with any edit, and a paste (the paste request's).
+	TEST_EXPECT(refused(R"([{"op": "apply", "id": )" + h + "}]",
+			"edits[0]: an apply edit carries a change its document type makes in C++: a batch "
+			"cannot send one."));
+	TEST_EXPECT(refused(R"([{"op": "set", "id": )" + h +
+					R"(, "field": "name", "value": "Y", "payload": "blob.replace"}])",
+			"edits[0]: \"payload\" names a change a document type makes in C++"));
+	TEST_EXPECT(refused(
+			R"([{"op": "paste", "id": )" + h + "}]", "edits[0]: a batch takes no \"paste\" edit"));
 	TEST_EXPECT(refused(
 			R"([{"op": "set", "id": )" + h + R"(, "field": "name"}])", "names its \"value\""));
 	TEST_EXPECT(refused(R"([{"op": "add", "kind": "window", "parent": )" + m +
@@ -773,7 +784,6 @@ static int test_menu_reads_and_batches() {
 			"gizmos"));
 	TEST_EXPECT(refused(
 			R"([{"op": "replace_list", "id": )" + h + R"(, "list": "action"}])", "records"));
-	TEST_EXPECT(refused(R"([{"op": "paste", "id": )" + h + "}]", "unknown edit op \"paste\""));
 	TEST_EXPECT(menu->revision() == kept);
 	// Refused by the document: nothing committed, the reason in the outcome, nothing added.
 	answer = send(session,

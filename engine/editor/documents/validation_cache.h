@@ -74,11 +74,13 @@ struct ValidationInput {
 	const ProjectPaths &paths;
 	const ProjectDocument &project;
 	const AssetScan &scan;
-	const std::vector<std::shared_ptr<const Document>> &open;
+	const std::vector<std::shared_ptr<const DocumentBase>> &open;
 	ValidationCache &cache;
 
-	// The open document for the file, else the file itself through the cache. Null, with
-	// `error`, when the file does not load.
+	// The open record document for the file, else the file itself through the cache (an open
+	// document of another kind stands in for nothing here). Null, with `error`, when the file does
+	// not load, or its type's documents hold no records (document.no_records: no validator reads
+	// them yet).
 	std::shared_ptr<const Document> document(const AssetEntry &asset, Diagnostic &error) const;
 };
 
