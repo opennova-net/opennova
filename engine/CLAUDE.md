@@ -47,10 +47,13 @@
     kind from `request_factories.h`); its wire form, the view the windows read
     (`session/view`, S13 V4: sub-views of the project, the documents, the findings, the
     activity and the dialogs, and the events a request posts for one window to take once),
-    and the record batch the editor MCP names records by), `model` (the
+    the selection (S13 D7: one document's records over any of its rows), and the record batch
+    the editor MCP names records by), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
+    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), the `ChangeSet` a
+    document answers since a state, `FieldSchema`; it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the

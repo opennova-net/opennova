@@ -175,7 +175,7 @@ def cmd_state(args: argparse.Namespace) -> int:
 
 
 def parse_edits(text: str) -> list:
-    """--edits: a JSON array of edit objects (one batch on one row)."""
+    """--edits: a JSON array of edit objects (one batch over any rows)."""
     try:
         value = json.loads(text)
     except ValueError as error:
@@ -223,6 +223,8 @@ def cmd_request(args: argparse.Namespace) -> int:
         request["imports"] = parse_imports(args.imports)
     if args.edits:
         request["edits"] = parse_edits(args.edits)
+    if args.records:
+        request["records"] = parse_json_list(args.records, "--records")
     for field in ("address", "paste_at", "settings"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
@@ -756,8 +758,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="plan_import's files chosen, import_files' rows kept: a JSON array of "
                               "{path, entry?, install?, native?} (editor_state's import rows carry each as source)")
     request.add_argument("--edits", default=None,
-                         help="a batch of edits on one row as a JSON array (edit_record, revert_to_saved): one undo step")
+                         help="a batch of edits over any rows as a JSON array (edit_record, revert_to_saved): one undo step")
     request.add_argument("--address", default=None, help="a record's address as a JSON object {row, kind, child}")
+    request.add_argument("--records", default=None,
+                         help="select_record: the records selected with --address (a marquee's, of any rows), "
+                              "a JSON array of {row, kind, child}")
     request.add_argument("--paste-at", dest="paste_at", default=None,
                          help="paste: where, as a JSON object {row, parent, position} (left out: after the selection)")
     request.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,

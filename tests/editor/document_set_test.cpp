@@ -2,9 +2,10 @@
 // rule each: the one position rule, where a record placed right after another goes, which Paste
 // after the selection and Duplicate share (a nested record's copy lands at the index after it in
 // its owner's collection, whichever made it, byte for byte the same file; a row's after it among
-// the rows; a row selected takes a Paste into itself, at its end); and the selection each open
+// the rows; a row selected takes a Paste into itself, at its end); the selection each open
 // document keeps while another is active (the primary and every selected record given back, a
-// document read again or closed keeping none).
+// document read again or closed keeping none); and a selection over several rows (S13 D7), whose
+// Duplicate and whose removal are one step each.
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -181,10 +182,51 @@ static int test_remembered_selections() {
 	return 0;
 }
 
+// A selection over several rows (S13 D7): the TITLE of two screens, a marquee's (SelectRecord with
+// records) or one joined to the other (Add, another row); Duplicate copies each after itself in one
+// step, the copies selected; a batch removing both is one step, the selection repaired to the
+// primary's owner; Cut asks the type, and a menu copies the windows of one screen only.
+static int test_selection_over_rows() {
+	Menus menus("opennova_editor_document_set_rows");
+	const SessionView &v = menus.view();
+	menus.select(menus.at(kStartup));
+	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate) && menus.menu().rows().size() == 2);
+	const std::string two = menus.menu().serialize().text;
+	const NodeAddress title = menus.at(kTitle), other = menus.at("1/window:0/window:0");
+	TEST_EXPECT(other.row && other.row != title.row && menus.menu().record_name(other) == "TITLE");
+	menus.select(title);
+	menus.select(other, SelectMode::Add);
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({title, other}) && v.documents.selection.primary == other);
+	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {other}));
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({other, title}) && v.documents.selection.primary == title);
+
+	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
+	TEST_EXPECT(v.documents.selection.records == std::vector<NodeAddress>({menus.at("0/window:0/window:1"), menus.at("1/window:0/window:1")}) &&
+	            v.documents.selection.primary == menus.at("0/window:0/window:1"));
+	menus.session.handle(request::undo(menus.menu().path()));
+	TEST_EXPECT(menus.menu().serialize().text == two);
+
+	// Cut: the menu copies windows of one screen only, so nothing is cut.
+	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {other}));
+	TEST_EXPECT(!menus.act(EditorRequestKind::Cut) && menus.menu().serialize().text == two);
+	// Both removed in one batch: one step; the primary's owner selected.
+	Edit remove_title, remove_other;
+	remove_title.operation = remove_other.operation = EditOperation::Remove;
+	remove_title.address = title;
+	remove_other.address = other;
+	menus.session.handle(request::edit_record("main.mnu", std::vector<Edit>{remove_title, remove_other}));
+	TEST_EXPECT(menus.session.last_edit_ok() && !menus.at("1/window:0/window:1").row && !menus.at(kExit).row);
+	TEST_EXPECT(v.documents.selection.primary == menus.at(kMain) && v.documents.selection.records.size() == 1);
+	menus.session.handle(request::undo(menus.menu().path()));
+	TEST_EXPECT(menus.menu().serialize().text == two);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paste_and_duplicate_agree();
 	failures += test_remembered_selections();
+	failures += test_selection_over_rows();
 	if (failures == 0) std::printf("editor_document_set: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
