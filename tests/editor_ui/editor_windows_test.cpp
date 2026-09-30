@@ -1137,8 +1137,8 @@ void test_preview_gestures_end() {
 	if (!preview) return;
 	// The model the active document, or the menu again.
 	const auto show_model = [&](bool on) {
-		v.documents.open = on ? std::vector<std::shared_ptr<const Document>>{document, model}
-		                 : std::vector<std::shared_ptr<const Document>>{document};
+		v.documents.open = on ? std::vector<std::shared_ptr<const DocumentBase>>{document, model}
+		                      : std::vector<std::shared_ptr<const DocumentBase>>{document};
 		v.documents.previews.model.path = on ? model->path() : std::string();
 		v.documents.active = on ? model->path() : document->path();
 		v.revisions.touch(ViewConcern::Documents);

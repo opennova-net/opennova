@@ -164,12 +164,14 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 }
 
 GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &project,
-		const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open) {
+		const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open) {
 	stats_ = GraphStats();
 	Patch patch;
+	// The open record documents stand in for their files (another kind of document reads none).
 	std::unordered_map<std::string, const Document *> documents;
 	for (const auto &document : open)
-		if (document) documents[document->path()] = document.get();
+		if (const Document *records = document ? records_of(*document) : nullptr)
+			documents[document->path()] = records;
 	std::unordered_set<uint32_t> listed;
 	listed.reserve(scan.entries.size());
 	for (const AssetEntry &asset : scan.entries) {

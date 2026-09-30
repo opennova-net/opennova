@@ -15,13 +15,14 @@ namespace opennova::editor {
 
 // The registry of editable file kinds (ADR 0046 d9): one row per document type, one per
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
-// document and how to validate the project's files of the kinds it opens, which are the asset
-// kinds whose row names its id (AssetKindRow::document). The session, the windows and the shell
-// reach a document type only through this table.
+// document (a DocumentBase: a record type's is its Document, as_records) and how to validate the
+// project's files of the kinds it opens, which are the asset kinds whose row names its id
+// (AssetKindRow::document). The session, the windows and the shell reach a document type only
+// through this table.
 struct DocumentType {
 	DocumentTypeId id = DocumentTypeId::None;
 	const char *name = "";
-	std::unique_ptr<Document> (*make)() = nullptr;
+	std::unique_ptr<DocumentBase> (*make)() = nullptr;
 	// The type's findings over the project's files of its kinds, with the project's asset graph
 	// (updated first: a type reads what its records are used for).
 	std::vector<Diagnostic> (*validate)(const ValidationInput &input, const AssetGraph &graph) = nullptr;
@@ -32,6 +33,23 @@ struct DocumentType {
 const DocumentType *document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
+// Whether the documents a type makes are record documents (DocumentBase::as_records): what the
+// graph's extraction, the validators and the rename read. A type of another kind (a raster, a
+// text) contributes nothing to them until its own hooks (S13 D9). Asked of a document the type
+// makes, once per registered type.
+bool holds_records(const DocumentType &type);
+
+// A test's document type in a registered one's place (S13 D6: a type of another kind than
+// records, before one ships): while it lives, document_type answers it for its id, and so
+// document_type_for for every asset kind whose row names that id. The registry's one seam:
+// nothing but a test makes one, one at a time.
+class DocumentTypeStandIn {
+public:
+	explicit DocumentTypeStandIn(const DocumentType &type);
+	~DocumentTypeStandIn();
+	DocumentTypeStandIn(const DocumentTypeStandIn &) = delete;
+	DocumentTypeStandIn &operator=(const DocumentTypeStandIn &) = delete;
+};
 
 // Every type's validation over the project, with the open documents standing in for
 // their files, then the asset graph's findings (a missing reference). `graph`, when
@@ -40,7 +58,7 @@ bool is_editable_kind(AssetKind kind);
 // session's); else they are read for this call alone (the command line, once).
 std::vector<Diagnostic> validate_open_documents(const ProjectPaths &paths, const ProjectDocument &project,
                                                 const AssetScan &scan,
-                                                const std::vector<std::shared_ptr<const Document>> &open,
+                                                const std::vector<std::shared_ptr<const DocumentBase>> &open,
                                                 AssetGraph *graph = nullptr, ValidationCache *cache = nullptr);
 
 } // namespace opennova::editor

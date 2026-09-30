@@ -245,7 +245,17 @@ static int test_menu_tools() {
 	TEST_EXPECT(refused(R"({"edits": [{"op": "set", "id": "nobody", "field": "name", "value": "X"}]})", "nobody"));
 	TEST_EXPECT(refused(R"({"edits": [{"op": "add", "kind": "gizmo", "parent": )" + m + "}]}", "gizmo"));
 	TEST_EXPECT(refused(R"({"edits": [{"op": "set", "id": 999999, "field": "name", "value": "X"}]})", "No record"));
-	TEST_EXPECT(refused(R"({"edits": [{"op": "teleport", "id": )" + h + "}]}", "teleport"));
+	TEST_EXPECT(refused(R"({"edits": [{"op": "teleport", "id": )" + h + "}]}",
+	                    "Unknown edit op \"teleport\""));
+	// Operations the core knows that a batch does not send (S13 D6), each named as such: an apply
+	// (its change is made in C++), a paste and a file-wide value.
+	TEST_EXPECT(refused(R"({"edits": [{"op": "apply", "id": )" + h + "}]}",
+	                    "An apply edit carries a change its document type makes in C++: a batch "
+	                    "cannot send one."));
+	TEST_EXPECT(refused(R"({"edits": [{"op": "paste", "id": )" + h + "}]}",
+	                    "A batch takes no \"paste\" edit"));
+	TEST_EXPECT(refused(R"({"edits": [{"op": "set_file_value", "id": )" + h + "}]}",
+	                    "A batch takes no \"set_file_value\" edit"));
 	TEST_EXPECT(refused(R"({"edits": [{"op": "set", "id": )" + h + R"(, "field": "name"}]})", "value"));
 	TEST_EXPECT(refused(R"({"edits": [{"op": "add", "kind": "window", "parent": )" + m +
 	                    R"(, "as": "x"}, {"op": "add", "kind": "window", "parent": )" + m + R"(, "as": "x"}]})",

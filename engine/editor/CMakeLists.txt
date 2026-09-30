@@ -28,6 +28,7 @@ add_library(opennova_editor STATIC
     # model — the neutral editing core: the document lifecycle and the undo journal, what a field
     # shows, and the find over a document's fields
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/document_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp

@@ -54,7 +54,8 @@ struct Reveal {
 };
 
 const Document *active(const SessionView &view) {
-	for (const auto &document : view.documents.open) if (document->path() == view.documents.active) return document.get();
+	for (const auto &document : view.documents.open)
+		if (document->path() == view.documents.active) return records_of(*document);
 	return nullptr;
 }
 
@@ -932,7 +933,7 @@ void InspectorWindow::receive(const ViewEvent &event) {
 	HeldReveal held;
 	held.event = event;
 	held.selection = view.revisions.of(ViewConcern::Selection);
-	for (const std::shared_ptr<const Document> &document : view.documents.open)
+	for (const std::shared_ptr<const DocumentBase> &document : view.documents.open)
 		if (document->path() == event.path) held.document = document->identity();
 	events_.post(std::move(held));
 }

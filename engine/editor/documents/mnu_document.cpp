@@ -747,8 +747,10 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 }
 
 void MnuDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
-	if (lookups_.revision != revision() || !lookups_.made) {
+	if (lookups_.load_generation != load_generation() || lookups_.revision != revision() ||
+	    !lookups_.made) {
 		lookups_.made = true;
+		lookups_.load_generation = load_generation();
 		lookups_.revision = revision();
 		lookups_.unfound.clear();
 		for (const MenuLookupName &name : lookup_names())
@@ -936,9 +938,11 @@ SerializeResult MnuDocument::serialize() const {
 }
 
 std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<SourceIssue> *issues) const {
-	if (!saved_.made || saved_.revision != revision()) {
+	if (!saved_.made || saved_.load_generation != load_generation() ||
+	    saved_.revision != revision()) {
 		saved_ = SavedImage();
 		saved_.made = true;
+		saved_.load_generation = load_generation();
 		saved_.revision = revision();
 		const SerializeResult result = serialize();
 		if (result.ok()) {

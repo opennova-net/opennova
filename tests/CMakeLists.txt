@@ -3650,6 +3650,13 @@ target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
 target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_document_set COMMAND editor_document_set_test)
 
+# A document type of another kind than records (S13 D6), a test's standing in for the
+# stylesheet's: the graph, the validation, the rename and the session over it.
+add_executable(editor_non_record_document_test editor/non_record_document_test.cpp)
+target_link_libraries(editor_non_record_document_test PRIVATE opennova_editor)
+target_include_directories(editor_non_record_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_non_record_document COMMAND editor_non_record_document_test)
+
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
 target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

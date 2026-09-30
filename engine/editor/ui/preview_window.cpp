@@ -15,7 +15,7 @@ namespace opennova::editor {
 
 namespace {
 
-const Document *open_document(const SessionView &view, const std::string &path) {
+const DocumentBase *open_document(const SessionView &view, const std::string &path) {
 	for (const auto &document : view.documents.open)
 		if (document && document->path() == path) return document.get();
 	return nullptr;
@@ -37,7 +37,7 @@ PreviewFamily preview_family_of(AssetKind kind) {
 
 PreviewFamily preview_family(const SessionView &view, PreviewFamily last) {
 	PreviewFamily family = last;
-	if (const Document *active = open_document(view, view.documents.active))
+	if (const DocumentBase *active = open_document(view, view.documents.active))
 		if (preview_family_of(active->kind()) != PreviewFamily::None) family = preview_family_of(active->kind());
 	// What each has to show: the view keeps a preview's target until its document closes.
 	const PreviewFamily menu = view.documents.previews.menu.path.empty() ? PreviewFamily::None : PreviewFamily::Menu;
@@ -72,11 +72,12 @@ void PreviewWindow::end_frame() {
 // dot after it leaves; the whole of it, the path and whether it is unsaved in its tooltip.
 void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
 	const std::string &path = family == PreviewFamily::Menu ? view.documents.previews.menu.path : view.documents.previews.model.path;
-	const Document *document = open_document(view, path);
+	const DocumentBase *document = open_document(view, path);
+	const Document *records = document ? records_of(*document) : nullptr;
 	std::string text = basename_of(path);
 	if (family == PreviewFamily::Menu) {
 		if (const Node *screen =
-						document ? document->row(view.documents.previews.menu.screen) : nullptr)
+						records ? records->row(view.documents.previews.menu.screen) : nullptr)
 			text += " - " + screen->name();
 	} else if (ModelPreviewViewport *device = workspace_.devices().model) {
 		// The model pane's device: the line names the rig's model.

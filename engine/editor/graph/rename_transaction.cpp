@@ -83,6 +83,13 @@ Diagnostic refusal(const char *code, const std::string &message, const std::stri
 	return make_diagnostic(DiagnosticSeverity::Error, code, message, asset, field);
 }
 
+// Why a file's sites cannot be rewritten: its kind has no editor, or its editor's documents hold
+// no records a rename sets (a document of another kind, S13 D6).
+Diagnostic cannot_rewrite(const DocumentType *type, const std::string &file) {
+	if (!type) return refusal("rename.site", file + " has no editor to rewrite it.", file);
+	return refusal("rename.site", file + " holds no records for a rename to rewrite.", file);
+}
+
 // A field of a record kind of a document type, asked of a blank document of the type (a type's
 // schema never depends on a file's content), one made per kind of file.
 const FieldSchema *site_field(std::map<AssetKind, std::unique_ptr<Document>> &blanks, AssetKind file, NodeKind kind,
@@ -91,7 +98,8 @@ const FieldSchema *site_field(std::map<AssetKind, std::unique_ptr<Document>> &bl
 	if (!blank) {
 		const DocumentType *type = document_type_for(file);
 		if (!type) return nullptr;
-		blank = type->make();
+		blank = records_of(type->make());
+		if (!blank) return nullptr;
 	}
 	for (const FieldSchema &field : blank->fields(kind))
 		if (field.id == id) return &field;
@@ -302,12 +310,12 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 	for (const auto &entry : files) {
 		const AssetEntry *asset = find_asset(scan, entry.first);
 		const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
-		if (!type) {
-			findings.push_back(refusal("rename.site", entry.first + " has no editor to rewrite it.", entry.first));
+		std::unique_ptr<Document> document = type ? records_of(type->make()) : nullptr;
+		if (!document) {
+			findings.push_back(cannot_rewrite(type, entry.first));
 			ok = false;
 			continue;
 		}
-		std::unique_ptr<Document> document = type->make();
 		Diagnostic error;
 		if (!document->load((fs::path(paths.root) / asset->relative_path).generic_string(), asset->relative_path, asset->kind,
 		                    project.target_game, error)) {
@@ -514,7 +522,7 @@ namespace {
 // file is tried, so the findings name each.
 bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
-                         const std::vector<std::shared_ptr<const Document>> &open,
+                         const std::vector<std::shared_ptr<const DocumentBase>> &open,
                          std::vector<std::unique_ptr<Document>> &staged, std::vector<Diagnostic> &findings) {
 	std::map<std::string, std::vector<const RenameSite *>> files;
 	for (const RenameSite &site : plan.sites) files[site.file].push_back(&site);
@@ -527,16 +535,17 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 	for (const auto &[file, sites] : files) {
 		const AssetEntry *asset = find_asset(scan, file);
 		const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
-		if (!type) {
-			findings.push_back(refusal("rename.site", file + " has no editor to rewrite it.", file));
+		std::unique_ptr<Document> document = type ? records_of(type->make()) : nullptr;
+		if (!document) {
+			findings.push_back(cannot_rewrite(type, file));
 			ok = false;
 			continue;
 		}
-		std::unique_ptr<Document> document = type->make();
 		Diagnostic error;
 		const Document *as_open = nullptr;
 		for (const auto &candidate : open)
-			if (candidate && candidate->path() == asset->relative_path) as_open = candidate.get();
+			if (candidate && candidate->path() == asset->relative_path)
+				as_open = records_of(*candidate);
 		const SerializeResult current = as_open ? as_open->serialize() : SerializeResult();
 		// An open document that would not write as it stands is the file the rename meets (its
 		// unsaved edits must be saved first, and that Save would fail): never the older file
@@ -642,7 +651,8 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 
 bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
-                         const std::vector<std::shared_ptr<const Document>> &open, std::vector<Diagnostic> &findings) {
+                         const std::vector<std::shared_ptr<const DocumentBase>> &open,
+                         std::vector<Diagnostic> &findings) {
 	if (!plan.ok()) return false;
 	std::vector<std::unique_ptr<Document>> staged;
 	return stage_symbol_rename(paths, project, scan, graph, plan, open, staged, findings);

@@ -130,7 +130,7 @@ struct ImportPlanRow {
 };
 
 // Whether what a file names goes unread: its kind names files (AssetKindRow::names_files) and
-// the graph does not read the file (graph_reads_file: a kind it has no document type or
+// the graph does not read the file (graph_reads_file: a kind it has no record type or
 // extractor for, a terrain, a script, the sound banks, the def tables beyond the catalogs and the
 // avatar table, a face; or a mission's .mis). An import takes such a file and lists it as not
 // followed.

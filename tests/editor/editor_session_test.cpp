@@ -405,8 +405,11 @@ static int test_import() {
 	session.handle(request::open_document("items.def"));
 	TEST_EXPECT(session.view().documents.open.size() == 1);
 	const Document *held = session.document_for("items.def");
+	// The view holds the open document as the base (S13 D6); the session's is its record document.
+	TEST_EXPECT(held && records_of(*session.view().documents.open[0]) == held);
 	EditorRequest edit = request::edit_record("defs/items.def", Edit());
-	edit.edits[0].address = {session.view().documents.open[0]->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item), 0};
+	edit.edits[0].address = {records_of(*session.view().documents.open[0])->rows()[0]->id,
+	                         node_kind(opennova::def::DefRecordKind::Item), 0};
 	edit.edits[0].field = "hp"; edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(session.documents_dirty());
@@ -433,7 +436,9 @@ static int test_import() {
 	session.handle(request::undo());
 	session.handle(importing);
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(std::get<opennova::def::DefItemDef>(static_cast<const CatalogRow &>(*session.view().documents.open[0]->rows()[0]).data).hp == 30);
+	const auto &reimported = static_cast<const CatalogRow &>(
+	        *records_of(*session.view().documents.open[0])->rows()[0]);
+	TEST_EXPECT(std::get<opennova::def::DefItemDef>(reimported.data).hp == 30);
 
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
 	const auto invalid = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}},
@@ -2936,7 +2941,8 @@ static int test_handle_entered_once() {
 		// The record the fix names, as a load of the file gives it (two loads give a record the
 		// same identity: the contract's).
 		Diagnostic error;
-		const std::shared_ptr<Document> probe = document_type_for(AssetKind::Menu)->make();
+		const std::shared_ptr<Document> probe =
+		        records_of(document_type_for(AssetKind::Menu)->make());
 		TEST_EXPECT(probe->load(v.project.root + "/" + main, main, AssetKind::Menu, v.project.document->target_game, error));
 		fix.edits[0].address = probe->address_at("0/window:0");
 	}

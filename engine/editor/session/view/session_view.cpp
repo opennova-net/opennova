@@ -11,9 +11,9 @@ namespace opennova::editor {
 std::string editor_window_title(const SessionView &view) {
 	const char *const product = "OpenNova Editor";
 	if (!view.project.open) return product;
-	const std::vector<std::shared_ptr<const Document>> &open = view.documents.open;
+	const std::vector<std::shared_ptr<const DocumentBase>> &open = view.documents.open;
 	const bool unsaved = std::any_of(open.begin(), open.end(),
-			[](const std::shared_ptr<const Document> &document) { return document->dirty(); });
+			[](const std::shared_ptr<const DocumentBase> &document) { return document->dirty(); });
 	// U+25CF BLACK CIRCLE: the OS draws the title, not the editor's ASCII font.
 	return view.project.document->title + (unsaved ? " \xE2\x97\x8F - " : " - ") + product;
 }

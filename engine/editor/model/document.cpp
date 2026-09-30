@@ -1,10 +1,5 @@
 #include "document.h"
 
-#include <base/gameprofile/gameprofile.h>
-#include <base/io/hash.h>
-#include <base/vfs/vfs_decode.h>
-#include <editor/project/project_files.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -17,32 +12,13 @@ uint64_t next_edit_gesture() {
 	return ++next;
 }
 
-namespace {
-
-std::atomic<uint64_t> g_next_identity{0};
-
-} // namespace
-
-Document::Document() : identity_(++g_next_identity) {}
-
 Document::Document(const Document &other)
-		: identity_(other.identity_), absolute_path_(other.absolute_path_),
-		  relative_path_(other.relative_path_), game_(other.game_), kind_(other.kind_),
-		  rows_(other.rows_), file_state_(other.file_state_), issues_(other.issues_),
-		  blocked_(other.blocked_), wrote_file_(other.wrote_file_),
-		  file_fingerprint_(other.file_fingerprint_), next_id_(other.next_id_),
-		  last_added_(other.last_added_), added_(other.added_),
+		: DocumentBase(other), rows_(other.rows_), file_state_(other.file_state_),
+		  next_id_(other.next_id_), last_added_(other.last_added_), added_(other.added_),
 		  history_(other.history_, rows_, file_state_), saved_rows_(other.saved_rows_),
-		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_),
-		  snapshot_(true) {}
+		  saved_state_(other.saved_state_), saved_positions_(other.saved_positions_) {}
 
 namespace {
-
-uint64_t fingerprint(const uint8_t *data, size_t size) { return io::fnv1a64_bytes(io::kFnv1a64Offset, data, size); }
-uint64_t fingerprint(const std::vector<uint8_t> &bytes) { return fingerprint(bytes.data(), bytes.size()); }
-uint64_t fingerprint(const std::string &text) {
-	return fingerprint(reinterpret_cast<const uint8_t *>(text.data()), text.size());
-}
 
 bool fail(Diagnostic &error, const std::string &path, const char *code, const std::string &message,
           const std::string &field = {}) {
@@ -51,7 +27,8 @@ bool fail(Diagnostic &error, const std::string &path, const char *code, const st
 }
 
 // True for an edit that adds, removes or moves a whole row (or pastes rows at the top
-// level): it changes the row list, not one row.
+// level): it changes the row list, not one row; and for an Apply naming no row, which changes
+// the file-wide state alone.
 bool row_level(const Edit &edit) {
 	switch (edit.operation) {
 	case EditOperation::Add:
@@ -59,13 +36,17 @@ bool row_level(const Edit &edit) {
 	case EditOperation::Duplicate:
 	case EditOperation::Remove:
 	case EditOperation::Move: return edit.address.child == 0;
+	case EditOperation::Apply: return edit.address.row == 0;
 	default: return false;
 	}
 }
 
+// True for an edit that may change what a row holds (an Apply's payload may too): a later edit
+// of its batch finds its record by walking the clone.
 bool structural(EditOperation operation) {
 	return operation == EditOperation::Add || operation == EditOperation::Duplicate ||
-	       operation == EditOperation::Remove || operation == EditOperation::Move || operation == EditOperation::Paste;
+	       operation == EditOperation::Remove || operation == EditOperation::Move ||
+	       operation == EditOperation::Paste || operation == EditOperation::Apply;
 }
 
 // A kind as a message names it: its label, else its number (an address may name a kind the
@@ -111,12 +92,6 @@ NodeKind Document::kind_from_name(const std::string &token) const {
 	for (const RecordKindRow &row : kinds())
 		if (token == row.token) return row.kind;
 	return -1;
-}
-
-size_t Document::ignored_lines() const {
-	size_t count = 0;
-	for (const auto &issue : issues_) if (!issue.blocks) ++count;
-	return count;
 }
 
 size_t Document::row_index(NodeId id) const {
@@ -387,8 +362,32 @@ void Document::assign_ids(Node &row) {
 	row.for_each_identity([this](NodeId &id) { id = allocate_id(); });
 }
 
+std::shared_ptr<Node> Document::make_node(NodeKind, NodeId, std::string &error) {
+	error = "This document cannot add that record.";
+	return nullptr;
+}
+
 bool Document::set_present(Node &, const NodeAddress &, const std::string &, bool, std::string &error) {
 	error = "This field is always written.";
+	return false;
+}
+
+bool Document::edit_collection(Node &, const Edit &, const IdAllocator &, NodeId &,
+                               std::string &error) {
+	error = "This collection cannot accept that edit.";
+	return false;
+}
+
+bool Document::apply_payload(Node &, const NodeAddress &, const EditPayload &,
+                             std::shared_ptr<const FileState> &, const IdAllocator &, bool &,
+                             std::string &error) {
+	error = "This document does not take that change.";
+	return false;
+}
+
+bool Document::apply_file_payload(std::shared_ptr<const FileState> &, const EditPayload &, bool &,
+                                  std::string &error) {
+	error = "This document does not take that change.";
 	return false;
 }
 
@@ -401,37 +400,15 @@ bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, 
 	return fail(error, path(), "document.value", "This document has no file-wide values.");
 }
 
-bool Document::read_source(std::vector<uint8_t> bytes, std::vector<std::shared_ptr<Node>> &rows,
-                           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!opennova::vfs_decode_payload(bytes, gameprofile::gameprofile_scr_policy_for_code(game_.c_str())))
-		return fail(error, relative_path_, "document.decode", "The file could not be decoded.");
-	// The C parsers permit an empty file, but require a non-null input pointer.
-	if (bytes.empty()) bytes.push_back(0);
-	return parse(bytes, rows, state, issues, error);
-}
-
-bool Document::load(const std::string &absolute, const std::string &relative, AssetKind kind,
-                    const std::string &game, Diagnostic &error) {
-	if (snapshot_) return fail(error, relative, "document.snapshot", "A snapshot is never loaded.");
-	std::vector<uint8_t> bytes;
-	std::string message;
-	if (!read_file_bytes(absolute, bytes, message)) return fail(error, relative, "document.read", message);
-	if (!load_bytes(bytes, relative, kind, game, error)) return false;
-	absolute_path_ = absolute;
-	return true;
-}
-
-bool Document::load_bytes(const std::vector<uint8_t> &bytes, const std::string &relative, AssetKind kind,
-                          const std::string &game, Diagnostic &error) {
-	if (snapshot_) return fail(error, relative, "document.snapshot", "A snapshot is never loaded.");
-	const uint64_t hash = fingerprint(bytes);
+bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
+                           std::vector<SourceIssue> &issues, Diagnostic &error) {
 	std::vector<std::shared_ptr<Node>> rows;
 	std::shared_ptr<const FileState> state;
-	std::vector<SourceIssue> issues;
-	relative_path_ = relative; kind_ = kind; game_ = game;
-	if (!read_source(bytes, rows, state, issues, error)) return false;
-	absolute_path_.clear(); // no file until load names one
-	rows_.clear(); file_state_.reset(); issues_ = std::move(issues);
+	// The C parsers permit an empty file, but require a non-null input pointer.
+	const std::vector<uint8_t> one_byte(decoded.empty() ? 1 : 0, 0);
+	if (!parse(decoded.empty() ? one_byte : decoded, rows, state, issues, error)) return false;
+	if (!adopt) return true;
+	rows_.clear(); file_state_.reset();
 	indexes_.clear();
 	history_.reset();
 	next_id_ = 1; last_added_ = 0; added_.clear();
@@ -441,64 +418,19 @@ bool Document::load_bytes(const std::vector<uint8_t> &bytes, const std::string &
 		rows_.push_back(row);
 	}
 	file_state_ = state;
-	blocked_ = false;
-	for (const auto &issue : issues_) blocked_ = blocked_ || issue.blocks;
-	file_fingerprint_ = hash;
-	wrote_file_ = false;
 	set_baseline();
 	return true;
 }
 
-bool Document::save(Diagnostic &error) {
-	if (snapshot_)
-		return fail(error, path(), "document.snapshot", "A snapshot is read, never saved.");
-	if (absolute_path_.empty())
-		return fail(error, path(), "document.no_file", "This document was read from bytes, not from a file: it has no file to save to.");
-	const SerializeResult output = serialize();
-	if (!output.ok())
-		return fail(error, path(), "document.unserializable", output.issues.front().message, output.issues.front().field);
-	if (!matches_file())
-		return fail(error, path(), "document.conflict", "This file changed outside the editor. Reload it before saving.");
-	std::string message;
-	if (!write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), "document.write", message);
-	file_fingerprint_ = fingerprint(output.text);
-	wrote_file_ = true;
+void Document::on_saved() {
 	history_.mark_saved();
 	history_.end_edit_group();
-	// The source is now the text just written, read the way a reload would: its findings
-	// replace the ones of the text it was loaded from, so what the rewrite dropped (the lines
-	// the game ignores, a table's grouping) is no longer reported. Only the findings are
-	// kept: the rows, their identities and the history are the document's. (A text that
-	// does not read back keeps the findings it had: a reload says why.)
-	std::vector<std::shared_ptr<Node>> rows;
-	std::shared_ptr<const FileState> state;
-	std::vector<SourceIssue> issues;
-	Diagnostic unread;
-	if (read_source(std::vector<uint8_t>(output.text.begin(), output.text.end()), rows, state, issues, unread)) {
-		issues_ = std::move(issues);
-		blocked_ = false;
-		for (const auto &issue : issues_) blocked_ = blocked_ || issue.blocks;
-	}
 	set_baseline();
-	return true;
 }
-
-Document::RewriteNeed Document::rewrite_need() const {
-	const SerializeResult output = serialize();
-	if (!output.ok()) return RewriteNeed::Unserializable;
-	return fingerprint(output.text) != file_fingerprint_ ? RewriteNeed::Rewrite : RewriteNeed::None;
-}
-
-bool Document::matches_file() const {
-	std::vector<uint8_t> current;
-	std::string message;
-	return read_file_bytes(absolute_path_, current, message) && fingerprint(current) == file_fingerprint_;
-}
-
-bool Document::apply(const Edit &edit, Diagnostic &error) { return apply(std::vector<Edit>{edit}, error); }
 
 // A whole row added, duplicated, removed or moved (or a file-wide value set): one edit,
-// one step, never folded.
+// one step, never folded. An Apply naming no row, the file-wide state alone: one step, a
+// gesture's folding into one.
 bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 	Change change;
 	change.before_state = change.after_state = file_state_;
@@ -509,6 +441,21 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 		return commit(std::move(change), {}, error);
 	}
 	std::string message;
+	if (edit.operation == EditOperation::Apply) {
+		if (!edit.payload)
+			return fail(error, path(), "document.payload", "This change carries nothing to apply.");
+		std::shared_ptr<const FileState> updated = file_state_;
+		bool changes = true;
+		if (!apply_file_payload(updated, *edit.payload, changes, message))
+			return fail(error, path(), "document.payload",
+			            message.empty() ? "This document does not take that change." : message);
+		if (!changes) return true; // the file-wide state as it was: no step
+		change.after_state = updated;
+		// A gesture's changes fold into one step, keyed by the file rather than a row.
+		const std::string key =
+		        edit.gesture ? "g" + std::to_string(edit.gesture) + "/file" : std::string();
+		return commit(std::move(change), key, error);
+	}
 	std::shared_ptr<Node> updated;
 	if (edit.operation == EditOperation::Paste)
 		return fail(error, path(), "document.paste", "Paste inside a record: select where the records go.");
@@ -577,10 +524,7 @@ bool Document::commit(Change change, const std::string &key, Diagnostic &error) 
 	return true;
 }
 
-bool Document::apply(const std::vector<Edit> &edits, Diagnostic &error) {
-	if (snapshot_)
-		return fail(error, path(), "document.snapshot", "A snapshot is read, never edited.");
-	if (blocked_) return fail(error, path(), "document.parse", "Fix the reported source errors and reload this document before editing.");
+bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (edits.empty()) return true;
 	for (const Edit &edit : edits) {
 		if (edit.operation != EditOperation::SetFileValue && !row_level(edit)) continue;
@@ -673,6 +617,8 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	const IdAllocator allocate = [this] { return allocate_id(); };
 	std::vector<NodeId> added;
 	bool changed = false, reshaped = false;
+	// The file-wide state as the batch leaves it (an Apply's payload may change it too).
+	std::shared_ptr<const FileState> state = file_state_;
 	const std::string row_label = kind_label(current->kind);
 	// A nested record's placement: the committed row's index until an edit of this batch
 	// changes the row's shape, then a walk of the clone.
@@ -739,6 +685,19 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			if (read_before && read(*updated, address, edit.field, after) && after == before &&
 			    read_present(*updated, address, edit.field) == written_before)
 				continue;
+			break;
+		}
+		case EditOperation::Apply: {
+			// A change the type made in C++, to the record and the file-wide state as the batch
+			// has left them; one that changes nothing is no step, as a Set of the value held.
+			if (!edit.payload)
+				return fail(error, path(), "document.payload",
+				            "This change carries nothing to apply.");
+			bool changes = true;
+			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
+				return fail(error, path(), "document.payload",
+				            message.empty() ? "This document does not take that change." : message);
+			if (!changes) continue;
 			break;
 		}
 		case EditOperation::Clear:
@@ -839,19 +798,13 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	out.changed = changed;
 	if (!changed) return true;
 	after_edit(*updated);
-	out.change.before_state = out.change.after_state = file_state_;
+	out.change.before_state = file_state_;
+	out.change.after_state = state;
 	out.change.before = current;
 	out.change.before_position = out.change.after_position = index;
 	out.change.after = updated;
 	out.added = std::move(added);
 	return true;
-}
-
-void Document::undo() {
-	if (!snapshot_) history_.undo();
-}
-void Document::redo() {
-	if (!snapshot_) history_.redo();
 }
 
 // --- the saved baseline ------------------------------------------------------------------

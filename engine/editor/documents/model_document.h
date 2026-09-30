@@ -131,7 +131,7 @@ public:
 	// A user point past the first 16 is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<ModelDocument>(*this);
 	}
 

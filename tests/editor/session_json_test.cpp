@@ -90,7 +90,7 @@ static int test_tokens() {
 	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
 	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
 	TEST_EXPECT(editor_request_kind_tokens().front() == "new_project");
-	for (int i = 0; i <= static_cast<int>(EditOperation::SetFileValue); ++i) {
+	for (int i = 0; i <= static_cast<int>(EditOperation::Apply); ++i) {
 		const auto operation = static_cast<EditOperation>(i);
 		EditOperation back = EditOperation::Set;
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
@@ -1297,7 +1297,7 @@ public:
 		return use.schema->id == "param";
 	}
 	SerializeResult serialize() const override { return {}; }
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
 
 protected:
 	void refine_field(const NodeAddress &, FieldUse &use) const override {
@@ -1565,6 +1565,45 @@ static int test_import_pages() {
 	return 0;
 }
 
+// S13 D6: an Apply edit's change is made in C++ by its document type (Edit::payload). A request's
+// JSON names it by the payload's token alone, and the reader takes neither an apply edit nor a
+// payload: the editor MCP cannot send one.
+static int test_apply_edit_json() {
+	struct Brush : EditPayload {
+		const char *token() const override { return "raster.brush"; }
+	};
+	Edit brush;
+	brush.operation = EditOperation::Apply;
+	brush.address = {3, 0, 0};
+	brush.payload = std::make_shared<Brush>();
+	EditorRequest request = request::edit_record("terrain.cpt", brush);
+	const JsonValue json = editor_request_to_json(request);
+	const JsonValue *edits = json.get("edits");
+	const JsonValue *edit = edits && edits->array.size() == 1 ? &edits->array[0] : nullptr;
+	TEST_EXPECT(edit && edit->get_string("operation", "") == "apply" &&
+	            edit->get_string("payload", "") == "raster.brush");
+	EditorRequest back;
+	std::string error;
+	const std::string apply_refused = "edits[0]: an apply edit carries a change its document type "
+	                                  "makes in C++; the editor's JSON cannot send one.";
+	const std::string payload_refused = "edits[1]: \"payload\" names a change a document type "
+	                                    "makes in C++; the editor's JSON cannot carry one.";
+	TEST_EXPECT(!editor_request_from_json(json, back, error) && error == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"apply\"}]}",
+	                          back) == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"field\":\"name\"},"
+	                          "{\"field\":\"name\",\"payload\":\"raster.brush\"}]}",
+	                          back) == payload_refused);
+	// No payload on any other edit's JSON.
+	request.edits = {Edit()};
+	const JsonValue set = editor_request_to_json(request);
+	const JsonValue *set_edits = set.get("edits");
+	TEST_EXPECT(set_edits && set_edits->array.size() == 1 && !set_edits->array[0].get("payload"));
+	TEST_EXPECT(editor_request_from_json(set, back, error) && back.edits.size() == 1 &&
+	            !back.edits[0].payload);
+	return 0;
+}
+
 // The view events in the view JSON (S13 V4): a page by seq, as the output's, the last 64 held.
 // Seventy posted, the first six are gone: `first` is 7, `next` 71, and a page from 0 starts at the
 // first held. Paging by `next_cursor`, ten at a time, reads every held event once, in order, with
@@ -1681,6 +1720,7 @@ static int test_view_events_json() {
 
 int main() {
 	int failures = 0;
+	failures += test_apply_edit_json();
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();
 	failures += test_import_pages();

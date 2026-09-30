@@ -134,7 +134,8 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 // file that would not write.
 bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
-                         const std::vector<std::shared_ptr<const Document>> &open, std::vector<Diagnostic> &findings);
+                         const std::vector<std::shared_ptr<const DocumentBase>> &open,
+                         std::vector<Diagnostic> &findings);
 // Commit a plan that is ok, on disk as apply_rename does (not undoable, like a file's rename):
 // every file of its sites read again from disk and rewritten in memory as check_symbol_rename
 // does, and only when every one of them takes every site and would write, written together

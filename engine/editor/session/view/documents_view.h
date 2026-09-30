@@ -10,12 +10,14 @@
 namespace opennova::editor {
 
 class Document;
+class DocumentBase;
 
 // The open documents as the view shows them (ADR 0046 S13 V4; the Documents, DocumentSet,
 // ActiveDocument and Selection concerns): each document, the active one, the selection in it,
 // the clipboard, and what the previews follow.
 struct DocumentsView {
-	std::vector<std::shared_ptr<const Document>> open;
+	// The open documents, each as the base: a window that reads rows asks records_of.
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::string active; // the active document's path ("" = none)
 	// The selection in the active document: the primary record (the inspector's, the one
 	// a new record goes beside) and every selected record, the primary among them, all
