@@ -2079,7 +2079,7 @@ void test_styles_lines_listed() {
 	// graph, kept across frames and a line of Output, and made again for an edit.
 	const StylesView *view = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count() && !view; ++i)
-		if (const auto *window = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
+		if (auto *window = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
 			view = dynamic_cast<const StylesView *>(window->view_of(path));
 	CHECK(view != nullptr, "the stylesheet's view");
 	const size_t made = view ? view->uses_made() : 0;

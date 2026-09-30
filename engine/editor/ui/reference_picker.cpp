@@ -7,6 +7,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iterator>
 #include <set>
@@ -74,6 +75,18 @@ void ReferencePicker::drop_list(Popup &popup) {
 	popup.fixes = std::vector<ProblemFix>();
 }
 
+void ReferencePicker::let_go(int frame) {
+	for (size_t i = 0; i < held_.size();) {
+		const auto it = popups_.find(held_[i]);
+		if (it != popups_.end() && it->second.view && it->second.drawn + 1 >= frame) {
+			++i;
+			continue;
+		}
+		if (it != popups_.end()) drop_list(it->second);
+		held_.erase(held_.begin() + std::ptrdiff_t(i));
+	}
+}
+
 size_t ReferencePicker::lists_held() const {
 	size_t held = 0;
 	for (const auto &popup : popups_) held += popup.second.view ? 1 : 0;
@@ -101,14 +114,20 @@ bool ReferencePicker::draw(Workspace &workspace, const Document &document, const
 	// The popup's own id, the document and the record key its state: another record's field of
 	// the same place in the window has its own.
 	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("references")};
+	// A list whose popup is not drawn open goes as any popup of the picker draws: one closed, and
+	// one whose picker the window no longer draws (another record's, of the same popup id or not).
+	const int frame = ImGui::GetFrameCount();
+	let_go(frame);
 	if (!ImGui::BeginPopup("references")) {
-		// Closed (or never opened): a list it held goes, made again as it opens.
+		// Closed (or never opened): a list it held goes now, made again as it opens.
 		const auto kept = popups_.find(key);
 		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
 		return false;
 	}
 	prune(workspace.view());
 	Popup &popup = popups_[key];
+	popup.drawn = frame;
+	if (!popup.view) held_.push_back(key);
 	refresh(popup, workspace.view(), document, record, field, value, others);
 	const bool done = draw_popup(workspace, popup, picked);
 	ImGui::EndPopup();

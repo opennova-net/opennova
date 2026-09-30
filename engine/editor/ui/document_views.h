@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/session/view/view_events.h>
+#include <editor/ui/outline_model.h>
 #include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 
@@ -25,16 +26,17 @@ enum class DocumentViewRole {
 };
 
 // A document's view in its Document tab (ADR 0046 S13 V3; CONTEXT.md "Document view"): made from
-// its type's row (make_view) the first time the Document window meets the open document, one per
-// open document by its path, and kept with all it holds (its filter and order, what it has open,
-// its caches, the events it is sent) while the document is open there; the document read again
-// (another instance at the path) is rebound to it, and closed, the view goes with it.
+// its type's row (make_view) the first time the Document window draws the document's tab as the
+// active document's or sends it a RevealRecord, one per open document by its path, and kept with
+// all it holds (its filter and order, what it has open, its caches, the events it is sent) while
+// the document is open there; the document read again (another instance at the path, or the same
+// one loaded again) is rebound to it, and closed, the view goes with it. A renamed file's
+// document is another instance at another path (the session closes it and opens the new path):
+// its view is a new one.
 class DocumentView {
 public:
 	virtual ~DocumentView() = default;
 
-	// Its row's role (DocumentViewRow::role).
-	virtual DocumentViewRole role() const { return DocumentViewRole::Records; }
 	// The tab's content over `document`, the one open at the view's path (a record document's views
 	// read records_of): its toolbar, then what it shows of the document. It takes the RevealRecord
 	// events it holds as it draws (the selection shown again).
@@ -42,23 +44,29 @@ public:
 	// The view's own modals (a menu's Remove screen?), which the workspace draws every frame
 	// whether the tab shows or not: a modal no frame draws would hold the input.
 	virtual void draw_modals(Workspace &workspace) { (void)workspace; }
-	// The document at the view's path is another instance (read again): what the view keeps that
-	// names the old one's records by identity goes (the reveal, a range's anchor); its filter, its
-	// order and what it has open stay.
+	// The document at the view's path was read again (another instance, or the same one loaded
+	// again): what the view keeps that names the old records by identity goes (the reveal, a
+	// range's anchor, the cell being edited); its filter, its order and what it has open stay. The
+	// events it held went before (drop_events).
 	virtual void rebind(const DocumentBase &document) { (void)document; }
-	// The Main-role viewport that fills the tab where the view's role is MainViewport, drawn in the
-	// room the tab gives it: true when it drew one. The hook S13 V5's viewport seam fills (a
+	// The Main-role viewport that fills the tab where the view's row's role is MainViewport, drawn
+	// in the room the tab gives it: true when it drew one. The hook S13 V5's viewport seam fills (a
 	// mission's 3D view, with ImGui overlays); every view draws its records itself until then.
 	virtual bool main_viewport(Workspace &workspace, const DocumentBase &document) {
 		(void)workspace;
 		(void)document;
 		return false;
 	}
+	// An outline's model (its row's OutlineSpec): its lines, its filter, its order and what is open,
+	// which its filter box, its sort and its arrows read and write; null for a view of its own.
+	virtual OutlineModel *outline() { return nullptr; }
 
 	// A RevealRecord event for its document (EditorWindows::begin_frame through the Document
 	// window), held until the view draws; how many it holds.
 	void receive(const ViewEvent &event) { events_.post(event); }
 	size_t held_events() const { return events_.held(); }
+	// The events held for a document read again go: they name its old records.
+	void drop_events() { events_.take(); }
 
 protected:
 	// The events held since the view last drew, now the view's: it takes them as it draws.
@@ -69,11 +77,13 @@ private:
 };
 
 // A document type's view (ADR 0046 S13 V3): one row per DocumentTypeId past None, in its order,
-// in ui/document_views.cpp, which does not build without it (static_asserts): its role and how
-// its view is made (an outline in its mode, or a view of its own).
+// in ui/document_views.cpp, which does not build without it (static_asserts): its role, and the
+// view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view), or a view of its
+// own, which its make makes (one of the two).
 struct DocumentViewRow {
 	DocumentTypeId type = DocumentTypeId::None;
 	DocumentViewRole role = DocumentViewRole::Records;
+	const OutlineSpec *outline = nullptr;
 	std::unique_ptr<DocumentView> (*make)() = nullptr;
 };
 

@@ -36,20 +36,33 @@ void OutlineModel::set_sort(bool by_name) { sort_ = by_name; }
 void OutlineModel::set_every(bool every) { every_ = every; }
 
 void OutlineModel::set_open(const OutlineLine &line, bool open) {
+	if (line.forced) return;
 	const bool changed = open ? open_.insert(key_of(line)).second : open_.erase(key_of(line)) > 0;
 	if (changed) ++open_version_;
 }
 
 bool OutlineModel::is_open(const OutlineLine &line) const { return open_.count(key_of(line)) > 0; }
 
-bool OutlineModel::reveal(const std::vector<NodeAddress> &path) {
-	bool changed = false;
-	for (size_t i = 0; i + 1 < path.size(); ++i) {
-		changed = open_.insert({path[i], false, 0}).second || changed;
-		changed = open_.insert({path[i], true, path[i + 1].kind}).second || changed;
+size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master) {
+	if (path.empty()) return SIZE_MAX;
+	const NodeAddress &shown = mode_ == OutlineMode::List ? path.front() : path.back();
+	if (mode_ == OutlineMode::MasterDetail && !shown.child) return SIZE_MAX;
+	if (mode_ == OutlineMode::Tree) {
+		bool changed = false;
+		for (size_t i = 0; i + 1 < path.size(); ++i) {
+			changed = open_.insert({path[i], false, 0}).second || changed;
+			changed = open_.insert({path[i], true, path[i + 1].kind}).second || changed;
+		}
+		if (changed) ++open_version_;
 	}
-	if (changed) ++open_version_;
-	return changed;
+	lines(document, master);
+	size_t at = line_of(shown);
+	if (at == SIZE_MAX && filtered()) {
+		set_filter(std::string());
+		lines(document, master);
+		at = line_of(shown);
+	}
+	return at;
 }
 
 bool OutlineModel::matches(const std::string &text) const {
@@ -166,11 +179,18 @@ bool OutlineModel::add_filtered_record(const Document &document, const NodeAddre
 	bool any = false;
 	for (const Document::Collection &collection : held)
 		any = add_filtered_collection(document, record, collection, depth + 1) || any;
-	if (!matched && !any) {
+	if (any) {
+		lines_[at].open = lines_[at].forced = true;
+		return true;
+	}
+	if (!matched) {
 		lines_.resize(at);
 		return false;
 	}
-	lines_[at].open = any;
+	// Kept for itself with nothing under it kept: it opens as it does unfiltered, onto all it holds.
+	lines_[at].open = lines_[at].branch && is_open(lines_[at]);
+	if (lines_[at].open)
+		for (const Document::Collection &collection : held) add_collection(document, record, collection, depth + 1);
 	return true;
 }
 
@@ -186,7 +206,7 @@ bool OutlineModel::add_filtered_collection(const Document &document, const NodeA
 		lines_.resize(at);
 		return false;
 	}
-	lines_[at].open = true;
+	lines_[at].open = lines_[at].forced = true;
 	return true;
 }
 
@@ -235,7 +255,7 @@ void OutlineModel::make_master_detail(const Document &document, NodeId master) {
 	if (!found) return;
 	for (const FieldSchema &field : document.fields(detail_kind_))
 		if (field.type == FieldType::Text && !field.read_only) columns_.push_back(&field);
-	const bool every = every_ && !needle_.empty();
+	const bool every = every_row();
 	for (size_t r = 0; r < rows.size(); ++r) {
 		if (!rows[r] || (!every && rows[r]->id != master)) continue;
 		const NodeAddress row{rows[r]->id, rows[r]->kind, 0};

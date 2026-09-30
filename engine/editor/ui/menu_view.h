@@ -44,7 +44,7 @@ private:
 	RecordTree tree_;
 	std::vector<std::string> lines_; // per tree entry: the name and the type's name, after the change dot's room
 	std::vector<std::string> tips_;  // per tree entry: the type's name and how the file writes it
-	uint64_t tree_document_ = 0, tree_revision_ = 0;
+	uint64_t tree_document_ = 0, tree_load_ = 0, tree_revision_ = 0;
 	NodeAddress revealed_;       // the selection the tree last opened its owners for
 	std::vector<NodeId> reveal_; // the windows to open this frame
 	NodeId scroll_to_ = 0;       // the window to scroll into view this frame

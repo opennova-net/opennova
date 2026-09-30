@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <editor/ui/field_widgets.h>
+#include <editor/ui/text_edit.h>
 #include "editor_ui_test_support.h"
 
 #include <imgui.h>
@@ -344,9 +345,9 @@ void test_typed_values() {
 	      "a long token a wide field holds is taken whole");
 }
 
-// S13 V3: a text box over a value longer than its field holds (a UTF-8 text past the schema's
-// width, which the format may store in fewer bytes: five e-acutes are ten bytes of UTF-8, five of
-// Windows-1252) shows it whole and never cuts it (ui/text_edit): drawn, nothing is set; a Backspace
+// S13 V3: a text box over a value longer than its field holds (a field whose width counts the
+// value's own bytes, as a def's, a menu's and a stylesheet's do: five e-acutes are ten bytes of
+// UTF-8, past its nine) shows it whole and never cuts it (ui/text_edit): drawn, nothing is set; a Backspace
 // at its end takes its last character whole (eight bytes left, no half sequence), and once it is
 // no longer than the field, a typed character past the width is refused whole. A box of a field
 // wide enough takes what is typed.
@@ -401,6 +402,114 @@ void test_long_value_whole() {
 	widget_frame(draw_wide);
 }
 
+// S13 V3: a field its file stores in the game's code page (a string table's texts, one byte a
+// character there) counts its width in characters, not in the bytes of the UTF-8 the editor holds:
+// a field of width 9 takes eight e-acutes (sixteen bytes of UTF-8) and refuses a ninth whole; a
+// value already past the width shows whole, shrinks, and does not grow.
+void test_code_page_width() {
+	NullBackend backend;
+	std::string typed;
+	FieldSchema field;
+	field.id = "text";
+	field.type = FieldType::Text;
+	field.width = 9; // eight characters and the terminator
+	field.code_page = true;
+	const FieldUse use = field_use(field);
+	const std::vector<FieldChoice> none;
+	const std::string e = "\xC3\xA9"; // one e-acute: two bytes of UTF-8, one of Windows-1252
+	std::string eight;
+	for (int i = 0; i < 8; ++i) eight += e;
+	Value value = std::string();
+	int sets = 0;
+	const auto draw = [&] {
+		if (widgets::value(use, none, value, false, typed).changed) ++sets;
+	};
+	widget_frame(draw, 2);
+	type_into(widget({"##value"}), draw);
+	ImGui::GetIO().AddInputCharactersUTF8(eight.c_str());
+	widget_frame(draw, 2);
+	CHECK(std::get<std::string>(value) == eight, "eight e-acutes: sixteen bytes of UTF-8, eight characters");
+	const int taken = sets;
+	ImGui::GetIO().AddInputCharactersUTF8(e.c_str());
+	widget_frame(draw, 2);
+	CHECK(sets == taken && std::get<std::string>(value) == eight, "a ninth character is refused whole");
+	ImGui::ClearActiveID();
+	widget_frame(draw);
+	// Past the width already (as a file may hold it): whole, a Backspace takes a character, and
+	// what is typed then is refused.
+	value = eight + e + e;
+	widget_frame(draw, 2);
+	CHECK(std::get<std::string>(value) == eight + e + e, "a value past the width is shown whole");
+	type_into(widget({"##value"}), draw);
+	const auto press = [&](ImGuiKey key) {
+		ImGui::GetIO().AddKeyEvent(key, true);
+		widget_frame(draw);
+		ImGui::GetIO().AddKeyEvent(key, false);
+		widget_frame(draw);
+	};
+	press(ImGuiKey_End);
+	press(ImGuiKey_Backspace);
+	CHECK(std::get<std::string>(value) == eight + e, "it shrinks a character at a time");
+	ImGui::GetIO().AddInputCharactersUTF8("x");
+	widget_frame(draw, 2);
+	CHECK(std::get<std::string>(value) == eight + e, "and does not grow");
+	ImGui::ClearActiveID();
+	widget_frame(draw);
+}
+
+// The test's clipboard, never the machine's: what a paste takes.
+std::string g_clipboard;
+const char *clipboard_text(ImGuiContext *) { return g_clipboard.c_str(); }
+
+// S13 V3: a paste into a text box (ui/text_edit) is taken whole or refused whole, never cut. A box
+// of width 9 counted in bytes refuses ten and takes eight; a paste it refuses over a selection
+// still removes the selection (the text box deletes it first). A box counted in the code page's
+// characters refuses nine e-acutes and takes eight. Dear ImGui past 1.91.6 pastes the part of an
+// oversized paste that fits, cut at a character boundary: this test fails on such a bump.
+void test_paste_whole() {
+	NullBackend backend;
+	ImGui::GetPlatformIO().Platform_GetClipboardTextFn = clipboard_text;
+	namespace edit = opennova::editor::text_edit;
+	std::string text;
+	edit::Box box;
+	const auto draw = [&] { edit::edit("##box", text, 9, box); };
+	const auto chord = [&](ImGuiKey key) {
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+		ImGui::GetIO().AddKeyEvent(key, true);
+		widget_frame(draw);
+		ImGui::GetIO().AddKeyEvent(key, false);
+		ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+		widget_frame(draw);
+	};
+	const auto paste = [&](const std::string &clip) {
+		g_clipboard = clip;
+		chord(ImGuiKey_V);
+	};
+	widget_frame(draw, 2);
+	type_into(widget({"##box"}), draw);
+	paste("abcdefghij");
+	CHECK(text.empty(), "ten bytes into a box of eight: refused whole, not cut");
+	paste("abcdefgh");
+	CHECK(text == "abcdefgh", "eight bytes: taken whole");
+	chord(ImGuiKey_A);
+	paste("0123456789");
+	CHECK(text.empty(), "a refused paste still removes the selection it would have replaced");
+	ImGui::ClearActiveID();
+	widget_frame(draw);
+	const std::string e = "\xC3\xA9";
+	std::string eight;
+	for (int i = 0; i < 8; ++i) eight += e;
+	box.code_page = true;
+	type_into(widget({"##box"}), draw);
+	paste(eight + e);
+	CHECK(text.empty(), "nine characters into a code-page box of eight: refused whole");
+	paste(eight);
+	CHECK(text == eight, "eight characters (sixteen bytes of UTF-8): taken whole");
+	ImGui::ClearActiveID();
+	widget_frame(draw);
+	ImGui::GetPlatformIO().Platform_GetClipboardTextFn = nullptr;
+}
+
 } // namespace
 
 void run_field_widget_tests() {
@@ -411,6 +520,8 @@ void run_field_widget_tests() {
 	test_open_choice();
 	test_typed_values();
 	test_long_value_whole();
+	test_code_page_width();
+	test_paste_whole();
 }
 
 } // namespace editor_ui_test

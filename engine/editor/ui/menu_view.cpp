@@ -151,11 +151,15 @@ void MenuView::draw_modals(Workspace &workspace) {
 }
 
 void MenuView::refresh_tree(const MnuDocument &document, const Node &screen) {
-	if (tree_document_ == document.identity() && tree_revision_ == document.revision() && tree_.row == screen.id) return;
-	// Ids start again in every document: a range starts from a row of this screen of this
-	// document only (an edit keeps it).
-	if (tree_document_ != document.identity() || tree_.row != screen.id) anchor_ = 0;
+	if (tree_document_ == document.identity() && tree_load_ == document.load_generation() &&
+	    tree_revision_ == document.revision() && tree_.row == screen.id)
+		return;
+	// Ids start again in every document and every load of it: a range starts from a row of this
+	// screen of this load of this document only (an edit keeps it).
+	if (tree_document_ != document.identity() || tree_load_ != document.load_generation() || tree_.row != screen.id)
+		anchor_ = 0;
 	tree_document_ = document.identity();
+	tree_load_ = document.load_generation();
 	tree_revision_ = document.revision();
 	tree_ = build_record_tree(document, screen, kWindow);
 	lines_.clear();

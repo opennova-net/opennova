@@ -5,6 +5,8 @@
 #include <map>
 #include <memory>
 
+#include <editor/assets/asset_kinds.h>
+#include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -17,17 +19,29 @@
 namespace opennova::editor {
 
 DocumentView *DocumentWindow::view_for(const DocumentBase &document) {
+	const DocumentTypeId type = asset_kind_row(document.kind()).document;
 	auto found = views_.find(document.path());
+	if (found != views_.end() && found->second.type != type) {
+		// Opened again as a document of another type: a view of that type's.
+		views_.erase(found);
+		found = views_.end();
+	}
 	if (found == views_.end()) {
 		Slot slot;
 		slot.view = make_view(document);
 		if (!slot.view) return nullptr;
+		slot.type = type;
 		slot.identity = document.identity();
+		slot.load = document.load_generation();
 		found = views_.emplace(document.path(), std::move(slot)).first;
-	} else if (found->second.identity != document.identity()) {
-		// Read again: another instance at the path, the view kept and rebound to it.
-		found->second.identity = document.identity();
-		found->second.view->rebind(document);
+	} else if (found->second.identity != document.identity() || found->second.load != document.load_generation()) {
+		// Read again (another instance at the path, or the same one loaded again): the events it
+		// held name the old records and go; the view is kept and rebound.
+		Slot &slot = found->second;
+		slot.identity = document.identity();
+		slot.load = document.load_generation();
+		slot.view->drop_events();
+		slot.view->rebind(document);
 	}
 	return found->second.view.get();
 }
@@ -56,7 +70,7 @@ size_t DocumentWindow::held_events(const std::string &path) const {
 	return found == views_.end() ? 0 : found->second.view->held_events();
 }
 
-const DocumentView *DocumentWindow::view_of(const std::string &path) const {
+DocumentView *DocumentWindow::view_of(const std::string &path) {
 	const auto found = views_.find(path);
 	return found == views_.end() ? nullptr : found->second.view.get();
 }

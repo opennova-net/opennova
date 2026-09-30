@@ -69,6 +69,7 @@ Edited text(const FieldSchema &field, Value &value, bool compact, bool mixed) {
 	box.multiline = field.multiline && !compact;
 	box.height = ImGui::GetTextLineHeight() * 4.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
 	box.hint = mixed ? "(mixed)" : nullptr;
+	box.code_page = field.code_page;
 	if (text_edit::edit("##value", current, field.width, box)) {
 		value = std::move(current);
 		out.changed = true;
@@ -202,6 +203,7 @@ Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices,
 			text_edit::Box box;
 			box.hint = field.open_choices ? "Filter, or type a value" : "Filter";
 			box.enter_returns = true;
+			box.code_page = field.type == FieldType::Text && field.code_page;
 			enter = text_edit::edit("##typed", typed, typed_capacity(field), box);
 		}
 		const std::string token = typed;

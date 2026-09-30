@@ -31,8 +31,11 @@ inline constexpr const char *kFileDragPayload = "opennova.file";
 // stylesheets do not define). Each popup keeps its own filter and its own "Show unreachable", by
 // its id, its document and its record (every field of every record its own); a picker instance
 // holds them for the window drawing it, and forgets a document's once it is closed. S13 V3: the
-// list draws only the names that show (clipped), and a popup that closes lets its list go (the
-// graph's choices, the finding and its fixes), keeping its filter: it is made again as it opens.
+// list draws only the names that show (clipped), and a list (the graph's choices, the finding and
+// its fixes) is held only while its popup is drawn open: a popup that closes lets it go, and so
+// does one not drawn open since the last frame (another record's, whose picker the window no
+// longer draws) as any of the picker's popups draws, each keeping its filter: the list is made
+// again as it opens.
 class ReferencePicker {
 public:
 	// Out of line: a popup's fixes (problem_fixes.h) are the picker's own.
@@ -57,7 +60,8 @@ public:
 	// its fixes): once per opening, and again while it is open only when what it reads moves
 	// (ListKey), never for a change of anything else (a line of Output, a build's step).
 	size_t lists_made() const { return lists_made_; }
-	// The lists the popups hold now: an open popup's (none once it closes).
+	// The lists the popups hold now: an open popup's (none once it closes, or once another draws
+	// while it is not drawn open).
 	size_t lists_held() const;
 
 private:
@@ -98,16 +102,20 @@ private:
 		std::vector<ReferenceChoice> choices;
 		bool missing = false;
 		std::vector<ProblemFix> fixes;
+		int drawn = -1; // the frame it was last drawn open
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	             const FieldUse &field, const Value &value, bool others);
 	// A popup closed: its list goes, its filter and its "Show unreachable" stay.
 	static void drop_list(Popup &popup);
+	// The lists of the popups not drawn open this frame or the last let go (held_ swept).
+	void let_go(int frame);
 	bool draw_popup(Workspace &workspace, Popup &popup, std::string &picked);
 	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);
 
 	std::map<Key, Popup> popups_;
+	std::vector<Key> held_; // the popups holding a list (at most the open one, once swept)
 	const SessionView *pruned_view_ = nullptr;
 	RevisionKey pruned_key_;
 	size_t lists_made_ = 0;

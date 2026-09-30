@@ -51,10 +51,14 @@ FieldSchema field(const char *id, FieldType type, size_t width, const char *labe
 // the first of a name; a string by its key in its section, the first of a key; the text is
 // stored in cp1252; the position is a pair of 16-bit numbers no witnessed reader uses.
 const std::vector<FieldSchema> &section_fields() {
-	static const std::vector<FieldSchema> fields = {
-		field("name", FieldType::Text, kNameWidth, "Name",
-		      "A lookup finds the section by this name, in any case: the first section of a name."),
-	};
+	static const std::vector<FieldSchema> fields = [] {
+		std::vector<FieldSchema> out = {
+			field("name", FieldType::Text, kNameWidth, "Name",
+			      "A lookup finds the section by this name, in any case: the first section of a name."),
+		};
+		out[0].code_page = true; // stored in cp1252 (set_text)
+		return out;
+	}();
 	return fields;
 }
 
@@ -72,6 +76,9 @@ const std::vector<FieldSchema> &string_fields() {
 		};
 		out[0].defines = ReferenceKind::TextId;
 		out[1].multiline = true;
+		// Both stored in cp1252 (set_text): their widths count characters.
+		out[0].code_page = true;
+		out[1].code_page = true;
 		for (size_t coordinate : {size_t(2), size_t(3)}) {
 			out[coordinate].group = "Position";
 			out[coordinate].applies = Applicability::Unverified;

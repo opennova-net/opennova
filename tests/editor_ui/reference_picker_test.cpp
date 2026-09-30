@@ -5,7 +5,9 @@
 // through the list, Enter picks, a pick is the field's Set. A Files row
 // dropped on a reference's value sets the file there when the field's kind loads it, and
 // nothing when it does not. A missing value's picker offers the fixes Problems offers for it.
+#include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/graph/reference_queries.h>
@@ -327,6 +329,67 @@ void test_list_kept() {
 	draw(false);
 }
 
+// S13 V3: a list is held only while its popup is drawn open. Opened on one item's model field (A),
+// then on another's (B) as the window stops drawing A's picker (the Inspector's selection moved),
+// A's list goes as B's popup draws, though A's picker is not drawn again: one list held, and none
+// once B closes. The same popup id over another record (the selection moved while the popup
+// stayed open) lets the first record's list go too.
+void test_lists_let_go() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(2);
+	NodeAddress other;
+	CHECK(find_definition(AssetGraph(), *project.items, "100301", other), "the other item");
+	const FieldSchema *graphic = nullptr;
+	for (const FieldSchema &field : project.items->fields(project.item.kind))
+		if (field.id == "graphic") graphic = &field;
+	CHECK(graphic != nullptr, "the model field");
+	if (!graphic) return;
+	ReferencePicker picker;
+	using Row = std::pair<const char *, const NodeAddress *>;
+	// A frame drawing each row's picker under the row's id, `open` the row whose popup opens.
+	const auto draw = [&](const std::vector<Row> &rows, const char *open) {
+		ImGui::NewFrame();
+		ImGui::Begin("Picker test");
+		for (const Row &row : rows) {
+			ImGui::PushID(row.first);
+			Value value;
+			project.items->get(*row.second, "graphic", value);
+			std::string picked;
+			if (open && std::strcmp(open, row.first) == 0) ImGui::OpenPopup("references");
+			picker.draw(ui.windows, *project.items, *row.second, project.items->field_on(*row.second, *graphic),
+			            value, false, picked);
+			ImGui::PopID();
+		}
+		ImGui::End();
+		ImGui::Render();
+	};
+	const std::vector<Row> both = {{"a", &project.item}, {"b", &other}};
+	draw(both, "a");
+	draw(both, nullptr);
+	CHECK(picker.lists_held() == 1, "A's popup open: its list held");
+	const std::vector<Row> b_alone = {{"b", &other}};
+	draw(b_alone, "b");
+	draw(b_alone, nullptr);
+	CHECK(picker.lists_held() == 1, "B's popup open, A's picker no longer drawn: A's list let go");
+	ImGui::ClosePopupsExceptModals();
+	draw(b_alone, nullptr);
+	CHECK(picker.lists_held() == 0, "B closed: no list held");
+	// One popup id, the record under it changed while it stays open.
+	draw({{"x", &project.item}}, "x");
+	draw({{"x", &project.item}}, nullptr);
+	CHECK(picker.lists_held() == 1, "the popup open over A");
+	draw({{"x", &other}}, nullptr);
+	draw({{"x", &other}}, nullptr);
+	CHECK(picker.lists_held() == 1, "the same popup over B: A's list let go");
+	ImGui::ClosePopupsExceptModals();
+	draw({{"x", &other}}, nullptr);
+	CHECK(picker.lists_held() == 0, "closed: none held");
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -334,6 +397,7 @@ void run_reference_picker_tests() {
 	test_drop_on_value();
 	test_missing_value_fixes();
 	test_list_kept();
+	test_lists_let_go();
 }
 
 } // namespace editor_ui_test

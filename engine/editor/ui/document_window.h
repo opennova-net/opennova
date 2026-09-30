@@ -25,12 +25,14 @@ class NewProjectForm;
 // never otherwise, so a click is never fought; a tab a click (or the tab list) shows makes
 // its document the active one, a click in the frame the active document changed included.
 // A tab shows its document's view (S13 V3, ui/document_views): one per open document by its
-// path, made from its type's row the first time the window meets the document and kept with
-// what it holds (its filter and order, what it has open, its caches) while the document is open
-// there, rebound when the document is read again, gone when it closes, so no two open documents
-// share a view's state. Each shows the selection a Go to, a find or a Problems row moves there,
-// and again for each RevealRecord view event its document is sent, which the view holds until it
-// draws.
+// path, made from its type's row the first time the window draws the tab as the active document's
+// or sends the document a RevealRecord, and kept with what it holds (its filter and order, what it
+// has open, its caches) while the document is open there; rebound when the document is read again
+// (the events it held dropped), made anew when the path's document is of another type, gone when
+// it closes, so no two open documents share a view's state (a renamed file's document, closed and
+// opened at its new path, gets a new one). Each shows the selection a Go to, a find or a Problems
+// row moves there, and again for each RevealRecord view event its document is sent, which the view
+// holds until it draws.
 // With no project open it is the
 // welcome view; with nothing open it says how to open a file. Ctrl+F (Edit > Find...) opens the
 // find bar over the active tab's view: every field whose value as the Inspector shows it holds
@@ -61,16 +63,19 @@ public:
 	// The events the view of the document at `path` holds until it draws (0: none, or no view).
 	size_t held_events(const std::string &path) const;
 	// The view of the document open at `path`; null until the window meets the document.
-	const DocumentView *view_of(const std::string &path) const;
+	DocumentView *view_of(const std::string &path);
 
 private:
-	// A document's view and the document instance it is bound to.
+	// A document's view, its type, and the document it is bound to: the instance and its load.
 	struct Slot {
 		std::unique_ptr<DocumentView> view;
+		DocumentTypeId type = DocumentTypeId::None;
 		uint64_t identity = 0;
+		uint64_t load = 0;
 	};
-	// The view of the open `document`: made from its type's row the first time, rebound when the
-	// document at its path is another instance. Null for a document no type opens.
+	// The view of the open `document`: made from its type's row the first time (and again for a
+	// document of another type at the path), rebound when the document at its path is another
+	// instance or was loaded again. Null for a document no type opens.
 	DocumentView *view_for(const DocumentBase &document);
 	// The views of documents no longer open go.
 	void prune(const SessionView &view);

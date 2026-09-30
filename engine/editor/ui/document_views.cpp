@@ -27,42 +27,37 @@ bool catalog_file_values(const Document &document, OutlineFileValues &out) {
 	return true;
 }
 
-std::unique_ptr<DocumentView> make_catalog_view() {
-	return std::make_unique<OutlineView>(OutlineSpec{OutlineMode::List, "", catalog_file_values});
-}
-std::unique_ptr<DocumentView> make_strings_view() {
-	return std::make_unique<OutlineView>(OutlineSpec{OutlineMode::MasterDetail, "Sections", nullptr});
-}
+constexpr OutlineSpec kCatalogOutline{OutlineMode::List, "", catalog_file_values};
+constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
+constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }
 std::unique_ptr<DocumentView> make_styles_view() { return std::make_unique<StylesView>(); }
-std::unique_ptr<DocumentView> make_tree_view() {
-	return std::make_unique<OutlineView>(OutlineSpec{OutlineMode::Tree, "", nullptr});
-}
 
 // A view per document type, in DocumentTypeId's order: a catalog's rows as a list with its
 // spawn registry after them, a string table's sections and strings as master and detail, a menu's
 // screens and windows and a stylesheet's lines each their own view, a model, a clip and an
 // animation table their records as a tree.
 constexpr DocumentViewRow kViews[] = {
-	{DocumentTypeId::Catalog, DocumentViewRole::Records, make_catalog_view},
-	{DocumentTypeId::Strings, DocumentViewRole::Records, make_strings_view},
-	{DocumentTypeId::Menu, DocumentViewRole::Records, make_menu_view},
-	{DocumentTypeId::Styles, DocumentViewRole::Records, make_styles_view},
-	{DocumentTypeId::Model, DocumentViewRole::Records, make_tree_view},
-	{DocumentTypeId::Animation, DocumentViewRole::Records, make_tree_view},
-	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, make_tree_view},
+	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr},
+	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
+	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view},
+	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
+	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kTreeOutline, nullptr},
 };
 
-// One view per DocumentTypeId past None, in its order, each made by its row.
+// One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.
 constexpr bool views_in_order() {
 	for (size_t i = 0; i < kDocumentTypeCount; ++i)
-		if (static_cast<size_t>(kViews[i].type) != i + 1 || !kViews[i].make) return false;
+		if (static_cast<size_t>(kViews[i].type) != i + 1 || (kViews[i].outline != nullptr) == (kViews[i].make != nullptr))
+			return false;
 	return true;
 }
 
 static_assert(sizeof(kViews) / sizeof(kViews[0]) == kDocumentTypeCount,
               "every DocumentTypeId has exactly one view");
-static_assert(views_in_order(), "the views follow DocumentTypeId's order, each with its make");
+static_assert(views_in_order(), "the views follow DocumentTypeId's order, each an outline or its own make");
 
 } // namespace
 
@@ -73,7 +68,9 @@ const DocumentViewRow *document_view_row(DocumentTypeId type) {
 
 std::unique_ptr<DocumentView> make_view(const DocumentBase &document) {
 	const DocumentViewRow *row = document_view_row(asset_kind_row(document.kind()).document);
-	return row ? row->make() : nullptr;
+	if (!row) return nullptr;
+	if (row->outline) return std::make_unique<OutlineView>(*row->outline);
+	return row->make();
 }
 
 } // namespace opennova::editor

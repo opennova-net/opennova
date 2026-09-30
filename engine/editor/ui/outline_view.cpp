@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -92,8 +93,21 @@ bool adds_rows_of(const Document &document, NodeKind kind) {
 OutlineView::OutlineView(const OutlineSpec &spec) : spec_(spec), model_(spec.mode, spec.file_values) {}
 
 void OutlineView::rebind(const DocumentBase &) {
-	// The reveal names the records of the document it last drew: the next draw follows anew.
+	// The reveal and the cell being edited name the records of the document it last drew: the next
+	// draw follows anew.
 	reveal_ = RecordReveal();
+	editing_ = NodeAddress();
+}
+
+void OutlineView::filter_box(const char *hint, float width, const char *tip) {
+	const std::string &filter = model_.filter();
+	if (filter != filter_) {
+		const size_t size = std::min(filter.size(), sizeof(filter_) - 1);
+		std::memcpy(filter_, filter.data(), size);
+		filter_[size] = '\0';
+	}
+	ui_kit::filter_box("##filter", filter_, sizeof(filter_), hint, width, tip, false);
+	model_.set_filter(filter_);
 }
 
 void OutlineView::draw(Workspace &workspace, const DocumentBase &base) {
@@ -123,13 +137,15 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		ui_kit::WrapRow row;
 		const float filter = ImGui::GetFontSize() * 14.0f;
 		row.next(filter);
-		ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter records", filter, nullptr, false);
+		filter_box("Filter records", filter, nullptr);
 		row.next(ui_kit::checkbox_width("Sort by name"));
-		ImGui::Checkbox("Sort by name", &sort_);
+		bool sort = model_.sort();
+		if (ImGui::Checkbox("Sort by name", &sort)) model_.set_sort(sort);
 		ui_kit::tooltip("Lists the records by name; Up and Down still move them in the file's order.");
 	}
-	model_.set_filter(filter_);
-	model_.set_sort(sort_);
+	// The selection moved there: its row shown (a filter hiding it cleared) and scrolled to, however
+	// far down.
+	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
 	ImGui::BeginDisabled(document.blocked());
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX; // the selected record's row, its place in the file
@@ -151,8 +167,6 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 	const std::vector<OutlineLine> &lines = model_.lines(document);
 	if (rows.empty()) ui_kit::empty_state("The file has no records yet.", "Add one with the buttons above.");
 	else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
-	// The row holding a selection being revealed draws, however far down, to scroll to.
-	const size_t revealed = reveal_.moved() ? model_.line_of(reveal_.path().front()) : SIZE_MAX;
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(lines.size()));
 	if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
@@ -171,7 +185,10 @@ void OutlineView::draw_file_values(Workspace &workspace, const Document &documen
 	const float x = ImGui::GetCursorScreenPos().x;
 	const Document::RecordChange change =
 	        document.file_state_changed() ? Document::RecordChange::Changed : Document::RecordChange::Unchanged;
+	// The heading open or closed as the model has it; a click on it changes the model.
+	ImGui::SetNextItemOpen(model_.values_open());
 	const bool open = ImGui::TreeNode("file_values", "%s%s", ui_kit::kChangeRoom, values.title.c_str());
+	model_.set_values_open(open);
 	ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
 	ui_kit::tooltip(ui_kit::change_words(change));
 	if (!open) return;
@@ -206,11 +223,10 @@ void OutlineView::draw_file_values(Workspace &workspace, const Document &documen
 // The filter, the rows the file adds and the selected record's tools, then the tree (clipped,
 // scrolling sideways when deep).
 void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter records", 0.0f,
-	                   "Lists the records whose name holds the text, and what holds them.", false);
-	model_.set_filter(filter_);
-	// The selection moved there: the records and collections holding it open.
-	if (reveal_.moved()) model_.reveal(reveal_.path());
+	filter_box("Filter records", 0.0f, "Lists the records whose name holds the text, and what holds them.");
+	// The selection moved there: the records and collections holding it open (a filter hiding it
+	// cleared), its line scrolled to, however far down.
+	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
 	ImGui::BeginDisabled(document.blocked());
 	draw_tree_tools(workspace, document);
 	ImGui::Separator();
@@ -218,8 +234,6 @@ void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 		const std::vector<OutlineLine> &lines = model_.lines(document);
 		if (document.rows().empty()) ui_kit::empty_state("The file holds no records.");
 		else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
-		// The selection being revealed draws, however far down, to scroll to.
-		const size_t revealed = reveal_.moved() ? model_.line_of(reveal_.path().back()) : SIZE_MAX;
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(lines.size()));
 		if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
@@ -234,7 +248,8 @@ void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 // One line of the tree at its depth: a record (a node over its collections, or a leaf; marked when
 // it was added or changed since the last save; selected on a click, Ctrl joining or leaving the
 // selection) or a collection (a node over its records, + adding one at its end where it takes
-// one). What is open is the model's: the arrow opens or closes the line there.
+// one). What is open is the model's: the arrow opens or closes the line there (a line the filter
+// holds open stays so).
 void OutlineView::draw_tree_line(Workspace &workspace, const Document &document, const OutlineLine &line) {
 	const SessionView &view = workspace.view();
 	const float indent = ImGui::GetStyle().IndentSpacing * float(line.depth);
@@ -336,16 +351,18 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 	                   ImGui::GetStyle().ItemSpacing.x;
 	const bool beside = room >= ImGui::GetFontSize() * 8.0f;
 	const std::string hint = detail_words.empty() ? std::string("Filter") : "Filter " + detail_words;
-	ui_kit::filter_box("##filter", filter_, sizeof(filter_), hint.c_str(), beside ? room : 0.0f, nullptr, false);
+	filter_box(hint.c_str(), beside ? room : 0.0f, nullptr);
 	if (beside) ImGui::SameLine();
-	ImGui::Checkbox(every.c_str(), &every_);
-	ui_kit::tooltip(every_ ? "The filter lists what matches in every " + row_words + ". Untick for the selected one's."
-	                       : "Tick for the filter to list what matches in every " + row_words + ".");
-	model_.set_filter(filter_);
-	model_.set_every(every_);
+	bool ticked = model_.every();
+	if (ImGui::Checkbox(every.c_str(), &ticked)) model_.set_every(ticked);
+	ui_kit::tooltip(model_.every() ? "The filter lists what matches in every " + row_words + ". Untick for the selected one's."
+	                               : "Tick for the filter to list what matches in every " + row_words + ".");
 	ImGui::BeginDisabled(document.blocked());
 	const Node *master = document.row(view.documents.selection.row);
-	model_.lines(document, master ? master->id : 0);
+	const NodeId master_id = master ? master->id : 0;
+	// The selection moved to a record: its line shown (a filter hiding it cleared) and scrolled to.
+	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path(), master_id) : SIZE_MAX;
+	model_.lines(document, master_id);
 	const float masters = std::max(std::min(ImGui::GetFontSize() * 16.0f, ImGui::GetContentRegionAvail().x * 0.35f),
 	                               ui_kit::button_width("Duplicate"));
 	if (ImGui::BeginTable("master", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
@@ -356,10 +373,10 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 		ImGui::TableNextColumn();
 		draw_masters(workspace, document);
 		ImGui::TableNextColumn();
-		if (!master && !(every_ && filter_[0]))
+		if (!master && !model_.every_row())
 			ui_kit::empty_state(("Select one of the " + lower(spec_.rows) + " to list what it holds.").c_str());
 		else
-			draw_details(workspace, document, master);
+			draw_details(workspace, document, master, revealed);
 		ImGui::EndTable();
 	}
 	ImGui::EndDisabled();
@@ -396,12 +413,12 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 // The master row's records: their tools, then the table of their text fields edited in place, each
 // record marked when it was added or changed since the last save (a click on its mark selects it,
 // as a click into one of its cells does), a cell as tall as its text's lines (eight at most); only
-// the rows in sight draw their cells (and the one being revealed, to scroll to). Filtered over every
-// row, the table lists each row's matching records under a column of the row's name; the tools stay
-// the master row's.
-void OutlineView::draw_details(Workspace &workspace, const Document &document, const Node *master) {
+// the rows in sight draw their cells (and the one being revealed, `revealed`, to scroll to). Filtered
+// over every row, the table lists each row's matching records under a column of the row's name;
+// the tools stay the master row's.
+void OutlineView::draw_details(Workspace &workspace, const Document &document, const Node *master, size_t revealed) {
 	const SessionView &view = workspace.view();
-	const bool every = every_ && filter_[0];
+	const bool every = model_.every_row();
 	const NodeKind kind = model_.detail_kind();
 	if (master) {
 		std::vector<NodeId> ids;
@@ -439,18 +456,29 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		ImGui::TableSetupColumn(field_widgets::column_header(*field).c_str(), ImGuiTableColumnFlags_WidthStretch,
 		                        field->multiline ? 3.0f : 1.0f);
 	ImGui::TableHeadersRow();
-	// Where the table's rows show (its own scrolling window), and how tall a row of n lines is: a
+	// Where the table's rows show (its own scrolling window), and how tall a row is: its tallest
 	// cell's box and the table's padding.
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float top = ImGui::GetWindowPos().y, bottom = top + ImGui::GetWindowHeight();
-	const size_t revealed = reveal_.moved() ? model_.line_of(reveal_.path().back()) : SIZE_MAX;
+	const auto height_of = [&](const OutlineLine &line) {
+		return ImGui::GetTextLineHeight() * float(line.lines) + style.FramePadding.y * 2.0f + style.CellPadding.y * 2.0f;
+	};
+	// A row out of sight keeps its height and draws no cell, but for the row past each edge of what
+	// shows (Tab and Shift+Tab move into it, and it scrolls into sight), the one being revealed (to
+	// scroll to) and the one whose cell has the keyboard (it keeps it, and ends its edit, however the
+	// table scrolled).
+	NodeAddress editing;
+	bool past_bottom = false;
 	for (size_t i = 0; i < lines.size(); ++i) {
 		const OutlineLine &line = lines[i];
-		const float height =
-		        ImGui::GetTextLineHeight() * float(line.lines) + style.FramePadding.y * 2.0f + style.CellPadding.y * 2.0f;
+		const float height = height_of(line);
 		ImGui::TableNextRow(ImGuiTableRowFlags_None, height);
 		const float y = ImGui::GetCursorScreenPos().y;
-		if (i != revealed && (y > bottom || y + height < top)) continue; // out of sight: the row keeps its height
+		bool drawn = y <= bottom && y + height >= top;
+		if (!drawn && y > bottom && !past_bottom) drawn = past_bottom = true;
+		else if (!drawn && y + height < top && i + 1 < lines.size() && y + height + height_of(lines[i + 1]) >= top)
+			drawn = true; // the row just above what shows
+		if (!drawn && i != revealed && !(line.address == editing_)) continue;
 		ImGui::PushID(static_cast<int>(line.address.child));
 		const bool on = view.documents.selection.row == line.address.row && view.documents.selection.child == line.address.child;
 		if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
@@ -470,12 +498,14 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		}
 		for (const FieldSchema *field : columns) {
 			ImGui::TableNextColumn();
-			if (text_edit::cell(workspace, document, line.address, *field, line.lines) && ImGui::IsItemActivated())
-				select(workspace, document, line.address);
+			if (!text_edit::cell(workspace, document, line.address, *field, line.lines)) continue;
+			if (ImGui::IsItemActivated()) select(workspace, document, line.address);
+			if (ImGui::IsItemActive()) editing = line.address;
 		}
 		ImGui::PopID();
 	}
 	ImGui::EndTable();
+	editing_ = editing;
 }
 
 } // namespace opennova::editor

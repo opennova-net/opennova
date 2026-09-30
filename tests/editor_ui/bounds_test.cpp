@@ -26,6 +26,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/document_window.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include "common/file_io.h"
@@ -177,9 +178,9 @@ struct Sweep {
 		}
 		follow();
 	}
-	// Every section of the inspector's form open (those the file leaves out start folded), and
-	// the catalog's file-wide values (the spawn registry): set open in the windows' own state, as a
-	// click leaves it.
+	// Every section of the inspector's form open (those the file leaves out start folded): set open
+	// in the window's own state, as a click leaves it; and the catalog's file-wide values (the spawn
+	// registry), opened through its outline's model.
 	void unfold() {
 		const Document *document = session.document_for(view.documents.active);
 		ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
@@ -190,8 +191,10 @@ struct Sweep {
 		for (const InspectorSection &section :
 				plan_inspector(*document, view.documents.selection, owner, ""))
 			if (!section.key.empty()) inspector->StateStorage.SetInt(item_id(inspector->ID, {("###" + section.key).c_str()}), 1);
-		if (ImGuiWindow *window = ImGui::FindWindowByName("Document"))
-			window->StateStorage.SetInt(item_id(document_tab_id(document->path()), {"file_values"}), 1);
+		for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+			if (auto *documents = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
+				if (DocumentView *shown = documents->view_of(document->path()))
+					if (OutlineModel *outline = shown->outline()) outline->set_values_open(true);
 		ui.frames(3);
 	}
 	// The first reference field's picker in the inspector's form (Pick), open; false when the

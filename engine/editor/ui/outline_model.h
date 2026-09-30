@@ -28,6 +28,9 @@ struct OutlineLine {
 	int depth = 0;       // how deep in the tree it sits: 0 for a row
 	bool branch = false; // it opens: a record that holds collections, a collection holding records
 	bool open = false;   // what it holds is listed under it
+	// A tree under a filter: open because the filter keeps a record under it, whatever is open
+	// otherwise, so its arrow changes nothing (set_open leaves it).
+	bool forced = false;
 	size_t index = 0;    // a record's place among its owner's records of its kind, a row's among the rows
 	size_t count = 0;    // a collection's records
 	bool addable = false; // a collection that takes another record at its end (its + tool)
@@ -57,11 +60,22 @@ struct OutlineFileValues {
 // The hook of a type whose files hold such values: false for a document that has none.
 using OutlineFileValuesHook = bool (*)(const Document &document, OutlineFileValues &out);
 
+// What an outline view of a type is (its DocumentViewRow's outline, ui/document_views): its mode,
+// the heading of the master column (master and detail: the rows' words, "Sections"), and the hook
+// of a type whose files hold file-wide values a list shows after its rows (null: none).
+struct OutlineSpec {
+	OutlineMode mode = OutlineMode::Tree;
+	const char *rows = "";
+	OutlineFileValuesHook file_values = nullptr;
+};
+
 // The portable half of a document's outline (S13 V3; ImGui-free, as ui/problems_list and
-// ui/find_cursor are): the lines it shows, what is open, the filter, the order, and in master and
-// detail the columns. The lines are made again only when what they read moves (lines_made counts
-// it): the document (its identity, load and revision), what is open, the filter, the order, the
-// "every row" switch, and in master and detail the master row; drawing reads them as they stand.
+// ui/find_cursor are): the lines it shows, what is open (the file-wide values' heading too), the
+// filter, the order, and in master and detail the columns; the view's filter box, sort and Every
+// read and write the model's. The lines are made again only when what they read moves (lines_made
+// counts it): the document (its identity, load and revision), what is open, the filter, the
+// order, the "every row" switch, and in master and detail the master row; drawing reads them as
+// they stand.
 class OutlineModel {
 public:
 	explicit OutlineModel(OutlineMode mode = OutlineMode::Tree,
@@ -69,27 +83,37 @@ public:
 
 	OutlineMode mode() const { return mode_; }
 
-	// What the lines keep to. The filter, any case, as the game compares names: a list keeps the
-	// rows whose name holds it; a tree the records whose title or name holds it and the records
-	// and collections holding them, listed open whatever is open otherwise; master and detail the
-	// detail records one of whose columns holds it. The order, a list's alone: its rows by name,
-	// a display order (Up and Down keep the file's). Every row, master and detail's alone: while a
-	// filter is set, every row's detail records it keeps, not the master row's alone.
+	// What the lines keep to. The filter, any case, as the game compares names (filtered(): one
+	// of blanks alone keeps everything): a list keeps the rows whose name holds it; a tree the
+	// records whose title or name holds it and the records and collections holding them, listed
+	// open whatever is open otherwise (forced), a record kept for itself opening as it does
+	// unfiltered, onto all it holds; master and detail the detail records one of whose columns
+	// holds it. The order, a list's alone: its rows by name, a display order (Up and Down keep the
+	// file's). Every row, master and detail's alone: while the filter keeps lines (every_row), every
+	// row's detail records it keeps, not the master row's alone.
 	void set_filter(const std::string &filter);
 	const std::string &filter() const { return filter_; }
+	bool filtered() const { return !needle_.empty(); }
 	void set_sort(bool by_name);
 	bool sort() const { return sort_; }
 	void set_every(bool every);
 	bool every() const { return every_; }
+	bool every_row() const { return every_ && filtered(); }
 
 	// A tree's line opened or closed: a record's (its collections under it), a collection's (its
-	// records under it).
+	// records under it); one the filter holds open (OutlineLine::forced) is left as it is.
 	void set_open(const OutlineLine &line, bool open);
 	bool is_open(const OutlineLine &line) const;
-	// A tree: every record and collection that holds the last record of `path` opened (`path`:
-	// the records holding it, the row first, then the record: RecordReveal's), so its line is
-	// listed; false when every one was open already.
-	bool reveal(const std::vector<NodeAddress> &path);
+	// The file-wide values' heading (a list's, after its rows) opened or closed.
+	void set_values_open(bool open) { values_open_ = open; }
+	bool values_open() const { return values_open_; }
+	// The selection a Go to, a find or a Problems row moves to, shown (`path`: the records holding
+	// it, the row first, then the record: RecordReveal's): in a tree every record and collection
+	// holding it opened; a filter that would hide its line cleared, the reveal winning over it. Its
+	// line among lines(document, master) as they are then (a list's: the row holding it; a tree's and
+	// master and detail's: the record), SIZE_MAX for none (master and detail's rows are its master
+	// column's, which lists every one).
+	size_t reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master = 0);
 
 	// The lines of `document` as they stand (a tree's, a list's, master and detail's detail
 	// records), and in master and detail the rows (every one, in the file's order): made anew
@@ -156,6 +180,7 @@ private:
 	bool every_ = false;
 	std::set<OpenKey> open_;
 	uint64_t open_version_ = 0;
+	bool values_open_ = false;
 	Key key_;
 	std::vector<OutlineLine> lines_;
 	std::vector<OutlineLine> masters_;
