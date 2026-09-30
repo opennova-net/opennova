@@ -60,7 +60,8 @@ void draw_sections(EditorHost &host, const StringsDocument &document, const Reco
 		const Document::RecordChange change = document.record_change(at);
 		ui_kit::change_dot(change, x);
 		const std::string words = ui_kit::change_words(change);
-		hover_tip(shown != name ? section->name() + (words.empty() ? "" : "\n" + words) : words);
+		ui_kit::tooltip(shown != name ? section->name() + (words.empty() ? "" : "\n" + words)
+		                              : words);
 		ImGui::PopID();
 	}
 	ImGui::PopID();
@@ -78,8 +79,10 @@ void StringsView::draw(EditorHost &host, const StringsDocument &document) {
 	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter keys and text", beside ? room : 0.0f, nullptr, false);
 	if (beside) ImGui::SameLine();
 	ImGui::Checkbox("Every section", &every_section_);
-	hover_tip(every_section_ ? "The filter lists the matching strings of every section. Untick for the selected section's."
-	                         : "Tick to list the strings of every section the filter matches.");
+	ui_kit::tooltip(every_section_ ? "The filter lists the matching strings of every section. "
+	                                 "Untick for the selected section's."
+	                               : "Tick to list the strings of every section the filter "
+	                                 "matches.");
 	ImGui::BeginDisabled(document.blocked());
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX;
@@ -174,13 +177,13 @@ void StringsView::draw_strings(EditorHost &host, const StringsDocument &document
 		reveal_.scroll_to(string);
 		const Document::RecordChange change = document.record_change(string);
 		ui_kit::change_dot(change, x);
-		hover_tip(*ui_kit::change_words(change) ? ui_kit::change_words(change) : "Select this string.");
+		ui_kit::tooltip(*ui_kit::change_words(change) ? ui_kit::change_words(change) : "Select this string.");
 		if (every) {
 			ImGui::TableNextColumn();
 			const std::string name = text_of(document, {string.row, kSection, 0}, "name");
 			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(ui_kit::fit(name, ImGui::GetContentRegionAvail().x).c_str());
-			hover_tip(name);
+			ui_kit::tooltip(name);
 		}
 		ImGui::TableNextColumn();
 		text_cell(host, document, string, "key");

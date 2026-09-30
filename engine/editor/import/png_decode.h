@@ -17,5 +17,9 @@ namespace opennova::editor {
 // format the editor reads on the way in.
 bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error);
 bool is_png(const std::vector<uint8_t> &bytes);
+// The size a PNG states in its IHDR, the chunk that follows the signature, read without
+// decoding the image (the editor's texture probe measures a menu's PNG with it): false when
+// the bytes are not a PNG that starts with one.
+bool png_header_size(const std::vector<uint8_t> &bytes, uint32_t &width, uint32_t &height);
 
 } // namespace opennova::editor

@@ -24,7 +24,6 @@ enum class ArchiveSlot { Language, Localres, Resource, Loose };
 
 // "language.pff", "localres.pff", "resource.pff"; "" for Loose.
 const char *archive_slot_file_name(ArchiveSlot slot);
-const char *archive_slot_label(ArchiveSlot slot);
 
 // The slot for an asset, which its kind decides. An Archive-kind file (a .pff inside
 // the project) has no slot: the build reports it and leaves it out. A PNG source never

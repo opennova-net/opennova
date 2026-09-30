@@ -26,6 +26,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "editor/png_test_support.h"
 
 using opennova::project_cli::run_project_command;
@@ -381,16 +382,7 @@ static int test_cap() {
 
 namespace {
 
-struct NoProcess : opennova::editor::ProcessPlatform {
-	bool can_spawn() const override { return false; }
-	int64_t spawn(const opennova::editor::LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 // A finding as `validate` prints it.
 std::string printed(const opennova::editor::Diagnostic &d) {

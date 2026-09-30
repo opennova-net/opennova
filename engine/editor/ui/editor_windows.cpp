@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <filesystem>
 #include <memory>
 #include <utility>
 
+#include <editor/project/project_files.h>
 #include <editor/session/request_kinds.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/inspector_window.h>
@@ -74,7 +74,7 @@ bool names_the_active_document(EditorRequestKind kind) {
 
 // What waits on the unsaved prompt, in the words of the menu that asked for it.
 std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
-	const std::string file = std::filesystem::path(prompt.target).filename().generic_string();
+	const std::string file = basename_of(prompt.target);
 	switch (prompt.action) {
 	case EditorRequestKind::CloseDocument: return "Close " + file;
 	case EditorRequestKind::ReloadDocument: return "Reload " + file;
@@ -261,8 +261,8 @@ void EditorWindows::begin_frame() {
 }
 
 void EditorWindows::end_frame() {
-	// Preview not drawn this frame (closed, collapsed, its tab hidden): its gestures end,
-	// before what waits on the files as saved.
+	// A Preview canvas not drawn this frame (the other pane shown, the window closed, collapsed
+	// or its tab hidden): its gesture ends, before what waits on the files as saved.
 	if (preview_window_) preview_window_->end_frame();
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));

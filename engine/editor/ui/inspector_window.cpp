@@ -1,13 +1,13 @@
 #include "inspector_window.h"
 
 #include <editor/graph/asset_graph.h>
+#include <editor/session/findings_index.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
-#include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -54,10 +54,6 @@ struct Reveal {
 const Document *active(const SessionView &view) {
 	for (const auto &document : view.documents) if (document->path() == view.active_document) return document.get();
 	return nullptr;
-}
-
-bool is_selected(const SessionView &view, const NodeAddress &address) {
-	return std::find(view.selected.begin(), view.selected.end(), address) != view.selected.end();
 }
 
 // A Set on every target (`coalesce` folds a typing burst into one undo step).
@@ -225,12 +221,12 @@ void reference_status(EditorHost &host, const Document &document, const FieldSch
 		                                            ImGui::GetColorU32(colour));
 		tip = std::string(word) + ": " + tip;
 		if (present) go_to_tool(host, document, field, value, pressed, tip, "A click: ");
-		else hover_tip(tip);
+		else ui_kit::tooltip(tip);
 		return;
 	}
 	place(row, ui_kit::text_width(word));
 	ImGui::TextColored(colour, "%s", word);
-	hover_tip(tip);
+	ui_kit::tooltip(tip);
 	if (!present) return;
 	place(row, ui_kit::button_width("Go to"));
 	go_to_tool(host, document, field, value, ImGui::SmallButton("Go to"), std::string(), "");
@@ -318,7 +314,7 @@ void rename_hint(EditorHost &host, const Document &document, const NodeAddress &
 		window_requests::revert(host, document, {address}, {field.id});
 		host.request(RenameDialog::preview(document.path(), document.locator(address), field.id, now, true));
 	}
-	hover_tip("Puts '" + old + "' back, then renames it to '" + now + "' with every use of it, in every file (F2).");
+	ui_kit::tooltip("Puts '" + old + "' back, then renames it to '" + now + "' with every use of it, in every file (F2).");
 }
 
 // The control that edits one value (the caller has set its width): the field's widget
@@ -338,24 +334,12 @@ void value_control(EditorHost &host, const Document &document, const Targets &ta
 				const std::string shown = compact ? title : ui_kit::fit(title, room);
 				if (ImGui::Checkbox((shown + "###" + title).c_str(), &checked)) {
 					// Each target keeps its other bits.
-					std::vector<Edit> batch;
-					for (const NodeAddress &address : targets) {
-						Value own;
-						const int64_t was = document.get(address, field.id, own) && std::get_if<int64_t>(&own)
-						                            ? std::get<int64_t>(own)
-						                            : bits;
-						int64_t result = checked ? was | choice.value : was & ~choice.value;
-						if (field.type == FieldType::Integer) result = int32_t(uint32_t(result));
-						Edit change;
-						change.address = address;
-						change.field = field.id;
-						change.value = result;
-						batch.push_back(change);
-					}
+					std::vector<Edit> batch =
+					        flag_bit_edits(document, targets, field, choice.value, checked);
 					if (batch.size() == 1) window_requests::set(host, document, targets.front(), field.id, batch.front().value, false);
 					else window_requests::edits(host, document, std::move(batch));
 				}
-				if (!choice.label.empty() || shown != title) hover_tip(shown != title ? title + "\n" + choice.name : choice.name);
+				if (!choice.label.empty() || shown != title) ui_kit::tooltip(shown != title ? title + "\n" + choice.name : choice.name);
 			}
 		};
 		if (!compact) return boxes();
@@ -377,7 +361,7 @@ void written_tick(EditorHost &host, const Document &document, const Targets &tar
                   bool present) {
 	bool on = present;
 	if (ImGui::Checkbox("##written", &on)) set_written(host, document, targets, field.id, on);
-	hover_tip(present ? "Written to the file. Untick to leave it out." : "Left out of the file. Tick to write it.");
+	ui_kit::tooltip(present ? "Written to the file. Untick to leave it out." : "Left out of the file. Tick to write it.");
 }
 
 // What the tooltip of a row's name says of its fields: the schema's words of a field alone
@@ -439,7 +423,7 @@ void field_name(EditorHost &host, const Document &document, const Targets &targe
 	for (const Tag &tag : tags) {
 		ImGui::SameLine();
 		ImGui::TextColored(tag.color, "%s", tag.text);
-		hover_tip(tag.tip);
+		ui_kit::tooltip(tag.tip);
 	}
 }
 
@@ -499,14 +483,14 @@ void field_row(EditorHost &host, ReferencePicker &picker, const Document &docume
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
 	value_control(host, document, targets, field, value, false, mixed);
-	if (about) hover_tip(about);
+	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(host, document, targets, field);
 	ImGui::EndDisabled();
 	if (is_reference(field) && present) reference_tools(host, picker, document, targets, field, value, false, beside);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(host, document, address, field, value);
-		hover_tip("Rename everywhere (F2): this name and every use of it, in every file.");
+		ui_kit::tooltip("Rename everywhere (F2): this name and every use of it, in every file.");
 		rename_hint(host, document, address, field, value);
 	}
 	ImGui::EndDisabled();
@@ -591,7 +575,7 @@ void field_cell(EditorHost &host, ReferencePicker &picker, const Document &docum
 	const bool ignored = field.applies == Applicability::Ignored;
 	if (ignored && !written(document, address, field)) {
 		ImGui::TextDisabled("-");
-		hover_tip("The game does not read this for this record.");
+		ui_kit::tooltip("The game does not read this for this record.");
 		return;
 	}
 	ImGui::PushID(field.id.c_str());
@@ -615,7 +599,7 @@ void field_cell(EditorHost &host, ReferencePicker &picker, const Document &docum
 	if (ignored) {
 		ImGui::SameLine();
 		ImGui::TextColored(kIgnored, "!");
-		hover_tip(kIgnoredTip);
+		ui_kit::tooltip(kIgnoredTip);
 	}
 	ImGui::EndDisabled();
 	ImGui::PopID();
@@ -684,7 +668,8 @@ void records_table(EditorHost &host, ReferencePicker &picker, const Document &do
 		ImGui::TableSetColumnIndex(column);
 		ImGui::PushID(column);
 		ImGui::TableHeader(ImGui::TableGetColumnName(column));
-		if (column) hover_tip(field_widgets::field_tip(fields[size_t(column) - 1]));
+		const auto tip = [&] { return field_widgets::field_tip(fields[size_t(column) - 1]); };
+		if (column) ui_kit::tooltip_lazy(tip);
 		ImGui::PopID();
 	}
 	ImGuiListClipper clipper;
@@ -695,14 +680,14 @@ void records_table(EditorHost &host, ReferencePicker &picker, const Document &do
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, row);
 			ImGui::PushID(static_cast<int>(address.child));
 			ImGui::TableNextColumn();
-			const bool on = is_selected(host.view(), address);
+			const bool on = holds(host.view().selected, address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
 			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
 			if (ImGui::Selectable(number.c_str(), on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
 				select_row(host, document, address);
 			ui_kit::change_dot(document.record_change(address), x);
-			hover_tip(record_tip(document, address));
+			ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
 			row_menu(host, document, records.spec, address, size_t(i), records.ids.size());
 			for (const FieldSchema &field : fields) {
 				ImGui::TableNextColumn();
@@ -725,9 +710,9 @@ void records_list(EditorHost &host, const Document &document, const NodeAddress 
 		const std::string name =
 		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
 		                    ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((name + "###record").c_str(), is_selected(host.view(), address))) select_row(host, document, address);
+		if (ImGui::Selectable((name + "###record").c_str(), holds(host.view().selected, address))) select_row(host, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
-		hover_tip(record_tip(document, address));
+		ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
 		row_menu(host, document, records.spec, address, i, records.ids.size());
 		ImGui::PopID();
 	}
@@ -744,7 +729,7 @@ void collection_block(EditorHost &host, ReferencePicker &picker, const Document 
 		const std::string heading = std::string(spec.label) + " (" + std::to_string(ids.size()) + ")";
 		const float padding = ImGui::GetStyle().SeparatorTextPadding.x * 2.0f;
 		ImGui::SeparatorText(ui_kit::fit(heading, ImGui::GetContentRegionAvail().x - padding).c_str());
-		hover_tip(heading + "\n" + spec.kind_name);
+		ui_kit::tooltip(heading + "\n" + spec.kind_name);
 	}
 	if (spec.applies == Applicability::Ignored) {
 		ImGui::PushStyleColor(ImGuiCol_Text, kIgnored);
@@ -816,7 +801,7 @@ void draw_section(EditorHost &host, ReferencePicker &picker, const Document &doc
 			ImGui::SetNextItemOpen(true);
 		const bool shown = section.written || section_changed(document, {record}, section);
 		const bool open = ImGui::CollapsingHeader(heading.c_str(), shown ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-		hover_tip(section.key);
+		ui_kit::tooltip(section.key);
 		if (!open) return;
 	}
 	ImGui::PushID(section.key.c_str());
@@ -897,18 +882,19 @@ void breadcrumb(EditorHost &host, const Document &document, const NodeAddress &s
 	}
 }
 
-// The record's findings, each a line: its severity, and its message after the name of the
-// field it is about when it names one.
-void findings(const SessionView &view, const Document &document, const Node &row, const NodeAddress &selection) {
-	for (const Diagnostic &d : view.diagnostics) {
-		if (d.asset != document.path() || d.row_id != row.id || (selection.child && d.child_id != selection.child)) continue;
+// The record's findings (the view's index of them, not a scan of every one), each a line: its
+// severity, and its message after the name of the field it is about when it names one.
+void findings(const SessionView &view, const FindingsIndex &index, const Document &document,
+              const Node &row, const NodeAddress &selection) {
+	for (const size_t i : index.of_record(document.path(), row.id, selection.child)) {
+		const Diagnostic &d = view.diagnostics[i];
 		ui_kit::severity_marker(d.severity);
 		ImGui::SameLine();
 		ImGui::AlignTextToFramePadding();
 		const NodeKind kind = d.record_kind ? d.record_kind : selection.kind;
 		ImGui::TextWrapped("%s", d.field.empty() ? d.message.c_str()
 		                                         : (field_title(document, kind, d.field) + ": " + d.message).c_str());
-		if (!d.field.empty()) hover_tip(d.field);
+		if (!d.field.empty()) ui_kit::tooltip(d.field);
 	}
 }
 
@@ -983,7 +969,8 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			break;
 		}
 	referenced_by(host_, *document, selection);
-	findings(view, *document, *row, selection);
+	findings_.follow(view);
+	findings(view, findings_, *document, *row, selection);
 }
 
 // Several records of one kind (ADR 0046 S9k2): which they are (a click selects one alone),
@@ -1008,7 +995,10 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			const std::string shown = ui_kit::fit(ui_kit::kChangeRoom + titles, ImGui::GetContentRegionAvail().x);
 			if (ImGui::Selectable((shown + "###record").c_str(), record == records.front())) select(host_, document, record);
 			ui_kit::change_dot(document.record_change(record), x);
-			hover_tip((titles != path ? titles + "\n" : std::string()) + path + "\nSelect this one alone.");
+			ui_kit::tooltip_lazy([&] {
+				const std::string above = titles != path ? titles + "\n" : std::string();
+				return above + path + "\nSelect this one alone.";
+			});
 			ImGui::PopID();
 		}
 	}
@@ -1021,7 +1011,7 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			const bool shown = section.written || section_changed(document, records, section);
 			const bool open = ImGui::CollapsingHeader((section.title + "###" + section.key).c_str(),
 			                                          shown ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-			hover_tip(section.key);
+			ui_kit::tooltip(section.key);
 			if (!open) continue;
 		}
 		ImGui::PushID(section.key.c_str());

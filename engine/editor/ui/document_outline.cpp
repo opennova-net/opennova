@@ -4,7 +4,6 @@
 #include <string>
 
 #include <editor/ui/editor_requests.h>
-#include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
 #include <imgui.h>
 
@@ -13,11 +12,6 @@ namespace {
 
 using window_requests::edit;
 using window_requests::select;
-
-bool is_selected(const SessionView &view, const NodeAddress &address) {
-	if (view.selection == address) return true;
-	return std::find(view.selected.begin(), view.selected.end(), address) != view.selected.end();
-}
 
 void draw_collection(EditorHost &host, const Document &document, const RecordReveal &reveal, NodeId row,
                      const NodeAddress &owner, const Document::Collection &collection);
@@ -41,7 +35,7 @@ void draw_record(EditorHost &host, const Document &document, const RecordReveal 
 	const std::vector<Document::Collection> held = document.collections_of(address);
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 	if (held.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-	if (is_selected(view, address)) flags |= ImGuiTreeNodeFlags_Selected;
+	if (holds(view.selected, address)) flags |= ImGuiTreeNodeFlags_Selected;
 	const std::string title = document.record_title(address);
 	const std::string label = ui_kit::kChangeRoom + title;
 	const float x = ImGui::GetCursorScreenPos().x;
@@ -51,7 +45,7 @@ void draw_record(EditorHost &host, const Document &document, const RecordReveal 
 	reveal.scroll_to(address);
 	const Document::RecordChange change = document.record_change(address);
 	ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
-	hover_tip(record_tip(document, address, title, change));
+	ui_kit::tooltip_lazy([&] { return record_tip(document, address, title, change); });
 	if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
 		select(host, document, address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
 	if (!open || held.empty()) return;
@@ -73,7 +67,7 @@ void draw_collection(EditorHost &host, const Document &document, const RecordRev
 		ImGui::SameLine();
 		if (ImGui::SmallButton("+"))
 			edit(host, document, EditOperation::Add, {row, spec.kind, 0}, SIZE_MAX, owner.child);
-		hover_tip("Adds one at the end.");
+		ui_kit::tooltip("Adds one at the end.");
 	}
 	if (open) {
 		const auto address_at = [&](size_t i) { return NodeAddress{row, spec.kind, collection.ids[i]}; };
@@ -145,7 +139,7 @@ void draw_selection_tools(EditorHost &host, const Document &document) {
 		ImGui::TextUnformatted(shown.c_str());
 		std::string tip = shown != title ? title : std::string();
 		if (name != title) tip += (tip.empty() ? "" : "\n") + name;
-		hover_tip(tip);
+		ui_kit::tooltip(tip);
 	}
 	switch (ui_kit::row_tools(row, tools)) {
 	case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, selection, at.index + 1); break;

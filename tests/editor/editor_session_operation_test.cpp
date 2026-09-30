@@ -21,37 +21,13 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
+using editor_test::FakePlatform;
 
 namespace {
-
-struct FakePlatform : ProcessPlatform {
-	int64_t next_pid = 700;
-	std::vector<int64_t> running;
-	LaunchPlan last_plan;
-	int spawns = 0;
-	int64_t spawn(const LaunchPlan &plan) override {
-		last_plan = plan;
-		++spawns;
-		running.push_back(next_pid);
-		return next_pid++;
-	}
-	bool is_running(int64_t pid) override {
-		for (int64_t p : running) if (p == pid) return true;
-		return false;
-	}
-	bool terminate(int64_t pid) override { return kill(pid); }
-	bool kill(int64_t pid) override {
-		for (size_t i = 0; i < running.size(); ++i)
-			if (running[i] == pid) running.erase(running.begin() + static_cast<std::ptrdiff_t>(i));
-		return true;
-	}
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
 
 // What the fake operations did, kept past the slot dropping them.
 struct Tally {

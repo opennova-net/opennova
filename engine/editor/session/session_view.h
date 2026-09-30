@@ -215,6 +215,12 @@ struct SessionView {
 	std::string status; // the last thing that happened, one line
 };
 
+// Whether a selection's records (a view's `selected`) hold `address`: every list and tree of
+// records marks a row selected by it. The primary is one of them whenever there is one
+// (select_only, select, select_added and repair_selection keep it there), so a row is marked
+// exactly when Copy, Cut, Duplicate and Remove take it.
+bool holds(const std::vector<NodeAddress> &selected, const NodeAddress &address);
+
 // The editor's OS window title, which the shell applies when it changes: "OpenNova Editor",
 // the open project's name before it ("Armory - OpenNova Editor"), and a bullet (U+25CF)
 // after the name while a file has unsaved changes.

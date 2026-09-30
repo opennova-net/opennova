@@ -7,7 +7,6 @@
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
-#include <formats/mnu/mnu_layout.h>
 
 #include <algorithm>
 #include <string>
@@ -28,11 +27,14 @@ using window_requests::select;
 using window_requests::set;
 
 // What the game makes of a stylesheet, from its Problems rows.
-const char *sheet_status(const SessionView &view, const MnsDocument &document) {
+const char *sheet_status(const SessionView &view, const FindingsIndex &findings,
+                         const MnsDocument &document) {
 	if (!document.read_by_game()) return "Not read by the game: it reads menu_style.mns and brand.mns only.";
-	for (const Diagnostic &d : view.diagnostics)
-		if (d.asset == document.path() && d.severity == DiagnosticSeverity::Error && d.code.rfind("style.", 0) == 0)
+	for (const size_t i : findings.of_file(document.path())) {
+		const Diagnostic &d = view.diagnostics[i];
+		if (d.severity == DiagnosticSeverity::Error && d.code.rfind("style.", 0) == 0)
 			return "The game reads it only in part: see Problems.";
+	}
 	return "Read by the game.";
 }
 
@@ -63,10 +65,12 @@ void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users)
 	}
 	const std::string label = std::to_string(users.size()) + (users.size() == 1 ? " use" : " uses");
 	if (ImGui::SmallButton(label.c_str())) ImGui::OpenPopup("uses");
-	std::string tip;
-	for (size_t i = 0; i < users.size() && i < 8; ++i)
-		tip += (i ? "\n" : "") + users[i]->source + ": " + (users[i]->record.empty() ? users[i]->field : users[i]->record);
-	hover_tip(tip);
+	ui_kit::tooltip_lazy([&] {
+		std::string tip;
+		for (size_t i = 0; i < users.size() && i < 8; ++i)
+			tip += (i ? "\n" : "") + users[i]->source + ": " + (users[i]->record.empty() ? users[i]->field : users[i]->record);
+		return tip;
+	});
 	if (!ImGui::BeginPopup("uses")) return;
 	for (size_t i = 0; i < users.size(); ++i) {
 		const GraphEdge &edge = *users[i];
@@ -83,8 +87,9 @@ void used_by_cell(EditorHost &host, const std::vector<const GraphEdge *> &users)
 void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 	const SessionView &view = host.view();
 	reveal_.follow(view, document);
+	findings_.follow(view);
 	draw_document_toolbar(host, document);
-	ui_kit::empty_state(sheet_status(view, document));
+	ui_kit::empty_state(sheet_status(view, findings_, document));
 	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter names and values", 0.0f, nullptr, false);
 
 	// The lines the table lists: the variables and the lines that decide what the game reads
@@ -179,48 +184,33 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 		reveal_.scroll_to(line, true);
 		const Document::RecordChange change = document.record_change(line);
 		ui_kit::change_dot(change, x);
-		hover_tip(ui_kit::change_words(change));
+		ui_kit::tooltip(ui_kit::change_words(change));
 		const bool frozen = document.frozen(*row);
 		ImGui::TableNextColumn();
 		if (row->kind == kVariable) {
-			// What the value is used as: the definition the game reads, through its uses.
-			const bool winner = document.winning_row(row->name()) == row->id;
+			// What the value is used as (the document's answer): a colour, or a font or a texture
+			// picked with the reference picker from the project's files the kind loads, or a Files
+			// row dropped on the value; its uses, the menus' uses of the definition the game reads.
+			const StyleValueUse &use =
+			        document.style_value_use(line, view.graph.get(), cache_key(view));
 			std::vector<const GraphEdge *> users;
-			bool color = false, font = false, image = false;
-			if (winner && read && view.graph) {
-				const GraphSymbol *binding = view.graph->style_binding(row->name());
-				if (binding && binding->file == document.path())
-					users = view.graph->referrers_of(ReferenceKind::StyleVar, row->name());
-				for (const GraphEdge *edge : users) {
-					if (edge->through == ReferenceKind::None) color = true;
-					else if (edge->through == ReferenceKind::Font) font = true;
-					else image = true;
-				}
-			}
-			FieldSchema value_schema;
-			for (const FieldSchema &schema : document.fields(kVariable))
-				if (schema.id == "value") value_schema = document.field_on(line, schema);
-			// A font or a texture: picked with the reference picker from the project's files the
-			// kind loads, or a Files row dropped on the value.
-			const bool colour = !frozen && (color || (!font && !image && mnu::color_reads_whole(value)));
-			FieldSchema file = value_schema;
-			file.reference = font || value_schema.reference == ReferenceKind::Font ? ReferenceKind::Font
-			                 : image || value_schema.reference == ReferenceKind::MenuTexture ? ReferenceKind::MenuTexture
-			                                                                                  : ReferenceKind::None;
-			const bool picks = !frozen && !colour && view.graph && file.reference != ReferenceKind::None;
+			if (use.bound) users = view.graph->referrers_of(ReferenceKind::StyleVar, row->name());
 			text_cell(host, document, line, "name");
 			if (ImGui::IsItemActivated()) select(host, document, line);
 			ImGui::TableNextColumn();
 			text_cell(host, document, line, "value");
 			if (ImGui::IsItemActivated()) select(host, document, line);
 			std::string picked;
-			if (picks && !document.blocked() && ReferencePicker::accept_file(view, file, picked))
+			const bool drops = use.picks && !document.blocked();
+			if (drops && ReferencePicker::accept_file(view, use.file, picked))
 				set(host, document, line, "value", picked, false);
 			ImGui::TableNextColumn();
-			if (colour) {
+			if (use.colour) {
 				color_cell(host, document, line, value);
-			} else if (picks && picker_.draw(host, document, line, file, Value(value), false, picked, false)) {
-				set(host, document, line, "value", picked, false);
+			} else if (use.picks) {
+				const FieldSchema &file = use.file;
+				if (picker_.draw(host, document, line, file, Value(value), false, picked, false))
+					set(host, document, line, "value", picked, false);
 			}
 			ImGui::TableNextColumn();
 			text_cell(host, document, line, "comment");
@@ -228,7 +218,7 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 			ImGui::TableNextColumn();
 			used_by_cell(host, users);
 			ImGui::TableNextColumn();
-			if (!winner) quiet_text("defined again below: the game reads that one");
+			if (!use.winner) quiet_text("defined again below: the game reads that one");
 			else if (!read) quiet_text("not read by the game");
 			else if (frozen) quiet_text("locked: continues across other lines");
 		} else {

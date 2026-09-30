@@ -8,6 +8,7 @@
 
 #include <imgui.h>
 
+#include <base/io/strutil.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
@@ -21,24 +22,9 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr float kWheelDolly = 0.85f;      // one wheel notch toward the target
 constexpr int64_t kRegisterRange = 32767; // a slider's reach (the value is the register's word)
-constexpr float kDragThreshold = 3.0f;    // pixels before a press becomes an orbit or a pan
-constexpr float kPickSlop = 8.0f;         // how far from a marker a click still takes it
-constexpr ImU32 kUserPointColor = IM_COL32(255, 220, 90, 255);
-constexpr ImU32 kPivotColor = IM_COL32(110, 220, 255, 255);
-constexpr ImU32 kSelectedColor = IM_COL32(255, 200, 60, 255);
-constexpr ImU32 kHoverColor = IM_COL32(120, 190, 255, 220);
-
-std::string fixed_name(const char *name, size_t size) {
-	size_t length = 0;
-	while (length < size && name[length]) ++length;
-	return std::string(name, length);
-}
-
-ImU32 light_color(uint32_t rgb) {
-	return IM_COL32((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, 255);
-}
+// A clip event's tick on the timeline (a step's is green, a shot's red).
+constexpr ImU32 kEventColor = IM_COL32(255, 220, 90, 255);
 
 // The model document the preview shows (open), or null.
 const ModelDocument *previewed(const SessionView &view, const std::string &path) {
@@ -49,20 +35,13 @@ const ModelDocument *previewed(const SessionView &view, const std::string &path)
 
 } // namespace
 
-void ModelPreviewPane::end_press_() {
-	if (press_.handle && press_.sent) window_requests::end_edit(host_, press_.path);
-	press_ = Press();
-}
-
 void ModelPreviewPane::draw() {
 	if (!viewport_) {
-		end_press_();
 		ui_kit::empty_state(model_preview_status_message(ModelPreviewStatus::NoDevice, std::string()).c_str());
 		return;
 	}
 	ModelPreviewModel &model = viewport_->model();
 	if (model.status() != ModelPreviewStatus::Ready || !model.model()) {
-		end_press_();
 		ui_kit::empty_state(model_preview_status_message(model.status(), model.detail()).c_str());
 		// An animation no item pairs: the author picks the model it plays on.
 		if (model.status() == ModelPreviewStatus::NoRig) {
@@ -94,9 +73,20 @@ void ModelPreviewPane::draw() {
 			ImGui::PopStyleColor();
 		}
 	}
-	toolbar_(model);
+	// What the canvas maps: the model document shown (an animation's rig model has none), and the
+	// selected record's marker while the picture is the document's and it is the active one.
+	const SessionView &view = host_.view();
+	ModelCanvasFrame frame;
+	frame.document = previewed(view, model.shown_path());
+	frame.model = &model;
+	frame.current = frame.document && model.shown_revision() == frame.document->revision();
+	if (frame.current && view.active_document == frame.document->path())
+		model_overlay_of(*frame.document, view.selection, frame.selected_kind, frame.selected);
+	toolbar_(model, frame);
+	frame.overlays = model.overlays();
+	frame.snap = kModelHandleSnaps[std::clamp(snap_, 0, 4)];
 	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + 6.0f : 0.0f;
-	canvas_(model, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
+	draw_canvas_(frame, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
 	if (model.animating()) timeline_(model);
 }
 
@@ -116,9 +106,8 @@ void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &mod
 				options.rig_model = entry.logical_name;
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("The model the animation plays on. Auto takes the graphic of an item whose anim_def "
-		                  "names the table.");
+	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
+	                "anim_def names the table.");
 	if (options != model.options()) model.set_options(options);
 }
 
@@ -136,13 +125,13 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	const int32_t ticks = model.clip_ticks();
 	const int32_t shown = model.clip_loops() ? ticks % length : std::min(ticks, length);
 	if (ImGui::Button(options.playing ? "Pause##clip" : "Run##clip")) options.playing = !options.playing;
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip(options.playing ? "Hold the clip where it is." : "Run the clip.");
+	ui_kit::tooltip(options.playing ? "Hold the clip where it is." : "Run the clip.");
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##back", ImGuiDir_Left)) model.seek_ticks(std::max(shown - 1, 0));
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("A tick back.");
+	ui_kit::tooltip("A tick back.");
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##forward", ImGuiDir_Right)) model.seek_ticks(shown + 1);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("A tick on.");
+	ui_kit::tooltip("A tick on.");
 	ImGui::SameLine();
 	// The frame the clip shows after the track, its width kept for it; in a window too
 	// narrow for both, in the track's tooltip.
@@ -158,7 +147,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 		model.seek_ticks(scrub);
 		options.playing = false;
 	}
-	if (!frame_beside && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", frame);
+	if (!frame_beside) ui_kit::tooltip(frame);
 	const ImVec2 track_min = ImGui::GetItemRectMin(), track_max = ImGui::GetItemRectMax();
 	if (frame_beside) {
 		ImGui::SameLine();
@@ -179,7 +168,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	const PreviewClipEvent *under = nullptr;
 	for (const PreviewClipEvent &event : model.clip_events()) {
 		const float x = left + (right - left) * float(event.tick) / float(length);
-		ImU32 color = kUserPointColor;
+		ImU32 color = kEventColor;
 		if (event.trigger & (anim::kAnimEventFootLeft | anim::kAnimEventFootRight)) color = IM_COL32(120, 220, 120, 255);
 		else if (event.trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3))
 			color = IM_COL32(240, 90, 80, 255);
@@ -190,7 +179,9 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	std::string bits;
 	for (const anim::AnimEventBit &bit : anim::kAnimEventBits)
 		if (under->trigger & bit.mask) bits += (bits.empty() ? "" : ", ") + std::string(bit.name);
-	ImGui::SetTooltip("frame %d, tick %d: %s", under->frame, under->tick, bits.empty() ? "no named bit" : bits.c_str());
+	ui_kit::tooltip("frame " + std::to_string(under->frame) + ", tick " +
+	                std::to_string(under->tick) + ": " +
+	                (bits.empty() ? std::string("no named bit") : bits));
 	if (!clicked) return;
 	model.seek_ticks(under->tick);
 	ModelPreviewOptions held = model.options();
@@ -210,7 +201,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 
 // The level (Auto or one held), what Auto picks and why, the clock, what the overlays
 // mark, Frame, and the registers, on a row that wraps whole controls in a narrow window.
-void ModelPreviewPane::toolbar_(ModelPreviewModel &model) {
+void ModelPreviewPane::toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame) {
 	const threedi::Threedi3di3 &shown = *model.model();
 	ModelPreviewOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
@@ -231,24 +222,23 @@ void ModelPreviewPane::toolbar_(ModelPreviewModel &model) {
 		}
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Auto draws the level the game picks at this distance: the model's projected radius "
-		                  "against each level's threshold. A level held stays at any distance.");
+	ui_kit::tooltip("Auto draws the level the game picks at this distance: the model's projected "
+	                "radius against each level's threshold. A level held stays at any distance.");
 	char radius[32];
 	std::snprintf(radius, sizeof(radius), "%.1f px", projected / 65536.0);
 	row.next(ui_kit::text_width(radius));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", radius);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("The model's projected radius, the size Auto measures.");
+	ui_kit::tooltip("The model's projected radius, the size Auto measures.");
 	// The clock: Run or Pause (Play is the game's).
 	const char *clock = options.playing ? "Pause" : "Run";
 	row.next(ui_kit::button_width(clock));
 	if (ImGui::Button(clock)) options.playing = !options.playing;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Run or hold the model's clock: its part animations, flipbooks and colour generators.");
+	ui_kit::tooltip("Run or hold the model's clock: its part animations, flipbooks and colour "
+	                "generators.");
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("What the preview marks over the model.");
+	ui_kit::tooltip("What the preview marks over the model.");
 	if (ImGui::BeginPopup("marks")) {
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
@@ -259,20 +249,19 @@ void ModelPreviewPane::toolbar_(ModelPreviewModel &model) {
 	row.next(ui_kit::field_width(unit * 5.0f, "Snap"));
 	ImGui::SetNextItemWidth(unit * 5.0f);
 	ImGui::Combo("Snap", &snap_, kSnapNames, IM_ARRAYSIZE(kSnapNames));
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold Alt to "
-		                  "place freely.");
+	ui_kit::tooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold "
+	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
-	if (ImGui::Button("Frame")) frame_(model);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look at the selected marker, or at the whole model (F).");
+	if (ImGui::Button("Frame"))
+		model_canvas_.frame_selected(frame);
+	ui_kit::tooltip("Look at the selected marker, or at the whole model (F).");
 	row.next(ui_kit::button_width("Registers"));
 	ImGui::BeginDisabled(shown.ctrl.count == 0);
 	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
-		                                        : "Hold the model's CTRL registers at a value, as the game's "
-		                                          "entity would drive them.");
+	ui_kit::tooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
+	                                      : "Hold the model's CTRL registers at a value, as the game's "
+	                                        "entity would drive them.");
 	if (options != model.options()) model.set_options(options);
 	if (ImGui::BeginPopup("registers")) {
 		registers_(model);
@@ -285,7 +274,7 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 	ModelPreviewOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
 	for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
-		const std::string name = fixed_name(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
+		const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 		if (name.empty()) continue;
 		const auto held = options.ctrl.find(name);
 		int64_t value = held == options.ctrl.end() ? 0 : held->second;
@@ -297,175 +286,25 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 		}
 	}
 	if (ImGui::Button("Reset all")) options.ctrl.clear();
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Let every register go back to 0.");
+	ui_kit::tooltip("Let every register go back to 0.");
 	if (options != model.options()) model.set_options(options);
 }
 
-// The selected marker's place (the model's sphere when none is selected).
-void ModelPreviewPane::frame_(ModelPreviewModel &model) {
-	const SessionView &view = host_.view();
-	const ModelDocument *document = previewed(view, model.shown_path());
-	ModelOverlayKind kind = ModelOverlayKind::UserPoint;
-	int index = -1;
-	if (document && view.active_document == document->path() && model.shown_revision() == document->revision() &&
-	    model_overlay_of(*document, view.selection, kind, index)) {
-		for (const ModelOverlay &overlay : model.overlays())
-			if (overlay.kind == kind && overlay.index == index) {
-				PreviewVec3 center;
-				float radius = 1.0f;
-				model_preview_sphere(*model.model(), center, radius);
-				const float around = overlay.kind == ModelOverlayKind::Light && overlay.radius > 0.0f
-				                             ? overlay.radius
-				                             : std::max(0.25f, radius * 0.15f);
-				model.camera().frame(overlay.at, around, model.device_width(), model.device_height());
-				return;
-			}
+// The canvas: the marker under the pointer, found once a frame; the markers where the device drew
+// the model (the camera as it placed it), then the pointer's gestures and F (an orbit moves the
+// camera the next frame draws with).
+void ModelPreviewPane::draw_canvas_(const ModelCanvasFrame &frame, float available_height) {
+	model_canvas_.follow(frame, requests_);
+	if (canvas_.begin(available_height, 0, 0)) {
+		const CanvasInput &in = canvas_.input();
+		const int under = model_canvas_under(frame, in);
+		canvas_.picture([this](int width, int height) { viewport_->draw(width, height); },
+				[&] { return model_canvas_.hover_tip(frame, under); });
+		const OverlayList shapes = model_canvas_.shapes(frame, in, under);
+		model_canvas_.input(frame, in, under, requests_);
+		canvas_.draw(shapes, CanvasCursor::Default);
 	}
-	model.frame();
-}
-
-void ModelPreviewPane::canvas_(ModelPreviewModel &model, float available_height) {
-	const ImGuiIO &io = ImGui::GetIO();
-	const ImVec2 region = ImGui::GetContentRegionAvail();
-	const int width = std::max(64, int(region.x));
-	const int height = std::max(48, int(available_height));
-	// Every press on the canvas is the window's: the surface is the first item, so the
-	// device's own item under it never takes the mouse.
-	const ImVec2 base = ImGui::GetCursorScreenPos();
-	ImGui::InvisibleButton("##surface", ImVec2(float(width), float(height)),
-	                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
-	const bool hovered = ImGui::IsItemHovered();
-	const bool active = ImGui::IsItemActive();
-	const bool activated = ImGui::IsItemActivated();
-	const bool double_clicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
-	ImGui::SetCursorScreenPos(base);
-	viewport_->draw(width, height);
-	ImDrawList *paint = ImGui::GetWindowDrawList();
-	paint->AddRect(base, ImVec2(base.x + float(width), base.y + float(height)), IM_COL32(90, 90, 90, 255));
-
-	// The markers over the picture, the selected one ringed, and the one under the mouse.
-	const SessionView &view = host_.view();
-	const ModelDocument *document = previewed(view, model.shown_path());
-	const bool current = document && model.shown_revision() == document->revision();
-	ModelOverlayKind selected_kind = ModelOverlayKind::UserPoint;
-	int selected = -1;
-	if (current && view.active_document == document->path())
-		model_overlay_of(*document, view.selection, selected_kind, selected);
-	OrbitCamera &camera = model.camera();
-	const std::vector<ModelOverlay> overlays = model.overlays();
-	const float mx = io.MousePos.x - base.x, my = io.MousePos.y - base.y;
-	const int under = hovered ? pick_model_overlay(overlays, camera, width, height, mx, my, kPickSlop) : -1;
-	paint->PushClipRect(base, ImVec2(base.x + float(width), base.y + float(height)), true);
-	for (size_t i = 0; i < overlays.size(); ++i) {
-		const ModelOverlay &overlay = overlays[i];
-		float x = 0.0f, y = 0.0f, depth = 0.0f;
-		if (!camera.project(overlay.at, width, height, x, y, &depth)) continue;
-		const ImVec2 at(base.x + x, base.y + y);
-		const auto line_to = [&](const PreviewVec3 &tip, ImU32 color) {
-			float tx = 0.0f, ty = 0.0f;
-			if (camera.project(tip, width, height, tx, ty)) paint->AddLine(at, ImVec2(base.x + tx, base.y + ty), color, 1.5f);
-		};
-		const bool is_selected = overlay.kind == selected_kind && overlay.index == selected;
-		switch (overlay.kind) {
-		case ModelOverlayKind::UserPoint:
-			if (overlay.has_direction) line_to(model.axis_tip(overlay), kUserPointColor);
-			paint->AddQuadFilled(ImVec2(at.x, at.y - 4.0f), ImVec2(at.x + 4.0f, at.y), ImVec2(at.x, at.y + 4.0f),
-			                     ImVec2(at.x - 4.0f, at.y), kUserPointColor);
-			break;
-		case ModelOverlayKind::Light: {
-			const ImU32 color = light_color(overlay.color);
-			if (overlay.radius > 0.0f && depth > 0.0f) {
-				const float reach = overlay.radius * OrbitCamera::focal_pixels(width) / depth;
-				if (reach > 2.0f && reach < 4.0f * float(width))
-					paint->AddCircle(at, reach, (color & 0x00FFFFFFu) | 0x60000000u, 48);
-			}
-			if (overlay.has_direction) line_to(model.axis_tip(overlay), color);
-			paint->AddCircleFilled(at, 4.5f, color);
-			paint->AddCircle(at, 4.5f, IM_COL32(20, 20, 20, 255));
-			break;
-		}
-		case ModelOverlayKind::Pivot:
-			paint->AddLine(ImVec2(at.x - 5.0f, at.y), ImVec2(at.x + 5.0f, at.y), kPivotColor, 1.5f);
-			paint->AddLine(ImVec2(at.x, at.y - 5.0f), ImVec2(at.x, at.y + 5.0f), kPivotColor, 1.5f);
-			break;
-		}
-		if (int(i) == under) paint->AddCircle(at, 8.0f, kHoverColor, 16, 1.5f);
-		if (is_selected) {
-			paint->AddCircle(at, 9.0f, kSelectedColor, 16, 2.0f);
-			// The selected marker's axis tip: the handle that turns it.
-			float tx = 0.0f, ty = 0.0f;
-			if (overlay.has_direction && camera.project(model.axis_tip(overlay), width, height, tx, ty))
-				paint->AddCircleFilled(ImVec2(base.x + tx, base.y + ty), 4.0f, kSelectedColor);
-		}
-	}
-	paint->PopClipRect();
-	if (under >= 0 && !press_.dragging) ImGui::SetTooltip("%s", overlays[size_t(under)].name.c_str());
-
-	// The left button: on the selected marker (or its axis tip) a drag moves (or turns) its
-	// record; elsewhere a click selects the marker under it and a drag orbits (Shift: pans);
-	// the middle button pans; the wheel dollies.
-	if (activated) {
-		end_press_();
-		press_.active = true;
-		press_.x = io.MousePos.x;
-		press_.y = io.MousePos.y;
-		press_.pan = ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || io.KeyShift;
-		press_.pick = under;
-		if (!press_.pan && current && selected >= 0 && !document->blocked()) {
-			for (const ModelOverlay &overlay : overlays) {
-				if (overlay.kind != selected_kind || overlay.index != selected) continue;
-				float hx = 0.0f, hy = 0.0f;
-				const auto near_mouse = [&](const PreviewVec3 &point) {
-					return camera.project(point, width, height, hx, hy) && std::fabs(hx - mx) <= kPickSlop &&
-					       std::fabs(hy - my) <= kPickSlop;
-				};
-				if (overlay.has_direction && near_mouse(model.axis_tip(overlay))) press_.which = ModelHandle::Axis;
-				else if (overlay.kind != ModelOverlayKind::Pivot && near_mouse(overlay.at)) press_.which = ModelHandle::Place;
-				else break;
-				press_.handle = true;
-				press_.marker = overlay;
-				press_.offset_x = hx - mx;
-				press_.offset_y = hy - my;
-				press_.path = document->path();
-				break;
-			}
-		}
-	}
-	if (press_.active) {
-		if (!active) {
-			// A click on a marker selects its record (while the picture is the document's).
-			if (!press_.dragging && press_.pick >= 0 && size_t(press_.pick) < overlays.size() && current) {
-				const NodeAddress record = model_overlay_record(*document, overlays[size_t(press_.pick)], model.lod());
-				if (record.row) window_requests::select(host_, *document, record);
-			}
-			end_press_();
-		} else {
-			if (!press_.dragging && (std::fabs(io.MousePos.x - press_.x) > kDragThreshold ||
-			                         std::fabs(io.MousePos.y - press_.y) > kDragThreshold)) {
-				press_.dragging = true;
-				if (press_.handle) press_.gesture = next_edit_gesture();
-			}
-			if (press_.dragging && press_.handle) {
-				// The handle follows the mouse (kept where the press took it) in the plane that
-				// faces the eye; each step is planned from the marker as it was pressed.
-				std::vector<Edit> edits;
-				const float snap = io.KeyAlt ? 0.0f : kModelHandleSnaps[std::clamp(snap_, 0, 4)];
-				if (document && document->path() == press_.path &&
-				    model.handle_edits(*document, press_.marker, press_.which, mx + press_.offset_x, my + press_.offset_y,
-				                       snap, press_.gesture, edits) &&
-				    !edits.empty()) {
-					window_requests::edits(host_, *document, std::move(edits));
-					press_.sent = true;
-				}
-			} else if (press_.dragging) {
-				if (press_.pan) camera.pan(io.MouseDelta.x, io.MouseDelta.y, width);
-				else camera.orbit(io.MouseDelta.x, io.MouseDelta.y);
-			}
-		}
-	}
-	if (hovered && io.MouseWheel != 0.0f) camera.dolly(std::pow(kWheelDolly, io.MouseWheel));
-	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
-	if (double_clicked || (focused && ImGui::IsKeyPressed(ImGuiKey_F, false))) frame_(model);
+	canvas_.end();
 }
 
 } // namespace opennova::editor

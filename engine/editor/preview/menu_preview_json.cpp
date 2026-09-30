@@ -15,16 +15,16 @@ namespace opennova::editor {
 namespace {
 
 using io::JsonValue;
-
-JsonValue num(double value) { return JsonValue::make_number(value); }
-JsonValue str(const std::string &value) { return JsonValue::make_string(value); }
+using io::json_number;
+using io::json_string;
+using io::json_whole_in;
 
 JsonValue edges(const mnu::RectEdges &rect) {
 	JsonValue out = JsonValue::make_array();
-	out.push(num(rect.left));
-	out.push(num(rect.top));
-	out.push(num(rect.right));
-	out.push(num(rect.bottom));
+	out.push(json_number(rect.left));
+	out.push(json_number(rect.top));
+	out.push(json_number(rect.right));
+	out.push(json_number(rect.bottom));
 	return out;
 }
 
@@ -38,15 +38,6 @@ std::string argb(uint32_t color) {
 bool current(const MenuPreviewSnapshot &snapshot) {
 	return snapshot.status == MenuPreviewStatus::Ready && snapshot.document && snapshot.screen && snapshot.compiler &&
 	       snapshot.state && snapshot.shown_revision == snapshot.document->revision();
-}
-
-// A JSON number as a whole number in [lo, hi], its fraction dropped; false for anything else.
-bool whole_in(const JsonValue &json, double lo, double hi, int64_t &out) {
-	if (!json.is_number()) return false;
-	const double whole = std::trunc(json.number);
-	if (!(whole >= lo && whole <= hi)) return false;
-	out = int64_t(whole);
-	return true;
 }
 
 // The window `id` of the screen the snapshot shows (none when it is not one of its windows).
@@ -102,19 +93,19 @@ io::JsonValue menu_notes_to_json(const MnuDocument &document, const Node &screen
 		DiagnosticSeverity severity = DiagnosticSeverity::Warning;
 		const bool problem = menu_note_problem(note.code, &severity);
 		JsonValue row = JsonValue::make_object();
-		row.set("index", num(note.widget));
-		row.set("window_id", num(note.widget >= 0 ? double(document.window_at(screen, size_t(note.widget))) : 0.0));
-		row.set("id", num(double(address.child)));
-		row.set("name", str(note.widget >= 0 ? compiler.widget_name(note.widget) : std::string()));
-		row.set("code", str(menu::menu_frame_note_token(note.code)));
-		row.set("finding", str(menu_note_code(note.code)));
-		row.set("basis", str(menu::menu_frame_note_basis_token(menu::menu_frame_note_basis(note.code))));
-		row.set("severity", str(problem ? diagnostic_severity_label(severity) : "preview"));
-		row.set("subject", str(note.subject));
-		row.set("list", str(note.list));
-		row.set("record", num(note.record));
-		row.set("field", str(field));
-		row.set("message", str(menu_note_message(note)));
+		row.set("index", json_number(note.widget));
+		row.set("window_id", json_number(note.widget >= 0 ? double(document.window_at(screen, size_t(note.widget))) : 0.0));
+		row.set("id", json_number(double(address.child)));
+		row.set("name", json_string(note.widget >= 0 ? compiler.widget_name(note.widget) : ""));
+		row.set("code", json_string(menu::menu_frame_note_token(note.code)));
+		row.set("finding", json_string(menu_note_code(note.code)));
+		row.set("basis", json_string(menu::menu_frame_note_basis_token(menu::menu_frame_note_basis(note.code))));
+		row.set("severity", json_string(problem ? diagnostic_severity_label(severity) : "preview"));
+		row.set("subject", json_string(note.subject));
+		row.set("list", json_string(note.list));
+		row.set("record", json_number(note.record));
+		row.set("field", json_string(field));
+		row.set("message", json_string(menu_note_message(note)));
 		out.push(row);
 	}
 	return out;
@@ -122,36 +113,36 @@ io::JsonValue menu_notes_to_json(const MnuDocument &document, const Node &screen
 
 io::JsonValue menu_preview_to_json(const MenuPreviewSnapshot &snapshot) {
 	JsonValue out = JsonValue::make_object();
-	out.set("status", str(menu_preview_status_token(snapshot.status)));
-	out.set("message", str(menu_preview_status_message(snapshot.status, snapshot.detail)));
-	out.set("detail", str(snapshot.detail));
-	out.set("path", str(snapshot.document ? snapshot.document->path() : std::string()));
+	out.set("status", json_string(menu_preview_status_token(snapshot.status)));
+	out.set("message", json_string(menu_preview_status_message(snapshot.status, snapshot.detail)));
+	out.set("detail", json_string(snapshot.detail));
+	out.set("path", json_string(snapshot.document ? snapshot.document->path() : std::string()));
 	if (snapshot.screen) {
 		JsonValue screen = JsonValue::make_object();
-		screen.set("id", num(double(snapshot.screen->id)));
-		screen.set("name", str(snapshot.screen->name()));
+		screen.set("id", json_number(double(snapshot.screen->id)));
+		screen.set("name", json_string(snapshot.screen->name()));
 		out.set("screen", screen);
 	}
-	out.set("revision", num(double(snapshot.document ? snapshot.document->revision() : 0)));
-	out.set("shown_revision", num(double(snapshot.shown_revision)));
+	out.set("revision", json_number(double(snapshot.document ? snapshot.document->revision() : 0)));
+	out.set("shown_revision", json_number(double(snapshot.shown_revision)));
 	out.set("current", JsonValue::make_bool(current(snapshot)));
 	JsonValue device = JsonValue::make_object();
-	device.set("width", num(snapshot.options.width));
-	device.set("height", num(snapshot.options.height));
+	device.set("width", json_number(snapshot.options.width));
+	device.set("height", json_number(snapshot.options.height));
 	out.set("device", device);
 	JsonValue options = JsonValue::make_object();
 	options.set("show_hidden", JsonValue::make_bool(snapshot.options.show_hidden));
-	options.set("force_id", num(double(snapshot.options.force_window)));
-	options.set("force_state", str(menu_preview_state_token(snapshot.options.force_state)));
+	options.set("force_id", json_number(double(snapshot.options.force_window)));
+	options.set("force_state", json_string(menu_preview_state_token(snapshot.options.force_state)));
 	options.set("checked", JsonValue::make_bool(snapshot.options.checked));
 	options.set("popup_open", JsonValue::make_bool(snapshot.options.popup_open));
 	options.set("focus", JsonValue::make_bool(snapshot.options.focused));
 	out.set("options", options);
 	JsonValue missing = JsonValue::make_array();
-	for (const std::string &name : snapshot.missing) missing.push(str(name));
+	for (const std::string &name : snapshot.missing) missing.push(json_string(name));
 	out.set("missing", missing);
 	JsonValue unreadable = JsonValue::make_array();
-	for (const std::string &name : snapshot.unreadable) unreadable.push(str(name));
+	for (const std::string &name : snapshot.unreadable) unreadable.push(json_string(name));
 	out.set("unreadable", unreadable);
 	JsonValue widgets = JsonValue::make_array();
 	if (current(snapshot)) {
@@ -159,11 +150,11 @@ io::JsonValue menu_preview_to_json(const MenuPreviewSnapshot &snapshot) {
 		const menu::MenuFrameState &state = *snapshot.state;
 		for (int index = 0; index < compiler.widget_count(); ++index) {
 			JsonValue widget = JsonValue::make_object();
-			widget.set("index", num(index));
-			widget.set("id", num(double(snapshot.document->window_at(*snapshot.screen, size_t(index)))));
-			widget.set("name", str(compiler.widget_name(index)));
+			widget.set("index", json_number(index));
+			widget.set("id", json_number(double(snapshot.document->window_at(*snapshot.screen, size_t(index)))));
+			widget.set("name", json_string(compiler.widget_name(index)));
 			const int kind = compiler.widget_kind(index);
-			widget.set("type", str(kind >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(kind)) : ""));
+			widget.set("type", json_string(kind >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(kind)) : ""));
 			widget.set("shown", JsonValue::make_bool(compiler.widget_shown(index, state)));
 			widget.set("disabled", JsonValue::make_bool(compiler.widget_disabled(index, state)));
 			mnu::RectEdges rect{};
@@ -179,12 +170,12 @@ io::JsonValue menu_preview_to_json(const MenuPreviewSnapshot &snapshot) {
 				}
 				widget.set("local", edges(local));
 			}
-			widget.set("text", str(compiler.widget_authored_text(index)));
+			widget.set("text", json_string(compiler.widget_authored_text(index)));
 			std::string font;
 			uint32_t colors[4] = {};
 			if (compiler.widget_font(index, &font, colors)) {
-				widget.set("font", str(font));
-				widget.set("text_color", str(argb(colors[menu::kStateDefault])));
+				widget.set("font", json_string(font));
+				widget.set("text_color", json_string(argb(colors[menu::kStateDefault])));
 			}
 			widgets.push(widget);
 		}
@@ -204,9 +195,9 @@ io::JsonValue menu_preview_hit_to_json(const MenuPreviewSnapshot &snapshot, floa
 	JsonValue out = JsonValue::make_object();
 	int index = -1;
 	if (current(snapshot)) index = snapshot.compiler->hit_widget(*snapshot.state, x, y, 1.0f, 1.0f);
-	out.set("index", num(index));
-	out.set("id", num(index >= 0 ? double(snapshot.document->window_at(*snapshot.screen, size_t(index))) : 0.0));
-	out.set("name", str(index >= 0 ? snapshot.compiler->widget_name(index) : std::string()));
+	out.set("index", json_number(index));
+	out.set("id", json_number(index >= 0 ? double(snapshot.document->window_at(*snapshot.screen, size_t(index))) : 0.0));
+	out.set("name", json_string(index >= 0 ? snapshot.compiler->widget_name(index) : ""));
 	out.set("current", JsonValue::make_bool(current(snapshot)));
 	return out;
 }
@@ -219,10 +210,10 @@ bool menu_preview_options_from_json(const io::JsonValue &json, MenuPreviewOption
 		const JsonValue &value = member.value;
 		int64_t number = 0;
 		if (key == "width" || key == "height") {
-			if (!whole_in(value, 1.0, 8192.0, number)) return false;
+			if (!json_whole_in(value, 1.0, 8192.0, number)) return false;
 			(key == "width" ? out.width : out.height) = int(number);
 		} else if (key == "force_id") {
-			if (!whole_in(value, 0.0, 9007199254740992.0, number)) return false;
+			if (!json_whole_in(value, 0.0, 9007199254740992.0, number)) return false;
 			out.force_window = NodeId(number);
 		} else if (key == "force_state") {
 			if (!value.is_string() || !menu_preview_state_from_token(value.string, out.force_state)) return false;

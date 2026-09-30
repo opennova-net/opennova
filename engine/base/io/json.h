@@ -10,6 +10,7 @@
 // "\n" line ends, integral numbers without a fraction, other numbers in the shortest
 // form that round-trips, a trailing newline.
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -153,6 +154,20 @@ inline int JsonValue::get_int(std::string_view key, int fallback) const {
 inline std::string JsonValue::get_string(std::string_view key, std::string_view fallback) const {
 	const JsonValue *v = get(key);
 	return (v && v->is_string()) ? v->string : std::string(fallback);
+}
+
+// A number or a string as a value: the shorthands a writer builds its members with.
+inline JsonValue json_number(double value) { return JsonValue::make_number(value); }
+inline JsonValue json_string(std::string_view value) { return JsonValue::make_string(value); }
+
+// A number read as a whole number in [lo, hi], its fraction dropped; false for anything else
+// (not a number, or a whole number outside the range).
+inline bool json_whole_in(const JsonValue &json, double lo, double hi, int64_t &out) {
+	if (!json.is_number()) return false;
+	const double whole = std::trunc(json.number);
+	if (!(whole >= lo && whole <= hi)) return false;
+	out = static_cast<int64_t>(whole);
+	return true;
 }
 
 // ---------------------------------------------------------------------------

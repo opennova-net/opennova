@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include <editor/model/document_search.h>
 #include <editor/ui/catalog_view.h>
 #include <editor/ui/editor_host.h>
+#include <editor/ui/find_cursor.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/strings_view.h>
@@ -34,7 +34,8 @@ class NewProjectForm;
 // find bar over the active tab's view: every field whose value as the Inspector shows it holds
 // the text (find_in_document), how many, the one shown of them, Enter and the arrows next and
 // previous (Shift+Enter previous), the hits listed under it; a hit shown (or clicked) selects its
-// record and reveals its field in the Inspector; Escape closes the bar.
+// record and reveals its field in the Inspector; Escape closes the bar. Where the bar is among the
+// hits is its model's (FindCursor, S13 V1).
 class DocumentWindow : public devtools::Window {
 public:
 	DocumentWindow(EditorHost &host, NewProjectForm &form) : host_(host), form_(form) { open = true; }
@@ -71,26 +72,14 @@ private:
 	std::string followed_;
 	std::string raised_;
 	// The find bar: open, the keyboard to go to its text on the next draw, the text and whether
-	// case matters, the hit shown; the hits, kept while the document's revision, the text and the
-	// option they were found with stand.
+	// case matters, where it is among the hits.
 	struct Find {
 		bool open = false;
 		bool focus = false;
 		char text[128] = {};
 		bool match_case = false;
-		// Where the bar is among the hits: `current` the hit shown (`on_hit`, its record and field
-		// kept to find it again when the hits are found anew), else the one the next goes to (the
-		// hit after one that stopped matching; past the last or SIZE_MAX: none, the next the first).
-		size_t current = SIZE_MAX;
-		bool on_hit = false;
-		NodeAddress hit_address;
-		std::string hit_field;
+		FindCursor cursor;
 		bool scroll = false; // the hit shown moved: its line scrolled to
-		uint64_t identity = 0;
-		uint64_t revision = 0;
-		std::string searched;
-		bool searched_case = false;
-		std::vector<DocumentHit> hits;
 	};
 	Find find_;
 };

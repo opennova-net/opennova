@@ -14,8 +14,7 @@ class ModelDocument;
 // What a drag of a marker changes (ADR 0046 S10p5): its place, or its axis by the tip (a
 // user point's Z axis, a spot light's).
 enum class ModelHandle : uint8_t { Place, Axis };
-// "place", "axis": the MCP's tokens, and back; false for another token.
-const char *model_handle_token(ModelHandle handle);
+// The handle the MCP's token names ("place", "axis"); false for another token.
 bool model_handle_from_token(const char *token, ModelHandle &out);
 
 // The grid a dragged place snaps to, metres in the file's axes (0: free).

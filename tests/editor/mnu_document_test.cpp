@@ -23,6 +23,7 @@
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_runtime.h>
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -47,15 +48,7 @@ namespace {
 constexpr NodeKind kScreen = node_kind(MenuKind::Screen);
 constexpr NodeKind kWindow = node_kind(MenuKind::Window);
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 Edit set(NodeAddress address, const char *field, Value value) { return menu_test::set_edit(address, field, std::move(value)); }
 

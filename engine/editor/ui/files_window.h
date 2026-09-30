@@ -80,6 +80,10 @@ private:
 	};
 
 	void refresh(const SessionView &view);
+	// The files the filter matches (their scan indices), found again only when the filter or the
+	// scan moved; each file's path as the filter compares it made only while a filter is set,
+	// once a scan.
+	const std::vector<size_t> &matching(const SessionView &view);
 	void show_revealed(const SessionView &view);
 	void draw_toolbar(const SessionView &view);
 	void draw_folder(const SessionView &view, const Folder &folder);
@@ -94,12 +98,18 @@ private:
 	NewFilePrompt &new_file_;
 	char filter_[128]{};
 	std::string selected_;
-	// What refresh() makes of the view, kept while what it reads stands (cache_key).
+	// What refresh() makes of the view, kept while what it reads stands (cache_key); each file's
+	// path as the filter compares it (matching()'s, once a filter is set); the files the filter
+	// last matched and the filter they matched.
 	const SessionView *view_ = nullptr;
 	RevisionKey key_;
 	size_t rebuilds_ = 0;
 	std::vector<Folder> folders_; // [0]: the project's own folder
 	std::unordered_map<std::string, Counts> counts_;
+	std::vector<std::string> compared_;
+	std::string matched_;
+	bool matches_made_ = false;
+	std::vector<size_t> matches_;
 	// What References... lists of a file (the graph's edges both ways), kept while the graph
 	// stands.
 	struct Listed {

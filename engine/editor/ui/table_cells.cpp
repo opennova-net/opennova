@@ -38,8 +38,4 @@ void text_cell(EditorHost &host, const Document &document, NodeAddress address, 
 	if (ImGui::IsItemDeactivatedAfterEdit()) host.request(make_request(EditorRequestKind::EndEdit, document.path()));
 }
 
-void hover_tip(const std::string &text) {
-	if (!text.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", text.c_str());
-}
-
 } // namespace opennova::editor
