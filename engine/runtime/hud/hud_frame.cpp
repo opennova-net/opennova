@@ -7,6 +7,7 @@
 #include <runtime/hud/hud_medic_cross.h>
 
 #include <algorithm>
+#include <utility>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -885,6 +886,32 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_death_map(
 		}
 	}
 	return death_map_draw_;
+}
+
+// The console messages alone, into their own list: CMAP's CHAT_MSGS handler
+// is a bare jump into HUD_DrawConsoleMessages from inside the menu walk — the
+// payload rect unread, the same anchors, gates and rings as the HUD's own
+// call, the squad order lines not drawn.
+// [orig: CMap_OnChatMsgsCustomDraw @0x5482d0 (`if (event == 1) jmp
+//  HUD_DrawConsoleMessages`); HUD_DrawConsoleMessages @0x59ad30]
+const HudDrawList &HudFrameCompiler::compile_console_messages(const HudFrameState &state,
+		float surface_w, float surface_h) {
+	std::swap(draw_list_, console_draw_);
+	draw_list_.quads.clear();
+	draw_list_.tris.clear();
+	draw_list_.lines.clear();
+	draw_list_.glyphs.clear();
+	draw_list_.underlines.clear();
+	draw_list_.map.visible = false;
+	draw_list_.big_map.visible = false;
+	draw_list_.map_glyphs.clear();
+	draw_list_.big_map_glyphs.clear();
+	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.order_breaks.clear();
+	draw_list_.elements_drawn = 0;
+	element_feed(state, surface_w, surface_h);
+	std::swap(draw_list_, console_draw_);
+	return console_draw_;
 }
 
 const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_command_map(

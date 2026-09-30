@@ -117,6 +117,16 @@ struct MenuDrawList {
 	// embedder that mounts its own controls over the frame (the PLAYER_INFO
 	// preview and icon mounts) must draw ops from here on ABOVE those mounts.
 	int32_t overlay_op_start = 0;
+	// The custom-draw slot (MenuFrameState::custom_slot_index): the op index
+	// its widget's CUSTOM appearance pass runs at, -1 when it did not draw.
+	// Every op before it paints under the embedder's slot draw and every op
+	// from it on above; it never precedes overlay_op_start (a slot before the
+	// split pulls the split to it), so the embedder layers its slot item
+	// between the overlay ops before and after it.
+	// [orig: CUIElement_Draw @ 0x64a8a0 — the CUSTOM (&4) pass,
+	//  CUIElement_DispatchCustomDrawEvent @ 0x647f10, after COLOR / IMAGE /
+	//  OUTLINE and before the frame and the children]
+	int32_t custom_slot_op = -1;
 	int64_t widgets_drawn = 0;
 };
 
@@ -206,6 +216,10 @@ struct MenuFrameState {
 	// CMapWindow_HandleEvent's pass runs inside MAP's draw, before
 	// WAYPOINTNAME_DLG / USERWP_CLOSE paint].
 	int32_t mount_index = -1;
+	// The widget whose CUSTOM appearance pass the embedder draws into the
+	// walk (a registered event-1 handler that draws no Control of its own,
+	// like CMAP's CHAT_MSGS console), -1 none (MenuDrawList::custom_slot_op).
+	int32_t custom_slot_index = -1;
 };
 
 // The table's custom-draw event (0x8000002) for a CUSTOM_DRAW column: the
@@ -489,6 +503,9 @@ private:
 		int32_t image_height = 0;
 		bool has_outline = false;       // OUTLINE=8 [orig: entry+16]
 		uint32_t outline = 0;
+		// CUSTOM=4: the event-1 custom-draw hook [orig: the parse
+		// @ 0x64839c..0x6483ae; CUIElement_DispatchCustomDrawEvent @ 0x647f10].
+		bool has_custom = false;
 	};
 	struct EditScroll {
 		int start = 0;
@@ -666,6 +683,9 @@ private:
 	std::vector<int> deferred_popups_;
 	// The draw-op count when the mount widget's subtree closed (-1 not yet).
 	int32_t mount_split_ = -1;
+	// The custom-draw slot widget's CUSTOM pass point.
+	void mark_custom_slot_(int index, const WidgetNode &node, int appearance_slot,
+			const MenuFrameState &state);
 	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &owner, int fallback_top,
 			int fallback_height, int fallback_width,

@@ -236,6 +236,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::post_feed_lines);
 	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text", "frame"),
 			&HudOverlay::send_command_map_chat);
+	ClassDB::bind_method(D_METHOD("render_console_messages", "item"),
+			&HudOverlay::render_console_messages);
 	ClassDB::bind_method(D_METHOD("set_end_round_statistics", "shown", "raised",
 			"title", "labels", "values"),
 			&HudOverlay::set_end_round_statistics);
@@ -1930,6 +1932,25 @@ void HudOverlay::_draw() {
 		draw_compile_us_ += static_cast<int64_t>(t1 - t0);
 		draw_emit_us_ += static_cast<int64_t>(t2 - t1);
 	}
+}
+
+void HudOverlay::render_console_messages(const RID &p_item) {
+	if (!p_item.is_valid()) return;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_clear(p_item);
+	if (!configured_) return;
+	const Vector2 surface = draw_surface_();
+	ensure_label_fonts_(surface.x);
+	ensure_flat_material_();
+	rs->canvas_item_set_material(p_item, flat_material_->get_rid());
+	const HudDrawList &list = compiler_.compile_console_messages(state_, surface.x, surface.y);
+	FlatRange all;
+	all.quads_end = list.quads.size();
+	all.tris_end = list.tris.size();
+	all.lines_end = list.lines.size();
+	all.glyphs_end = list.glyphs.size();
+	all.underlines_end = list.underlines.size();
+	render_flat_(p_item, list, all);
 }
 
 void HudOverlay::set_draw_timing_enabled(bool p_enabled) {

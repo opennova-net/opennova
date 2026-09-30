@@ -68,8 +68,15 @@ Color sample_bilinear(const Ref<Image> &image, float u, float v) {
 MenuFrame::MenuFrame() = default;
 
 MenuFrame::~MenuFrame() {
+	RenderingServer *rs = RenderingServer::get_singleton();
 	if (overlay_canvas_item_.is_valid()) {
-		RenderingServer::get_singleton()->free_rid(overlay_canvas_item_);
+		rs->free_rid(overlay_canvas_item_);
+	}
+	if (slot_canvas_item_.is_valid()) {
+		rs->free_rid(slot_canvas_item_);
+	}
+	if (overlay_upper_canvas_item_.is_valid()) {
+		rs->free_rid(overlay_upper_canvas_item_);
 	}
 }
 
@@ -83,6 +90,26 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 	// One z above the frame and every sibling child it draws in front of.
 	rs->canvas_item_set_z_as_relative_to_parent(overlay_canvas_item_, true);
 	rs->canvas_item_set_z_index(overlay_canvas_item_, 1);
+	slot_canvas_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(slot_canvas_item_, get_canvas_item());
+	rs->canvas_item_set_z_as_relative_to_parent(slot_canvas_item_, true);
+	rs->canvas_item_set_z_index(slot_canvas_item_, 2);
+	rs->canvas_item_set_visible(slot_canvas_item_, false);
+	overlay_upper_canvas_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(overlay_upper_canvas_item_, get_canvas_item());
+	rs->canvas_item_set_z_as_relative_to_parent(overlay_upper_canvas_item_, true);
+	rs->canvas_item_set_z_index(overlay_upper_canvas_item_, 3);
+}
+
+void MenuFrame::set_custom_slot_widget(int p_index) {
+	if (state_.custom_slot_index == p_index) return;
+	state_.custom_slot_index = p_index;
+	queue_redraw();
+}
+
+RID MenuFrame::get_custom_slot_canvas_item() {
+	ensure_overlay_canvas_item_();
+	return slot_canvas_item_;
 }
 
 void MenuFrame::free_fonts_() {
@@ -903,7 +930,10 @@ void MenuFrame::_draw() {
 	ensure_overlay_canvas_item_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_clear(overlay_canvas_item_);
+	rs->canvas_item_clear(overlay_upper_canvas_item_);
 	if (!configured_) {
+		custom_slot_drawn_ = false;
+		rs->canvas_item_set_visible(slot_canvas_item_, false);
 		return;
 	}
 	const Vector2 scale = design_scale_();
@@ -1014,9 +1044,16 @@ void MenuFrame::_draw() {
 							opennova::color_from_argb(underline.color), 1.0f);
 				}
 			};
+	// The custom-draw slot: the companion's item shows only while the pass
+	// ran, and the ops from it on move to the item above it.
+	custom_slot_drawn_ = list.custom_slot_op >= 0;
+	rs->canvas_item_set_visible(slot_canvas_item_, custom_slot_drawn_);
 	for (size_t op_index = 0; op_index < list.draw_ops.size(); ++op_index) {
 		if (static_cast<int32_t>(op_index) == list.overlay_op_start) {
 			target = overlay_canvas_item_;
+		}
+		if (static_cast<int32_t>(op_index) == list.custom_slot_op) {
+			target = overlay_upper_canvas_item_;
 		}
 		const opennova::menu::MenuDrawList::DrawOp &op = list.draw_ops[op_index];
 		switch (op.kind) {
@@ -1152,6 +1189,12 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::widget_local_rect);
 	ClassDB::bind_method(D_METHOD("set_mount_widget", "index"), &MenuFrame::set_mount_widget);
 	ClassDB::bind_method(D_METHOD("get_mount_widget"), &MenuFrame::get_mount_widget);
+	ClassDB::bind_method(D_METHOD("set_custom_slot_widget", "index"),
+			&MenuFrame::set_custom_slot_widget);
+	ClassDB::bind_method(D_METHOD("get_custom_slot_widget"), &MenuFrame::get_custom_slot_widget);
+	ClassDB::bind_method(D_METHOD("get_custom_slot_canvas_item"),
+			&MenuFrame::get_custom_slot_canvas_item);
+	ClassDB::bind_method(D_METHOD("is_custom_slot_drawn"), &MenuFrame::is_custom_slot_drawn);
 	ClassDB::bind_method(D_METHOD("item_count", "index"),
 			&MenuFrame::item_count);
 	ClassDB::bind_method(D_METHOD("get_widget_text", "index"),

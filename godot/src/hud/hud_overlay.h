@@ -181,6 +181,10 @@ public:
 	// global (Chat_SendTeamMessage, a misnomer) sender; a flooded line echoes
 	// on the CHAT ring in that sender's colour. Returns the ChatSendResult.
 	// Witness: hud-re "The windowed map views" (CMap_HandleChatSubmit).
+	// CMAP's CHAT_MSGS slot: the console messages (the engine's
+	// compile_console_messages over this overlay's frame state, at its own
+	// surface) drawn into `p_item`, cleared first.
+	void render_console_messages(const RID &p_item);
 	int send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all, const String &p_text,
 			int64_t p_frame);
 	// The Recent Messages (J) window: the OldMessages toggle and its stdbox

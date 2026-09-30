@@ -57,6 +57,8 @@ func before_each() -> void:
 	body += MenuDriverFixture.wnd("combobox", "LOCATION", 480, list_box % "")
 	body += MenuDriverFixture.wnd("button", "NEW_ORDER", 500)
 	body += MenuDriverFixture.wnd("button", "ADDTO_FIRETEAM_A", 510)
+	body += MenuDriverFixture.wnd("window", "CHAT_MSGS", 530,
+			'<APPEARANCE type="custom" state="default"></APPEARANCE>')
 	_write(dir.path_join("cmap.mnu"), MenuDriverFixture.screen_xml("CMAP", body).to_utf8_buffer())
 	_write(dir.path_join("menutxt.BIN"), RtxtStringFile.new().to_byte_array())
 
@@ -289,3 +291,19 @@ func test_the_tables_populate_and_the_store_ends_with_the_session() -> void:
 	assert_true(presenter.open())
 	driver = presenter.get_menu_driver()
 	assert_eq(driver.table_row_count(driver.widget_id("CURRENT_ORDERS")), 0)
+
+
+# CHAT_MSGS is the frame's custom-draw slot (its CUSTOM appearance pass is
+# where the HUD's console messages draw) [orig: CMap_OnChatMsgsCustomDraw
+# @0x5482d0].
+func test_chat_msgs_is_the_custom_draw_slot() -> void:
+	var presenter := _make_presenter()
+	var hud := HudOverlay.new()
+	hud.size = Vector2(800, 600)
+	add_child_autofree(hud)
+	presenter.set_hud_source(func() -> HudOverlay: return hud)
+	assert_true(presenter.open())
+	var driver := presenter.get_menu_driver()
+	var frame: MenuFrame = driver.get_frame()
+	assert_eq(frame.get_custom_slot_widget(), driver.frame_index(driver.widget_id("CHAT_MSGS")))
+	assert_true(frame.get_custom_slot_canvas_item().is_valid(), "the slot has its canvas item")

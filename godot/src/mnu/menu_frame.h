@@ -145,6 +145,14 @@ public:
 	// after it paint on the menu-top overlay, above the mount.
 	void set_mount_widget(int p_index);
 	int get_mount_widget() const { return state_.mount_index; }
+	// The widget whose CUSTOM appearance pass a companion draws (-1 none):
+	// its canvas item sits between the ops before and after that pass, and
+	// is visible only while the pass ran this frame (engine
+	// MenuDrawList::custom_slot_op).
+	void set_custom_slot_widget(int p_index);
+	int get_custom_slot_widget() const { return state_.custom_slot_index; }
+	RID get_custom_slot_canvas_item();
+	bool is_custom_slot_drawn() const { return custom_slot_drawn_; }
 	int item_count(int p_index) const;
 	String get_widget_text(int p_index) const; // effective: runtime else authored
 	int get_widget_caret(int p_index) const;
@@ -276,6 +284,11 @@ private:
 	// @ 0x63bf60; D-MNU-12 in docs/mnu/menu-re.md).
 	RID overlay_canvas_item_;
 	void ensure_overlay_canvas_item_();
+	// The custom-draw slot's item (z 2: a companion draws into it) and the
+	// overlay ops after the slot (z 3).
+	RID slot_canvas_item_;
+	RID overlay_upper_canvas_item_;
+	bool custom_slot_drawn_ = false;
 };
 
 } // namespace godot

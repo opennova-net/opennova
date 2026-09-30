@@ -308,6 +308,60 @@ void test_clip_viewport(const fnt_font_t *font) {
 	CHECK(clipped, "the image is cut at the viewport's right edge (99 + 1) with its UVs");
 }
 
+// The custom-draw slot: the slot widget's CUSTOM appearance pass marks the op
+// index its handler draws at (after its COLOR pass, before its children); a
+// slot before the overlay split pulls the split to it; a hidden slot widget
+// marks nothing. [orig: CUIElement_Draw @ 0x64a8a0 — the CUSTOM (&4) pass
+// after COLOR / IMAGE / OUTLINE; CMap_OnChatMsgsCustomDraw @ 0x5482d0]
+void test_custom_draw_slot(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SLOT</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="BEFORE">
+      <APPEARANCE type="color" state="default">FF0000</APPEARANCE>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="window" name="CHAT_MSGS">
+      <APPEARANCE type="color" state="default">00FF00</APPEARANCE>
+      <APPEARANCE type="custom" state="default"></APPEARANCE>
+      <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>10</RIGHT><BOTTOM>30</BOTTOM></POSITION>
+      <WINDOW type="window" name="CHILD">
+        <APPEARANCE type="color" state="default">0000FF</APPEARANCE>
+        <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>5</RIGHT><BOTTOM>5</BOTTOM></POSITION>
+      </WINDOW>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState state;
+	state.custom_slot_index = c.widget_index("CHAT_MSGS");
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl.custom_slot_op == 2, "the slot follows BEFORE's fill and its own COLOR pass");
+	CHECK(dl.overlay_op_start == dl.custom_slot_op, "a slot before the split pulls the split to it");
+	if (dl.custom_slot_op == 2 && dl.draw_ops.size() > 2) {
+		const MenuDrawList::DrawOp &op = dl.draw_ops[2];
+		CHECK(op.kind == MenuDrawList::DrawOp::Kind::Quad &&
+						(dl.quads[static_cast<size_t>(op.index)].color & 0xFFFFFFu) == 0x0000FFu,
+				"the child draws after the slot");
+	}
+	MenuWidgetState hidden;
+	hidden.index = state.custom_slot_index;
+	hidden.hide = true;
+	state.widgets.push_back(hidden);
+	const MenuDrawList &dl2 = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl2.custom_slot_op == -1, "a hidden slot widget marks nothing");
+	state.widgets.clear();
+	state.custom_slot_index = -1;
+	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl3.custom_slot_op == -1 && dl3.overlay_op_start == static_cast<int32_t>(dl3.draw_ops.size()),
+			"no slot widget, no slot");
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +371,7 @@ int main() {
 	test_text_alignment_color_and_hidden_rows(&font);
 	test_hit_test(&font);
 	test_clip_viewport(&font);
+	test_custom_draw_slot(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

@@ -225,8 +225,11 @@ void MenuFrameCompiler::build_state_passes(
 			pass.has_image_height = ap.has_height;
 			pass.image_height = ap.height;
 		}
-		// type="cursor" is the shell-owned custom hook (the CURSOR=4 bit ->
-		// the vtable+28 event); the compiler emits nothing for it.
+		else if (iequals(ap.type, "custom")) {
+			// CUSTOM=4: the event-1 hook (the registered handler draws; the
+			// compiler emits nothing and marks the slot) [orig: @ 0x64839c..0x6483ae].
+			pass.has_custom = true;
+		}
 	}
 }
 
@@ -2231,10 +2234,11 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		}
 		default: {
 			// [orig: CUIElement_Draw @ 0x64a8a0 — appearance BEFORE frame
-			//  for generic containers; the RADIOEDIT interior stays deferred
-			//  (D-MNU-13)]
-			emit_appearance(node, rect, s,
-					appearance_state_with_fallback(node, pump));
+			//  for generic containers, the CUSTOM pass last among them; the
+			//  RADIOEDIT interior stays deferred (D-MNU-13)]
+			const int slot = appearance_state_with_fallback(node, pump);
+			emit_appearance(node, rect, s, slot);
+			mark_custom_slot_(index, node, slot, state);
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
@@ -2313,6 +2317,13 @@ void MenuFrameCompiler::emit_marquee(int index, const WidgetNode &node,
 	}
 }
 
+void MenuFrameCompiler::mark_custom_slot_(int index, const WidgetNode &node,
+		int appearance_slot, const MenuFrameState &state) {
+	if (index != state.custom_slot_index || appearance_slot < 0 || appearance_slot > 3) return;
+	if (!node.states[appearance_slot].has_custom) return;
+	draw_list_.custom_slot_op = static_cast<int32_t>(draw_list_.draw_ops.size());
+}
+
 const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 		float scale_x, float scale_y) {
 	draw_list_.quads.clear();
@@ -2322,6 +2333,7 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	draw_list_.font_runs.clear();
 	draw_list_.draw_ops.clear();
 	draw_list_.overlay_op_start = 0;
+	draw_list_.custom_slot_op = -1;
 	draw_list_.widgets_drawn = 0;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return draw_list_;
@@ -2337,6 +2349,8 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	draw_list_.overlay_op_start = mount_split_ >= 0
 			? mount_split_
 			: static_cast<int32_t>(draw_list_.draw_ops.size());
+	if (draw_list_.custom_slot_op >= 0 && draw_list_.custom_slot_op < draw_list_.overlay_op_start)
+		draw_list_.overlay_op_start = draw_list_.custom_slot_op;
 	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
 	// walk paint after every widget, before the cursor.
 	for (int index : deferred_popups_) {

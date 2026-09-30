@@ -1202,6 +1202,12 @@ public:
 	const MapWindowDraw &compile_command_map(const HudFrameState &state,
 			CommandMapView &cmap, const MapViewRect &rect, int32_t scaled_800,
 			const DeathMapFacts &facts, float surface_w, float surface_h);
+	// The console messages alone (the chat and system rings at their HUD
+	// anchors, the HUD call's gates), for CMAP's CHAT_MSGS slot; their own
+	// list, so last_draw_list() is untouched [orig: CMap_OnChatMsgsCustomDraw
+	// @0x5482d0].
+	const HudDrawList &compile_console_messages(const HudFrameState &state, float surface_w,
+			float surface_h);
 	// The briefing panel's page state (the page keys walk it; the drawer
 	// writes each overflowing page's successor start).
 	HudBriefingPages &briefing_pages() { return briefing_pages_; }
@@ -1305,6 +1311,7 @@ private:
 	void element_team_id_line(const HudFrameState &state, float w, float h);
 	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	HudDrawList console_draw_;
 	void element_squad_orders(const HudFrameState &state, float w, float h);
 	void element_message_log(const HudFrameState &state, float w, float h);
 	// The overlay-panel pass's voice-macro menus and the pause text

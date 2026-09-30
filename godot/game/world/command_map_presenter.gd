@@ -60,6 +60,8 @@ const FIRETEAM_WIDGETS: Array[String] = ["ADDTO_NO_FIRETEAM", "ADDTO_FIRETEAM_A"
 		"ADDTO_FIRETEAM_B", "ADDTO_FIRETEAM_C"]
 const NEW_ORDER_WIDGET := "NEW_ORDER"
 const TEAM_TAB_WIDGET := "RADIO_TAB_TEAM"
+# The ORDERS tab's console-message slot (a custom-appearance window).
+const CHAT_MSGS_WIDGET := "CHAT_MSGS"
 const PLAYERS_TAB_WIDGET := "RADIO_TAB_PLAYERS"
 
 signal opened
@@ -202,6 +204,7 @@ func _process(_delta: float) -> void:
 	var gates := _screen.refresh(Time.get_ticks_msec())
 	if gates >= 0:
 		_apply_tab_gates(gates)
+	_draw_chat_msgs()
 
 
 func _ensure_menu() -> bool:
@@ -225,6 +228,8 @@ func _ensure_menu() -> bool:
 			Strings.get_table(Strings.TABLE_GAMEUI))
 	_screen.install_painters()
 	_screen.seed_current_orders()
+	var chat_msgs := _driver.frame_index(_driver.widget_id(CHAT_MSGS_WIDGET))
+	_frame.set_custom_slot_widget(chat_msgs)
 	for widget_name in MAP_WIDGETS:
 		if _driver.widget_id(widget_name) >= 0:
 			_map_window = MapViewWindow.new()
@@ -305,6 +310,17 @@ func _bind_delete_button(map_name: String) -> void:
 	if map_window != null:
 		map_window.set_close_button(_delete_bound,
 				int(_driver.widget_local_rect(_driver.widget_id(DELETE_WIDGET)).size.x))
+
+
+# CHAT_MSGS: the HUD's console messages drawn into the frame's custom-draw
+# slot item (between the ORDERS tab's earlier and later widgets); the slot
+# item shows only while the tab is up.
+func _draw_chat_msgs() -> void:
+	if _frame.get_custom_slot_widget() < 0:
+		return
+	var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
+	if hud != null:
+		hud.render_console_messages(_frame.get_custom_slot_canvas_item())
 
 
 # A team-list populate's tab gates (RULES only from the show's full one).
