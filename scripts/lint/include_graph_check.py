@@ -51,6 +51,14 @@ in the path is what makes the layering visible, so this check reads it:
      are listed (EDITOR_RANK_ALLOWED), each with the slice that removes it; an
      entry the tree no longer makes is itself a violation, so the list only
      shrinks.
+  8. CLI SESSION (ADR 0046 S13 A7) — apps/project, opennova-project, is the
+     editor's session on the command line and nothing more: it includes
+     editor/ only through editor/session/ (the session's facade, its request
+     and query tables, the request factories, the wire form, the preferences
+     stores) and editor/run/null_process_platform.h (the process seam with no
+     processes), never the editor's own parts (the assets, the graph, the
+     import planner, the build), so it cannot grow a second orchestration
+     beside the session's.
 
 Modes:
   (default)   report violations; exit 0
@@ -132,6 +140,11 @@ EDITOR_RANK_ALLOWED = {
     # validate_file that takes no graph.)
     ("engine/editor/documents/mns_document.h", "editor/graph/asset_graph.h"),
 }
+
+# Rule 8: the command line reaches the editor as a session client (ADR 0046 S13 A7).
+CLI_TREE = "apps/project"
+CLI_EDITOR_PREFIXES = ("editor/session/",)
+CLI_EDITOR_HEADERS = {"editor/run/null_process_platform.h"}
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
@@ -227,6 +240,7 @@ def scan() -> tuple[list[str], int]:
         net_agnostic = tree == "runtime" and len(rel.parts) > 3 and \
                 rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
         editor_from = editor_lib(rel)
+        cli = posix.startswith(CLI_TREE + "/")
         for lineno, line in enumerate(text.splitlines(), 1):
             m = INCLUDE_LINE.match(line)
             if not m:
@@ -269,6 +283,11 @@ def scan() -> tuple[list[str], int]:
                 if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and \
                         inc not in TERRAIN_QUERY_HEADERS and inc not in seam_extra:
                     violations.append(f"[terrain-seam] {where}")
+                if cli and group == "editor" and not inc.startswith(CLI_EDITOR_PREFIXES) and \
+                        inc not in CLI_EDITOR_HEADERS:
+                    violations.append(
+                            f"[cli-session] {where} (apps/project includes editor/ only through "
+                            f"editor/session/ and editor/run/null_process_platform.h; ADR 0046 S13 A7)")
                 if editor_from and group == "editor" and lib in EDITOR_RANK and \
                         EDITOR_RANK[lib] > EDITOR_RANK[editor_from] and inc not in EDITOR_SEAM_HEADERS:
                     if (posix, inc) in EDITOR_RANK_ALLOWED:
@@ -313,7 +332,9 @@ def main() -> int:
               "through runtime/terrain_query's seam headers (ADR 0020); nothing under "
               "engine/, apps/ or tests/ includes godot; imgui headers stay under "
               "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6); inside "
-              "engine/editor, model < documents < graph < session < ui (ADR 0046 S13 D3).")
+              "engine/editor, model < documents < graph < session < ui (ADR 0046 S13 D3); "
+              "apps/project includes editor/ only through editor/session/ and "
+              "editor/run/null_process_platform.h (ADR 0046 S13 A7).")
         return 1
     return 0
 

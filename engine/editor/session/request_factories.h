@@ -21,16 +21,22 @@ inline EditorRequest of(EditorRequestKind kind) {
 
 // --- the project -------------------------------------------------------------------------------
 
-// A project made in `dir` (titled `title`, else New Game), then opened.
-inline EditorRequest new_project(std::string dir, std::string title = std::string()) {
+// A project made in `dir` (titled `title`, else New Game; of `game`, a gameprofile code, else
+// jo), then opened.
+inline EditorRequest new_project(
+		std::string dir, std::string title = std::string(), std::string game = std::string()) {
 	EditorRequest request = of(EditorRequestKind::NewProject);
 	request.dir = std::move(dir);
 	request.title = std::move(title);
+	request.game = std::move(game);
 	return request;
 }
-inline EditorRequest open_project(std::string dir) {
+// The project in `dir` opened, its import pass first unless `import_pass` is false (its files as
+// they are, nothing written).
+inline EditorRequest open_project(std::string dir, bool import_pass = true) {
 	EditorRequest request = of(EditorRequestKind::OpenProject);
 	request.dir = std::move(dir);
+	request.import_pass = import_pass;
 	return request;
 }
 inline EditorRequest close_project() {
@@ -107,8 +113,11 @@ inline EditorRequest preview_install_import(
 
 // --- the build and Play ------------------------------------------------------------------------
 
-inline EditorRequest build() {
-	return of(EditorRequestKind::Build);
+// The project packed into a build under `out_dir` ("" the project's .opennova/build/play).
+inline EditorRequest build(std::string out_dir = std::string()) {
+	EditorRequest request = of(EditorRequestKind::Build);
+	request.out_dir = std::move(out_dir);
+	return request;
 }
 inline EditorRequest play() {
 	return of(EditorRequestKind::Play);

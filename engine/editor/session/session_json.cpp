@@ -486,12 +486,14 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	switch (id) {
 	case F::Dir: return text_of(json, token, request.dir, error);
 	case F::Title: return text_of(json, token, request.title, error);
+	case F::Game: return text_of(json, token, request.game, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
 	case F::Field: return text_of(json, token, request.field, error);
 	case F::NewName: return name_of(json, token, request.new_name, error);
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
+	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::Roles: return texts_of(json, token, request.roles, error);
 	case F::Names: return texts_of(json, token, request.names, error);
 	case F::Paths: return texts_of(json, token, request.paths, error);
@@ -538,6 +540,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Force: return flag_of(json, token, request.force, error);
 	case F::AskName: return flag_of(json, token, request.ask_name, error);
 	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
+	case F::ImportPass: return flag_of(json, token, request.import_pass, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -552,12 +555,14 @@ bool field_to_json(
 	switch (id) {
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
 	case F::Title: out = json_string(request.title); return !request.title.empty();
+	case F::Game: out = json_string(request.game); return !request.game.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();
 	case F::Field: out = json_string(request.field); return !request.field.empty();
 	case F::NewName: out = json_string(request.new_name); return !request.new_name.empty();
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
+	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
 	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
 	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
 	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
@@ -593,6 +598,8 @@ bool field_to_json(
 	case F::Force: out = boolean(request.force); return request.force;
 	case F::AskName: out = boolean(request.ask_name); return request.ask_name;
 	case F::OpenFirst: out = boolean(request.open_first); return request.open_first;
+	// Its default is true: the writer names it only when it is false.
+	case F::ImportPass: out = boolean(request.import_pass); return !request.import_pass;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

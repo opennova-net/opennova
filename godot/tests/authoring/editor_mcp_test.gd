@@ -358,7 +358,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
 			"Unknown request kind"), "the retail token names nothing")
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
-			"build takes no \"path\" (it takes nothing)"))
+			"build takes no \"path\" (it takes out_dir)"))
 	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
 			"needs \"dir\""))
 	for retired in ["text", "flag", "edit", "unsaved_choice"]:

@@ -1,6 +1,6 @@
-// opennova-project: the OpenNova Editor's project core on the command line
-// (ADR 0046 d4). See commands.h for the commands and exit codes.
-#include "commands.h"
+// opennova-project: the OpenNova Editor's project session on the command line
+// (ADR 0046 d4, S13 A7). See cli_verbs.h for the verbs and exit codes.
+#include "cli_verbs.h"
 
 #include <cstdio>
 

@@ -13,12 +13,14 @@ namespace opennova::editor {
 enum class RequestFieldId : uint8_t {
 	Dir,
 	Title,
+	Game,
 	Path,
 	Locator,
 	Field,
 	NewName,
 	Role,
 	FileKind,
+	OutDir,
 	Roles,
 	Names,
 	Paths,
@@ -35,6 +37,7 @@ enum class RequestFieldId : uint8_t {
 	Force,
 	AskName,
 	OpenFirst,
+	ImportPass,
 	kCount,
 };
 

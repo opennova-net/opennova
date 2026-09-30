@@ -201,10 +201,10 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # The request's fields (engine/editor/session/request_fields.cpp), one flag each: the text fields,
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
-REQUEST_TEXTS = ("dir", "title", "path", "locator", "field", "new_name", "role", "file_kind", "mode", "choice",
-                 "purpose")
+REQUEST_TEXTS = ("dir", "title", "game", "path", "locator", "field", "new_name", "role", "file_kind", "out_dir",
+                 "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
-REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first")
+REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -457,6 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
                                       "(`query catalog` lists every kind with its fields)")
     request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
     request.add_argument("--title", default=None, help="a new project's title")
+    request.add_argument("--game", default=None, help="a new project's game, a gameprofile code (jo when left out)")
     request.add_argument("--path", default=None, help="a file: a project file or open document ('' the active one)")
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
@@ -464,6 +465,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")
+    request.add_argument("--out-dir", dest="out_dir", default=None,
+                         help="build: where it lands, each build a directory under it (left out: the project's "
+                              ".opennova/build/play)")
     request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
     request.add_argument("--names", default=None, help="comma-separated: preview_install_import's files")
     request.add_argument("--paths", action="append", default=None,
@@ -496,6 +500,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="show_in_files, preview_rename: and ask the new name")
     request.add_argument("--open-first", dest="open_first", choices=switch, default=None,
                          help="edit_record: open the document first when it is not")
+    request.add_argument("--import-pass", dest="import_pass", choices=switch, default=None,
+                         help="open_project: false opens it on its files as they are, nothing written")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)
 

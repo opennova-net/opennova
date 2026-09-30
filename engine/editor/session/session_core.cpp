@@ -159,22 +159,23 @@ void SessionCore::show_operation() {
 
 // --- the project ---------------------------------------------------------------------------
 
-// The project made in `dir`, then opened. What would refuse it (a project there already) is asked
-// before anything changes: the open project stays open, its operation running. Then the open
-// project closes, its operation cancelled (refused, nothing made, when it cannot be), and only
-// then is the folder made.
-bool SessionCore::new_project(const std::string &dir, const std::string &title) {
+// The project made in `dir`, then opened. What would refuse it (a project there already, a game no
+// gameprofile has) is asked before anything changes: the open project stays open, its operation
+// running. Then the open project closes, its operation cancelled (refused, nothing made, when it
+// cannot be), and only then is the folder made.
+bool SessionCore::new_project(const std::string &dir, const std::string &title, const std::string &game) {
 	if (dir.empty()) return false;
+	const std::string target_game = game.empty() ? std::string(kDefaultTargetGame) : game;
 	ProjectDocument doc;
 	Diagnostic error;
-	if (!can_create_project(dir, kDefaultTargetGame, error)) {
+	if (!can_create_project(dir, target_game, error)) {
 		report(error);
 		view_.activity.status = "The project could not be created.";
 		touch(ViewConcern::Output);
 		return false;
 	}
 	if (!close_project()) return false;
-	if (!create_project(dir, title.empty() ? std::string("New Game") : title, kDefaultTargetGame, doc, error)) {
+	if (!create_project(dir, title.empty() ? std::string("New Game") : title, target_game, doc, error)) {
 		report(error);
 		view_.activity.status = "The project could not be created.";
 		touch(ViewConcern::Output);
@@ -186,8 +187,10 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title) 
 
 // The project in `dir` opened, read before the open one closes: one that does not open leaves the
 // open project open, its operation running; one that does closes it (close_project: refused,
-// nothing opened, when its operation cannot be cancelled).
-bool SessionCore::open_project(const std::string &dir) {
+// nothing opened, when its operation cannot be cancelled). Without its import pass (`import_pass`
+// false) it opens on its files as they are: a dry run's read writes nothing, and a request whose
+// own refresh runs the pass (a build, a reimport) runs it once.
+bool SessionCore::open_project(const std::string &dir, bool import_pass) {
 	if (dir.empty()) return false;
 	ProjectDocument doc;
 	Diagnostic error;
@@ -217,7 +220,7 @@ bool SessionCore::open_project(const std::string &dir) {
 	save_preferences();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	imports().refresh_install_files();
-	refresh();
+	refresh(false, std::string(), import_pass);
 	// Output names the project; the menu bar's tooltip on what was said names its folder.
 	note("Opened " + doc.title + ".");
 	view_.activity.status = "Opened " + doc.title + ".";
@@ -272,10 +275,17 @@ bool SessionCore::close_project() {
 }
 
 // Re-read the project's files and re-evaluate the checklist through the engine's one
-// refresh (project/project_state.h: import, scan, requirements), the same the command
-// line runs; the project findings replace the last action's.
-ImportRunResult SessionCore::refresh(bool force_import, const std::string &only) {
-	ProjectState state = refresh_project_state(paths_, *view_.project.document, force_import, only);
+// refresh (project/project_state.h: import, scan, requirements); the project findings replace
+// the last action's. Without the import pass (`import_pass` false) the scan lists the files as
+// they are and the project's import sources are not read: none is listed until a refresh runs it.
+ImportRunResult SessionCore::refresh(bool force_import, const std::string &only, bool import_pass) {
+	ProjectState state;
+	if (import_pass) {
+		state = refresh_project_state(paths_, *view_.project.document, force_import, only);
+	} else {
+		state.scan = scan_project_assets(paths_, *view_.project.document);
+		state.requirements = evaluate_requirements(*view_.project.document, state.scan);
+	}
 	view_.project.imports =
 			std::make_shared<const std::vector<ImportedSource>>(state.imports.sources);
 	for (const ImportedSource &source : state.imports.sources)
@@ -497,7 +507,7 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(bool then_play) {
+void SessionCore::start_build(bool then_play, const std::string &out_dir) {
 	if (then_play && play().refused()) return;
 	problems().clear_build_findings(); // the last build's rows go: this one reports anew
 	documents().reload_changed();
@@ -512,12 +522,14 @@ void SessionCore::start_build(bool then_play) {
 	// that may still run (a game left running across an editor restart; one the platform cannot
 	// check is kept); a lease whose game is gone is deleted (run/play_lease.h). The operation
 	// lives in the session's slot, so the session outlives every call.
-	const std::string output_root = paths_.build_dir + "/play";
+	const std::string output_root = out_dir.empty() ? paths_.build_dir + "/play" : out_dir;
 	ProtectedDirs protected_dirs = play().protected_dirs(output_root);
-	// The build lands under the cache, which keeps itself out of the modder's repository;
-	// a cache that cannot be made fails the build's own first step, which says why.
-	std::string cache_error;
-	ensure_project_cache_dir(paths_, cache_error);
+	// The build lands under the cache by default, which keeps itself out of the modder's
+	// repository; a cache that cannot be made fails the build's own first step, which says why.
+	if (out_dir.empty()) {
+		std::string cache_error;
+		ensure_project_cache_dir(paths_, cache_error);
+	}
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
 	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, then_play));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs

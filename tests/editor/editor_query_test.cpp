@@ -34,6 +34,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
+#include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -318,6 +319,46 @@ static int test_paging() {
 		cursor = next;
 	}
 	TEST_EXPECT(seen == held);
+	return 0;
+}
+
+// build_gate (S13 A7): what a build started now would be refused for, nothing built. With no
+// project open it is refused; a new project lacking its required files is blocked, each unmet
+// requirement blocking it; with them made nothing blocks it; an archive in the project blocks it by
+// the build's own check of the files, which no Problems row shows; and the build then refused, as
+// the gate said.
+static int test_build_gate() {
+	editor_test::TempProjectDir dir("opennova_editor_query_build_gate");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	TEST_EXPECT(refusal(session, "build_gate", "{}") == "query build_gate: no project is open.");
+	session.handle(request::new_project(dir.file("project"), "Gate"));
+	JsonValue gate = ask(session, "build_gate");
+	size_t missing = 0;
+	for (const JsonValue &finding : gate.get("blocking")->array)
+		missing += finding.get_string("code", "") == "requirement.missing" ? 1 : 0;
+	TEST_EXPECT(gate.get_bool("blocked", false) && missing > 0 &&
+			gate.get_number("count", 0.0) >= double(missing));
+	editor_test::create_missing_files(session);
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0 &&
+			gate.get("blocking")->array.empty());
+	// An archive in the project: blocked by the build's own check, no Problems row having it.
+	const uint8_t note[] = { 'x' };
+	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };
+	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
+						opennova::pff::PFF_FORMAT_PFF3, entries, 1) == opennova::pff::PFF_WRITE_OK);
+	session.handle(request::rescan());
+	gate = ask(session, "build_gate", R"({"limit": 1})");
+	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
+			gate.get("blocking")->array.size() == 1 &&
+			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		TEST_EXPECT(d.code != "build.archive_in_project");
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
 	return 0;
 }
 
@@ -1172,6 +1213,7 @@ int main() {
 	int failures = 0;
 	failures += test_paging();
 	failures += test_refusals();
+	failures += test_build_gate();
 	failures += test_problems_params();
 	failures += test_state_since();
 	failures += test_catalog();
