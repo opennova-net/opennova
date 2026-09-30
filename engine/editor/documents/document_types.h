@@ -10,13 +10,15 @@
 
 namespace opennova::editor {
 
+class ProjectCheck;
+
 // The registry of editable file kinds (ADR 0046 d9): one row per document type, one per
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
 // document (a DocumentBase: a record type's is its Document, as_records), how to validate one
 // file of the kinds it opens, which are the asset kinds whose row names its id
-// (AssetKindRow::document), and what its records' fields are. The session, the windows and the
-// shell reach a document type only through this table (its view through ui/document_views,
-// keyed by the same id).
+// (AssetKindRow::document), what its records' fields are, and the check of its own it runs across
+// the project's files, if any. The session, the windows and the shell reach a document type only
+// through this table (its view through ui/document_views, keyed by the same id).
 struct DocumentType {
 	DocumentTypeId id = DocumentTypeId::None;
 	const char *name = "";
@@ -34,6 +36,12 @@ struct DocumentType {
 	// what it takes, asked where no document of the file is open (a graph edge's field in Files
 	// and the Inspector, a rename's site); a test's stand-in type may leave it null.
 	const std::vector<FieldSchema> &(*fields)(NodeKind kind) = nullptr;
+	// The type's project check (ADR 0046 S13 V9; documents/project_check.h), null for a type with
+	// none: a check of its own across the project's files that keeps what it made from one
+	// validation to the next (the menu type's render check). The row makes it; the instance lives
+	// with whoever validates, keyed by the type's id (documents/project_checks.h), since the row
+	// is constexpr.
+	std::unique_ptr<ProjectCheck> (*project_check)() = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a

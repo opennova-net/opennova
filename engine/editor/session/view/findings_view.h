@@ -8,13 +8,14 @@
 namespace opennova::editor {
 
 class AssetGraph;
-class MenuRenderCheck;
 class ProjectAssetSource;
+class ProjectChecks;
 
 // What the project's validation found, as the view shows it (ADR 0046 S13 V4; the Findings and
 // Graph concerns): the Problems rows, and what the rows were made from and the windows read too,
-// each shared (null before the first validation) and forward-declared, so a header naming the
-// view pulls none of the graph's, the asset source's or the render check's headers.
+// each shared (made with the session, which fills them as it validates: null only in a view no
+// session made) and forward-declared, so a header naming the view pulls none of the graph's, the
+// asset source's or the project checks' headers.
 struct FindingsView {
 	// The project's current findings (scan + requirements) followed by the last action's.
 	std::vector<Diagnostic> diagnostics;
@@ -25,10 +26,12 @@ struct FindingsView {
 	// the menu preview reads the way the game reads its mounted files. Follows every
 	// rescan and every change to the open documents (its generation moves).
 	std::shared_ptr<const ProjectAssetSource> assets;
-	// Every menu screen of the project compiled headless as the game draws it (S9j2), run
-	// with every validation: its notes are Problems rows (never a build's gate), and a
-	// screen's render answers the MCP's editor_menu_preview render.
-	std::shared_ptr<const MenuRenderCheck> render_check;
+	// The document types' project checks (S13 V9), one per type that has one, by its
+	// DocumentTypeId, run with every validation: their findings are Problems rows (never a
+	// build's gate). The menu type's is the render check, every menu screen of the project
+	// compiled headless as the game draws it (S9j2; preview/menu_render_check.h's
+	// menu_render_check), whose render of a screen answers the menu_render query.
+	std::shared_ptr<const ProjectChecks> project_checks;
 };
 
 } // namespace opennova::editor
