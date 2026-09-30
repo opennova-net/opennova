@@ -47,7 +47,6 @@ public:
 	void validate_pending() {
 		if (validation_due_) validate_pending_now();
 	}
-	bool validation_due() const { return validation_due_; }
 	// A pump holds validation until its poll (hold), which releases it (release).
 	void hold() { validation_held_ = true; }
 	void release() { validation_held_ = false; }
