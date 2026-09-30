@@ -34,7 +34,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
@@ -460,16 +460,16 @@ static int test_plan_material_sources() {
 		TEST_EXPECT(row && row->state == State::Found && row->found_in == "the game install" && row->kind == AssetKind::Texture);
 	}
 	const std::string root = project.root();
-	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), project.view().document, false);
+	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 3);
 	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
 	size_t resolved = 0;
-	for (const GraphEdge *edge : view.graph->references_of("models/relief.3di"))
-		if ((edge->value == "ready.mdt" || edge->value == "field.nq8") && view.graph->resolve(*edge) == ReferenceStatus::Present)
+	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di"))
+		if ((edge->value == "ready.mdt" || edge->value == "field.nq8") && view.findings.graph->resolve(*edge) == ReferenceStatus::Present)
 			++resolved;
 	TEST_EXPECT(resolved == 2);
-	const BuildPlan build = plan_build(ProjectPaths::for_root(root), view.scan, view.requirements, {});
+	const BuildPlan build = plan_build(ProjectPaths::for_root(root), *view.project.scan, *view.project.requirements, {});
 	size_t packed = 0;
 	for (const BuildArchive &archive : build.archives)
 		for (const BuildEntry &entry : archive.entries)
@@ -571,15 +571,15 @@ static int test_plan_native_png() {
 	const ImportPlanRow *logo = row_named(plan, "logo.png");
 	TEST_EXPECT(logo && logo->state == State::Found && logo->kind == AssetKind::Texture && logo->source.native);
 	const std::string root = project.root();
-	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), project.view().document, false);
+	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 2);
 	project.session.handle(request::rescan());
 	const SessionView &view = project.view();
-	const AssetEntry *png = view.scan.find("logo.png");
+	const AssetEntry *png = view.project.scan->find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
 	TEST_EXPECT(editor_test::write_bytes(art + "/badge.png", editor_test::gradient_png(4, 4, 7)));
-	const ImportResult authored = import_assets({{art + "/badge.png", {}}}, ProjectPaths::for_root(root), view.document, false);
+	const ImportResult authored = import_assets({{art + "/badge.png", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(authored.imported.size() == 1 && fs::exists(fs::path(root) / (authored.imported[0] + kImportSidecarSuffix)));
 	return 0;
 }

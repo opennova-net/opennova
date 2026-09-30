@@ -4,6 +4,7 @@
 #include <string>
 
 #include <editor/model/value.h>
+#include <editor/ui/view_event_mailbox.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
@@ -16,9 +17,10 @@ namespace opennova::editor {
 // typed name's and is not refused (it writes the files on disk, which Undo does not reach).
 class RenameDialog {
 public:
-	// Opens when the view's rename_preview asks the new name (its ask_serial moved), the name
-	// typed starting as the preview's.
-	void follow(const SessionView &view);
+	// An AskRename view event, held until the dialog draws (every frame, with the workspace's
+	// modals): it opens on the rename preview the event names (the view's rename_preview of its
+	// serial), the name typed starting as the preview's.
+	void receive(const ViewEvent &event) { events_.post(event); }
 	void draw(Workspace &workspace);
 	// The PreviewRename of a name's rename everywhere: the field `field` of the record at
 	// `locator` in `path`, renamed to `name`; `ask` opens the dialog.
@@ -26,7 +28,7 @@ public:
 	                             const std::string &name, bool ask);
 
 private:
-	uint64_t ask_serial_ = 0;
+	ViewEventMailbox<> events_;
 	bool open_ = false;
 	std::string path_, locator_, field_, old_name_;
 	ReferenceKind kind_ = ReferenceKind::None;

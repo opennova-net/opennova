@@ -38,8 +38,8 @@ struct PickerProject {
 		const std::string repo = test_paths_repo_root(__FILE__);
 		const std::vector<uint8_t> model = test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di");
 		for (const char *name : {"alpha.3di", "beta.3di", "gamma.3di"})
-			if (!editor_test::write_bytes(v.project_root + "/models/" + name, model)) return false;
-		if (!editor_test::write_text(v.project_root + "/defs/items.def",
+			if (!editor_test::write_bytes(v.project.root + "/models/" + name, model)) return false;
+		if (!editor_test::write_text(v.project.root + "/defs/items.def",
 		                             "begin \"Picked\"\nid 100300\ntype building\ngraphic alpha\nhusk beta\n"
 		                             "hud_image gone.tga\nend\n"
 		                             "begin \"Other\"\nid 100301\ntype building\ngraphic gamma\nend\n"))
@@ -50,12 +50,13 @@ struct PickerProject {
 		if (!items || !find_definition(AssetGraph(), *items, "100300", item)) return false;
 		EditorRequest select = request::select_record(items->path(), item);
 		session.handle(select);
-		return v.scan.find("gamma.3di") != nullptr;
+		return v.project.scan->find("gamma.3di") != nullptr;
 	}
 	// The Inspector's section holding a field of the item.
 	std::string section_of(const char *field) const {
 		const SessionView &v = session.view();
-		for (const InspectorSection &section : plan_inspector(*items, v.selection, v.selection, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*items, v.documents.selection, v.documents.selection, ""))
 			for (const FieldUse &use : section.fields)
 				if (use.schema->id == field) return section.key;
 		return std::string();
@@ -198,13 +199,13 @@ void test_drop_on_value() {
 	ui.drain();
 	const ImVec2 graphic = centre_of(ui, field_item(project, "graphic", "##value"));
 	CHECK(graphic.x > 0.0f && graphic.y > 0.0f, "the graphic's value is on the screen");
-	const AssetEntry *gamma = project.session.view().scan.find("gamma.3di");
+	const AssetEntry *gamma = project.session.view().project.scan->find("gamma.3di");
 	CHECK(gamma != nullptr, "gamma.3di in the project");
 	if (!gamma) return;
 	CHECK(set_value(drop_at(ui, graphic, gamma->relative_path), "graphic") == "gamma.3di",
 	      "a model dropped on a model reference is set there");
 	// A file of another kind is not taken.
-	const AssetEntry *table = project.session.view().scan.find("items.def");
+	const AssetEntry *table = project.session.view().project.scan->find("items.def");
 	CHECK(table != nullptr, "items.def in the project");
 	if (table) CHECK(set_value(drop_at(ui, graphic, table->relative_path), "graphic").empty(),
 	                 "an item table dropped on a model reference sets nothing");
@@ -306,7 +307,7 @@ void test_list_kept() {
 	draw(false);
 	CHECK(picker.lists_made() == 3, "the graph moved: the list made again");
 	const std::string repo = test_paths_repo_root(__FILE__);
-	CHECK(editor_test::write_bytes(project.session.view().project_root + "/models/delta.3di",
+	CHECK(editor_test::write_bytes(project.session.view().project.root + "/models/delta.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
 	      "another model");
 	project.session.handle(request::rescan());

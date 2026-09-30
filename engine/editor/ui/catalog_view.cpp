@@ -2,7 +2,7 @@
 
 #include <editor/documents/def_catalog_document.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
@@ -45,7 +45,7 @@ void CatalogView::draw(Workspace &workspace, const DefCatalogDocument &document)
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX; // the selected record's place in the file
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.row) index = i;
 	{
 		// Each kind's Add, then the selected record's tools, on a row that wraps.
 		ui_kit::WrapRow row;
@@ -84,7 +84,7 @@ void CatalogView::draw(Workspace &workspace, const DefCatalogDocument &document)
 		const NodeAddress address{row->id, row->kind, 0};
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string shown = ui_kit::fit(ui_kit::kChangeRoom + name, ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((shown + "###record").c_str(), view.selection.row == row->id)) select(workspace, document, address);
+		if (ImGui::Selectable((shown + "###record").c_str(), view.documents.selection.row == row->id)) select(workspace, document, address);
 		reveal_.scroll_to(address, true);
 		const Document::RecordChange change = document.record_change(address);
 		ui_kit::change_dot(change, x);

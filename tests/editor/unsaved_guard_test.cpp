@@ -20,7 +20,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -58,7 +58,7 @@ struct Dirty {
 
 // The requirement row whose file is `name`, or null.
 const RequirementRow *requirement_of(const SessionView &view, const std::string &name) {
-	for (const RequirementRow &row : view.requirements.rows)
+	for (const RequirementRow &row : view.project.requirements->rows)
 		if (normalized_logical_name(row.name) == normalized_logical_name(name)) return &row;
 	return nullptr;
 }
@@ -76,10 +76,10 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		request.dir = dirty.dir.file("elsewhere");
 		request.title = "Elsewhere";
 		break;
-	case EditorRequestKind::OpenProject: request.dir = dirty.view().project_root; break;
+	case EditorRequestKind::OpenProject: request.dir = dirty.view().project.root; break;
 	case EditorRequestKind::ImportFiles: {
 		const std::string loose = dirty.dir.file("loose/extra.mnu");
-		const std::string saved = dirty.view().project_root + "/" + dirty.extra;
+		const std::string saved = dirty.view().project.root + "/" + dirty.extra;
 		std::error_code ec;
 		fs::create_directories(fs::path(loose).parent_path(), ec);
 		fs::copy_file(saved, loose, fs::copy_options::overwrite_existing, ec);
@@ -95,13 +95,13 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		if (!row) break;
 		const std::string role = row->role;
 		std::error_code ec;
-		fs::remove(dirty.view().project_root + "/" + row->asset_path, ec);
+		fs::remove(dirty.view().project.root + "/" + row->asset_path, ec);
 		dirty.session.handle(request::rescan());
 		request.role = role;
 		break;
 	}
 	case EditorRequestKind::RenameSymbol: {
-		for (const GraphSymbol *symbol : dirty.view().graph->symbols_of_kind(ReferenceKind::MenuScreen)) {
+		for (const GraphSymbol *symbol : dirty.view().findings.graph->symbols_of_kind(ReferenceKind::MenuScreen)) {
 			if (symbol->file != dirty.extra) continue;
 			request.locator = symbol->locator;
 			request.field = symbol->field;
@@ -127,7 +127,7 @@ static int test_guard_column_is_the_prompt() {
 		const EditorRequest request = touching(kind, dirty);
 		TEST_EXPECT(dirty.session.document_for(dirty.extra)->dirty());
 		dirty.session.handle(request);
-		const SessionView::UnsavedPrompt &prompt = dirty.view().unsaved_prompt;
+		const DialogsView::UnsavedPrompt &prompt = dirty.view().dialogs.unsaved_prompt;
 		const bool guarded = row.guard != GuardScope::None;
 		if (prompt.open != guarded)
 			std::fprintf(stderr, "%s: the prompt %s, its guard column says %s\n", editor_request_kind_token(kind),
@@ -158,11 +158,11 @@ static int test_untouched_goes_ahead() {
 	dirty.session.handle(request::open_document("main.mnu"));
 	const std::string main = dirty.session.document_for("main.mnu")->path();
 	dirty.session.handle(request::reload_document(main));
-	TEST_EXPECT(!dirty.view().unsaved_prompt.open && dirty.session.outcome().done());
+	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done());
 	dirty.session.handle(request::close_document(main));
-	TEST_EXPECT(!dirty.view().unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
+	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
 	dirty.session.handle(request::rename_asset("menu_style.mns", "renamed.mns"));
-	TEST_EXPECT(!dirty.view().unsaved_prompt.open);
+	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open);
 	TEST_EXPECT(dirty.session.document_for(dirty.extra)->dirty());
 	return 0;
 }

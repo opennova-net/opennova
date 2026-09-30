@@ -9,7 +9,7 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -59,9 +59,11 @@ MenuPreviewSnapshot menu_preview_snapshot(const SessionView &view, const MenuPre
 	snapshot.missing = model.missing();
 	snapshot.unreadable = model.unreadable();
 	snapshot.shown_revision = model.shown_revision();
-	for (const auto &open : view.documents)
-		if (open && open->path() == view.menu_preview.path) snapshot.document = dynamic_cast<const MnuDocument *>(open.get());
-	if (snapshot.document) snapshot.screen = snapshot.document->row(view.menu_preview.screen);
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == view.documents.previews.menu.path)
+			snapshot.document = dynamic_cast<const MnuDocument *>(open.get());
+	if (snapshot.document)
+		snapshot.screen = snapshot.document->row(view.documents.previews.menu.screen);
 	if (snapshot.status == MenuPreviewStatus::Ready) {
 		snapshot.compiler = compiler;
 		snapshot.state = state;
@@ -240,10 +242,10 @@ bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snaps
 	const NodeAddress held = shown_window(snapshot, window);
 	if (!held.child) return false;
 	const SessionView &view = session.view();
-	const std::vector<NodeAddress> selected =
-	        view.active_document == document.path()
-	                ? selected_windows(document, view.selection, view.selected, snapshot.screen->id)
-	                : std::vector<NodeAddress>();
+	const std::vector<NodeAddress> selected = view.documents.active == document.path()
+			? selected_windows(document, view.documents.selection, view.documents.selected,
+					  snapshot.screen->id)
+			: std::vector<NodeAddress>();
 	LayoutPress press;
 	std::vector<Edit> edits;
 	if (!layout_press(document, held, handle, selected, *snapshot.compiler, *snapshot.state, press) ||

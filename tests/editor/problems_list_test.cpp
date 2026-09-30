@@ -18,10 +18,13 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/requirements/requirements.h>
-#include <editor/session/session_view.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/problems_list.h>
 
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
 
@@ -65,25 +68,27 @@ AssetEntry file_entry(const std::string &name, const std::string &path, AssetKin
 // on a record's field, a warning in a menu and a stylesheet's note in another.
 SessionView problems_view() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Problems";
-	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
-	                  file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
-	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
-	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
-	v.scan.index(); // a scan made by hand is indexed, as the session's is
-	v.requirements.rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
-	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
-	v.requirements.required_total = 2;
-	v.requirements.required_missing = 2;
-	v.retail_files = {"gametext.bin"};
+	v.project.open = true;
+	v.project.root = "C:/mods/Problems";
+	editor_test::own(v.project.scan).entries = { file_entry("items.def", "defs/items.def",
+														 AssetKind::ItemDefs),
+		file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
+		file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
+		file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings) };
+	editor_test::own(v.project.scan).index(); // a scan made by hand is indexed, as the session's is
+	editor_test::own(v.project.requirements).rows = { missing_row("gametext", "gametext.bin",
+															  AssetKind::Strings),
+		missing_row("main_menu", "main.mnu", AssetKind::Menu) };
+	editor_test::own(v.project.requirements).required_total = 2;
+	editor_test::own(v.project.requirements).required_missing = 2;
+	v.project.retail_files = {"gametext.bin"};
 	Diagnostic type = finding(DiagnosticSeverity::Error, "catalog.item_type",
 	                          "Alpha: choose an item type.", "defs/items.def", "type");
 	type.record = "Marker";
 	type.line = 12;
 	type.row_id = 4;
 	type.record_kind = 2;
-	v.diagnostics = {missing_finding("gametext", "gametext.bin"),
+	v.findings.diagnostics = {missing_finding("gametext", "gametext.bin"),
 	                 missing_finding("main_menu", "main.mnu"), type,
 	                 finding(DiagnosticSeverity::Warning, "menu.duplicate_window",
 	                         "Bravo: two windows are named GO.", "menus/a.mnu"),
@@ -97,7 +102,7 @@ SessionView problems_view() {
 Words shown(const ProblemsList &list, const ProblemAnswer &answer, const SessionView &v) {
 	Words out;
 	for (const ProblemsList::Line &line : list.lines()) {
-		const std::string &message = v.diagnostics[line.finding].message;
+		const std::string &message = v.findings.diagnostics[line.finding].message;
 		out.push_back(line.header ? "#" + answer.groups[line.group].title
 		                          : message.substr(0, message.find(' ')));
 	}
@@ -140,12 +145,12 @@ int test_lines() {
 	answer = &list.refresh(v);
 	TEST_EXPECT(shown(list, *answer, v).size() == 9);
 	// Where a finding is, and the summary.
-	TEST_EXPECT(ProblemsList::location_of(v.diagnostics[2], false) ==
+	TEST_EXPECT(ProblemsList::location_of(v.findings.diagnostics[2], false) ==
 	            "items.def:12 - Marker - type");
-	TEST_EXPECT(ProblemsList::location_of(v.diagnostics[2], true) ==
+	TEST_EXPECT(ProblemsList::location_of(v.findings.diagnostics[2], true) ==
 	            "defs/items.def:12 - Marker - type");
-	TEST_EXPECT(ProblemsList::location_of(v.diagnostics[0], false) == "gametext.bin");
-	TEST_EXPECT(ProblemsList::summary(v.requirements) ==
+	TEST_EXPECT(ProblemsList::location_of(v.findings.diagnostics[0], false) == "gametext.bin");
+	TEST_EXPECT(ProblemsList::summary(*v.project.requirements) ==
 	            "The game cannot start: 2 required files are missing.");
 	RequirementReport met;
 	TEST_EXPECT(ProblemsList::summary(met).empty());
@@ -159,9 +164,9 @@ int test_lines() {
 // their record keep apart: the one selected stays selected when one before it goes.
 int test_keys() {
 	SessionView v = problems_view();
-	v.requirements.rows.push_back(
+	editor_test::own(v.project.requirements).rows.push_back(
 	        missing_row("menu_style", "menu_style.mns", AssetKind::MenuStyle));
-	v.requirements.required_missing = 3;
+	editor_test::own(v.project.requirements).required_missing = 3;
 	Diagnostic unnamed = finding(DiagnosticSeverity::Error, "catalog.name_empty",
 	                             "Lima: a record has no name.", "defs/items.def", "name");
 	unnamed.row_id = 10;
@@ -174,7 +179,7 @@ int test_keys() {
 	                                          missing_finding("main_menu", "main.mnu"),
 	                                          missing_finding("menu_style", "menu_style.mns"),
 	                                          unnamed, unnamed_too, unnamed_three};
-	v.diagnostics = findings;
+	v.findings.diagnostics = findings;
 	ProblemsList list;
 	list.query().grouping = ProblemGrouping::None;
 	list.refresh(v);
@@ -185,7 +190,7 @@ int test_keys() {
 	ProblemsList::PressLatch latch;
 	TEST_EXPECT(!latch.released_on(list.fix_id(v, 1, create_main), true, false, false)); // pressed
 
-	v.diagnostics.erase(v.diagnostics.begin());
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin());
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.key(0) == main_key);
@@ -196,20 +201,20 @@ int test_keys() {
 	TEST_EXPECT(!latch.released_on(list.fix_id(v, 1, slid), false, true, true));
 	TEST_EXPECT(latch.released_on(list.fix_id(v, 0, after), false, true, true));
 	TEST_EXPECT(latch.released_on(list.fix_id(v, 1, slid), true, true, false));
-	TEST_EXPECT(list.resolve(v, {v.project_root, main_key}) == 0);
+	TEST_EXPECT(list.resolve(v, {v.project.root, main_key}) == 0);
 	TEST_EXPECT(list.resolve(v, {"C:/mods/Another", main_key}) == SIZE_MAX);
 
 	// The second of three findings alike but for their record selected; the first goes: the
 	// same finding, now the first of two, is still the selected one.
-	v.diagnostics = findings;
+	v.findings.diagnostics = findings;
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	list.toggle_selected(v, 4);
-	TEST_EXPECT(list.selected() == 4 && v.diagnostics[list.selected()].row_id == 11);
-	v.diagnostics.erase(v.diagnostics.begin() + 3);
+	TEST_EXPECT(list.selected() == 4 && v.findings.diagnostics[list.selected()].row_id == 11);
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin() + 3);
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
-	TEST_EXPECT(list.selected() == 3 && v.diagnostics[list.selected()].row_id == 11);
+	TEST_EXPECT(list.selected() == 3 && v.findings.diagnostics[list.selected()].row_id == 11);
 	list.toggle_selected(v, 3); // clicked again: folded back
 	TEST_EXPECT(list.selected() == SIZE_MAX);
 	return 0;
@@ -225,8 +230,8 @@ int test_fix_changes() {
 	                          "Kilo: the font is missing.", "menus/a.mnu", "font.name");
 	font.reference = ReferenceKind::Font;
 	font.target = "Custom.fnt";
-	v.diagnostics.push_back(font);
-	const size_t kilo = v.diagnostics.size() - 1;
+	v.findings.diagnostics.push_back(font);
+	const size_t kilo = v.findings.diagnostics.size() - 1;
 	ProblemsList list;
 	list.refresh(v);
 	const std::string key = list.key(kilo);
@@ -237,7 +242,7 @@ int test_fix_changes() {
 	ProblemsList::PressLatch latch;
 	TEST_EXPECT(!latch.released_on(pressed, true, false, false)); // pressed on the Create
 
-	v.retail_files = {"Custom.fnt", "gametext.bin"};
+	v.project.retail_files = {"Custom.fnt", "gametext.bin"};
 	v.revisions.touch(ViewConcern::Files); // the findings stand
 	list.refresh(v);
 	const ProblemFix import = list.fixes(v, kilo).front();
@@ -260,26 +265,26 @@ int test_folding() {
 	ProblemsList list;
 	list.refresh(v);
 	TEST_EXPECT(list.folded("style"));
-	v.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "style.line_ending",
+	v.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "style.line_ending",
 	                                "Delta: its line ends changed.", "menus/b.mns"));
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(!list.folded("style"));
-	v.diagnostics.pop_back();
+	v.findings.diagnostics.pop_back();
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(!list.folded("style"));
 	list.toggle_fold("menu");
 	list.refresh(v);
 	TEST_EXPECT(list.folded("menu"));
-	v.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.test",
+	v.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.test",
 	                                "Echo: another warning.", "menus/a.mnu"));
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.folded("menu"));
 	// Another project: its own groups, the notes folded again.
 	SessionView other = problems_view();
-	other.project_root = "C:/mods/Another";
+	other.project.root = "C:/mods/Another";
 	list.refresh(other);
 	TEST_EXPECT(!list.folded("menu") && list.folded("style"));
 	return 0;
@@ -305,17 +310,18 @@ int test_proposals() {
 	TEST_EXPECT(list.group_fixes(1).requests.empty() && list.group_fixes(2).requests.empty());
 
 	// The summary's Fix alls: a Create and an import list, each confirmed by kind.
-	v.requirements.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
-	v.requirements.required_missing = 3;
-	v.retail_files = {"cmap.mnu", "gametext.bin"};
-	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
+	editor_test::own(v.project.requirements)
+			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
+	editor_test::own(v.project.requirements).required_missing = 3;
+	v.project.retail_files = {"cmap.mnu", "gametext.bin"};
+	v.findings.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	const std::vector<EditorRequest> &summary = list.required_fixes().requests;
 	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 2" &&
 	            ProblemsList::fix_all_label(summary[1]) == "Import 1 from the game data...");
-	TEST_EXPECT(ProblemsList::summary(v.requirements) ==
+	TEST_EXPECT(ProblemsList::summary(*v.project.requirements) ==
 	            "The game cannot start: 3 required files are missing.");
 	const ProblemsList::Proposal create =
 	        list.propose(v, list.required_fix(v, EditorRequestKind::CreateMissing));
@@ -343,8 +349,8 @@ int test_proposals() {
 
 	// Two textures the project lacks: their placeholders in one line, a CreateFile each.
 	SessionView textures;
-	textures.project_open = true;
-	textures.project_root = "C:/mods/Placeholders";
+	textures.project.open = true;
+	textures.project.root = "C:/mods/Placeholders";
 	Diagnostic skin = finding(DiagnosticSeverity::Error, "reference.missing",
 	                          "Golf: the texture 'skin.tga'.", "models/tank.3di", "name");
 	skin.reference = ReferenceKind::Texture;
@@ -354,7 +360,7 @@ int test_proposals() {
 	                          "Hotel: the texture 'puff.tga'.", "fx.ptl", "graphic1");
 	puff.reference = ReferenceKind::Texture;
 	puff.target = "puff.tga";
-	textures.diagnostics = {skin, puff};
+	textures.findings.diagnostics = {skin, puff};
 	ProblemsList placeholders;
 	placeholders.refresh(textures);
 	const ProblemsList::Proposal &made = placeholders.group_fixes(0);
@@ -369,9 +375,9 @@ int test_proposals() {
 
 	// No Rewrite of a file that does not serialize; Only fixable: the finding a fix is offered for.
 	SessionView rewrite;
-	rewrite.project_open = true;
-	rewrite.project_root = "C:/mods/Rewrite";
-	rewrite.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
+	rewrite.project.open = true;
+	rewrite.project.root = "C:/mods/Rewrite";
+	rewrite.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
 	                               "Delta: a key the game ignores.", "defs/weapon.def"),
 	                       finding(DiagnosticSeverity::Error, "catalog.unserializable",
 	                               "Echo: this cannot be written.", "defs/weapon.def"),
@@ -403,9 +409,9 @@ int test_confirmation() {
 	ProblemsList::PressLatch apply;
 	TEST_EXPECT(!apply.released_on(std::to_string(list.version()), true, false, false)); // pressed
 
-	v.diagnostics.erase(v.diagnostics.begin() + 1);
-	v.requirements.rows[1].state = RequirementState::Present;
-	v.requirements.required_missing = 1;
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin() + 1);
+	editor_test::own(v.project.requirements).rows[1].state = RequirementState::Present;
+	editor_test::own(v.project.requirements).required_missing = 1;
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
@@ -426,7 +432,7 @@ int test_confirmation() {
 	// Another project (or none): it closes.
 	list.ask(v, list.fix_all_of(v, list.refresh(v).groups[0].rows));
 	SessionView other = v;
-	other.project_root = "C:/mods/Another";
+	other.project.root = "C:/mods/Another";
 	TEST_EXPECT(!list.follow(other));
 	SessionView closed;
 	TEST_EXPECT(!list.follow(closed));
@@ -438,23 +444,24 @@ int test_confirmation() {
 // each once while what they read stands.
 int test_fixes_lazy() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Many";
+	v.project.open = true;
+	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
 		const std::string name = "f" + std::to_string(file) + ".def";
-		v.scan.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+		editor_test::own(v.project.scan)
+				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		const std::string message = "Finding " + std::to_string(i) + ": a line the game ignores.";
-		const std::string &file = v.scan.entries[i / 20].relative_path;
+		const std::string &file = v.project.scan->entries[i / 20].relative_path;
 		Diagnostic d = finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
 		                       message.c_str(), file.c_str(), "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
 		d.line = i + 1;
-		v.diagnostics.push_back(d);
+		v.findings.diagnostics.push_back(d);
 	}
-	v.scan.index();
+	editor_test::own(v.project.scan).index();
 	ProblemsList list;
 	list.query().grouping = ProblemGrouping::None;
 	TEST_EXPECT(list.refresh(v).rows.size() == 1000 && list.lines().size() == 1000);

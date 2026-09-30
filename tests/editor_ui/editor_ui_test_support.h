@@ -19,15 +19,17 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/import/import_plan.h>
+#include <editor/preview/menu_preview_state.h>
+#include <editor/preview/menu_preview_viewport.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_preview_viewport.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
-#include <editor/ui/menu_preview_pane.h>
-#include <editor/ui/model_preview_pane.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
 #include "../editor/test_platform.h"
@@ -307,30 +309,58 @@ inline AssetEntry file_entry(const std::string &name, const std::string &path, A
 // An open project with one menu, the active document.
 inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Menus";
-	v.document.title = "Menus";
-	v.scan.entries.push_back(file_entry("options.mnu", document->path(), AssetKind::Menu));
-	v.scan.index();
-	v.documents.push_back(document);
-	v.active_document = document->path();
+	v.project.open = true;
+	v.project.root = "C:/mods/Menus";
+	editor_test::own(v.project.document).title = "Menus";
+	editor_test::own(v.project.scan)
+			.entries.push_back(file_entry("options.mnu", document->path(), AssetKind::Menu));
+	editor_test::own(v.project.scan).index();
+	v.documents.open.push_back(document);
+	v.documents.active = document->path();
 	return v;
 }
 
 inline void select_in(SessionView &v, const NodeAddress &address) {
-	v.selection = address;
-	v.selected = {address};
+	v.documents.selection = address;
+	v.documents.selected = {address};
 	v.revisions.touch(ViewConcern::Selection);
 }
 
 // A view put in the place of another, at its address (which a window's cache knows it by): its
-// counters carry on from the old view's, every concern moved.
+// counters and its events carry on from the old view's, every concern moved.
 inline void replace_view(SessionView &v, SessionView fresh) {
 	const ViewRevisions revisions = v.revisions;
+	const ViewEvents events = v.events;
 	v = std::move(fresh);
 	v.revisions = revisions;
+	v.events = events;
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
 		v.revisions.touch(static_cast<ViewConcern>(concern));
+}
+
+// An event posted into a hand-made view as the session posts it (view_events.h), with the
+// concern its site moves.
+inline void post_event(SessionView &v, ViewEventKind kind, const std::string &path = std::string(),
+		const NodeAddress &address = NodeAddress(), const std::string &field = std::string(),
+		bool flag = false, uint64_t tag = 0) {
+	ViewEvent event;
+	event.kind = kind;
+	event.path = path;
+	event.address = address;
+	event.field = field;
+	event.flag = flag;
+	event.tag = tag;
+	v.events.post(std::move(event));
+	const bool selection = kind == ViewEventKind::RevealRecord || kind == ViewEventKind::RevealFile;
+	v.revisions.touch(selection ? ViewConcern::Selection : ViewConcern::Dialogs);
+}
+
+// The newest event of `kind` a view holds (seq 0: none).
+inline ViewEvent newest_event(const SessionView &v, ViewEventKind kind) {
+	for (auto event = v.events.held().rbegin(); event != v.events.held().rend(); ++event)
+		if (event->kind == kind)
+			return *event;
+	return ViewEvent();
 }
 
 using editor_test::NoProcess;
@@ -409,13 +439,13 @@ inline bool preview_project(ProjectSession &session, const editor_test::TempProj
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
-	if (!editor_test::write_text(v.project_root + "/defs/items.def",
+	if (!editor_test::write_text(v.project.root + "/defs/items.def",
 	                             "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n") ||
-	    !editor_test::write_bytes(v.project_root + "/models/armory.3di",
+	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")))
 		return false;
 	session.handle(request::rescan());
-	return v.scan.find("skinned.3di") && v.scan.find("SKIN.adm") && v.scan.find("walk.bad") && v.scan.find("armory.3di");
+	return v.project.scan->find("skinned.3di") && v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") && v.project.scan->find("armory.3di");
 }
 
 // An import dialog's preview (S11g), as a session plans it: menu<stretch>.mnu chosen from
@@ -424,12 +454,11 @@ inline bool preview_project(ProjectSession &session, const editor_test::TempProj
 // whose name the archives cannot store, found but not taken; a texture found nowhere; a screen
 // reference and a terrain not followed; the cap reached; a file that could not be read.
 // `stretch` makes every name the dialog shows run long.
-inline SessionView::ImportPreview planned_import(const std::string &folder, const std::string &stretch = std::string()) {
+inline DialogsView::ImportPreview planned_import(const std::string &folder, const std::string &stretch = std::string()) {
 	using State = ImportPlanRow::State;
-	SessionView::ImportPreview preview;
+	DialogsView::ImportPreview preview;
 	preview.open = true;
 	preview.with_dependencies = true;
-	preview.serial = 1;
 	const std::string menu = "menu" + stretch + ".mnu";
 	const std::string found_in = "the folder " + folder;
 	const auto row = [&](State state, const std::string &name, AssetKind kind, const ImportSource &source,
@@ -468,13 +497,16 @@ inline SessionView::ImportPreview planned_import(const std::string &folder, cons
 	cut.needed_by = {menu, "MAIN/BADGE/Appearance 1", "value", ReferenceKind::MenuTexture, "a_long_texture_name.tga", -1};
 	cut.selected = false;
 	cut.problem = "a_long_texture_name.tga is longer than the 16 characters the game's archives store.";
-	preview.plan.rows = {row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip, font, gone, logo, cut};
-	preview.plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
-	                             {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
-	preview.plan.truncated = true;
-	preview.plan.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
-	                                            "The file could not be read" + stretch + ". The files it names are not looked for.",
-	                                            "broken.mnu")};
+	ImportPlan plan;
+	plan.rows = { row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip,
+		font, gone, logo, cut };
+	plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
+	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
+	plan.truncated = true;
+	plan.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+			"The file could not be read" + stretch + ". The files it names are not looked for.",
+			"broken.mnu") };
+	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
 	return preview;
 }
 

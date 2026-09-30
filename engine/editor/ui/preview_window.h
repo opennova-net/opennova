@@ -3,13 +3,14 @@
 #include <cstdint>
 
 #include <editor/assets/asset_kind.h>
-#include <editor/session/session_view.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/menu_preview_pane.h>
 #include <editor/ui/model_preview_pane.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
+
+struct SessionView;
 
 // The two previews the Preview window shows one of.
 enum class PreviewFamily : uint8_t { None, Menu, Model };

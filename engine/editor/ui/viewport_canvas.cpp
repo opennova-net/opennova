@@ -8,7 +8,7 @@
 
 #include <editor/session/editor_request.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/ui_kit.h>
 

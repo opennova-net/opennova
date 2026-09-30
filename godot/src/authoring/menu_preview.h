@@ -11,10 +11,13 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_preview_state.h>
-#include <editor/session/session_view.h>
-#include <editor/ui/menu_preview_pane.h>
+#include <editor/preview/menu_preview_viewport.h>
 
 #include "mnu/menu_frame.h"
+
+namespace opennova::editor {
+struct SessionView;
+}
 
 namespace godot {
 

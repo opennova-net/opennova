@@ -42,12 +42,12 @@ void SessionCore::start() {
 	if (!preferences_.load(finding) || !finding.code.empty())
 		report(finding);
 	const Preferences &settings = preferences_.values();
-	view_.recent_projects = settings.recent_projects;
-	view_.retail_directory = settings.game_install;
-	view_.play_retail = settings.play_in_install;
-	view_.runtime_setting = settings.runtime_executable;
-	view_.import_dependencies = settings.import_dependencies;
-	view_.status = "No project open.";
+	view_.project.recent_projects = settings.recent_projects;
+	view_.project.retail_directory = settings.game_install;
+	view_.project.play_retail = settings.play_in_install;
+	view_.project.runtime_setting = settings.runtime_executable;
+	view_.project.import_dependencies = settings.import_dependencies;
+	view_.activity.status = "No project open.";
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
 	touch(ViewConcern::Output);
@@ -65,7 +65,7 @@ SessionCore::RequestScope::~RequestScope() {
 }
 
 void SessionCore::note(std::string line) {
-	view_.output.append(std::move(line));
+	view_.activity.output.append(std::move(line));
 	touch(ViewConcern::Output);
 }
 
@@ -103,7 +103,7 @@ uint64_t SessionCore::start_operation(std::unique_ptr<SessionOperation> operatio
 void SessionCore::step_operation() {
 	if (operations_.running() && !operations_.done()) {
 		operations_.poll(poll_budget_, steady_clock_ms);
-		view_.operation = operations_.status();
+		view_.activity.operation = operations_.status();
 		touch(ViewConcern::Operation);
 	}
 }
@@ -139,7 +139,7 @@ bool SessionCore::cancel_operation(bool asked) {
 		return false;
 	}
 	const std::string line = "Cancelled " + noun + ".";
-	if (asked) view_.status = line;
+	if (asked) view_.activity.status = line;
 	note(line);
 	show_operation();
 	return true;
@@ -152,8 +152,8 @@ void SessionCore::finish_operation() {
 
 // The slot as the view shows it: the running operation (none) and what the last one came to.
 void SessionCore::show_operation() {
-	view_.operation = operations_.status();
-	view_.last_operation = operations_.last();
+	view_.activity.operation = operations_.status();
+	view_.activity.last_operation = operations_.last();
 	touch(ViewConcern::Operation);
 }
 
@@ -169,14 +169,14 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title) 
 	Diagnostic error;
 	if (!can_create_project(dir, kDefaultTargetGame, error)) {
 		report(error);
-		view_.status = "The project could not be created.";
+		view_.activity.status = "The project could not be created.";
 		touch(ViewConcern::Output);
 		return false;
 	}
 	if (!close_project()) return false;
 	if (!create_project(dir, title.empty() ? std::string("New Game") : title, kDefaultTargetGame, doc, error)) {
 		report(error);
-		view_.status = "The project could not be created.";
+		view_.activity.status = "The project could not be created.";
 		touch(ViewConcern::Output);
 		return false;
 	}
@@ -195,7 +195,7 @@ bool SessionCore::open_project(const std::string &dir) {
 		report(error);
 		preferences_.forget_recent_project(dir);
 		save_preferences();
-		view_.status = "The project could not be opened.";
+		view_.activity.status = "The project could not be opened.";
 		touch(ViewConcern::Output);
 		return false;
 	}
@@ -208,19 +208,19 @@ bool SessionCore::open_project(const std::string &dir) {
 	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_finding) ||
 			!local_finding.code.empty())
 		report(local_finding);
-	view_.project_open = true;
-	view_.project_root = paths_.root;
-	view_.document = doc;
-	view_.has_build = false;
-	view_.last_build = BuildReport();
+	view_.project.open = true;
+	view_.project.root = paths_.root;
+	view_.project.document = std::make_shared<const ProjectDocument>(doc);
+	view_.activity.has_build = false;
+	view_.activity.last_build = std::make_shared<const BuildReport>();
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
-	view_.runtime_executable = play().resolve_runtime_executable();
+	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	imports().refresh_install_files();
 	refresh();
 	// Output names the project; the menu bar's tooltip on what was said names its folder.
 	note("Opened " + doc.title + ".");
-	view_.status = "Opened " + doc.title + ".";
+	view_.activity.status = "Opened " + doc.title + ".";
 	touch(ViewConcern::Project);
 	touch(ViewConcern::Operation); // no build yet
 	touch(ViewConcern::Output);
@@ -236,8 +236,8 @@ bool SessionCore::close_project() {
 		return false;
 	}
 	problems().clear();
-	if (!view_.project_open) return true;
-	const std::string title = view_.document.title;
+	if (!view_.project.open) return true;
+	const std::string title = view_.project.document->title;
 	// What belongs to the project goes with it: its documents, their selections, a prompt
 	// waiting on them (an answer to it afterwards is refused: nothing waits), and the boot
 	// report of the game started in it (a later line of that game's log is ignored; the
@@ -246,27 +246,25 @@ bool SessionCore::close_project() {
 	guard().close_prompt_if_open();
 	play().forget_project();
 	documents().activate(std::string());
-	view_.clipboard.clear();
-	view_.reveal_file.clear();
-	view_.reveal_file_rename = false;
+	view_.documents.clipboard.clear();
 	documents().update_view();
-	view_.project_open = false;
+	view_.project.open = false;
 	imports().clear();
-	view_.project_root.clear();
-	view_.document = ProjectDocument();
-	view_.scan = AssetScan();
-	view_.requirements = RequirementReport();
-	view_.diagnostics.clear();
-	view_.has_build = false;
-	view_.last_build = BuildReport();
+	view_.project.root.clear();
+	view_.project.document = std::make_shared<const ProjectDocument>();
+	view_.project.scan = std::make_shared<const AssetScan>();
+	view_.project.requirements = std::make_shared<const RequirementReport>();
+	view_.findings.diagnostics.clear();
+	view_.activity.has_build = false;
+	view_.activity.last_build = std::make_shared<const BuildReport>();
 	// The last build's findings are this project's and go with it.
 	problems().clear_build_findings();
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
-	view_.runtime_executable = play().resolve_runtime_executable();
-	view_.retail_directory = game_install();
+	view_.activity.runtime_executable = play().resolve_runtime_executable();
+	view_.project.retail_directory = game_install();
 	note("Closed " + title + ".");
-	view_.status = "No project open.";
+	view_.activity.status = "No project open.";
 	// What the project was goes with it: every concern of the view moves.
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
 		touch(static_cast<ViewConcern>(concern));
@@ -277,14 +275,16 @@ bool SessionCore::close_project() {
 // refresh (project/project_state.h: import, scan, requirements), the same the command
 // line runs; the project findings replace the last action's.
 ImportRunResult SessionCore::refresh(bool force_import, const std::string &only) {
-	ProjectState state = refresh_project_state(paths_, view_.document, force_import, only);
-	view_.imports = state.imports.sources;
+	ProjectState state = refresh_project_state(paths_, *view_.project.document, force_import, only);
+	view_.project.imports =
+			std::make_shared<const std::vector<ImportedSource>>(state.imports.sources);
 	for (const ImportedSource &source : state.imports.sources)
 		if (source.reimported) note("Imported " + source.source + " (" + std::to_string(source.outputs.size()) + " file" +
 		                            (source.outputs.size() == 1 ? "" : "s") + ")");
-	view_.scan = std::move(state.scan);
-	problems().set_scan(paths_.root, view_.scan, view_.document.target_game);
-	view_.requirements = std::move(state.requirements);
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(state.scan));
+	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	view_.project.requirements =
+			std::make_shared<const RequirementReport>(std::move(state.requirements));
 	touch(ViewConcern::Files);
 	problems().validate_documents();
 	return std::move(state.imports);
@@ -295,19 +295,20 @@ ImportRunResult SessionCore::refresh(bool force_import, const std::string &only)
 // runtime, Play in the game install) to its preferences. Each is written from a copy and
 // its values take effect once it is written, so a setting that failed is still the one in
 // effect and a retry writes it again, while one that was written is compared with from then
-// on. The result (the view's settings_result, under the request's serial) lists what could not
-// be written; each is also a finding. The request is never refused whole (the settings dialog
-// waits on its result): each part is weighed against the running operation as what it reads and
-// writes, and a part that conflicts is a failure the result carries, its setting unchanged. The
-// name writes the project; the features write it too and, through the refresh the requirements
-// follow them by (the import pass, the scan), read and write the files; the game install writes
-// the project's local settings. The editor's own preferences hold nothing an operation holds.
+// on. The result (the view's settings_result) lists what could not be written, each also a
+// finding, and a SettingsApplied event carries the request's serial back. The request is never
+// refused whole (the settings dialog waits on its result): each part is weighed against the
+// running operation as what it reads and writes, and a part that conflicts is a failure the
+// result carries, its setting unchanged. The name writes the project; the features write it
+// too and, through the refresh the requirements follow them by (the import pass, the scan),
+// read and write the files; the game install writes the project's local settings. The
+// editor's own preferences hold nothing an operation holds.
 void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	std::vector<Diagnostic> failures;
 	const auto refuse_part = [this, &failures](const std::string &until) {
 		failures.push_back(make_diagnostic(DiagnosticSeverity::Warning, "operation.busy", busy_message(until)));
 	};
-	ProjectDocument project = view_.document;
+	ProjectDocument project = *view_.project.document;
 	bool project_changed = false, features_changed = false;
 	if (change.title && *change.title != project.title) {
 		if (change.title->empty()) {
@@ -328,7 +329,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (multiplayer) project.features.multiplayer = *change.multiplayer;
 		if (mission || multiplayer) project_changed = features_changed = true;
 	}
-	if (project_changed && !view_.project_open) {
+	if (project_changed && !view_.project.open) {
 		failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.none",
 		                                   "Open a project to change its name or its features."));
 		project_changed = features_changed = false;
@@ -336,7 +337,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (project_changed) {
 		Diagnostic error;
 		if (save_project_document(paths_.project_file, project, error)) {
-			view_.document = project;
+			view_.project.document = std::make_shared<const ProjectDocument>(project);
 			if (features_changed) refresh(); // the requirements follow the features
 		} else {
 			failures.push_back(error);
@@ -350,12 +351,12 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	std::optional<std::string> install =
 	        change.game_install ? std::optional<std::string>(absolute_install_path(*change.game_install))
 	                                : std::nullopt;
-	if (install && view_.project_open && *install != local_.game_install && busy_for(HoldsNothing, HoldsProject)) {
+	if (install && view_.project.open && *install != local_.game_install && busy_for(HoldsNothing, HoldsProject)) {
 		refuse_part("before changing the game install");
 		install.reset();
 	}
 	bool install_changed = false;
-	if (install && view_.project_open && *install != local_.game_install) {
+	if (install && view_.project.open && *install != local_.game_install) {
 		LocalSettings local = local_;
 		local.game_install = *install;
 		Diagnostic error;
@@ -377,24 +378,30 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
-			view_.play_retail = preferences_.values().play_in_install;
-			view_.runtime_setting = preferences_.values().runtime_executable;
-			view_.runtime_executable = play().resolve_runtime_executable();
+			view_.project.play_retail = preferences_.values().play_in_install;
+			view_.project.runtime_setting = preferences_.values().runtime_executable;
+			view_.activity.runtime_executable = play().resolve_runtime_executable();
 		} else {
 			failures.push_back(error);
 			editor_changed = false;
 		}
 	}
-	if (game_install() != view_.retail_directory) {
-		view_.retail_directory = game_install();
+	if (game_install() != view_.project.retail_directory) {
+		view_.project.retail_directory = game_install();
 		touch(ViewConcern::Preferences);
 		imports().refresh_install_files();
 	}
 	for (const Diagnostic &failure : failures) report(failure);
-	view_.settings_result = {change.serial, failures};
-	view_.status = !failures.empty()                                       ? "A setting could not be saved: see Problems."
-	               : project_changed || install_changed || editor_changed ? "Saved the settings."
-	                                                                      : "No setting changed.";
+	view_.project.settings_result.failures = failures;
+	// The dialog waiting on its Apply learns it came by the event naming its serial.
+	ViewEvent applied;
+	applied.kind = ViewEventKind::SettingsApplied;
+	applied.flag = !failures.empty();
+	applied.tag = change.serial;
+	view_.events.post(std::move(applied));
+	view_.activity.status = !failures.empty() ? "A setting could not be saved: see Problems."
+			: project_changed || install_changed || editor_changed ? "Saved the settings."
+																   : "No setting changed.";
 	if (project_changed) touch(ViewConcern::Project);
 	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
 	touch(ViewConcern::Dialogs);
@@ -407,12 +414,12 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 // overwritten.
 void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	if (roles.empty()) {
-		view_.status = "Nothing to create.";
+		view_.activity.status = "Nothing to create.";
 		touch(ViewConcern::Output);
 		return;
 	}
-	const RequirementReport now = evaluate_requirements(view_.document, scan_project_assets(paths_, view_.document));
-	const CreateMissingResult result = create_missing_requirements(paths_, view_.document, now, roles);
+	const RequirementReport now = evaluate_requirements(*view_.project.document, scan_project_assets(paths_, *view_.project.document));
+	const CreateMissingResult result = create_missing_requirements(paths_, *view_.project.document, now, roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");
@@ -420,9 +427,9 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	refresh();
 	for (const Diagnostic &d : result.diagnostics) report(d);
 	if (result.created.empty() && result.unavailable.empty() && result.diagnostics.empty()) {
-		view_.status = "Nothing to create.";
+		view_.activity.status = "Nothing to create.";
 	} else {
-		view_.status = std::to_string(result.created.size()) + " file(s) created" +
+		view_.activity.status = std::to_string(result.created.size()) + " file(s) created" +
 		               (result.unavailable.empty()
 		                        ? "."
 		                        : ", " + std::to_string(result.unavailable.size()) + " not yet possible.");
@@ -436,7 +443,7 @@ void SessionCore::forget_recent(const std::string &root) {
 }
 
 void SessionCore::clear_output() {
-	view_.output.clear();
+	view_.activity.output.clear();
 	touch(ViewConcern::Output);
 }
 
@@ -447,7 +454,7 @@ void SessionCore::quit() {
 		refuse_busy(std::string());
 		return;
 	}
-	view_.quit_requested = true;
+	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }
 
@@ -455,20 +462,20 @@ void SessionCore::save_preferences() {
 	Diagnostic error;
 	if (!preferences_.save(error)) report(error);
 	const Preferences &settings = preferences_.values();
-	view_.recent_projects = settings.recent_projects;
-	view_.retail_directory = game_install();
-	view_.play_retail = settings.play_in_install;
-	view_.import_dependencies = settings.import_dependencies;
+	view_.project.recent_projects = settings.recent_projects;
+	view_.project.retail_directory = game_install();
+	view_.project.play_retail = settings.play_in_install;
+	view_.project.import_dependencies = settings.import_dependencies;
 	touch(ViewConcern::Preferences);
 }
 
 std::string SessionCore::game_install() const {
-	return view_.project_open ? local_.game_install : preferences_.values().game_install;
+	return view_.project.open ? local_.game_install : preferences_.values().game_install;
 }
 
 const RequirementRow *SessionCore::requirement_row(const std::string &role) const {
 	const RequirementRow *row = nullptr;
-	for (const RequirementRow &candidate : view_.requirements.rows)
+	for (const RequirementRow &candidate : view_.project.requirements->rows)
 		if (candidate.role == role) row = &candidate;
 	return row;
 }
@@ -476,10 +483,10 @@ const RequirementRow *SessionCore::requirement_row(const std::string &role) cons
 // Two files of one name are the scan's asset.name.duplicate: the path named, else the first of
 // the name.
 const AssetEntry *SessionCore::project_file(const std::string &file) const {
-	for (const AssetEntry &candidate : view_.scan.entries)
+	for (const AssetEntry &candidate : view_.project.scan->entries)
 		if (candidate.relative_path == file) return &candidate;
 	const std::string wanted = normalized_logical_name(fs::path(file).filename().string());
-	for (const AssetEntry &candidate : view_.scan.entries)
+	for (const AssetEntry &candidate : view_.project.scan->entries)
 		if (normalized_logical_name(candidate.logical_name) == wanted) return &candidate;
 	return nullptr;
 }
@@ -498,7 +505,7 @@ void SessionCore::start_build(bool then_play) {
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	const BuildPlan plan = plan_build(paths_, view_.scan, view_.requirements, problems().document_findings());
+	const BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().document_findings());
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot
@@ -511,18 +518,18 @@ void SessionCore::start_build(bool then_play) {
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.diagnostics, then_play));
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, then_play));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
-	view_.status = then_play ? "Building, then playing..." : "Building...";
+	view_.activity.status = then_play ? "Building, then playing..." : "Building...";
 	note("Build started.");
 	show_operation();
 }
 
 OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate,
                                            bool then_play) {
-	view_.has_build = true;
-	view_.last_build = result;
+	view_.activity.has_build = true;
+	view_.activity.last_build = std::make_shared<const BuildReport>(result);
 	// A blocked build's report repeats the findings that blocked it, which were Problems rows
 	// when it started: only the ones those rows lacked (the plan's own, the build's) are the
 	// build's, whatever an edit made of the rows while it packed, and every validation keeps
@@ -536,16 +543,16 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 	if (result.ok) {
 		if (result.reused_existing) {
 			note("Build unchanged: " + shown_path(result.build_dir, paths_.root));
-			view_.status = "Build unchanged.";
+			view_.activity.status = "Build unchanged.";
 		} else {
 			note("Built " + shown_path(result.build_dir, paths_.root) + " (" + std::to_string(result.archives_written.size()) +
 			     " archive(s) written, " + std::to_string(result.archives_reused.size()) + " reused, " +
 			     std::to_string(result.loose_written.size()) + " loose file(s))");
-			view_.status = "Build finished.";
+			view_.activity.status = "Build finished.";
 		}
 	} else {
 		note("Build failed.");
-		view_.status = "Build failed; see Problems.";
+		view_.activity.status = "Build failed; see Problems.";
 	}
 	if (result.ok && then_play) play().start();
 	touch(ViewConcern::Operation);

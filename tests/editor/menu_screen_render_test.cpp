@@ -31,10 +31,11 @@
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/mnu/mnu_schema.h>
 #include <runtime/menu/menu_screen_inputs.h>
 
@@ -72,7 +73,7 @@ size_t list_index(const char *path) {
 
 std::vector<const Diagnostic *> render_findings(const SessionView &view, const std::string &code = std::string()) {
 	std::vector<const Diagnostic *> out;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code.rfind("menu.render.", 0) == 0 && (code.empty() || d.code == code)) out.push_back(&d);
 	return out;
 }
@@ -107,8 +108,8 @@ static int test_blank_startup() {
 	session.handle(request::new_project(dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.render_check);
-	const MenuRenderCheck &check = *view.render_check;
+	TEST_EXPECT(view.findings.render_check);
+	const MenuRenderCheck &check = *view.findings.render_check;
 	// A new project renders clean.
 	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code.c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
@@ -161,7 +162,7 @@ static int test_blank_startup() {
 	edit(session, *menu, row, "value", std::string("nope.tga"));
 	TEST_EXPECT(render_findings(view, "menu.render.texture_missing").empty());
 	bool graph_has_it = false;
-	for (const Diagnostic &d : view.diagnostics) graph_has_it = graph_has_it || d.message.find("nope.tga") != std::string::npos;
+	for (const Diagnostic &d : view.findings.diagnostics) graph_has_it = graph_has_it || d.message.find("nope.tga") != std::string::npos;
 	TEST_EXPECT(graph_has_it);
 	const MenuScreenRender *again = check.render(menu->path(), startup->id);
 	TEST_EXPECT(again && has_note(again->notes(), MenuFrameNoteCode::TextureMissing));
@@ -173,9 +174,9 @@ static int test_blank_startup() {
 	            render_findings(view, "menu.render.color_transparent").size() == 1);
 	session.handle(request::build());
 	session.run_operations();
-	for (const Diagnostic &d : view.last_build.diagnostics)
+	for (const Diagnostic &d : view.activity.last_build->diagnostics)
 		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code.c_str(), d.message.c_str());
-	TEST_EXPECT(view.has_build && view.last_build.ok);
+	TEST_EXPECT(view.activity.has_build && view.activity.last_build->ok);
 	return 0;
 }
 
@@ -188,7 +189,7 @@ static int test_render_again_only_when_moved() {
 	session.handle(request::new_project(dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const MenuRenderCheck &check = *view.render_check;
+	const MenuRenderCheck &check = *view.findings.render_check;
 	// The files just made: every menu renders.
 	const size_t menus = check.rendered();
 	TEST_EXPECT(menus >= 1);
@@ -221,7 +222,7 @@ static int test_render_again_only_when_moved() {
 	session.handle(request::close_project());
 	EditorRequest discard = request::resolve_unsaved(UnsavedChoice::Discard);
 	session.handle(discard);
-	TEST_EXPECT(!view.project_open && !check.render("menus/main.mnu", title.row));
+	TEST_EXPECT(!view.project.open && !check.render("menus/main.mnu", title.row));
 	return 0;
 }
 
