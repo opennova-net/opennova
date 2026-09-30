@@ -222,7 +222,8 @@ void HostRole::run_tick(const TickInput &input) {
 	// the death camera): sampled pre-fold, exactly the value the old inline
 	// view tick consumed at this point in the frame.
 	kernel.local.view_session_inputs = view_session_inputs_for(
-			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead());
+			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead(),
+			kernel.world.rules.mp_session);
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps against
 	// the renderer viewport height [orig: Server_SendRandomSeedSync @0x511360];
 	// a missing viewport leaves the seam unset and inmatch suppresses 0x68

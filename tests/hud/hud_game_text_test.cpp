@@ -77,16 +77,20 @@ int main() {
 		CHECK(waypoint_display_name(k, false, 0x10004u, mission, gametext) == "Alpha");
 	}
 	// In a session the id is remapped +1 unless the game type carries 0x20000
-	// [orig: @0x594678]: retail's 00TRa "Alley Corner" is STRWPNAME002 = raw id
-	// 1 + 1; the co-op shape 0x30020 keys the raw id.
+	// [orig: @0x594678]; the co-op shape 0x30020 keys the raw id. Single
+	// player is outside the session (the SP launch sets network type 0
+	// [orig: CNapiNetwork_SetNetworkType(0) @0x561bce]), so 00TRa's route
+	// (entry 0 raw id 1, entry 1 raw id 2 after the Marketplace area event)
+	// reads "Marketplace" at spawn and "Alley Corner" one waypoint on.
 	{
 		const GameTextLookup trg = table_of({
-				{ "WPNames/STRWPNAME001", "Front Gate" },
+				{ "WPNames/STRWPNAME001", "Marketplace" },
 				{ "WPNames/STRWPNAME002", "Alley Corner" },
 		});
+		CHECK(waypoint_display_name(wp(1), false, 0x10020u, trg, gametext) == "Marketplace");
+		CHECK(waypoint_display_name(wp(2), false, 0x10020u, trg, gametext) == "Alley Corner");
 		CHECK(waypoint_display_name(wp(1), true, 0x10020u, trg, gametext) == "Alley Corner");
-		CHECK(waypoint_display_name(wp(1), true, 0x30020u, trg, gametext) == "Front Gate");
-		CHECK(waypoint_display_name(wp(1), false, 0x10020u, trg, gametext) == "Front Gate");
+		CHECK(waypoint_display_name(wp(1), true, 0x30020u, trg, gametext) == "Marketplace");
 	}
 	// The in-session def specials [orig: @0x594688..0x59470D]: ARMORY beats
 	// TARGET beats the type lists; a special's miss (and no special at all)

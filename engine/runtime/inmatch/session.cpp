@@ -65,11 +65,19 @@ bool Role::request_medic() {
 }
 
 world::LocalViewSessionInputs Role::view_session_inputs_for(
-		const ClientRuntime *runtime, bool joiner, bool local_dead) {
+		const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session) {
 	// What the arbiter reads from the session: the net layer sits above the
 	// world group, so its client state crosses as plain values.
 	world::LocalViewSessionInputs s;
-	s.in_session = runtime != nullptr;
+	// The session word is the launch's network type, not the replica fold:
+	// the SP launch sets type 0, so is_in_session reads 0 for the whole SP
+	// mission although its in-process listen server folds a loopback client.
+	// [orig: CNapiNetwork_SetNetworkType @0x4c4a50 stores +0x58 = (type in
+	//  1..3) @0x4c4a85; SinglePlayer_StartMission passes 0 @0x561bce
+	//  (`xor ebx, ebx` @0x561b30); the readers here: Render_ProcessMainSceneFrame
+	//  @0x5ca22d (the forced first person) and @0x5ca8f6 (the dead-in-session
+	//  distortion skip)]
+	s.in_session = in_session;
 	s.joiner = joiner;
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)

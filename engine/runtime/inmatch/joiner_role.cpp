@@ -615,7 +615,8 @@ void JoinerRole::run_tick(const TickInput &) {
 		return;
 	}
 	kernel.local.view_session_inputs = view_session_inputs_for(
-			runtime.get(), /*joiner=*/true, runtime->local_player_dead());
+			runtime.get(), /*joiner=*/true, runtime->local_player_dead(),
+			kernel.world.rules.mp_session);
 	wire_leg_start_us_ = static_cast<int64_t>(io::perf_now_us());
 	pump();
 	sync_class_attribute_flags();
@@ -796,8 +797,8 @@ void JoinerRole::pump() {
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,
 	// exactly the value its view tick consumed at this point in the frame.
-	lp.view_session_inputs = view_session_inputs_for(
-			runtime.get(), /*joiner=*/true, rt.local_player_dead());
+	lp.view_session_inputs = view_session_inputs_for(runtime.get(), /*joiner=*/true,
+			rt.local_player_dead(), world.rules.mp_session);
 	lp.tick_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
 	// pumps weapon actions per-entity, so a joiner whose player has not spawned

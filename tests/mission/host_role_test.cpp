@@ -135,6 +135,13 @@ int main() {
 			role.run_tick(tick_input(0));
 		CHECK(kernel.world.logic_tick == tick0 + 8);
 		CHECK(host.host_owner.now_tick == now0 + 8);
+		// The SP listen server folds a loopback replica, yet the view arbiter's
+		// session word stays clear: the SP launch sets network type 0, so
+		// retail's is_in_session reads 0 for the whole mission.
+		// [orig: SinglePlayer_StartMission -> CNapiNetwork_SetNetworkType(0)
+		//  @0x561bce; the +0x58 store @0x4c4a85]
+		CHECK(!kernel.world.rules.mp_session);
+		CHECK(!kernel.local.view_session_inputs.in_session);
 		CHECK(host.host_owner.ctx.loaded_model_viewport_height == 0u);
 		if (host.client_runtime) {
 			CHECK(host.client_runtime->state().frames_applied > 0);
@@ -327,6 +334,10 @@ int main() {
 			role.run_tick(tick_input(0));
 		CHECK(kernel.world.logic_tick == tick0 + 4);
 		CHECK(host.host_owner.now_tick == now0 + 4);
+		// A network host is in the session (the host launch passes type 1..3).
+		// [orig: UI_HandleHostSessionStart -> CNapiNetwork_SetNetworkType(2)
+		//  @0x556e83; the +0x58 store @0x4c4a85]
+		CHECK(kernel.local.view_session_inputs.in_session);
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		CHECK(!kernel.local.has_local_player());

@@ -72,7 +72,9 @@ struct WaypointNameKey {
 // Outside a session: mission WPNames/STRWPNAME%03i of the RAW id
 // (@0x594668). In a session the id is first remapped +1 unless the game type
 // carries the co-op bit 0x20000 (@0x594678 — retail single player boots as
-// 0x10020 and is never in session, so it always keys the raw id); then a def
+// 0x10020 and is never in session, its launch setting network type 0
+// [orig: CNapiNetwork_SetNetworkType(0) @0x561bce], so it always keys the
+// raw id); then a def
 // picks a gametext WPNames special key — attrib 0x80000 ARMORY, else 0x8000
 // TARGET, else type 4091/4093/4095/4096/4097 FLAG, 4098/4100..4103 FLAGBAY
 // (@0x594688..0x59470D) — and an empty result (no key, a miss) falls back to

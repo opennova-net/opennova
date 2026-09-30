@@ -189,7 +189,7 @@ int main() {
 			channel.host_send(opennova::s2c::MINIMAP_OVERLAY,
 					linked_record(0x2001, 100, -50, 7, seconds, type, 40), false);
 			runtime.Client_ProcessNetworkFrame(0);
-			return opennova::inmatch::Role::view_session_inputs_for(&runtime, false, false);
+			return opennova::inmatch::Role::view_session_inputs_for(&runtime, false, false, false);
 		};
 		const auto active = receive(1, 2);
 		CHECK(active.hud_designations.size() == 1, "a live type-1 point reaches the HUD feed");

@@ -224,9 +224,12 @@ public:
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
 	// What the view arbiter reads from the session (death screen, end round,
-	// the death camera), as plain values off the role's replica runtime.
+	// the death camera), as plain values off the role's replica runtime, plus
+	// the retail is_in_session fact (the world's mp_session rule: single
+	// player, the in-process listen server included, is outside the session,
+	// whatever replica runtime it folds).
 	static world::LocalViewSessionInputs view_session_inputs_for(
-			const ClientRuntime *runtime, bool joiner, bool local_dead);
+			const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session);
 
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
