@@ -172,6 +172,9 @@ struct HudRoleFacts {
 	//  writer sets that bit]
 	hud::HudVoiceMacroMenuState emotes_menu;
 	hud::HudVoiceMacroMenuState radio_menu;
+	// The connection indicators' feed (hud/net_quality_indicators.h): the
+	// session gate, the NovaWorld icon gate and the runtime's g_NetQuality.
+	hud::HudNetQualityState net_quality;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

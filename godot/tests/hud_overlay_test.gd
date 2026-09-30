@@ -814,6 +814,33 @@ func test_capture_point_label_device_seam() -> void:
 	assert_true(is_instance_valid(hud), "The capture-point labels render safely.")
 
 
+# The connection indicators' device seam (D-HUD-38): the three atlases and the
+# NETWORKINDICATOR corners load through the real VFS path, and out of a
+# session (no Simulation: the role facts' session gate is down) the drawer
+# adds nothing [orig: CNetQuality_DrawIndicators @0x4c3200, the session gate
+# @0x4c3210; the atlas loads CNetworkIcons_LoadTextures @0x4c2cf0].
+func test_net_quality_indicators_device_seam() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"NETWORKINDICATOR 6,6 22,6 54,6",
+	]), PackedStringArray(["neticon1.tga", "neticon2.tga", "neticon3.tga"]),
+			{"neticon1.tga": Vector2i(32, 64), "neticon2.tga": Vector2i(16, 64),
+			 "neticon3.tga": Vector2i(16, 32)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var before := hud.get_draw_list_stats()
+	hud.set_role_facts(null, null)
+	var after := hud.get_draw_list_stats()
+	assert_eq(after.quads_textured, before.quads_textured,
+			"Out of a session the connection indicators draw nothing.")
+	assert_eq(after.elements_drawn, before.elements_drawn)
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The indicator atlases load and render safely.")
+
+
 func test_sights_viewport_aspect_preserves_square_reticle() -> void:
 	var square := Rect2(384, 256, 256, 256)
 	assert_eq(HudPos.sight_scale_rect(square, Vector2(1024, 768)), square)

@@ -265,7 +265,8 @@ public:
 	// round-over latch plus its Overlays/STROVER91 label; the MP session lines'
 	// facts plus their gametext strings (hud_session_text); the HUDLS slot
 	// bar's category scan with its icons, loaded only while the layout's
-	// HUDLS_SYSTEM draws the bar. No sim leaves every one empty.
+	// HUDLS_SYSTEM draws the bar; the connection indicators' state. No sim
+	// leaves every one empty.
 	void set_role_facts(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
 	// The overlay-panel pass's key-toggled state (engine hud_toggles.h): the F9
 	// emotes and F10 radio menus' open flags, which make the next role-facts

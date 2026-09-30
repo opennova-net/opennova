@@ -27,6 +27,19 @@ namespace opennova::inmatch {
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 
+// The protocol callbacks that raise the connection indicators' link-error
+// flags (hud/net_quality_indicators.h), as a mask a connection latches for
+// its owner: a resend list that named a sequence (the peer missed ours: flag
+// 1, outgoing) and a missing-sequence request that named one (we missed the
+// peer's: flag 2, incoming). Zero-only and key-only lists raise nothing.
+// [orig: NapiNP_HandleResendList @0x6239ef..0x623a37 (cb_server_6 /
+//  cb_client_3); CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
+//  (cb_server_5 / cb_client_2); the callbacks CNapiNetwork_Init installs
+//  @0x4ca948..0x4ca9cd: sub_4C62A0 and Network_LogOutgoingPacketError raise
+//  flag 1, @0x4c4681 and Network_LogIncomingPacketError flag 2]
+inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
+inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
+
 // Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
 // time-sync validator compares only unsigned deltas, so a nonzero logical base
 // preserves its clock contract without introducing wall-time into native tests.

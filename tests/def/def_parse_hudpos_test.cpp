@@ -26,7 +26,8 @@ static int synthetic_legs(void) {
         "HUDLS_SLOT\t0 11 12\n"
         "HUDLS_SLOT\t11 13 14\n"
         "ZONEINFO\t1013,386,Right\n"
-        "PAUSEDPOS\t980 12\n";
+        "PAUSEDPOS\t980 12\n"
+        "NETWORKINDICATOR\t6,5 30,5 70,5\n";
     DefHudPosFile f;
     memset(&f, 0, sizeof(f));
     if (def_parse_hudpos_memory((const unsigned char *)text, sizeof(text) - 1, &f) != 0) {
@@ -75,8 +76,21 @@ static int synthetic_legs(void) {
         fprintf(stderr, "FAIL: PAUSEDPOS = %d,%d\n", h->paused_pos[0], h->paused_pos[1]);
         ++failures;
     }
+    /* NETWORKINDICATOR: the three connection-indicator corners, six fields,
+       with the presence flag [orig: @0x59F981..0x59FA0C]. */
+    if (!h->network_indicator_present || h->network_indicator[0] != 6 ||
+        h->network_indicator[1] != 5 || h->network_indicator[2] != 30 ||
+        h->network_indicator[3] != 5 || h->network_indicator[4] != 70 ||
+        h->network_indicator[5] != 5) {
+        fprintf(stderr, "FAIL: NETWORKINDICATOR = %d (%d,%d %d,%d %d,%d)\n",
+                h->network_indicator_present, h->network_indicator[0], h->network_indicator[1],
+                h->network_indicator[2], h->network_indicator[3], h->network_indicator[4],
+                h->network_indicator[5]);
+        ++failures;
+    }
     def_free_hudpos(&f);
-    if (failures == 0) printf("HUDLS + ZONEINFO + PAUSEDPOS synthetic legs OK\n");
+    if (failures == 0)
+        printf("HUDLS + ZONEINFO + PAUSEDPOS + NETWORKINDICATOR synthetic legs OK\n");
     return failures;
 }
 

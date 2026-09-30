@@ -159,7 +159,19 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	HudRoleFacts out;
 	out.breath = breath_bar_facts(view);
 	if (view.runtime != nullptr) out.squad_orders = view.runtime->state().squad_orders;
+	// The connection indicators: the role's replica runtime keeps g_NetQuality
+	// (the listen host's own client included); the N icon draws on a
+	// NovaWorld session whose NWU session is in use [orig:
+	// CNetQuality_DrawIndicators @0x4c33d4..0x4c33f0].
+	if (view.runtime != nullptr) {
+		out.net_quality.indicators = view.runtime->net_quality_indicators();
+		const hud::NovaWorldLinkFacts &nw = view.runtime->novaworld_link();
+		out.net_quality.novaworld_icon = nw.novaworld && nw.nwu_in_use;
+	}
 	if (view.kernel == nullptr) return out;
+	// The drawer's session gate, the same session bit as the MP lines below
+	// [orig: `cmp is_in_session, 0` @0x4c3210].
+	out.net_quality.in_session = view.kernel->world.rules.mp_session;
 	if (voice_menus != 0u) {
 		const world::World &vw = view.kernel->world;
 		if (const world::Entity *local = vw.registry.get(vw.cached.local_player)) {

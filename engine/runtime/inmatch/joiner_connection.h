@@ -547,6 +547,15 @@ public:
 	// Milliseconds since the last VALID inbound datagram on this connection (0
 	// before the first one). Diagnostics + the loss predicate share this clock.
 	uint64_t milliseconds_since_last_receive() const;
+	// The link-error callbacks this connection fired since the last take
+	// (kNetQualityLinkError* bits): a received 0x84 resend list that named a
+	// sequence, a sent 0x44 missing-sequence request that named one. The
+	// owner raises the connection indicators' flags from them.
+	uint32_t take_net_quality_link_errors() {
+		const uint32_t mask = net_quality_link_errors_;
+		net_quality_link_errors_ = 0;
+		return mask;
+	}
 
 	Phase phase() const { return phase_; }
 	// Admission-stage name for diagnostics (the shell's post-load join watchdog names the
@@ -729,6 +738,7 @@ private:
 	//  read by PumpStateMachine @0x6295b2]
 	uint64_t last_receive_ms_ = 0;
 	bool receive_clock_armed_ = false;
+	uint32_t net_quality_link_errors_ = 0; // take_net_quality_link_errors()
 	bool silence_timeout_latched_ = false;
 	PostAuthStage post_auth_stage_ = PostAuthStage::Inactive;
 	uint64_t session_last_send_ms_ = 0;

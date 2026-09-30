@@ -191,6 +191,16 @@ struct NapiNPServerCtx {
 	//  the dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
 	replication::NetQualityWindow host_quality_window;
 	uint32_t net_quality_sample_countdown = 0;
+	// The authority's bucketed 0..4 level off that window (the receive window
+	// never runs here, so the combined scalar is the send window's), stored
+	// with each sample; the host role hands it to its own client's connection
+	// indicators [orig: CNetQuality_UpdateMetrics's tail @0x4c585a..0x4c58b0 ->
+	// CNetQuality_SetLevel(&g_NetQuality, level) @0x52659b].
+	int32_t net_quality_level = 0;
+	// The server protocol's link-error callbacks since the host role last
+	// drained them (kNetQualityLinkError* bits): a joiner's 0x44 resend list
+	// that named a sequence, our 0x84 missing-sequence request that named one.
+	uint32_t net_quality_link_errors = 0;
 	// The main loop's FR counter (world::TickAccumulator::average_fps), handed
 	// over by the session once per banked frame (HostRole::observe_frame_rate):
 	// the send window's frame-pressure input and, copied at the head of every

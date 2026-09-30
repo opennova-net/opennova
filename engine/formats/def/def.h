@@ -1138,6 +1138,14 @@ typedef struct DefHudPosDef {
        [orig: HUD_ParseHudposToken @0x59FC8D..0x59FCC8 -> dword_272360C /
        dword_2723610 (atof, ftol); the reader sub_59D650 @0x59D656..0x59D670] */
     int paused_pos[2];
+    /* NETWORKINDICATOR x0 y0 x1 y1 x2 y2 — the three connection indicators'
+       corners (quality, link error, NovaWorld). Unauthored, the CNetQuality
+       reset's (4,4) (20,4) (52,4) stand; `network_indicator_present` tells an
+       authored zero from none.
+       [orig: HUD_ParseHudposToken @0x59F981..0x59FA0C -> g_NetQuality
+       +0x40..+0x54 (atof, ftol); CNetQuality_Reset @0x4C58C0] */
+    int network_indicator[6];
+    int network_indicator_present;
     int roomtk_pos[2];
     int roomtk_txt_pos[2];
     int stance_pos[2];

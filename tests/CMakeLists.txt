@@ -1776,6 +1776,13 @@ target_include_directories(hud_chat_entry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(hud_chat_entry_test PRIVATE cxx_std_17)
 add_test(NAME hud_chat_entry COMMAND hud_chat_entry_test)
 
+# The connection indicators (D-HUD-38): g_NetQuality's frame step and the three icons' draw.
+add_executable(net_quality_indicators_test hud/net_quality_indicators_test.cpp)
+target_link_libraries(net_quality_indicators_test PRIVATE opennova_runtime)
+target_include_directories(net_quality_indicators_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(net_quality_indicators_test PRIVATE cxx_std_17)
+add_test(NAME net_quality_indicators COMMAND net_quality_indicators_test)
+
 add_executable(hud_vehicle_panel_test hud/hud_vehicle_panel_test.cpp)
 target_link_libraries(hud_vehicle_panel_test PRIVATE opennova_runtime)
 target_include_directories(hud_vehicle_panel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

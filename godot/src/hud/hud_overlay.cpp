@@ -644,6 +644,15 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// constant [orig: the 4x4 cell grid, see docs/interface/hud-re.md].
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
+		// The connection indicators' other two atlases: the T/R link-error
+		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
+		// load witness). Absent files leave that icon undrawn.
+		const Ref<Texture2D> link_icon = load_hud_texture_("neticon1.tga");
+		const Ref<Texture2D> novaworld_icon = load_hud_texture_("neticon3.tga");
+		textures_[opennova::hud::kHudTexNetLinkIcon] = link_icon;
+		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
+		layout_.net_link_icon_texture_valid = link_icon.is_valid();
+		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
 		// The tip panel's own box atlas (no second stage) and its two icons.
 		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga");
 		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga");
@@ -1514,6 +1523,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
 	state_.session = facts.session;
 	state_.squad_orders = facts.squad_orders;
+	state_.net_quality = facts.net_quality;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];

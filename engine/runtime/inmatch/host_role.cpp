@@ -331,10 +331,20 @@ void HostRole::run_tick(const TickInput &input) {
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside
 	// host_session_pump, fused with the logic tick.
 	const int64_t net_start = static_cast<int64_t>(io::perf_now_us());
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (state.client_runtime) {
+		// The connection indicators on the authority: the level its send
+		// window buckets lands before the indicators step inside the client
+		// frame, and the server protocol's link-error callbacks of this tick
+		// after it, as retail's Server_TickUpdate runs after that step
+		// [orig: Game_ProcessMainFrame — CNetQuality_SetLevel @0x52659b,
+		//  CNetQuality_UpdateIndicators @0x52668d, Server_TickUpdate @0x5266b6].
+		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
+		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
 	}
+	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);

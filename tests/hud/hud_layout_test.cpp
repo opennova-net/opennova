@@ -10,6 +10,7 @@
 
 #include <formats/def/def.h>
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -224,6 +225,34 @@ static void synthetic() {
 	CHECK(layout.breath_time.x == 0 && layout.breath_time.y == 0 && layout.breath_time.align == 0);
 	// The device-owned fields are untouched by the fill.
 	CHECK(!layout.frame_texture_valid && layout.stance_frame0_w == 0 && !layout.box_texture_valid);
+	// No NETWORKINDICATOR line: the connection indicators keep the reset corners.
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
+	def_free_hudpos(&file);
+}
+
+// NETWORKINDICATOR authors the connection indicators' three corners; a file
+// without the line restores the reset's, as the mission-start reset runs
+// before every parse [orig: HUD_ParseHudposToken @0x59F981..0x59FA0C;
+// CNetQuality_Reset @0x4C5908..0x4C591E via Game_StartMission @0x5243B4].
+static void network_indicator() {
+	DefHudPosFile file;
+	if (!parse("NETWORKINDICATOR\t6,7 30,7 70,8\n", file)) {
+		std::printf("FAIL: NETWORKINDICATOR parse\n");
+		++failures;
+		return;
+	}
+	HudLayout layout;
+	HudLayoutAssets assets;
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK((layout.net_indicator_pos == std::array<int, 6>{6, 7, 30, 7, 70, 8}));
+	def_free_hudpos(&file);
+	if (!parse("PAUSEDPOS\t980 12\n", file)) {
+		std::printf("FAIL: second parse\n");
+		++failures;
+		return;
+	}
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
 }
 
@@ -259,12 +288,15 @@ static void retail_leg() {
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
+	// The shipped file authors no NETWORKINDICATOR: the reset corners stand.
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
 }
 
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	synthetic();
+	network_indicator();
 	retail_leg();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

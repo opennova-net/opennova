@@ -3,6 +3,7 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
+#include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
 #include <runtime/hud/squad_feed.h>     // SquadFeedLine (the squad folds' HUD lines)
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
@@ -264,7 +265,34 @@ public:
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
 	// client's own ping readings (0 before the first completed round trip).
-	uint8_t net_quality_level() const { return net_quality_; }
+	// The level is g_NetQuality's first dword [orig: `mov eax, g_NetQuality`
+	// @0x42c256], the connection indicators' own.
+	uint8_t net_quality_level() const { return static_cast<uint8_t>(net_indicators_.level); }
+	// THE CONNECTION INDICATORS (hud/net_quality_indicators.h): the g_NetQuality
+	// display state this client keeps, stepped once per client frame while in
+	// a session, read by the HUD role facts.
+	const hud::NetQualityIndicators &net_quality_indicators() const { return net_indicators_; }
+	// The authority's level: the host's server tick samples its send window
+	// and the host role stores the bucketed level here ahead of this client
+	// frame [orig: CNetQuality_UpdateMetrics @0x4c52c0 -> CNetQuality_SetLevel
+	// (&g_NetQuality, level) @0x52659b, both before CNetQuality_UpdateIndicators
+	// @0x52668d]. The joiner's own fold stores its level itself.
+	void set_net_quality_level(int32_t level);
+	// The host protocol's link-error callbacks of one server tick, bit 0 a
+	// joiner's resend request (flag 1), bit 1 our own missing-sequence
+	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = sub_4C62A0
+	// @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
+	// the g_NetQuality flag stores]. The host role hands them over after
+	// this client frame, as retail's server tick runs after the indicators'
+	// update.
+	void raise_net_quality_link_errors(uint32_t mask);
+	// What the NovaWorld N icon reads (hud::NovaWorldLinkFacts): the network
+	// type, the NWU session in use and its state flags. Nothing feeds it yet:
+	// the NovaWorld joiner closes its NWU session at the in-match handoff and
+	// the NovaWorld listen host keeps the Lan network type (D-NET-220), so the
+	// icon stays hidden.
+	void set_novaworld_link(const hud::NovaWorldLinkFacts &facts) { novaworld_link_ = facts; }
+	const hud::NovaWorldLinkFacts &novaworld_link() const { return novaworld_link_; }
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;
@@ -674,6 +702,9 @@ private:
 	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
 	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
 	void update_net_quality();
+	// The link-error callbacks a mask carries (kNetQualityLinkError*), onto
+	// the indicators at this frame's clock.
+	void apply_net_quality_link_errors(uint32_t mask);
 	// Chat_CheckFloodControl @0x498F60: truncates `text` to 59 characters in
 	// place first, then the table walk; true = the line may go out.
 	bool chat_flood_control(std::string &text, uint32_t frame);
@@ -725,8 +756,10 @@ private:
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.
-	uint8_t  net_quality_ = 0;           // [orig: g_NetQuality byte @0x82BF88] the 0..4 level
-	                                     // CNetQuality_SetLevel folds every 62 frames; 0 = best
+	// [orig: g_NetQuality @0x82BF88] the 0..4 level CNetQuality_SetLevel folds
+	// every 62 frames (0 = no measurement) and the connection indicators.
+	hud::NetQualityIndicators net_indicators_;
+	hud::NovaWorldLinkFacts novaworld_link_;
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.

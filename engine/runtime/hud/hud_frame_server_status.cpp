@@ -244,9 +244,11 @@ bool HudFrameCompiler::compile_server_status_page(const HudFrameState &state,
 	//  HudFrameState::end_round].
 	if (state.spawn_success_gate && (gt & 0xFFFDFFFFu) != 0x10020u)
 		element_end_round_overlay(state, w, h);
-	// CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af draws the
-	// net-quality icons at their fixed slot; the indicator drawer is not
-	// ported for either of its callers (docs/interface/hud-re.md D-HUD-37).
+	// The connection indicators at their reset corners, whatever hudpos
+	// authors [orig: CNetQuality_DrawIndicators(&g_NetQuality, 1) @0x50b2af].
+	mark_order_break();
+	emit_net_quality_indicators(state.net_quality, state.overlay_master,
+			/*force_default_pos=*/true, w, h);
 	status_page_list_ = draw_list_;
 	return true;
 }

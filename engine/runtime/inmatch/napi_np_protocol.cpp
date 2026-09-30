@@ -1024,9 +1024,13 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
 	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
 	//  the loop on a key-only body]
+	// The same callback raises the outgoing link error of the host's own
+	// connection indicators [orig: sub_4C62A0 @0x4c62c0..0x4c62d5 — the
+	// g_NetQuality flag-1 store behind the cooldown test].
 	if (std::any_of(requested.begin(), requested.end(),
 			[](uint32_t sequence) { return sequence != 0; })) {
 		conn->link.nak_backoff_pending = true;
+		ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
 	}
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
@@ -1180,6 +1184,13 @@ std::vector<TickOut> flush_server_missing_requests(
 		item.outbound.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_RESEND_LIST, std::move(missing_body)));
 		out.push_back(std::move(item));
+		// A request that named a sequence fires the incoming link-error
+		// callback [orig: SendMissingSeqList has_missing_seqs @0x623690,
+		// cb_server_5 @0x623788..0x62379b = @0x4c4681, the g_NetQuality
+		// flag-2 store behind the cooldown test].
+		if (std::any_of(missing.begin(), missing.end(),
+				[](uint32_t sequence) { return sequence != 0; }))
+			ctx.net_quality_link_errors |= kNetQualityLinkErrorIncoming;
 	}
 	return out;
 }

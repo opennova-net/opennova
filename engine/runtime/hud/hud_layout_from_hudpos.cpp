@@ -129,6 +129,15 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// PAUSEDPOS x, y [orig: @0x59FCB0 / @0x59FCC8 -> dword_272360C / 10].
 	out.paused_x = hud.paused_pos[0];
 	out.paused_y = hud.paused_pos[1];
+	// NETWORKINDICATOR: the connection indicators' three corners; unauthored,
+	// the layout keeps the CNetQuality reset's [orig: HUD_ParseHudposToken
+	// @0x59F9A8..0x59FA0C over the reset @0x4C5908..0x4C591E, which the mission
+	// start runs first @0x5243B4, before HUD_InitOverlaySystem @0x525733].
+	out.net_indicator_pos = kNetIndicatorResetPos;
+	if (hud.network_indicator_present) {
+		for (size_t i = 0; i < out.net_indicator_pos.size(); ++i)
+			out.net_indicator_pos[i] = hud.network_indicator[i];
+	}
 	// MRCLIPPYNORMAL / MRCLIPPYALTERNATE x, y, width pad, height pad
 	// [orig: HUD_ParseHudposToken @0x59fa15..0x59fa76 -> g_TipSystem +0x40..+0x4C,
 	//  @0x59fa7f..0x59fae0 -> +0x50..+0x5C].

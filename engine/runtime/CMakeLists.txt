@@ -113,6 +113,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_scoreboard.cpp # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/net_quality_indicators.cpp # the g_NetQuality display state
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_net_quality.cpp  # the connection indicators element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_chat_entry.cpp   # the talk keys + the captured line editor
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_chat_input.cpp # the chat input line element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers

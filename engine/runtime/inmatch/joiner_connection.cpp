@@ -2094,6 +2094,13 @@ void JoinerConnection::on_server_resend_list(
 			body.data(), body.size(), client_key_, requested)) {
 		return;
 	}
+	// A list that named a sequence fires the outgoing link-error callback
+	// after the resends [orig: NapiNP_HandleResendList @0x6239aa latches it on
+	// a nonzero dword, @0x6239ef..0x623a37 calls cb_client_3 =
+	// Network_LogOutgoingPacketError @0x4c4920].
+	if (std::any_of(requested.begin(), requested.end(),
+			[](uint32_t sequence) { return sequence != 0; }))
+		net_quality_link_errors_ |= kNetQualityLinkErrorOutgoing;
 
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
@@ -2138,6 +2145,13 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			if (encode_session_resend_list(conn_.server_sk, missing, missing_body)) {
 				out.push_back(nw_encode_outbound(
 						SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(missing_body)));
+				// A sent request that named a sequence fires the incoming
+				// link-error callback [orig: CNapiNPConnection_SendMissingSeqList
+				// — has_missing_seqs @0x623690, after the send @0x623775..0x6237bd
+				// cb_client_2 = Network_LogIncomingPacketError @0x4c4890].
+				if (std::any_of(missing.begin(), missing.end(),
+						[](uint32_t sequence) { return sequence != 0; }))
+					net_quality_link_errors_ |= kNetQualityLinkErrorIncoming;
 			}
 		}
 	}

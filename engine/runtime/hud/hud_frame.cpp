@@ -533,6 +533,11 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_chat_input(state, surface_w, surface_h);
 	element_kill_announcement(state, surface_w, surface_h);
 	compile_gameplay_overlay_windows(state, surface_w, surface_h);
+	// The connection indicators close the scene frame, after the overlay
+	// panels, at level 0 only (so never on the level-3 path above)
+	// [orig: Render_ProcessMainSceneFrame — HUD_DrawOverlayPanels @0x5cae3b,
+	//  then CNetQuality_DrawIndicators(0) @0x5cae5d].
+	element_net_quality_indicators(state, surface_w, surface_h);
 	return draw_list_;
 }
 

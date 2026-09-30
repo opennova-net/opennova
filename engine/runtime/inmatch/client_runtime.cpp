@@ -430,11 +430,14 @@ std::vector<uint8_t> ClientRuntime::start() {
 	last_keepalive_tick_ = 0;
 	net_quality_timer_ = 0;
 	tag2c_send_cooldown_ = 0;
-	net_quality_ = 0;
 	send_holdoff_countdown_ = 0;
 	send_holdoff_ticks_ = 0;
 	replay_mode_ = false;
 	view_.state() = replication::ClientState{};
+	// The client connection start resets the quality object [orig:
+	// CNapiNetwork_StartClientConnection @0x4ca3f7 / @0x4ca401 ->
+	// CNetQuality_Reset @0x4c58c0], its cooldown at the fresh clock.
+	hud::net_quality_reset(net_indicators_, view_.state().local_clock_ms);
 	view_.drain_round_events();
 	view_.drain_game_events();
 	view_.drain_weapon_reloads();
@@ -624,11 +627,33 @@ void ClientRuntime::update_net_quality() {
 				replication::net_quality_loss_metric(0.0));
 	}
 	const int32_t combined = std::max(0, client_quality_window_.quality);
-	net_quality_ = static_cast<uint8_t>(replication::net_quality_level(combined));
+	// CNetQuality_SetLevel(&g_NetQuality, level) [orig: @0x52659b]: the level
+	// the 0x4C report carries and the quality icon's channels ramp toward.
+	hud::net_quality_set_level(net_indicators_, replication::net_quality_level(combined));
 	replication::ClientNetQuality &net = view_.state().net;
-	net.level = net_quality_;
+	net.level = net_quality_level();
 	net.ping_ms = joiner_->client_ping_ms();
 	net.average_ping_ms = joiner_->client_average_ping_ms();
+}
+
+void ClientRuntime::set_net_quality_level(int32_t level) {
+	hud::net_quality_set_level(net_indicators_, level);
+}
+
+void ClientRuntime::raise_net_quality_link_errors(uint32_t mask) {
+	apply_net_quality_link_errors(mask);
+}
+
+// The link-error callbacks at the clock they fire on: bit 0 raises flag 1
+// (outgoing), bit 1 flag 2 (incoming) [orig: CNetQuality_SetLinkErrorFlag
+// @0x4c34f0, which Network_LogOutgoingPacketError @0x4c4943 / sub_4C62A0
+// @0x4c62ce and Network_LogIncomingPacketError @0x4c48b3 / @0x4c468f inline].
+void ClientRuntime::apply_net_quality_link_errors(uint32_t mask) {
+	const uint32_t now = view_.state().local_clock_ms;
+	if ((mask & kNetQualityLinkErrorOutgoing) != 0)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorOutgoing, now);
+	if ((mask & kNetQualityLinkErrorIncoming) != 0)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming, now);
 }
 
 bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
@@ -777,6 +802,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports).
 	if (role_ == Role::Joiner) update_net_quality();
+	// Then the connection indicators step once, in a session, still ahead of
+	// the client net frame whose callbacks raise their flags [orig:
+	// Game_ProcessMainFrame — `cmp is_in_session` @0x526680 ->
+	// CNetQuality_UpdateIndicators @0x52668d, Client_ProcessNetworkFrame
+	// @0x526692]. The session word is the view's: a joiner is always in one,
+	// the listen host's own client only on a networked host.
+	if (view_.mp_session()) hud::net_quality_update_indicators(net_indicators_, novaworld_link_);
 
 	// Per-frame tick bump — SKIPPED entirely while the clock is unseeded. The client's
 	// network-role tick is anchored by the host's S2C 0x61 seed, never free-run from zero:
@@ -801,6 +833,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
 	}
+	// A joiner that has heard nothing for three whole seconds raises the
+	// incoming link error every frame, ahead of the receive pump [orig:
+	// Client_ProcessNetworkFrame @0x42c1f8..0x42c21e — `is_mp_session_peer &&
+	// !is_authority && CNapiNetwork_GetSessionUptime(ctx) > 2`; that getter
+	// @0x4c6ed0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the connection's
+	// last-admitted-receive stamp, not a session uptime].
+	if (role_ == Role::Joiner && joiner_ != nullptr &&
+			joiner_->milliseconds_since_last_receive() / 1000u > 2u)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming,
+				view_.state().local_clock_ms);
 	lap.mark(devtools::Slot::SIM_CLIENT_SETUP);
 
 	// (1) RECV pump — fold S2C into ClientState, recv-before-send [orig: PumpClientProtocolRecv
@@ -838,6 +880,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
 			recv_fifo_.pop_front();
 			JoinerConnection::PollResult pr = joiner_->handle_datagram(dg.data(), dg.size());
+			// A 0x84 resend list that named a sequence is the outgoing link
+			// error, at its datagram's position [orig: NapiNP_HandleResendList
+			// @0x6239ef..0x623a37 -> cb_client_3 = Network_LogOutgoingPacketError
+			// @0x4c4920 -> flag 1].
+			apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 			if (joiner_->poll_session_loss()) {
 				// Host teardown sends its keyed goodbye burst synchronously, then
 				// destroys both pending and outgoing semantic queues. It does not
@@ -883,6 +930,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 						tb.first == s2c::PER_FRAME_UPDATE
 						? view_.state().health_updates_applied : 0;
 				view_.apply(tb.first, tb.second);
+				// Every 0x0F a joiner handles clears the link errors and holds
+				// new ones off for 10 s [orig: NapiNPClientMsg_0x00F — the
+				// `!is_authority` burst @0x42e5b7, CNetQuality_SetLinkErrorFlag
+				// (&g_NetQuality, 4) @0x42e660].
+				if (tb.first == s2c::WORLD_STATE_LOAD)
+					hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorClear,
+							view_.state().local_clock_ms);
 				// Evaluate every 0x0A tail at its original position. A later
 				// positive sample cannot erase an earlier death edge.
 				if (tb.first == s2c::PER_FRAME_UPDATE &&
@@ -1057,7 +1111,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		if (++net_quality_timer_ > kNetQualityInterval) {
 			net_quality_timer_ = 0;
 			ProtocolMessage quality = make_protocol_message(
-					0x4C, std::vector<uint8_t>{net_quality_});
+					0x4C, std::vector<uint8_t>{net_quality_level()});
 			// This is neither indefinitely reliable nor one-send: retail passes
 			// userParam=310 and ages it in open logical send boundaries.
 			// [orig: QueueReliableMessage @0x42C279 -> user_param1 310]
@@ -1192,6 +1246,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// already carried it. Retail places this pump inside the same field-3 gate.
 		for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
 			outbound.push_back(std::move(d));
+		// A 0x44 missing-sequence request that named a sequence is the incoming
+		// link error [orig: CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
+		// -> cb_client_2 = Network_LogIncomingPacketError @0x4c4890 -> flag 2].
+		apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 		// Retail builds every packet at connection+0x64C, prunes message nodes
 		// against that same value, then increments it exactly once. MTU splits
 		// therefore remain one flush, and held frames never age finite records.

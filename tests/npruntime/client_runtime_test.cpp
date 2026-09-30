@@ -4229,6 +4229,103 @@ bool run_world_state_load_bursts_on_every_0x0f() {
 	return expect(burst_count(r2) == 1, "a second 0x0F queues the burst again");
 }
 
+// The connection indicators on a joiner (D-HUD-38): the frame step under the
+// session, the three-second receive silence's incoming flag, a received 0x84
+// that named a sequence (outgoing), and the S2C 0x0F clear with its 10 s
+// hold-off [orig: Game_ProcessMainFrame @0x52668d; Client_ProcessNetworkFrame
+// @0x42c1f8..0x42c21e; NapiNP_HandleResendList cb_client_3 @0x623a24;
+// NapiNPClientMsg_0x00F @0x42e660; CNetQuality_SetLinkErrorFlag @0x4c34f0].
+bool run_connection_indicators_on_a_joiner() {
+	const std::string client_scrk = "CLIENT-NETQ-SCRK";
+	const std::string server_scrk = "SERVER-NETQ-SCRK";
+	uint64_t now_ms = 50000;
+	inmatch::ClientRuntime client("NetQ", [&now_ms] { return now_ms; });
+	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	const hud::NetQualityIndicators &q = client.net_quality_indicators();
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(q.link_error_bits == 0 && q.link_error_countdown == 0,
+			"a freshly seeded joiner holds no link error"))
+		return false;
+	// Two whole seconds (2999 ms) of silence raise nothing; the third does.
+	now_ms += 2999;
+	(void)client.Client_ProcessNetworkFrame(2);
+	if (!expect(q.link_error_bits == 0, "2999 ms of receive silence raise no flag"))
+		return false;
+	now_ms += 1;
+	(void)client.Client_ProcessNetworkFrame(3);
+	if (!expect(q.link_error_bits == hud::kNetLinkErrorIncoming &&
+					q.link_error_countdown == hud::kNetLinkErrorFrames && q.link_error_alpha == 0,
+			"three seconds of receive silence raise the incoming flag after the step"))
+		return false;
+	// The next frame steps first (alpha 64), then the silence re-raises.
+	(void)client.Client_ProcessNetworkFrame(4);
+	if (!expect(q.link_error_alpha == 64 && q.link_error_countdown == hud::kNetLinkErrorFrames,
+			"the step runs ahead of the re-raised flag"))
+		return false;
+	// A 0x84 naming a sequence is the outgoing flag, at its datagram.
+	std::vector<uint8_t> resend_body;
+	if (!expect(encode_session_resend_list(1u, {1}, resend_body), "encode a 0x84 body"))
+		return false;
+	const std::vector<uint8_t> resend =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(5);
+	if (!expect(q.link_error_bits == (hud::kNetLinkErrorIncoming | hud::kNetLinkErrorOutgoing),
+			"a 0x84 that names a sequence raises the outgoing flag"))
+		return false;
+	// Any S2C 0x0F clears both and holds new flags off for 10 s; its receive
+	// also ends the silence.
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const std::vector<uint8_t> load = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, world_state)});
+	client.receive(load.data(), load.size());
+	(void)client.Client_ProcessNetworkFrame(6);
+	const uint32_t cleared_at = client.state().local_clock_ms;
+	if (!expect(q.link_error_bits == 0 && q.link_error_countdown == 0 &&
+					q.link_error_alpha == 0 &&
+					q.flag_cooldown_until_ms == cleared_at + hud::kNetLinkErrorCooldownMs,
+			"a 0x0F clears the link errors and arms the 10 s hold-off"))
+		return false;
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(7);
+	if (!expect(q.link_error_bits == 0, "inside the hold-off a 0x84 raises nothing"))
+		return false;
+	uint32_t tick = 8;
+	while (client.state().local_clock_ms < q.flag_cooldown_until_ms)
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(q.link_error_bits == hud::kNetLinkErrorOutgoing,
+			"past the hold-off the next 0x84 raises the outgoing flag again");
+}
+
+// The listen host's own client (D-HUD-38): the host role's level lands before
+// the step, its server protocol's link errors after it, and nothing steps off
+// a networked session [orig: CNetQuality_SetLevel @0x52659b ahead of
+// CNetQuality_UpdateIndicators @0x52668d under `is_in_session` @0x526686].
+bool run_connection_indicators_on_the_host_client() {
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	const hud::NetQualityIndicators &q = host_view.net_quality_indicators();
+	host_view.set_net_quality_level(3);
+	(void)host_view.Client_ProcessNetworkFrame(1);
+	if (!expect(q.level == 3 && q.level3_alpha == 0,
+			"single player (no session) never steps the indicators"))
+		return false;
+	host_view.view().set_mp_session(true);
+	(void)host_view.Client_ProcessNetworkFrame(2);
+	if (!expect(q.level3_alpha == 4 && host_view.net_quality_level() == 3,
+			"a networked host's own client steps toward its level"))
+		return false;
+	host_view.raise_net_quality_link_errors(inmatch::kNetQualityLinkErrorOutgoing |
+			inmatch::kNetQualityLinkErrorIncoming);
+	return expect(q.link_error_bits == 3 && q.link_error_countdown == hud::kNetLinkErrorFrames,
+			"the server protocol's callbacks raise both flags");
+}
+
 // The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
 // the 59-character cut, `Flooded` for a repeat within 0x500 main frames of
 // its entry, and nothing for the non-peer channels 4/5 [orig:
@@ -6419,6 +6516,8 @@ bool run_guided_zero_steer_point_is_stored() {
 
 int main() {
 	const bool ok = run_guided_zero_steer_point_is_stored() &&
+	                run_connection_indicators_on_a_joiner() &&
+	                run_connection_indicators_on_the_host_client() &&
 	                run_radio_events_preserve_order_chat_and_mute_state(false) &&
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
                     run_emote_and_local_chat_track_the_speaker(false) &&

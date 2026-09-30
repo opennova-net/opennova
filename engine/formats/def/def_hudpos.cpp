@@ -422,6 +422,13 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             for (int i = 0; i < 2 && i < nvals; ++i)
                 hud->paused_pos[i] = parse_int_n(vals[i].s, vals[i].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "networkindicator", 16)) {
+            /* [orig: @0x59F981 _stricmp "NETWORKINDICATOR", six atof/ftol stores
+               @0x59F9A8..0x59FA0C -> g_NetQuality +0x40..+0x54] */
+            for (int i = 0; i < 6 && i < nvals; ++i)
+                hud->network_indicator[i] = parse_int_n(vals[i].s, vals[i].len);
+            hud->network_indicator_present = 1;
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "roomtkpos", 9) && !lower_starts_with(lower, ll, "roomtktxtpos", 12)) {
             for (int i = 0; i < 2 && i < nvals; ++i)
                 hud->roomtk_pos[i] = parse_int_n(vals[i].s, vals[i].len);

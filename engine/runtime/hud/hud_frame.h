@@ -19,6 +19,7 @@
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass
 #include <runtime/hud/hud_overlay_windows.h>
 #include <runtime/hud/hud_server_status.h> // the server-status page
+#include <runtime/hud/net_quality_indicators.h> // the connection indicators' state
 #include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
 #include <array>
@@ -63,7 +64,16 @@ enum HudTexture : int32_t {
 	kHudTexBoxTile,
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
 	// [orig: the quad @0x4241fb; the atlas load CNetworkIcons_LoadTextures @0x4c2cf0].
+	// neticon2.tga, iconPtrs[1] = g_NetConnectionIcon @0xB5E03C; the HUD's
+	// top-left quality icon draws the same atlas.
 	kHudTexNetIcon,
+	// The other two connection indicators [orig: CNetworkIcons_LoadTextures
+	// @0x4c2cf0 — neticon1.tga, 4 rows (tga height / 4 @0x4c2d58) ->
+	// iconPtrs[0] = g_NetLatencyIcon @0xB5E038, the T/R link-error pair;
+	// neticon3.tga, 2 rows (tga height / 2 @0x4c2e46) -> iconPtrs[2] =
+	// g_NetNovaWorldIcon @0xB5E040, the NovaWorld N].
+	kHudTexNetLinkIcon,
+	kHudTexNetNovaWorldIcon,
 	// The mounted-vehicle panel silhouette (the block's `interface` texture).
 	kHudTexVehiclePanel,
 	// The AAS zone status panel's three team icons — 64x256 vertical 4-frame
@@ -164,6 +174,12 @@ inline constexpr float kBoxTitleTrim = 12.0f;
 inline int hud_static_frame_index(int authored_count) {
 	return authored_count > 0 ? authored_count - 1 : -1;
 }
+
+// The connection indicators' corners as the CNetQuality reset leaves them:
+// quality (4, 4), link error (20, 4), NovaWorld (52, 4) — also the corners the
+// server-status page always uses [orig: CNetQuality_Reset @0x4c5908..0x4c591e;
+// the forceDefaultPos arms @0x4c325d / @0x4c332e / @0x4c345c].
+inline constexpr std::array<int, 6> kNetIndicatorResetPos = {4, 4, 20, 4, 52, 4};
 
 struct HudQuad {
 	float x0 = 0.0f;
@@ -344,6 +360,15 @@ struct HudLayout {
 	int box_tile_w = 0;
 	int box_tile_h = 0;
 	bool net_icon_texture_valid = false;
+	// The connection indicators' other two atlases (neticon1 / neticon3) and
+	// their three design-space corners, quality / link-error / NovaWorld, as
+	// x, y pairs. The hudpos NETWORKINDICATOR line authors all six; unauthored,
+	// they keep the reset's (4, 4), (20, 4), (52, 4) [orig: CNetQuality_Reset
+	// @0x4c5908..0x4c591e -> g_NetQuality +0x40..+0x54; HUD_ParseHudposToken
+	// @0x59f981..0x59fa0c overwrites them after the mission-start reset].
+	bool net_link_icon_texture_valid = false;
+	bool net_novaworld_icon_texture_valid = false;
+	std::array<int, 6> net_indicator_pos = kNetIndicatorResetPos;
 	// The AAS zone status panel: the LFP_FLAGS anchor (the panel's right edge
 	// and its row base) and the three team-icon atlases + the two tile slots
 	// [orig: the hudpos writes g_HUDZonePanelX/Y @0x5a0563/@0x5a057b; the
@@ -1026,6 +1051,10 @@ struct HudFrameState {
 	// The non-bank map legs' feed (zone labels, pool-3 rings, player slots,
 	// the tracked callout), lent to the compile input by pointer.
 	HudMinimapOverlays map_overlays;
+	// The connection indicators (net_quality_indicators.h): the session gate,
+	// the NovaWorld icon's gate and the g_NetQuality display state the role's
+	// replica runtime keeps.
+	HudNetQualityState net_quality;
 };
 
 struct HudDrawList {
@@ -1182,6 +1211,17 @@ public:
 	static constexpr uint32_t kRadarGatePass = 1u;
 	static constexpr uint32_t kRadarGateMapSite = 2u;
 	uint32_t radar_frame_gates(const HudFrameState &state) const;
+
+	// THE CONNECTION INDICATORS' DRAWER, shared by both of retail's callers
+	// [orig: CNetQuality_DrawIndicators @0x4c3200]: the HUD compile's last
+	// element (force_default_pos false: the hudpos corners) and the listen
+	// host's server-status page (force_default_pos true: the reset corners
+	// (4, 4) / (20, 4) / (52, 4)) [orig: Server_DrawStatusScreen
+	// @0x50b2a8..0x50b2af]. It appends to the list being built (after a
+	// compile, last_draw_list()): the server-status page's compile calls it
+	// with the frame's HudNetQualityState and its own /NOHUD word.
+	void emit_net_quality_indicators(const HudNetQualityState &net, uint32_t overlay_master,
+			bool force_default_pos, float w, float h);
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
 			float surface_h);
@@ -1393,6 +1433,11 @@ private:
 	// witness) [orig: HUD_DrawTexturedQuadCentered @0x5909E0].
 	void emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw, int32_t qh,
 			int32_t texture, uint32_t diffuse, float w, float h);
+	// The connection indicators (hud_frame_net_quality.cpp): the HUD's call,
+	// last in the frame and only at hud_detail level 0 [orig:
+	// Render_ProcessMainSceneFrame @0x5cae4d..0x5cae5d]; the drawer is public
+	// (emit_net_quality_indicators).
+	void element_net_quality_indicators(const HudFrameState &state, float w, float h);
 	void mark_order_break();
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);
