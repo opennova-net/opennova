@@ -125,6 +125,15 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 		++malformed_bodies_;
 		return;
 	}
+	// The sender gate runs first: an active slot whose chat is muted, or a
+	// spectator slot while the spawn gate is down, drops the line and its
+	// channel-13 tracking [orig: Chat_DispatchToChannel @0x42b91e..0x42b943 —
+	// PlayerSlotTable_GetActiveSlot, slot+0x32 & 2, slot+0x2E &&
+	// !g_SpawnSuccessGate].
+	const ClientRosterSlot &sender = state_.roster[rec.sender_slot];
+	if (sender.bound && ((sender.radio_mute_flags & 2u) != 0 ||
+			(sender.spectator && !state_.end_round.header_known)))
+		return;
 	ClientChatLine line;
 	line.channel = rec.channel;
 	line.sender_slot = rec.sender_slot;

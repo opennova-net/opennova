@@ -406,7 +406,7 @@ void test_zone_waypoint_labels() {
 
 // The pool-3 walk — the 2044 location label (bit11), the 6027 capture ring,
 // and the 6006 KOTH ring (bit4) over the score delta.
-// [orig: @0x5a7504..0x5a76f5; sub_5974E0 @0x5974E0]
+// [orig: @0x5a7504..0x5a76f5; Minimap_DrawKothZoneRing @0x5974E0]
 void test_pool3_walk() {
 	HudMinimapOverlays ov;
 	ov.location_names = {"Hill 60"};

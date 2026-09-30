@@ -204,7 +204,7 @@ void draw_pool3_walk(MapCompile &c) {
 			// The KOTH zone ring over the score delta: ahead blue with a
 			// 0x60 fill, behind red with a 0x60 fill, level the active HUD
 			// colour, no fill; the radius entity+0, min 6 px.
-			// [orig: sub_5974E0 @0x5974E0 — dword_A85AFC - dword_A85B0C,
+			// [orig: Minimap_DrawKothZoneRing @0x5974E0 — dword_A85AFC - dword_A85B0C,
 			//  0x4060FF / 0xFF2020 / g_HUDColors.active, alpha 96 / 255]
 			const int32_t delta = ov->zone_score_delta;
 			if (delta > 0) {

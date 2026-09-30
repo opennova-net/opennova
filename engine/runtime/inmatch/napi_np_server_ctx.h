@@ -45,7 +45,7 @@ enum class ConnectionMode : uint32_t {
 // AppId/JoinTicket gates branch on this == NovaWorld. The session setter stores it from its
 // argument, the menu's connect type on a host or a join, 0 on SP and every reset; a joiner
 // carries it on its join record (the Godot JoinTarget.network_type), where the squad talk
-// row reads it [orig: sub_4C4A50 @0x4c4a50: +0x50 = state @0x4c4a82 (and +0x58
+// row reads it [orig: CNapiNetwork_SetNetworkType @0x4c4a50: +0x50 = state @0x4c4a82 (and +0x58
 // is_in_session = state in 1..3 @0x4c4a85); the join leg passes
 // g_GameConfigState.networkConnectType_480 @0x558314..0x55831f, SinglePlayer_StartMission 0
 // @0x561bd4; the squad gate @0x49ba13].

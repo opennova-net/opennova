@@ -156,7 +156,7 @@ void test_overlays_gather() {
 // entity the slot drives; the own-slot test on the entry's entity; the name
 // with the registry-tag wrap; the KOTH delta off the 0x16 team rows; and
 // Entity_GetDisplayName's player arm through the same table.
-// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a4a54..0x5a4eb4; sub_5974E0
+// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a4a54..0x5a4eb4; Minimap_DrawKothZoneRing
 //  @0x5974E0; Entity_GetDisplayName @0x59C07A..0x59C0F9]
 void test_player_slot_table_feeds_loop_one() {
     MapWorld mw;

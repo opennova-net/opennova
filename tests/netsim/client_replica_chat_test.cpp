@@ -113,6 +113,29 @@ int main() {
 	host_owned->apply(s2c::GAME_RESET, {});
 	CHECK(!host_owned->state().round_reset_hold);
 
+	// THE SENDER GATE: an active slot whose chat is muted (+50 bit 1), or a
+	// spectator slot while the spawn gate is down, drops the line; an unbound
+	// slot never gates [orig: Chat_DispatchToChannel @0x42b91e..0x42b943].
+	{
+		auto gate_owned = std::make_unique<ClientReplicaPipeline>();
+		ClientReplicaPipeline &g = *gate_owned;
+		g.state().roster[4].bound = true;
+		g.state().roster[4].radio_mute_flags = 2;
+		g.state().roster[5].bound = true;
+		g.state().roster[5].spectator = true;
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 4, "muted"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 5, "spectating"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 6, "unbound"));
+		std::vector<ClientChatLine> gated = g.drain_chat_lines();
+		CHECK(gated.size() == 1 && gated[0].text == "unbound");
+		g.state().roster[4].radio_mute_flags = 1; // the voice bit does not gate chat
+		g.state().end_round.header_known = true;  // the spawn gate up
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 4, "voice-muted"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 5, "spectating"));
+		gated = g.drain_chat_lines();
+		CHECK(gated.size() == 2);
+	}
+
 	// THE WIRE ORDER ACROSS THE THREE RING LANES: each record takes the
 	// dispatch stamp of the message that carried it, so a 0x32 that arrives
 	// between two 0x1E events sorts between their lines, and a 0x14 after them

@@ -270,15 +270,13 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (roster != nullptr && (roster->radio_mute_flags & 1u) != 0) continue;
             set_tracked_entity_target(view_.state(), world, speaker);
         } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
-            // A local-channel line: the sender slot's person, when the slot is
-            // bound and passes the dispatcher's mute gate, becomes the
-            // tracked target. [orig: Chat_DispatchToChannel @0x42B910 — the
-            //  slot gate @0x42b91e..0x42b943 (slot+50 bit 1; the +46 byte
-            //  there is the unfolded 0x46 field 0x1000), slot+0x24
+            // A local-channel line: the sender slot's person becomes the
+            // tracked target (the fold already ran the dispatcher's slot
+            // gate). [orig: Chat_DispatchToChannel @0x42B910 — slot+0x24
             //  @0x42b9ee, PlayerSlot_IsEntityInGame (def type 3) @0x42b9fb,
             //  HUD_SetTrackedEntityTarget @0x42ba09]
             const replication::ClientRosterSlot &slot = state().roster[chat->slot];
-            if (!slot.bound || (slot.radio_mute_flags & 2u) != 0 || slot.entity_slot < 0) continue;
+            if (!slot.bound || slot.entity_slot < 0) continue;
             world::Entity speaker;
             if (!sound_actor(*this, world, static_cast<uint16_t>(slot.entity_slot), speaker)) continue;
             if (!entity_is_person(*this, world, speaker)) continue;

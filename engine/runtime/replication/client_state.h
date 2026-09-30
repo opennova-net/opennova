@@ -236,8 +236,8 @@ struct ClientGameText {
 // [channel][sender_slot][cstr text] (D-NET-215); the text is already the
 // server-formatted "name(/squad): text" line. Which ring it lands in and which
 // colour it takes is the HUD's channel table (hud/feed_format.h
-// chat_channel_sink/color); the sender gate (a muted slot, or an unspawned
-// spectator while the spawn gate is down) reads the roster the embedder owns
+// chat_channel_sink/color); the sender gate (a chat-muted slot, or a
+// spectator slot while the spawn gate is down) drops the line in the fold
 // [orig: NapiNPClientMsg_ChatMessage @0x42f240 -> Chat_DispatchToChannel
 //  @0x42b910 — the slot gate @0x42b923..0x42b943, the switch @0x42b95d].
 struct ClientChatLine {
