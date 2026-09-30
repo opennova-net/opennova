@@ -2324,21 +2324,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::BURST_MEMBER_2D: { // SESSION-STATUS request -> requester-only S2C 0x58.
 				// The request has no fields. Retail rebuilds its live 0x158-byte report,
 				// serializes it, then uses send_mask 0x20 with the requester's player slot.
-				// Count admitted player records only; pending handshake nodes are not in
-				// byte_A7628C, and a Goodbye node has already left that registry.
+				// A 0x2D only reaches the host in a session (is_in_session for key 8).
 				// [orig: NapiNPServerMsg_0x02D @0x502430 -> Server_BuildAndSerializeSessionStatus @0x4FC990 ->
 				// Server_BuildStatusReport @0x530A60]
-				uint32_t active_players = 0;
-				for (const NapiNPConnection &candidate : roster) {
-					if (candidate.phase >= ConnectionPhase::PlayerAdded &&
-					    candidate.phase < ConnectionPhase::Goodbye)
-						++active_players;
-				}
 				replies.push_back(make_protocol_message(
 						s2c::SESSION_STATUS,
 						serialize_session_status(
-								config, inputs.session_uptime_ms,
-								active_players, world)));
+								config, inputs.session_uptime_ms, true, world)));
 				break;
 			}
 			case c2s::EMPTY_SLOT_SWEEP_REQUEST: { // EMPTY-SLOT SWEEP REQUEST -> S2C 0x5D to the REQUESTER ONLY.

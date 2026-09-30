@@ -104,6 +104,22 @@ void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out);
 //  HUD_GetLoadingScreenTextByGameType @0x51f408 / @0x51f46b]
 SessionVars scoreboard_session_vars(const RoleView &view);
 
+// THE CMAP RULES TEXT for this client (RULELIST at the CMAP show): a
+// joiner's S2C 0x58 record and 0x7E strings; on the authority its own report,
+// built fresh as every C2S 0x2D rebuilds it (its uptime part is the time since
+// the session start whenever it is read, the rest fixed for the round) and its
+// mission text; plus the game type, the 0x16 in-game count, the local team and
+// the spawn-zone test. False (nothing built, RULELIST keeps its text) while
+// the record is not valid, or on the bare local role (retail's single player
+// builds a valid report, but out of a session its RULES tab is disabled, so
+// the text is never shown).
+// [orig: sub_54B320 @0x54b490 -> Overlay_BuildEndGameStatsText @0x54a240; the
+//  authority's report Server_BuildStatusReport @0x530a60, rebuilt at
+//  Game_StartMission @0x524871 / @0x525b95, Render_LoadingScreen @0x521ecd and
+//  Server_BuildAndSerializeSessionStatus @0x4fc990]
+bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
+		std::string &out);
+
 // THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
 // screen and round-over latches off the replica, the session (a joiner's
 // connection, the authority's is_in_session), the replica's reset hold, the

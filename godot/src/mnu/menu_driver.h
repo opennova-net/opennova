@@ -237,6 +237,10 @@ public:
 			int p_value);
 	// Current standalone scroll state, or null until seeded.
 	Ref<MenuScrollRange> get_widget_scroll_range(int p_id) const;
+	// A row owner's first visible row (a list / table's, a multiline edit's
+	// first line; the multiline edit's SetText resets it to 0, docs/interface/
+	// hud-re.md "The windowed map views").
+	void set_scroll_row(int p_id, int p_row);
 
 	void table_add_row(int p_id, const PackedStringArray &p_cells);
 	void table_clear_rows(int p_id);

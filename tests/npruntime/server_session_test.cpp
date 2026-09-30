@@ -3296,6 +3296,13 @@ bool check_session_status_reply_matches_retail_writer() {
 	roster[1].phase = opennova::inmatch::ConnectionPhase::InMatch;
 	roster[1].burst.spawned = true;
 
+	// Co-op's key 9 is the mission's defined-subgoal count: two authored win
+	// conditions ahead of the 0 terminator [orig: Server_BuildStatusReport
+	// @0x530cb0..0x530ce1].
+	opennova::world::World world;
+	world.script.subgoals.win_text_ids[1] = 3;
+	world.script.subgoals.win_text_ids[2] = 4;
+
 	opennova::inmatch::ServerDispatchInputs inputs;
 	inputs.session_uptime_ms = 111844u;
 	std::vector<opennova::ProtocolMessage> replies =
@@ -3303,7 +3310,7 @@ bool check_session_status_reply_matches_retail_writer() {
 					config, roster[1],
 					{opennova::make_protocol_message(
 							opennova::c2s::BURST_MEMBER_2D, {})},
-					17u, roster, nullptr, inputs);
+					17u, roster, &world, inputs);
 	if (!expect(replies.size() == 1 &&
 	                    replies.front().tag == opennova::s2c::SESSION_STATUS,
 	            "C2S 0x2D receives one requester-only S2C 0x58"))
@@ -3338,7 +3345,7 @@ bool check_session_status_reply_matches_retail_writer() {
 	                    decoded.kv[0].key == 9 && decoded.kv[0].value == 2 &&
 	                    decoded.kv[1].key == 8 && decoded.kv[1].value == 30 &&
 	                    decoded.trailing_bytes == 5,
-	            "session-status carries player-count/respawn pairs and writer sentinel"))
+	            "session-status carries subgoal-count/respawn pairs and writer sentinel"))
 		return false;
 	return expect(std::all_of(replies.front().payload.end() - 5,
 	                          replies.front().payload.end(),
@@ -3368,7 +3375,7 @@ bool check_objective_mode_session_status_options() {
 	world.match.configure(rules);
 	opennova::SessionStatusBlock decoded;
 	std::vector<uint8_t> body = opennova::inmatch::serialize_session_status(
-			config, 0, 0, &world);
+			config, 0, true, &world);
 	if (!expect(opennova::decode_session_status(
 				body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
 				decoded.kv[0].key == 7 && decoded.kv[0].value == 2 &&
@@ -3385,7 +3392,7 @@ bool check_objective_mode_session_status_options() {
 		config.game_type = game_type;
 		rules.game_type = game_type;
 		world.match.configure(rules);
-		body = opennova::inmatch::serialize_session_status(config, 0, 0, &world);
+		body = opennova::inmatch::serialize_session_status(config, 0, true, &world);
 		decoded = {};
 		if (!expect(opennova::decode_session_status(
 					body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
@@ -3402,7 +3409,7 @@ bool check_objective_mode_session_status_options() {
 		config.max_score = 0;
 		rules.game_type = game_type;
 		world.match.configure(rules);
-		body = opennova::inmatch::serialize_session_status(config, 0, 0, &world);
+		body = opennova::inmatch::serialize_session_status(config, 0, true, &world);
 		decoded = {};
 		if (!expect(opennova::decode_session_status(
 					body.data(), body.size(), decoded) && decoded.kv.size() == 1 &&

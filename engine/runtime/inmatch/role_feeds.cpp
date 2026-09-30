@@ -10,6 +10,8 @@
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
+#include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
+#include <runtime/hud/session_rules_text.h>
 #include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
@@ -1091,6 +1093,49 @@ SessionVars scoreboard_session_vars(const RoleView &view) {
 		decode_session_vars(stream.data(), stream.size(), vars);
 	}
 	return vars;
+}
+
+bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
+		std::string &out) {
+	if (view.runtime == nullptr || view.kernel == nullptr) return false;
+	const replication::ClientState &state = view.runtime->state();
+	world::World &w = view.kernel->world;
+	replication::ClientSessionStatus status;
+	hud::RulesBriefingInputs inputs;
+	if (view.joiner) {
+		status = state.session_status;
+		inputs.config_first = replication::server_config_first_text(state.server_config_strings);
+		inputs.config_second = replication::server_config_second_text(state.server_config_strings);
+	} else if (view.host != nullptr) {
+		const std::vector<uint8_t> body = serialize_session_status(view.host->config,
+				view.host->np_protocol.host_run_duration_ms, view.host->is_in_session != 0, &w);
+		SessionStatusBlock block;
+		(void)decode_session_status(body.data(), body.size(), block);
+		status = replication::fold_session_status(block, state.local_clock_ms);
+		inputs.authority = true;
+		// MissionText info/briefing3 and info/briefing2, else info/briefing
+		// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0 — the authority arm].
+		inputs.briefing3 = view.host->mission_briefing3;
+		inputs.briefing2 = view.host->mission_briefing2;
+	} else {
+		return false;
+	}
+	hud::SessionStatusView sv;
+	sv.valid = status.valid;
+	sv.server_name = status.server_name;
+	sv.mission_name = status.mission_name;
+	sv.max_players = status.max_players;
+	sv.elapsed_ms = replication::session_status_elapsed_ms(status, state.local_clock_ms);
+	sv.stats = status.stats;
+	for (const replication::ClientSessionStatus::Option &o : status.options)
+		sv.options.emplace_back(o.key, o.value);
+	inputs.game_type = view.runtime->game_type();
+	// [orig: `g_LocalPlayerEntity ? ->Team (+0x162) : 0` @0x5b92de..0x5b92f1]
+	if (const world::Entity *local = w.registry.get(w.cached.local_player))
+		inputs.local_team = static_cast<int8_t>(local->team);
+	inputs.spawn_zones = w.zones.has_spawn_zone(); // sub_43B910
+	// [orig: g_ScoreboardInGameCount, the 0x16 trailer @0x42fe70]
+	return hud::build_end_game_stats_text(sv, state.scoreboard.in_game_count, inputs, gametext, out);
 }
 
 void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {

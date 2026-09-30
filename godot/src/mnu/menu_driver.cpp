@@ -583,6 +583,7 @@ void MenuDriver::set_widget_scroll_range(int p_id, int p_minimum, int p_maximum,
 		int p_value) {
 	runtime_.set_widget_scroll_range(p_id, p_minimum, p_maximum, p_page, p_value);
 }
+void MenuDriver::set_scroll_row(int p_id, int p_row) { runtime_.set_scroll_row(p_id, p_row); }
 Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 	opennova::menu::MenuScrollRangeState state;
 	Ref<MenuScrollRange> out;
@@ -975,6 +976,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "id", "minimum", "maximum", "page",
 								 "value"),
 			&MenuDriver::set_widget_scroll_range);
+	ClassDB::bind_method(D_METHOD("set_scroll_row", "id", "row"), &MenuDriver::set_scroll_row);
 	ClassDB::bind_method(D_METHOD("get_widget_scroll_range", "id"),
 			&MenuDriver::get_widget_scroll_range);
 

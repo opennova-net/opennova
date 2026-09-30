@@ -4,7 +4,8 @@
 // (world/vehicle_panel_feed.h, world/lfp_feed.h, hud/feed_format.h); this TU is
 // the Simulation seam that resolves the local player, the client runtime's
 // zone-timer table and minimap banks, and the replica pipeline's chat drain
-// for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape).
+// for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape),
+// and the CMAP RULES text (inmatch::command_map_rules_text).
 
 #include "simulation/simulation_internal.h"
 #include "simulation/hud_view_records.h"
@@ -99,6 +100,16 @@ PackedByteArray Simulation::take_tip_events() {
 	for (size_t i = 0; i < events.size(); ++i) out.set(static_cast<int64_t>(i), events[i]);
 	events.clear();
 	return out;
+}
+
+String Simulation::get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const {
+	// The CMAP show's RULELIST text (engine inmatch::command_map_rules_text,
+	// where the witness is cited); "" when nothing is built, and the presenter
+	// then leaves the control's text alone.
+	std::string text;
+	if (!opennova::inmatch::command_map_rules_text(role_view(), game_text_lookup(p_gametext), text))
+		return String();
+	return opennova::to_gd(text);
 }
 
 Ref<ScoreFeedback> Simulation::take_score_feedback() {

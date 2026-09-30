@@ -931,6 +931,55 @@ struct ClientNetQuality {
 	std::uint8_t level = 0;
 };
 
+// The session status a client keeps from S2C 0x58 (the authority builds the
+// same record from its own report): the CMAP RULES text's source. The fold
+// memsets it, keeps at most 31 characters of the server name and 63 of the
+// mission name, the three bytes, the uptime and the 39 stat values, then only
+// the first 8 option pairs whose key is 9 or less (the cursor still reads
+// every advertised pair, each short read 0), stamps the local clock and marks
+// it valid.
+// [orig: NapiNPClientMsg_SessionStatus @0x4228c0 -> SessionStatus_ParseFromBuffer
+//  @0x530ed0 into g_SessionStatus @0x24E3E88 — the name loops (32 / 64-byte
+//  fields), the pair gate `count < 8 && key <= 9` @0x53107f, the GetTickCount
+//  stamp +0x74 and valid @0x5310aa]
+struct ClientSessionStatus {
+	bool valid = false;               // +0x00
+	std::string server_name;          // +0x04 g_SessionStatusServerName
+	std::string mission_name;         // +0x24 g_ServerMissionName
+	uint32_t game_type_byte = 0;      // +0x64
+	uint32_t score_table = 0;         // +0x68
+	uint32_t max_players = 0;         // +0x6C g_ServerMaxPlayers
+	uint32_t uptime_ms = 0;           // +0x70
+	uint32_t stamp_ms = 0;            // +0x74, the local clock at the fold
+	std::array<int32_t, 39> stats{};  // +0x78
+	struct Option {
+		uint32_t key = 0;
+		uint32_t value = 0;
+	};
+	std::vector<Option> options;      // +0x114 g_SessionStatusOptionCount, +0x118
+};
+ClientSessionStatus fold_session_status(const SessionStatusBlock &block, uint32_t now_ms);
+// The session's elapsed milliseconds: 0 while not valid, else the uptime plus
+// the time since the stamp (u32 wrap) [orig: SessionStatus_GetElapsedMS @0x52d5f0].
+uint32_t session_status_elapsed_ms(const ClientSessionStatus &status, uint32_t now_ms);
+
+// The S2C 0x7E strings a client keeps: each strncpy'd into its own 1024-byte
+// buffer, the second buffer (byte_A86120) lying directly below the first
+// (byte_A86520). The handler reads the first string up to its NUL (or the
+// body end) and the second from just past it.
+// [orig: NapiNPClientMsg_ServerConfigStrings @0x425e20 — strncpy(byte_A86520,
+//  body, 0x400) @0x425e56, strncpy(byte_A86120, second, 0x400) @0x425e6d]
+struct ClientServerConfigStrings {
+	std::string first;  // the raw first string (briefing3 on a stock host)
+	std::string second; // the raw second string (briefing2, else briefing)
+};
+void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerConfigStrings &out);
+// The two buffers as a C-string read sees them: byte_A86520 (at most its 1024
+// bytes: what lies past it is not this record's) and byte_A86120, whose read
+// runs on into byte_A86520 when strncpy left its 1024 bytes unterminated.
+std::string server_config_first_text(const ClientServerConfigStrings &strings);
+std::string server_config_second_text(const ClientServerConfigStrings &strings);
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -1118,6 +1167,14 @@ struct ClientState {
 	uint16_t exp_fanfare = 0;
 	ClientSpawnWaveStatus spawn_waves;
 	std::vector<ClientZoneWaveCounts> zone_wave_counts;
+	// The client's local millisecond clock (the platform stand-in for
+	// GetTickCount the 0x58 fold stamps and the elapsed read compares):
+	// advanced io::kTickMs per client net frame.
+	uint32_t local_clock_ms = 0;
+	// S2C 0x58 (the CMAP RULES text's record) and S2C 0x7E (a client's
+	// briefing strings).
+	ClientSessionStatus session_status;
+	ClientServerConfigStrings server_config_strings;
 	// The two HUD order lines S2C 0x72 writes: [0] the individual order, [1]
 	// the fireteam order, 127 characters each; an empty line cancels. They
 	// hold until overwritten or the next mission start clears them.

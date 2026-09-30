@@ -1366,6 +1366,12 @@ add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
 target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
 add_test(NAME hud_game_text COMMAND hud_game_text_test)
 
+# The CMAP RULES tab's text (hud/session_rules_text.h) over the S2C 0x58 fold and
+# the 0x7E briefing strings (replication client_state.h), the serializer's key 9.
+add_executable(session_rules_text_test hud/session_rules_text_test.cpp)
+target_link_libraries(session_rules_text_test PRIVATE opennova_runtime)
+add_test(NAME session_rules_text COMMAND session_rules_text_test)
+
 # The HUD item flash BMS action 28 sub 37 arms and the declutter level-0 side
 # path it takes (hud/hud_declutter.h HudItemFlash / apply_level).
 add_executable(hud_item_flash_test hud/hud_item_flash_test.cpp)

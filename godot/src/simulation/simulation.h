@@ -1692,6 +1692,7 @@ public:
 			std::vector<opennova::hud::HudLfpZone> &r_zones);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
+	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep
 	// NOT ClassDB-bound: the talk keys' facts (inmatch::chat_entry_facts), C2S 0x0D send
 	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;

@@ -264,6 +264,8 @@ void Simulation::_bind_methods() {
 			&Simulation::get_vehicle_panel_view);
 	ClassDB::bind_method(D_METHOD("get_session_game_type"),
 			&Simulation::get_session_game_type);
+	ClassDB::bind_method(D_METHOD("get_command_map_rules_text", "gametext"),
+			&Simulation::get_command_map_rules_text);
 	ClassDB::bind_method(D_METHOD("get_scoreboard"), &Simulation::get_scoreboard);
 	ClassDB::bind_method(
 			D_METHOD("format_feed_line", "template", "attacker", "victim",

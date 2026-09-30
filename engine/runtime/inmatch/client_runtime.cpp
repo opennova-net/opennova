@@ -8,6 +8,7 @@
 #include <runtime/world/world.h>
 
 #include <base/io/le.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cstring>
@@ -783,6 +784,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// while it is 0. [orig: Client_ProcessNetworkFrame @0x42c193 cmp/jz -> loc_42C1F2;
 	// ++ @0x42c1ab, store @0x42c1b5]
 	if (current_tick_ != 0) ++current_tick_;
+	// The client's local millisecond clock the S2C 0x58 fold stamps and the
+	// RULES text's elapsed read compares (retail's GetTickCount): free-running
+	// one fixed tick per client net frame, independent of the seeded tick
+	// above [orig: SessionStatus_ParseFromBuffer @0x5310a5 stamps
+	// GetTickCount; SessionStatus_GetElapsedMS @0x52d5fc reads it].
+	view_.state().local_clock_ms += static_cast<uint32_t>(io::kTickMs);
 
 	// (0x34) keepalive — runs for EVERYONE (NOT authority-gated), emitted before the recv pump in the
 	// original [orig @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's

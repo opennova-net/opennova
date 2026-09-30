@@ -94,6 +94,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// The talk keys' reset hold clears on every 0x0F, authority or not
 		// [orig: `mov dword_24C195C, eax` (0) @0x42e396].
 		state_.round_reset_hold = false;
+		// The session status is reset at the mission start, ahead of this
+		// 0x0F: its completion burst's C2S 0x2D asks the host for the fresh
+		// 0x58 [orig: Game_StartMission @0x524871 / @0x525b95 —
+		// Server_BuildStatusReport @0x530a60 memsets it (valid 0) off the
+		// authority; NapiNPClientMsg_0x00F's burst sends the 0x2D].
+		state_.session_status = ClientSessionStatus{};
 		WorldStateLoad wsl;
 		if (decode_world_state_load(body.data(), body.size(), wsl,
 				game_type::is_waypoint_family(game_type_))) {
@@ -338,6 +344,19 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		break;
 	case s2c::OBJECTIVE_NOTIFICATION: // the authority's HUD relay (0x3F)
 		apply_objective_notification(body);
+		break;
+	case s2c::SESSION_STATUS: { // §5.48 the CMAP RULES text's record (0x58)
+		// [orig: NapiNPClientMsg_SessionStatus @0x4228c0 ->
+		//  SessionStatus_ParseFromBuffer @0x530ed0]
+		SessionStatusBlock block;
+		(void)decode_session_status(body.data(), body.size(), block); // lenient: see the fold
+		state_.session_status = fold_session_status(block, state_.local_clock_ms);
+		state_.mark_changed();
+		break;
+	}
+	case s2c::SERVER_CONFIG_STRINGS: // a client's briefing strings (0x7E)
+		fold_server_config_strings(body, state_.server_config_strings);
+		state_.mark_changed();
 		break;
 	default:
 		// Game-start scalars and other non-entity tags this reducer

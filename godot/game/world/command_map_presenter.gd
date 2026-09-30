@@ -154,6 +154,7 @@ func open() -> bool:
 	_bind_delete_button("MAP")
 	_apply_tab_gates(_screen.populate_team_list(true))
 	_screen.populate_player_list()
+	_fill_rules_text()
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	_place_map_window()
@@ -492,3 +493,20 @@ func _on_frame_gui_input(event: InputEvent) -> void:
 func _recompute_fit() -> void:
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
 	_place_map_window()
+
+
+# The show's RULELIST text, the RULES tab's read-only multiline edit (the
+# engine's command_map_rules_text: the session status, win conditions, rules,
+# briefing and scoring rules), its first line scrolled back to the top;
+# nothing built leaves the control's old text (hud-re D-HUD-19, "The windowed
+# map views").
+func _fill_rules_text() -> void:
+	var id := _driver.widget_id("RULELIST")
+	var sim: Simulation = _view.sim() if _view != null else null
+	if id < 0 or sim == null:
+		return
+	var text := sim.get_command_map_rules_text(Strings.get_table(Strings.TABLE_GAMETEXT))
+	if text.is_empty():
+		return
+	_driver.set_widget_text(id, text)
+	_driver.set_scroll_row(id, 0)

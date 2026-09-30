@@ -95,6 +95,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/session_rules_text.cpp # the CMAP RULELIST text (the session status, rules, briefing)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
