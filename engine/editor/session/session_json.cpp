@@ -1453,8 +1453,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 			entry.set("open_choices", boolean(true));
 		if (!field.scope.empty() && (field.reference != ReferenceKind::None || field.defines != ReferenceKind::None))
 			entry.set("scope", json_string(field.scope));
-		if (field.reference != ReferenceKind::None) {
-			entry.set("reference", json_string(reference_row(field.reference).token));
+		// The field's reference, or the variable a menu text's whole %NAME% names (value_reference).
+		const ReferenceKind reference = value_reference(field, value);
+		if (reference != ReferenceKind::None) {
+			entry.set("reference", json_string(reference_row(reference).token));
 			std::string symbol;
 			const ReferenceStatus status = view.findings.graph
 					? reference_status(*view.findings.graph, field, value, &symbol)

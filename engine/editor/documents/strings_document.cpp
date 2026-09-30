@@ -370,62 +370,55 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 	}
 }
 
-std::vector<Diagnostic> validate_strings(const ValidationInput &input, const AssetGraph &) {
+std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	for (const auto &asset : input.scan.entries) {
-		if (!is_strings_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
-			continue;
-		}
-		// On the string it names, when the table holds it, wherever it is now (source_address; a
-		// string of a section the table does not have, or one removed since: the file alone).
-		source_issue_findings(*document, "strings.invalid_input", "strings.regrouped", findings);
-		if (document->blocked()) continue;
-		// The sections by the reader's rule (rtxt::File::section_index): a lookup finds the first
-		// section of a name, in any case, so a later one of the name is never read by section (the
-		// flat key walk still reads its strings [orig: TextResource_FindEntryByKey @ 0x75D450]). An
-		// empty name is the editor's rule, as an empty key is.
-		rtxt::File names;
-		for (const auto &node : document->rows()) names.sections.push_back({section_of(*node).section_name, 0});
-		for (size_t s = 0; s < names.sections.size(); ++s) {
-			const Node &node = *document->rows()[s];
-			const std::string &name = names.sections[s].name;
-			const size_t found = names.section_index(name);
-			if (!name.empty() && found == s) continue;
-			auto diagnostic = name.empty()
-			        ? make_diagnostic(DiagnosticSeverity::Error, "strings.section_empty",
-			                          "Enter a name for this section: a lookup finds a section by its name.", document->path(), "name")
-			        : make_diagnostic(DiagnosticSeverity::Warning, "strings.section_duplicate",
-			                          "Section " + std::to_string(found + 1) + " is named '" + retail_text_to_utf8(names.sections[found].name) +
-			                                  "' too, and a lookup by section reads the first: this one's strings are reached only by a "
-			                                  "lookup of the key alone.",
-			                          document->path(), "name");
-			diagnostic.record = retail_text_to_utf8(name);
-			diagnostic.row_id = node.id;
-			diagnostic.record_kind = kSection;
-			findings.push_back(std::move(diagnostic));
-		}
-		for (const auto &node : document->rows()) {
-			const StringsSection &section = section_of(*node);
-			std::set<std::string> keys;
-			for (size_t i = 0; i < section.entries.size(); ++i) {
-				const rtxt::Entry &entry = section.entries[i];
-				auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
-					auto diagnostic = make_diagnostic(severity, code, message, document->path(), "key");
-					diagnostic.record = section.section_name;
-					diagnostic.row_id = node->id;
-					diagnostic.child_id = section.collections[0][i];
-					diagnostic.record_kind = kString;
-					findings.push_back(std::move(diagnostic));
-				};
-				if (entry.key.empty()) add(DiagnosticSeverity::Error, "strings.key_empty", "Enter a key for this string in section '" + section.section_name + "'.");
-				else if (!keys.insert(strutil::to_upper(entry.key)).second)
-					add(DiagnosticSeverity::Warning, "strings.key_duplicate",
-					    "Section '" + section.section_name + "' has more than one '" + entry.key + "'; the game reads the first.");
-			}
+	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
+	if (!strings) return findings;
+	// On the string it names, when the table holds it, wherever it is now (source_address; a
+	// string of a section the table does not have, or one removed since: the file alone).
+	source_issue_findings(*strings, "strings.invalid_input", "strings.regrouped", findings);
+	if (document.blocked()) return findings;
+	// The sections by the reader's rule (rtxt::File::section_index): a lookup finds the first
+	// section of a name, in any case, so a later one of the name is never read by section (the
+	// flat key walk still reads its strings [orig: TextResource_FindEntryByKey @ 0x75D450]). An
+	// empty name is the editor's rule, as an empty key is.
+	rtxt::File names;
+	for (const auto &node : strings->rows()) names.sections.push_back({section_of(*node).section_name, 0});
+	for (size_t s = 0; s < names.sections.size(); ++s) {
+		const Node &node = *strings->rows()[s];
+		const std::string &name = names.sections[s].name;
+		const size_t found = names.section_index(name);
+		if (!name.empty() && found == s) continue;
+		auto diagnostic = name.empty()
+		        ? make_diagnostic(DiagnosticSeverity::Error, "strings.section_empty",
+		                          "Enter a name for this section: a lookup finds a section by its name.", document.path(), "name")
+		        : make_diagnostic(DiagnosticSeverity::Warning, "strings.section_duplicate",
+		                          "Section " + std::to_string(found + 1) + " is named '" + retail_text_to_utf8(names.sections[found].name) +
+		                                  "' too, and a lookup by section reads the first: this one's strings are reached only by a "
+		                                  "lookup of the key alone.",
+		                          document.path(), "name");
+		diagnostic.record = retail_text_to_utf8(name);
+		diagnostic.row_id = node.id;
+		diagnostic.record_kind = kSection;
+		findings.push_back(std::move(diagnostic));
+	}
+	for (const auto &node : strings->rows()) {
+		const StringsSection &section = section_of(*node);
+		std::set<std::string> keys;
+		for (size_t i = 0; i < section.entries.size(); ++i) {
+			const rtxt::Entry &entry = section.entries[i];
+			auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
+				auto diagnostic = make_diagnostic(severity, code, message, document.path(), "key");
+				diagnostic.record = section.section_name;
+				diagnostic.row_id = node->id;
+				diagnostic.child_id = section.collections[0][i];
+				diagnostic.record_kind = kString;
+				findings.push_back(std::move(diagnostic));
+			};
+			if (entry.key.empty()) add(DiagnosticSeverity::Error, "strings.key_empty", "Enter a key for this string in section '" + section.section_name + "'.");
+			else if (!keys.insert(strutil::to_upper(entry.key)).second)
+				add(DiagnosticSeverity::Warning, "strings.key_duplicate",
+				    "Section '" + section.section_name + "' has more than one '" + entry.key + "'; the game reads the first.");
 		}
 	}
 	return findings;

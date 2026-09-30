@@ -3,7 +3,8 @@
 // readers leave its files alone and say so: the graph reads none (graph_reads_kind false,
 // extract_from_bytes giving nothing), so an import lists the kind as not followed; the
 // validation's input answers document.no_records for its file, open or closed, without reading
-// it; a rename refuses a site in it with that reason, where a kind with no editor gets its own
+// it (S13 D4: the validation cache's own finding for the file, its document never made); a rename
+// refuses a site in it with that reason, where a kind with no editor gets its own
 // words. Through a session the file opens as a document of that kind: the lifecycle's callers
 // find it (document_base_for), the rows' do not (document_for null); it takes an Apply of its
 // type's payload and nothing else, undoes, redoes and saves; Copy, Cut, Paste, Duplicate and
@@ -43,7 +44,7 @@ namespace {
 
 std::unique_ptr<DocumentBase> make_blob() { return std::make_unique<BlobDocument>(); }
 
-std::vector<Diagnostic> validate_nothing(const ValidationInput &, const AssetGraph &) { return {}; }
+std::vector<Diagnostic> validate_nothing(const DocumentBase &) { return {}; }
 
 // The blob type, in the stylesheet type's place.
 const DocumentType kBlobType{DocumentTypeId::Styles, "blob", make_blob, validate_nothing};
@@ -94,27 +95,24 @@ static int test_non_record_type() {
 		TEST_EXPECT(extract_from_bytes(path, kind, bytes, "jo", extracted, error));
 		TEST_EXPECT(extracted.edges.empty() && extracted.symbols.empty());
 		TEST_EXPECT(references_unread(kind, asset.logical_name));
-		// The validation's input: document.no_records for its file, closed and open, the file
-		// unread.
+		// The validation: document.no_records for its file, closed and open, the file unread and
+		// no document of the type made for it.
 		const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
 		ValidationCache cache;
-		cache.begin();
 		std::vector<std::shared_ptr<const DocumentBase>> open;
-		{
-			const ValidationInput input{paths, *view.project.document, *view.project.scan, open,
-			                            cache};
-			TEST_EXPECT(!input.document(asset, error) && error.code == "document.no_records");
-		}
+		const auto no_records = [&] {
+			const ValidationInput input{paths, *view.project.document, *view.project.scan, open};
+			cache.begin();
+			const std::vector<Diagnostic> findings = cache.file_findings(input, asset);
+			cache.end();
+			return findings.size() == 1 && findings.front().code == "document.no_records" &&
+			       cache.stats().files_loaded == 0 && !cache.records_checked(path);
+		};
+		TEST_EXPECT(no_records());
 		auto blob = std::make_shared<BlobDocument>();
 		TEST_EXPECT(blob->load(file, path, kind, "jo", error));
 		open.push_back(blob);
-		{
-			error = Diagnostic();
-			const ValidationInput input{paths, *view.project.document, *view.project.scan, open,
-			                            cache};
-			TEST_EXPECT(!input.document(asset, error) && error.code == "document.no_records");
-		}
-		cache.end();
+		TEST_EXPECT(no_records());
 		// A rename refuses a site in it with that reason; a kind with no editor gets its own
 		// words.
 		SymbolRenamePlan plan;

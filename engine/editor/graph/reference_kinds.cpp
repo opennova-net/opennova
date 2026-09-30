@@ -264,6 +264,10 @@ constexpr ReferenceKindRow kRows[] = {
 	        .tolerated(clip_missing)
 	        .message_reads_files()
 	        .row,
+	// Never a reference of its own: a menu's text as the game reads it (a NAME, a shown text, an
+	// ACTION's target), which a whole %NAME% of the stylesheets stands in for (a StyleVar edge's
+	// through: FieldUse::variable_through).
+	Row(ReferenceKind::MenuText, "menu_text", "the text", "text").row,
 	// An item's particle slot naming no user point attaches its effect to none.
 	Row(ReferenceKind::UserPoint, "user_point", "the user point", "user point")
 	        .symbol(NameCase::NoCase)
@@ -313,6 +317,15 @@ ReferenceKind style_value_reference(AssetKind file) {
 	for (const ReferenceKindRow &row : kRows)
 		if (row.also_offers == ReferenceKind::StyleVar && row.file == file) return row.kind;
 	return ReferenceKind::None;
+}
+
+StyleVariableUse style_variable_use(ReferenceKind through) {
+	switch (through) {
+	case ReferenceKind::None: return StyleVariableUse::Colour;
+	case ReferenceKind::Font: return StyleVariableUse::Font;
+	case ReferenceKind::MenuTexture: return StyleVariableUse::Image;
+	default: return StyleVariableUse::Other;
+	}
 }
 
 } // namespace opennova::editor

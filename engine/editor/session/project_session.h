@@ -97,6 +97,9 @@ public:
 	bool project_open() const;
 	// What the last validation read: the closed files it loaded and reused.
 	const ValidationStats &validation_stats() const;
+	// How many times the Problems rows were composed: a validation that finds nothing they are
+	// made of moved composes none (for the tests).
+	size_t problems_compositions() const;
 	// The directory the running game uses ("" when none): the build never prunes it.
 	std::string running_build_dir() const;
 

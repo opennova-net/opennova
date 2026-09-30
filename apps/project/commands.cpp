@@ -20,7 +20,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_lease.h>
 
-#include <editor/documents/document_types.h>
+#include <editor/graph/project_validation.h>
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -453,8 +453,11 @@ int command_build(int argc, const char *const *argv, std::FILE *out, std::FILE *
 	if (!open_for_report(dir, project, err)) return 2;
 	print_imported(out, project.state.imports);
 	// The document gate is the same validation `validate` prints, run once here.
-	const std::vector<Diagnostic> findings =
-	        validate_open_documents(project.paths, project.doc, project.state.scan, {}, nullptr, nullptr);
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const std::vector<Diagnostic> findings = validate_project(
+			{ project.paths, project.doc, project.state.scan, open }, graph, cache);
 	const BuildPlan plan = plan_build(project.paths, project.state.scan, project.state.requirements, findings);
 	if (!plan.ok) {
 		for (const Diagnostic &d : plan.diagnostics) print_diagnostic(out, d);

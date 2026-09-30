@@ -7,15 +7,12 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/model/document.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_schema.h>
 #include <runtime/assets/asset_store.h>
 
 namespace opennova::editor {
-
-class AssetGraph;
 
 // A model (ADR 0046 S10): a `.3di`, whose engine features the editor changes through
 // the format's property table (formats/threedi/threedi_schema.h) over the engine's own
@@ -169,12 +166,12 @@ protected:
 
 bool is_model_kind(AssetKind kind);
 
-// The model document type's validator (document_types): every model in the project,
-// open documents standing in for their files. More than 8 `sitex` seats, a register or
+// The model document type's validator over one model (DocumentType::validate_file), an open
+// document standing in for its file. More than 8 `sitex` seats, a register or
 // frame named that the model lacks, a light on a part LOD 0 lacks are errors; duplicate
 // user point names, a shader or register name the engine does not know, LOD thresholds
 // that do not descend are warnings; more than 16 user points and a material no strip
 // draws with are notes. Textures are the asset graph's.
-std::vector<Diagnostic> validate_models(const ValidationInput &input, const AssetGraph &graph);
+std::vector<Diagnostic> validate_model_file(const DocumentBase &document);
 
 } // namespace opennova::editor

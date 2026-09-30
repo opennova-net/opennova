@@ -5,13 +5,10 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/model/document.h>
 #include <formats/adm/adm.h>
 
 namespace opennova::editor {
-
-class AssetGraph;
 
 // An animation map (ADR 0046 S10): a `.adm`, the table that names which clips a rig
 // plays in each of the engine's 252 animation slots. Rows are the table's rows in file
@@ -74,8 +71,8 @@ bool is_animation_map_kind(AssetKind kind);
 // the engine compares them ("anim_walk_forward": "walk forward"), any other key as it is.
 std::string animation_key_title(const std::string &key);
 
-// The animation map document type's validator (document_types): every table loads, open
-// documents standing in for their files. Each line the table leaves out is a finding on its
+// The animation map document type's validator over one table (DocumentType::validate_file), an
+// open document standing in for its file. Each line the table leaves out is a finding on its
 // line (and its row, where it keeps one): input the game ignores a warning
 // (animation_map.ignored_input, Rewrite drops it), a row the table cannot hold an error
 // (animation_map.invalid_input). A table with no anim_reset row and a row the writer
@@ -84,6 +81,6 @@ std::string animation_key_title(const std::string &key);
 // slot an earlier row names is a note (animation_map.slot_repeated: the game joins their
 // clips into one ring, and keeps only the last reset clip). A clip the project lacks is the
 // asset graph's.
-std::vector<Diagnostic> validate_animation_maps(const ValidationInput &input, const AssetGraph &graph);
+std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document);
 
 } // namespace opennova::editor

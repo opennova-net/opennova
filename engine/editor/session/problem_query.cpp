@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>

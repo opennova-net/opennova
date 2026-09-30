@@ -1,7 +1,9 @@
 #include <editor/project/project_findings.h>
 
+#include <iterator>
+
 #include <base/gameprofile/required_resources.h>
-#include <editor/documents/document_types.h>
+#include <editor/graph/project_validation.h>
 #include <editor/preview/menu_render_check.h>
 
 namespace opennova::editor {
@@ -25,18 +27,40 @@ Diagnostic boot_finding(const std::string &name) {
 
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                                          MenuRenderCheck &render_check, const FileSource &files) {
+	refresh_project_findings(input, graph, cache, render_check, files);
+	return collect_project_findings(input, graph, cache, render_check);
+}
+
+bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
+                              MenuRenderCheck &render_check, const FileSource &files) {
+	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
+	const bool files_moved = refresh_project(validation, graph, cache);
+	const bool notes_moved = render_check.update(validation, files);
+	return files_moved || notes_moved;
+}
+
+ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
+                                         const ValidationCache &cache, const MenuRenderCheck &render_check) {
 	ProjectFindings out;
-	out.documents = validate_open_documents(input.paths, input.project, input.scan, input.open, &graph, &cache);
-	out.documents.insert(out.documents.end(), input.open_findings.begin(), input.open_findings.end());
-	const ValidationInput validation{input.paths, input.project, input.scan, input.open, cache};
-	render_check.update(validation, files);
-	out.rows = input.scan.diagnostics;
-	out.rows.insert(out.rows.end(), input.requirements.diagnostics.begin(), input.requirements.diagnostics.end());
-	for (const std::string &name : input.boot_missing) out.rows.push_back(boot_finding(name));
-	out.rows.insert(out.rows.end(), input.play.begin(), input.play.end());
-	out.rows.insert(out.rows.end(), out.documents.begin(), out.documents.end());
-	out.rows.insert(out.rows.end(), render_check.diagnostics().begin(), render_check.diagnostics().end());
-	out.rows.insert(out.rows.end(), input.build.begin(), input.build.end());
+	std::vector<Diagnostic> &rows = out.rows;
+	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
+	std::vector<Diagnostic> documents = project_rows(validation, graph, cache);
+	rows.reserve(input.scan.diagnostics.size() + input.requirements.diagnostics.size() +
+			input.boot_missing.size() + input.play.size() + documents.size() +
+			input.open_findings.size() + render_check.diagnostics().size() + input.build.size());
+	rows.insert(rows.end(), input.scan.diagnostics.begin(), input.scan.diagnostics.end());
+	rows.insert(rows.end(), input.requirements.diagnostics.begin(),
+			input.requirements.diagnostics.end());
+	for (const std::string &name : input.boot_missing)
+		rows.push_back(boot_finding(name));
+	rows.insert(rows.end(), input.play.begin(), input.play.end());
+	out.gate_begin = rows.size();
+	rows.insert(rows.end(), std::make_move_iterator(documents.begin()),
+			std::make_move_iterator(documents.end()));
+	rows.insert(rows.end(), input.open_findings.begin(), input.open_findings.end());
+	out.gate_end = rows.size();
+	rows.insert(rows.end(), render_check.diagnostics().begin(), render_check.diagnostics().end());
+	rows.insert(rows.end(), input.build.begin(), input.build.end());
 	return out;
 }
 
