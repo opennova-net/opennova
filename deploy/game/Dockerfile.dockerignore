@@ -1,0 +1,22 @@
+# The web build's context (deploy/game/Dockerfile): only what its stages copy.
+# BuildKit reads this file instead of the repo root's .dockerignore.
+*
+!third_party/
+!engine/
+!godot/
+!assets/
+!scripts/build_godot_web.sh
+!scripts/godot_bin.sh
+!scripts/bootstrap_imgui_godot.sh
+!scripts/package_godot_web.sh
+!deploy/game/nginx.conf
+
+# Local build output and editor state never enter the image.
+**/build/
+**/build-*/
+**/.godot/
+godot/bin/*
+!godot/bin/opennova.gdextension
+godot/exports/
+godot/addons/
+godot/src/build*/
