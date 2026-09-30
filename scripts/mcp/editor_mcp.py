@@ -2,45 +2,36 @@
 """The opennova-editor MCP client (docs/mcp.md).
 
 Launches the OpenNova Editor with `--mcp-port`, speaks JSON-RPC to its
-loopback Streamable-HTTP endpoint, and wraps the everyday tools as
-subcommands. Standard library only; the transport class is game_mcp.py's,
-so a `play start` here hands its `mcp_port` straight to `game_mcp.py --port`.
+loopback Streamable-HTTP endpoint, and wraps its tools as subcommands that
+print JSON. Standard library only; the transport class is game_mcp.py's, so a
+`play start` here hands its `mcp_port` straight to `game_mcp.py --port`.
 
     python scripts/mcp/editor_mcp.py launch --headless --open "C:/mods/My Game" --pid-file build/editor.pid
-    python scripts/mcp/editor_mcp.py state
+    python scripts/mcp/editor_mcp.py state --sections documents,problem_counts  # the view by section
+    python scripts/mcp/editor_mcp.py state --since 42                         # only what moved since view_revision 42
+    python scripts/mcp/editor_mcp.py query catalog                  # every request and query, with its params
+    python scripts/mcp/editor_mcp.py query files --limit 5          # a page of the files; next_offset the next page
+    python scripts/mcp/editor_mcp.py query files --limit 5 --offset 5
+    python scripts/mcp/editor_mcp.py query problems --arg severities='["error"]' --arg group=kind
+    python scripts/mcp/editor_mcp.py query record --path main.mnu --arg symbol=MAIN
+    python scripts/mcp/editor_mcp.py query references --path main.mnu
+    python scripts/mcp/editor_mcp.py query output --cursor 0 --limit 50
     python scripts/mcp/editor_mcp.py request new_project --dir "C:/mods/My Game" --title "My Game"
     python scripts/mcp/editor_mcp.py request create_missing --roles main_menu,gametext
+    python scripts/mcp/editor_mcp.py request open_document --path main.mnu
+    python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
+        "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
-    python scripts/mcp/editor_mcp.py request preview_import --paths "C:/art/main.mnu" --with-dependencies true  # with what it needs
-    python scripts/mcp/editor_mcp.py request import_files --imports '[{"path": "C:/art/main.mnu"},
-        {"path": "C:/art/arial.fnt", "native": true}]'   # the rows kept (state's import rows' sources)
-    python scripts/mcp/editor_mcp.py call editor_document '{"op": "open", "path": "main.mnu"}'
-    python scripts/mcp/editor_mcp.py problems --severity error --group kind --fixable
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
-    python scripts/mcp/editor_mcp.py references main.mnu  # what it names, who names it
-    python scripts/mcp/editor_mcp.py rename logo.tga logo2.tga
-    python scripts/mcp/editor_mcp.py menu-preview              # the previewed screen's widgets
-    python scripts/mcp/editor_mcp.py menu-preview --hit 400,200 # the widget the game's hit test finds
-    python scripts/mcp/editor_mcp.py menu-preview --notes      # the frame compiler's notes on it
-    python scripts/mcp/editor_mcp.py menu-preview --render main.mnu --screen 12  # the render check's
-    python scripts/mcp/editor_mcp.py menu-preview --drag 7 --handle right --by 16,0  # resize window 7
-    python scripts/mcp/editor_mcp.py menu-preview --nudge 7 --by 0,-1                # move it up a unit
-    python scripts/mcp/editor_mcp.py menu-preview --arrange align_left --ids 7,9,12   # 9 and 12 to 7's left edge
-    python scripts/mcp/editor_mcp.py model-preview --lod auto --frame   # the open model as the game draws it
-    python scripts/mcp/editor_mcp.py model-preview --ctrl HEAT=5 --yaw 1.2  # a register held, the camera turned
-    python scripts/mcp/editor_mcp.py menu tree --path main.mnu   # screens and windows, with rects
-    python scripts/mcp/editor_mcp.py menu edit --edits '[{"op": "add", "kind": "window", "parent": 2, "as": "w"},
-        {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
-    python scripts/mcp/editor_mcp.py menu list --id 11 --list action --records '[{"type": "POP_SCREEN"}]'
-    python scripts/mcp/editor_mcp.py menu analyze --path main.mnu   # its Problems rows by source
-    python scripts/mcp/editor_mcp.py play start          # prints the game's mcp_port
+    python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
+    python scripts/mcp/editor_mcp.py call editor_menu_preview '{"op": "state"}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
 
-Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported
-isError, or a `request` was not done (its outcome: refused, did not finish, or
-waits on the unsaved-changes prompt); 3 a JSON-RPC error; 6 stop: the process
-outlived the quit; 7 launch failed.
+Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported isError, a
+`request` was not done (its outcome: refused, did not finish, or waits on the
+unsaved-changes prompt), or a build or play did not land; 3 a JSON-RPC error;
+6 stop: the process outlived the quit; 7 launch failed.
 """
 
 from __future__ import annotations
@@ -149,17 +140,6 @@ def cmd_launch(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_tools(args: argparse.Namespace) -> int:
-    tools = client_of(args).tools()
-    if args.json:
-        print(json.dumps(tools, indent=2))
-        return EXIT_OK
-    for tool in tools:
-        description = str(tool.get("description", "")).split(". ")[0]
-        print(f"{tool['name']:<20} {description}")
-    return EXIT_OK
-
-
 def cmd_call(args: argparse.Namespace) -> int:
     payload = client_of(args).call(args.tool, parse_json_arg(args.arguments, args.args_file),
                                    timeout=args.timeout)
@@ -167,46 +147,67 @@ def cmd_call(args: argparse.Namespace) -> int:
     return EXIT_TOOL_ERROR if payload.get("isError") else EXIT_OK
 
 
+def print_json(value) -> None:
+    print(json.dumps(value, indent=2))
+
+
 def cmd_state(args: argparse.Namespace) -> int:
-    request = {"output_cursor": args.output_cursor, "output_limit": args.output_limit,
-               "import_offset": args.import_offset, "import_limit": args.import_limit}
-    print(json.dumps(client_of(args).structured("editor_state", request), indent=2))
+    request: dict = {}
+    if args.sections:
+        request["sections"] = [name.strip() for name in args.sections.split(",") if name.strip()]
+    if args.since is not None:
+        request["since"] = args.since
+    print_json(client_of(args).structured("editor_state", request))
     return EXIT_OK
 
 
-def parse_edits(text: str) -> list:
-    """--edits: a JSON array of edit objects (one batch on one row)."""
+def parse_value(text: str):
+    """A --arg value: JSON when it reads as JSON (a number, true, a list), else the text itself."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
+def cmd_query(args: argparse.Namespace) -> int:
+    params = parse_json_arg(args.params, args.params_file) if (args.params or args.params_file) else {}
+    for name in ("offset", "limit", "cursor", "path", "id", "field", "text"):
+        if getattr(args, name) is not None:
+            params[name] = getattr(args, name)
+    for pair in args.arg or []:
+        name, sep, value = pair.partition("=")
+        if not sep or not name:
+            raise GameMcpError(EXIT_USAGE, f"--arg takes NAME=VALUE, not {pair!r}")
+        params[name] = parse_value(value)
+    payload = client_of(args).call("editor_query", {"query": args.name, **params}, timeout=args.timeout)
+    if payload.get("isError"):
+        print(text_of(payload), file=sys.stderr)
+        return EXIT_TOOL_ERROR
+    print_json(payload.get("structuredContent", {}))
+    return EXIT_OK
+
+
+def parse_list(text: str, flag: str, shape: str) -> list:
+    """--edits / --imports: a JSON array of objects."""
     try:
         value = json.loads(text)
     except ValueError as error:
-        raise GameMcpError(EXIT_USAGE, f"--edits is not JSON: {error}") from error
-    if not isinstance(value, list) or not all(isinstance(edit, dict) for edit in value):
-        raise GameMcpError(EXIT_USAGE, "--edits must be a JSON array of edit objects")
-    return value
-
-
-def parse_imports(text: str) -> list:
-    """--imports: a JSON array of import sources ({path, entry?, install?, native?}), as
-    editor_state's import rows carry them in `source`."""
-    try:
-        value = json.loads(text)
-    except ValueError as error:
-        raise GameMcpError(EXIT_USAGE, f"--imports is not JSON: {error}") from error
-    if not isinstance(value, list) or not all(isinstance(source, dict) for source in value):
-        raise GameMcpError(EXIT_USAGE, "--imports must be a JSON array of {path, entry?, install?, native?} objects")
+        raise GameMcpError(EXIT_USAGE, f"{flag} is not JSON: {error}") from error
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise GameMcpError(EXIT_USAGE, f"{flag} must be a JSON array of {shape} objects")
     return value
 
 
 # The request's fields (engine/editor/session/request_fields.cpp), one flag each: the text fields,
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
-# takes; the editor refuses the rest, naming what the kind takes.
+# takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "path", "locator", "field", "new_name", "role", "file_kind", "mode", "choice",
                  "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first")
 
 
-def cmd_request(args: argparse.Namespace) -> int:
+def request_of(args: argparse.Namespace) -> dict:
     request: dict = {"kind": args.kind}
     for field in REQUEST_TEXTS:
         if getattr(args, field) is not None:
@@ -220,37 +221,25 @@ def cmd_request(args: argparse.Namespace) -> int:
     if args.paths:
         request["paths"] = args.paths
     if args.imports:
-        request["imports"] = parse_imports(args.imports)
+        request["imports"] = parse_list(args.imports, "--imports", "{path, entry?, install?, native?}")
     if args.edits:
-        request["edits"] = parse_edits(args.edits)
+        request["edits"] = parse_list(args.edits, "--edits", "edit")
     for field in ("address", "paste_at", "settings"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
-    payload = client_of(args).call("editor_request", request, timeout=args.timeout)
-    emit_payload(payload, args)
+    return request
+
+
+def cmd_request(args: argparse.Namespace) -> int:
+    payload = client_of(args).call("editor_request", request_of(args), timeout=args.timeout)
     if payload.get("isError"):
+        print(text_of(payload), file=sys.stderr)
         return EXIT_TOOL_ERROR
-    # `ok` only says the request parsed; the outcome says whether it happened.
-    outcome = payload.get("structuredContent", {}).get("outcome", {})
-    if outcome and not outcome.get("done", False):
-        print_not_done(outcome)
-        return EXIT_TOOL_ERROR
-    return EXIT_OK
-
-
-def print_not_done(outcome: dict) -> None:
-    """Why a request's outcome is not done: the unsaved-changes prompt it waits on, or its findings."""
-    if outcome.get("unsaved_prompt"):
-        print("not done: it waits on unsaved changes (`state` names the files); answer with "
-              "`request resolve_unsaved --choice save|discard|cancel` (build and play take "
-              "save or cancel)", file=sys.stderr)
-    for finding in outcome.get("findings", []):
-        print(f"not done: {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}",
-              file=sys.stderr)
-
-
-# A light editor_state: no output lines, no import rows, no file list.
-LIGHT_STATE = {"output_limit": 0, "import_limit": 0, "files_limit": 0}
+    answer = payload.get("structuredContent", {})
+    print_json(answer)
+    # `ok` only says the request read; the outcome says whether it happened.
+    outcome = answer.get("outcome", {})
+    return EXIT_OK if not outcome or outcome.get("done", False) else EXIT_TOOL_ERROR
 
 
 def progress_line(operation: dict) -> str:
@@ -261,9 +250,9 @@ def progress_line(operation: dict) -> str:
 
 
 def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, dict]:
-    """Raise `kind` (build, play) and wait on the operation its outcome names, polling editor_state
-    while the editor steps it frame by frame (its progress on stderr): the outcome, and what the
-    operation came to (last_operation; {} when it was not the one to end, or none ran)."""
+    """Raise `kind` (build, play) and wait on the operation its outcome names, polling `query
+    operation` while the editor steps it frame by frame (its progress on stderr): the outcome, and
+    what the operation came to (last_operation; {} when it was not the one to end, or none ran)."""
     payload = client.call("editor_request", {"kind": kind}, timeout=60)
     if payload.get("isError"):
         raise GameMcpError(EXIT_TOOL_ERROR, f"editor_request {kind} failed: {text_of(payload)}")
@@ -274,7 +263,7 @@ def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, di
     deadline = time.monotonic() + timeout
     shown = ""
     while True:
-        state = client.structured("editor_state", LIGHT_STATE)
+        state = client.structured("editor_query", {"query": "operation"})
         running = state.get("operation") or {}
         if not operation or not running.get("running") or running.get("id") != operation:
             last = state.get("last_operation") or {}
@@ -289,323 +278,40 @@ def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, di
         time.sleep(0.2)
 
 
-def cmd_problems(args: argparse.Namespace) -> int:
-    query: dict = {"offset": args.offset, "limit": args.limit}
-    if args.severity:
-        query["severities"] = args.severity
-    if args.text:
-        query["text"] = args.text
-    if args.scope:
-        query["scope"] = args.scope
-    if args.fixable:
-        query["fixable"] = True
-    if args.group:
-        query["group"] = args.group
-    page = client_of(args).structured("editor_problems", query)
-    # The page's groups by key (the transport caps a long list with a marker string: skip it).
-    groups = {entry.get("key"): entry for entry in page.get("groups", []) if isinstance(entry, dict)}
-    group = None
-    for problem in page.get("problems", []):
-        if not isinstance(problem, dict):
-            continue
-        if problem.get("group") is not None and problem["group"] != group:
-            group = problem["group"]
-            entry = groups.get(group, {})
-            print(f"== {entry.get('title', group)} ({entry.get('count', '?')})")
-        where = problem.get("asset", "") or problem.get("target", "")
-        if problem.get("field"):
-            where += f" [{problem['field']}]"
-        print(f"{problem.get('severity', ''):<8} {problem.get('code', ''):<32} {where:<40} {problem.get('message', '')}")
-        for fix in problem.get("fixes", []):
-            if isinstance(fix, dict):
-                print(f"{'':<8} fix: {fix.get('label', '')}  {json.dumps(fix.get('request', {}))}")
-    groups_note = f" in {page['group_count']} group(s)" if "group_count" in page else ""
-    print(f"{page.get('shown', 0)} of {page.get('total', 0)} problem(s){groups_note}", file=sys.stderr)
-    return EXIT_OK
-
-
-def graph_edges(client: GameMcp, request: dict) -> list:
-    """Every edge of an editor_graph list op, page after page (the tool answers a page)."""
-    edges: list = []
-    while True:
-        page = client.structured("editor_graph", {**request, "offset": len(edges), "limit": 200})
-        edges += page.get("edges", [])
-        if not page.get("edges") or len(edges) >= int(page.get("count", 0)):
-            return edges
-
-
-def cmd_references(args: argparse.Namespace) -> int:
-    client = client_of(args)
-    names = graph_edges(client, {"op": "references", "path": args.path})
-    print(f"{args.path} references {len(names)} name(s):")
-    for edge in names:
-        where = f"{edge.get('record')}: " if edge.get("record") else ""
-        print(f"  {where}{edge.get('field')} = {edge.get('value')}  [{edge.get('kind')}, {edge.get('status')}]")
-    users = graph_edges(client, {"op": "referrers", "path": args.path})
-    print(f"referenced by {len(users)} field(s):")
-    for edge in users:
-        where = f" ({edge.get('record')})" if edge.get("record") else ""
-        print(f"  {edge.get('source')}{where}: {edge.get('field')}")
-    return EXIT_OK
-
-
-def cmd_rename(args: argparse.Namespace) -> int:
-    payload = client_of(args).call("editor_graph", {"op": "rename", "path": args.path, "name": args.name},
-                                   timeout=args.timeout)
-    emit_payload(payload, args)
-    return EXIT_TOOL_ERROR if payload.get("isError") else EXIT_OK
-
-
-def print_notes(notes: list) -> None:
-    for note in notes:
-        where = note.get("name") or "(screen)"
-        print(f"  [{note.get('severity')}/{note.get('basis')}] {where}: {note.get('message')}")
-
-
-def cmd_model_preview(args: argparse.Namespace) -> int:
-    client = client_of(args)
-    options = {}
-    if args.lod is not None:
-        options["lod"] = "auto" if args.lod == "auto" else int(args.lod)
-    if args.ctrl is not None:
-        held = {}
-        for pair in args.ctrl:
-            name, _, value = pair.partition("=")
-            try:
-                held[name] = int(value)
-            except ValueError:
-                raise GameMcpError(EXIT_USAGE, "--ctrl takes NAME=VALUE (an integer)") from None
-        options["ctrl"] = held
-    if options:
-        client.structured("editor_model_preview", {"op": "options", **options})
-    camera = {key: getattr(args, key) for key in ("yaw", "pitch", "distance") if getattr(args, key) is not None}
-    if args.frame:
-        camera["frame"] = True
-    if camera:
-        client.structured("editor_model_preview", {"op": "camera", **camera})
-    state = client.structured("editor_model_preview", {"op": "state"})
-    if args.json:
-        print(json.dumps(state, indent=2))
-        return EXIT_OK
-    print(f"{state.get('status')}: {state.get('message') or state.get('path', '')} (builds {state.get('builds', 0)})")
-    lod = state.get("lod", {})
-    if lod:
-        print(f"level {lod.get('shown')} of {lod.get('count')} (auto {lod.get('auto')}, "
-              f"{lod.get('projected_px', 0):.1f} px, thresholds {lod.get('thresholds')})")
-    for register in state.get("registers", []):
-        print(f"  ctrl {register.get('name')} = {register.get('value')}")
-    for point in state.get("user_points", []):
-        print(f"  user point {point.get('index')} {point.get('name', ''):<16} {point.get('position')} "
-              f"-> {point.get('screen')}")
-    return EXIT_OK
-
-
-def cmd_menu_preview(args: argparse.Namespace) -> int:
-    client = client_of(args)
-    options = {}
-    if args.width:
-        options["width"] = args.width
-    if args.height:
-        options["height"] = args.height
-    if args.show_hidden:
-        options["show_hidden"] = True
-    if args.force_id is not None:
-        options["force_id"] = args.force_id
-    if args.force_state:
-        options["force_state"] = args.force_state
-    for flag in ("checked", "popup_open", "focus"):
-        if getattr(args, flag):
-            options[flag] = True
-    if options:
-        client.structured("editor_menu_preview", {"op": "options", **options})
-    if args.drag is not None or args.nudge is not None:
-        try:
-            dx, dy = (int(part) for part in args.by.split(","))
-        except (AttributeError, ValueError):
-            raise GameMcpError(EXIT_USAGE, "--drag and --nudge take --by dx,dy in design units") from None
-        if args.drag is not None:
-            moved = {"op": "drag", "id": args.drag, "handle": args.handle, "dx": dx, "dy": dy, "snap": not args.no_snap}
-        else:
-            moved = {"op": "nudge", "id": args.nudge, "dx": dx, "dy": dy}
-        payload = client.call("editor_menu_preview", moved, timeout=60)
-        if payload.get("isError"):
-            emit_payload(payload, args)
-            return EXIT_TOOL_ERROR
-    if args.arrange:
-        try:
-            ids = [int(part) for part in (args.ids or "").split(",") if part.strip()]
-        except ValueError:
-            raise GameMcpError(EXIT_USAGE, "--arrange takes --ids id,id,... (window record ids)") from None
-        payload = client.call("editor_menu_preview", {"op": "arrange", "ids": ids, "arrange": args.arrange}, timeout=60)
-        if payload.get("isError"):
-            emit_payload(payload, args)
-            return EXIT_TOOL_ERROR
-    if args.hit:
-        try:
-            x, y = (float(part) for part in args.hit.split(","))
-        except ValueError:
-            raise GameMcpError(EXIT_USAGE, "--hit takes x,y in 800x600 design units") from None
-        hit = client.structured("editor_menu_preview", {"op": "hit", "x": x, "y": y})
-        print(json.dumps(hit, indent=2) if args.json else f"index={hit.get('index')} id={hit.get('id')} name={hit.get('name')}")
-        return EXIT_OK
-    if args.render:
-        if args.screen is None:
-            raise GameMcpError(EXIT_USAGE, "--render takes --screen (the screen row id)")
-        render = client.structured("editor_menu_preview", {"op": "render", "path": args.render, "screen": args.screen,
-                                                      "limit": 200})
-        notes = client.structured("editor_menu_preview", {"op": "notes", "path": args.render, "screen": args.screen,
-                                                     "limit": 200})
-        if args.json:
-            print(json.dumps({"render": render, "notes": notes.get("notes", [])}, indent=2))
-            return EXIT_OK
-        print(f"{render.get('status')}: {render.get('path', '')} {render.get('screen', {}).get('name', '')} "
-              f"({render.get('widget_count', 0)} widgets, {render.get('note_count', 0)} notes)")
-        for widget in render.get("widgets", []):
-            print(f"  {widget.get('index'):>3} {widget.get('name', ''):<24} {widget.get('rect')}")
-        print_notes(notes.get("notes", []))
-        return EXIT_OK
-    if args.notes:
-        notes = client.structured("editor_menu_preview", {"op": "notes", "limit": 200})
-        if args.json:
-            print(json.dumps(notes, indent=2))
-        else:
-            print(f"{notes.get('status')}: {notes.get('count', 0)} note(s)")
-            print_notes(notes.get("notes", []))
-        return EXIT_OK
-    state = client.structured("editor_menu_preview", {"op": "state"})
-    rects = client.structured("editor_menu_preview", {"op": "rects", "limit": 200}) if state.get("status") == "ready" else {}
-    if args.json:
-        print(json.dumps({"state": state, "widgets": rects.get("widgets", [])}, indent=2))
-        return EXIT_OK
-    print(f"{state.get('status')}: {state.get('message') or state.get('path', '')} {state.get('screen', {}).get('name', '')}")
-    if state.get("missing"):
-        print("missing: " + ", ".join(state["missing"]))
-    if state.get("unreadable"):
-        print("did not load: " + ", ".join(state["unreadable"]))
-    for widget in rects.get("widgets", []):
-        print(f"  {widget.get('index'):>3} {widget.get('name', ''):<24} {widget.get('type', ''):<10} "
-              f"{widget.get('rect')} {'' if widget.get('shown') else '(hidden) '}{widget.get('text', '')!r}")
-    return EXIT_OK
-
-
-def parse_json_list(text: str, flag: str) -> list:
-    """--edits / --records: a JSON array of objects."""
-    try:
-        value = json.loads(text)
-    except ValueError as error:
-        raise GameMcpError(EXIT_USAGE, f"{flag} is not JSON: {error}") from error
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-        raise GameMcpError(EXIT_USAGE, f"{flag} must be a JSON array of objects")
-    return value
-
-
-def print_menu_tree(tree: dict) -> None:
-    print(f"{tree.get('path', '')}{' (open)' if tree.get('open') else ''}{' (unsaved)' if tree.get('dirty') else ''}")
-    for screen in tree.get("screens", []):
-        state = screen.get("status", "")
-        if screen.get("status") == "ready" and not screen.get("current"):
-            state += ", not current"
-        print(f"  screen {screen.get('name', '')} (id {screen.get('id')}, {state}, "
-              f"{screen.get('window_count', 0)} windows)")
-        for window in screen.get("windows", []):
-            indent = "    " + "  " * int(window.get("depth", 0))
-            lists = ", ".join(f"{kind} {count}" for kind, count in sorted(window.get("lists", {}).items()))
-            text = f" {window['text']!r}" if "text" in window else ""
-            rect = f" {window['rect']}" if "rect" in window else ""
-            hidden = " (hidden)" if window.get("shown") is False else ""
-            print(f"{indent}{window.get('id')} {window.get('name', '')} {window.get('type', '')}{rect}{hidden}{text}"
-                  + (f" [{lists}]" if lists else ""))
-
-
-def cmd_menu(args: argparse.Namespace) -> int:
-    request: dict = {"op": args.op}
-    if args.path:
-        request["path"] = args.path
-    if args.op == "tree" and args.screen is not None:
-        request["screen"] = args.screen
-    if args.op == "edit":
-        if not args.edits:
-            raise GameMcpError(EXIT_USAGE, "menu edit takes --edits '[...]'")
-        request["edits"] = parse_json_list(args.edits, "--edits")
-    if args.op == "list":
-        if args.id is None or not args.list or args.records is None:
-            raise GameMcpError(EXIT_USAGE, "menu list takes --id, --list and --records '[...]'")
-        request.update({"id": args.id, "list": args.list, "records": parse_json_list(args.records, "--records")})
-    if args.op == "analyze" and args.severity:
-        request["severity"] = args.severity
-    payload = client_of(args).call("editor_menu", request, timeout=args.timeout)
-    if payload.get("isError") or args.json:
-        emit_payload(payload, args)
-        return EXIT_TOOL_ERROR if payload.get("isError") else EXIT_OK
-    out = payload.get("structuredContent", {})
-    if args.op == "tree":
-        print_menu_tree(out)
-    elif args.op == "analyze":
-        counts = out.get("counts", {})
-        sources = ", ".join(f"{source} {count}" for source, count in sorted(out.get("sources", {}).items()))
-        print(f"{out.get('path', '')}: {counts.get('error', 0)} error(s), {counts.get('warning', 0)} warning(s), "
-              f"{counts.get('info', 0)} info" + (f" ({sources})" if sources else ""))
-        for screen in out.get("screens", []):
-            print(f"  screen {screen.get('name', '')}: {screen.get('status', '')}, {screen.get('notes', 0)} note(s), "
-                  f"{screen.get('problems', 0)} problem(s)")
-        for problem in out.get("problems", []):
-            where = problem.get("record", "")
-            if problem.get("field"):
-                where += f" [{problem['field']}]"
-            print(f"  {problem.get('severity', ''):<8} {problem.get('source', ''):<7} {problem.get('code', ''):<32} "
-                  f"{where}: {problem.get('message', '')}")
-    else:
-        made = out.get("made", {})
-        print("done" + (": " + ", ".join(f"{label}={id_}" for label, id_ in made.items()) if made else "")
-              + (f" (added {out.get('added')})" if out.get("added") else ""))
-    return EXIT_OK
-
-
 def cmd_build(args: argparse.Namespace) -> int:
     client = client_of(args)
     outcome, ended = raise_and_wait(client, "build", args.timeout)
     if not outcome.get("done", False):
-        print_not_done(outcome)
+        print_json({"outcome": outcome})
         return EXIT_TOOL_ERROR
-    build = client.structured("editor_state", LIGHT_STATE).get("build", {})
+    build = client.structured("editor_query", {"query": "operation"}).get("build", {})
     build["operation"] = ended
-    ok = ended.get("end") == "done" and bool(build.get("ok"))
-    if args.json:
-        print(json.dumps(build, indent=2))
-    elif ok:
-        print(f"built {build.get('dir', '')}" + (" (unchanged)" if build.get("reused_existing") else ""))
-    else:
-        print(f"build {ended.get('end', 'cancelled')}")
-        for finding in ended.get("findings", []) or build.get("diagnostics", []):
-            print(f"  {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}")
-    return EXIT_OK if ok else EXIT_TOOL_ERROR
+    print_json(build)
+    return EXIT_OK if ended.get("end") == "done" and build.get("ok") else EXIT_TOOL_ERROR
+
+
+def run_section(client: GameMcp) -> dict:
+    return client.structured("editor_state", {"sections": ["run"]}).get("run", {})
 
 
 def cmd_play(args: argparse.Namespace) -> int:
     client = client_of(args)
     if args.op == "start":
-        # Play builds first: its build's operation is waited on as `build` waits, then the play
-        # block read (the game started on the poll the build landed).
+        # Play builds first: its build's operation is waited on as `build` waits, then the run
+        # section read (the game started on the poll the build landed).
         outcome, ended = raise_and_wait(client, "play", args.timeout)
         if not outcome.get("done", False):
-            print_not_done(outcome)
+            print_json({"outcome": outcome})
             return EXIT_TOOL_ERROR
-        block = client.structured("editor_state", LIGHT_STATE).get("play", {})
-        if block.get("state") != "running":
-            print(f"play did not start: the build {ended.get('end', 'cancelled')}, or the launch refused "
-                  f"(`problems`, `state`'s output)")
-            return EXIT_TOOL_ERROR
-    else:
-        payload = client.call("editor_play", {"op": args.op}, timeout=args.timeout)
-        if payload.get("isError"):
-            print(text_of(payload))
-            return EXIT_TOOL_ERROR
-        block = payload.get("structuredContent", {})
-    if args.json:
-        print(json.dumps(block, indent=2))
-    else:
-        print(f"state={block.get('state')} pid={block.get('pid')} mcp_port={block.get('mcp_port')}"
-              + (" exited_on_its_own" if block.get("exited_on_its_own") else ""))
+        run = run_section(client)
+        run["operation"] = ended
+        print_json(run)
+        return EXIT_OK if run.get("state") == "running" else EXIT_TOOL_ERROR
+    payload = client.call("editor_play", {"op": args.op}, timeout=args.timeout)
+    if payload.get("isError"):
+        print(text_of(payload), file=sys.stderr)
+        return EXIT_TOOL_ERROR
+    print_json(payload.get("structuredContent", {}))
     return EXIT_OK
 
 
@@ -622,7 +328,7 @@ def cmd_screenshot(args: argparse.Namespace) -> int:
     target = Path(args.out)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(base64.b64decode(images[0]["data"]))
-    print(f"{target} ({images[0].get('mimeType')})")
+    print_json({"out": str(target), "mime": images[0].get("mimeType")})
     return EXIT_OK
 
 
@@ -630,10 +336,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
     request = {"limit": args.limit}
     if args.cursor > 0:
         request["cursor"] = args.cursor
-    page = client_of(args).structured("editor_logs", request)
-    for entry in page.get("entries", []):
-        print(f"{entry.get('seq', '')}\t{entry.get('source', '')}\t{entry.get('level', '')}\t{entry.get('text', '')}")
-    print(f"next_cursor={page.get('next_cursor', args.cursor)}", file=sys.stderr)
+    print_json(client_of(args).structured("editor_logs", request))
     return EXIT_OK
 
 
@@ -711,11 +414,6 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--timeout", type=float, default=240.0, help="seconds to wait for the endpoint")
     launch.set_defaults(func=cmd_launch)
 
-    tools = commands.add_parser("tools", help="list the tools")
-    add_endpoint_options(tools)
-    tools.add_argument("--json", action="store_true")
-    tools.set_defaults(func=cmd_tools)
-
     call = commands.add_parser("call", help="call one tool with JSON arguments")
     add_endpoint_options(call)
     call.add_argument("tool")
@@ -726,19 +424,37 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--timeout", type=float, default=300.0)
     call.set_defaults(func=cmd_call)
 
-    state = commands.add_parser("state", help="print editor_state")
+    state = commands.add_parser("state", help="editor_state: the view by section, as JSON")
     add_endpoint_options(state)
-    state.add_argument("--output-cursor", type=int, default=0)
-    state.add_argument("--output-limit", type=int, default=200)
-    state.add_argument("--import-offset", type=int, default=0,
-                       help="the page of the import lists (choices, roots, rows, not_found) from here")
-    state.add_argument("--import-limit", type=int, default=200)
+    state.add_argument("--sections", default=None,
+                       help="comma-separated: the sections to read (query catalog lists them; every one by default)")
+    state.add_argument("--since", type=int, default=None,
+                       help="a view_revision an earlier answer carried: the sections that have not moved since are "
+                            "left out (0 or left out: every section)")
     state.set_defaults(func=cmd_state)
 
-    request = commands.add_parser("request", help="raise one editor_request by kind")
+    query = commands.add_parser("query", help="editor_query: one query by name, its answer as JSON")
+    add_endpoint_options(query)
+    query.add_argument("name", help="files, document, record, problems, references, output, operation, catalog, ... "
+                                    "(`query catalog` lists every query with its params)")
+    query.add_argument("params", nargs="?", default=None, help="the params as a JSON object")
+    query.add_argument("--params-file", default=None, help="read the params' JSON object from this file")
+    query.add_argument("--offset", type=int, default=None, help="a page's first entry")
+    query.add_argument("--limit", type=int, default=None, help="how many entries a page holds, 1 to 200")
+    query.add_argument("--cursor", type=int, default=None, help="the output's or the events' page from this cursor")
+    query.add_argument("--path", default=None, help="a document, a file or a menu, as the query takes it")
+    query.add_argument("--id", type=int, default=None, help="a record's identity")
+    query.add_argument("--field", default=None, help="a record's field")
+    query.add_argument("--text", default=None, help="what a search finds")
+    query.add_argument("--arg", action="append", default=None, metavar="NAME=VALUE",
+                       help="any other param (VALUE read as JSON when it is, else as text); repeat for more")
+    query.add_argument("--timeout", type=float, default=120.0)
+    query.set_defaults(func=cmd_query)
+
+    request = commands.add_parser("request", help="editor_request: one request by kind, its answer as JSON")
     add_endpoint_options(request)
-    request.add_argument("kind", help="new_project, open_project, create_missing, build, play, save_all, quit, ... "
-                                      "(editor_request's kind enum lists them)")
+    request.add_argument("kind", help="new_project, open_project, create_missing, edit_record, save_all, quit, ... "
+                                      "(`query catalog` lists every kind with its fields)")
     request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
     request.add_argument("--title", default=None, help="a new project's title")
     request.add_argument("--path", default=None, help="a file: a project file or open document ('' the active one)")
@@ -754,9 +470,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="a file picked for preview_import (repeat for more)")
     request.add_argument("--imports", default=None,
                          help="plan_import's files chosen, import_files' rows kept: a JSON array of "
-                              "{path, entry?, install?, native?} (editor_state's import rows carry each as source)")
+                              "{path, entry?, install?, native?} (query import_preview's rows carry each as source)")
     request.add_argument("--edits", default=None,
-                         help="a batch of edits on one row as a JSON array (edit_record, revert_to_saved): one undo step")
+                         help="edit_record: the batch form as a JSON array of {op, id, parent, kind, field, value, "
+                              "position, as, ...}, one undo step; revert_to_saved: [{id, field}]")
     request.add_argument("--address", default=None, help="a record's address as a JSON object {row, kind, child}")
     request.add_argument("--paste-at", dest="paste_at", default=None,
                          help="paste: where, as a JSON object {row, parent, position} (left out: after the selection)")
@@ -779,106 +496,17 @@ def build_parser() -> argparse.ArgumentParser:
                          help="show_in_files, preview_rename: and ask the new name")
     request.add_argument("--open-first", dest="open_first", choices=switch, default=None,
                          help="edit_record: open the document first when it is not")
-    request.add_argument("--json", action="store_true", help="print the raw result payload")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)
 
-    problems = commands.add_parser("problems", help="print editor_problems, each with its fixes")
-    add_endpoint_options(problems)
-    problems.add_argument("--severity", choices=("error", "warning", "info"), action="append", default=None,
-                          help="a level to show (repeat for more; every level when left out)")
-    problems.add_argument("--text", default=None, help="matched without case against message, file, record, field, code")
-    problems.add_argument("--scope", choices=("project", "active_file", "open_files"), default=None)
-    problems.add_argument("--fixable", action="store_true", help="only the problems with a fix")
-    problems.add_argument("--group", choices=("none", "file", "kind"), default=None)
-    problems.add_argument("--offset", type=int, default=0)
-    problems.add_argument("--limit", type=int, default=100)
-    problems.set_defaults(func=cmd_problems)
-
-    references = commands.add_parser("references", help="editor_graph: what a file names and who names it")
-    add_endpoint_options(references)
-    references.add_argument("path", help="a project file (project-relative path or logical name)")
-    references.set_defaults(func=cmd_references)
-
-    rename = commands.add_parser("rename", help="editor_graph: rename a file with every reference rewritten")
-    add_endpoint_options(rename)
-    rename.add_argument("path")
-    rename.add_argument("name", help="the new logical name (same extension)")
-    rename.add_argument("--json", action="store_true", help="print the raw result payload")
-    rename.add_argument("--timeout", type=float, default=120.0)
-    rename.set_defaults(func=cmd_rename)
-
-    preview = commands.add_parser("menu-preview", help="editor_menu_preview: the previewed menu screen as the game draws it")
-    add_endpoint_options(preview)
-    preview.add_argument("--hit", default=None, help="x,y in 800x600 design units: the widget the hit test finds")
-    preview.add_argument("--width", type=int, default=None)
-    preview.add_argument("--height", type=int, default=None)
-    preview.add_argument("--show-hidden", action="store_true")
-    preview.add_argument("--force-id", type=int, default=None, help="a window record held in --force-state")
-    preview.add_argument("--force-state", choices=("normal", "mouseover", "selected", "disabled"), default=None)
-    preview.add_argument("--checked", action="store_true", help="the --force-id window checked")
-    preview.add_argument("--popup-open", action="store_true", help="the --force-id combo box with its list open")
-    preview.add_argument("--focus", action="store_true", help="the --force-id edit box focused, its caret showing")
-    preview.add_argument("--drag", type=int, default=None, metavar="ID",
-                         help="drag a window of the previewed screen by --handle, --by dx,dy (one undo step)")
-    preview.add_argument("--handle", default="move",
-                         choices=("move", "left", "right", "top", "bottom", "top_left", "top_right", "bottom_left",
-                                  "bottom_right"))
-    preview.add_argument("--no-snap", action="store_true", help="--drag without the grid of 8")
-    preview.add_argument("--nudge", type=int, default=None, metavar="ID", help="move a window --by dx,dy, no snap")
-    preview.add_argument("--by", default=None, metavar="DX,DY", help="how far --drag or --nudge moves, design units")
-    preview.add_argument("--arrange", default=None,
-                         choices=("align_left", "align_right", "align_top", "align_bottom", "align_horizontal_centers",
-                                  "align_vertical_centers", "distribute_horizontally", "distribute_vertically",
-                                  "bring_to_front", "bring_forward", "send_backward", "send_to_back"),
-                         help="arrange the --ids windows (aligned to the first), one undo step")
-    preview.add_argument("--ids", default=None, metavar="ID,ID,...", help="the windows --arrange takes")
-    preview.add_argument("--notes", action="store_true", help="the frame compiler's notes on the previewed screen")
-    preview.add_argument("--render", default=None, metavar="PATH",
-                         help="a menu's screen as the render check compiled it (with --screen)")
-    preview.add_argument("--screen", type=int, default=None, help="the screen row id --render reads")
-    preview.add_argument("--json", action="store_true", help="print the state and widgets as JSON")
-    preview.set_defaults(func=cmd_menu_preview)
-
-    model = commands.add_parser("model-preview", help="editor_model_preview: the open model as the game draws it")
-    add_endpoint_options(model)
-    model.add_argument("--lod", default=None, help="a level, or auto (the level the game picks at the distance)")
-    model.add_argument("--ctrl", action="append", default=None, metavar="NAME=VALUE",
-                       help="hold a CTRL register at a value (repeat for more; replaces the held set)")
-    model.add_argument("--yaw", type=float, default=None, help="the camera's turn about the vertical, radians")
-    model.add_argument("--pitch", type=float, default=None, help="the eye's elevation, radians")
-    model.add_argument("--distance", type=float, default=None, help="the camera's distance from its target")
-    model.add_argument("--frame", action="store_true", help="look at the whole model")
-    model.add_argument("--json", action="store_true", help="print the state as JSON")
-    model.set_defaults(func=cmd_model_preview)
-
-    menu = commands.add_parser("menu", help="editor_menu: a menu's tree, a batch edit, a list replaced, its findings")
-    add_endpoint_options(menu)
-    menu.add_argument("op", choices=("tree", "edit", "list", "analyze"))
-    menu.add_argument("--path", default=None,
-                      help="the menu (project-relative path or logical name; default the previewed menu, "
-                           "else the active document when it is a menu; the same menu for every op)")
-    menu.add_argument("--screen", type=int, default=None, help="tree: one screen (its row id)")
-    menu.add_argument("--edits", default=None,
-                      help="edit: a JSON array of {op, id, field, value, kind, parent, position, as}: one undo step")
-    menu.add_argument("--id", type=int, default=None, help="list: the record that holds the list")
-    menu.add_argument("--list", default=None, help="list: the list's kind token (action, sound, items.item, ...)")
-    menu.add_argument("--records", default=None, help="list: a JSON array of {field: value} records that replace it")
-    menu.add_argument("--severity", choices=("error", "warning", "info"), default=None, help="analyze: one severity")
-    menu.add_argument("--json", action="store_true", help="print the raw result payload")
-    menu.add_argument("--timeout", type=float, default=300.0)
-    menu.set_defaults(func=cmd_menu)
-
     build = commands.add_parser("build", help="build the project and wait on its operation (progress on stderr)")
     add_endpoint_options(build)
-    build.add_argument("--json", action="store_true", help="print the build block, with the operation, as JSON")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
 
     play = commands.add_parser("play", help="start (build, waiting on its operation, then run), stop or read the game")
     add_endpoint_options(play)
     play.add_argument("op", choices=("start", "stop", "state"))
-    play.add_argument("--json", action="store_true", help="print the play block as JSON")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 
@@ -890,7 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     screenshot.add_argument("--quality", type=float, default=None)
     screenshot.set_defaults(func=cmd_screenshot)
 
-    logs = commands.add_parser("logs", help="print editor_logs entries")
+    logs = commands.add_parser("logs", help="editor_logs: a page of the transport's own log, as JSON")
     add_endpoint_options(logs)
     logs.add_argument("--cursor", type=int, default=0)
     logs.add_argument("--limit", type=int, default=200)

@@ -14,6 +14,7 @@ extends GutTest
 ## the clip clock's tick.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
+const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const ROCKING := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
 const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
@@ -67,6 +68,8 @@ event 0 0 0 0x2 0.9 1.7
 
 var _dirs: Array[String] = []
 var _app: Node = null
+## The typed seam the tests knew, over the app's request_json and query_json (S13 A5).
+var _seam: RefCounted = null
 
 
 func before_each() -> void:
@@ -75,6 +78,7 @@ func before_each() -> void:
 	if packed == null:
 		return
 	_app = packed.instantiate()
+	_seam = EditorSeam.new(_app)
 	var settings_dir := OS.get_cache_dir().path_join("opennova editor model preview %d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
 	_dirs.append(settings_dir)
@@ -102,7 +106,7 @@ func _vector(values: Variant) -> Vector3:
 func _new_project_with(model: String, name: String) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor model preview project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	if not _app.new_project(dir, "Model Preview Game"):
+	if not _seam.new_project(dir, "Model Preview Game"):
 		return false
 	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(model))
 	if bytes.is_empty() or DirAccess.make_dir_recursive_absolute(dir.path_join("models")) != OK:
@@ -130,8 +134,8 @@ func _overlays(preview: Dictionary, kind: String) -> Array:
 
 
 func _first_child(kind: String) -> int:
-	var row: int = _app.get_row_id(0)
-	var ids: PackedInt64Array = _app.get_child_records(row, kind)
+	var row: int = _seam.get_row_id(0)
+	var ids: PackedInt64Array = _seam.get_child_records(row, kind)
 	return ids[0] if ids.size() > 0 else 0
 
 
@@ -143,7 +147,7 @@ func test_preview_draws_the_open_model() -> void:
 
 	assert_true(_new_project_with(ARMORY, "armory.3di"))
 	assert_eq(String(_preview().get("status", "")), "no_model")
-	assert_true(_app.open_document("models/armory.3di"))
+	assert_true(_seam.open_document("models/armory.3di"))
 
 	# The open model as it would save, at the level the portable half picks.
 	var preview := _preview()
@@ -172,14 +176,14 @@ func test_preview_draws_the_open_model() -> void:
 	var serial: int = model.get_scene_build_serial()
 	var user_point := _first_child("user_point")
 	assert_gt(user_point, 0)
-	assert_true(_app.set_field(user_point, "position.x", float(_app.get_field(user_point, "position.x")) + 1.0))
+	assert_true(_seam.set_field(user_point, "position.x", float(_seam.get_field(user_point, "position.x")) + 1.0))
 	preview = _preview()
 	assert_true(bool(preview.get("current", false)))
 	assert_eq(int(preview.get("builds", 0)), 1, "a user point is the overlays' alone")
 	assert_eq(model.get_scene_build_serial(), serial, "the scene is not built again")
 	var light := _first_child("light")
 	assert_gt(light, 0)
-	assert_true(_app.set_field(light, "start.r", 12))
+	assert_true(_seam.set_field(light, "start.r", 12))
 	preview = _preview()
 	assert_eq(int(preview.get("builds", 0)), 2)
 	assert_ne(model.get_scene_build_serial(), serial, "a light's edit builds the scene again")
@@ -212,11 +216,11 @@ func test_markers_ride_the_parts_the_device_draws() -> void:
 	if _app == null:
 		return
 	assert_true(_new_project_with(ROCKING, "house.3di"))
-	assert_true(_app.open_document("models/house.3di"))
+	assert_true(_seam.open_document("models/house.3di"))
 	# The ground point moved off the axis the part turns about.
 	var point := _first_child("user_point")
 	assert_gt(point, 0)
-	assert_true(_app.set_field(point, "position.x", 2.0))
+	assert_true(_seam.set_field(point, "position.x", 2.0))
 	# The clock held at a quarter second: the device's part node and the overlay pose alike.
 	assert_true(_app.set_model_preview_options({"playing": false, "time_ms": 250}))
 	await get_tree().process_frame
@@ -252,7 +256,7 @@ func test_markers_ride_the_parts_the_device_draws() -> void:
 	assert_almost_eq(float(now[1]), target.y, 0.5)
 	assert_false(_app.model_preview_drag(point, "twist", target.x, target.y, 0.0), "an unknown handle")
 	# One undo step takes it back.
-	_app.undo()
+	_seam.undo()
 	var undone: Array = _overlays(_preview(), "user_point")[0].get("screen", [0, 0])
 	assert_almost_eq(float(undone[0]), float(screen[0]), 0.5)
 
@@ -262,7 +266,7 @@ func test_a_table_plays_on_its_rig() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova editor model preview rig %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(_app.new_project(dir.path_join("project"), "Rig Game"))
+	assert_true(_seam.new_project(dir.path_join("project"), "Rig Game"))
 	var source := dir.path_join("source")
 	_write(source.path_join("skinned.o3d"), FileAccess.get_file_as_string(ProjectSettings.globalize_path(SKINNED)))
 	_write(source.path_join("skin.o3a"), SKIN_CLIPS)
@@ -271,10 +275,10 @@ func test_a_table_plays_on_its_rig() -> void:
 	_write(dir.path_join("project/defs/items.def"),
 			"begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n")
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
-	assert_true(_app.open_document("anims/SKIN.adm"))
-	var walk: int = _app.find_record("anim_walk_forward")
+	assert_true(_seam.open_document("anims/SKIN.adm"))
+	var walk: int = _seam.find_record("anim_walk_forward")
 	assert_gt(walk, 0)
-	assert_true(_app.select_record(walk))
+	assert_true(_seam.select_record(walk))
 	assert_true(_app.set_model_preview_options({"playing": false, "clip_ticks": 0}))
 	var preview := _preview()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
