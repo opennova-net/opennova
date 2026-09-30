@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
+#include <base/io/json.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
 
@@ -49,6 +51,22 @@ public:
 	// True when the request was served here; false for the shell-only kinds. The view is
 	// validated when it returns, unless a pump holds validation.
 	bool handle(const EditorRequest &request);
+	// A request in its wire form (S13 A5; the editor MCP's editor_request, the Shell's
+	// request_json): read by session_json's editor_request_from_json, its edits named in the
+	// document it acts on (the one its path names, else the active one; opened first when it asks,
+	// open_first, and is not open), then handled. The answer: {ok (it read), served, error?,
+	// outcome (action_outcome_to_json: what it came to, with the records its edits made, `added`,
+	// and for an edit_record `made`, each label its batch gave to the record it named), status,
+	// revision (the view's any)}. A shell row is not served here: `shell`, when given, receives it
+	// (served false) for the shell to serve; the pickers need a person and are refused by their
+	// kind before their fields are read.
+	io::JsonValue handle_json(const io::JsonValue &json, EditorRequest *shell = nullptr);
+	// What is asked of the session without a request (S13 A5, editor_queries.h): the query row
+	// `name` answers `args` (an object of its params, or null for none), stamped with the revision
+	// of the concern it reads; null with `error` for a name no row has, args the row refuses (a
+	// member it does not take, one it needs left out, a wrongly typed one, an offset or a limit out
+	// of range), or a question it cannot answer (no such document or record).
+	io::JsonValue query(std::string_view name, const io::JsonValue &args, std::string &error);
 	// A pump starts (the shell: the requests its windows raised this frame): the requests
 	// handled until the next poll() leave their validation to that poll, so a burst of
 	// edits (typing, a drag) validates once.
@@ -79,13 +97,6 @@ public:
 	// reads or writes what a build does not).
 	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
 
-	// What is asked of the session without a request (S13 A5 makes this one seam, query(name,
-	// args, error), each row a name: the state by section, the files, the documents, the
-	// problems, the graph). Until then: the Problems query as JSON text, {total, shown, counts,
-	// groups when grouped, problems with their fixes}, or {error} for a query that does not
-	// parse (session_json's problem_query_from_json and problems_to_json), each answer and its
-	// fixes kept while what they read stands.
-	std::string problems_json(const std::string &query);
 	Document *document_for(const std::string &path = {});
 	bool documents_dirty() const;
 	bool project_open() const;

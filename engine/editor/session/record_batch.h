@@ -9,48 +9,48 @@
 
 namespace opennova::editor {
 
-class ProjectSession;
-
-// Edits named the way the editor MCP names records (ADR 0046 S9m, `editor_menu`): a record
-// by its identity, a record kind by its token, and a record the batch itself makes by the
-// label its edit gave it (the core's batch_made underneath), so one undo step can add a
-// window and fill it in: its fields, its ACTIONs, a SOUND, an ITEM. Any document type; one
-// row per batch, as every batch.
+// A request's edits in their wire form (ADR 0046 S9m, S13 A5): the batch form every client names
+// records by. A record by its identity, or by the label (`as`) an earlier add or duplicate of the
+// batch gave it (the core's batch_made underneath), and a record kind by its token, each in the
+// record document the request acts on (`names`), so one undo step can add a window and fill it in:
+// its fields, its ACTIONs, a SOUND, an ITEM. One row per batch, as every batch.
 struct RecordBatch {
 	std::vector<Edit> edits;
-	// One per edit that makes a record (an add, a duplicate), in order: the label it gave
-	// with `as` ("" for none). The records it made are then the document's
-	// last_added_records(), in the same order.
+	// One per edit that makes a record (an add, a duplicate, and each add of a replace_list), in
+	// order: the label it gave with `as` ("" for none). The records the batch made are then the
+	// request's outcome's `added` (Document::last_added_records()), in the same order.
 	std::vector<std::string> made_labels;
 };
 
-// A batch from [{op, id, field, value, kind, parent, position, as}]: `op` is set, clear,
-// write, add, duplicate, remove or move; `id` names the record (an identity, or the label
-// an earlier add or duplicate of the batch gave it with `as`); `field` and `value` a set's
-// (a clear's and a write's field); `kind` an add's record kind token ("window", "action");
-// `parent` an add's owner (a record, a label, or the row itself; none adds a row) and a
-// move's destination; `position` an index inside the owner's collection (an add goes at the
-// end, a duplicate right after its record, a move needs one). Strict: an unknown op,
-// member, label, identity or kind is refused with the reason, and nothing is applied.
-bool record_batch_from_json(const io::JsonValue &edits, const Document &document, RecordBatch &out,
-                            std::string &error);
+// What a batch's edits are: changes of records (edit_record), or the fields whose saved value
+// comes back (revert_to_saved: each edit {id, field}).
+enum class RecordBatchForm { Edits, Fields };
 
-// The records of the list `list` (a collection's kind token: "action", "sound",
-// "items.item") that `owner` holds, replaced by `records` ([{field: value, ...}], each added
-// at the end with its fields set in the order written): one batch.
-bool list_batch_from_json(const Document &document, NodeId owner, const std::string &list,
-                          const io::JsonValue &records, RecordBatch &out, std::string &error);
+// A batch from its wire form, `edits` a list of one edit or more, each refused by its place
+// ("edits[1]: ..."). Edits: {op, id, parent, kind, field, value, position, as, coalesce, gesture,
+// list, records}, `op` one of set, clear, write, add, duplicate, remove, move, set_file_value or
+// replace_list. `id` names the record every op but add and set_file_value changes (an identity, or
+// a label an earlier add or duplicate of the batch gave with `as`); `field` and `value` a set's (a
+// clear's and a write's field; an add's field its `value` sets in the same step; a set_file_value's
+// file-wide field); `kind` an add's record kind token ("window", "action"); `parent` an add's owner
+// (a record, a label, or a row's own identity; none adds a row) and a move's destination; `position`
+// an index in the owner's collection (an add goes at the end, a duplicate right after its record,
+// a move needs one); `coalesce` a set that folds into the one before on its field (typing);
+// `gesture` edits that fold into one undo step until end_edit (a drag); a replace_list's `list` (a
+// collection's kind token: "action", "sound", "items.item") of the record `id` replaced by
+// `records` ([{field: value, ...}], each added at the end with its fields set in the order
+// written). Fields: {id, field}. Strict: an unknown op, member, label, identity or kind is refused
+// with the reason, and nothing is read. `names` is the record document the request acts on; with
+// none, an edit naming a record or a kind is refused.
+bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
+		RecordBatch &out, std::string &error);
 
-// A batch named this way, on one document. `request` is {edits: [...]}
-// (record_batch_from_json) or {id, list, records} (list_batch_from_json) for the document at
-// `path` ("" = the active one; opened first when it is not open); the editor MCP's
-// editor_menu edit and list reach it through menu_edit_request (preview/menu_report.h),
-// which names the menu the way its tree and analyze do. The batch goes to the
-// session as one EditRecord request: one undo step; a name set is its record's edit alone,
-// as any Set is (Rename everywhere, RenameSymbol, renames a name with its uses). Answers
-// {ok, error?, outcome (the request's outcome), made {label: identity}, added [the
-// identities of the records it made, in order], revision}; ok says the batch parsed (nothing
-// is asked of the session when it did not), the outcome's done whether it went through.
-io::JsonValue record_batch_request(ProjectSession &session, const std::string &path, const io::JsonValue &request);
+// The batch form of `edits`, which record_batch_from_json reads back as they are: each record by
+// its identity (one an earlier edit of the batch makes by a label, "edit<i>", the edit that makes
+// it giving it with `as`), an add's kind by its token in `names` ("" without it), a record added
+// straight into a row naming the row's identity as its `parent`. A Paste has no batch form (the
+// paste request carries the clipboard): written as op "paste", which the reader refuses.
+io::JsonValue record_batch_to_json(
+		const std::vector<Edit> &edits, const Document *names, RecordBatchForm form);
 
 } // namespace opennova::editor

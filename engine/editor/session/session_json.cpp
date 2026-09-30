@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
@@ -12,6 +13,8 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_session.h>
+#include <editor/project/project_files.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 
@@ -155,6 +158,8 @@ const char *requirement_state_token(RequirementState state) {
 
 JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
 
+} // namespace
+
 JsonValue address_to_json(const NodeAddress &address) {
 	JsonValue out = JsonValue::make_object();
 	out.set("row", json_number(double(address.row)));
@@ -162,6 +167,8 @@ JsonValue address_to_json(const NodeAddress &address) {
 	out.set("child", json_number(double(address.child)));
 	return out;
 }
+
+namespace {
 
 // A whole, non-negative JSON number as an identity; false for anything else.
 bool read_id(const JsonValue &json, uint64_t &out) {
@@ -262,75 +269,6 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	return out;
 }
 
-// One edit of a request's `edits`, `what` naming it in a refusal ("edits[2]").
-bool edit_from_json(const JsonValue &json, const std::string &what, Edit &out, std::string &error) {
-	if (!json.is_object()) {
-		error = "\"" + what + "\" must be an object.";
-		return false;
-	}
-	if (!members_known(json,
-				{ "operation", "row", "kind", "child", "parent", "field", "value", "position",
-						"coalesce", "gesture" },
-				what.c_str(), error))
-		return false;
-	// A member's refusal names the edit it is in.
-	const auto refuse = [&error, &what](const std::string &why) {
-		error = what + ": " + why;
-		return false;
-	};
-	Edit edit;
-	std::string operation;
-	if (!read_string(json, "operation", operation, error))
-		return refuse(error);
-	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation))
-		return refuse("unknown edit operation \"" + operation + "\".");
-	for (const char *key : {"row", "child", "parent"}) {
-		if (const JsonValue *member = json.get(key)) {
-			uint64_t id = 0;
-			if (!read_id(*member, id))
-				return refuse(std::string("\"") + key + "\" must be a record identity.");
-			(key[0] == 'r' ? edit.address.row : key[0] == 'c' ? edit.address.child : edit.parent) = id;
-		}
-	}
-	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, edit.address.kind))
-		return refuse("\"kind\" must be a whole number.");
-	if (!read_string(json, "field", edit.field, error))
-		return refuse(error);
-	if (const JsonValue *value = json.get("value")) {
-		if (!value_from_json(*value, edit.value))
-			return refuse("\"value\" must be a number, a string or a bool.");
-	}
-	if (const JsonValue *position = json.get("position")) {
-		uint64_t index = 0;
-		if (!read_id(*position, index))
-			return refuse("\"position\" must be a whole number.");
-		edit.position = static_cast<size_t>(index);
-	}
-	if (!read_bool(json, "coalesce", edit.coalesce, error))
-		return refuse(error);
-	if (const JsonValue *gesture = json.get("gesture")) {
-		if (!read_id(*gesture, edit.gesture))
-			return refuse("\"gesture\" must be a whole number.");
-	}
-	out = edit;
-	return true;
-}
-
-JsonValue edit_to_json(const Edit &edit) {
-	JsonValue out = JsonValue::make_object();
-	out.set("operation", json_string(edit_operation_token(edit.operation)));
-	out.set("row", json_number(double(edit.address.row)));
-	out.set("kind", json_number(double(edit.address.kind)));
-	out.set("child", json_number(double(edit.address.child)));
-	if (edit.parent) out.set("parent", json_number(double(edit.parent)));
-	if (!edit.field.empty()) out.set("field", json_string(edit.field));
-	out.set("value", value_to_json(edit.value));
-	if (edit.position != SIZE_MAX) out.set("position", json_number(double(edit.position)));
-	if (edit.coalesce) out.set("coalesce", boolean(true));
-	if (edit.gesture) out.set("gesture", json_number(double(edit.gesture)));
-	return out;
-}
-
 // A record's own collections (none for one that holds nothing), each record with the
 // collections it holds in turn.
 JsonValue collections_to_json(const Document &document, const NodeAddress &owner) {
@@ -362,6 +300,8 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 
 // An import source as a request's `imports` takes it: {path, entry, install, native}, the
 // defaults left out, so the view's sources pass back as they are.
+} // namespace
+
 JsonValue import_source_to_json(const ImportSource &source) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(source.path));
@@ -370,6 +310,8 @@ JsonValue import_source_to_json(const ImportSource &source) {
 	if (source.native) out.set("native", boolean(true));
 	return out;
 }
+
+namespace {
 
 // Whether the document holds the record `address` names, of the kind it says.
 bool holds_record(const Document &document, const NodeAddress &address) {
@@ -389,6 +331,22 @@ bool field_of(const Document &document, const NodeAddress &address, const std::s
 			return true;
 		}
 	return false;
+}
+
+// What a kind's edits are (S13 A5): revert_to_saved's the fields to give back, every other's
+// changes.
+RecordBatchForm batch_form(EditorRequestKind kind) {
+	return kind == EditorRequestKind::RevertToSaved ? RecordBatchForm::Fields
+													: RecordBatchForm::Edits;
+}
+
+// A blank record document of the type that opens `path` (its kinds' tokens, no records): what a
+// request's edits name their kinds in when no document it acts on is open (a fix's edit, whose
+// document opens first). Null for a path no document type opens.
+std::unique_ptr<Document> blank_names(const std::string &path) {
+	if (path.empty()) return nullptr;
+	const DocumentType *type = document_type_for(asset_kind_for_name(basename_of(path)));
+	return type && type->make ? type->make() : nullptr;
 }
 
 // --- a request's fields (request_fields.h): each read and written by its row's JSON type ---------
@@ -523,10 +481,11 @@ bool import_source_from_json(const JsonValue &json, ImportSource &out, std::stri
 	return true;
 }
 
-// A request's field `id` from its wire form into `request`; false with `error` for a value of
-// another type, an unknown token or a malformed object.
+// A request's field `id` from its wire form into `request` (its edits named in `names`, their
+// labels into `labels`); false with `error` for a value of another type, an unknown token or a
+// malformed object.
 bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &request,
-                     std::string &error) {
+		const Document *names, std::vector<std::string> &labels, std::string &error) {
 	using F = RequestFieldId;
 	const char *token = request_field(id).token;
 	const std::string shown = json.is_string() ? json.string : std::string("?");
@@ -557,18 +516,11 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Edits: {
-		if (!json.is_array()) {
-			error = "\"edits\" must be an array of edits.";
+		RecordBatch batch;
+		if (!record_batch_from_json(json, names, batch_form(request.kind), batch, error))
 			return false;
-		}
-		std::vector<Edit> edits;
-		for (size_t i = 0; i < json.array.size(); ++i) {
-			Edit edit;
-			if (!edit_from_json(json.array[i], "edits[" + std::to_string(i) + "]", edit, error))
-				return false;
-			edits.push_back(std::move(edit));
-		}
-		request.edits = std::move(edits);
+		request.edits = std::move(batch.edits);
+		labels = std::move(batch.made_labels);
 		return true;
 	}
 	case F::Address: return address_from_json(json, request.address, error);
@@ -597,9 +549,10 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	return false;
 }
 
-// A request's field `id` as it goes on the wire into `out`; false when it holds its default, which
-// the writer leaves out unless the kind must carry the field.
-bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &out) {
+// A request's field `id` as it goes on the wire into `out` (its edits named in `names`); false when
+// it holds its default, which the writer leaves out unless the kind must carry the field.
+bool field_to_json(
+		RequestFieldId id, const EditorRequest &request, const Document *names, JsonValue &out) {
 	using F = RequestFieldId;
 	switch (id) {
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
@@ -618,8 +571,7 @@ bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &o
 		for (const ImportSource &source : request.imports) out.push(import_source_to_json(source));
 		return !request.imports.empty();
 	case F::Edits:
-		out = JsonValue::make_array();
-		for (const Edit &edit : request.edits) out.push(edit_to_json(edit));
+		out = record_batch_to_json(request.edits, names, batch_form(request.kind));
 		return !request.edits.empty();
 	case F::Address:
 		out = address_to_json(request.address);
@@ -706,6 +658,13 @@ std::vector<std::string> editor_request_kind_tokens() {
 	return tokens;
 }
 
+void set_page(JsonValue &out, const JsonPage &page, size_t total) {
+	out.set("count", json_number(double(total)));
+	const size_t first = page.first(total), last = page.last(total);
+	out.set("offset", json_number(double(first)));
+	out.set("next_offset", last < total ? json_number(double(last)) : JsonValue::make_null());
+}
+
 JsonValue value_to_json(const Value &value) {
 	if (const auto *number = std::get_if<int64_t>(&value)) return json_number(double(*number));
 	if (const auto *real = std::get_if<double>(&value)) return json_number(*real);
@@ -726,7 +685,8 @@ bool value_from_json(const JsonValue &json, Value &out) {
 	}
 }
 
-bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::string &error) {
+bool editor_request_from_json(
+		const JsonValue &json, EditorRequest &out, std::string &error, RequestNames *names) {
 	if (!json.is_object()) { error = "A request is a JSON object."; return false; }
 	const JsonValue *kind = json.get("kind");
 	if (!kind || !kind->is_string()) { error = "\"kind\" names the request (a string)."; return false; }
@@ -735,9 +695,17 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		error = "Unknown request kind \"" + kind->string + "\".";
 		return false;
 	}
-	// Each member a field the kind's row takes (request_kinds.cpp), each field it must carry there.
+	// Each member a field the kind's row takes (request_kinds.cpp), each field it must carry there;
+	// its edits named in the document it acts on, else in a blank of the type its path opens.
 	const RequestParams &params = request_kind_row(request.kind).params;
 	RequestFieldSet carried = 0;
+	std::unique_ptr<Document> blank;
+	const Document *document = names ? names->document : nullptr;
+	if (!document && params.has(RequestFieldId::Edits)) {
+		blank = blank_names(json.get_string("path", ""));
+		document = blank.get();
+	}
+	std::vector<std::string> labels;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "kind") continue;
 		RequestFieldId id = RequestFieldId::Dir;
@@ -751,7 +719,7 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 					fields_taken(params) + ").";
 			return false;
 		}
-		if (!field_from_json(id, member.value, request, error)) return false;
+		if (!field_from_json(id, member.value, request, document, labels, error)) return false;
 		carried |= field_bit(id);
 	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
@@ -763,19 +731,25 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		}
 	}
 	out = std::move(request);
+	if (names) names->made_labels = std::move(labels);
 	return true;
 }
 
-JsonValue editor_request_to_json(const EditorRequest &request) {
+JsonValue editor_request_to_json(const EditorRequest &request, const Document *names) {
 	JsonValue out = JsonValue::make_object();
 	out.set("kind", json_string(editor_request_kind_token(request.kind)));
 	// The fields its row takes: each it must carry, and any other it carries (not its default).
 	const RequestParams &params = request_kind_row(request.kind).params;
+	std::unique_ptr<Document> blank;
+	if (!names && !request.edits.empty()) {
+		blank = blank_names(request.path);
+		names = blank.get();
+	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
 		if (!params.has(id)) continue;
 		JsonValue value;
-		if (field_to_json(id, request, value) || params.needs(id))
+		if (field_to_json(id, request, names, value) || params.needs(id))
 			out.set(request_field(id).token, std::move(value));
 	}
 	return out;
@@ -818,56 +792,8 @@ JsonValue problem_fix_to_json(const ProblemFix &fix) {
 	return out;
 }
 
-bool problem_query_from_json(const JsonValue &json, ProblemQuery &query, size_t &offset, size_t &limit,
-                             std::string &error) {
-	if (!json.is_object()) { error = "A Problems query is a JSON object."; return false; }
-	if (!members_known(json, {"severities", "text", "scope", "fixable", "group", "offset", "limit"}, "query", error))
-		return false;
-	ProblemQuery parsed;
-	if (const JsonValue *severities = json.get("severities")) {
-		if (!severities->is_array()) { error = "\"severities\" must be an array of error, warning and info."; return false; }
-		parsed.errors = parsed.warnings = parsed.infos = false;
-		for (const JsonValue &token : severities->array) {
-			DiagnosticSeverity severity = DiagnosticSeverity::Error;
-			if (!token.is_string() || !diagnostic_severity_from_token(token.string, severity)) {
-				error = "\"severities\" takes error, warning and info.";
-				return false;
-			}
-			switch (severity) {
-			case DiagnosticSeverity::Error: parsed.errors = true; break;
-			case DiagnosticSeverity::Warning: parsed.warnings = true; break;
-			case DiagnosticSeverity::Info: parsed.infos = true; break;
-			}
-		}
-	}
-	if (!read_string(json, "text", parsed.text, error) || !read_bool(json, "fixable", parsed.fixable, error)) return false;
-	std::string scope, group;
-	if (!read_string(json, "scope", scope, error) || !read_string(json, "group", group, error)) return false;
-	if (!scope.empty() && !problem_scope_from_token(scope, parsed.scope)) {
-		error = "Unknown scope \"" + scope + "\".";
-		return false;
-	}
-	if (!group.empty() && !problem_grouping_from_token(group, parsed.grouping)) {
-		error = "Unknown grouping \"" + group + "\".";
-		return false;
-	}
-	uint64_t first = 0, count = UINT64_MAX;
-	if (const JsonValue *member = json.get("offset"); member && !read_id(*member, first)) {
-		error = "\"offset\" must be a whole number.";
-		return false;
-	}
-	if (const JsonValue *member = json.get("limit"); member && !read_id(*member, count)) {
-		error = "\"limit\" must be a whole number.";
-		return false;
-	}
-	query = parsed;
-	offset = static_cast<size_t>(first);
-	limit = count == UINT64_MAX ? SIZE_MAX : static_cast<size_t>(count);
-	return true;
-}
-
-JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer, size_t offset, size_t limit,
-                           ProblemFixCache &fixes) {
+JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
+		const JsonPage &page, ProblemFixCache &fixes) {
 	JsonValue out = JsonValue::make_object();
 	out.set("total", json_number(double(answer.total())));
 	out.set("shown", json_number(double(answer.rows.size())));
@@ -876,8 +802,9 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	counts.set("warnings", json_number(double(answer.warnings)));
 	counts.set("infos", json_number(double(answer.infos)));
 	out.set("counts", std::move(counts));
-	const size_t first = std::min(offset, answer.rows.size());
-	const size_t last = first + std::min(limit, answer.rows.size() - first);
+	const size_t first = page.first(answer.rows.size());
+	const size_t last = page.last(answer.rows.size());
+	set_page(out, page, answer.rows.size());
 	// Grouped, the rows run group after group: the group of each shown row and where each
 	// group starts. Only the page's groups are written (a project can have a group per file).
 	std::vector<size_t> group_of;
@@ -923,6 +850,9 @@ JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
 	out.set("unsaved_prompt", boolean(outcome.unsaved_prompt));
 	out.set("operation", json_number(double(outcome.operation)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
+	JsonValue added = JsonValue::make_array();
+	for (const NodeId id : outcome.added) added.push(json_number(double(id)));
+	out.set("added", std::move(added));
 	return out;
 }
 
@@ -1066,7 +996,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 
 	JsonValue documents = JsonValue::make_array();
 	for (const auto &document : view.documents) {
-		if (document) documents.push(document_to_json(*document, false));
+		if (document) documents.push(document_to_json(*document));
 	}
 	out.set("documents", std::move(documents));
 	out.set("active_document", json_string(view.active_document));
@@ -1270,7 +1200,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	return out;
 }
 
-JsonValue document_to_json(const Document &document, bool with_rows) {
+JsonValue document_to_json(const Document &document, const JsonPage *page) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(document.path()));
 	out.set("kind", json_string(asset_kind_token(document.kind())));
@@ -1303,9 +1233,12 @@ JsonValue document_to_json(const Document &document, bool with_rows) {
 		kinds.push(std::move(entry));
 	}
 	out.set("top_kinds", std::move(kinds));
-	if (!with_rows) return out;
+	if (!page) return out;
 	JsonValue rows = JsonValue::make_array();
-	for (const auto &row : document.rows()) {
+	const size_t total = document.rows().size();
+	set_page(out, *page, total);
+	for (size_t i = page->first(total); i < page->last(total); ++i) {
+		const auto &row = document.rows()[i];
 		if (!row) continue;
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id", json_number(double(row->id)));
@@ -1468,15 +1401,16 @@ JsonValue graph_symbol_to_json(const GraphSymbol &symbol) {
 	return out;
 }
 
-JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address, const std::string &id,
-                                    const SessionView &view) {
+JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address,
+		const std::string &id, const SessionView &view, const JsonPage &page) {
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
 	const std::vector<ReferenceChoice> choices =
 	        view.graph ? reference_choices(*view.graph, field) : std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
-	for (const ReferenceChoice &choice : choices) {
+	for (size_t i = page.first(choices.size()); i < page.last(choices.size()); ++i) {
+		const ReferenceChoice &choice = choices[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("name", json_string(choice.name));
 		entry.set("kind", json_string(reference_row(choice.kind).token));
@@ -1493,13 +1427,13 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	out.set("field", json_string(field.schema->id));
 	out.set("reference", json_string(reference_row(field.reference).token));
 	if (!field.scope.empty()) out.set("scope", json_string(field.scope));
-	out.set("count", json_number(double(choices.size())));
+	set_page(out, page, choices.size());
 	out.set("choices", std::move(list));
 	return out;
 }
 
-JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address, const std::string &id,
-                                    const SessionView &view) {
+JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address,
+		const std::string &id, const SessionView &view, const JsonPage &page) {
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
@@ -1507,7 +1441,8 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 			? reference_targets(*view.graph, view.scan, field, value)
 			: std::vector<ReferenceTarget>();
 	JsonValue list = JsonValue::make_array();
-	for (const ReferenceTarget &target : targets) {
+	for (size_t i = page.first(targets.size()); i < page.last(targets.size()); ++i) {
+		const ReferenceTarget &target = targets[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("label", json_string(target.label));
 		entry.set("file", json_string(target.file));
@@ -1520,14 +1455,15 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	out.set("field", json_string(field.schema->id));
 	out.set("reference", json_string(reference_row(field.reference).token));
 	out.set("value", value_to_json(value));
-	out.set("count", json_number(double(targets.size())));
+	set_page(out, page, targets.size());
 	out.set("targets", std::move(list));
 	return out;
 }
 
-JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits) {
+JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits, const JsonPage &page) {
 	JsonValue list = JsonValue::make_array();
-	for (const DocumentHit &hit : hits) {
+	for (size_t i = page.first(hits.size()); i < page.last(hits.size()); ++i) {
+		const DocumentHit &hit = hits[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id",
 		          json_number(double(hit.address.child ? hit.address.child : hit.address.row)));
@@ -1541,14 +1477,15 @@ JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits) {
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("count", json_number(double(hits.size())));
+	set_page(out, page, hits.size());
 	out.set("hits", std::move(list));
 	return out;
 }
 
-JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits) {
+JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits, const JsonPage &page) {
 	JsonValue list = JsonValue::make_array();
-	for (const GraphSearchHit &hit : hits) {
+	for (size_t i = page.first(hits.size()); i < page.last(hits.size()); ++i) {
+		const GraphSearchHit &hit = hits[i];
 		JsonValue entry = hit.symbol ? graph_symbol_to_json(*hit.symbol) : JsonValue::make_object();
 		if (!hit.symbol) {
 			entry.set("kind", json_string("file"));
@@ -1559,7 +1496,7 @@ JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits) {
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("count", json_number(double(hits.size())));
+	set_page(out, page, hits.size());
 	out.set("hits", std::move(list));
 	return out;
 }

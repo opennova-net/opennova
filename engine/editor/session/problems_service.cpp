@@ -4,12 +4,10 @@
 #include <cstddef>
 #include <utility>
 
-#include <base/io/json.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/project/project_findings.h>
 #include <editor/session/document_set.h>
 #include <editor/session/session_core.h>
-#include <editor/session/session_json.h>
 
 namespace opennova::editor {
 
@@ -79,19 +77,6 @@ void ProblemsService::clear() {
 	document_findings_.clear();
 	reported_.clear();
 	validation_due_ = false;
-}
-
-std::string ProblemsService::problems_json(const std::string &text) {
-	io::JsonValue json;
-	std::string error;
-	ProblemQuery query;
-	size_t offset = 0, limit = 0;
-	if (!io::json_parse(text, json, error) || !problem_query_from_json(json, query, offset, limit, error)) {
-		io::JsonValue answer = io::JsonValue::make_object();
-		answer.set("error", io::JsonValue::make_string(error));
-		return io::json_write(answer);
-	}
-	return io::json_write(problems_to_json(view_, query_cache_.answer(query, view_), offset, limit, fix_cache_));
 }
 
 } // namespace opennova::editor

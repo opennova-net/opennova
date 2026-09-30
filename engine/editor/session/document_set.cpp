@@ -565,6 +565,7 @@ bool DocumentSet::apply_edits(Document &document, const std::vector<Edit> &edits
 		gesture = gesture || edit.gesture != 0;
 	}
 	if (adds && document.revision() != before) {
+		core_.outcome().added = document.last_added_records();
 		activate(document.path()); // what an edit adds is selected, in its own document
 		view_.select_added(document);
 	} else {
