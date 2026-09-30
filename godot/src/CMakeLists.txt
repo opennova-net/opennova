@@ -315,7 +315,10 @@ set_target_properties(
 # gersemi: on
 
 # emsdkHack clears the shared-library suffix; Godot looks the web side module
-# up by the .wasm name opennova.gdextension lists.
+# up by the .wasm name opennova.gdextension lists. Every object is already
+# LLVM-optimized; binaryen's -O3 over the whole ~16 MB module ran past an hour,
+# so its link-time pass runs at -O1 (the last -O on the link line wins).
 if(EMSCRIPTEN)
     set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".wasm")
+    target_link_options(${TARGET_NAME} PRIVATE -O1)
 endif()
