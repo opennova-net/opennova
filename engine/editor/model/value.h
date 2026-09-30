@@ -91,6 +91,11 @@ struct FieldSchema {
 	std::string id;
 	FieldType type = FieldType::Integer;
 	size_t width = 0; // text capacity in bytes, including the terminator
+	// The file stores the text in the game's code page (Windows-1252: one byte a character), so
+	// `width` counts characters, not the bytes of the UTF-8 the editor holds (a string table's
+	// texts, which its document transcodes); else it counts the value's own bytes (a def's, a
+	// menu's, a stylesheet's).
+	bool code_page = false;
 	ReferenceKind reference = ReferenceKind::None;
 	std::vector<FieldChoice> choices;
 	bool flags = false;        // the choices are bits of one integer

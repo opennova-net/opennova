@@ -124,14 +124,11 @@ SEAM_TREE_EXTRA_HEADERS = {
 # Rule 7: the editor's rank (ADR 0046 S13 D3).
 EDITOR_RANK = {"model": 0, "documents": 1, "graph": 2, "session": 3, "ui": 4}
 EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h"}
-# (includer, included header): the upward includes the tree still makes.
-EDITOR_RANK_ALLOWED = {
-    # MnsDocument::style_value_use reads a variable's uses from the graph (S13
-    # V1); S13 V3 moves it under field_on. (S13 D4 moved the stylesheet's use
-    # checks into graph/use_checks and gave DocumentType a per-file
-    # validate_file that takes no graph.)
-    ("engine/editor/documents/mns_document.h", "editor/graph/asset_graph.h"),
-}
+# (includer, included header): the upward includes the tree still makes. None
+# since S13 V3, which moved the last (a stylesheet line's value use, which reads
+# the menus' uses from the graph) out of documents/ into graph/style_value_use;
+# a new entry names the slice that removes it.
+EDITOR_RANK_ALLOWED: set[tuple[str, str]] = set()
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 

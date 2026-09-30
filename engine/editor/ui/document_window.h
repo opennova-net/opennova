@@ -3,17 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
-#include <editor/ui/catalog_view.h>
-#include <editor/ui/workspace.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/find_cursor.h>
-#include <editor/ui/menu_view.h>
-#include <editor/ui/record_reveal.h>
-#include <editor/ui/strings_view.h>
-#include <editor/ui/styles_view.h>
-#include <editor/ui/view_event_mailbox.h>
+#include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
@@ -28,11 +24,15 @@ class NewProjectForm;
 // documents). The active document's tab is selected when the active document changes,
 // never otherwise, so a click is never fought; a tab a click (or the tab list) shows makes
 // its document the active one, a click in the frame the active document changed included.
-// A tab shows its type's view (a catalog, a string table, a stylesheet, a menu; a model, a
-// clip or an animation table as its records' outline); each shows the selection a Go to, a
-// find or a Problems row moves there (RecordReveal; a menu's window tree its own way: MenuView),
-// and again for each RevealRecord view event its document is sent, which waits until that
-// document's view draws.
+// A tab shows its document's view (S13 V3, ui/document_views): one per open document by its
+// path, made from its type's row the first time the window draws the tab as the active document's
+// or sends the document a RevealRecord, and kept with what it holds (its filter and order, what it
+// has open, its caches) while the document is open there; rebound when the document is read again
+// (the events it held dropped), made anew when the path's document is of another type, gone when
+// it closes, so no two open documents share a view's state (a renamed file's document, closed and
+// opened at its new path, gets a new one). Each shows the selection a Go to, a find or a Problems
+// row moves there, and again for each RevealRecord view event its document is sent, which the view
+// holds until it draws.
 // With no project open it is the
 // welcome view; with nothing open it says how to open a file. Ctrl+F (Edit > Find...) opens the
 // find bar over the active tab's view: every field whose value as the Inspector shows it holds
@@ -51,37 +51,42 @@ public:
 	}
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
-	// The views' own confirmations (a menu's Remove screen...), which the workspace draws
-	// every frame with its modals, whether a tab shows them or not.
+	// The views' own modals (a menu's Remove screen...), which the workspace draws every frame
+	// with its modals, whether a tab shows them or not; the views of documents no longer open go
+	// after (a closed menu's prompt closes first).
 	void draw_modals();
 	// Opens the find bar with the keyboard in its text (Edit > Find..., Ctrl+F).
 	void open_find();
-	// A RevealRecord event, held for the view of its document until that view draws (a document
-	// closed first drops it).
-	void receive(const ViewEvent &event) { events_[event.path].post(event); }
-	// The events held for the document at `path` until its view draws.
-	size_t held_events(const std::string &path) const {
-		const auto found = events_.find(path);
-		return found == events_.end() ? 0 : found->second.held();
-	}
+	// A RevealRecord event, sent to the view of its document (made for it when the document is
+	// open and has none yet), which holds it until it draws; dropped for a document not open.
+	void receive(const ViewEvent &event);
+	// The events the view of the document at `path` holds until it draws (0: none, or no view).
+	size_t held_events(const std::string &path) const;
+	// The view of the document open at `path`; null until the window meets the document.
+	DocumentView *view_of(const std::string &path);
 
 private:
+	// A document's view, its type, and the document it is bound to: the instance and its load.
+	struct Slot {
+		std::unique_ptr<DocumentView> view;
+		DocumentTypeId type = DocumentTypeId::None;
+		uint64_t identity = 0;
+		uint64_t load = 0;
+	};
+	// The view of the open `document`: made from its type's row the first time (and again for a
+	// document of another type at the path), rebound when the document at its path is another
+	// instance or was loaded again. Null for a document no type opens.
+	DocumentView *view_for(const DocumentBase &document);
+	// The views of documents no longer open go.
+	void prune(const SessionView &view);
 	void draw_tabs(const SessionView &view);
-	void draw_view(const Document &document);
-	// A RevealRecord event for `document`, handed to the view that draws it.
-	void reveal_again(const Document &document);
 	void draw_find(const Document &document);
 	// The find bar's hit `index` shown: its record selected, its field revealed.
 	void show_hit(const Document &document, size_t index);
 
 	Workspace &workspace_;
 	NewProjectForm &form_;
-	CatalogView catalog_;
-	StringsView strings_;
-	StylesView styles_;
-	MenuView menu_;
-	RecordReveal outline_; // the outline's reveal of the selection (a model, a clip, an animation table)
-	std::map<std::string, ViewEventMailbox<>> events_; // by the path of the document they are for
+	std::map<std::string, Slot> views_; // by the path of the open document each is for
 	// The active document the tab bar last selected the tab of, and the document whose tab
 	// the user chose, the OpenDocument raised for it.
 	std::string followed_;

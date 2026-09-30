@@ -53,7 +53,8 @@ add_library(opennova_editor STATIC
     # graph — the asset graph: the extractors, the reference kinds' table, the per-file slots and
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
     # fields ask, the rename transaction; what other files make of what one defines (the use
-    # checks) and the one validation pass over the project's files
+    # checks, and what a stylesheet line's value is used as) and the one validation pass over the
+    # project's files
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
@@ -62,6 +63,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the game's PCX), the sidecars, the import pass, and
     # the plan of an import with the files it needs
@@ -162,9 +164,8 @@ add_library(opennova_editor STATIC
 # consumer whether the windows exist in this build.
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_outline.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
@@ -176,6 +177,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_preview_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_preview_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/preview_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_list.cpp
@@ -186,9 +189,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/strings_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/table_cells.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp

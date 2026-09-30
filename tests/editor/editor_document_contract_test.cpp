@@ -27,7 +27,10 @@
 // undo still finds every record where it was and answers what changed in it as it did. S13 D5
 // adds the type's record kinds (kinds()): each named back by its token, no two sharing a kind or
 // a token, a kind the outline adds a row of being a row of the file; every row of the file of a
-// kind that is a row, and every record a collection holds of a kind the table has. S13 D4 adds the
+// kind that is a row, and every record a collection holds of a kind the table has. S13 V3 adds that
+// a kind is one record kind across every asset kind the type opens (the same token in each: the
+// type's schema without a document, DocumentType::fields, answers by the kind alone), whose fields
+// are the type's fields(kind), the very table its documents answer. S13 D4 adds the
 // type's validate_file: the file's own findings from its document alone, each on the file and on
 // a record the document holds, the same findings from a second load of the file, and a finding
 // over each type's files (a flawed file of its own where its fixture has no flaw). S13 D6: the
@@ -45,6 +48,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -93,6 +97,8 @@ size_t g_foreign = 0, g_row_adds = 0, g_record_adds = 0, g_adds_waiting = 0, g_a
 size_t g_findings = 0;
 size_t g_checked_again = 0; // files a type's project check was brought to twice, and after a clear
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
+// Each type's record kinds over the files of every asset kind it opens: a kind's token by the kind.
+std::map<std::string, std::map<NodeKind, std::string>> g_type_kinds;
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
 // it did.
@@ -427,7 +433,7 @@ Edit edit_of(EditOperation operation, const NodeAddress &address, const std::str
 // sharing a kind or a token, a kind the outline adds a row of being a row of the file; every row
 // of the file of a kind that is a row, and every record a collection holds of a kind the table
 // has (its token the one its locator and a batch's add name it by).
-void check_kinds(const Fixture &fixture, const Document &document,
+void check_kinds(const DocumentType &type, const Fixture &fixture, const Document &document,
                  const std::vector<NodeAddress> &records) {
 	const std::vector<RecordKindRow> &kinds = document.kinds();
 	check(!kinds.empty(), fixture.name, "the type declares its record kinds");
@@ -442,6 +448,11 @@ void check_kinds(const Fixture &fixture, const Document &document,
 			check(kinds[j].kind != row.kind && std::string(kinds[j].token) != row.token, where,
 			      "no two kinds share a kind or a token");
 		g_kinds.insert(std::string(typeid(document).name()) + "/" + row.token);
+		const auto known = g_type_kinds[type.name].emplace(row.kind, row.token).first;
+		check(known->second == row.token, where,
+		      "a kind is one record kind across every asset kind the type opens (the same token)");
+		check(type.fields && &type.fields(row.kind) == &document.fields(row.kind), where,
+		      "the type's fields(kind) is the table its documents answer");
 	}
 	for (const NodeAddress &address : records) {
 		const std::string where = where_of(fixture, document, address, "");
@@ -971,7 +982,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 		      "parse, serialize, parse again serializes the same bytes and records");
 	}
 
-	check_kinds(fixture, *document, records);
+	check_kinds(type, fixture, *document, records);
 	check_validate_file(type, fixture, *document, counts);
 	check_foreign_payload(fixture, *document, records, first.text);
 	check_adds(type, fixture, *document, records, first.text);

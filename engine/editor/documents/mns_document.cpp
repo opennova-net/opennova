@@ -6,7 +6,6 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
-#include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>
 
 #include <algorithm>
@@ -147,7 +146,7 @@ const std::vector<RecordKindRow> &MnsDocument::kinds() const {
 	return table;
 }
 
-const std::vector<FieldSchema> &MnsDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &MnsDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	switch (kind) {
 	case kVariable: return variable_fields();
@@ -205,57 +204,6 @@ void MnsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) 
 		return;
 	}
 	facts.value = sheet.get(node->name());
-}
-
-const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const AssetGraph *graph,
-                                                  uint64_t graph_key) const {
-	if (!value_uses_.made || value_uses_.load_generation != load_generation() ||
-	    value_uses_.revision != revision() || value_uses_.graph != graph ||
-	    value_uses_.graph_key != graph_key) {
-		value_uses_.made = true;
-		value_uses_.load_generation = load_generation();
-		value_uses_.revision = revision();
-		value_uses_.graph = graph;
-		value_uses_.graph_key = graph_key;
-		value_uses_.rows.clear();
-	}
-	const auto kept = value_uses_.rows.find(line.row);
-	if (kept != value_uses_.rows.end()) return kept->second;
-	StyleValueUse &out = value_uses_.rows[line.row];
-	const Node *row = this->row(line.row);
-	if (!row || row->kind != kVariable) return out;
-	// The uses of the definition the game reads, by what its value must be there.
-	out.winner = winning_row(row->name()) == row->id;
-	bool colour = false, font = false, image = false, other = false;
-	if (out.winner && read_by_game() && graph) {
-		const GraphSymbol *binding = graph->style_binding(row->name());
-		out.bound = binding && binding->file == path();
-	}
-	if (out.bound)
-		for (const GraphEdge *edge : graph->referrers_of(ReferenceKind::StyleVar, row->name())) {
-			const StyleVariableUse use = style_variable_use(edge->through);
-			colour = colour || use == StyleVariableUse::Colour;
-			font = font || use == StyleVariableUse::Font;
-			image = image || use == StyleVariableUse::Image;
-			other = other || use == StyleVariableUse::Other;
-		}
-	const NodeAddress address{row->id, row->kind, 0};
-	FieldUse value;
-	for (const FieldSchema &schema : fields(kVariable))
-		if (schema.id == "value") value = field_on(address, schema);
-	Value text;
-	const std::string shown = get(address, "value", text) ? std::get<std::string>(text) : "";
-	const bool fixed = frozen(*row);
-	// The guess from the value alone only where no use says what it is: a string id's, a name's
-	// or a shown text's value is none of a colour, a font and an image, hex digits or not.
-	out.colour = !fixed && (colour || (!font && !image && !other && mnu::color_reads_whole(shown)));
-	out.file = value;
-	if (font || value.reference == ReferenceKind::Font) out.file.reference = ReferenceKind::Font;
-	else if (image || value.reference == ReferenceKind::MenuTexture)
-		out.file.reference = ReferenceKind::MenuTexture;
-	else out.file.reference = ReferenceKind::None;
-	out.picks = !fixed && !out.colour && graph && out.file.reference != ReferenceKind::None;
-	return out;
 }
 
 const mns::StyleSheet &MnsDocument::game_sheet() const {

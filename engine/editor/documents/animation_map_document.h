@@ -41,7 +41,10 @@ public:
 	// A row, which the outline adds, and its clips.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A row by its slot's words (animation_key_title), a clip by its file.
 	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
