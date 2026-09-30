@@ -35,8 +35,8 @@ public:
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 
-	// How many findings the window has asked the fixes of at the view's revision (the lines it
-	// drew, the selected one and More's, never every one).
+	// How many findings the window has asked the fixes of while what they read stands (the
+	// lines it drew, the selected one and More's, never every one).
 	size_t fixes_asked() const { return list_.fixes_asked(); }
 
 private:

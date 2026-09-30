@@ -660,7 +660,7 @@ void test_inspector_ui() {
 	const NodeAddress title = named(*document, "TITLE");
 	v.selection = back;
 	v.selected = {back, title};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.drain();
 	const std::string text = logged_frame(ui);
@@ -753,13 +753,16 @@ void test_actions_after_edits() {
 	other_entry.relative_path = other->path();
 	other_entry.kind = AssetKind::Menu;
 	v.scan.entries.push_back(other_entry);
+	v.scan.index();
 	// A required file the project lacks names no file of it: its row (showing the file it is
 	// about) opens nothing.
 	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	lacking.role = "gametext";
 	lacking.target = "gametext.bin";
 	v.diagnostics = {lacking};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	problems_grouping(ui, "None");
@@ -772,9 +775,11 @@ void test_actions_after_edits() {
 	font_entry.relative_path = "fonts/Arial14b.fnt";
 	font_entry.kind = AssetKind::Font;
 	v.scan.entries.push_back(font_entry);
+	v.scan.index();
 	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
 	                                 font_entry.relative_path)};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	ui.drain();
@@ -787,7 +792,7 @@ void test_actions_after_edits() {
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
 	v.diagnostics = {finding};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
 	ui.drain();
@@ -813,7 +818,7 @@ void test_actions_after_edits() {
 	v.unsaved_prompt.open = true;
 	v.unsaved_prompt.action = EditorRequestKind::Quit;
 	v.unsaved_prompt.files = {document->path()};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
 	CHECK(chord({ImGuiMod_Ctrl, ImGuiKey_Z}).empty() && chord({ImGuiMod_Ctrl, ImGuiKey_S}).empty() &&
@@ -824,7 +829,7 @@ void test_actions_after_edits() {
 	              prompt.find("Save all") != std::string::npos && prompt.find("Discard") != std::string::npos,
 	      "the prompt names what waits, its file and its answers");
 	v.unsaved_prompt = SessionView::UnsavedPrompt();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
 }
@@ -999,7 +1004,8 @@ void test_preview_canvas_smoke() {
 	v.documents = { document, model };
 	v.model_preview.path = model->path();
 	v.active_document = model->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.focus("Preview");
 	ui.drain();
@@ -1012,7 +1018,8 @@ void test_preview_canvas_smoke() {
 	v.documents = { document };
 	v.model_preview.path.clear();
 	v.active_document = document->path();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 
 	// Ctrl+wheel over the picture steps the zoom about the mouse: 100% to 150%.
@@ -1039,6 +1046,303 @@ void test_preview_canvas_smoke() {
 	ui.windows.set_menu_preview_viewport(nullptr);
 	CHECK(logged_frame(ui).find("No preview renderer is attached.") != std::string::npos, "no device");
 	CHECK(ui.windows.pending_requests() == 0, "the empty states raise nothing");
+}
+
+// S11d: a gesture the menu pane began ends once, for the menu it began in, whenever the pane
+// stops drawing mid-gesture: the model pane shown (a model made the active document) during
+// a drag or a held nudge, and Preview closed during either (the workspace's frame bracket
+// ends what a window the pass skipped left open); after that, letting go raises nothing.
+// The pane not drawn takes no key: with the model pane shown, an arrow, Esc and Space raise
+// nothing.
+void test_preview_gestures_end() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_gestures_test");
+	auto document = std::make_shared<MnuDocument>();
+	Diagnostic error;
+	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
+	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
+	auto model = std::make_shared<ModelDocument>();
+	CHECK(model->load(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di", "models/armory.3di",
+	                  AssetKind::Model, "jo", error),
+	      "a model");
+	if (document->rows().empty()) return;
+	const Node &screen = *document->rows()[0];
+	FakePreview fake;
+	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
+	SessionView v = menu_view(document);
+	v.menu_preview.path = document->path();
+	v.menu_preview.screen = screen.id;
+	select_in(v, named(*document, "BOX"));
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_menu_preview_viewport(&fake);
+	ui.frames(6);
+	ui.focus("Preview");
+	ui.activate(item_id(item_id(Ui::window_id("Preview"), {"menu"}), {"Zoom"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
+	ui.frames(2);
+	ui.drain();
+	devtools::Window *preview = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview = &ui.windows.pass().window(i);
+	CHECK(preview && preview->is_closeable(), "Preview has a close button");
+	if (!preview) return;
+	// The model the active document, or the menu again.
+	const auto show_model = [&](bool on) {
+		v.documents = on ? std::vector<std::shared_ptr<const Document>>{document, model}
+		                 : std::vector<std::shared_ptr<const Document>>{document};
+		v.model_preview.path = on ? model->path() : std::string();
+		v.active_document = on ? model->path() : document->path();
+		v.revisions.touch(ViewConcern::Documents);
+		v.revisions.touch(ViewConcern::Selection);
+		ui.frames(2);
+	};
+	// Exactly one request, the menu's gesture's end.
+	const auto one_end = [&](const std::vector<EditorRequest> &requests) {
+		return one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path();
+	};
+	const ImVec2 box(fake.origin.x + 200.0f, fake.origin.y + 150.0f); // BOX at 100%
+	const auto start_drag = [&]() {
+		ui.mouse(box.x, box.y);
+		ui.button(true);
+		ui.mouse(box.x + 24.0f, box.y);
+		return only(ui.drain(), EditorRequestKind::EditRecord) != nullptr;
+	};
+	const auto start_nudge = [&]() {
+		ui.key(ImGuiKey_RightArrow, true);
+		return only(ui.drain(), EditorRequestKind::EditRecord) != nullptr;
+	};
+
+	// The model shown mid-drag, then mid-nudge.
+	CHECK(start_drag(), "a drag's first step");
+	show_model(true);
+	CHECK(one_end(ui.drain()), "the model shown mid-drag: the drag's one end");
+	ui.button(false);
+	ui.frames(2);
+	CHECK(ui.drain().empty(), "letting go raises nothing");
+	show_model(false);
+	ui.focus("Preview");
+	ui.drain();
+	CHECK(start_nudge(), "a nudge's first step");
+	show_model(true);
+	CHECK(one_end(ui.drain()), "the model shown mid-nudge: the nudge's one end");
+	ui.key(ImGuiKey_RightArrow, false);
+	ui.frames(2);
+	CHECK(ui.drain().empty(), "letting go of the arrow raises nothing");
+	show_model(false);
+
+	// Preview closed mid-drag, then mid-nudge: the frame bracket ends each once.
+	ui.focus("Preview");
+	ui.drain();
+	CHECK(start_drag(), "a drag's first step");
+	preview->open = false;
+	ui.frames(2);
+	CHECK(one_end(ui.drain()), "Preview closed mid-drag: the drag's one end");
+	ui.button(false);
+	ui.frames(2);
+	preview->open = true;
+	ui.frames(3);
+	CHECK(ui.drain().empty(), "let go and opened again: nothing");
+	ui.focus("Preview");
+	ui.drain();
+	CHECK(start_nudge(), "a nudge's first step");
+	preview->open = false;
+	ui.frames(2);
+	CHECK(one_end(ui.drain()), "Preview closed mid-nudge: the nudge's one end");
+	ui.key(ImGuiKey_RightArrow, false);
+	preview->open = true;
+	ui.frames(3);
+	CHECK(ui.drain().empty(), "let go and opened again: nothing");
+
+	// The menu pane hidden behind the model's: its keys do nothing.
+	show_model(true);
+	ui.focus("Preview");
+	ui.drain();
+	for (const ImGuiKey key : {ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_Escape, ImGuiKey_Space}) {
+		ui.key(key, true);
+		ui.key(key, false);
+	}
+	CHECK(ui.drain().empty(), "the hidden menu pane takes no key");
+}
+
+// S9k2: several windows on the canvas. Shift+click adds a window, Ctrl+click toggles one; a
+// drag from the screen's background selects what its box touches (none: the screen); a
+// drag of a selected window moves every selected one in one batch per step, one gesture;
+// the arrows nudge them all; Ctrl+C / X / V / D; the toolbar's Arrange aligns them.
+void test_preview_several_windows_ui() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_multi_test");
+	auto document = std::make_shared<MnuDocument>();
+	Diagnostic error;
+	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
+	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
+	if (document->rows().empty()) return;
+	const Node &screen = *document->rows()[0];
+	FakePreview fake;
+	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
+	SessionView v = menu_view(document);
+	v.menu_preview.path = document->path();
+	v.menu_preview.screen = screen.id;
+	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
+	select_in(v, box);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_menu_preview_viewport(&fake);
+	ui.frames(6);
+	ui.focus("Preview");
+	const ImGuiID preview_id = item_id(Ui::window_id("Preview"), {"menu"}); // the menu pane's scope
+	ui.activate(item_id(preview_id, {"Zoom"}));
+	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
+	ui.frames(2);
+	ui.drain();
+	auto at = [&](float x, float y) {
+		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
+	};
+	auto click = [&](ImVec2 p, ImGuiKey modifier) {
+		ui.mouse(p.x, p.y);
+		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, true);
+		ui.button(true);
+		ui.button(false);
+		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, false);
+		ui.frames();
+		return ui.drain();
+	};
+	auto drag = [&](ImVec2 from, float dx, float dy) {
+		ui.mouse(from.x, from.y);
+		ui.button(true);
+		for (int step = 1; step <= 4; ++step) ui.mouse(from.x + dx * float(step) / 4.0f, from.y + dy * float(step) / 4.0f);
+		ui.button(false);
+		ui.frames();
+		return ui.drain();
+	};
+	auto selections = [&](const std::vector<EditorRequest> &requests) {
+		std::vector<std::pair<NodeAddress, SelectMode>> out;
+		for (const EditorRequest &request : requests)
+			if (request.kind == EditorRequestKind::SelectRecord) out.emplace_back(request.edit.address, request.select_mode);
+		return out;
+	};
+	// Where the batch sets one window's field (-1: it does not).
+	auto set_on = [](const std::vector<Edit> &edits, const NodeAddress &window, const char *field) -> int64_t {
+		for (const Edit &edit : edits)
+			if (edit.operation == EditOperation::Set && edit.address == window && edit.field == field)
+				return std::get<int64_t>(edit.value);
+		return -1;
+	};
+
+	// Shift+click adds OTHER; Ctrl+click toggles BOX; neither edits.
+	std::vector<EditorRequest> requests = click(at(500.0f, 350.0f), ImGuiMod_Shift);
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{other, SelectMode::Add}}) &&
+	              !only(requests, EditorRequestKind::EditRecord),
+	      "Shift+click adds a window");
+	requests = click(at(200.0f, 150.0f), ImGuiMod_Ctrl);
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Toggle}}) &&
+	              !only(requests, EditorRequestKind::EditRecord),
+	      "Ctrl+click toggles a window");
+
+	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
+	v.selection = other;
+	v.selected = {box, other};
+	v.revisions.touch(ViewConcern::Selection);
+	ui.frames(2);
+	ui.drain();
+	requests = drag(at(200.0f, 150.0f), 40.0f, 21.0f);
+	uint64_t gesture = 0;
+	size_t count = 0;
+	std::vector<Edit> last = batches(requests, gesture, count);
+	CHECK(count >= 2 && gesture != 0, "the steps share one gesture");
+	CHECK(set_on(last, box, "position.left") == 144 && set_on(last, box, "position.top") == 120 &&
+	              set_on(last, other, "position.left") == 444 && set_on(last, other, "position.right") == 644 &&
+	              set_on(last, other, "position.top") == 320,
+	      "one batch moves both windows by BOX's snapped step");
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Add}}),
+	      "the window dragged becomes the primary, the other stays selected");
+	CHECK(!requests.empty() && requests.back().kind == EditorRequestKind::EndEdit, "release ends the gesture");
+
+	// The arrows move both.
+	ui.key(ImGuiKey_RightArrow, true);
+	ui.key(ImGuiKey_RightArrow, false);
+	requests = ui.drain();
+	last = batches(requests, gesture, count);
+	CHECK(count == 1 && set_on(last, box, "position.left") == 101 && set_on(last, other, "position.left") == 401,
+	      "Right moves every selected window a unit");
+
+	// A drag from MAIN's empty part (a root window not selected) selects what the box touches.
+	requests = drag(at(50.0f, 500.0f), 400.0f, -390.0f);
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Replace},
+	                                                                              {other, SelectMode::Add}}) &&
+	              !only(requests, EditorRequestKind::EditRecord),
+	      "the marquee selects BOX and OTHER, not TINY or MAIN");
+	requests = drag(at(20.0f, 500.0f), 40.0f, 60.0f);
+	const NodeAddress screen_address{screen.id, node_kind(MenuKind::Screen), 0};
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{screen_address, SelectMode::Replace}}),
+	      "a box over nothing selects the screen");
+	requests = click(at(20.0f, 500.0f), ImGuiKey_None);
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Replace}}),
+	      "a click on the background still selects it");
+
+	// The clipboard keys.
+	auto chord = [&](ImGuiKey key) {
+		ui.key(ImGuiMod_Ctrl, true);
+		ui.key(key, true);
+		ui.key(key, false);
+		ui.key(ImGuiMod_Ctrl, false);
+		return ui.drain();
+	};
+	CHECK(only(chord(ImGuiKey_C), EditorRequestKind::Copy) != nullptr, "Ctrl+C copies");
+	CHECK(only(chord(ImGuiKey_X), EditorRequestKind::Cut) != nullptr, "Ctrl+X cuts");
+	CHECK(only(chord(ImGuiKey_D), EditorRequestKind::Duplicate) != nullptr, "Ctrl+D duplicates");
+	CHECK(!only(chord(ImGuiKey_V), EditorRequestKind::Paste), "nothing to paste while the clipboard is empty");
+	v.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
+	ui.frames();
+	requests = chord(ImGuiKey_V);
+	const EditorRequest *paste = only(requests, EditorRequestKind::Paste);
+	CHECK(paste && paste->edit.address.row == screen.id && paste->edit.parent == main.child && paste->edit.position == 2,
+	      "Ctrl+V pastes after the primary window (OTHER)");
+	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
+	// window's list row) the preview raises none of them, as the menu view does not.
+	v.selected = {screen_address, box, other};
+	v.revisions.touch(ViewConcern::Selection);
+	ui.frames(2);
+	ui.drain();
+	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) && !only(chord(ImGuiKey_X), EditorRequestKind::Cut) &&
+	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
+	      "the screen selected with the windows: no Copy, Cut or Duplicate");
+	v.selected = {box, other};
+	v.revisions.touch(ViewConcern::Selection);
+	ui.frames(2);
+	ui.drain();
+
+	// Arrange from the toolbar: BOX's left edge to the primary OTHER's, one batch.
+	ui.activate(item_id(preview_id, {"Arrange"}));
+	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Align left edges"));
+	requests = ui.drain();
+	const EditorRequest *aligned = only(requests, EditorRequestKind::EditRecord);
+	CHECK(aligned && set_on(aligned->edits, box, "position.left") == 400 && set_on(aligned->edits, box, "position.right") == 600 &&
+	              set_on(aligned->edits, other, "position.left") == -1,
+	      "Align left edges: BOX to OTHER's left, one batch");
+	ui.activate(item_id(preview_id, {"Arrange"}));
+	ui.activate(popup_item(item_id(preview_id, {"arrange"}), "Bring to front"));
+	requests = ui.drain();
+	const EditorRequest *front = only(requests, EditorRequestKind::EditRecord);
+	const NodeAddress tiny = named(*document, "TINY");
+	CHECK(front && front->edits.size() == 1 && front->edits[0].operation == EditOperation::Move &&
+	              front->edits[0].address == tiny && front->edits[0].position == 0,
+	      "Bring to front of BOX and OTHER: one Move, TINY before them");
+
+	// MAIN and OTHER selected, OTHER the primary: a press on BOX (not selected, but inside
+	// MAIN's rect) is a press inside a selected window, so the drag moves MAIN (OTHER rides
+	// inside it), and MAIN becomes the primary with OTHER still selected.
+	v.selection = other;
+	v.selected = {main, other};
+	v.revisions.touch(ViewConcern::Selection);
+	ui.frames(2);
+	ui.drain();
+	requests = drag(at(200.0f, 150.0f), 16.0f, 8.0f);
+	last = batches(requests, gesture, count);
+	CHECK(gesture != 0 && set_on(last, main, "position.left") == 16 && set_on(last, main, "position.top") == 8 &&
+	              set_on(last, box, "position.left") == -1 && set_on(last, other, "position.left") == -1,
+	      "a press on a window inside a selected one moves the selection");
+	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{main, SelectMode::Add}}),
+	      "the selected window pressed in becomes the primary, the other stays selected");
+	CHECK(ui.windows.pending_requests() == 0, "nothing else");
 }
 
 // --- S11c: the Problems window ------------------------------------------------------------
@@ -1116,12 +1420,12 @@ constexpr const char *kMainMenu = "Missing required file main.mnu";
 // error on a record's field, a warning in the active menu and a note in the other open one.
 SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shared_ptr<MnuDocument> &b) {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Problems";
 	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs), file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
 	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
 	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
+	v.scan.index();
 	v.requirements.rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
 	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
 	v.requirements.required_total = 2;
@@ -1327,7 +1631,8 @@ void test_problems_window_ui() {
 	v.requirements.required_missing = 3;
 	v.retail_files = {"cmap.mnu", "gametext.bin"};
 	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	CHECK(in_order(logged_frame(ui), {"The game cannot start: 3 required files are missing.", "Create 2",
@@ -1354,7 +1659,7 @@ void test_problems_window_ui() {
 	optional.role = "brand_style";
 	optional.target = "brand.mns";
 	v.diagnostics.push_back(optional);
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
 	// Errors (the three required files and the catalog's), the warning, then the notes.
@@ -1392,11 +1697,11 @@ void test_problems_confirmation_follows() {
 	CHECK(confirmation() != nullptr, "the Fix all asks");
 	const std::string root = v.project_root;
 	v.project_root = "C:/mods/Another";
-	++v.revision;
+	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation(), "another project closes it");
 	v.project_root = root;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation() && ui.drain().empty(), "and nothing it held is raised");
 
@@ -1413,7 +1718,8 @@ void test_problems_confirmation_follows() {
 	v.diagnostics.erase(v.diagnostics.begin() + 1);
 	v.requirements.rows[1].state = RequirementState::Present;
 	v.requirements.required_missing = 1;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
+	v.revisions.touch(ViewConcern::Files);
 	ui.frames(2);
 	ui.button(false);
 	ui.frames();
@@ -1429,8 +1735,8 @@ void test_problems_confirmation_follows() {
 	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}), "then the new list alone");
 
 	// More's list follows its finding: main.mnu's again, gametext's gone before it.
-	v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
-	v.revision = 100;
+	replace_view(v, problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"),
+			menu_at(dir, "b.mnu", "menus/b.mnu")));
 	ui.activate(item_id(window, {"Group"}));
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"None"}));
 	ui.frames(2);
@@ -1438,13 +1744,13 @@ void test_problems_confirmation_follows() {
 	ui.away();
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") != std::string::npos, "More lists main.mnu's fixes");
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	text = logged_frame(ui);
 	CHECK(text.find("Use a.mnu as main.mnu") != std::string::npos && text.find("Use spare.bin") == std::string::npos,
 	      "still main.mnu's when a finding before it goes");
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") == std::string::npos, "closed when its finding goes");
 	CHECK(ui.windows.pending_requests() == 0, "nothing else");
@@ -1505,7 +1811,6 @@ void test_problems_narrow() {
 // (its own finding says so, and the Save would be refused); Only fixable lists what has a fix.
 void test_problems_rewrite_hidden() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Rewrite";
 	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
@@ -1538,7 +1843,6 @@ void test_problems_rewrite_hidden() {
 // a click in the middle opens the finding under it too.
 void test_problems_many() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
@@ -1554,6 +1858,7 @@ void test_problems_many() {
 		d.line = i + 1;
 		v.diagnostics.push_back(d);
 	}
+	v.scan.index();
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -1638,7 +1943,6 @@ void test_styles_window_ui() {
 	CHECK(document->load(dir.file("menu_style.mns"), "menu_style.mns", AssetKind::MenuStyle, "jo", error),
 	      "the stylesheet loads");
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = dir.root();
 	AssetEntry entry;
@@ -1646,6 +1950,7 @@ void test_styles_window_ui() {
 	entry.relative_path = "menu_style.mns";
 	entry.kind = AssetKind::MenuStyle;
 	v.scan.entries.push_back(entry);
+	v.scan.index();
 	v.documents.push_back(document);
 	v.active_document = document->path();
 	const Node &fg = *document->rows()[1];
@@ -1950,6 +2255,8 @@ void run_inspector_tests() {
 }
 void run_preview_tests() {
 	test_preview_canvas_smoke();
+	test_preview_gestures_end();
+	test_preview_several_windows_ui();
 }
 void run_styles_tests() {
 	test_styles_window_ui();

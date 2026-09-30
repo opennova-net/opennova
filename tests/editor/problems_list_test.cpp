@@ -65,13 +65,13 @@ AssetEntry file_entry(const std::string &name, const std::string &path, AssetKin
 // on a record's field, a warning in a menu and a stylesheet's note in another.
 SessionView problems_view() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Problems";
 	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
 	                  file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
 	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
 	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
+	v.scan.index(); // a scan made by hand is indexed, as the session's is
 	v.requirements.rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
 	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
 	v.requirements.required_total = 2;
@@ -186,7 +186,7 @@ int test_keys() {
 	TEST_EXPECT(!latch.released_on(list.fix_id(v, 1, create_main), true, false, false)); // pressed
 
 	v.diagnostics.erase(v.diagnostics.begin());
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.key(0) == main_key);
 	const ProblemFix after = list.fixes(v, 0).front();
@@ -202,12 +202,12 @@ int test_keys() {
 	// The second of three findings alike but for their record selected; the first goes: the
 	// same finding, now the first of two, is still the selected one.
 	v.diagnostics = findings;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	list.toggle_selected(v, 4);
 	TEST_EXPECT(list.selected() == 4 && v.diagnostics[list.selected()].row_id == 11);
 	v.diagnostics.erase(v.diagnostics.begin() + 3);
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.selected() == 3 && v.diagnostics[list.selected()].row_id == 11);
 	list.toggle_selected(v, 3); // clicked again: folded back
@@ -238,7 +238,7 @@ int test_fix_changes() {
 	TEST_EXPECT(!latch.released_on(pressed, true, false, false)); // pressed on the Create
 
 	v.retail_files = {"Custom.fnt", "gametext.bin"};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files); // the findings stand
 	list.refresh(v);
 	const ProblemFix import = list.fixes(v, kilo).front();
 	TEST_EXPECT(import.request.kind == EditorRequestKind::PreviewRetailImport &&
@@ -262,11 +262,11 @@ int test_folding() {
 	TEST_EXPECT(list.folded("style"));
 	v.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "style.line_ending",
 	                                "Delta: its line ends changed.", "menus/b.mns"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(!list.folded("style"));
 	v.diagnostics.pop_back();
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(!list.folded("style"));
 	list.toggle_fold("menu");
@@ -274,7 +274,7 @@ int test_folding() {
 	TEST_EXPECT(list.folded("menu"));
 	v.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.test",
 	                                "Echo: another warning.", "menus/a.mnu"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.folded("menu"));
 	// Another project: its own groups, the notes folded again.
@@ -309,7 +309,8 @@ int test_proposals() {
 	v.requirements.required_missing = 3;
 	v.retail_files = {"cmap.mnu", "gametext.bin"};
 	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	const std::vector<EditorRequest> &summary = list.required_fixes().requests;
 	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 2" &&
@@ -342,7 +343,6 @@ int test_proposals() {
 
 	// Two textures the project lacks: their placeholders in one line, a CreateFile each.
 	SessionView textures;
-	textures.revision = 1;
 	textures.project_open = true;
 	textures.project_root = "C:/mods/Placeholders";
 	Diagnostic skin = finding(DiagnosticSeverity::Error, "reference.missing",
@@ -369,7 +369,6 @@ int test_proposals() {
 
 	// No Rewrite of a file that does not serialize; Only fixable: the finding a fix is offered for.
 	SessionView rewrite;
-	rewrite.revision = 1;
 	rewrite.project_open = true;
 	rewrite.project_root = "C:/mods/Rewrite";
 	rewrite.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input",
@@ -407,7 +406,8 @@ int test_confirmation() {
 	v.diagnostics.erase(v.diagnostics.begin() + 1);
 	v.requirements.rows[1].state = RequirementState::Present;
 	v.requirements.required_missing = 1;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Files);
+	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	TEST_EXPECT(list.follow(v) && list.changed() && list.version() == asked + 1);
 	TEST_EXPECT(list.shown().lines.front() ==
@@ -435,10 +435,9 @@ int test_confirmation() {
 
 // A thousand findings in fifty catalogs: a refresh, grouped or not, plans no finding's fixes
 // (a group's Fix all reads the bulk ones, unkept); the fixes are planned for the findings asked,
-// each once for the view's revision.
+// each once while what they read stands.
 int test_fixes_lazy() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
@@ -455,6 +454,7 @@ int test_fixes_lazy() {
 		d.line = i + 1;
 		v.diagnostics.push_back(d);
 	}
+	v.scan.index();
 	ProblemsList list;
 	list.query().grouping = ProblemGrouping::None;
 	TEST_EXPECT(list.refresh(v).rows.size() == 1000 && list.lines().size() == 1000);

@@ -15,6 +15,7 @@ namespace opennova::editor {
 // the flat logical name (the basename), its path is organization only.
 struct AssetEntry {
 	std::string logical_name;  // basename, original case
+	std::string key;           // normalized_logical_name(logical_name), set by AssetScan::index
 	std::string relative_path; // project-relative, '/'-separated
 	AssetKind kind = AssetKind::Unknown;
 	uint64_t size_bytes = 0;
@@ -23,11 +24,22 @@ struct AssetEntry {
 };
 
 struct AssetScan {
-	std::vector<AssetEntry> entries; // sorted by normalized logical name, then path
+	std::vector<AssetEntry> entries; // sorted by key (the normalized logical name), then path
 	std::vector<Diagnostic> diagnostics;
 
-	// The entry for a logical name (case-insensitive, the engine's lookup), or nullptr.
+	// The entry for a logical name (case-insensitive, the engine's lookup), or nullptr: a
+	// binary search of the entries by key; of two files of a name, the first by path.
 	const AssetEntry *find(std::string_view logical_name) const;
+	// The entry at a project-relative path, or nullptr: a binary search of the path index.
+	const AssetEntry *at_path(std::string_view relative_path) const;
+	// Keys each entry, sorts the entries by key then path, and indexes their paths: what
+	// scan_project_assets does with the files it found. A scan made by hand calls it before it
+	// is read, and again after its entries change; until it does, the two lookups walk the
+	// entries (a warning on the log sink says so) and never read past them.
+	void index();
+
+private:
+	std::vector<size_t> by_path_; // the entries' indexes, by relative path
 };
 
 // The engine's identity for a logical name: the PFF normalization (uppercase, trailing

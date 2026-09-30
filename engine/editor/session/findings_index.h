@@ -19,8 +19,10 @@ namespace opennova::editor {
 // leaves out any past their end, so an index the findings outran reads nothing.
 class FindingsIndex {
 public:
-	// What the index is kept by: the view's revision, which moves with the findings.
-	static uint64_t cache_key(const SessionView &view) { return view.revision; }
+	// What the index is kept by (session_revisions.h): the findings.
+	static RevisionKey cache_key(const SessionView &view) {
+		return revision_key(view.revisions, {ViewConcern::Findings});
+	}
 
 	// Made again from the view's findings when the view or its cache key moved since, or the
 	// findings are not the ones it was made from (another count, or moved in memory).
@@ -40,7 +42,7 @@ private:
 	};
 
 	const SessionView *view_ = nullptr;
-	uint64_t key_ = 0;
+	RevisionKey key_;
 	size_t count_ = 0;
 	const Diagnostic *data_ = nullptr;
 	bool made_ = false;

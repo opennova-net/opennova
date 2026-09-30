@@ -67,9 +67,13 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 // one the table does not name.
 std::string problem_family_title(const std::string &code);
 
-// The answer kept while neither the view's revision nor the query moves: the window asks
-// every frame, and the revision moves with every change an answer reads (the findings, the
-// active and open documents, the files and the game install's a fix looks for).
+// What an answer reads of a view, as a cache's key (session_revisions.h): the findings; which
+// document is active for the active file's scope (ActiveDocument), which are open for the open
+// files' (DocumentSet); for only the fixable, what their fixes read (problem_fix_key).
+RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query);
+
+// The answer kept while neither what it reads (problem_query_key) nor the query moves: the
+// window asks every frame.
 class ProblemQueryCache {
 public:
 	const ProblemAnswer &answer(const ProblemQuery &query, const SessionView &view);
@@ -79,7 +83,7 @@ public:
 
 private:
 	const SessionView *view_ = nullptr;
-	uint64_t revision_ = 0;
+	RevisionKey key_;
 	ProblemQuery query_;
 	ProblemAnswer answer_;
 	uint64_t generation_ = 0;

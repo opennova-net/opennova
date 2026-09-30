@@ -21,6 +21,12 @@ std::string what_of(const GraphSearchHit &hit) {
 	return std::string(reference_row(hit.symbol->kind).label) + (hit.symbol->inert ? ", unreachable" : "");
 }
 
+// What the hits and their uses read of the view: the graph (its files and symbols, their uses,
+// where each leads: the graph moves with the files' paths and kinds too).
+RevisionKey cache_key(const SessionView &view) {
+	return revision_key(view.revisions, {ViewConcern::Graph});
+}
+
 } // namespace
 
 const std::vector<ProjectFind::Usage> &ProjectFind::usages(const SessionView &view, size_t hit) {
@@ -69,9 +75,9 @@ void ProjectFind::draw(EditorHost &host) {
 		std::memcpy(text_, typed, sizeof(typed));
 		ImGui::CloseCurrentPopup();
 	}
-	if (view_ != &view || revision_ != view.revision || searched_ != text_) {
+	if (view_ != &view || key_ != cache_key(view) || searched_ != text_) {
 		view_ = &view;
-		revision_ = view.revision;
+		key_ = cache_key(view);
 		searched_ = text_;
 		hits_ = view.graph->search(searched_);
 		usages_.clear();

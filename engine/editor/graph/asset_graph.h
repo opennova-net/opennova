@@ -122,12 +122,23 @@ struct Extracted {
 
 class AssetGraph {
 public:
-	// Rebuild over the scan; the open documents stand in for their files.
+	// Rebuild over the scan; the open documents stand in for their files. An update that finds
+	// the files as they were (their rows in the scan's order, and what each file the graph reads
+	// references and defines) changes nothing: the edges and symbols stay where they were.
 	void update(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
 	            const std::vector<std::shared_ptr<const Document>> &open);
+	// A value of a process-wide counter: taken anew each time an update changes what the graph
+	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
+	// states of one graph share it. While it stands, every edge and symbol the graph handed out
+	// is where it was (a cache may keep them).
+	uint64_t generation() const { return generation_.value; }
+	// Every file, edge and symbol gone (a project closed), under a new generation.
+	void clear();
 
 	const std::vector<GraphEdge> &edges() const { return edges_; }
 	const std::vector<GraphSymbol> &symbols() const { return symbols_; }
+	// Every symbol of `kind`, inert ones too, in the order the files define them.
+	std::vector<const GraphSymbol *> symbols_of_kind(ReferenceKind kind) const;
 	const GraphStats &stats() const { return stats_; }
 
 	// The edges out of a file, by project-relative path or logical name.
@@ -223,6 +234,19 @@ private:
 	};
 	void assemble(const AssetScan &scan);
 	std::string resolved_target(const GraphEdge &edge) const;
+	bool same_files(const AssetScan &scan) const;
+	// The generation: the counter's next value on every construction, copy and assignment (a
+	// copy holds edges and symbols of its own); update() takes another when it assembles.
+	static uint64_t next_generation();
+	struct Generation {
+		uint64_t value = AssetGraph::next_generation();
+		Generation() = default;
+		Generation(const Generation &) {}
+		Generation &operator=(const Generation &) {
+			value = AssetGraph::next_generation();
+			return *this;
+		}
+	};
 
 	std::map<std::string, Extraction> cache_; // by project-relative path
 	std::vector<GraphEdge> edges_;
@@ -235,6 +259,9 @@ private:
 	std::set<std::pair<std::string, std::string>> inert_style_values_;
 	struct FileRow { std::string path; std::string logical_name; AssetKind kind = AssetKind::Unknown; };
 	std::map<std::string, FileRow> files_; // normalized logical name -> the file
+	// The scan's files in its order, as the graph was last assembled over them.
+	std::vector<FileRow> scanned_;
+	Generation generation_;
 	std::multimap<std::string, size_t> symbol_index_; // kind token + '\n' + name -> symbols_ index
 	std::map<std::pair<std::string, std::string>, std::vector<size_t>> record_symbols_; // (file, record) -> symbols_ indexes
 	std::map<std::string, std::vector<size_t>> file_symbols_; // file -> symbols_ indexes

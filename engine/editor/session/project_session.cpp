@@ -54,7 +54,9 @@ ProjectSession::ProjectSession(ProcessPlatform &platform, std::string editor_set
 	view_.assets = assets_;
 	view_.render_check = render_check_;
 	view_.status = "No project open.";
-	touch();
+	touch(ViewConcern::Preferences);
+	touch(ViewConcern::Graph);
+	touch(ViewConcern::Output);
 }
 
 ProjectSession::~ProjectSession() {
@@ -67,7 +69,7 @@ void ProjectSession::set_launcher(PlayLauncher launcher) {
 	launcher_ = std::move(launcher);
 	view_.source_run = launcher_.source_run;
 	view_.runtime_executable = resolve_runtime_executable();
-	touch();
+	touch(ViewConcern::Preferences);
 }
 
 bool ProjectSession::handle(const EditorRequest &request) {
@@ -131,7 +133,7 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::SetImportDependencies: set_import_dependencies(request.flag); return true;
 	case EditorRequestKind::CancelImport:
 		view_.import_preview = SessionView::ImportPreview();
-		touch();
+		touch(ViewConcern::Dialogs);
 		return true;
 	case EditorRequestKind::ImportFiles: import_files(request); return true;
 	case EditorRequestKind::PreviewRetailImport:
@@ -176,12 +178,15 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::RenameSymbol: rename_symbol(request); return true;
 	case EditorRequestKind::ClearOutput:
 		view_.output.clear();
-		touch();
+		touch(ViewConcern::Output);
 		return true;
 	case EditorRequestKind::PickDirectory:
 	case EditorRequestKind::PickFile:
 	case EditorRequestKind::RevealPath: return false;
-	case EditorRequestKind::Quit: view_.quit_requested = true; touch(); return true;
+	case EditorRequestKind::Quit:
+		view_.quit_requested = true;
+		touch(ViewConcern::Project);
+		return true;
 	default: return false;
 	}
 	return false;
@@ -195,7 +200,7 @@ void ProjectSession::poll() {
 		view_.build_done = build_->steps_done();
 		view_.build_total = build_->steps_total();
 		view_.build_step = build_->last_step();
-		touch();
+		touch(ViewConcern::Operation);
 		if (build_->done()) absorb_build();
 	}
 	const PlayState before = play_.state();
@@ -209,7 +214,7 @@ void ProjectSession::poll() {
 		view_.play_state = now;
 		view_.play_pid = play_.pid();
 		if (now == PlayState::Stopped) view_.play_mcp_port = 0;
-		touch();
+		touch(ViewConcern::Run);
 		validate_pending();
 	}
 }
@@ -226,7 +231,7 @@ bool ProjectSession::new_project(const std::string &dir, const std::string &titl
 	if (!create_project(dir, title.empty() ? std::string("New Game") : title, kDefaultTargetGame, doc, error)) {
 		report(error);
 		view_.status = "The project could not be created.";
-		touch();
+		touch(ViewConcern::Output);
 		return false;
 	}
 	note("Created " + doc.title + ".");
@@ -243,7 +248,7 @@ bool ProjectSession::open_project(const std::string &dir) {
 		forget_recent_project(settings_, dir);
 		save_editor_settings();
 		view_.status = "The project could not be opened.";
-		touch();
+		touch(ViewConcern::Output);
 		return false;
 	}
 	paths_ = ProjectPaths::for_root(dir);
@@ -265,12 +270,14 @@ bool ProjectSession::open_project(const std::string &dir) {
 	// Output names the project; the menu bar's tooltip on what was said names its folder.
 	note("Opened " + doc.title + ".");
 	view_.status = "Opened " + doc.title + ".";
-	touch();
+	touch(ViewConcern::Project);
+	touch(ViewConcern::Operation); // no build yet
+	touch(ViewConcern::Output);
 	return true;
 }
 
 void ProjectSession::close_project() {
-	*graph_ = AssetGraph();
+	graph_->clear();
 	assets_->clear();
 	render_check_->clear();
 	validation_cache_ = ValidationCache();
@@ -318,7 +325,9 @@ void ProjectSession::close_project() {
 	view_.retail_directory = game_install();
 	note("Closed " + title + ".");
 	view_.status = "No project open.";
-	touch();
+	// What the project was goes with it: every concern of the view moves.
+	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
+		touch(static_cast<ViewConcern>(concern));
 }
 
 // Re-read the project's files and re-evaluate the checklist through the engine's one
@@ -333,8 +342,8 @@ ImportRunResult ProjectSession::refresh(bool force_import, const std::string &on
 	view_.scan = std::move(state.scan);
 	assets_->set_scan(paths_.root, view_.scan, view_.document.target_game);
 	view_.requirements = std::move(state.requirements);
+	touch(ViewConcern::Files);
 	validate_documents();
-	touch();
 	return std::move(state.imports);
 }
 
@@ -420,6 +429,7 @@ void ProjectSession::apply_project_settings(const ProjectSettingsChange &change)
 	}
 	if (game_install() != view_.retail_directory) {
 		view_.retail_directory = game_install();
+		touch(ViewConcern::Preferences);
 		refresh_retail_files();
 	}
 	for (const Diagnostic &failure : failures) report(failure);
@@ -427,7 +437,10 @@ void ProjectSession::apply_project_settings(const ProjectSettingsChange &change)
 	view_.status = !failures.empty()                                       ? "A setting could not be saved: see Problems."
 	               : project_changed || install_changed || editor_changed ? "Saved the settings."
 	                                                                      : "No setting changed.";
-	touch();
+	if (project_changed) touch(ViewConcern::Project);
+	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
+	touch(ViewConcern::Dialogs);
+	touch(ViewConcern::Output);
 }
 
 // The required files `roles` names, made from their factories. The checklist the request
@@ -438,7 +451,7 @@ void ProjectSession::create_missing(const std::vector<std::string> &roles) {
 	if (build_) return refuse_now("create_missing.build_running", "Wait for the build to finish before creating files.");
 	if (roles.empty()) {
 		view_.status = "Nothing to create.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	const RequirementReport now = evaluate_requirements(view_.document, scan_project_assets(paths_, view_.document));
@@ -457,7 +470,7 @@ void ProjectSession::create_missing(const std::vector<std::string> &roles) {
 		                        ? "."
 		                        : ", " + std::to_string(result.unavailable.size()) + " not yet possible.");
 	}
-	touch();
+	touch(ViewConcern::Output);
 }
 
 // Unsaved edits never reach here: Build and Play wait on the unsaved prompt first
@@ -497,7 +510,7 @@ void ProjectSession::start_build(bool then_play) {
 	view_.build_step.clear();
 	view_.status = "Building...";
 	note("Build started.");
-	touch();
+	touch(ViewConcern::Operation);
 }
 
 void ProjectSession::absorb_build() {
@@ -535,7 +548,7 @@ void ProjectSession::absorb_build() {
 	const bool play = play_after_build_;
 	play_after_build_ = false;
 	if (result.ok && play) start_play();
-	touch();
+	touch(ViewConcern::Operation);
 }
 
 // The game install the editor imports from and plays in: the open project's (its
@@ -560,17 +573,20 @@ void ProjectSession::start_play() {
 	// make none); the game started now reports on this project.
 	view_.boot_missing.clear();
 	play_findings_.clear();
+	const size_t rows = view_.diagnostics.size();
 	view_.diagnostics.erase(std::remove_if(view_.diagnostics.begin(), view_.diagnostics.end(),
 	                                       [](const Diagnostic &d) {
 		                                       return d.code == "play.boot_missing" || d.code == "play.crashed";
 	                                       }),
 	                        view_.diagnostics.end());
+	touch(ViewConcern::Run);
+	if (view_.diagnostics.size() != rows) touch(ViewConcern::Findings);
 	boot_project_ = view_.project_root;
 	if (settings_.play_retail) {
 		if (!prepare_retail_launch_plan(game_install(), build_dir, plan, error)) {
 			report(error);
 			view_.status = "The game install could not be prepared; see Problems.";
-			touch();
+			touch(ViewConcern::Output);
 			return;
 		}
 	} else {
@@ -581,7 +597,7 @@ void ProjectSession::start_play() {
 			                               ? "No game runtime is set; choose opennova.exe in File > Project settings..."
 			                               : "The game runtime was not found: " + executable));
 			view_.status = "The game runtime was not found.";
-			touch();
+			touch(ViewConcern::Output);
 			return;
 		}
 		plan = launcher_.source_run
@@ -599,7 +615,7 @@ void ProjectSession::start_play() {
 	if (!play_.start(plan, error)) {
 		report(error);
 		view_.status = "The game could not be started.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	view_.play_state = play_.state();
@@ -610,7 +626,7 @@ void ProjectSession::start_play() {
 	view_.play_exit_code = -1;
 	note("Running: " + view_.play_command_line);
 	view_.status = settings_.play_retail ? "Game install running." : "Game running.";
-	touch();
+	touch(ViewConcern::Run);
 }
 
 void ProjectSession::stop_play() {
@@ -619,7 +635,7 @@ void ProjectSession::stop_play() {
 	view_.play_state = play_.state();
 	view_.status = "Stopping the game...";
 	note("Stop requested.");
-	touch();
+	touch(ViewConcern::Run);
 }
 
 void ProjectSession::note(std::string line) {
@@ -629,13 +645,14 @@ void ProjectSession::note(std::string line) {
 		                   view_.output.begin() +
 		                           static_cast<std::ptrdiff_t>(view_.output.size() - kOutputLinesMax));
 	}
-	touch();
+	touch(ViewConcern::Output);
 }
 
 void ProjectSession::report(const Diagnostic &d) {
 	// A validation an edit left due runs first, so it cannot replace this row.
 	validate_pending();
 	view_.diagnostics.push_back(d);
+	touch(ViewConcern::Findings);
 	record_outcome(d);
 	note(std::string(diagnostic_severity_label(d.severity)) + ": " + d.message);
 }
@@ -702,6 +719,7 @@ void ProjectSession::absorb_boot_report(const std::string &line) {
 	if (!view_.project_open || view_.project_root != boot_project_) return;
 	if (view_.missing_at_boot(name)) return;
 	view_.boot_missing.push_back(name);
+	touch(ViewConcern::Run);
 	validate_later();
 }
 
@@ -739,7 +757,7 @@ void ProjectSession::save_editor_settings() {
 	view_.retail_directory = game_install();
 	view_.play_retail = settings_.play_retail;
 	view_.import_dependencies = settings_.import_dependencies;
-	touch();
+	touch(ViewConcern::Preferences);
 }
 
 
@@ -760,7 +778,16 @@ void ProjectSession::update_document_view() {
 	view_.documents.clear();
 	for (const auto &document : documents_) view_.documents.push_back(document);
 	assets_->set_open(view_.documents);
-	touch();
+	touch(ViewConcern::Documents);
+	// Which documents are open, each as read and whether it has unsaved edits: an edit that
+	// leaves its document as unsaved as it was moves Documents alone.
+	std::vector<std::pair<uint64_t, bool>> set;
+	for (const auto &document : documents_)
+		set.emplace_back(document->identity(), document->dirty());
+	if (set != document_set_) {
+		document_set_ = std::move(set);
+		touch(ViewConcern::DocumentSet);
+	}
 }
 
 // The project's findings now, composed as `opennova-project validate` composes them
@@ -770,24 +797,28 @@ void ProjectSession::update_document_view() {
 // open documents' own (a file changed outside the editor that was not read again), the menu
 // render check's notes and the last build's own findings (after the gate the build reads: a
 // note never blocks a build, nor does the last Play's report, which only the next Play can
-// clear, nor the last build's, which the next build replaces). They replace the Problems rows.
+// clear, nor the last build's, which the next build replaces). They replace the Problems rows:
+// Findings moves only when they differ, and Graph only when the graph's update changed it.
 void ProjectSession::validate_documents() {
 	validation_due_ = false;
+	const uint64_t graph_generation = graph_->generation();
 	const std::vector<Diagnostic> open = open_document_findings();
 	ProjectFindings findings = compose_project_findings(
 	        {paths_, view_.document, view_.scan, view_.requirements, view_.documents, view_.boot_missing, play_findings_,
 	         open, build_findings_},
 	        *graph_, validation_cache_, *render_check_, *assets_);
 	document_findings_ = std::move(findings.documents);
-	view_.diagnostics = std::move(findings.rows);
-	touch();
+	if (findings.rows != view_.diagnostics) {
+		view_.diagnostics = std::move(findings.rows);
+		touch(ViewConcern::Findings);
+	}
+	if (graph_->generation() != graph_generation) touch(ViewConcern::Graph);
 }
 
 // An edit's validation, left for validate_pending: the request's return from outside, a
-// pump's poll, or the next finding reported.
+// pump's poll, or the next finding reported. Nothing in the view moves until it runs.
 void ProjectSession::validate_later() {
 	validation_due_ = true;
-	touch();
 }
 
 void ProjectSession::validate_pending() {
@@ -849,6 +880,7 @@ void ProjectSession::reload_changed_documents() {
 	}
 	if (!changed) return;
 	select_first_screen(); // the active menu read again shows its first screen
+	touch(ViewConcern::Selection);
 	update_document_view();
 }
 
@@ -894,7 +926,7 @@ void ProjectSession::rename_asset(const std::string &file, const std::string &ne
 	if (!plan.ok()) {
 		for (const Diagnostic &d : plan.refusals) report(d);
 		view_.status = "The rename was refused.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	std::vector<Diagnostic> findings;
@@ -940,7 +972,8 @@ void ProjectSession::rename_asset(const std::string &file, const std::string &ne
 	} else {
 		view_.status = "The rename did not finish.";
 	}
-	touch();
+	touch(ViewConcern::Selection); // the active document and its selection, kept or started over
+	touch(ViewConcern::Output);
 }
 
 // Whether the project file at `path`, as saved, has a use that reaches exactly the renamed
@@ -1016,7 +1049,7 @@ void ProjectSession::preview_rename(const EditorRequest &request) {
 		preview.refusals = plan.refusals;
 	}
 	view_.rename_preview = std::move(preview);
-	touch();
+	touch(ViewConcern::Dialogs);
 }
 
 // A name renamed everywhere (graph/rename_transaction), or refused with the reasons as
@@ -1030,7 +1063,7 @@ void ProjectSession::rename_symbol(const EditorRequest &request) {
 	if (!plan.ok()) {
 		for (const Diagnostic &d : plan.refusals) report(d);
 		view_.status = "The rename was refused.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	std::vector<Diagnostic> findings;
@@ -1064,7 +1097,8 @@ void ProjectSession::rename_symbol(const EditorRequest &request) {
 	} else {
 		view_.status = "The rename did not finish.";
 	}
-	touch();
+	touch(ViewConcern::Selection); // the active document and its selection, kept or started over
+	touch(ViewConcern::Output);
 }
 
 // The refresh with the import pass forced over one source (or all): every stale source
@@ -1085,7 +1119,7 @@ void ProjectSession::reimport(const std::string &source, bool force) {
 	for (const Diagnostic &d : imported.diagnostics)
 		if (std::find(asked.begin(), asked.end(), d.asset) != asked.end()) record_outcome(d);
 	view_.status = std::to_string(imported.reimported) + " source" + (imported.reimported == 1 ? "" : "s") + " imported.";
-	touch();
+	touch(ViewConcern::Output);
 }
 
 // The import dialog on `roots` chosen among `choices` (each file once), planned with the
@@ -1136,7 +1170,8 @@ void ProjectSession::plan_preview() {
 		                                                              std::to_string(missing) + " not found."
 		                                                    : std::string("."));
 	}
-	touch();
+	touch(ViewConcern::Dialogs);
+	if (preview.open) touch(ViewConcern::Output);
 }
 
 // The import dialog's "Include the files these need": the editor's setting, written from a
@@ -1160,7 +1195,8 @@ void ProjectSession::set_import_dependencies(bool flag) {
 		preview.changed = false;
 		plan_preview();
 	}
-	touch();
+	touch(ViewConcern::Preferences);
+	touch(ViewConcern::Output);
 }
 
 // The rows kept, written the whole selection or none of it as far as the disk allows
@@ -1181,7 +1217,8 @@ void ProjectSession::import_files(const EditorRequest &request) {
 		if (!same_import(shown, preview.plan)) {
 			preview.changed = true;
 			view_.status = "The files changed since the preview: nothing was imported.";
-			touch();
+			touch(ViewConcern::Dialogs);
+			touch(ViewConcern::Output);
 			return refuse_now("import.changed",
 			                  "The files changed since the preview: nothing was imported. Check the import again.");
 		}
@@ -1197,7 +1234,8 @@ void ProjectSession::import_files(const EditorRequest &request) {
 	view_.import_preview = SessionView::ImportPreview();
 	if (request.imports.empty()) {
 		view_.status = "Nothing to import.";
-		touch();
+		touch(ViewConcern::Dialogs);
+		touch(ViewConcern::Output);
 		return;
 	}
 	const ImportResult imported = import_assets(request.imports, paths_, view_.document, request.flag);
@@ -1210,14 +1248,15 @@ void ProjectSession::import_files(const EditorRequest &request) {
 	                       ? std::to_string(done) + " of " + std::to_string(done + imported.not_imported.size()) +
 	                                 " files imported: the import stopped at " + imported.not_imported.front() + "."
 	                       : std::to_string(done) + " file(s) imported.";
-	touch();
+	touch(ViewConcern::Dialogs); // the preview closed
+	touch(ViewConcern::Output);
 }
 
 // The game install's file names, for the Import fixes (problem_fixes.h).
 void ProjectSession::refresh_retail_files() {
 	view_.retail_files = view_.project_open ? list_retail_file_names(game_install(), view_.document)
 	                                        : std::vector<std::string>();
-	touch();
+	touch(ViewConcern::Files);
 }
 
 // The requirement row of `role`, or null.
@@ -1288,7 +1327,7 @@ bool ProjectSession::save_documents(const std::vector<std::string> &paths, bool 
 				writes.push_back(document.get());
 	if (writes.empty()) {
 		view_.status = paths.size() == 1 ? paths.front() + " has no changes to save." : "No file has unsaved changes.";
-		touch();
+		touch(ViewConcern::Output);
 		return true;
 	}
 	size_t saved = 0;
@@ -1313,7 +1352,7 @@ bool ProjectSession::save_documents(const std::vector<std::string> &paths, bool 
 	for (const Diagnostic &d : failures) report(d);
 	view_.status = "Saved " + std::to_string(saved) + " file(s)" +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
-	touch();
+	touch(ViewConcern::Output);
 	return failures.empty();
 }
 
@@ -1335,19 +1374,19 @@ void ProjectSession::rewrite_file(const std::string &path) {
 	if (!document) return report(error);
 	if (document->rewrite_need() == Document::RewriteNeed::None) {
 		view_.status = relative + " has no changes to save.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	if (!document->save(error)) { // one that does not serialize says why here
 		report(error);
 		view_.status = relative + " could not be saved: see Problems.";
-		touch();
+		touch(ViewConcern::Output);
 		return;
 	}
 	note("Saved " + relative);
 	refresh();
 	view_.status = "Saved 1 file(s).";
-	touch();
+	touch(ViewConcern::Output);
 }
 
 std::vector<std::string> ProjectSession::dirty_files() const {
@@ -1387,6 +1426,7 @@ void ProjectSession::activate(const std::string &path) {
 		if (const Document *document = open(path)) view_.repair_selection(*document, NodeAddress());
 	}
 	select_first_screen();
+	touch(ViewConcern::ActiveDocument); // the caller touches Selection
 }
 
 // A menu made the active document, or read again, with nothing selected shows its first
@@ -1452,7 +1492,7 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 			handle(make_request(EditorRequestKind::OpenDocument, request.path));
 		} else {
 			view_.status = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
-			touch();
+			touch(ViewConcern::Output);
 		}
 		return true;
 	}
@@ -1476,7 +1516,7 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 			const Document &document = *document_for(path);
 			activate(document.path());
 			if (request.edit.address.row || !request.text.empty()) select_named(document);
-			touch();
+			touch(ViewConcern::Selection);
 			return true;
 		}
 		for (const auto &asset : view_.scan.entries) {
@@ -1497,6 +1537,7 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 			activate(document->path());
 			select_named(*document);
 			select_first_screen(); // no record named: a menu shows its first screen
+			touch(ViewConcern::Selection);
 			update_document_view(); validate_documents(); return true;
 		}
 		report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", path));
@@ -1514,7 +1555,7 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 		view_.reveal_file = asset->relative_path;
 		view_.reveal_file_rename = request.flag;
 		++view_.reveal_file_serial;
-		touch();
+		touch(ViewConcern::Selection);
 		return true;
 	}
 	case EditorRequestKind::CloseDocument: {
@@ -1523,7 +1564,10 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 			if ((*it)->path() == path) { documents_.erase(it); break; }
 		remembered_.erase(path);
 		forget_file_state(path);
-		if (view_.active_document == path) activate(documents_.empty() ? "" : documents_.back()->path());
+		if (view_.active_document == path) {
+			activate(documents_.empty() ? "" : documents_.back()->path());
+			touch(ViewConcern::Selection);
+		}
 		update_document_view(); validate_documents(); return true;
 	}
 	case EditorRequestKind::SelectRecord: {
@@ -1538,7 +1582,7 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 		} else {
 			view_.select(path, request.edit.address, request.select_mode);
 		}
-		touch();
+		touch(ViewConcern::Selection);
 		return true;
 	}
 	case EditorRequestKind::EditRecord: {
@@ -1609,8 +1653,11 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 			return true;
 		}
 		const uint64_t before = document->revision();
+		const NodeAddress primary = view_.selection;
+		const std::vector<NodeAddress> selected = view_.selected;
 		if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
 		view_.repair_selection(*document, NodeAddress());
+		if (view_.selection != primary || view_.selected != selected) touch(ViewConcern::Selection);
 		update_document_view();
 		// An undo or a redo ends a gesture: the validation its edits left waiting runs now.
 		if (document->revision() != before || gesture_validation_due_) validate_later();
@@ -1649,6 +1696,9 @@ bool ProjectSession::apply_edits(Document &document, const std::vector<Edit> &ed
 	if (document.path() == view_.active_document && document.placement(view_.selection, at)) owner = at.owner;
 	Diagnostic error;
 	const uint64_t before = document.revision();
+	const std::string active = view_.active_document;
+	const NodeAddress primary = view_.selection;
+	const std::vector<NodeAddress> selected = view_.selected;
 	// A screen's or a window's new name follows into the references of its file that find it
 	// by the name it had when the edit's group began (graph/rename_transaction's
 	// plan_symbol_rename), in the same step.
@@ -1669,6 +1719,8 @@ bool ProjectSession::apply_edits(Document &document, const std::vector<Edit> &ed
 	} else {
 		view_.repair_selection(document, owner);
 	}
+	if (view_.active_document != active || view_.selection != primary || view_.selected != selected)
+		touch(ViewConcern::Selection);
 	update_document_view();
 	// A Move that leaves a record where it is changes nothing to validate; a gesture's
 	// edits validate once it ends (EndEdit, Undo, Redo, Save).
@@ -1677,6 +1729,7 @@ bool ProjectSession::apply_edits(Document &document, const std::vector<Edit> &ed
 		else validate_later();
 	}
 	view_.status = "Edited " + document.path() + ".";
+	touch(ViewConcern::Output);
 	return true;
 }
 
@@ -1690,10 +1743,11 @@ void ProjectSession::copy_records(Document &document, bool cut) {
 	if (payload.empty())
 		return refuse_now("document.copy", "These records cannot be copied.", document.path());
 	view_.clipboard = std::move(payload);
-	touch();
+	touch(ViewConcern::Selection);
 	if (!cut) {
 		last_edit_ok_ = true;
 		view_.status = "Copied " + std::to_string(records.size()) + " record(s).";
+		touch(ViewConcern::Output);
 		return;
 	}
 	std::vector<Edit> removes;
@@ -1891,7 +1945,7 @@ bool ProjectSession::guard_unsaved(const EditorRequest &request) {
 	pending_request_->path = prompt.target;
 	view_.unsaved_prompt = std::move(prompt);
 	outcome_.unsaved_prompt = true;
-	touch();
+	touch(ViewConcern::Dialogs);
 	return true;
 }
 
@@ -1917,7 +1971,8 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 		view_.unsaved_prompt.files = files;
 		view_.status = file + " has unsaved changes too: the prompt lists it now.";
 		outcome_.unsaved_prompt = true;
-		touch();
+		touch(ViewConcern::Dialogs);
+		touch(ViewConcern::Output);
 		return;
 	}
 	if (choice == UnsavedChoice::Save) {
@@ -1949,7 +2004,7 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 void ProjectSession::close_unsaved_prompt() {
 	pending_request_.reset();
 	view_.unsaved_prompt = SessionView::UnsavedPrompt();
-	touch();
+	touch(ViewConcern::Dialogs);
 }
 
 } // namespace opennova::editor

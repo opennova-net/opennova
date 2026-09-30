@@ -297,11 +297,11 @@ inline AssetEntry file_entry(const std::string &name, const std::string &path, A
 // An open project with one menu, the active document.
 inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Menus";
 	v.document.title = "Menus";
 	v.scan.entries.push_back(file_entry("options.mnu", document->path(), AssetKind::Menu));
+	v.scan.index();
 	v.documents.push_back(document);
 	v.active_document = document->path();
 	return v;
@@ -310,7 +310,17 @@ inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 inline void select_in(SessionView &v, const NodeAddress &address) {
 	v.selection = address;
 	v.selected = {address};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
+}
+
+// A view put in the place of another, at its address (which a window's cache knows it by): its
+// counters carry on from the old view's, every concern moved.
+inline void replace_view(SessionView &v, SessionView fresh) {
+	const ViewRevisions revisions = v.revisions;
+	v = std::move(fresh);
+	v.revisions = revisions;
+	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
+		v.revisions.touch(static_cast<ViewConcern>(concern));
 }
 
 using editor_test::NoProcess;

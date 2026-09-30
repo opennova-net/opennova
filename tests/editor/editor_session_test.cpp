@@ -120,10 +120,10 @@ static int test_lifecycle() {
 	TEST_EXPECT(!v.diagnostics.empty()); // one per unmet required row
 
 	// A build on the unmet project is refused, and Play with it.
-	const uint64_t before = v.revision;
+	const uint64_t before = v.revisions.any();
 	session.handle(make_request(EditorRequestKind::Play));
 	session.finish_build();
-	TEST_EXPECT(v.revision > before);
+	TEST_EXPECT(v.revisions.any() > before);
 	TEST_EXPECT(v.has_build && !v.last_build.ok);
 	TEST_EXPECT(v.play_state == PlayState::Stopped && platform.spawns == 0);
 	TEST_EXPECT(output_has(v, "Build failed"));
@@ -2264,6 +2264,202 @@ static int test_build_findings_stay() {
 	return 0;
 }
 
+// The concerns of the view that moved since `before` (session_revisions.h), in the enum's order;
+// kCount at the end when `any` did not move with them (it moves with every one, never alone).
+static std::vector<ViewConcern> moved_since(const SessionView &v, const ViewRevisions &before) {
+	std::vector<ViewConcern> out;
+	for (size_t i = 0; i < kViewConcernCount; ++i) {
+		const ViewConcern concern = static_cast<ViewConcern>(i);
+		if (v.revisions.of(concern) != before.of(concern)) out.push_back(concern);
+	}
+	if ((v.revisions.any() != before.any()) != !out.empty()) out.push_back(ViewConcern::kCount);
+	return out;
+}
+
+// S13 D1: each concern of the view moves with what it covers alone, `any` with every one. A
+// build's step moves Operation and a line of the game's log Output, neither validating; the
+// game's boot report Run (and the row it makes); the next Play drops that row; a Rescan that
+// finds the files as they were moves Files alone; opening a document moves DocumentSet and
+// ActiveDocument; a selection Selection alone; an edit Documents (and Output, whose status line
+// says so), DocumentSet only when the document goes from saved to unsaved, Findings only when
+// the Problems rows differ and Graph only when what the graph holds does; a finding reported
+// Findings; a close every concern. The view JSON's revision is `any`, its revisions each
+// concern's counter by its token.
+static int test_view_revisions() {
+	using Concerns = std::vector<ViewConcern>;
+	const auto has = [](const Concerns &concerns, ViewConcern concern) {
+		return std::find(concerns.begin(), concerns.end(), concern) != concerns.end();
+	};
+	editor_test::TempProjectDir dir("opennova_editor_session_revisions");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Revisions"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const ValidationStats &stats = session.validation_stats();
+
+	// The build: each step moves Operation alone and validates nothing; the last lands it.
+	session.handle(make_request(EditorRequestKind::Build));
+	size_t steps = 0;
+	while (session.build_running()) {
+		const ViewRevisions before = v.revisions;
+		const size_t passes = stats.passes;
+		session.poll();
+		TEST_EXPECT(stats.passes == passes);
+		if (!session.build_running()) break;
+		++steps;
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Operation}));
+	}
+	TEST_EXPECT(steps > 1 && v.has_build);
+
+	// Play, then a line of the game's log: Output alone, nothing validated; a poll with nothing
+	// new moves nothing.
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher(launcher);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.finish_build();
+	TEST_EXPECT(v.play_state == PlayState::Running);
+	{
+		ViewRevisions before = v.revisions;
+		session.poll();
+		TEST_EXPECT(moved_since(v, before).empty());
+		before = v.revisions;
+		const size_t passes = stats.passes;
+		const std::string log = platform.last_plan.log_file;
+		TEST_EXPECT(editor_test::write_text(log, "Godot Engine v4.6.1\r\n"));
+		session.poll();
+		TEST_EXPECT(output_has(v, "game: Godot Engine v4.6.1"));
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Output}));
+		TEST_EXPECT(stats.passes == passes);
+		// The game's boot report names a file it did not find: Run, the row it makes, its line.
+		before = v.revisions;
+		const std::string boot = "Godot Engine v4.6.1\r\n" + boot_line("main.mnu", "- gone");
+		TEST_EXPECT(editor_test::write_text(log, boot));
+		session.poll();
+		TEST_EXPECT(v.boot_missing.size() == 1 && has_code(v.diagnostics, "play.boot_missing"));
+		TEST_EXPECT(moved_since(v, before) ==
+				Concerns({ViewConcern::Findings, ViewConcern::Output, ViewConcern::Run}));
+	}
+	// The game quits, and the next Play drops its boot report: the row goes (Findings) as the
+	// game starts, no validation making it go.
+	platform.codes[v.play_pid] = 0;
+	platform.exit_child(v.play_pid);
+	session.poll();
+	{
+		const ViewRevisions before = v.revisions;
+		session.handle(make_request(EditorRequestKind::Play));
+		session.finish_build();
+		TEST_EXPECT(v.play_state == PlayState::Running && v.boot_missing.empty());
+		TEST_EXPECT(!has_code(v.diagnostics, "play.boot_missing"));
+		TEST_EXPECT(has(moved_since(v, before), ViewConcern::Findings));
+	}
+
+	// An item naming a model the project lacks, read by a Rescan.
+	const std::string crate_def =
+			"begin \"Crate\"\nid 100300\ntype building\nhp 10\ngraphic crate\nend\n";
+	TEST_EXPECT(editor_test::write_text(v.project_root + "/defs/items.def", crate_def));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(finding_about(v.diagnostics, "reference.missing", "crate") != nullptr);
+
+	// A Rescan that finds the files as they were: Files alone.
+	{
+		const ViewRevisions before = v.revisions;
+		session.handle(make_request(EditorRequestKind::Rescan));
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Files}));
+	}
+
+	// Opening a document: which are open, and which is active, both move.
+	{
+		const ViewRevisions before = v.revisions;
+		session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+		const Concerns moved = moved_since(v, before);
+		TEST_EXPECT(has(moved, ViewConcern::DocumentSet));
+		TEST_EXPECT(has(moved, ViewConcern::ActiveDocument));
+	}
+	Document *items = session.document_for("items.def");
+	TEST_EXPECT(items != nullptr && !items->rows().empty());
+	if (!items || items->rows().empty()) return 1;
+	const NodeAddress crate{items->rows()[0]->id, items->rows()[0]->kind, 0};
+	// A record picked: Selection alone (not which document is active, nor which are open).
+	{
+		const ViewRevisions before = v.revisions;
+		EditorRequest select = make_request(EditorRequestKind::SelectRecord, items->path());
+		select.edit.address = crate;
+		session.handle(select);
+		TEST_EXPECT(v.selection == crate);
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Selection}));
+	}
+
+	// Edits: Documents and the status line; Findings and Graph only when they changed.
+	const auto set = [&](const char *field, Value value) {
+		EditorRequest request = make_request(EditorRequestKind::EditRecord, items->path());
+		request.edit.address = crate;
+		request.edit.field = field;
+		request.edit.value = std::move(value);
+		const ViewRevisions before = v.revisions;
+		session.handle(request);
+		return moved_since(v, before);
+	};
+	const uint64_t graph = v.graph->generation();
+	// A number no finding and no reference reads: the rows and the graph as they were; the
+	// document, saved until now, has unsaved edits (DocumentSet).
+	TEST_EXPECT(set("hp", int64_t(20)) ==
+			Concerns({ViewConcern::Documents, ViewConcern::Output, ViewConcern::DocumentSet}));
+	TEST_EXPECT(v.graph->generation() == graph);
+	// The name the item defines: the graph moves, the rows stay, the document as unsaved as it
+	// was (no DocumentSet, no ActiveDocument).
+	TEST_EXPECT(set("id", int64_t(100302)) ==
+			Concerns({ViewConcern::Graph, ViewConcern::Documents, ViewConcern::Output}));
+	TEST_EXPECT(v.graph->generation() != graph);
+	// The model it names, missing either way: the graph and the row both move.
+	TEST_EXPECT(set("graphic", std::string("barrel")) == Concerns({ViewConcern::Findings,
+			ViewConcern::Graph, ViewConcern::Documents, ViewConcern::Output}));
+	TEST_EXPECT(finding_about(v.diagnostics, "reference.missing", "barrel") != nullptr);
+	{
+		const ViewRevisions before = v.revisions;
+		session.handle(make_request(EditorRequestKind::Undo, items->path()));
+		TEST_EXPECT(moved_since(v, before) ==
+				Concerns({ViewConcern::Findings, ViewConcern::Graph, ViewConcern::Documents}));
+		TEST_EXPECT(finding_about(v.diagnostics, "reference.missing", "crate") != nullptr);
+	}
+
+	// A finding reported (a request refused: no prompt is open to answer): Findings, and its line.
+	{
+		const ViewRevisions before = v.revisions;
+		session.handle(make_request(EditorRequestKind::ResolveUnsaved));
+		TEST_EXPECT(has_code(v.diagnostics, "unsaved.none"));
+		TEST_EXPECT(moved_since(v, before) ==
+				Concerns({ViewConcern::Findings, ViewConcern::Output}));
+	}
+	const opennova::io::JsonValue json = session_view_to_json(v);
+	TEST_EXPECT(json.get_number("revision", -1.0) == double(v.revisions.any()));
+	const opennova::io::JsonValue *revisions = json.get("revisions");
+	TEST_EXPECT(revisions != nullptr);
+	if (revisions)
+		for (const ViewConcernRow &row : kViewConcernRows) {
+			const double counter = double(v.revisions.of(row.concern));
+			TEST_EXPECT(revisions->get_number(row.token, -1.0) == counter);
+		}
+
+	// Closed (saved first, so nothing waits on the prompt): every concern moves, and the graph
+	// is emptied under a generation it never had.
+	session.handle(make_request(EditorRequestKind::SaveAll));
+	{
+		const ViewRevisions before = v.revisions;
+		const uint64_t open_generation = v.graph->generation();
+		session.handle(make_request(EditorRequestKind::CloseProject));
+		TEST_EXPECT(!session.project_open() && v.graph->edges().empty());
+		Concerns every;
+		for (size_t i = 0; i < kViewConcernCount; ++i) every.push_back(static_cast<ViewConcern>(i));
+		TEST_EXPECT(moved_since(v, before) == every);
+		TEST_EXPECT(v.graph->generation() != open_generation);
+	}
+	return 0;
+}
+
 // S12: the import guard looks at every file the import writes, past the import plan's cap: a
 // replacement of more files than the cap, the last an edited catalog's, waits on the unsaved
 // prompt for that catalog, nothing written.
@@ -2318,6 +2514,7 @@ static int test_import_guard_past_the_cap() {
 
 int main() {
 	int failures = 0;
+	failures += test_view_revisions();
 	failures += test_import_guard_past_the_cap();
 	failures += test_build_findings_stay();
 	failures += test_boot_findings();

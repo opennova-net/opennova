@@ -85,6 +85,7 @@ std::vector<Diagnostic> validated(const std::shared_ptr<const ModelDocument> &do
 	entry.logical_name = entry.relative_path = document->path();
 	entry.kind = AssetKind::Model;
 	scan.entries.push_back(entry);
+	scan.index();
 	const std::vector<std::shared_ptr<const Document>> open = {document};
 	ValidationCache cache;
 	const ValidationInput input{paths, project, scan, open, cache};
