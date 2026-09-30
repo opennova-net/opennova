@@ -170,6 +170,7 @@ void Simulation::_bind_methods() {
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
 	                     &Simulation::get_end_round_statistics);
+	ClassDB::bind_method(D_METHOD("get_epilog_score"), &Simulation::get_epilog_score);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),

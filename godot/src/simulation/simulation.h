@@ -1349,9 +1349,9 @@ public:
 	TypedArray<EndRoundRow> get_end_round_rows(int p_tab) const;
 	// hud::strip_inline_tags — retail's `<...>` markup stripper.
 	static String strip_inline_tags(const String &p_text);
-	// The SP Show Score statistics counters (hud/end_round_statistics.h):
-	// the 0xC846xx block the toggled panel draws. Null when no host world.
+	// The SP score block's Show Score rows / win epilog lines (null: no host world).
 	Ref<EndRoundStatistics> get_end_round_statistics() const;
+	Ref<EndRoundStatistics> get_epilog_score() const;
 	// Send the player's deploy pick: 0 = default spawn (0xFFFF), 65534 = auto team
 	// spawn (0xFFFE), else the 1-based registry index resolved to its entity handle.
 	// Re-picks while awaiting the release match retail (the host silently drops an

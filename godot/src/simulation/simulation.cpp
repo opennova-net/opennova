@@ -1079,7 +1079,7 @@ Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
 	v.winner_team = kernel_->world.match.outcome().winner_team;
 	v.bluekills = kernel_->world.kill_stats.bluekills_by_player;
 	v.greenkills = kernel_->world.kill_stats.greenkills_by_player;
-	v.enemy_kills = kernel_->world.kill_stats.enemy_kills_by_player;
+	v.enemy_kills = kernel_->world.kill_stats.enemy_kills_by_player();
 	v.team_kills_by_others = kernel_->world.kill_stats.team_kills_by_others;
 	v.friendly_kills_by_others = kernel_->world.kill_stats.friendly_kills_by_others;
 	v.enemy_kills_by_others = kernel_->world.kill_stats.enemy_kills_by_others;

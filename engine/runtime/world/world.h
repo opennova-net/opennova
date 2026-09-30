@@ -253,31 +253,70 @@ inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
 // [orig: the 48+48-tick cine fade pair @0x574512]
 inline constexpr int32_t kEpilogFadeInTicks = 48 + 48;
 
-// SP mission kill tallies — the 0xC846xx stat-bucket family the epilog score
-// screen counts from and the WAC bluekills/greenkills builtins read. By-player
-// = kills by the local/host player; by-others = every other killer. Only
-// person-class victims (itemdef class 3) tally the blue/green buckets; the
-// original's per-type enemy split (infantry/vehicle/aircraft) and the point
-// values (def+404, difficulty-scaled) fold into plain counts here — the WAC
-// predicates and the epilog count columns read counts. [orig:
-// Score_TallyKillByLocalPlayer @0x4fd160 / Score_TallyKillByOthers @0x4fd300,
-// dispatched per kill by Score_ProcessKillEvent @0x4fd400 (SP only).]
+// The def+0x196 unit-class split the SP score block keys on: 3 and 4 are
+// vehicles, 9 aircraft, anything else (0 included) infantry. The census and
+// the by-player kill tally read the same byte.
+// [orig: Score_ClassifyEntityForCounts @0x4fd0c7; Score_TallyKillByLocalPlayer
+//  @0x4fd242]
+enum class ScoreUnitClass : uint8_t { Infantry, Vehicle, Aircraft };
+
+inline ScoreUnitClass score_unit_class(int32_t item_unit_type) {
+    switch (static_cast<uint8_t>(item_unit_type)) {
+        case 3:
+        case 4: return ScoreUnitClass::Vehicle;
+        case 9: return ScoreUnitClass::Aircraft;
+        default: return ScoreUnitClass::Infantry;
+    }
+}
+
+// The SP score block — the 0xC84688..0xC8470B statistics the Show Score panel
+// and the SP win epilog draw and the WAC bluekills/greenkills builtins read.
+// By-player = kills by the local/host player; by-others = every other killer.
+// Only person-class victims (itemdef class 3) tally the blue/green buckets.
+// The block's point sums (def+404, difficulty-scaled, the +4 word of every
+// kill bucket), the human-victim bucket, the subgoal bonus @0xC846D4 and
+// g_SPElapsedUpdateCount @0xC84700 are not modeled: no live code draws them —
+// their readers are the dead Cine_ProcessEpilogSequence_Retail @0x575a90,
+// Score_ComputeSpTimeWeightedAverage @0x40da30 (called only from it) and
+// sub_40D960 @0x40d960, the Show Score panel's dead-store sprintfs and the
+// save block. The by-others enemy split folds (only its sum is read); the
+// by-player split stays, because its census overflow is visible.
+// Zeroed whole by the authority after the PreMission pass and carried by the
+// play-start baseline. [orig: Score_TallyKillByLocalPlayer @0x4fd160 /
+// Score_TallyKillByOthers @0x4fd300, dispatched per kill by
+// Score_ProcessKillEvent @0x4fd400 (SP only); Score_TallySubGoalWon @0x4fd100;
+// Server_ResetRoundCounters @0x516c50 — memset(0xC84688, 0, 0x84) @0x516c5e]
 struct MissionKillStats {
     int32_t bluekills_by_player = 0;      // team-1 persons [orig: 0xC846F0 — WAC 'bluekills']
     int32_t greenkills_by_player = 0;     // team-0 persons [orig: 0xC846F8 — WAC 'greenkills']
-    int32_t enemy_kills_by_player = 0;    // team >= 2, any kind [orig: 0xC846D8/E0/E8 folded]
+    // team >= 2, any kind, per unit class [orig: 0xC846D8 / 0xC846E0 / 0xC846E8]
+    int32_t enemy_infantry_kills_by_player = 0;
+    int32_t enemy_vehicle_kills_by_player = 0;
+    int32_t enemy_aircraft_kills_by_player = 0;
     int32_t team_kills_by_others = 0;     // [orig: 0xC846C0]
     int32_t friendly_kills_by_others = 0; // [orig: 0xC846C8]
     int32_t enemy_kills_by_others = 0;    // [orig: 0xC846A8/B0/B8 folded]
-    // The mission's enemy-unit total, counted ONCE at mission start over the
-    // entity pools: non-player entities with team >= 2 and a non-zero
-    // items.def unit-class byte (def+0x196). The original also splits the
-    // count per class (vehicle 3/4, aircraft 9, else infantry @0xC84694/9C/98)
-    // — the Show Score panel consumes only the total, so the split folds like
-    // the kill buckets above. [orig: 0xC84690 — Score_ClassifyEntityForCounts
-    // @0x4fd070 over both pools from Score_CountMissionSubgoalsAndUnits @0x509dc0, called at
-    // Game_StartMission @0x525d5d]
+    // The mission's enemy-unit census, counted at mission start over pools 0
+    // and 1: non-player entities with team >= 2 and a non-zero items.def
+    // unit-class byte (def+0x196), with its per-class split. A by-player kill
+    // that takes a class past its census grows that class and the total by
+    // the overflow (Match::process_kill_event). [orig: 0xC84690 total,
+    // @0xC84694 vehicle / @0xC84698 infantry / @0xC8469C aircraft —
+    // Score_ClassifyEntityForCounts @0x4fd070 from
+    // Score_CountMissionSubgoalsAndUnits @0x509dc0, called at Game_StartMission
+    // @0x525d5d]
     int32_t enemy_unit_total = 0;
+    int32_t enemy_vehicle_total = 0;
+    int32_t enemy_infantry_total = 0;
+    int32_t enemy_aircraft_total = 0;
+    // One per first SubGoalWon of a slot, outside a session.
+    // [orig: g_SubGoalsWonCount 0xC846D0 — Score_TallySubGoalWon @0x4fd117]
+    int32_t subgoals_won = 0;
+
+    int32_t enemy_kills_by_player() const {
+        return enemy_infantry_kills_by_player + enemy_vehicle_kills_by_player +
+                enemy_aircraft_kills_by_player;
+    }
 };
 
 
@@ -1077,6 +1116,15 @@ public:
         TeammateOperations teammates;
         int32_t vehicle_ai_spawn_phase = 0;
         Match match;
+        // The SP score block and the subgoal masks at play start: a restart
+        // lands on the post-census, post-memset block and the post-PreMission
+        // masks retail's re-run of Game_StartMission rebuilds (the masks
+        // zeroed by EventSystem_FreeAll, then the PreMission pass).
+        // [orig: Game_RestartRoundSP @0x5263a0 -> Game_DestroyAllEntitiesAndReset
+        //  -> Mission_ResetBmsState -> EventSystem_FreeAll @0x453356..0x453368,
+        //  then Game_StartMission @0x5263db]
+        MissionKillStats kill_stats;
+        SubgoalState subgoals;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;
         uint32_t spawn_cycle_counter = 0;
@@ -1096,12 +1144,13 @@ private:
     std::vector<ISystem *> systems_;
 };
 
-// The mission-start unit scan feeding MissionKillStats::enemy_unit_total —
-// the Show Score panel's enemy-units denominator. Runs once at the
-// Game_StartMission-equivalent moment, after entity placement and the
-// item-traits sweep stamped Entity::item_unit_type.
+// The mission-start unit scan feeding MissionKillStats's census (the total
+// and its per-class split) — the Show Score panel's and the win epilog's
+// enemy-units max. Runs once at the Game_StartMission-equivalent moment, after
+// entity placement and the item-traits sweep stamped Entity::item_unit_type,
+// over pools 0 and 1 only.
 // [orig: Score_CountMissionSubgoalsAndUnits (ex sub_509DC0) @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
-//  called at Game_StartMission @0x525d5d]
+//  the pool walks @0x509e13..0x509e4a, called at Game_StartMission @0x525d5d]
 void count_mission_units(World &world);
 
 // The mission's defined-subgoal count: the leading run of authored win

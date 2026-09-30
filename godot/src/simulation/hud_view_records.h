@@ -175,7 +175,9 @@ public:
 };
 
 // The SP Show Score counters (Simulation::get_end_round_statistics, null
-// without a host world): parallel Epilog label keys and engine-composed values.
+// without a host world) or the SP win epilog's lines
+// (Simulation::get_epilog_score): parallel Epilog label keys and
+// engine-composed values.
 class EndRoundStatistics : public RefCounted {
 	GDCLASS(EndRoundStatistics, RefCounted)
 
@@ -186,6 +188,13 @@ protected:
 
 public:
 	void assign(const opennova::hud::EndRoundStatisticsPanel &p_value) { value_ = p_value; }
+	// The epilog's four lines composed by hud::epilog_score_lines.
+	static Ref<EndRoundStatistics> epilog(const opennova::hud::EndRoundStatisticsInput &p_in);
+	// The same over authored counters: the shell's sim-less mount and the
+	// end-screen tests.
+	static Ref<EndRoundStatistics> make_epilog(int p_subgoals_won, int p_subgoals_defined,
+			int p_enemy_kills, int p_enemy_unit_total, int p_team_unit_kills,
+			int p_friendly_unit_kills);
 
 	bool get_raised() const { return value_.raised; }
 	PackedStringArray get_label_keys() const;
@@ -205,11 +214,9 @@ protected:
 
 public:
 	void assign(const opennova::world::RoundOutcomeView &p_value) { value_ = p_value; }
-	// The shell's sim-less fallback and the end-screen tests author one: the
-	// outcome pair and the six kill buckets.
-	static Ref<RoundOutcome> make(bool p_ended, int p_winner_team, int p_enemy_kills = 0,
-			int p_enemy_kills_by_others = 0, int p_bluekills = 0, int p_team_kills_by_others = 0,
-			int p_greenkills = 0, int p_friendly_kills_by_others = 0);
+	// The shell's sim-less fallback and the end-screen tests author the
+	// outcome pair.
+	static Ref<RoundOutcome> make(bool p_ended, int p_winner_team);
 
 	bool get_ended() const { return value_.ended; }
 	int get_winner_team() const { return value_.winner_team; }

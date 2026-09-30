@@ -734,6 +734,13 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (!options.joiner) {
 		step("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+		// Then the SP score block zeroes whole, so a PreMission SubGoalWon
+		// keeps its mask bit but not its tally; the WAC init and the census
+		// write after it.
+		// [orig: Game_StartMission — the Server_ResetRoundCounters call
+		//  @0x525B90 inside the same authority gate; its memset(0xC84688, 0,
+		//  0x84) @0x516C5E]
+		world.kill_stats = w::MissionKillStats{};
 	}
 	// Every peer then zeroes the frame tick, and each frame advances it ahead
 	// of its entity update, so the first frame runs at tick 1 on the host and
