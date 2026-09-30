@@ -59,7 +59,7 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 }
 
 void ReferencePicker::prune(const SessionView &view) {
-	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Documents});
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::DocumentSet});
 	if (pruned_view_ == &view && pruned_key_ == key) return;
 	pruned_view_ = &view;
 	pruned_key_ = key;

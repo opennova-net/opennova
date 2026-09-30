@@ -86,9 +86,10 @@ std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes);
 
 // What the fixes of a view's findings read, as a cache's key (session_revisions.h): the
 // findings; the project (open, its folder); the files (the scan, the requirements, the game
-// install's file names); the graph (where a symbol belongs, a Use fix's rename); the open
-// documents (a Reload, a Rewrite's unsaved edits); the editor's settings (an Import's
-// dependencies).
+// install's file names); the graph (where a symbol belongs, a Use fix's rename); which
+// documents are open and unsaved (a Reload, a Rewrite's unsaved edits: DocumentSet, which an
+// edit that leaves a document as unsaved as it was does not move); the editor's settings (an
+// Import's dependencies).
 RevisionKey problem_fix_key(const SessionView &view);
 
 // The fixes of a view's findings, kept while what they read stands (problem_fix_key): the

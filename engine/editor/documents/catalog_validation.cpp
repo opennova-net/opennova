@@ -1,5 +1,6 @@
 #include "catalog_validation.h"
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/source_issue_findings.h>
 #include <editor/project/project_files.h>
 
 #include <base/io/strutil.h>
@@ -70,15 +71,10 @@ std::vector<Diagnostic> validate_catalogs(const ValidationInput &input, const As
 				}
 			}
 		};
-		for (const auto &issue : document->issues()) {
-			// Input the game ignores is dropped on save: a warning. Input the typed
-			// model cannot carry blocks the file: an error.
-			auto diagnostic = make_diagnostic(issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-				issue.blocks ? "catalog.invalid_input" : "catalog.ignored_input",
-				issue.message, document->path(), issue.field);
-			diagnostic.line = issue.line; diagnostic.record = issue.record; locate(diagnostic);
-			findings.push_back(std::move(diagnostic));
-		}
+		// Input the game ignores is dropped on save: a warning. Input the typed model cannot
+		// carry blocks the file: an error. On the record the issue names, found by its name.
+		source_issue_findings(
+				*document, "catalog.invalid_input", "catalog.ignored_input", findings, locate);
 		if (document->blocked()) continue;
 		for (const auto &issue : input.cache.serialize_issues(*document)) {
 			auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable",

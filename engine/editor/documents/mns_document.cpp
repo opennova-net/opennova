@@ -3,13 +3,13 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>
 
 #include <algorithm>
 #include <cctype>
-#include <filesystem>
 #include <set>
 
 namespace opennova::editor {
@@ -119,8 +119,6 @@ std::string style_code(const std::string &code) {
 	for (char c : code) out += c == '-' ? '_' : c;
 	return out;
 }
-
-std::string basename_of(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
 } // namespace
 

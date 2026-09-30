@@ -37,6 +37,13 @@ enum class ViewConcern : uint8_t {
 	// The editor's settings: the recent projects, the game install, the runtime, the import
 	// setting.
 	Preferences,
+	// Which documents are open and whether each has unsaved edits: moves when a document opens,
+	// closes, is read again, or goes from saved to unsaved or back; never for an edit that
+	// leaves it as it was there (Documents moves with every edit).
+	DocumentSet,
+	// Which document is the active one: moves only when another becomes it (Selection moves
+	// with every record picked in it).
+	ActiveDocument,
 	kCount,
 };
 
@@ -55,6 +62,8 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::Output, "output"},       {ViewConcern::Operation, "operation"},
 	{ViewConcern::Run, "run"},             {ViewConcern::Dialogs, "dialogs"},
 	{ViewConcern::Preferences, "preferences"},
+	{ViewConcern::DocumentSet, "document_set"},
+	{ViewConcern::ActiveDocument, "active_document"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

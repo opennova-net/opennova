@@ -49,6 +49,10 @@ bool is_dot_directory(const std::filesystem::path &path);
 // is (a folder outside the project, another drive). As it is for an empty `root`.
 std::string shown_path(const std::string &path, const std::string &root);
 
+// A path's file name, its last step ("menus/main.mnu" -> "main.mnu"): the flat logical name
+// a project path names (ADR 0046 d6).
+std::string basename_of(const std::string &path);
+
 // A name someone chose for a file the editor is about to write into the project: a
 // created document, an imported file, a rename's new name (ADR 0046 d6: the identity
 // is the flat logical name). True when `name` is a plain file name (no folder, not "."

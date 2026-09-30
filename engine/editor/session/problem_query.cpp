@@ -148,9 +148,9 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query) {
 	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings});
 	if (query.scope == ProblemScope::ActiveFile)
-		key = key | revision_key(view.revisions, {ViewConcern::Selection});
+		key = key | revision_key(view.revisions, {ViewConcern::ActiveDocument});
 	if (query.scope == ProblemScope::OpenFiles)
-		key = key | revision_key(view.revisions, {ViewConcern::Documents});
+		key = key | revision_key(view.revisions, {ViewConcern::DocumentSet});
 	if (query.fixable) key = key | problem_fix_key(view);
 	return key;
 }

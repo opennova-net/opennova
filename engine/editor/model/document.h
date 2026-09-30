@@ -149,8 +149,8 @@ public:
 		const char *label = "";        // "Actions"
 		const char *name_field = "";   // the field that names a record ("" = none)
 		const char *kind_name = "";    // the kind's token (kind_from_name, add_record, the MCP, locators)
-		// No Add, Duplicate, Remove or Move: the core's own facility (no document type sets it
-		// today; the core's tests do).
+		// No Add, Duplicate, Remove or Move: the core refuses each (a model's LODs and collision
+		// records, a clip's bones and frame events).
 		bool fixed = false;
 		Applicability applies = Applicability::Reads; // does the game read this collection here
 		size_t max = 0; // the most records it holds (0 = any number; a menu window's part: 1)

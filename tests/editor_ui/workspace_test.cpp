@@ -1586,7 +1586,8 @@ void test_window_title() {
 
 // S13 D1: Files makes its tree and each file's counts again only when what they read moves (the
 // files, the findings): a line of Output, the status line and every step of a build leave them
-// as they were, and a file the scan finds anew makes them again.
+// as they were; a finding about a file, the files as they were, makes them again, and so does a
+// file the scan finds anew.
 void test_files_tree_kept() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_files_kept");
 	NoProcess platform;
@@ -1606,6 +1607,16 @@ void test_files_tree_kept() {
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	ui.frames(3);
 	CHECK(window->rebuilds() == made, "Output and the status line: the tree kept");
+	// An Undo in a file that is not open is refused with a warning on the file: Findings moves
+	// alone of what the tree reads.
+	const AssetEntry *items = session.view().scan.find("items.def");
+	CHECK(items != nullptr, "the item table");
+	if (!items) return;
+	const uint64_t files = session.view().revisions.of(ViewConcern::Files);
+	session.handle(make_request(EditorRequestKind::Undo, items->relative_path));
+	ui.frames(2);
+	CHECK(session.view().revisions.of(ViewConcern::Files) == files, "the files as they were");
+	CHECK(window->rebuilds() == made + 1, "a finding alone: the tree and its counts made again");
 	session.set_poll_budget({0, 64 * 1024}); // one step per poll
 	session.handle(make_request(EditorRequestKind::Build)); // its refresh reads the files again
 	ui.frames(2);
