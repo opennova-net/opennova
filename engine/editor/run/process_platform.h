@@ -12,6 +12,14 @@ namespace opennova::editor {
 // alive.
 enum class ProcessLiveness : uint8_t { Alive, Dead, Unknown };
 
+// A child as the OS knows it, read through the handle spawn kept: the image it runs, as the OS
+// reports it (a link or an alias resolved), and when the OS created it, written as the platform
+// writes it ("" when unknown): compared with another of the same platform, never read.
+struct ProcessIdentity {
+	std::string image;
+	std::string created;
+};
+
 // The OS seam under PlaySession (ADR 0046 d8): spawn a child with a working directory,
 // ask whether it still runs, ask it to stop, force it, read the code it exited with,
 // forget it, and read a clock. The Godot layer implements it
@@ -41,13 +49,23 @@ public:
 	}
 	// Forget the child (release the handle spawn kept).
 	virtual void release(int64_t pid) = 0;
-	// Whether a process this platform did not spawn (or spawned before the editor restarted) still
-	// runs `executable` as `pid`: a Play lease's game (run/play_lease.h). Dead only when the
-	// platform knows it: no such process, or one running another program (a recycled pid).
-	// Unknown where it cannot tell, the default.
-	virtual ProcessLiveness process_liveness(int64_t pid, const std::string &executable) {
+	// The identity of the child `pid` this platform spawned (process_identity: the image and the
+	// creation time the OS reports), read through the handle spawn kept, before release(); false
+	// where the platform cannot tell.
+	virtual bool process_identity(int64_t pid, ProcessIdentity &out) {
 		(void)pid;
-		(void)executable;
+		(void)out;
+		return false;
+	}
+	// Whether the process a Play lease names still runs (run/play_lease.h): `pid`, created at
+	// `created` (process_identity's), which this platform may not have spawned, or spawned before
+	// the editor restarted. Dead when the platform knows it: no process of that id, one that has
+	// exited, or one created at another time under the id (a recycled pid, a reboot's). Alive when
+	// the one created then runs. Unknown where it cannot tell (the process will not be opened, or
+	// the lease records no time), the default.
+	virtual ProcessLiveness process_liveness(int64_t pid, const std::string &created) {
+		(void)pid;
+		(void)created;
 		return ProcessLiveness::Unknown;
 	}
 	virtual int64_t now_ms() = 0;

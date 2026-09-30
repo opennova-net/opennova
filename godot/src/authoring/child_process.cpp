@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <windows.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #endif
@@ -69,41 +70,29 @@ bool has_exited(HANDLE handle) {
 	return WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
 }
 
-// ASCII lower case, for comparing Windows paths.
-std::wstring lowered(std::wstring text) {
-	for (wchar_t &c : text) {
-		if (c >= L'A' && c <= L'Z') c = wchar_t(c - L'A' + L'a');
+std::string from_wide(const std::wstring &wide) {
+	if (wide.empty()) {
+		return std::string();
 	}
-	return text;
+	const int needed = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0,
+			nullptr, nullptr);
+	if (needed <= 0) {
+		return std::string();
+	}
+	std::string out(static_cast<size_t>(needed), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), out.data(), needed, nullptr,
+			nullptr);
+	return out;
 }
 
-// A path's file name, lower-cased, whichever separator it uses.
-std::wstring file_name_of(const std::wstring &path) {
-	const size_t slash = path.find_last_of(L"\\/");
-	return lowered(slash == std::wstring::npos ? path : path.substr(slash + 1));
-}
-
-// A path in one form, lower-cased: made absolute, then its short (8.3) components made long; a
-// path that no longer resolves keeps its absolute form.
-std::wstring long_path_of(const std::wstring &path) {
-	std::wstring full(MAX_PATH, L'\0');
-	DWORD length = GetFullPathNameW(path.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
-	if (length >= full.size()) {
-		full.resize(length);
-		length = GetFullPathNameW(path.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
+// The process's creation time as the OS keeps it (a FILETIME's 100 ns count), in decimal: equal
+// for one process, different for another that later takes its pid. "" when it cannot be read.
+std::string creation_stamp(HANDLE handle) {
+	FILETIME created{}, exited{}, kernel{}, user{};
+	if (GetProcessTimes(handle, &created, &exited, &kernel, &user) == 0) {
+		return std::string();
 	}
-	full.resize(length > 0 && length < full.size() ? length : 0);
-	if (full.empty()) {
-		full = path;
-	}
-	std::wstring expanded(MAX_PATH, L'\0');
-	length = GetLongPathNameW(full.c_str(), expanded.data(), static_cast<DWORD>(expanded.size()));
-	if (length >= expanded.size()) {
-		expanded.resize(length);
-		length = GetLongPathNameW(full.c_str(), expanded.data(), static_cast<DWORD>(expanded.size()));
-	}
-	expanded.resize(length > 0 && length < expanded.size() ? length : 0);
-	return lowered(expanded.empty() ? full : expanded);
+	return std::to_string((static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime);
 }
 
 // The child's top-level windows get WM_CLOSE: the game's orderly quit path.
@@ -259,41 +248,57 @@ void ChildProcessPlatform::release(int64_t pid) {
 #endif
 }
 
-opennova::editor::ProcessLiveness ChildProcessPlatform::process_liveness(int64_t pid, const std::string &executable) {
+bool ChildProcessPlatform::process_identity(int64_t pid, opennova::editor::ProcessIdentity &out) {
+#ifdef _WIN32
+	std::lock_guard<std::mutex> lock(mutex_);
+	const auto it = children_.find(pid);
+	if (it == children_.end()) {
+		return false;
+	}
+	HANDLE handle = static_cast<HANDLE>(it->second);
+	std::wstring image(MAX_PATH * 4, L'\0');
+	DWORD length = static_cast<DWORD>(image.size());
+	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
+		image.resize(length);
+		std::string path = from_wide(image);
+		std::replace(path.begin(), path.end(), '\\', '/');
+		out.image = path;
+	}
+	out.created = creation_stamp(handle);
+	return !out.created.empty();
+#else
+	(void)pid;
+	(void)out;
+	return false;
+#endif
+}
+
+opennova::editor::ProcessLiveness ChildProcessPlatform::process_liveness(int64_t pid, const std::string &created) {
 	using opennova::editor::ProcessLiveness;
 #ifdef _WIN32
-	if (pid <= 0 || executable.empty()) {
+	if (pid <= 0) {
 		return ProcessLiveness::Unknown;
 	}
-	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
 	if (handle == nullptr) {
-		// No process of that id is Dead; one that will not be opened (an elevated game) may be the
-		// game: Unknown.
+		// No process of that id is Dead; one that will not be opened may be the game: Unknown.
 		return GetLastError() == ERROR_INVALID_PARAMETER ? ProcessLiveness::Dead : ProcessLiveness::Unknown;
 	}
 	ProcessLiveness state = ProcessLiveness::Unknown;
-	if (has_exited(handle)) {
-		state = ProcessLiveness::Dead;
-	} else {
-		std::wstring image(MAX_PATH * 4, L'\0');
-		DWORD length = static_cast<DWORD>(image.size());
-		if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
-			image.resize(length);
-			const std::wstring running = long_path_of(image);
-			const std::wstring leased = long_path_of(native_path(executable));
-			if (running == leased) {
-				state = ProcessLiveness::Alive;
-			} else if (file_name_of(running) != file_name_of(leased)) {
-				state = ProcessLiveness::Dead; // the id was recycled: another program runs under it
-			}
-			// The same program's name by another path (a link, a junction): Unknown.
+	DWORD code = 0;
+	if (GetExitCodeProcess(handle, &code) != 0 && code != STILL_ACTIVE) {
+		state = ProcessLiveness::Dead; // it has exited (a handle someone holds keeps it listed)
+	} else if (!created.empty()) {
+		const std::string now = creation_stamp(handle);
+		if (!now.empty()) {
+			state = now == created ? ProcessLiveness::Alive : ProcessLiveness::Dead;
 		}
 	}
 	CloseHandle(handle);
 	return state;
 #else
 	(void)pid;
-	(void)executable;
+	(void)created;
 	return ProcessLiveness::Unknown;
 #endif
 }

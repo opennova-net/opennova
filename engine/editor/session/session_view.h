@@ -123,10 +123,15 @@ struct SessionView {
 	std::vector<Diagnostic> diagnostics;
 
 	// The operation that runs (a build: its progress, what it works on, whether it can be
-	// cancelled, what it holds; id 0 when none), and what the last one came to (id 0 before the
-	// first ends).
+	// cancelled, what it reads and writes; id 0 when none), and what the last one came to (id 0
+	// before the first ends).
 	OperationStatus operation;
 	OperationOutcome last_operation;
+	// Whether the session's busy gate takes a request of `kind` now: not busy_refuses over the
+	// running operation (request_kinds.h). Every window enables a menu item or a button that
+	// raises a request of `kind` by it, so a control is enabled exactly when the session would
+	// take its request.
+	bool allows(EditorRequestKind kind) const;
 	bool has_build = false;
 	BuildReport last_build;
 

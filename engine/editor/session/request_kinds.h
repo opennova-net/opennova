@@ -52,5 +52,13 @@ GateAnswer gate_answer(EditorRequestKind kind, const OperationStatus &running);
 // True when the gate refuses `kind` while `running` runs: what the windows disable, exactly what
 // the session refuses (a request the unsaved-changes prompt holds meets the gate once answered).
 bool busy_refuses(EditorRequestKind kind, const OperationStatus &running);
+// True when the unsaved-changes prompt's answer `choice` is refused while `running` runs and a
+// request of `waiting` waits on the prompt, before anything is saved or dropped: what waits is
+// refused at the gate (it would be once answered: a Discard would lose the edits and still not
+// run it); or, when it does not cancel the operation as it commits (a project switch, Quit, which
+// cancel it first), the answer itself conflicts with it: a Save writes the files and the
+// documents as a Save All does, a Discard drops documents, a write of them. What the prompt's
+// buttons are enabled by, and what the session refuses.
+bool busy_refuses_answer(EditorRequestKind waiting, UnsavedChoice choice, const OperationStatus &running);
 
 } // namespace opennova::editor

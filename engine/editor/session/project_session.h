@@ -110,9 +110,9 @@ private:
 	void rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files);
 	bool guard_unsaved(const EditorRequest &request);
 	void resolve_unsaved(UnsavedChoice choice);
-	// The prompt's answer, reading `reads` and writing `writes`, refused against the running
-	// operation (true, said why), unless what waits cancels it anyway and it was cancelled.
-	bool unsaved_answer_refused(Holds reads, Holds writes);
+	// The prompt's answer (Save or Discard) refused against the running operation (true, said
+	// why, the prompt kept): what waits as the gate would answer it, then the answer itself.
+	bool unsaved_answer_refused(UnsavedChoice choice);
 	void close_unsaved_prompt();
 	bool apply_edits(Document &document, const std::vector<Edit> &edits);
 	void copy_records(Document &document, bool cut);

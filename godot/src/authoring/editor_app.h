@@ -57,7 +57,10 @@ public:
 	void set_play_engine_args(const PackedStringArray &p_args) { play_engine_args_ = p_args; }
 	PackedStringArray get_play_engine_args() const { return play_engine_args_; }
 
-	// The typed seam: what the windows ask for, callable the same way from GDScript.
+	// The typed seam: what the windows ask for, callable the same way from GDScript. Open answers
+	// whether the project at `p_dir` is the one open afterwards (a switch that failed, or that an
+	// operation refused, leaves the project open before it open); New, whether it made that
+	// project too.
 	bool new_project(const String &p_dir, const String &p_title);
 	bool open_project(const String &p_dir);
 	void close_project();
@@ -278,6 +281,7 @@ protected:
 
 private:
 	void ensure_session();
+	bool project_open_at(const std::string &p_dir) const;
 	void drain_requests();
 	void serve(const opennova::editor::EditorRequest &p_request);
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);

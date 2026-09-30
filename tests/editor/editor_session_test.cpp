@@ -2592,12 +2592,14 @@ static int test_play_then_close() {
 }
 
 // S13 A1: a game left running across an editor restart keeps its build. Play writes the game's
-// lease beside the build directory (<build-id>.<pid>.lease, the directory itself immutable) and
-// removes it when the game stops, its own and no other: two games may run from one build. A
-// build asks when it publishes which directories a lease protects: one whose process runs
-// (Alive) or cannot be told (Unknown: a game the platform may not question) is kept, and a lease
-// whose process is gone (Dead) is deleted, after which its directory is pruned like any other. A
-// file that only looks like a lease is never touched.
+// lease beside the build directory (<build-id>.<pid>.lease, the directory itself immutable),
+// recording the image and the creation time the platform reports for the game, and removes it
+// when the game stops, its own and no other: two games may run from one build. A build asks when
+// it publishes which directories a lease protects, naming each lease's pid and creation time to
+// the platform: one whose process runs (Alive) or cannot be told (Unknown: a game the platform
+// may not question) is kept, and a lease whose process is gone (Dead) is deleted, after which its
+// directory is pruned like any other. A file that only looks like a lease (an older record among
+// them) is never touched.
 static int test_play_leases() {
 	editor_test::TempProjectDir dir("opennova_editor_session_leases");
 	const std::string project = dir.file("project");
@@ -2625,22 +2627,29 @@ static int test_play_leases() {
 		std::string text, error;
 		opennova::io::JsonValue record;
 		TEST_EXPECT(read_file_text(lease_of(played, 500), text, error) && opennova::io::json_parse(text, record, error));
-		TEST_EXPECT(record.get_int("pid", -1) == 500 && record.get_string("executable", "") == executable &&
+		TEST_EXPECT(record.get_int("schema_version", -1) == kPlayLeaseSchemaVersion && record.get_int("pid", -1) == 500 &&
+		            record.get_string("image", "") == executable && record.get_string("created", "") == "created 500" &&
 		            record.get_string("build_id", "") == fs::path(played).filename().string());
 		// The editor quits; the game runs on (its handle released, never the process).
 	}
 	// A second game runs from the same build (another editor's), and files that only look like
 	// leases lie beside them: an older name, a lease's name over a record that is not one, a
-	// record naming another pid than its name.
+	// record naming another pid than its name, an older record's schema.
 	std::string error;
-	TEST_EXPECT(write_play_lease({played, 600, executable}, error));
+	TEST_EXPECT(write_play_lease({played, 600, executable, "created 600"}, error));
 	const std::string build_id = fs::path(played).filename().string();
 	const std::vector<std::string> decoys = {output_root + "/" + build_id + kPlayLeaseSuffix,
 	                                         output_root + "/" + build_id + ".77" + kPlayLeaseSuffix,
-	                                         output_root + "/" + build_id + ".78" + kPlayLeaseSuffix};
-	TEST_EXPECT(editor_test::write_text(decoys[0], "{\"schema_version\":1,\"build_id\":\"" + build_id + "\",\"pid\":78}"));
+	                                         output_root + "/" + build_id + ".78" + kPlayLeaseSuffix,
+	                                         output_root + "/" + build_id + ".79" + kPlayLeaseSuffix};
+	const auto record = [&build_id](int schema, int pid) {
+		return "{\"schema_version\":" + std::to_string(schema) + ",\"build_id\":\"" + build_id + "\",\"pid\":" +
+		       std::to_string(pid) + ",\"created\":\"created " + std::to_string(pid) + "\"}";
+	};
+	TEST_EXPECT(editor_test::write_text(decoys[0], record(kPlayLeaseSchemaVersion, 78)));
 	TEST_EXPECT(editor_test::write_text(decoys[1], "not a lease record"));
-	TEST_EXPECT(editor_test::write_text(decoys[2], "{\"schema_version\":1,\"build_id\":\"" + build_id + "\",\"pid\":79}"));
+	TEST_EXPECT(editor_test::write_text(decoys[2], record(kPlayLeaseSchemaVersion, 79)));
+	TEST_EXPECT(editor_test::write_text(decoys[3], record(1, 79)));
 
 	FakePlatform platform;
 	platform.next_pid = 900;
@@ -2657,14 +2666,17 @@ static int test_play_leases() {
 		session.run_operations();
 		return v.last_build.ok ? v.last_build.build_dir : std::string();
 	};
-	// Both games may still run: their directory survives the build's prune, both leases kept.
+	// Both games may still run: their directory survives the build's prune, both leases kept. The
+	// platform was asked about each by the creation time its lease records.
 	const std::string second = rebuild("20");
 	TEST_EXPECT(!second.empty() && second != played);
 	TEST_EXPECT(fs::is_directory(played) && fs::exists(lease_of(played, 500)) && fs::exists(lease_of(played, 600)));
+	TEST_EXPECT(platform.asked_created[500] == "created 500" && platform.asked_created[600] == "created 600" &&
+	            platform.asked_created.count(78) == 0 && platform.asked_created.count(79) == 0);
 
 	// This editor's game runs from the new build beside another game's lease on it: stopped, its
 	// own lease goes and the other stays.
-	TEST_EXPECT(write_play_lease({second, 901, executable}, error));
+	TEST_EXPECT(write_play_lease({second, 901, executable, "created 901"}, error));
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running && v.play_pid == 900 && v.last_build.build_dir == second);

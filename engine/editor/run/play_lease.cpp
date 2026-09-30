@@ -44,8 +44,9 @@ bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid)
 	return true;
 }
 
-// The lease record at `path`, when it is one and names the build id and the pid its name does.
-bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, std::string &executable) {
+// The lease record at `path`, when it is one and names the build id and the pid its name does:
+// the creation time it records.
+bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, std::string &created) {
 	std::string text, error;
 	if (!read_file_text(path.generic_string(), text, error)) return false;
 	io::JsonValue json;
@@ -54,7 +55,7 @@ bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, 
 	if (json.get_string("build_id", "") != build_id) return false;
 	const double number = json.get_number("pid", -1.0);
 	if (number < 0.0 || number != std::floor(number) || static_cast<int64_t>(number) != pid) return false;
-	executable = json.get_string("executable", "");
+	created = json.get_string("created", "");
 	return true;
 }
 
@@ -71,7 +72,9 @@ bool write_play_lease(const PlayLease &lease, std::string &error) {
 	json.set("schema_version", io::JsonValue::make_number(kPlayLeaseSchemaVersion));
 	json.set("build_id", io::JsonValue::make_string(build_id));
 	json.set("pid", io::JsonValue::make_number(double(lease.pid)));
-	json.set("executable", io::JsonValue::make_string(lease.executable));
+	json.set("image", io::JsonValue::make_string(lease.image));
+	// A string: a creation time (a FILETIME's 100 ns count) passes a JSON number's exact range.
+	json.set("created", io::JsonValue::make_string(lease.created));
 	return write_file_atomic(path.generic_string(), io::json_write(json), error);
 }
 
@@ -88,12 +91,12 @@ std::vector<std::string> leased_build_dirs(const std::string &output_root, const
 			fs::directory_iterator(output_root, fs::directory_options::skip_permission_denied, ec)) {
 		if (ec) break;
 		const fs::path &path = entry.path();
-		std::string build_id, executable;
+		std::string build_id, created;
 		int64_t pid = -1;
 		if (!entry.is_regular_file(ec) || !parse_lease_name(path, build_id, pid) ||
-		    !read_lease(path, build_id, pid, executable))
+		    !read_lease(path, build_id, pid, created))
 			continue; // not a lease: never ours to read further or delete
-		const ProcessLiveness state = liveness ? liveness(pid, executable) : ProcessLiveness::Unknown;
+		const ProcessLiveness state = liveness ? liveness(pid, created) : ProcessLiveness::Unknown;
 		if (state == ProcessLiveness::Dead) {
 			std::error_code removed;
 			fs::remove(path, removed);

@@ -231,11 +231,12 @@ static int test_request_table() {
 }
 
 // For every request kind the gate refuses (an operation.busy warning) exactly what busy_refuses
-// says, which is what the windows enable their controls by (editor_windows.cpp's allowed): under
-// a real build of an open project, a request of each kind in turn (the project opened and the
-// build started again when one closed or cancelled it), and under a fake of every operation kind,
-// cancellable and not, in a session of its own.
-static int test_gate_is_what_the_windows_show() {
+// says, which is what the windows enable their controls by (SessionView::allows; the editor_ui
+// test test_windows_show_the_gate draws them): under a real build of an open project, a request
+// of each kind in turn (the project opened and the build started again when one closed or
+// cancelled it), and under a fake of every operation kind, cancellable and not, in a session of
+// its own.
+static int test_gate_is_what_busy_refuses_says() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_every_kind");
 	FakePlatform platform;
 	const auto agree = [](EditorRequestKind kind, const OperationStatus &running, bool refused) {
@@ -453,14 +454,15 @@ static int test_busy_gate() {
 // An operation that cannot be cancelled keeps the slot: a project switch and Quit, which cancel
 // the running operation as they commit, are refused at the gate as busy_refuses says, nothing
 // closed or made; one that stops being cancellable once the gate let the request through is
-// refused where the request commits (close_project, Quit), nothing closed; and the unsaved
-// prompt's Save and Discard, which cancel it for a project's close, are refused when it cannot be
-// cancelled, the prompt and the edits kept.
+// refused where the request commits (close_project, Quit, a new project before its folder is
+// made), nothing closed or made; and the unsaved prompt's Save and Discard are refused when what
+// waits (a project's close) could not cancel the operation, the prompt and the edits kept: a
+// rename's, which writes the documents a Discard drops, and a build's, which holds none.
 static int test_uncancellable_operation() {
 	using K = EditorRequestKind;
 	editor_test::TempProjectDir dir("opennova_editor_operation_stubborn");
 	FakePlatform platform;
-	Tally tally, second; // outlive the session, which drops the operations
+	Tally tally, second, packed; // outlive the session, which drops the operations
 	ProjectSession session(platform, dir.file("settings.json"));
 	const SessionView &v = session.view();
 	session.handle(make_request(K::NewProject, dir.file("other"), "Other"));
@@ -494,23 +496,24 @@ static int test_uncancellable_operation() {
 	TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
 	            session.outcome().findings[0].code == "operation.not_cancellable" && v.operation.id == id);
 
-	// Cancellable when the gate asks, not when the request commits: refused there, nothing closed.
+	// Cancellable when the gate asks, not when the request commits: refused there, nothing closed
+	// and no folder made (a new project's is made only once the open one has closed).
 	rename->can_cancel = true;
-	for (const EditorRequest &request : {switches[1], switches[3], switches[0]}) {
+	for (const EditorRequest &request : {switches[1], switches[2], switches[3], switches[0]}) {
 		rename->cancellable_answers = 1;
 		session.handle(request);
 		TEST_EXPECT(!session.outcome().done() && refused_busy(session));
 		TEST_EXPECT(v.project_open && v.document.title == "Stubborn" && v.operation.id == id && !v.quit_requested &&
 		            !tally.cancelled);
 	}
+	TEST_EXPECT(!fs::exists(dir.file("third")));
 	rename->cancellable_answers = -1;
 	session.handle(make_request(K::CancelOperation));
 	TEST_EXPECT(session.outcome().done() && tally.cancelled && !v.operation.running());
 
 	// With unsaved edits, a project's close asks first. The rename that runs meanwhile (it writes
 	// the documents) turned stubborn: the prompt's Save and Discard cannot cancel it for the
-	// close, refused and the prompt kept; once it can be cancelled again, a Discard cancels it and
-	// the project closes.
+	// close, refused and the prompt kept, the edits with it.
 	EditorRequest edit = make_request(K::EditRecord, items->path());
 	edit.edit.address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
 	edit.edit.field = "hp";
@@ -533,11 +536,36 @@ static int test_uncancellable_operation() {
 	}
 	std::string text, error;
 	TEST_EXPECT(read_file_text(v.project_root + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
+	answer.unsaved_choice = UnsavedChoice::Cancel;
+	session.handle(answer);
 	held->can_cancel = true;
+	session.handle(make_request(K::CancelOperation));
+	TEST_EXPECT(!v.unsaved_prompt.open && second.cancelled && !v.operation.running() && items->dirty());
+
+	// A build holds no document, so a Discard drops nothing it reads; but the close it answers
+	// would be refused once answered (the build turned stubborn), so the answer is refused first:
+	// the prompt, the document and its edits stay. Cancellable again, a Discard cancels the build
+	// and the project closes.
+	auto build = std::make_unique<FakeOperation>(packed, 1000, OperationKind::Build);
+	FakeOperation *packing = build.get();
+	const uint64_t building = session.start_operation(std::move(build));
+	TEST_EXPECT(building > next);
+	session.handle(make_request(K::CloseProject));
+	TEST_EXPECT(session.outcome().unsaved_prompt && v.unsaved_prompt.open && v.operation.id == building);
+	packing->can_cancel = false;
+	for (const UnsavedChoice choice : {UnsavedChoice::Discard, UnsavedChoice::Save}) {
+		answer.unsaved_choice = choice;
+		session.handle(answer);
+		TEST_EXPECT(session.outcome().unsaved_prompt && refused_busy(session) && v.unsaved_prompt.open);
+		TEST_EXPECT(v.project_open && session.document_for("items.def") == items && items->dirty() &&
+		            v.operation.id == building && !packed.cancelled);
+	}
+	packing->can_cancel = true;
 	answer.unsaved_choice = UnsavedChoice::Discard;
 	session.handle(answer);
-	TEST_EXPECT(session.outcome().done() && !v.project_open && second.cancelled && !v.operation.running());
-	TEST_EXPECT(v.last_operation.id == next && v.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(session.outcome().done() && !v.project_open && packed.cancelled && !v.operation.running());
+	TEST_EXPECT(v.last_operation.id == building && v.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(read_file_text(dir.file("project") + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	return 0;
 }
 
@@ -634,7 +662,7 @@ int main() {
 	failures += test_slot_steps_and_finishes();
 	failures += test_slot_cancels_between_steps();
 	failures += test_request_table();
-	failures += test_gate_is_what_the_windows_show();
+	failures += test_gate_is_what_busy_refuses_says();
 	failures += test_busy_gate();
 	failures += test_uncancellable_operation();
 	failures += test_import_plan_superseded();

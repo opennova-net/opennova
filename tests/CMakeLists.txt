@@ -3782,19 +3782,20 @@ opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 # bounds_test.cpp's; the field controls (S12 D4) field_widgets_test.cpp's; the reference
 # picker (S12 D7: each field's own filter, the keys, a Files row dropped on a value, a missing
 # value's fixes) reference_picker_test.cpp's; find (S12 D8: the Document window's find bar, Find
-# in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; all
-# share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; every
+# control that raises a request enabled exactly when the busy gate takes it (S13 A1) gate_test.cpp's;
+# all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
     add_executable(editor_ui_test editor_ui/editor_windows_test.cpp editor_ui/workspace_test.cpp
                                   editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
-                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp)
+                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
-                                  menu inspector preview styles problems)
+                                  menu inspector preview styles problems gate)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()

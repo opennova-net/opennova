@@ -16,6 +16,17 @@ namespace {
 // The modal a Use fix and a Fix all wait in for Apply.
 constexpr const char *kConfirm = "Apply fixes";
 
+// Whether the busy gate takes every request of `requests` now (SessionView::allows): a fix, a Fix
+// all and the confirmation's Apply are enabled by it (a build packing the files refuses the fixes
+// that write them).
+bool allows_all(const SessionView &view, const std::vector<EditorRequest> &requests) {
+	return std::all_of(requests.begin(), requests.end(),
+	                   [&view](const EditorRequest &request) { return view.allows(request.kind); });
+}
+
+// Said on a fix the running operation holds back.
+constexpr const char *kWaits = "It waits for the running operation.";
+
 template <class T> struct Choice {
 	const char *label;
 	T value;
@@ -129,9 +140,12 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 		const std::string label = ProblemsList::fix_all_label(request);
 		row.next(ui_kit::button_width(label.c_str()));
 		ImGui::PushID(static_cast<int>(request.kind));
-		if (ui_kit::fitted_button(label, "fix", ImGui::GetContentRegionAvail().x))
+		const bool allowed = view.allows(request.kind);
+		ImGui::BeginDisabled(!allowed);
+		if (ui_kit::fitted_button(label, "fix", ImGui::GetContentRegionAvail().x) && allowed)
 			ask(view, list_.required_fix(view, request.kind));
-		ui_kit::tooltip_lazy([&] { return ProblemsList::describe(view, request); });
+		ImGui::EndDisabled();
+		ui_kit::tooltip_lazy([&] { return ProblemsList::describe(view, request) + (allowed ? "" : std::string("\n") + kWaits); });
 		ImGui::PopID();
 	}
 	ImGui::PopID();
@@ -197,12 +211,15 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {
-		if (ui_kit::fitted_button("Fix all", "fix_all", ImGui::GetContentRegionAvail().x))
+		const bool allowed = allows_all(view, all.requests);
+		ImGui::BeginDisabled(!allowed);
+		if (ui_kit::fitted_button("Fix all", "fix_all", ImGui::GetContentRegionAvail().x) && allowed)
 			ask(view, list_.fix_all_of(view, group.rows));
+		ImGui::EndDisabled();
 		ui_kit::tooltip_lazy([&] {
 			std::string tip;
 			for (const std::string &text : all.lines) tip += (tip.empty() ? "" : "\n") + text;
-			return tip;
+			return allowed ? tip : tip + "\n" + kWaits;
 		});
 	}
 	ImGui::PopID();
@@ -234,9 +251,12 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
-			if (fix_pressed(view, line.finding, fix, ui_kit::fitted_button(fix.label, "fix", room)))
+			const bool allowed = view.allows(fix.request.kind);
+			ImGui::BeginDisabled(!allowed);
+			if (fix_pressed(view, line.finding, fix, ui_kit::fitted_button(fix.label, "fix", room)) && allowed)
 				apply(view, line.finding, fix);
-			ui_kit::tooltip_lazy([&] { return fix.label + "\n\n" + fix.detail; });
+			ImGui::EndDisabled();
+			ui_kit::tooltip_lazy([&] { return fix.label + "\n\n" + fix.detail + (allowed ? "" : std::string("\n") + kWaits); });
 			// What it does beside it when there is room for a few words, else under it.
 			if (room - ImGui::GetItemRectSize().x - ImGui::GetStyle().ItemSpacing.x >= ImGui::GetFontSize() * 12.0f)
 				ImGui::SameLine();
@@ -268,9 +288,12 @@ void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const s
 	bool open = false;
 	if (room - more - style.FramePadding.x * 2.0f >= ImGui::GetFontSize() * 4.0f) {
 		const ProblemFix &first = fixes.front();
+		const bool allowed = view.allows(first.request.kind);
+		ImGui::BeginDisabled(!allowed);
 		const bool clicked = ui_kit::fitted_button(first.label, "fix", room - more);
-		if (fix_pressed(view, finding, first, clicked)) apply(view, finding, first);
-		ui_kit::tooltip_lazy([&] { return first.label + "\n\n" + first.detail; });
+		if (fix_pressed(view, finding, first, clicked) && allowed) apply(view, finding, first);
+		ImGui::EndDisabled();
+		ui_kit::tooltip_lazy([&] { return first.label + "\n\n" + first.detail + (allowed ? "" : std::string("\n") + kWaits); });
 		if (fixes.size() == 1) return;
 		ImGui::SameLine();
 		open = ImGui::Button("More");
@@ -299,8 +322,9 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 	}
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
 	for (const ProblemFix &fix : list_.fixes(view, finding)) {
-		if (fix_pressed(view, finding, fix, ImGui::Selectable(fix.label.c_str())))
-			apply(view, finding, fix);
+		const bool allowed = view.allows(fix.request.kind);
+		const bool clicked = ImGui::Selectable(fix.label.c_str(), false, allowed ? 0 : ImGuiSelectableFlags_Disabled);
+		if (fix_pressed(view, finding, fix, clicked) && allowed) apply(view, finding, fix);
 		ImGui::Indent();
 		ImGui::TextDisabled("%s", fix.detail.c_str());
 		ImGui::Unindent();
@@ -328,14 +352,16 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 		ImGui::TextUnformatted("Nothing is left to do: the problems it was for are gone.");
 	for (const std::string &line : shown.lines) ImGui::TextUnformatted(line.c_str());
 	ImGui::PopTextWrapPos();
-	ImGui::BeginDisabled(shown.requests.empty());
+	const bool allowed = allows_all(view, shown.requests);
+	ImGui::BeginDisabled(shown.requests.empty() || !allowed);
 	const bool apply = ImGui::Button("Apply");
 	// A mouse click counts only when pressed on what shows now; a key's, in one frame, does.
 	const bool applies = apply_press_.released_on(std::to_string(list_.version()),
 	                                              ImGui::IsItemActivated(), apply,
 	                                              ImGui::IsMouseReleased(ImGuiMouseButton_Left));
 	ImGui::EndDisabled();
-	if (applies) {
+	if (!allowed) ui_kit::tooltip(kWaits);
+	if (applies && allowed) {
 		for (const EditorRequest &request : shown.requests) host_.request(request);
 		list_.close();
 		ImGui::CloseCurrentPopup();

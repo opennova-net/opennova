@@ -335,12 +335,21 @@ void ProjectSession::show_operation() {
 	touch(ViewConcern::Operation);
 }
 
-// The project made in `dir`, then opened (open_project closes the open one, its operation with
-// it): one that cannot be made leaves the open project open, its operation running.
+// The project made in `dir`, then opened. What would refuse it (a project there already) is asked
+// before anything changes: the open project stays open, its operation running. Then the open
+// project closes, its operation cancelled (refused, nothing made, when it cannot be), and only
+// then is the folder made.
 bool ProjectSession::new_project(const std::string &dir, const std::string &title) {
 	if (dir.empty()) return false;
 	ProjectDocument doc;
 	Diagnostic error;
+	if (!can_create_project(dir, kDefaultTargetGame, error)) {
+		report(error);
+		view_.status = "The project could not be created.";
+		touch(ViewConcern::Output);
+		return false;
+	}
+	if (!close_project()) return false;
 	if (!create_project(dir, title.empty() ? std::string("New Game") : title, kDefaultTargetGame, doc, error)) {
 		report(error);
 		view_.status = "The project could not be created.";
@@ -647,8 +656,8 @@ void ProjectSession::start_build(bool then_play) {
 	ProtectedDirs protected_dirs = [this, output_root] {
 		const int64_t own = play_.state() != PlayState::Stopped ? play_.pid() : -1;
 		std::vector<std::string> dirs =
-		        leased_build_dirs(output_root, [this, own](int64_t pid, const std::string &executable) {
-			        return pid == own ? ProcessLiveness::Alive : platform_.process_liveness(pid, executable);
+		        leased_build_dirs(output_root, [this, own](int64_t pid, const std::string &created) {
+			        return pid == own ? ProcessLiveness::Alive : platform_.process_liveness(pid, created);
 		        });
 		if (!play_.running_build_dir().empty()) dirs.push_back(play_.running_build_dir());
 		return dirs;
@@ -771,8 +780,12 @@ void ProjectSession::start_play() {
 	}
 	// The game's lease on the directory it runs from: a build leaves it alone while the game
 	// runs, this editor's and one started after the editor restarts (run/play_lease.h).
+	// The game as the OS knows it (the image it runs, when it was created): what tells it from
+	// another process that later takes its pid.
 	std::string lease_error;
-	PlayLease lease{plan.build_dir, play_.pid(), plan.executable};
+	ProcessIdentity identity;
+	platform_.process_identity(play_.pid(), identity);
+	PlayLease lease{plan.build_dir, play_.pid(), identity.image, identity.created};
 	if (write_play_lease(lease, lease_error))
 		play_lease_ = std::move(lease);
 	else
@@ -2119,13 +2132,7 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 		touch(ViewConcern::Output);
 		return;
 	}
-	// Its Save writes the files and the documents, as a Save All does, and its Discard drops
-	// documents, a write of them: each is weighed against the running operation (a build packing
-	// the files refuses a Save, never a Discard), the prompt kept when it is refused.
-	const RequestKindRow &save_all = request_kind_row(EditorRequestKind::SaveAll);
-	if (choice == UnsavedChoice::Save ? unsaved_answer_refused(save_all.reads, save_all.writes)
-	                                  : unsaved_answer_refused(HoldsNothing, HoldsDocuments))
-		return;
+	if (unsaved_answer_refused(choice)) return;
 	if (choice == UnsavedChoice::Save) {
 		end_edit_groups();
 		if (!save_documents(view_.unsaved_prompt.files, false)) {
@@ -2152,12 +2159,19 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 	handle(pending);
 }
 
-// What waits and cancels the operation anyway when it commits (a project switch, Quit) cancels it
-// now instead; the answer is refused when it cannot be cancelled, as for any other request.
-bool ProjectSession::unsaved_answer_refused(Holds reads, Holds writes) {
-	if (!busy_for(reads, writes)) return false;
-	if (request_kind_row(pending_request_->kind).on_busy == OnBusy::CancelRunning && cancel_operation(false))
-		return false;
+// The prompt's answer weighed against the running operation before anything is saved or dropped,
+// refused (the prompt kept, said why) as busy_refuses_answer says, the rule the prompt's buttons
+// are enabled by: what waits meets the gate first, as it will once answered (refused there,
+// nothing is written or dropped: a Discard would lose the edits and still not close), then the
+// answer itself (a build packing the files refuses a Save, never a Discard). A project switch or
+// Quit, which cancels the operation as it commits, cancels it now, on either answer, and is
+// refused when that fails.
+bool ProjectSession::unsaved_answer_refused(UnsavedChoice choice) {
+	const OperationStatus running = operations_.status();
+	bool refused = busy_refuses_answer(pending_request_->kind, choice, running);
+	if (!refused && running.running() && gate_answer(pending_request_->kind, running) == GateAnswer::CancelRunning)
+		refused = !cancel_operation(false);
+	if (!refused) return false;
 	refuse_busy(std::string());
 	outcome_.unsaved_prompt = true;
 	return true;

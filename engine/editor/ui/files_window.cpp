@@ -108,7 +108,7 @@ void NewFilePrompt::draw(EditorHost &host) {
 	const bool taken = named && v.scan.find(name_) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
 	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name_);
-	const bool ready = fits && !taken;
+	const bool ready = fits && !taken && v.allows(EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
@@ -232,8 +232,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextDisabled("%s", files.c_str());
 	}
-	// F2 renames the selected file, as its menu's Rename... does.
-	if (!selected_.empty() && ImGui::Shortcut(ImGuiKey_F2))
+	// F2 renames the selected file, as its menu's Rename... does (while the busy gate takes a
+	// rename).
+	if (!selected_.empty() && v.allows(EditorRequestKind::RenameAsset) && ImGui::Shortcut(ImGuiKey_F2))
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
 	// A filter lists the files it matches flat.
 	const std::vector<size_t> &matches = matching(v);
@@ -264,7 +265,9 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	draw_references(v);
 }
 
-// Import, New and Refresh, wrapping in a narrow dock.
+// Import, New and Refresh, wrapping in a narrow dock; each item enabled while the busy gate takes
+// its request too (SessionView::allows: a build packing the files refuses a new file, a Refresh
+// and a reimport).
 void FilesWindow::draw_toolbar(const SessionView &view) {
 	ui_kit::WrapRow row;
 	const float arrow = ImGui::GetFrameHeight();
@@ -274,13 +277,16 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 	const bool importing = ImGui::BeginCombo("##import", "Import", ImGuiComboFlags_HeightLargest);
 	if (!importing) ui_kit::tooltip("Copy files into the project: from the disk, from the game data, or every source again.");
 	if (importing) {
-		if (ImGui::Selectable("Files...")) {
+		const bool picks = view.allows(EditorRequestKind::PreviewImport);
+		ImGui::BeginDisabled(!picks);
+		if (ImGui::Selectable("Files...") && picks) {
 			EditorRequest pick = make_request(EditorRequestKind::PickFile);
 			pick.purpose = PickPurpose::ImportFiles;
 			host_.request(pick);
 		}
+		ImGui::EndDisabled();
 		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
-		const bool game_data = !view.retail_directory.empty();
+		const bool game_data = !view.retail_directory.empty() && view.allows(EditorRequestKind::PreviewRetailImport);
 		ImGui::BeginDisabled(!game_data);
 		if (ImGui::Selectable("From the game data...") && game_data) {
 			EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
@@ -288,10 +294,11 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			host_.request(listed);
 		}
 		ImGui::EndDisabled();
-		ui_kit::tooltip(game_data ? "Files of the game install, copied into the project."
-		                          : "Choose the game install folder in File > Project settings... first.");
-		ImGui::BeginDisabled(view.imports.empty());
-		if (ImGui::Selectable("Reimport all") && !view.imports.empty()) {
+		ui_kit::tooltip(!view.retail_directory.empty() ? "Files of the game install, copied into the project."
+		                                               : "Choose the game install folder in File > Project settings... first.");
+		const bool reimports = !view.imports.empty() && view.allows(EditorRequestKind::Reimport);
+		ImGui::BeginDisabled(!reimports);
+		if (ImGui::Selectable("Reimport all") && reimports) {
 			EditorRequest all = make_request(EditorRequestKind::Reimport);
 			all.flag = true;
 			host_.request(all);
@@ -310,12 +317,16 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ui_kit::tooltip("Make a new file: a string table, a menu, a font, a placeholder texture, or a file the game reads "
 		                "by name.");
 	if (making) {
+		const bool creates = view.allows(EditorRequestKind::CreateFile);
 		// A new file of a kind with a free-form factory: its name is asked first.
 		for (size_t i = 0; i < blank_factory_count(); ++i) {
 			const BlankFactory &factory = *blank_factory_at(i);
 			if (!factory.free_form || factory.role[0] != '\0') continue;
 			ImGui::PushID(static_cast<int>(i));
-			if (ImGui::Selectable((std::string(asset_kind_label(factory.kind)) + "...").c_str())) new_file_.ask(factory.kind);
+			ImGui::BeginDisabled(!creates);
+			if (ImGui::Selectable((std::string(asset_kind_label(factory.kind)) + "...").c_str()) && creates)
+				new_file_.ask(factory.kind);
+			ImGui::EndDisabled();
 			ui_kit::tooltip(makes(factory));
 			ImGui::PopID();
 		}
@@ -327,8 +338,8 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			if (!resource) continue;
 			const bool present = view.scan.find(resource->name) != nullptr;
 			ImGui::PushID(static_cast<int>(i));
-			ImGui::BeginDisabled(present);
-			if (ImGui::Selectable(resource->name) && !present)
+			ImGui::BeginDisabled(present || !creates);
+			if (ImGui::Selectable(resource->name) && !present && creates)
 				host_.request(make_request(EditorRequestKind::CreateFile, resource->name, asset_kind_token(factory.kind)));
 			ImGui::EndDisabled();
 			ui_kit::tooltip(present ? std::string("The project has it.") : makes(factory));
@@ -336,7 +347,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		}
 		ImGui::EndCombo();
 	}
-	if (ui_kit::tool(row, "Refresh", true, "Read the project's folder again."))
+	if (ui_kit::tool(row, "Refresh", view.allows(EditorRequestKind::Rescan), "Read the project's folder again."))
 		host_.request(make_request(EditorRequestKind::Rescan));
 }
 
@@ -372,7 +383,8 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick |
 	                              ImGuiSelectableFlags_AllowOverlap)) {
 		selected_ = entry.relative_path;
-		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && is_editable_kind(entry.kind))
+		if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && is_editable_kind(entry.kind) &&
+		    view.allows(EditorRequestKind::OpenDocument))
 			host_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
 	}
 	// Dragged onto a reference field whose kind loads it, the file becomes its value
@@ -436,17 +448,20 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entry) {
 	if (!ImGui::BeginPopupContextItem("file_menu")) return;
 	selected_ = entry.relative_path;
-	const bool editable = is_editable_kind(entry.kind);
-	if (ImGui::MenuItem("Open", nullptr, false, editable) && editable)
+	const bool opens = is_editable_kind(entry.kind) && view.allows(EditorRequestKind::OpenDocument);
+	if (ImGui::MenuItem("Open", nullptr, false, opens) && opens)
 		host_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
-	if (ImGui::MenuItem("Rename...", "F2")) start_rename(entry);
+	const bool renames = view.allows(EditorRequestKind::RenameAsset);
+	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
 	if (ImGui::MenuItem("References...", nullptr, false, view.graph != nullptr) && view.graph) {
 		references_ = entry.relative_path;
 		open_references_ = true;
 	}
-	if (ImGui::MenuItem("Show in folder"))
+	const bool reveals = view.allows(EditorRequestKind::RevealPath);
+	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
 		host_.request(make_request(EditorRequestKind::RevealPath, (fs::path(view.project_root) / entry.relative_path).generic_string()));
-	if (entry.kind == AssetKind::ImageSource && ImGui::MenuItem("Import again")) {
+	const bool reimports = view.allows(EditorRequestKind::Reimport);
+	if (entry.kind == AssetKind::ImageSource && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports) {
 		EditorRequest one = make_request(EditorRequestKind::Reimport, entry.relative_path);
 		one.flag = true;
 		host_.request(one);
@@ -482,8 +497,9 @@ void FilesWindow::draw_rename(const SessionView &view) {
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 17.0f);
 	const bool enter = ImGui::InputText("##name", rename_, sizeof(rename_), ImGuiInputTextFlags_EnterReturnsTrue);
 	const bool changed = rename_[0] != '\0' && entry->logical_name != rename_;
-	// What it would rewrite, or why it would be refused, planned as the name is typed.
-	if (changed && previewed_ != rename_) {
+	// What it would rewrite, or why it would be refused, planned as the name is typed (while the
+	// busy gate takes the plan; a rename, which writes the files, waits for a build).
+	if (changed && previewed_ != rename_ && view.allows(EditorRequestKind::PreviewRename)) {
 		previewed_ = rename_;
 		EditorRequest preview = make_request(EditorRequestKind::PreviewRename, entry->relative_path);
 		preview.edit.value = previewed_;
@@ -509,11 +525,13 @@ void FilesWindow::draw_rename(const SessionView &view) {
 		}
 		if (plan.sites.size() > 12) ImGui::TextDisabled("and %zu more", plan.sites.size() - 12);
 	}
-	ImGui::BeginDisabled(!changed);
+	const bool allowed = view.allows(EditorRequestKind::RenameAsset);
+	ImGui::BeginDisabled(!changed || !allowed);
 	const bool rename = ImGui::Button("Rename");
 	ImGui::EndDisabled();
-	ui_kit::tooltip("Every file naming it is rewritten, or the rename is refused (Problems says why).");
-	if ((rename || enter) && changed) {
+	ui_kit::tooltip(allowed ? "Every file naming it is rewritten, or the rename is refused (Problems says why)."
+	                        : "A rename rewrites the project's files: it waits for the running operation.");
+	if ((rename || enter) && changed && allowed) {
 		host_.request(make_request(EditorRequestKind::RenameAsset, entry->relative_path, rename_));
 		ImGui::CloseCurrentPopup();
 	}

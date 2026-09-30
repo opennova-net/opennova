@@ -1,6 +1,6 @@
 // Shared scaffolding for the editor_ui ctest (editor_windows_test.cpp, workspace_test.cpp,
 // markers_test.cpp, bounds_test.cpp, field_widgets_test.cpp, reference_picker_test.cpp,
-// find_test.cpp, rename_test.cpp): the failure counter and CHECK, a null ImGui backend
+// find_test.cpp, rename_test.cpp, gate_test.cpp): the failure counter and CHECK, a null ImGui backend
 // (a display size and a built font atlas, no platform or renderer), the workspace driven
 // frame by frame with the mouse and the keys (Ui), the ids ImGui gives items, what a frame
 // writes as text, the requests a test looks for, the menu fixture the windows are driven
@@ -494,5 +494,8 @@ void run_reference_picker_tests();
 void run_find_tests();
 // Rename everywhere from the Inspector (rename_test.cpp): S12 D9.
 void run_rename_tests();
+// Every control that raises a request enabled exactly when the busy gate takes it
+// (gate_test.cpp): S13 A1.
+void run_gate_tests();
 
 } // namespace editor_ui_test

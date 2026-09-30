@@ -466,17 +466,27 @@ int EditorApp::allocate_mcp_port() {
 
 // --- the typed seam --------------------------------------------------------------
 
+// Whether the project at `dir` is the one open now: a switch that failed or was refused leaves
+// the project that was open before it open (or none).
+bool EditorApp::project_open_at(const std::string &p_dir) const {
+	return session_->project_open() &&
+			session_->view().project_root == opennova::editor::ProjectPaths::for_root(p_dir).root;
+}
+
 bool EditorApp::new_project(const String &p_dir, const String &p_title) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::NewProject, opennova::to_std(p_dir),
-			opennova::to_std(p_title)));
-	return session_->project_open();
+	const std::string dir = opennova::to_std(p_dir);
+	session_->handle(opennova::editor::make_request(EditorRequestKind::NewProject, dir, opennova::to_std(p_title)));
+	// Made and opened: the request went through (a folder that holds a project already refuses
+	// it, the open project's own among them) and the project it made is the one open.
+	return session_->outcome().done() && project_open_at(dir);
 }
 
 bool EditorApp::open_project(const String &p_dir) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenProject, opennova::to_std(p_dir)));
-	return session_->project_open();
+	const std::string dir = opennova::to_std(p_dir);
+	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenProject, dir));
+	return project_open_at(dir);
 }
 
 void EditorApp::close_project() {

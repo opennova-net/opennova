@@ -72,6 +72,20 @@ bool names_the_active_document(EditorRequestKind kind) {
 	}
 }
 
+// A menu item chosen only while it can run: a disabled one is never chosen, however it is
+// activated.
+bool menu_item(const char *label, const char *shortcut, bool enabled) {
+	return ImGui::MenuItem(label, shortcut, false, enabled) && enabled;
+}
+
+// A button pressed only while it can run, likewise.
+bool enabled_button(const char *label, bool enabled) {
+	ImGui::BeginDisabled(!enabled);
+	const bool pressed = ImGui::Button(label);
+	ImGui::EndDisabled();
+	return pressed && enabled;
+}
+
 // What waits on the unsaved prompt, in the words of the menu that asked for it.
 std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
 	const std::string file = basename_of(prompt.target);
@@ -122,10 +136,20 @@ void draw_unsaved_prompt(EditorHost &host, const SessionView::UnsavedPrompt &pro
 		host.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	};
-	if (ImGui::Button(save)) answer(UnsavedChoice::Save);
+	// An answer the session would refuse while an operation runs (busy_refuses_answer) is
+	// disabled, the prompt kept: the running operation named, as the refusal names it.
+	const OperationStatus &running = host.view().operation;
+	const std::string wait = running.running() ? std::string("Wait for ") + operation_kind_row(running.kind).noun +
+	                                                     " to finish" + (running.cancellable ? ", or cancel it." : ".")
+	                                           : std::string();
+	const bool save_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Save, running);
+	if (enabled_button(save, !save_refused)) answer(UnsavedChoice::Save);
+	if (save_refused) ui_kit::tooltip(wait);
 	if (prompt.can_discard) {
 		ImGui::SameLine();
-		if (ImGui::Button(one_file ? "Don't save" : "Discard")) answer(UnsavedChoice::Discard);
+		const bool discard_refused = busy_refuses_answer(prompt.action, UnsavedChoice::Discard, running);
+		if (enabled_button(one_file ? "Don't save" : "Discard", !discard_refused)) answer(UnsavedChoice::Discard);
+		if (discard_refused) ui_kit::tooltip(wait);
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) answer(UnsavedChoice::Cancel);
@@ -155,27 +179,6 @@ const Document *active_document(const SessionView &v) {
 	for (const auto &document : v.documents)
 		if (document->path() == v.active_document) return document.get();
 	return nullptr;
-}
-
-// A menu item chosen only while it can run: a disabled one is never chosen, however it is
-// activated.
-bool menu_item(const char *label, const char *shortcut, bool enabled) {
-	return ImGui::MenuItem(label, shortcut, false, enabled) && enabled;
-}
-
-// A button pressed only while it can run, likewise.
-bool enabled_button(const char *label, bool enabled) {
-	ImGui::BeginDisabled(!enabled);
-	const bool pressed = ImGui::Button(label);
-	ImGui::EndDisabled();
-	return pressed && enabled;
-}
-
-// False while the session's busy gate would refuse a request of `kind` (request_kinds.h:
-// busy_refuses, the gate's own answer over the running operation's reads and writes): the menus
-// and the bar disable it then, exactly when the session would refuse it.
-bool allowed(const SessionView &v, EditorRequestKind kind) {
-	return !busy_refuses(kind, v.operation);
 }
 
 // A number of bytes as the bar's tooltip says it: "512 bytes", "3.4 KB", "12.0 MB".
@@ -324,33 +327,36 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 
 void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("File")) return;
-	if (ImGui::MenuItem("New project...")) open_new_project_ = true;
-	if (ImGui::MenuItem("Open project...")) {
+	// A project switch and Quit, like every item that raises a request, are enabled while the
+	// busy gate takes their request (an operation that cannot be cancelled refuses them).
+	if (menu_item("New project...", nullptr, v.allows(EditorRequestKind::NewProject))) open_new_project_ = true;
+	if (menu_item("Open project...", nullptr, v.allows(EditorRequestKind::OpenProject))) {
 		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
 		pick.purpose = PickPurpose::OpenProject;
 		request(pick);
 	}
 	if (ImGui::BeginMenu("Open recent", !v.recent_projects.empty())) {
 		for (const std::string &root : v.recent_projects) {
-			if (ImGui::MenuItem(root.c_str())) request(make_request(EditorRequestKind::OpenProject, root));
+			if (menu_item(root.c_str(), nullptr, v.allows(EditorRequestKind::OpenProject)))
+				request(make_request(EditorRequestKind::OpenProject, root));
 		}
 		ImGui::EndMenu();
 	}
 	ImGui::Separator();
-	if (menu_item("Save", "Ctrl+S", !v.active_document.empty() && allowed(v, EditorRequestKind::Save)))
+	if (menu_item("Save", "Ctrl+S", !v.active_document.empty() && v.allows(EditorRequestKind::Save)))
 		request(make_request(EditorRequestKind::Save));
-	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.empty() && allowed(v, EditorRequestKind::SaveAll)))
+	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.empty() && v.allows(EditorRequestKind::SaveAll)))
 		request(make_request(EditorRequestKind::SaveAll));
-	if (menu_item("Close file", "Ctrl+W", !v.active_document.empty() && allowed(v, EditorRequestKind::CloseDocument)))
+	if (menu_item("Close file", "Ctrl+W", !v.active_document.empty() && v.allows(EditorRequestKind::CloseDocument)))
 		request(make_request(EditorRequestKind::CloseDocument));
 	ImGui::Separator();
-	if (menu_item("Import files...", nullptr, v.project_open && allowed(v, EditorRequestKind::PreviewImport))) {
+	if (menu_item("Import files...", nullptr, v.project_open && v.allows(EditorRequestKind::PreviewImport))) {
 		EditorRequest pick = make_request(EditorRequestKind::PickFile);
 		pick.purpose = PickPurpose::ImportFiles;
 		request(pick);
 	}
 	if (menu_item("Import from the game data...", nullptr,
-	              v.project_open && !v.retail_directory.empty() && allowed(v, EditorRequestKind::PreviewRetailImport))) {
+	              v.project_open && !v.retail_directory.empty() && v.allows(EditorRequestKind::PreviewRetailImport))) {
 		EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
 		listed.flag = v.import_dependencies;
 		request(listed);
@@ -358,19 +364,23 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (v.project_open && v.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
 	ImGui::Separator();
-	if (menu_item("Project settings...", nullptr, v.project_open)) settings_.open(v);
-	if (menu_item("Show project folder", nullptr, v.project_open))
+	if (menu_item("Project settings...", nullptr, v.project_open && v.allows(EditorRequestKind::ApplyProjectSettings)))
+		settings_.open(v);
+	if (menu_item("Show project folder", nullptr, v.project_open && v.allows(EditorRequestKind::RevealPath)))
 		request(make_request(EditorRequestKind::RevealPath, v.project_root));
-	if (menu_item("Close project", nullptr, v.project_open)) request(make_request(EditorRequestKind::CloseProject));
+	if (menu_item("Close project", nullptr, v.project_open && v.allows(EditorRequestKind::CloseProject)))
+		request(make_request(EditorRequestKind::CloseProject));
 	ImGui::Separator();
-	if (ImGui::MenuItem("Quit")) request(make_request(EditorRequestKind::Quit));
+	if (menu_item("Quit", nullptr, v.allows(EditorRequestKind::Quit))) request(make_request(EditorRequestKind::Quit));
 	ImGui::EndMenu();
 }
 
 void EditorWindows::draw_edit_menu(const SessionView &v, const Document *document) {
 	if (!ImGui::BeginMenu("Edit")) return;
-	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo())) request(make_request(EditorRequestKind::Undo));
-	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo())) request(make_request(EditorRequestKind::Redo));
+	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
+		request(make_request(EditorRequestKind::Undo));
+	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
+		request(make_request(EditorRequestKind::Redo));
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project_open && v.graph)) find_.open();
@@ -379,21 +389,24 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const Document *documen
 
 void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
-	if (menu_item("Build", "Ctrl+B", v.project_open && allowed(v, EditorRequestKind::Build)))
+	if (menu_item("Build", "Ctrl+B", v.project_open && v.allows(EditorRequestKind::Build)))
 		request(make_request(EditorRequestKind::Build));
-	if (menu_item("Play", "F5", v.project_open && v.play_state == PlayState::Stopped && allowed(v, EditorRequestKind::Play)))
+	if (menu_item("Play", "F5", v.project_open && v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
 		request(make_request(EditorRequestKind::Play));
-	if (menu_item("Stop", "Shift+F5", v.play_state == PlayState::Running)) request(make_request(EditorRequestKind::StopPlay));
+	if (menu_item("Stop", "Shift+F5", v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
+		request(make_request(EditorRequestKind::StopPlay));
 	ImGui::Separator();
+	// An editor setting, never refused (the busy gate takes it, as it takes the settings'
+	// Apply); the next Play reads it, so it waits while a game runs.
 	bool retail = v.play_retail;
-	const bool stopped = !v.operation.running() && v.play_state == PlayState::Stopped;
-	if (ImGui::MenuItem("Play in the game install", nullptr, &retail, stopped) && stopped) {
+	const bool settable = v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::ApplyProjectSettings);
+	if (ImGui::MenuItem("Play in the game install", nullptr, &retail, settable) && settable) {
 		EditorRequest set = make_request(EditorRequestKind::ApplyProjectSettings);
 		set.settings.play_retail = retail;
 		request(set);
 	}
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
-	if (menu_item("Show build folder", nullptr, v.has_build && v.last_build.ok))
+	if (menu_item("Show build folder", nullptr, v.has_build && v.last_build.ok && v.allows(EditorRequestKind::RevealPath)))
 		request(make_request(EditorRequestKind::RevealPath, v.last_build.build_dir));
 	ImGui::EndMenu();
 }
@@ -421,30 +434,31 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 	if (v.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
-		if (io.KeyShift && !v.documents.empty() && allowed(v, EditorRequestKind::SaveAll))
+		if (io.KeyShift && !v.documents.empty() && v.allows(EditorRequestKind::SaveAll))
 			request(make_request(EditorRequestKind::SaveAll));
-		else if (!io.KeyShift && !v.active_document.empty() && allowed(v, EditorRequestKind::Save))
+		else if (!io.KeyShift && !v.active_document.empty() && v.allows(EditorRequestKind::Save))
 			request(make_request(EditorRequestKind::Save));
 	}
 	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.active_document.empty() &&
-	    allowed(v, EditorRequestKind::CloseDocument))
+	    v.allows(EditorRequestKind::CloseDocument))
 		request(make_request(EditorRequestKind::CloseDocument));
 	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project_open && v.graph) find_.open();
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && allowed(v, EditorRequestKind::Build)) {
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && v.allows(EditorRequestKind::Build)) {
 		request(make_request(EditorRequestKind::Build));
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
-		if (io.KeyShift && v.play_state == PlayState::Running) {
+		if (io.KeyShift && v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
 			request(make_request(EditorRequestKind::StopPlay));
 		} else if (!io.KeyShift && v.project_open && v.play_state == PlayState::Stopped &&
-		           allowed(v, EditorRequestKind::Play)) {
+		           v.allows(EditorRequestKind::Play)) {
 			request(make_request(EditorRequestKind::Play));
 		}
 	}
 	if (!io.WantTextInput && document) {
-		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
-			request(make_request(io.KeyShift ? EditorRequestKind::Redo : EditorRequestKind::Undo));
-		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) request(make_request(EditorRequestKind::Redo));
+		const EditorRequestKind z = io.KeyShift ? EditorRequestKind::Redo : EditorRequestKind::Undo;
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false) && v.allows(z)) request(make_request(z));
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false) && v.allows(EditorRequestKind::Redo))
+			request(make_request(EditorRequestKind::Redo));
 	}
 }
 
@@ -535,9 +549,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ImGui::TextUnformatted(unsaved_text.c_str());
 		if (ImGui::BeginPopup("unsaved")) {
 			for (const Document *document : unsaved)
-				if (ImGui::MenuItem(document->path().c_str())) request(make_request(EditorRequestKind::OpenDocument, document->path()));
+				if (menu_item(document->path().c_str(), nullptr, v.allows(EditorRequestKind::OpenDocument)))
+					request(make_request(EditorRequestKind::OpenDocument, document->path()));
 			ImGui::Separator();
-			if (menu_item("Save all", nullptr, allowed(v, EditorRequestKind::SaveAll)))
+			if (menu_item("Save all", nullptr, v.allows(EditorRequestKind::SaveAll)))
 				request(make_request(EditorRequestKind::SaveAll));
 			ImGui::EndPopup();
 		}
@@ -557,16 +572,18 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ImGui::TextUnformatted(state.c_str());
 		ui_kit::tooltip(state_tip);
 		if (cancel) {
-			if (ImGui::Button("Cancel")) request(make_request(EditorRequestKind::CancelOperation));
+			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
+				request(make_request(EditorRequestKind::CancelOperation));
 			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.operation.kind).noun + ": nothing it made is kept.");
 		}
 	}
-	if (enabled_button("Build", allowed(v, EditorRequestKind::Build))) request(make_request(EditorRequestKind::Build));
+	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(make_request(EditorRequestKind::Build));
 	ui_kit::tooltip("Build the project (Ctrl+B).");
-	if (enabled_button("Play", v.play_state == PlayState::Stopped && allowed(v, EditorRequestKind::Play)))
+	if (enabled_button("Play", v.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
 		request(make_request(EditorRequestKind::Play));
 	ui_kit::tooltip("Build, then run the game on the build (F5).");
-	if (enabled_button("Stop", v.play_state == PlayState::Running)) request(make_request(EditorRequestKind::StopPlay));
+	if (enabled_button("Stop", v.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
+		request(make_request(EditorRequestKind::StopPlay));
 	ui_kit::tooltip("Stop the game (Shift+F5).");
 	ImGui::PopID();
 }

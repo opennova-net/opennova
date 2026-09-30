@@ -154,10 +154,14 @@ void ImportDialog::draw(EditorHost &host) {
 	ImGui::Checkbox("Replace existing files", &replace_existing_);
 	ui_kit::tooltip("A checked file the project has already is written over; otherwise the import refuses it.");
 	const std::string label = "Import " + counted(count, "file") + "###import";
+	// An import writes the project's files: while an operation holds them (a build packing
+	// them), the busy gate refuses it, and Import waits with it (SessionView::allows).
+	const bool allowed = host.view().allows(EditorRequestKind::ImportFiles);
 	const std::string why = count == 0        ? "Check the files to import first."
 	                        : !blocked.empty() ? blocked
+	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
-	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty(), why)) {
+	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
 		EditorRequest request = make_request(EditorRequestKind::ImportFiles);
 		request.flag = replace_existing_;
 		for (size_t i = 0; i < checked_.size(); ++i) {
@@ -168,7 +172,7 @@ void ImportDialog::draw(EditorHost &host) {
 		host.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
-	if (ui_kit::tool(actions, "Cancel", true, "Import nothing.")) {
+	if (ui_kit::tool(actions, "Cancel", host.view().allows(EditorRequestKind::CancelImport), "Import nothing.")) {
 		host.request(make_request(EditorRequestKind::CancelImport));
 		ImGui::CloseCurrentPopup();
 	}
@@ -279,11 +283,14 @@ void ImportDialog::draw_plan(EditorHost &host, const SessionView::ImportPreview 
 	const std::string include = "Include the files these need" + (with ? " (" + std::to_string(found) + " found)" : std::string());
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
-	if (ImGui::Checkbox((shown + "###needs").c_str(), &with)) {
+	const bool plans = host.view().allows(EditorRequestKind::SetImportDependencies);
+	ImGui::BeginDisabled(!plans);
+	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans) {
 		EditorRequest request = make_request(EditorRequestKind::SetImportDependencies);
 		request.flag = with;
 		host.request(std::move(request));
 	}
+	ImGui::EndDisabled();
 	ui_kit::tooltip((shown != include ? include + ".\n" : std::string()) +
 	                "Look for the files the chosen ones name (fonts, textures, models...) beside them and in the game "
 	                "install, and import those found too. The editor remembers it.");

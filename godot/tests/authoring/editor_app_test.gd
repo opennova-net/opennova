@@ -151,6 +151,31 @@ func test_new_project_fills_builds_and_plays() -> void:
 	assert_eq(_app.get_required_missing(), 0)
 
 
+## A switch that fails leaves the open project open, and new_project and open_project answer
+## whether the project asked for is the one open afterwards (S13 A1: a new project's folder is
+## checked, and another project read, before the open one closes).
+func test_failed_switch_keeps_the_project() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor switch %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Kept")
+	assert_true(_app.new_project(root, "Kept"))
+	assert_false(_app.new_project(root, "Again"), "a project is there already")
+	assert_true(_app.is_project_open())
+	assert_eq(_app.get_project_root(), root)
+	assert_eq(_app.get_project_title(), "Kept")
+	var empty := dir.path_join("Empty")
+	assert_eq(DirAccess.make_dir_recursive_absolute(empty), OK)
+	assert_false(_app.open_project(empty), "no project there")
+	assert_eq(_app.get_project_root(), root)
+	var other := dir.path_join("Other")
+	assert_true(_app.new_project(other, "Other"))
+	assert_eq(_app.get_project_root(), other)
+	assert_true(_app.open_project(root))
+	assert_eq(_app.get_project_title(), "Kept")
+
+
 ## A second document type through the same seam: a string table gains a section and a
 ## string, the text round-trips through cp1252 storage, and the file survives a reopen.
 func test_strings_edit_round_trip() -> void:

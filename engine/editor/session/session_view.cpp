@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include <editor/session/request_kinds.h>
+
 namespace opennova::editor {
 
 namespace {
@@ -65,6 +67,10 @@ void SessionView::select_added(const Document &document) {
 	// A batch that fills in what it adds (a window and its ACTIONs) selects the window.
 	selected = document.outermost(selected);
 	selection = selected.empty() ? NodeAddress() : selected.front();
+}
+
+bool SessionView::allows(EditorRequestKind kind) const {
+	return !busy_refuses(kind, operation);
 }
 
 void SessionView::update_previews() {
