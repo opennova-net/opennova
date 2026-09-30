@@ -139,9 +139,9 @@ io::JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge)
 io::JsonValue graph_edges_to_json(const AssetGraph &graph, const std::vector<const GraphEdge *> &edges);
 io::JsonValue graph_symbol_to_json(const GraphSymbol &symbol);
 // A reference field of a record, as it applies to it (Document::field_on): the names its
-// picker offers (Document::reference_choices): {field, reference (its kind token), scope,
+// picker offers (reference_choices): {field, reference (its kind token), scope,
 // count, choices: [{name, kind, file, record, status, inert, reason}]}; and where its Go to
-// leads with the value it holds (Document::reference_targets): {field, reference, value,
+// leads with the value it holds (reference_targets): {field, reference, value,
 // count, targets: [{label, file, locator, field, editable}]}. A field that is no reference
 // has none. Null for a record the document does not hold or a field it does not have.
 io::JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address, const std::string &field,

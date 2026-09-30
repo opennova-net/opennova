@@ -18,6 +18,7 @@
 
 #include <base/io/json.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_preview_json.h>
@@ -114,7 +115,9 @@ static int test_headless_preview() {
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu && !menu->rows().empty());
 	NodeAddress main, title, exit;
-	TEST_EXPECT(menu->find("MAIN", main) && menu->find("TITLE", title) && menu->find("EXIT", exit));
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "MAIN", main) &&
+			find_definition(AssetGraph(), *menu, "TITLE", title) &&
+			find_definition(AssetGraph(), *menu, "EXIT", exit));
 	// A menu open with none of its screens the preview's: it asks for one.
 	{
 		SessionView unselected = view;
@@ -238,7 +241,7 @@ static int test_headless_preview() {
 	Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style);
 	NodeAddress fg;
-	TEST_EXPECT(style->find("DEF_TEXT_FG", fg));
+	TEST_EXPECT(find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg));
 	set(session, *style, fg, "value", std::string("FFFF0000"));
 	TEST_EXPECT(style->dirty());
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);

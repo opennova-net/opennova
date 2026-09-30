@@ -8,6 +8,7 @@
 #include <editor/documents/strings_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
@@ -168,9 +169,10 @@ int load_edit_save() {
 	document.undo();
 	TEST_EXPECT(!document.apply(set(hello, "y", int64_t(1)), diagnostic) || true); // the string still exists here
 	NodeAddress found;
-	TEST_EXPECT(document.find("hello", found) && found.child == hello.child);
-	TEST_EXPECT(document.find("wepdes", found) && found.kind == kSection);
-	TEST_EXPECT(!document.find("nowhere", found));
+	TEST_EXPECT(
+			find_definition(AssetGraph(), document, "hello", found) && found.child == hello.child);
+	TEST_EXPECT(find_definition(AssetGraph(), document, "wepdes", found) && found.kind == kSection);
+	TEST_EXPECT(!find_definition(AssetGraph(), document, "nowhere", found));
 	// A string named in a section the table lacks blocks; an ungrouped table only warns.
 	TEST_EXPECT(write_file_atomic(dir.file("ungrouped.bin"), minted_table(false).data(), minted_table(false).size(), error));
 	StringsDocument ungrouped;

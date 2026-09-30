@@ -27,6 +27,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
 #include <editor/import/png_decode.h>
@@ -430,7 +431,7 @@ static int test_import_lifetime() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
-	TEST_EXPECT(menu && menu->find("EXIT", exit));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	EditorRequest set = make_request(EditorRequestKind::EditRecord, menu->path());
 	set.edits = menu_test::image_edits(*menu, exit, "logo.pcx");
 	session.handle(set);
@@ -461,7 +462,7 @@ static int test_import_lifetime() {
 	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "logo.pcx") == ReferenceStatus::Missing);
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	Value image;
-	TEST_EXPECT(menu && menu->find("EXIT", exit) &&
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit) &&
 	            menu->get(menu_test::child_of(*menu, exit, "appearance"), "value", image) &&
 	            std::get<std::string>(image) == "logo2.pcx");
 	TEST_EXPECT(count_code(view.diagnostics, "reference.missing") == 0);

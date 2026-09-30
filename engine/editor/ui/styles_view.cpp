@@ -74,7 +74,8 @@ void used_by_cell(Workspace &workspace, const std::vector<const GraphEdge *> &us
 		const GraphEdge &edge = *users[i];
 		ImGui::PushID(int(i));
 		const std::string where = edge.source + ": " + (edge.record.empty() ? std::string() : edge.record + " ") + "(" + edge.field + ")";
-		if (ImGui::Selectable(where.c_str())) window_requests::go_to(workspace, usage_target(edge, workspace.view()));
+		if (ImGui::Selectable(where.c_str()))
+			window_requests::go_to(workspace, usage_target(workspace.view().scan, edge));
 		ImGui::PopID();
 	}
 	ImGui::EndPopup();

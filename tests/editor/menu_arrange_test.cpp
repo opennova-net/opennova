@@ -21,6 +21,7 @@
 
 #include <base/vfs/file_source.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/edit.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
@@ -294,8 +295,13 @@ static int test_on_a_menu() {
 	const std::string original = document.serialize().text;
 	const NodeId screen = document.rows()[0]->id;
 	NodeAddress main, a, b, c, panel, d, flat;
-	TEST_EXPECT(document.find("MAIN", main) && document.find("A", a) && document.find("B", b) && document.find("C", c) &&
-	            document.find("PANEL", panel) && document.find("D", d) && document.find("FLAT", flat));
+	TEST_EXPECT(find_definition(AssetGraph(), document, "MAIN", main) &&
+			find_definition(AssetGraph(), document, "A", a) &&
+			find_definition(AssetGraph(), document, "B", b) &&
+			find_definition(AssetGraph(), document, "C", c) &&
+			find_definition(AssetGraph(), document, "PANEL", panel) &&
+			find_definition(AssetGraph(), document, "D", d) &&
+			find_definition(AssetGraph(), document, "FLAT", flat));
 	NoFiles files;
 	MenuScreenRender render;
 	auto compile = [&] { return render.configure(document, screen, files, {}) == MenuPreviewStatus::Ready; };

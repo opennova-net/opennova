@@ -9,6 +9,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_session.h>
 
@@ -1044,12 +1045,16 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 
 	JsonValue graph = JsonValue::make_object();
 	if (view.graph) {
-		graph.set("edges", json_number(double(view.graph->edges().size())));
-		graph.set("symbols", json_number(double(view.graph->symbols().size())));
-		graph.set("missing", json_number(double(view.graph->missing().size())));
-		graph.set("files_extracted", json_number(double(view.graph->stats().files_extracted)));
-		graph.set("files_reused", json_number(double(view.graph->stats().files_reused)));
-		graph.set("files_failed", json_number(double(view.graph->stats().files_failed)));
+		const GraphStats &stats = view.graph->stats();
+		graph.set("edges", json_number(double(view.graph->edge_count())));
+		graph.set("symbols", json_number(double(view.graph->symbol_count())));
+		graph.set("missing", json_number(double(view.graph->missing_count())));
+		graph.set("files_extracted", json_number(double(stats.files_extracted)));
+		graph.set("files_reused", json_number(double(stats.files_reused)));
+		graph.set("files_failed", json_number(double(stats.files_failed)));
+		graph.set("files_patched", json_number(double(stats.files_patched)));
+		graph.set("edges_resolved", json_number(double(stats.edges_resolved)));
+		graph.set("findings_made", json_number(double(stats.findings_made)));
 	}
 	out.set("graph", std::move(graph));
 
@@ -1208,10 +1213,13 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		if (field.reference != ReferenceKind::None) {
 			entry.set("reference", json_string(reference_row(field.reference).token));
 			std::string symbol;
-			const ReferenceStatus status = document.reference_status(field, value, view, &symbol);
+			const ReferenceStatus status = view.graph
+					? reference_status(*view.graph, field, value, &symbol)
+					: ReferenceStatus::Unverified;
 			entry.set("reference_status", json_string(reference_status_token(status)));
 			if (!symbol.empty()) entry.set("symbol", json_string(symbol));
-			const std::string target = document.reference_target_file(field, value, view);
+			const std::string target =
+					view.graph ? reference_target_file(*view.graph, field, value) : std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
@@ -1272,7 +1280,8 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices = document.reference_choices(field, view);
+	const std::vector<ReferenceChoice> choices =
+	        view.graph ? reference_choices(*view.graph, field) : std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceChoice &choice : choices) {
 		JsonValue entry = JsonValue::make_object();
@@ -1301,7 +1310,9 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, view);
+	const std::vector<ReferenceTarget> targets = view.graph
+			? reference_targets(*view.graph, view.scan, field, value)
+			: std::vector<ReferenceTarget>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceTarget &target : targets) {
 		JsonValue entry = JsonValue::make_object();

@@ -3,7 +3,6 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
 #include <runtime/hud/game_text_lookup.h>
 
 #include <algorithm>

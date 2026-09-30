@@ -49,8 +49,9 @@
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
     session and the windows reach a type through), `graph` (the asset graph: typed edges from the engine's own
-    parsed records, the one resolver behind the badges, the pickers and the Problems
-    rows, and the rename transaction), `import` (the importers: a PNG to the game's
+    parsed records in a slot per file that an update patches, the one resolver behind the badges, the
+    pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
+    (a read-only dependency mount's), and the rename transaction), `import` (the importers: a PNG to the game's
     PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
     one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
     (the menu preview's portable half: what it shows, when to configure it again, its
@@ -70,7 +71,12 @@
     STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
     the engine's own load paths; nothing under the four groups below may include or link it
     (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
-    child never carry it. Tooling, not a port: its sources sit in the citation
+    child never carry it. Inside it five libraries are ranked, model < documents < graph <
+    session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
+    includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
+    include; the upward includes the tree still makes are the lint's listed exceptions, each
+    naming the slice that removes it, and an exception the tree no longer makes fails the lint.
+    The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
     allowlist by the `editor/` prefix. No directory under it may start with `build`
     (the lints skip such directories; the build lib is `project_build/`).
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —

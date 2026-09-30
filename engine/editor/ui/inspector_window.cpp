@@ -1,6 +1,7 @@
 #include "inspector_window.h"
 
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/findings_index.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -178,23 +179,26 @@ std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
 	                       : "Show " + target.file + " in Files (the editor does not edit its kind).";
 }
 
-// A reference's Go to, to the places the game's lookup reaches (Document::reference_targets,
+// A reference's Go to, to the places the game's lookup reaches (reference_targets,
 // made only while the tool is hovered, pressed or its menu open): one gone to, or several
 // offered in a menu (a font through a style variable: the variable where the game reads it,
 // or the file its value names). `pressed` is the tool's press; its tooltip is `tip`, then
 // where it leads after `lead`.
-void go_to_tool(Workspace &workspace, const Document &document, const FieldUse &field, const Value &value, bool pressed,
+void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value, bool pressed,
                 const std::string &tip, const char *lead) {
 	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
+	const SessionView &view = workspace.view();
+	if (!view.graph) return;
 	if (pressed || hovered) {
-		const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, workspace.view());
+		const std::vector<ReferenceTarget> targets =
+				reference_targets(*view.graph, view.scan, field, value);
 		if (pressed && targets.size() == 1) go_to(workspace, targets.front());
 		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
 		if (hovered)
 			ui_kit::tooltip(targets.empty() ? tip : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets));
 	}
 	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target : document.reference_targets(field, value, workspace.view()))
+	for (const ReferenceTarget &target : reference_targets(*view.graph, view.scan, field, value))
 		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
 	ImGui::EndPopup();
 }
@@ -203,10 +207,13 @@ void go_to_tool(Workspace &workspace, const Document &document, const FieldUse &
 // uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to); a
 // reference that resolves gets a "Go to" (go_to_tool) to the record that defines it, this
 // document's own included, or the file it loads.
-void reference_status(Workspace &workspace, const Document &document, const FieldUse &field, const Value &value,
-                      bool compact, ui_kit::WrapRow *row) {
+void reference_status(Workspace &workspace, const FieldUse &field, const Value &value, bool compact,
+                      ui_kit::WrapRow *row) {
 	std::string symbol;
-	const ReferenceStatus status = document.reference_status(field, value, workspace.view(), &symbol);
+	const SessionView &view = workspace.view();
+	const ReferenceStatus status = view.graph
+			? editor::reference_status(*view.graph, field, value, &symbol)
+			: ReferenceStatus::Unverified;
 	if (status == ReferenceStatus::NotAReference) return;
 	const ImVec4 colour = ui_kit::reference_color(status);
 	const char *word = ui_kit::reference_word(status);
@@ -222,7 +229,7 @@ void reference_status(Workspace &workspace, const Document &document, const Fiel
 		ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + frame * 0.25f, at.y + frame * 0.5f), frame * 0.2f,
 		                                            ImGui::GetColorU32(colour));
 		tip = std::string(word) + ": " + tip;
-		if (present) go_to_tool(workspace, document, field, value, pressed, tip, "A click: ");
+		if (present) go_to_tool(workspace, field, value, pressed, tip, "A click: ");
 		else ui_kit::tooltip(tip);
 		return;
 	}
@@ -231,7 +238,7 @@ void reference_status(Workspace &workspace, const Document &document, const Fiel
 	ui_kit::tooltip(tip);
 	if (!present) return;
 	place(row, ui_kit::button_width("Go to"));
-	go_to_tool(workspace, document, field, value, ImGui::SmallButton("Go to"), std::string(), "");
+	go_to_tool(workspace, field, value, ImGui::SmallButton("Go to"), std::string(), "");
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
@@ -261,7 +268,7 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 		if (picker.draw(workspace, document, targets.front(), field, value, compact, picked))
 			set(workspace, document, targets, field.schema->id, picked, false);
 	}
-	reference_status(workspace, document, field, value, compact, row);
+	reference_status(workspace, field, value, compact, row);
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
@@ -845,7 +852,7 @@ void draw_section(Workspace &workspace, ReferencePicker &picker, const Document 
 // Who names this record: the graph's referrers of every symbol it defines (a row's, or a
 // nested record's, a menu window's NAME), a line each cut to the window: the file, the
 // record and the field's name (the whole of it, and the field's id, in its tooltip); a click
-// goes to the use (graph/usage_target).
+// goes to the use (graph/reference_queries' usage_target).
 void referenced_by(Workspace &workspace, const Document &document, const NodeAddress &record) {
 	const SessionView &view = workspace.view();
 	if (!view.graph) return;
@@ -866,7 +873,7 @@ void referenced_by(Workspace &workspace, const Document &document, const NodeAdd
 		const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
 		const bool pressed = ImGui::Selectable((shown + "###use").c_str());
 		if (pressed || ImGui::IsItemHovered()) {
-			const ReferenceTarget target = usage_target(edge, view);
+			const ReferenceTarget target = usage_target(view.scan, edge);
 			if (pressed) go_to(workspace, target);
 			ui_kit::tooltip(line + "\n" + edge.field + "\n" + go_to_words({target}));
 		}

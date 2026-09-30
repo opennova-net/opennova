@@ -593,7 +593,7 @@ void FilesWindow::draw_references(const SessionView &view) {
 			        edge.source + ": " + (edge.record.empty() ? "" : edge.record + " - ") + edge_field_title(view, edge);
 			const bool pressed = ImGui::Selectable((line + "###use").c_str());
 			if (pressed || ImGui::IsItemHovered()) {
-				const ReferenceTarget target = usage_target(edge, view);
+				const ReferenceTarget target = usage_target(view.scan, edge);
 				if (pressed) window_requests::go_to(workspace_, target);
 				ui_kit::tooltip(edge.field + "\n" +
 				                (target.editable ? "Open " + target.file + " at it." : "Show " + target.file + " in Files."));
