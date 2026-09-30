@@ -6,6 +6,7 @@
 #include "hud/vehicle_hud_block.h"
 
 #include "hud/hud_pos.h"
+#include "mnu/controls_model.h" // set_tip's binding (the key display source)
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
@@ -250,6 +251,9 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_briefing", "shown", "sim"), &HudOverlay::set_briefing);
 	ClassDB::bind_method(D_METHOD("cycle_briefing_page", "direction", "in_session"),
 			&HudOverlay::cycle_briefing_page);
+	ClassDB::bind_method(D_METHOD("set_tip", "tip", "countdown", "local_dead", "gametext",
+								  "controls"),
+			&HudOverlay::set_tip);
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
 			&HudOverlay::set_message_log_title);
 	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
@@ -628,6 +632,17 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// constant [orig: the 4x4 cell grid, see docs/interface/hud-re.md].
 		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
+		// The tip panel's own box atlas (no second stage) and its two icons.
+		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga");
+		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga");
+		const Ref<Texture2D> tip_gameplay = load_hud_texture_("g_tip.tga");
+		textures_[opennova::hud::kHudTexTipBox] = tip_box;
+		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
+		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
+		layout_.tip_box_texture_valid = tip_box.is_valid();
+		layout_.tip_box_tex_w = tip_box.is_valid() ? tip_box->get_width() : 0;
+		layout_.tip_keyboard_texture_valid = tip_keyboard.is_valid();
+		layout_.tip_gameplay_texture_valid = tip_gameplay.is_valid();
 	}
 	{
 		// The AAS zone status panel's three team-icon atlases and the two

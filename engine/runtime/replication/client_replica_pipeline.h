@@ -48,9 +48,17 @@ struct EntityDeathEvent {
 struct LocalChatSpeaker {
     uint8_t slot = 0;
 };
+// A tip event the client's own receive legs raise (hud/tip_system.h
+// TipEvent): the spectator begin on the S2C 0x0A death-screen edge and on
+// the own slot's S2C 0x4D. The effect pass queues it on the world's tip
+// events. [orig: NapiNPClientMsg_0x00A @0x42ffd8..0x42ffdf;
+// NapiNPClientMsg_HandleSpawnSlot @0x431857..0x43185e]
+struct TipEventCommand {
+    uint8_t event = 0;
+};
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent>;
+        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand>;
 
 class ClientReplicaPipeline {
 public:

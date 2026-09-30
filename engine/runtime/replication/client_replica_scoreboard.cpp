@@ -338,9 +338,9 @@ void ClientReplicaPipeline::apply_visible_players(const std::vector<uint8_t> &bo
 
 // S2C 0x4D: a player joined. Its slot's downed state clears; for another
 // player's slot this client asks for the slot's full 0x46 row and a fresh
-// 0x4C snapshot. The own slot's notice raises tip 22 while the death screen
-// is up and the round runs — the tip system is unported, so that leg does
-// nothing here. [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317B0 —
+// 0x4C snapshot. The own slot's notice raises the spectator tip (event 22)
+// while the death screen is up and the round runs (the spectate-mode toast
+// stamp beside it rides the unported toast). [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317B0 —
 //  PlayerSlot_SetDownedState(slot, 0, 0) @0x4317e5, the local-slot test
 //  @0x4317f0, CTipSystem_HandleEvent(22) + dword_24C18F0 = 186
 //  @0x431855..0x431863, the 0x22 {slot, 0x1CF7} @0x43181d and the empty 0x23
@@ -354,7 +354,13 @@ void ClientReplicaPipeline::apply_spawn_slot_notice(const std::vector<uint8_t> &
 		slot.medic_request_active = false;
 		state_.mark_changed();
 	}
-	if (notice.slot == local_player_slot_) return;
+	if (notice.slot == local_player_slot_) {
+		// [orig: @0x431845..0x43185e — g_DeathScreenActive, then
+		//  !g_SpawnSuccessGate, then CTipSystem_HandleEvent(22)]
+		if (state_.death_screen_active && !state_.spawn_success_gate)
+			pending_effect_commands_.push_back(TipEventCommand{22});
+		return;
+	}
 	ClientVisiblePlayersRefresh refresh;
 	refresh.slot = notice.slot;
 	refresh.fields = kSpawnSlotSyncFields;

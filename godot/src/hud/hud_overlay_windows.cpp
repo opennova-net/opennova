@@ -3,8 +3,13 @@
 // briefing panel and its page keys. The shell resolves the text tables;
 // the compiler owns the layout and the briefing's page state.
 #include "hud/hud_overlay.h"
+#include "mnu/controls_model.h"
+#include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "util/string_convert.h"
+
+#include <runtime/controls/binding_set.h>
+#include <runtime/hud/tip_system.h>
 
 namespace godot {
 
@@ -45,6 +50,26 @@ void HudOverlay::set_briefing(bool p_shown, const Ref<Simulation> &p_sim) {
 
 void HudOverlay::cycle_briefing_page(int p_direction, bool p_in_session) {
 	compiler_.briefing_pages().cycle(p_direction, p_in_session);
+}
+
+void HudOverlay::set_tip(int p_tip, int p_countdown, bool p_local_dead,
+		const Ref<RtxtStringFile> &p_gametext, const Ref<ControlsModel> &p_controls) {
+	state_.tip = p_tip;
+	state_.tip_countdown = p_countdown;
+	state_.local_dead = p_local_dead;
+	if (p_countdown <= 0) {
+		state_.tip_header.clear();
+		state_.tip_body.clear();
+		return;
+	}
+	const opennova::hud::TipKeyDisplay keys = [&p_controls](const std::string &token) {
+		return p_controls.is_valid()
+				? opennova::controls::display_string_for_token(p_controls->native_bindings(), token)
+				: std::string("???");
+	};
+	opennova::hud::tip_draw_text(p_tip, game_text_lookup(p_gametext), keys, state_.tip_header,
+			state_.tip_body);
+	queue_redraw();
 }
 
 } // namespace godot

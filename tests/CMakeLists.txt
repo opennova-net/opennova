@@ -1149,6 +1149,16 @@ target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
 add_test(NAME hud_toggles COMMAND hud_toggles_test)
 
+# The tip system (hud/tip_system.h): the event table, the once-counters and
+# option gates, the countdown / fade / reset, the text keys and expansion, the
+# escape leg, the panel draw, the "$token$" key display and the local player's
+# boarding producers.
+add_executable(tip_system_test hud/tip_system_test.cpp)
+target_link_libraries(tip_system_test PRIVATE opennova_runtime)
+target_include_directories(tip_system_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tip_system_test PRIVATE cxx_std_17)
+add_test(NAME tip_system COMMAND tip_system_test)
+
 # The key-toggled overlay windows (hud/hud_overlay_windows.h): the block
 # wrapper, the briefing pages, and the briefing / help / map-legend elements.
 add_executable(hud_overlay_windows_test hud/hud_overlay_windows_test.cpp)

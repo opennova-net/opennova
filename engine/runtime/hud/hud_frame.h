@@ -108,6 +108,13 @@ enum HudTexture : int32_t {
 	//  def+0x1BC/0x1C0/0x1C4 by HUD_DrawWeaponSlotBar @0x599E5A..0x599E73].
 	kHudTexSlotBarBracket,
 	kHudTexSlotBarMoreAv,
+	// The tip panel ("MrClippy"): its box atlas border3.tga (no second stage)
+	// and the two icons, keyboard k_tip.tga and gameplay g_tip.tga
+	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3
+	//  @0x5b698c, k_tip @0x5b69ae, g_tip @0x5b69b6].
+	kHudTexTipBox,
+	kHudTexTipKeyboard,
+	kHudTexTipGameplay,
 	kHudTexSlotBarIcon0, // + weapon category 0..9
 	kHudTexSightsBase = kHudTexSlotBarIcon0 + 10, // authored SIGHTS rows: + row index
 };
@@ -373,6 +380,18 @@ struct HudLayout {
 	// @0x59FCB0 / @0x59FCC8].
 	int paused_x = 0;
 	int paused_y = 0;
+	// MRCLIPPYNORMAL / MRCLIPPYALTERNATE: the tip panel's x, y and its two
+	// pads (the width and the height added past the measured text), BSS zero
+	// unauthored [orig: HUD_ParseHudposToken @0x59fa15..0x59fae0 ->
+	// g_TipSystem +0x40..+0x4C / +0x50..+0x5C (dword_28E1B10..28E1B2C)].
+	std::array<int, 4> tip_normal{};
+	std::array<int, 4> tip_alternate{};
+	// The tip panel's atlas (border3.tga, its piece size a quarter of its own
+	// width) and the two icons.
+	bool tip_box_texture_valid = false;
+	int tip_box_tex_w = 0;
+	bool tip_keyboard_texture_valid = false;
+	bool tip_gameplay_texture_valid = false;
 	// The six stance frames' authored per-frame offsets + frame-0 dims.
 	std::array<int, 6> stance_offset_x{};
 	std::array<int, 6> stance_offset_y{};
@@ -909,6 +928,18 @@ struct HudFrameState {
 	// HUD_DrawPausedText @0x59d650 (ex sub_59D650)].
 	bool paused = false;
 	std::string paused_text;
+	// THE TIP ("MrClippy", tip_system.h): the showing tip and its countdown,
+	// the Tips header and the expanded body the embedder resolved, and the
+	// local player's dead bit. The scene frame draws it after the HUD pass:
+	// at MRCLIPPYNORMAL with the M-cycle map closed, else at MRCLIPPYALTERNATE
+	// right after the big map, and not at all on the frame a dead player's
+	// map mode is cleared [orig: Render_ProcessMainSceneFrame
+	// @0x5cac50..0x5cad28 -> CTipSystem_Draw @0x5b6d60].
+	int32_t tip = 0;
+	int32_t tip_countdown = 0;
+	std::string tip_header;
+	std::string tip_body;
+	bool local_dead = false;
 	// THE END-OF-ROUND OVERLAY (net-re §5.68): the resolved Impact38 text
 	// ladder the presenter built from hud/end_round_overlay.h, drawn inside
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
@@ -1212,7 +1243,11 @@ private:
 	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
 			uint32_t color, float title_gap_w);
 	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
-			int row, bool crop_bottom, uint32_t color);
+			int row, bool crop_bottom, uint32_t color, int32_t texture = kHudTexBoxBorder);
+	// The eight border pieces of a box style over its atlas `texture`, each
+	// piece cw x ch output pixels (title_gap_w as in emit_stdbox).
+	void emit_box_pieces(float x0, float y0, float x1, float y1, float cw, float ch,
+			uint32_t color, float title_gap_w, int32_t texture);
 	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	// The three-quad progress bar in surface pixels: the border rect, the
@@ -1277,6 +1312,8 @@ private:
 	void element_voice_macro_menu(const HudFrameState &state, const HudVoiceMacroMenuState &menu,
 			int context_row, float w, float h);
 	void element_paused_text(const HudFrameState &state, float w, float h);
+	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
+	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
 	void compile_overlay_panel_menus(const HudFrameState &state, float w, float h);
 	void element_briefing(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);

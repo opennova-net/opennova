@@ -69,6 +69,17 @@ inline constexpr uint16_t kMouseWheelDown = 0x800;
 struct BindingRecord;
 std::string format_display_string(const BindingRecord &rec, bool flagged = false);
 
+class BindingSet;
+// The in-game display string of the binding NAMED by a config token, the
+// tip text's "$name$" expansion: the first record whose token matches
+// case-insensitively, formatted as above with its own flag word's 0x200
+// star; "???" when no record carries the token.
+// [orig: KeyBinding_GetDisplayStringByActionName @0x5b6a00 — the stricmp walk
+//  over the 768 records @0x5b6a10..0x5b6a2a, the "???" miss @0x5b6a2e, the
+//  KeyBinding_FormatDisplayString call @0x5b6a46 (its star reads the
+//  record's own +4 flags, `test [esi+4], 200h` @0x49715f)]
+std::string display_string_for_token(const BindingSet &set, const std::string &token);
+
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
   uint16_t secondary = 0;      // slot-2 VK scan

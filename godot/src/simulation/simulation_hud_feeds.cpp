@@ -90,6 +90,16 @@ int64_t Simulation::get_session_game_type() const {
 	return runtime_ ? static_cast<int64_t>(runtime_->game_type()) : 0;
 }
 
+PackedByteArray Simulation::take_tip_events() {
+	PackedByteArray out;
+	if (kernel_ == nullptr) return out;
+	std::vector<uint8_t> &events = kernel_->world.out.tip_events;
+	out.resize(static_cast<int64_t>(events.size()));
+	for (size_t i = 0; i < events.size(); ++i) out.set(static_cast<int64_t>(i), events[i]);
+	events.clear();
+	return out;
+}
+
 Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	// Revision-edge over the replica fold's 0x81 landing: every role's view
 	// folds it (the host's own loopback included), so the edge is

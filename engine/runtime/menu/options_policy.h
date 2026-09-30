@@ -85,18 +85,23 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // The authored Options controls the reimpl does not service yet. Retail
 // serves every one of them (UPDATE -> UI_LaunchUpdateProcess @0x55b0b0; the
 // WDM channel/rate radios -> the Audio_ShutdownAll / Audio_InitSubsystems
-// re-init, the joystick fields, the Mr-Clippy pair, PunkBuster and the
-// auto-reload / auto-medic profile bytes all read by the dialog's Accept
+// re-init, the joystick fields, PunkBuster and the auto-reload /
+// auto-medic profile bytes all read by the dialog's Accept
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40]). The shell shows
 // them read-only until each device leg lands — a tracked stand-in
 // (D-MNU-21), never an invention. The JOYSTICK device radio is NOT here:
 // it is served (the table shows the seeded joystick defaults, D-CTRL-1).
+// Nor is the tip pair MR_CLIPPY_KEYBOARD / MR_CLIPPY_HINTS: served, seeded
+// from and written back to the two tip words [orig: UI_OptionsScreenInit
+// @0x554d79..0x554dc0 / UI_PopulateRenderAndAudioSettings @0x55d48f..0x55d4d6
+// (seed), UI_IngameOptionsDialogEventHandler @0x5552c8..0x555301 / sub_55A710
+// @0x55aca7..0x55ace0 (write back); hud/tip_system.h TipOptions].
 inline constexpr const char *kOptionsUnsupportedControls[] = {
     "DIFFICULTY", "UPDATE",
     "WDM_AUDIO_2", "WDM_AUDIO_4", "WDM_AUDIO_6", "WDM_AUDIO_7",
     "WDM_AUDIO_8", "WDM_RATE",
     "ENABLE_JOYSTICK", "INVERT_JOYSTICK", "ENABLE_FORCE_FEEDBACK",
-    "MR_CLIPPY_KEYBOARD", "MR_CLIPPY_HINTS", "CLIENT_PUNKBUSTER",
+    "CLIENT_PUNKBUSTER",
     "OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC",
 };
 

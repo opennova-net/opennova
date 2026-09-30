@@ -480,6 +480,9 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_inset_cues(state, surface_w, surface_h);
 	if (state.hud_detail_level >= 3) {
 		element_spinmap(state, surface_w, surface_h);
+		// The tip rides the scene frame, not the overlay pass: the blank level
+		// keeps it (the alternate slot draws in the top layer, after the map).
+		if (state.minimap.map_mode == 0) element_tip(state, false, surface_w, surface_h);
 		// The frame drawer's panels run outside the level-3 skip: the chat
 		// input line precedes the kill banner [orig: HUD_DrawOverlayPanels
 		// @0x5c014e then HUD_DrawKillAnnounceBanner @0x5c0184]. The voice-macro
@@ -491,6 +494,12 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		return draw_list_;
 	}
 	compile_overlay_pass(state, surface_w, surface_h);
+	// The tip at MRCLIPPYNORMAL follows the HUD pass while the M-cycle map is
+	// closed, ahead of the gameplay overlays and the overlay panels
+	// [orig: Render_ProcessMainSceneFrame @0x5cac50 (map mode 0) -> @0x5cad21
+	//  CTipSystem_Draw(0)]; the alternate slot rides the top layer
+	// (compile_gameplay_overlay_windows).
+	if (state.minimap.map_mode == 0) element_tip(state, false, surface_w, surface_h);
 	// The Recent Messages window draws from the frame drawer, not the overlay
 	// pass: after every HUD element and BEFORE the Tab board
 	// [orig: Server_DrawStatusScreen @0x50a2d0 — HUD_DrawMessageLog @0x50b21f,
@@ -619,6 +628,13 @@ void HudFrameCompiler::compile_overlay_panel_menus(const HudFrameState &state, f
 void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &state, float w,
 		float h) {
 	mark_top_layer();
+	// With the M-cycle map up the tip draws at MRCLIPPYALTERNATE right after
+	// the big map; a dead local player's map mode is cleared instead and that
+	// frame draws no tip [orig: Render_ProcessMainSceneFrame @0x5cac5d..0x5cac77
+	// (Flags & 2 -> g_MapOverlayMode = 0), @0x5cad15 HUD_BuildMapOverlayView
+	// then @0x5cad1d CTipSystem_Draw(1)]. /NOHUD does not reach it (the
+	// gameplay-overlay gate below is HUD_DrawGameplayOverlays').
+	if (state.minimap.map_mode != 0 && !state.local_dead) element_tip(state, true, w, h);
 	if (state.overlay_master == 0u) return;
 	element_briefing(state, w, h);
 	element_objectives(state, w, h);
@@ -2017,19 +2033,20 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 // flt_7C459C = 0.9; the bottom trio passes the flag @0x56bbc0/@0x56bc22/
 // @0x56bc80].
 void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
-		int col, int row, bool crop_bottom, uint32_t color) {
+		int col, int row, bool crop_bottom, uint32_t color, int32_t texture) {
 	if (x1 <= x0 || y1 <= y0) return;
 	constexpr float kCell = 1.0f / 4.0f;
 	const float u0 = static_cast<float>(col) * kCell;
 	const float v0 = static_cast<float>(row) * kCell;
 	const float vh = crop_bottom ? kCell * kBoxBottomCrop : kCell;
 	const float dh = crop_bottom ? (y1 - y0) * kBoxBottomCrop : (y1 - y0);
-	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color,
-			kHudTexBoxBorder);
+	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color, texture);
 	// The combined material's second stage: the boxtile camo at its own
 	// dims, screen-anchored [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 with the
-	// style's boxtile w/h @0x56b97a..0x56bcbb].
-	if (layout_.box_tile_w > 0 && layout_.box_tile_h > 0) {
+	// style's boxtile w/h @0x56b97a..0x56bcbb]. Only the stdbox style was
+	// registered with a secondary texture; a style without one binds the
+	// border alone [orig: BoxTexture_LoadAndSetupUVRegions @0x56af4e..0x56af51].
+	if (texture == kHudTexBoxBorder && layout_.box_tile_w > 0 && layout_.box_tile_h > 0) {
 		HudQuad &piece = draw_list_.quads.back();
 		piece.texture2 = kHudTexBoxTile;
 		piece.stage2_w = static_cast<float>(layout_.box_tile_w);
@@ -2086,6 +2103,14 @@ void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
 	}
 
 	// 2. The border pieces, over the fill.
+	emit_box_pieces(x0, y0, x1, y1, cw, ch, color, title_gap_w, kHudTexBoxBorder);
+}
+
+// The eight border pieces (and the titled top row) of any registered box
+// style over its own atlas: the same piece pass for every style
+// [orig: Render_HUDBoxOverlay @0x56b700, the piece calls @0x56b937..0x56bcbb].
+void HudFrameCompiler::emit_box_pieces(float x0, float y0, float x1, float y1, float cw,
+		float ch, uint32_t color, float title_gap_w, int32_t texture) {
 	const float ix1 = x0 + cw;   // inner x after the left column
 	const float ix2 = x1 - cw;   // inner x before the right column
 	const float iy1 = y0 + ch;
@@ -2098,24 +2123,24 @@ void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
 		// x0+cw+gap, cap (2,3) width cw; the shared edge pick-up @0x56ba57].
 		const float bar_x2 = x0 + cw + title_gap_w;
 		const float cap_x2 = bar_x2 + cw;
-		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 3, false, color);
-		emit_stdbox_piece(x0 + cw, y0, bar_x2, y0 + ch, 1, 3, false, color);
-		emit_stdbox_piece(bar_x2, y0, cap_x2, y0 + ch, 2, 3, false, color);
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 3, false, color, texture);
+		emit_stdbox_piece(x0 + cw, y0, bar_x2, y0 + ch, 1, 3, false, color, texture);
+		emit_stdbox_piece(bar_x2, y0, cap_x2, y0 + ch, 2, 3, false, color, texture);
 		if (ix2 > cap_x2)
-			emit_stdbox_piece(cap_x2, y0, ix2, y0 + ch, 1, 0, false, color);
+			emit_stdbox_piece(cap_x2, y0, ix2, y0 + ch, 1, 0, false, color, texture);
 	} else {
-		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color);   // TL
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color, texture);   // TL
 		if (ix2 > ix1)
-			emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color);  // top
+			emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color, texture);  // top
 	}
-	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color);       // TR
-	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color);        // BL
-	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color);            // BR
+	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color, texture);       // TR
+	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color, texture);        // BL
+	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color, texture);            // BR
 	if (ix2 > ix1)
-		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color);       // bottom
+		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color, texture);       // bottom
 	if (iy2 > iy1) {
-		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color);  // left
-		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color);      // right
+		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color, texture);  // left
+		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color, texture);      // right
 	}
 }
 

@@ -269,6 +269,10 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             const replication::ClientRosterSlot *roster = slot_for_pool0(state(), emote->player_index);
             if (roster != nullptr && (roster->radio_mute_flags & 1u) != 0) continue;
             set_tracked_entity_target(view_.state(), world, speaker);
+        } else if (const auto *tip = std::get_if<replication::TipEventCommand>(&request)) {
+            // The receive legs' tip events join the world's in arrival order
+            // (replication::TipEventCommand carries the witness).
+            world.out.tip_events.push_back(tip->event);
         } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
             // A local-channel line: the sender slot's person becomes the
             // tracked target (the fold already ran the dispatcher's slot

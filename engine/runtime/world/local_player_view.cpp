@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <utility>
+#include <vector>
 
 #include <formats/def/def.h>        // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <formats/mission/bms.h>    // bms::AttribFlags::StartWithNVGOn
@@ -27,6 +28,8 @@
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
+#include <runtime/hud/tip_system.h>
 
 using namespace opennova::def;
 
@@ -364,6 +367,31 @@ bool local_player_scope_view_visible(World &world, LocalPlayerWeapon &w,
     return player != nullptr && slot != nullptr && scope_view_visible(world, w, v, *player, *slot);
 }
 
+namespace {
+
+// The toggle's tip events, by the equipped weapon's flags and name: a Scoped
+// ShowElevation sight the elevation / binocular hint, a UseDesignator weapon
+// the mortar hint, the designator itself the designator hint; each fades
+// again on the way down [orig: Player_ToggleWeaponScope — up: 11 @0x4df39c,
+// 13 @0x4df3b5, 15 @0x4df3d7 (stricmp "WPN_DESIGNATOR" @0x4df3cb); down: 12
+// @0x4df241, 14 @0x4df25a, 16 @0x4df27b].
+void raise_scope_tips(World &world, const LocalPlayerWeapon &w, bool engaged) {
+    const uint32_t flags = w.def.flags;
+    constexpr uint32_t kElevationSight = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    std::vector<uint8_t> &out = world.out.tip_events;
+    if ((flags & kElevationSight) == kElevationSight)
+        out.push_back(static_cast<uint8_t>(engaged ? hud::kTipEventScopeElevationOn
+                                                   : hud::kTipEventScopeElevationOff));
+    if ((flags & DEF_WEAPON_FLAG_USEDESIGNATOR) != 0)
+        out.push_back(static_cast<uint8_t>(engaged ? hud::kTipEventDesignatorWeaponOn
+                                                   : hud::kTipEventDesignatorWeaponOff));
+    if (strutil::iequals(w.def_name, "WPN_DESIGNATOR"))
+        out.push_back(static_cast<uint8_t>(engaged ? hud::kTipEventDesignatorOn
+                                                   : hud::kTipEventDesignatorOff));
+}
+
+} // namespace
+
 bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                             WeaponSlotState &slot, bool engaged) {
     if (!player_view_scope_request_pending(v, engaged)) return true;
@@ -374,6 +402,7 @@ bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerView
     if ((w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0)
         target = engaged && v.camera_mode == 0
             ? sighted_fov_target(local_player_scope_zoom(w, slot)) : 80 << 16;
+    raise_scope_tips(world, w, engaged);
     return true;
 }
 
@@ -470,7 +499,11 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
             (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
             w.nvg_scope_restore = scope_toggle();
         }
-        return player_view_toggle_nvg(v);
+        const bool on = player_view_toggle_nvg(v);
+        // The NVG tip, once [orig: case 41's on branch — CTipSystem_HandleEvent(7)
+        // @0x4e06ec, after the scope drop and the sound].
+        world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOn));
+        return on;
     }
     // Clear NVG before the normal scope-up request so the Inset refusal no
     // longer applies, then consume the one-shot restore latch.
@@ -478,6 +511,9 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     const bool restore_scope = w.nvg_scope_restore;
     w.nvg_scope_restore = false;
     if (restore_scope && !v.scope_engaged) scope_toggle();
+    // The off branch fades it [orig: CTipSystem_HandleEvent(8) @0x4e06a7, after
+    // the scope restore and the sound].
+    world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOff));
     return false;
 }
 
@@ -551,6 +587,20 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     player_view_resolve_mode(v);
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
+    // The binocular tip on the raw toggle's edges: a toggle that went up with
+    // the view up raises the range tip, any other change fades
+    // [orig: Player_UpdatePerFrame @0x4de3e9..0x4de41a — `cmp edx,
+    //  dword_B79438`, 9 when both the toggle (al) and the view byte (cl) are
+    //  set @0x4de3f4..0x4de3fc, else 10 @0x4de400; the store @0x4de41a].
+    if (!t.binocular_tip_seeded) {
+        t.binocular_tip_seeded = true;
+        t.binocular_tip_prev = v.binoculars_requested;
+    }
+    if (v.binoculars_requested != t.binocular_tip_prev)
+        world->out.tip_events.push_back(static_cast<uint8_t>(
+                v.binoculars_requested && v.binoculars_view_active ? hud::kTipEventBinocularsOn
+                                                                   : hud::kTipEventBinocularsOff));
+    t.binocular_tip_prev = v.binoculars_requested;
     // The per-tick movement delta the FP motion lead samples per render frame
     // (retail: the (position - entity+0x80 prev-position) << 8 samples
     // @0x437bb2/0x437b92/0x437ba2 -- player_view.h carries the witness).

@@ -1757,6 +1757,12 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			state_.death_screen_submode = 0;  // [orig: @0x42ffa6]
 			state_.spectate_target = 0xFFFF;  // [orig: @0x42ffac]
 			state_.enemy_tags_visible = true;
+			// The spectator tip, unless the round is over [orig:
+			// `cmp g_SpawnSuccessGate` @0x42ffd0 -> CTipSystem_HandleEvent(22)
+			// @0x42ffdf; the spectate-mode toast stamp dword_24C18F0 = 186
+			// @0x42ffe4 rides the unported toast, docs/interface/hud-re.md].
+			if (!state_.spawn_success_gate)
+				pending_effect_commands_.push_back(TipEventCommand{22});
 		} else if (!bit && state_.death_screen_active) {
 			state_.death_screen_active = false;
 			state_.enemy_tags_visible = false;

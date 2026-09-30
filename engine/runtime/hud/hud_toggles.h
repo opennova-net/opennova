@@ -21,7 +21,9 @@
 #include <runtime/hud/feed_format.h>
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/hud/tip_system.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::hud {
@@ -75,6 +77,10 @@ struct HudToggleState {
 	//  Game_ProcessMainFrame's tick gate @0x5265a0; HUD_DrawOverlayPanels
 	//  @0x5c0120]
 	bool paused = false;
+	// The tip ("MrClippy"), a process global like the rest of this state: the
+	// escape chain's last leg fades it, the mission start clears the showing
+	// tip and keeps the once-counters (tip_system.h carries the witness).
+	TipSystem tips;
 
 	HudKeyEdge huddetail, hudcolor, showhud, dotsize, goals;
 	HudKeyEdge view1st, viewwithgun, viewchase;
@@ -228,9 +234,9 @@ void hud_toggles_death_screen(HudToggleState &state);
 // The escape action's HUD-window close chain: out of a session the key is
 // dead while the spawn gate holds (the special-key handler owns it there);
 // the pause word clears first; then the first open window in the witnessed
-// order closes and consumes the key; with none open the respawn init runs and
-// the embedder opens the in-game menu. Closing the map legend runs the
-// respawn init too (its close keeps nothing else).
+// order closes and consumes the key; a showing tip starts its fade; with none
+// open the respawn init runs and the embedder opens the in-game menu. Closing
+// the map legend runs the respawn init too (its close keeps nothing else).
 // Legs with nothing to close in the port (docs/interface/hud-re.md D-HUD-31):
 // g_EpilogScreenActive, cleared beside the pause word, is only ever raised
 // while the SP spawn gate holds (the SP round end sets the gate before the
@@ -239,7 +245,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 // chain's own tail on a server-status view (is_in_session && is_authority &&
 // dword_24C1914), which the port does not have; dword_24C18D0 and
 // dword_B76494 have no reachable setter; the cine editor dword_24C18B8 opens
-// only from its own dialog; the tip is the unported CTipSystem.
+// only from its own dialog.
 // [orig: Input_HandleActionBinding case 18 @0x49b234: the SP spawn-gate
 //  return @0x49b243; the pause/epilog clear @0x49b24f..0x49b261 ->
 //  @0x49b3cd..0x49b3d3; the order D4 @0x49b267, D8 @0x49b27a, 1880
@@ -252,6 +258,18 @@ struct HudEscapeInput {
 	bool spawn_gate = false; // [orig: g_SpawnSuccessGate]
 };
 uint32_t hud_toggles_escape(HudToggleState &state, const HudEscapeInput &input);
+
+// The tip producers' events, in the order they were raised
+// [orig: CTipSystem_HandleEvent @0x5b6ad0 per call site].
+void hud_toggles_tip_events(HudToggleState &state, const uint8_t *events, size_t count);
+// `frames` main frames of the tip countdown [orig: CTipSystem_TickCountdown
+// @0x5b69f0, called once per Game_ProcessMainFrame @0x52675d whether or not
+// the SP pause holds (the pause gate @0x526779 comes after it)].
+void hud_toggles_tip_frames(HudToggleState &state, int frames);
+// The SP restart's reset: the once-counters clear too [orig:
+// Game_RestartRoundSP @0x5263db -> Game_StartMission(1) -> CTipSystem_Reset
+// @0x525df2 with the flag].
+void hud_toggles_restart_round(HudToggleState &state);
 
 // The verbose toggle's toast key [orig: STRMISC_VERBOSE_ON / _OFF @0x49b78f].
 const char *verbose_toast_key(bool verbose);

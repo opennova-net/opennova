@@ -8,6 +8,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <runtime/hud/hud_toggles.h>
@@ -115,6 +116,16 @@ public:
 	// in-game menu sets it on open and clears it on resume out of a session.
 	bool is_paused() const;
 	void set_paused(bool p_paused);
+	// The tip (engine hud/tip_system.h): the drained producer events, the
+	// HUD clock's main frames of countdown, the SP restart's full reset, the
+	// two options and the showing tip for the draw.
+	void apply_tip_events(const PackedByteArray &p_events);
+	void advance_tip_frames(int p_frames);
+	void restart_round();
+	void set_tip_options(bool p_keyboard_tips, bool p_gameplay_tips);
+	int get_tip() const;
+	int get_tip_countdown() const;
+	bool is_tip_showing() const;
 
 	const opennova::hud::HudToggleState &state() const { return state_; }
 

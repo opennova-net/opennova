@@ -129,6 +129,13 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// PAUSEDPOS x, y [orig: @0x59FCB0 / @0x59FCC8 -> dword_272360C / 10].
 	out.paused_x = hud.paused_pos[0];
 	out.paused_y = hud.paused_pos[1];
+	// MRCLIPPYNORMAL / MRCLIPPYALTERNATE x, y, width pad, height pad
+	// [orig: HUD_ParseHudposToken @0x59fa15..0x59fa76 -> g_TipSystem +0x40..+0x4C,
+	//  @0x59fa7f..0x59fae0 -> +0x50..+0x5C].
+	for (size_t i = 0; i < 4; ++i) {
+		out.tip_normal[i] = hud.mrclippy_normal[i];
+		out.tip_alternate[i] = hud.mrclippy_alternate[i];
+	}
 
 	// The targeting and instrument anchors (hud_combat.h): the sprites' pixel
 	// sizes are the device's once it resolves the names below.

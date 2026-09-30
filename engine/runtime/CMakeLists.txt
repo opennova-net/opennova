@@ -101,6 +101,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_scoreboard.cpp # its compile element

@@ -721,6 +721,13 @@ struct WorldOutbox {
 	// Water-surface crossings recorded this tick; the host fan drains them
 	// into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
 	WaterCrossQueue water_crossings;
+	// The local player's tip events (hud/tip_system.h TipEvent) in the order
+	// they were raised — boarding and leaving a seat, the scope and NVG
+	// toggles, the binocular edge, and a client's spectator begin (the
+	// replica's S2C 0x0A / 0x4D legs land through the client effects). The
+	// HUD owner drains them into its tip [orig: the CTipSystem_HandleEvent
+	// call sites; docs/interface/hud-re.md "The tip"].
+	std::vector<uint8_t> tip_events;
     // The destruction presentation events (world/destruction.h) the host drains.
     DestructionEvents destruction;
 	std::vector<VehicleEffectEvent> vehicle_effects; // fixed-tick movement particles

@@ -201,6 +201,30 @@ func test_voice_macro_menus_pause_and_escape() -> void:
 	assert_true(shell.is_gameplay_input_active(), "closing a menu does not open the in-game menu")
 
 
+# N raises the NVG tip (event 7, once); Esc fades a showing tip before it
+# opens the in-game menu [orig: case 41 CTipSystem_HandleEvent(7) @0x4e06ec;
+# the escape chain's tip leg @0x49b34d].
+func test_escape_fades_the_nvg_tip() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	var toggles: HudToggles = hud.toggles()
+	hud.set_tip_options(true, true)
+	await _tap(KEY_N)
+	await get_tree().process_frame
+	assert_eq(toggles.get_tip(), 7, "NVG on shows the KB_NVG tip")
+	assert_true(toggles.is_tip_showing(), "a fresh tip is showing")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_tip_showing(), "Esc starts the tip's fade")
+	assert_lte(toggles.get_tip_countdown(), 64, "the fade clamps the countdown")
+	assert_true(shell.is_gameplay_input_active(), "the fade consumed the key")
+	await _tap(KEY_N)
+	await _tap(KEY_N)
+	await get_tree().process_frame
+	assert_false(toggles.is_tip_showing(), "the NVG tip shows once per process")
+
+
 func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> void:
 	var shell := await _booted_in_world()
 	if shell == null:

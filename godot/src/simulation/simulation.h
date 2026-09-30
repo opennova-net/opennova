@@ -1238,6 +1238,8 @@ public:
 	// 2D interface sound behind the enable_slotmachine setting
 	// (engine: runtime/replication/client_state.h).
 	Ref<ScoreFeedback> take_score_feedback();
+	// Drain the world's tip events (hud/tip_system.h TipEvent), in raise order.
+	PackedByteArray take_tip_events();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
 	// bytes are exposed only in COMPLETE; the explicit state distinguishes a

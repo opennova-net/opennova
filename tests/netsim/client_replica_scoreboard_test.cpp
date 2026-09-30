@@ -715,8 +715,30 @@ void test_spawn_slot_notice_fold() {
 	}
 	st.pending_visible_refreshes.clear();
 	n.slot = 1;
+	view.drain_effect_commands();
 	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
 	CHECK(st.pending_visible_refreshes.empty());
+	// The own slot raises the spectator tip (event 22) only on the death
+	// screen and before the round is over [orig: @0x431845..0x43185e].
+	const auto tips = [&view]() {
+		int count = 0;
+		for (const ClientEffectCommand &c : view.drain_effect_commands())
+			if (const auto *tip = std::get_if<TipEventCommand>(&c))
+				count += tip->event == 22 ? 1 : 0;
+		return count;
+	};
+	CHECK(tips() == 0);
+	st.death_screen_active = true;
+	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
+	CHECK(tips() == 1);
+	st.spawn_success_gate = true;
+	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
+	CHECK(tips() == 0);
+	// Another slot's notice never does.
+	st.spawn_success_gate = false;
+	n.slot = 3;
+	view.apply(s2c::SPAWN_SLOT_NOTICE, encode_spawn_slot_notice(n));
+	CHECK(tips() == 0);
 }
 
 // S2C 0x50 for a player entity queues the team refresh {handle & 0xFF, 4} +

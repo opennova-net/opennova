@@ -1,5 +1,6 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/key_strings.h>
+#include <base/io/strutil.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -431,6 +432,18 @@ bool BindingSet::set_record(int index, const BindingRecord &rec) {
   }
   records_[static_cast<std::size_t>(index)] = rec;
   return true;
+}
+
+std::string display_string_for_token(const BindingSet &set, const std::string &token) {
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (cat[i].token == nullptr || !strutil::iequals(cat[i].token, token)) continue;
+    const BindingRecord *rec = set.record(static_cast<int>(i));
+    if (rec == nullptr) break;
+    return format_display_string(*rec, (cat[i].flags & 0x200u) != 0u);
+  }
+  return "???";
 }
 
 int BindingSet::index_of_token(const std::string &token) const {

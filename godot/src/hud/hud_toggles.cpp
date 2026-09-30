@@ -70,6 +70,21 @@ bool HudToggles::is_emotes_menu_open() const { return state_.emotes_menu_open; }
 bool HudToggles::is_radio_menu_open() const { return state_.radio_menu_open; }
 bool HudToggles::is_paused() const { return state_.paused; }
 void HudToggles::set_paused(bool p_paused) { state_.paused = p_paused; }
+void HudToggles::apply_tip_events(const PackedByteArray &p_events) {
+	opennova::hud::hud_toggles_tip_events(state_, p_events.ptr(),
+			static_cast<size_t>(p_events.size()));
+}
+void HudToggles::advance_tip_frames(int p_frames) {
+	opennova::hud::hud_toggles_tip_frames(state_, p_frames);
+}
+void HudToggles::restart_round() { opennova::hud::hud_toggles_restart_round(state_); }
+void HudToggles::set_tip_options(bool p_keyboard_tips, bool p_gameplay_tips) {
+	state_.tips.options.keyboard_tips = p_keyboard_tips;
+	state_.tips.options.gameplay_tips = p_gameplay_tips;
+}
+int HudToggles::get_tip() const { return state_.tips.tip; }
+int HudToggles::get_tip_countdown() const { return state_.tips.countdown; }
+bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(state_.tips); }
 
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "rows_share_key", "chorded", "active",
@@ -106,6 +121,14 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);
 	ClassDB::bind_method(D_METHOD("is_paused"), &HudToggles::is_paused);
 	ClassDB::bind_method(D_METHOD("set_paused", "paused"), &HudToggles::set_paused);
+	ClassDB::bind_method(D_METHOD("apply_tip_events", "events"), &HudToggles::apply_tip_events);
+	ClassDB::bind_method(D_METHOD("advance_tip_frames", "frames"), &HudToggles::advance_tip_frames);
+	ClassDB::bind_method(D_METHOD("restart_round"), &HudToggles::restart_round);
+	ClassDB::bind_method(D_METHOD("set_tip_options", "keyboard_tips", "gameplay_tips"),
+			&HudToggles::set_tip_options);
+	ClassDB::bind_method(D_METHOD("get_tip"), &HudToggles::get_tip);
+	ClassDB::bind_method(D_METHOD("get_tip_countdown"), &HudToggles::get_tip_countdown);
+	ClassDB::bind_method(D_METHOD("is_tip_showing"), &HudToggles::is_tip_showing);
 	BIND_ENUM_CONSTANT(EVENT_HUD_DETAIL_CYCLED);
 	BIND_ENUM_CONSTANT(EVENT_HUD_COLOR_CYCLED);
 	BIND_ENUM_CONSTANT(EVENT_SHOWHUD_CYCLED);

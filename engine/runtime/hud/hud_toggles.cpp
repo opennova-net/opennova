@@ -218,10 +218,11 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.help_open = !s.help_open;
 		events |= kHelpToggled | respawn_init_keeping(s, &s.help_open, k.in_session);
 	}
-	// The F12 map legend. Its gate refuses only a dedicated host's status
-	// screen, and the HUD never runs on a dedicated host [orig: case 234
-	// @0x49af8c -- is_authority && dword_24C1914 skips; `xor dword_24C18B4, 1`
-	// @0x49afa2; the wrapper @0x49afae]
+	// The F12 map legend. Its gate refuses it while the authority's
+	// server-status view is up — a listen host's ToggleServer view, which the
+	// port does not have (docs/interface/hud-re.md D-HUD-31), so the gate never
+	// holds here [orig: case 234 @0x49af8c -- is_authority && dword_24C1914
+	// skips; `xor dword_24C18B4, 1` @0x49afa2; the wrapper @0x49afae]
 	if (s.helpmap.step(k.helpmap, k.active, k.chorded)) {
 		s.map_legend_open = !s.map_legend_open;
 		events |= kMapLegendToggled | respawn_init_keeping(s, &s.map_legend_open, k.in_session);
@@ -308,6 +309,12 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 		s.map_legend_open = false;
 		return kEscapeClosedWindow | respawn_init_keeping(s, &s.map_legend_open, in.in_session);
 	}
+	// A showing tip starts its fade [orig: @0x49b34d -- CTipSystem_IsShowing
+	// @0x49b352, CTipSystem_BeginFade @0x49b360].
+	if (tip_is_showing(s.tips)) {
+		tip_begin_fade(s.tips);
+		return kEscapeClosedWindow;
+	}
 	// None open: the init keeping the quit-dialog word (never set in the
 	// port), then the menu [orig: @0x49b36a; @0x49b3ab..0x49b3be]
 	return kEscapeOpenMenu | respawn_init(s, in.in_session);
@@ -333,6 +340,9 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	// A mission start zeroes the pause word [orig: Game_StartMission @0x525baa
 	// -> Game_ResetSessionHudState @0x434bd7].
 	s.paused = false;
+	// ... and the showing tip, keeping the once-counters [orig: Game_StartMission
+	// @0x525dec..0x525df2 -- CTipSystem_Reset(arg 0 on a mission start)].
+	tip_reset(s.tips, false);
 	s.playerlist.reset();
 	s.old_messages.reset();
 	s.show_score.reset();
@@ -341,6 +351,20 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	s.briefing.reset();
 	s.audio_emote.reset();
 	s.radio_macro.reset();
+}
+
+void hud_toggles_tip_events(HudToggleState &s, const uint8_t *events, size_t count) {
+	for (size_t i = 0; i < count; ++i) tip_handle_event(s.tips, events[i]);
+}
+
+void hud_toggles_tip_frames(HudToggleState &s, int frames) {
+	// Past the countdown every further frame is the floor's no-op.
+	for (int i = 0; i < frames && s.tips.countdown > 0; ++i) tip_tick_countdown(s.tips);
+}
+
+void hud_toggles_restart_round(HudToggleState &s) {
+	hud_toggles_reset_mission(s);
+	tip_reset(s.tips, true);
 }
 
 void hud_toggles_death_screen(HudToggleState &s) {

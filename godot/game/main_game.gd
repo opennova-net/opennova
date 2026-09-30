@@ -129,6 +129,7 @@ func _on_player_options_changed(state: PlayerOptions.State) -> void:
 		_hud_presenter.set_crosshair_color(state.crosshair_color)
 		_hud_presenter.set_crosshair_spread_enabled(state.crosshair_spread)
 		_hud_presenter.set_aspect_mode(state.aspect_mode)
+		_hud_presenter.set_tip_options(state.keyboard_tips, state.gameplay_tips)
 
 
 func _notification(what: int) -> void:

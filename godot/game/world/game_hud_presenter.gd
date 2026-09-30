@@ -66,6 +66,9 @@ var _nvg_scene_card_published := false
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
+# The HUD clock's tick the tip countdown last advanced to (-1 = not yet this
+# mission): each frame advances the countdown by the main frames since.
+var _tip_ticks_seen := -1
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
@@ -194,6 +197,7 @@ func teardown() -> void:
 	_hud_objective = ""
 	_endround_banner = ""
 	_toggles.reset_mission()
+	_tip_ticks_seen = -1
 	_chat.reset()
 	_scoreboard.reset()
 	_vehicle_panel.reset()
@@ -237,6 +241,12 @@ func _sync_second_scene_camera() -> void:
 
 ## The USER crosshair options; cache each even before the lazy HUD exists,
 ## then apply it immediately to an existing HUD.
+## The two tip options (PlayerOptions keyboard_tips / gameplay_tips): the
+## engine tip's show gates.
+func set_tip_options(keyboard_tips: bool, gameplay_tips: bool) -> void:
+	_toggles.set_tip_options(keyboard_tips, gameplay_tips)
+
+
 func set_aspect_mode(mode: int) -> void:
 	_aspect_mode = mode
 	if _game_hud != null:
@@ -513,6 +523,17 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# their rows in the role-facts read below; the pause word draws STROVER7).
 	_game_hud.set_overlay_panel_windows(_toggles.is_emotes_menu_open(),
 			_toggles.is_radio_menu_open(), _toggles.is_paused())
+	# The tip (engine hud/tip_system.h): the world's producer events in the
+	# order they were raised, then the countdown by the HUD clock's main
+	# frames since the last frame (paused or not), then the draw feed.
+	_toggles.apply_tip_events(sim.take_tip_events())
+	var tip_ticks := _hud_ticks()
+	if _tip_ticks_seen >= 0:
+		_toggles.advance_tip_frames(maxi(tip_ticks - _tip_ticks_seen, 0))
+	_tip_ticks_seen = tip_ticks
+	_game_hud.set_tip(_toggles.get_tip(), _toggles.get_tip_countdown(),
+			bool(sim.is_local_player_dead()), Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model())
 	# The HUDLS key labels by weapon category: the live binding of the row the
 	# start-up re-lay puts at record 200 + category (engine controls
 	# action_for_code carries the witness).

@@ -31,6 +31,7 @@
 
 namespace godot {
 
+class ControlsModel;
 class HudChatEntry;
 class HudDrawListStats;
 class RtxtStringFile;
@@ -202,6 +203,12 @@ public:
 	static PackedStringArray map_legend_keys();
 	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
 	void cycle_briefing_page(int p_direction, bool p_in_session);
+	// The tip panel (engine hud/tip_system.h): the showing tip, its
+	// countdown, the local player's dead bit (a dead player's M-cycle map
+	// frame draws no tip), with its Tips strings resolved from the gametext
+	// table and its "$token$" keys from the live bindings.
+	void set_tip(int p_tip, int p_countdown, bool p_local_dead,
+			const Ref<RtxtStringFile> &p_gametext, const Ref<ControlsModel> &p_controls);
 	void set_message_log_title(const String &p_title);
 	// The AAS zone status panel: shown, the session game type (the conquest
 	// arm is unmodelled and draws nothing), the viewer's team, the HUD frame
