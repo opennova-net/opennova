@@ -22,8 +22,8 @@ std::vector<std::string> one(const std::string &file) {
 
 // --- the loaders' own rules (ReferenceKindRow::file_names) ---------------------------------
 
-// A model's texture row (`material_type` >= 0): the one file the loader the dispatcher picks for
-// the row's type opens (renderer::material_texture_source; the shell's
+// A model's texture row (`loader_arg` >= 0, the row's type): the one file the loader the
+// dispatcher picks for the row's type opens (renderer::material_texture_source; the shell's
 // TextureFiles::load_material_texture reads the same file), none when that loader opens none;
 // a loose file is never preferred, the project's files being an archive's as the game mounts
 // them. The row's type is the one the loader copies into the runtime row [orig:
@@ -31,20 +31,20 @@ std::vector<std::string> one(const std::string &file) {
 // graphic, a sky map, a def's graphic): the runtime's texture lookup, the name as written, then
 // its stem with each texture extension (texture_candidate_filenames, which
 // TextureFiles::load_texture probes).
-std::vector<std::string> texture_files(const std::string &name, int material_type, const Exists &exists) {
-	if (material_type < 0) return texture_candidate_filenames(name);
-	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(material_type));
+std::vector<std::string> texture_files(const std::string &name, int32_t loader_arg, const Exists &exists) {
+	if (loader_arg < 0) return texture_candidate_filenames(name);
+	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(loader_arg));
 	return one(renderer::material_texture_source(name, type, exists).file);
 }
 
 // The name's extension decides, and a .tga the files lack loads its .dds [orig: the dispatch
 // lives at the engine home, menu_assets.h, CTextureManager_LoadOrFindTexture @ 0x654980].
-std::vector<std::string> menu_texture_files(const std::string &name, int, const Exists &exists) {
+std::vector<std::string> menu_texture_files(const std::string &name, int32_t, const Exists &exists) {
 	return one(menu::menu_texture_source(name, exists).file);
 }
 
 // The .fnt from the name's first dot [orig: CFontCache_LoadOrGetFont @ 0x652f70].
-std::vector<std::string> font_files(const std::string &name, int, const Exists &) {
+std::vector<std::string> font_files(const std::string &name, int32_t, const Exists &) {
 	return one(menu::menu_font_file(name));
 }
 

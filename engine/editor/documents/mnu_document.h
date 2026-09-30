@@ -48,20 +48,20 @@ struct MenuScreen : Node {
 	std::string name() const override { return screen.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
 
-	// Where each identity sits: the root's index, then each list and index down to it.
-	// Built on first use, shared by a clone, and forgotten by every structural edit of the
-	// clone and by for_each_identity, which may give it new identities (a duplicated row);
-	// only a clone is ever changed, so a committed row's places never go stale.
+	// Where each identity sits: the root's index, then each list and index down to it. Made
+	// when the row is (for_each_identity, which gives a new or duplicated row its identities)
+	// and again by every structural edit of a clone (index_places), before it commits; shared
+	// by a clone, and never made inside a const query (the thread confinement, model/document.h).
 	struct Step {
 		size_t list = 0; // SIZE_MAX: the screen's roots
 		size_t index = 0;
 	};
 	using Places = std::unordered_map<NodeId, std::vector<Step>>;
 	const Places &places() const;
-	void forget_places() { places_.reset(); }
+	void index_places();
 
 private:
-	mutable std::shared_ptr<const Places> places_;
+	std::shared_ptr<const Places> places_;
 };
 
 // A NAME retail's by-name lookups find a record by (docs/mnu/menu-re.md, "Names and the
@@ -102,17 +102,17 @@ public:
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	void walk_records(const Node &row, const RecordVisitor &visit) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// Whether the record's window type reads the field (and an ACTION's verb, an extra
-	// element's tag), and what it references given the record's other fields.
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
 	// A screen or window no by-name lookup returns (lookup_names) is inert.
-	void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const override;
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they
 	// are, in document order, UTF-8 after a byte order mark (a window selected with a window
 	// that holds it comes with that one); "" when a record is not a window or the windows
 	// hold a value the format cannot carry back.
 	std::string copy(const std::vector<NodeAddress> &records) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<MnuDocument>(*this);
+	}
 
 	// The document as the runtime reads it, rebuilt from the rows.
 	mnu::Document native() const;
@@ -140,6 +140,9 @@ public:
 	std::vector<MenuLookupName> lookup_names() const;
 
 protected:
+	// Whether the record's window type reads the field (and an ACTION's verb, an extra
+	// element's tag), and what it references given the record's other fields.
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;

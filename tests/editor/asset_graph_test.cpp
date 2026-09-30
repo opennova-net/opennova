@@ -27,6 +27,7 @@
 
 #include <base/resource_index/texture_candidates.h>
 #include <editor/assets/asset_import.h>
+#include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_names.h>
@@ -61,10 +62,10 @@ const GraphEdge *edge_to(const AssetGraph &graph, const std::string &source, Ref
 }
 
 // A field as it applies to a record, and where its Go to leads (Document::reference_targets).
-FieldSchema field_on(const Document &document, const NodeAddress &record, const std::string &id) {
+FieldUse field_on(const Document &document, const NodeAddress &record, const std::string &id) {
 	for (const FieldSchema &schema : document.fields(record.kind))
 		if (schema.id == id) return document.field_on(record, schema);
-	return FieldSchema();
+	return FieldUse();
 }
 
 std::vector<ReferenceTarget> targets_of(const Document &document, const NodeAddress &record, const std::string &id,
@@ -222,20 +223,22 @@ static int test_menu_references() {
 	TEST_EXPECT(font && value);
 	edit_window(session, *document, exit, "font.name", std::string("%NOPE%"));
 	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Warning));
-	TEST_EXPECT(document->reference_status(*font, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
-	TEST_EXPECT(document->reference_status(*font, std::string("%DEF_FONTNAME_LG%"), view, nullptr) == ReferenceStatus::Present);
+	const FieldUse font_use = document->field_on(exit, *font);
+	TEST_EXPECT(document->reference_status(font_use, std::string("%NOPE%"), view, nullptr) == ReferenceStatus::Missing);
+	TEST_EXPECT(document->reference_status(font_use, std::string("%DEF_FONTNAME_LG%"), view, nullptr) ==
+	            ReferenceStatus::Present);
 	// The finding says what it misses (S11b): the reference's kind and name, as written.
 	const Diagnostic *nope = missing_of(view.diagnostics, "font.name", ReferenceKind::StyleVar);
 	TEST_EXPECT(nope && nope->target == "%NOPE%");
 	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
 	// define it), never a font file named %NOPE%; a variable that resolves makes none.
 	Diagnostic picked;
-	TEST_EXPECT(document->missing_finding(exit, *font, std::string("%NOPE%"), view, picked) &&
+	TEST_EXPECT(document->missing_finding(exit, font_use, std::string("%NOPE%"), view, picked) &&
 	            picked.reference == ReferenceKind::StyleVar && picked.target == "%NOPE%" && picked.field == "font.name");
 	const std::vector<ProblemFix> define = fixes_for(picked, view);
 	TEST_EXPECT(!define.empty() && define.front().request.kind == EditorRequestKind::OpenDocument &&
 	            define.front().request.path.find("menu_style.mns") != std::string::npos);
-	TEST_EXPECT(!document->missing_finding(exit, *font, std::string("%DEF_FONTNAME_LG%"), view, picked));
+	TEST_EXPECT(!document->missing_finding(exit, font_use, std::string("%DEF_FONTNAME_LG%"), view, picked));
 	// A name the game's expansion stops inside (a space) is no variable: a font file of
 	// that name (S12 B2).
 	edit_window(session, *document, exit, "font.name", std::string("%NO PE%"));
@@ -246,7 +249,7 @@ static int test_menu_references() {
 	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Error));
 	const Diagnostic *nofont = missing_of(view.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(nofont && nofont->target == "nofont.fnt" && nofont->scope.empty() && nofont->role.empty());
-	TEST_EXPECT(document->missing_finding(exit, *font, std::string("nofont.fnt"), view, picked) &&
+	TEST_EXPECT(document->missing_finding(exit, font_use, std::string("nofont.fnt"), view, picked) &&
 	            picked.reference == ReferenceKind::Font && picked.target == "nofont.fnt");
 	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one.
 	set_image(session, *document, exit, "missing.tga");
@@ -280,7 +283,7 @@ static int test_menu_references() {
 	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Warning));
 	// The font picker: the project's fonts, then the stylesheet's variables, each as the field
 	// would reference it.
-	const std::vector<ReferenceChoice> fonts = document->reference_choices(*font, view);
+	const std::vector<ReferenceChoice> fonts = document->reference_choices(font_use, view);
 	TEST_EXPECT(std::any_of(fonts.begin(), fonts.end(), [](const ReferenceChoice &c) { return c.kind == ReferenceKind::Font; }));
 	TEST_EXPECT(std::any_of(fonts.begin(), fonts.end(), [](const ReferenceChoice &c) {
 		return c.kind == ReferenceKind::StyleVar && c.name.front() == '%' && !c.file.empty() && !c.record.empty();
@@ -579,9 +582,9 @@ static int test_catalog_symbols() {
 	TEST_EXPECT(textid);
 	ReferenceKind kind;
 	std::string name, scope;
-	TEST_EXPECT(reference_target(*textid, std::string("WEP_X"), kind, name, scope) && kind == ReferenceKind::TextId &&
-	            scope == "GAMETEXT.BIN/WepDes");
-	TEST_EXPECT(!reference_target(*textid, std::string("NONE"), kind, name, scope));
+	TEST_EXPECT(reference_target(field_use(*textid), std::string("WEP_X"), kind, name, scope) &&
+	            kind == ReferenceKind::TextId && scope == "GAMETEXT.BIN/WepDes");
+	TEST_EXPECT(!reference_target(field_use(*textid), std::string("NONE"), kind, name, scope));
 	// A string table's ids carry their table and section: a def's game-text field
 	// resolves in its witnessed section, a menu's id in its window's table.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
@@ -1219,6 +1222,15 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(aways == 2 && found_aways == 1);
 	const GraphSymbol *board = symbol_at(graph, path, ReferenceKind::MenuWindow, "AWAY/BOARD");
 	TEST_EXPECT(board && board->inert && board->scope == "GRAPH.MNU/AWAY");
+	// What the menu's lookups make of a definition (Document::refine_symbol, S13 D2): the window
+	// on the shadowed screen inert and why, the screen they find as it is; a menu knows no line.
+	if (!home_screen || !board) return 1;
+	SymbolFacts shadowed, found;
+	menu->refine_symbol(board->address, shadowed);
+	menu->refine_symbol(home_screen->address, found);
+	TEST_EXPECT(shadowed.inert && shadowed.inert_reason == board->inert_reason &&
+	            shadowed.inert_reason.find("shadowed by a later screen") != std::string::npos);
+	TEST_EXPECT(!found.inert && found.inert_reason.empty() && found.value.empty() && found.line == 0 && home_screen->line == 0);
 	TEST_EXPECT(finding(view.diagnostics, "menu.duplicate_screen", "AWAY"));
 	// The windows: the first TITLE is found, the second a duplicate; HIDDEN_KID sits under a
 	// window with no NAME; a part is never a symbol.
@@ -1624,6 +1636,20 @@ static int test_symbol_locators() {
 	TEST_EXPECT(sheet_document && sheet_document->find("twice", by_name) && sheet_document->find("%TWICE%", by_variable) &&
 	            by_name == by_variable && sheet_document->get(by_name, "value", read) &&
 	            std::get<std::string>(read) == "2");
+	// What the stylesheet's lookup makes of each definition (Document::refine_symbol, S13 D2): the
+	// earlier TWICE inert and why, the last the value the game reads; each the line it is on,
+	// which the graph's symbol and its JSON carry.
+	const auto *styles = dynamic_cast<const MnsDocument *>(sheet_document);
+	TEST_EXPECT(styles && twice.size() == 2);
+	if (!styles || twice.size() != 2) return 1;
+	SymbolFacts earlier, last;
+	styles->refine_symbol(twice[0]->address, earlier);
+	styles->refine_symbol(twice[1]->address, last);
+	TEST_EXPECT(earlier.inert && earlier.inert_reason == twice[0]->inert_reason && !last.inert && last.value == "2");
+	TEST_EXPECT(last.line > 1 && last.line == size_t(styles->line_of(twice[1]->address.row)) && earlier.line + 1 == last.line &&
+	            twice[0]->line == earlier.line && twice[1]->line == last.line);
+	const opennova::io::JsonValue symbol_json = graph_symbol_to_json(*twice[1]);
+	TEST_EXPECT(symbol_json.get("line") && symbol_json.get("line")->number == double(last.line));
 	// Go to on MAIN's font, a style variable (S12 D3): the variable where the game reads it, a
 	// line of the stylesheet the editor opens at, its name shown; and the .fnt its value names,
 	// which the editor does not edit (Files shows it). A colour through a variable goes to the
@@ -1863,8 +1889,8 @@ static int test_model_texture_references() {
 		return edge ? view.graph->resolve(*edge, file) : ReferenceStatus::NotAReference;
 	};
 	textures({"wall.dds", "plain.dds", "bump.dds", "trim.dds"});
-	TEST_EXPECT(row_of("wall.tga") && row_of("wall.tga")->material_type == 0 && row_of("plain.tga")->material_type == 1 &&
-	            row_of("bump.tga")->material_type == 5 && row_of("trim.tga")->material_type == 3);
+	TEST_EXPECT(row_of("wall.tga") && row_of("wall.tga")->loader_arg == 0 && row_of("plain.tga")->loader_arg == 1 &&
+	            row_of("bump.tga")->loader_arg == 5 && row_of("trim.tga")->loader_arg == 3);
 	std::string file;
 	TEST_EXPECT(resolved("wall.tga", &file) == ReferenceStatus::Present && file == "textures/wall.dds");
 	TEST_EXPECT(resolved("plain.tga") == ReferenceStatus::Missing);
@@ -1875,16 +1901,18 @@ static int test_model_texture_references() {
 	// takes the stem's .dds too.
 	TEST_EXPECT(view.graph->resolve(ReferenceKind::Texture, "wall.tga", "", &file) == ReferenceStatus::Present &&
 	            file == "textures/wall.dds");
-	// Only the missing row is a finding, and it carries the row's type (in its JSON too).
+	// Only the missing row is a finding, and it carries the row's type as its loader's argument
+	// (in its JSON too).
 	const auto finding_for = [&](const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : view.diagnostics)
 			if (d.code == "reference.missing" && d.asset == model && d.target == target) return &d;
 		return nullptr;
 	};
 	const Diagnostic *plain = finding_for("plain.tga");
-	TEST_EXPECT(plain && plain->reference == ReferenceKind::Texture && plain->material_type == 1);
-	TEST_EXPECT(plain && diagnostic_to_json(*plain).get("material_type") &&
-	            diagnostic_to_json(*plain).get("material_type")->number == 1.0);
+	TEST_EXPECT(plain && plain->reference == ReferenceKind::Texture && plain->loader_arg == 1);
+	TEST_EXPECT(plain && diagnostic_to_json(*plain).get("loader_arg") &&
+	            diagnostic_to_json(*plain).get("loader_arg")->number == 1.0 &&
+	            !diagnostic_to_json(*plain).get("material_type"));
 	TEST_EXPECT(!finding_for("wall.tga") && !finding_for("bump.tga") && !finding_for("trim.tga"));
 	// With the .tga files alone, each row is its .tga.
 	textures({"wall.tga", "plain.tga", "bump.tga", "trim.tga"});
@@ -1916,21 +1944,21 @@ static int test_model_texture_references() {
 	const GraphEdge *wall = row_of("wall.tga");
 	TEST_EXPECT(document && wall);
 	if (!document || !wall) return 1;
-	FieldSchema name;
+	FieldUse name;
 	for (const FieldSchema &schema : document->fields(wall->address.kind))
 		if (schema.id == "name") name = document->field_on(wall->address, schema);
-	TEST_EXPECT(name.reference == ReferenceKind::Texture && name.material_type == 0);
+	TEST_EXPECT(name.reference == ReferenceKind::Texture && name.loader_arg == 0);
 	TEST_EXPECT(document->reference_status(name, std::string("wall.tga"), view, nullptr) == ReferenceStatus::Present);
 	TEST_EXPECT(document->reference_target_file(name, std::string("wall.tga"), view) == "textures/wall.dds");
 	const opennova::io::JsonValue json = graph_edge_to_json(*view.graph, *wall);
-	TEST_EXPECT(json.get("material_type") && json.get("material_type")->number == 0.0 &&
+	TEST_EXPECT(json.get("loader_arg") && json.get("loader_arg")->number == 0.0 && !json.get("material_type") &&
 	            json.get_string("status", "") == "present" && json.get_string("file", "") == "textures/wall.dds");
 	// A particle's texture, as the runtime's lookup reads it: its stem's .dds or its overlay
 	// twin serves it; an extension appended to the whole name does not.
 	textures({"puff.dds"});
 	const GraphEdge *puff = edge_to(*view.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->material_type == -1 && view.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
-	            file == "textures/puff.dds");
+	TEST_EXPECT(puff && puff->loader_arg == -1 && view.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
+	            file == "textures/puff.dds" && !graph_edge_to_json(*view.graph, *puff).get("loader_arg"));
 	textures({"puff_O.tga"});
 	puff = edge_to(*view.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && view.graph->resolve(*puff) == ReferenceStatus::Present);
@@ -1976,7 +2004,7 @@ static int test_rename_keeps_loader_spelling() {
 		std::string file;
 		TEST_EXPECT(edge->value == "stone.tga" && view.graph->resolve(*edge, &file) == ReferenceStatus::Present &&
 		            file == "textures/stone.dds");
-		const uint8_t type = opennova::renderer::material_texture_runtime_type(static_cast<uint8_t>(edge->material_type));
+		const uint8_t type = opennova::renderer::material_texture_runtime_type(static_cast<uint8_t>(edge->loader_arg));
 		TEST_EXPECT(opennova::renderer::material_texture_transform(type, edge->value, true) !=
 		            opennova::renderer::MaterialTextureTransform::Checkerboard);
 		TEST_EXPECT(opennova::renderer::material_texture_transform(type, "stone.dds", true) ==

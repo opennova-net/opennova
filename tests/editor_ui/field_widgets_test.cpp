@@ -1,7 +1,8 @@
 // S12 D4 (ADR 0046 S12): the Inspector's field controls (editor/ui/field_widgets) over a null
 // ImGui backend, drawn alone in a window. A ranged number clamps what is typed to its range as
 // it is typed and shows its unit after it; a group's fields draw on one row, a Channel group
-// after its swatch, each member its own control; an open list takes a typed token (a known one
+// after its swatch, each member its own control with the choices it is given (as they apply to
+// its record, not its schema's); an open list takes a typed token (a known one
 // as the table spells it) of the field's own type, within its range and no longer than it holds,
 // a closed one narrows to what is typed and takes the one left; and a field's tooltip and its
 // column's heading say what the schema says of it.
@@ -69,6 +70,13 @@ void press_enter(const std::function<void()> &draw) {
 	widget_frame(draw);
 }
 
+// Each member's own schema's choices, as group() takes them.
+std::vector<const std::vector<FieldChoice> *> schema_choices(const std::vector<FieldUse> &uses) {
+	std::vector<const std::vector<FieldChoice> *> out;
+	for (const FieldUse &use : uses) out.push_back(&use.schema->choices);
+	return out;
+}
+
 FieldSchema channel(const char *id, const char *label) {
 	FieldSchema field;
 	field.id = id;
@@ -91,7 +99,7 @@ void test_choices_of_one_name() {
 	field.type = FieldType::Integer;
 	field.choices = {{"5", 5, "Boat"}, {"6", 6, "Boat"}};
 	Value value = int64_t(0);
-	const auto draw = [&] { widgets::choice(field, value); };
+	const auto draw = [&] { widgets::choice(field, field.choices, value); };
 	widget_frame(draw, 2);
 	const ImGuiID list = ImHashStr("##Combo_00");
 	for (const int index : {1, 0}) {
@@ -152,13 +160,17 @@ void test_group_row() {
 	NullBackend backend;
 	std::vector<FieldSchema> fields = {channel("start.r", "Start red"), channel("start.g", "Start green"),
 	                                   channel("start.b", "Start blue")};
+	// Each as it applies to a record, its schema's own (FieldUse).
+	std::vector<FieldUse> uses;
+	for (const FieldSchema &field : fields) uses.push_back(field_use(field));
+	const std::vector<const std::vector<FieldChoice> *> choices = schema_choices(uses);
 	std::vector<Value> values = {int64_t(10), int64_t(20), int64_t(30)};
 	size_t changed = SIZE_MAX;
 	float top = 0.0f, bottom = 0.0f;
 	const auto draw = [&] {
 		top = ImGui::GetCursorScreenPos().y;
 		size_t at = SIZE_MAX;
-		if (widgets::group(fields, values, at).changed) changed = at;
+		if (widgets::group(uses, choices, values, at).changed) changed = at;
 		bottom = ImGui::GetCursorScreenPos().y;
 	};
 	widget_frame(draw, 2);
@@ -181,13 +193,48 @@ void test_group_row() {
 		position[i].unit = "m";
 		position[i].group = "Position";
 	}
+	std::vector<FieldUse> placed;
+	for (const FieldSchema &field : position) placed.push_back(field_use(field));
+	const std::vector<const std::vector<FieldChoice> *> placed_choices = schema_choices(placed);
 	std::vector<Value> at = {1.0, 2.0, 3.0};
 	const auto place = [&] {
 		size_t which = SIZE_MAX;
-		widgets::group(position, at, which);
+		widgets::group(placed, placed_choices, at, which);
 	};
 	widget_frame(place);
 	CHECK(count_of(logged_widgets(place), "m") == 1, "a unit the members share shows once");
+}
+
+// A member draws the choices it is given, as they apply to its record (Document::choices_on, a
+// record's own list; S13 D2's review), not its schema's: a member whose schema lists none shows
+// its value by the choice's name and takes a pick of another, its neighbour given none its number.
+void test_group_choices() {
+	NullBackend backend;
+	std::vector<FieldSchema> fields(2);
+	fields[0].id = "spawn.team";
+	fields[1].id = "spawn.count";
+	for (FieldSchema &field : fields) {
+		field.type = FieldType::Integer;
+		field.group = "Spawn";
+	}
+	std::vector<FieldUse> uses;
+	for (const FieldSchema &field : fields) uses.push_back(field_use(field));
+	const std::vector<FieldChoice> teams = {{"BLUE", 1, "Blue team"}, {"RED", 2, "Red team"}}, none;
+	const std::vector<const std::vector<FieldChoice> *> choices = {&teams, &none};
+	std::vector<Value> values = {int64_t(2), int64_t(7)};
+	size_t changed = SIZE_MAX;
+	const auto draw = [&] {
+		size_t at = SIZE_MAX;
+		if (widgets::group(uses, choices, values, at).changed) changed = at;
+	};
+	widget_frame(draw, 2);
+	CHECK(logged_widgets(draw).find("Red team") != std::string::npos, "a member shows its value by its own choice's name");
+	ImGui::ActivateItemByID(widget({"spawn.team", "##value"}));
+	widget_frame(draw, 2);
+	ImGui::ActivateItemByID(item_id(pushed(ImHashStr("##Combo_00"), 0), {"Blue team"}));
+	widget_frame(draw, 3);
+	CHECK(changed == 0 && std::get<int64_t>(values[0]) == 1 && std::get<int64_t>(values[1]) == 7,
+	      "a member takes a pick of its own choices, alone");
 }
 
 // An open list takes a typed token: one it lacks as typed, one it knows as the table spells
@@ -203,7 +250,7 @@ void test_open_choice() {
 	Value value = std::string("medic");
 	int picks = 0;
 	const auto draw = [&] {
-		if (widgets::choice(field, value).changed) ++picks;
+		if (widgets::choice(field, field.choices, value).changed) ++picks;
 	};
 	widget_frame(draw);
 	ImGui::ActivateItemByID(widget({"##value"}));
@@ -226,7 +273,7 @@ void test_open_choice() {
 	const char *names[] = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
 	for (int i = 0; i < 9; ++i) closed.choices.push_back({names[i], i + 1});
 	Value number = int64_t(1);
-	const auto list = [&] { widgets::choice(closed, number); };
+	const auto list = [&] { widgets::choice(closed, closed.choices, number); };
 	widget_frame(list);
 	ImGui::ActivateItemByID(widget({"##value"}));
 	widget_frame(list, 3);
@@ -248,7 +295,7 @@ void test_open_choice() {
 void test_typed_values() {
 	NullBackend backend;
 	auto typed = [](FieldSchema field, Value value, const char *text) {
-		const auto draw = [&] { widgets::choice(field, value); };
+		const auto draw = [&] { widgets::choice(field, field.choices, value); };
 		widget_frame(draw);
 		ImGui::ActivateItemByID(widget({"##value"}));
 		widget_frame(draw, 3);
@@ -297,6 +344,7 @@ void run_field_widget_tests() {
 	test_choices_of_one_name();
 	test_ranged_number();
 	test_group_row();
+	test_group_choices();
 	test_open_choice();
 	test_typed_values();
 }

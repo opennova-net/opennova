@@ -71,7 +71,8 @@ std::string value_name(const Value &value) {
 // (a FILE on an ACTION that is not SCREEN, a DATASOURCE on a window that is not a marquee),
 // references and defines nothing. A symbol is found where its field's scope says, and the
 // type says which definitions no lookup finds and what value one carries
-// (Document::refine_symbol).
+// (Document::refine_symbol). Each field is asked of its record as a FieldUse, which copies
+// nothing of the schema (an animation table key's 252 choices stay in the type's table).
 void extract_record(const Document &document, const NodeAddress &address, Extracted &out) {
 	if (!document.present(address, std::string())) return;
 	std::string record, locator;
@@ -81,34 +82,39 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		locator = document.locator(address);
 	};
 	for (const FieldSchema &schema : document.fields(address.kind)) {
-		const FieldSchema field = document.field_on(address, schema);
+		const FieldUse field = document.field_on(address, schema);
 		if (field.reference == ReferenceKind::None && field.defines == ReferenceKind::None) continue;
-		if (field.applies == Applicability::Ignored || !document.present(address, field.id)) continue;
+		if (field.applies == Applicability::Ignored || !document.present(address, schema.id)) continue;
 		Value value;
-		if (!document.get(address, field.id, value)) continue;
+		if (!document.get(address, schema.id, value)) continue;
 		const std::string defined = field.defines == ReferenceKind::None ? std::string() : value_name(value);
 		if (!defined.empty()) {
 			place();
 			GraphSymbol symbol = symbol_of(field.defines, defined, document.path(), record, field.scope);
 			symbol.locator = locator;
 			symbol.address = address;
-			symbol.field = field.id;
-			document.refine_symbol(address, symbol);
+			symbol.field = schema.id;
+			SymbolFacts facts;
+			document.refine_symbol(address, facts);
+			symbol.value = std::move(facts.value);
+			symbol.inert = facts.inert;
+			symbol.inert_reason = std::move(facts.inert_reason);
+			symbol.line = facts.line;
 			out.symbols.push_back(std::move(symbol));
 		}
 		ReferenceKind kind;
 		std::string name, scope;
 		if (!reference_target(field, value, kind, name, scope)) continue;
 		place();
-		GraphEdge edge = edge_of(document.path(), record, field.id, kind, name, scope, !field.read_only);
+		GraphEdge edge = edge_of(document.path(), record, schema.id, kind, name, scope, !field.read_only);
 		edge.locator = locator;
 		edge.address = address;
-		edge.material_type = field.material_type;
+		edge.loader_arg = field.loader_arg;
 		out.edges.push_back(std::move(edge));
 		// A menu's font or texture through a style variable is two references: the
 		// variable, and the file it names once resolved.
 		if (field.reference != ReferenceKind::StyleVar && is_style_reference(name)) {
-			GraphEdge var = edge_of(document.path(), record, field.id, ReferenceKind::StyleVar, name, std::string(),
+			GraphEdge var = edge_of(document.path(), record, schema.id, ReferenceKind::StyleVar, name, std::string(),
 			                        !field.read_only);
 			var.locator = locator;
 			var.address = address;
@@ -225,7 +231,7 @@ NativeExtractor native_extractor(AssetKind kind) {
 
 } // namespace
 
-bool reference_target(const FieldSchema &field, const Value &value, ReferenceKind &kind, std::string &name,
+bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &kind, std::string &name,
                       std::string &scope) {
 	kind = field.reference;
 	scope.clear();

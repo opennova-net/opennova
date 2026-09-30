@@ -176,7 +176,7 @@ const InspectorSection *section_of(const std::vector<InspectorSection> &plan, co
 }
 
 bool has_field(const InspectorSection *section, const char *id) {
-	return section && std::any_of(section->fields.begin(), section->fields.end(), [&](const FieldSchema &f) { return f.id == id; });
+	return section && std::any_of(section->fields.begin(), section->fields.end(), [&](const FieldUse &f) { return f.schema->id == id; });
 }
 
 // The inspector's plan: groups by the first step of a dotted id with their readable
@@ -195,9 +195,9 @@ void test_inspector_plan() {
 	const InspectorSection *position = section_of(button, "position");
 	CHECK(position && position->title == "Position" && position->fields.size() == 4 && !position->has_toggle && position->written,
 	      "POSITION's four edges under one heading, open while written");
-	CHECK(position && position->fields[0].label == "Left", "a field's readable name");
+	CHECK(position && position->fields[0].schema->label == "Left", "a field's readable name");
 	const InspectorSection *text = section_of(button, "string");
-	CHECK(text && text->title == "Text" && text->has_toggle && text->toggle.id == "string" && !has_field(text, "string"),
+	CHECK(text && text->title == "Text" && text->has_toggle && text->toggle.schema->id == "string" && !has_field(text, "string"),
 	      "STRING's own switch leads its group, apart from its fields");
 	CHECK(!section_of(button, "items") && !section_of(button, "column") && !section_of(button, "datasource"),
 	      "what a button does not read, and its file leaves out, is not there");
@@ -220,7 +220,7 @@ void test_inspector_plan() {
 
 	const std::vector<InspectorSection> filtered = plan_inspector(*document, back, back, "left");
 	CHECK(filtered.size() == 1 && filtered[0].key == "position" && filtered[0].fields.size() == 1 &&
-	              filtered[0].fields[0].id == "position.left",
+	              filtered[0].fields[0].schema->id == "position.left",
 	      "a filter keeps the matching fields and drops the rest");
 
 	const NodeAddress second = menu_test::child_of(*document, back, "action", 1);
@@ -2129,10 +2129,10 @@ void test_go_to_ui() {
 	ui.drain();
 	std::string key;
 	for (const InspectorSection &section : plan_inspector(*menu, main, main, ""))
-		for (const FieldSchema &field : section.fields)
-			if (field.id == "font.name") key = section.key;
+		for (const FieldUse &field : section.fields)
+			if (field.schema->id == "font.name") key = section.key;
 	CHECK(!key.empty(), "the font's section");
-	FieldSchema font;
+	FieldUse font;
 	for (const FieldSchema &schema : menu->fields(main.kind))
 		if (schema.id == "font.name") font = menu->field_on(main, schema);
 	Value value;
@@ -2194,8 +2194,8 @@ void test_numeric_go_to_ui() {
 	session.handle(select);
 	std::string form, list;
 	for (const InspectorSection &section : plan_inspector(*items, attachment, carrier, "")) {
-		for (const FieldSchema &field : section.fields)
-			if (field.id == "item_id") form = section.key;
+		for (const FieldUse &field : section.fields)
+			if (field.schema->id == "item_id") form = section.key;
 		for (const Document::Collection &collection : section.collections)
 			if (std::string(collection.spec.kind_name) == "attachment") list = section.key;
 	}

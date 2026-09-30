@@ -47,8 +47,8 @@ void test_rename_everywhere_ui() {
 	session.handle(select);
 	std::string section;
 	for (const InspectorSection &candidate : plan_inspector(*document, gun, gun, ""))
-		for (const FieldSchema &field : candidate.fields)
-			if (field.id == "weapon_name") section = candidate.key;
+		for (const FieldUse &field : candidate.fields)
+			if (field.schema->id == "weapon_name") section = candidate.key;
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);

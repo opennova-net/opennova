@@ -143,7 +143,7 @@ using Exists = std::function<bool(const std::string &)>;
 
 // The first name a reference's loader reads that `exists` has; "" for none.
 std::string first_candidate(const ImportNeed &need, const Exists &exists) {
-	for (const std::string &candidate : reference_file_candidates(need.reference, need.name, need.material_type, exists))
+	for (const std::string &candidate : reference_file_candidates(need.reference, need.name, need.loader_arg, exists))
 		if (exists(candidate)) return candidate;
 	return std::string();
 }
@@ -490,8 +490,8 @@ private:
 		}
 		const std::string name = resolve_name(edge.value);
 		if (is_style_reference(name)) return; // no stylesheet defines it: its variable's reference is listed
-		if (graph_.resolve(edge.kind, name, edge.scope, nullptr, edge.material_type) == ReferenceStatus::Present) return;
-		const ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.material_type};
+		if (graph_.resolve(edge.kind, name, edge.scope, nullptr, edge.loader_arg) == ReferenceStatus::Present) return;
+		const ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg};
 		const ImportOrigin *own = node.origin;
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
 		const std::string mine = look(own, need);
@@ -550,7 +550,7 @@ private:
 			found = missing_.emplace(presentation, Missing{plan_.rows.size() - 1, {}}).first;
 		}
 		for (const ImportNeed &known : found->second.needs)
-			if (known.reference == need.reference && known.name == need.name && known.material_type == need.material_type)
+			if (known.reference == need.reference && known.name == need.name && known.loader_arg == need.loader_arg)
 				return;
 		found->second.needs.push_back(need);
 	}

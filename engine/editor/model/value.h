@@ -69,8 +69,8 @@ enum class ReferenceKind {
 // witnessed is Unverified.
 enum class Applicability { Reads, Ignored, Unverified };
 
-// A choice holds its own strings, so Document::field_on can make a record's own (a model's
-// parts, its registers).
+// A choice holds its own strings, so a record can make its own (Document::record_choices: a
+// model's parts, its registers).
 struct FieldChoice {
 	std::string name; // the value as the file writes it (a token, or the number's name)
 	int64_t value = 0;
@@ -83,7 +83,9 @@ struct FieldChoice {
 // fields (`group`), drawn with one swatch.
 enum class FieldColor { None, HexArgb, PackedRgb, Channel };
 
-// One editable field of a record kind: what the generic inspector renders.
+// One editable field of a record kind: what the generic inspector renders. A kind's fields live
+// in a table of its type (Document::fields), which a record's use of a field points into
+// (FieldUse, Document::field_on): the members a record refines are the defaults here.
 struct FieldSchema {
 	std::string id;
 	FieldType type = FieldType::Integer;
@@ -104,10 +106,6 @@ struct FieldSchema {
 	// The symbol the field's value names its record as, which other records reference it
 	// by (a menu screen's or window's NAME); refined per record by Document::field_on.
 	ReferenceKind defines = ReferenceKind::None;
-	// A model texture row's type, by which its loader picks the file the name loads
-	// (reference_file_candidates); refined per record by Document::field_on. -1 for any
-	// other field.
-	int material_type = -1;
 	// What the editor shows: the field's readable name ("" = the id); the heading of the
 	// group its id's first step names ("Position" for position.left, carried too by a
 	// block's own switch, which is named as its group; "" = the step itself), which a field

@@ -934,17 +934,28 @@ public:
 			tint.type = FieldType::Text;
 			tint.width = 32;
 			tint.color = FieldColor::HexArgb;
-			// Open, with nothing known on this record (a model with no registers).
+			// Open, with nothing known on this record (a model with no registers): its own
+			// choices, none of them (record_choices).
 			FieldSchema reg;
 			reg.id = "param";
 			reg.open_choices = true;
-			return std::vector<FieldSchema>{reach, red, filter, tint, reg};
+			// The same field where the record names no register: a number, no list to open.
+			FieldSchema phase = reg;
+			phase.id = "phase";
+			return std::vector<FieldSchema>{reach, red, filter, tint, reg, phase};
 		}();
 		return fields;
 	}
+	bool record_choices(const NodeAddress &, const FieldUse &use, std::vector<FieldChoice> &) const override {
+		return use.schema->id == "param";
+	}
 	SerializeResult serialize() const override { return {}; }
+	std::unique_ptr<Document> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
 
 protected:
+	void refine_field(const NodeAddress &, FieldUse &use) const override {
+		if (use.schema->id == "param") use.own_choices = true;
+	}
 	bool parse(const std::vector<uint8_t> &, std::vector<std::shared_ptr<Node>> &rows, std::shared_ptr<const FileState> &,
 	           std::vector<SourceIssue> &, Diagnostic &) override {
 		rows.push_back(std::make_shared<MetadataRow>());
@@ -952,7 +963,7 @@ protected:
 	}
 	bool read(const Node &, const NodeAddress &, const std::string &field, Value &out) const override {
 		out = field == "atten_end" ? Value(12.5)
-		      : field == "start.r" || field == "param" ? Value(int64_t(200))
+		      : field == "start.r" || field == "param" || field == "phase" ? Value(int64_t(200))
 		      : field == "tint"    ? Value(std::string("FF00FF00"))
 		                           : Value(std::string("pilot"));
 		return true;
@@ -976,7 +987,8 @@ protected:
 
 // What a schema says of a field (S12 D4) survives the record's JSON, written and read back: the
 // unit, the table's note, the key the file writes, a ranged number's range and step, a colour's
-// form, the group whose row it shares, an open list's choices (open with none known too);
+// form, the group whose row it shares, an open list's choices (open with none known too: a
+// record's own list of none; S13 D2: open only where the field offers a list there);
 // nothing a field lacks is written.
 static int test_field_metadata() {
 	MetadataDocument document;
@@ -1002,6 +1014,8 @@ static int test_field_metadata() {
 	TEST_EXPECT(tint && tint->get_string("color", "") == "hex_argb" && tint->get_string("value", "") == "FF00FF00");
 	const JsonValue *param = find_field(record, "param");
 	TEST_EXPECT(param && param->get_bool("open_choices", false) && !param->get("choices"));
+	const JsonValue *phase = find_field(record, "phase");
+	TEST_EXPECT(phase && !phase->get("open_choices") && !phase->get("choices"));
 	return 0;
 }
 
@@ -1097,7 +1111,7 @@ static int test_import_plan_json() {
 	TEST_EXPECT(found.get_string("state", "") == "found" && found.get_string("found_in", "") == "the folder C:/art" && need &&
 	            need->get_string("file", "") == "a.mnu" && need->get_string("record", "") == "A/GO" &&
 	            need->get_string("field", "") == "font.name" && need->get_string("reference", "") == "font" &&
-	            need->get_string("name", "") == "arial99" && need->get("material_type") == nullptr);
+	            need->get_string("name", "") == "arial99" && need->get("loader_arg") == nullptr);
 	const JsonValue *source = found.get("source");
 	TEST_EXPECT(source && source->get_string("path", "") == "C:/art/arial99.fnt" && source->get_bool("native", false) &&
 	            source->get("entry") == nullptr && source->get("retail") == nullptr);

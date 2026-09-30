@@ -70,9 +70,10 @@ struct ModelRow : Node {
 	std::vector<threedi::ThreediControlRegister> registers;
 	std::vector<threedi::ThreediMatrix4x4> frames;
 	// collections: 0 LODs, 1 materials, 2 lights, 3 user points, 4 registers, 5 frames.
-	// Every identity's place, built on first use and shared by a clone; a structural
-	// edit of a clone forgets it (a committed row never changes).
-	mutable std::shared_ptr<const ModelPlaces> places;
+	// Every identity's place, made when the row is given its identities and again by each
+	// structural edit of a clone (model_document_detail::index_places), shared by a clone and
+	// never made inside a const query (a committed row never changes).
+	std::shared_ptr<const ModelPlaces> places;
 
 	ModelRow();
 	std::shared_ptr<Node> clone() const override;
@@ -86,7 +87,7 @@ struct CollisionRow : Node {
 	std::vector<threedi::ThreediCollisionFace> faces;
 	std::vector<threedi::ThreediOcclusionObject> occlusion;
 	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records.
-	mutable std::shared_ptr<const ModelPlaces> places;
+	std::shared_ptr<const ModelPlaces> places;
 
 	CollisionRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<CollisionRow>(*this); }
@@ -124,12 +125,16 @@ public:
 	std::vector<KindSpec> top_kinds() const override { return {}; }
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// Whether the game reads the field on this record (a generator's parameter as a
-	// register, a track by its flags, a spot light's axis), and what it names there.
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
+	// What an index field names on this record: the model's CTRL registers by name, LOD 0's
+	// parts, the MTRX rows (any other index typed too).
+	bool record_choices(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &out) const override;
 	// A user point past the first 16 is inert.
-	void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const override;
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<ModelDocument>(*this);
+	}
 
 	const ModelRow *model_row() const;
 	const CollisionRow *collision_row() const;
@@ -137,6 +142,10 @@ public:
 	void compose(ComposedModel &out) const;
 
 protected:
+	// Whether the game reads the field on this record (a generator's parameter as a
+	// register, a track by its flags, a spot light's axis), what it names there (a texture
+	// row's file, by the row's type; an index: record_choices).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;

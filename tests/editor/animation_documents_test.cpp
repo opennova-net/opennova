@@ -94,7 +94,8 @@ std::vector<uint8_t> chain_clip() {
 }
 
 // S12: a bone's parent is a choice among the clip's bones, named by the parent bone (a root's
-// by none), the index the file writes kept as its token.
+// by none), the index the file writes kept as its token. S13 D2: the bone's own choices
+// (Document::record_choices), of the records the clip row holds.
 int bone_parents() {
 	AnimationDocument document;
 	Diagnostic error;
@@ -103,14 +104,20 @@ int bone_parents() {
 	TEST_EXPECT(clip && clip->bones.size() == 4);
 	if (!clip || clip->bones.size() != 4) return 1;
 	for (const size_t i : {size_t(0), size_t(2)}) {
-		FieldSchema parent;
+		const NodeAddress bone{clip->id, kBone, clip->collections[0][i]};
+		FieldUse parent;
 		for (const FieldSchema &field : document.fields(kBone))
-			if (field.id == "parent") parent = document.field_on({clip->id, kBone, clip->collections[0][i]}, field);
+			if (field.id == "parent") parent = document.field_on(bone, field);
+		TEST_EXPECT(parent.schema && parent.own_choices && parent.schema->choices.empty() &&
+		            parent.record_owner == NodeAddress({clip->id, clip->kind, 0}));
+		if (!parent.schema) return 1;
+		std::vector<FieldChoice> own;
+		const std::vector<FieldChoice> &choices = document.choices_on(bone, parent, own);
 		const int64_t index = clip->bones[i].parent_index;
-		const auto named = std::find_if(parent.choices.begin(), parent.choices.end(),
+		const auto named = std::find_if(choices.begin(), choices.end(),
 		                                [&](const FieldChoice &choice) { return choice.value == index; });
-		TEST_EXPECT(parent.read_only && parent.choices.size() == 5 && named != parent.choices.end());
-		if (named == parent.choices.end()) return 1;
+		TEST_EXPECT(parent.read_only && &choices == &own && choices.size() == 5 && named != choices.end());
+		if (named == choices.end()) return 1;
 		TEST_EXPECT(named->name == std::to_string(index) &&
 		            named->label == (i == 0 ? std::string("None (a root)") : std::string(clip->bones[1].name)));
 	}

@@ -157,15 +157,13 @@ size_t StringsDocument::place_of(const NodeAddress &address) const {
 	return placement(address, at) ? at.index : SIZE_MAX;
 }
 
-FieldSchema StringsDocument::field_on(const NodeAddress &address, const FieldSchema &field) const {
-	FieldSchema out = field;
+void StringsDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	const Node *section = row(address.row);
-	if (field.defines == ReferenceKind::TextId && section)
-		out.scope = strutil::to_upper(basename_of(path())) + "/" + section->name();
-	return out;
+	if (use.defines == ReferenceKind::TextId && section)
+		use.scope = strutil::to_upper(basename_of(path())) + "/" + section->name();
 }
 
-void StringsDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const {
+void StringsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	// A lookup reads the first section of a name [orig: TextResource_FindEntryBySectionAndKey @
 	// 0x75d250]: the ids of a later one are defined but never read.
 	const Node *section = row(address.row);
@@ -173,8 +171,8 @@ void StringsDocument::refine_symbol(const NodeAddress &address, GraphSymbol &sym
 	for (const auto &node : rows()) {
 		if (node->id == section->id) return;
 		if (strutil::iequals(node->name(), section->name())) {
-			symbol.inert = true;
-			symbol.inert_reason = "an earlier section " + node->name() + " of the table shadows its section, and a lookup reads the first";
+			facts.inert = true;
+			facts.inert_reason = "an earlier section " + node->name() + " of the table shadows its section, and a lookup reads the first";
 			return;
 		}
 	}

@@ -9,7 +9,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <map>
 #include <new>
 
 namespace opennova::editor {
@@ -513,52 +512,68 @@ std::vector<Document::Collection> DefCatalogDocument::collections(const Node &ro
 	return out;
 }
 
-FieldSchema DefCatalogDocument::field_on(const NodeAddress &address, const FieldSchema &field) const {
-	FieldSchema out = field;
-	// A bit per id of the file-wide registry, in its slot's order [orig: @0x4A0253; @0x49DFC0].
-	if (field.id == "vehicle_spawn_mask" && def_kind(address.kind) == DefRecordKind::Item) {
-		const std::vector<int> &ids = spawn_ids();
-		for (size_t i = 0; i < ids.size() && i < size_t(DEF_VEHICLE_SPAWN_SLOTS); ++i)
-			out.choices.push_back({std::to_string(ids[i]), int64_t(uint32_t(1) << i), ""});
-		return out;
+void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
+	// A bit per id of the file-wide registry (record_choices).
+	if (use.schema->id == "vehicle_spawn_mask" && def_kind(address.kind) == DefRecordKind::Item) {
+		use.own_choices = true;
+		return;
 	}
-	if (field.reference != ReferenceKind::UserPoint) return out;
+	if (use.reference != ReferenceKind::UserPoint) return;
 	// The user point is looked up on the item's graphic model [orig:
 	// Game_ResolveItemMaterialsAndSpawnBoneTrails @ 0x522ee0]; with no graphic nothing is.
 	const Node *record = row(address.row);
 	Value graphic;
 	if (!record || !get({address.row, record->kind, 0}, "graphic", graphic) || !std::holds_alternative<std::string>(graphic) ||
 	    std::get<std::string>(graphic).empty()) {
-		out.reference = ReferenceKind::None;
-		return out;
+		use.reference = ReferenceKind::None;
+		return;
 	}
 	std::string model = basename_of(std::get<std::string>(graphic));
 	if (std::filesystem::path(model).extension().empty()) model += ".3di";
-	out.scope = strutil::to_upper(model);
-	return out;
+	use.scope = strutil::to_upper(model);
+}
+
+bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldUse &use,
+		std::vector<FieldChoice> &out) const {
+	if (use.schema->id != "vehicle_spawn_mask" || def_kind(address.kind) != DefRecordKind::Item)
+		return false;
+	// A bit per id of the file-wide registry, in its slot's order [orig: @0x4A0253; @0x49DFC0].
+	const std::vector<int> &ids = spawn_ids();
+	for (size_t i = 0; i < ids.size() && i < size_t(DEF_VEHICLE_SPAWN_SLOTS); ++i)
+		out.push_back({std::to_string(ids[i]), int64_t(uint32_t(1) << i), ""});
+	return true;
 }
 
 const std::vector<FieldSchema> &DefCatalogDocument::fields(NodeKind kind) const {
-	static std::map<NodeKind, std::vector<FieldSchema>> cache;
-	auto found = cache.find(kind);
-	if (found != cache.end()) return found->second;
-	std::vector<FieldSchema> schema;
-	for (const DefField &field : def_fields(def_kind(kind))) {
-		FieldSchema entry;
-		entry.id = field.id;
-		entry.type = field_type(field.type);
-		entry.width = field.width;
-		entry.reference = reference_kind(field.reference);
-		resolve_field(field, entry);
-		entry.defines = defined_by(def_kind(kind), field.id);
-		for (const DefChoice &choice : field.choices) entry.choices.push_back({choice.name, choice.value, choice.label});
-		entry.flags = field.flags;
-		entry.open_choices = field.open;
-		entry.read_only = field.read_only || is_present_flag(def_kind(kind), field.id);
-		describe(def_kind(kind), field, entry);
-		schema.push_back(std::move(entry));
-	}
-	return cache.emplace(kind, std::move(schema)).first->second;
+	// Every record kind's fields, made once for the process: a record's FieldUse points into
+	// them (the language makes the one initialisation, whichever thread asks first).
+	static const std::vector<std::vector<FieldSchema>> tables = [] {
+		std::vector<std::vector<FieldSchema>> out;
+		for (int k = 0; k <= int(DefRecordKind::Carry); ++k) {
+			const DefRecordKind record = DefRecordKind(k);
+			std::vector<FieldSchema> schema;
+			for (const DefField &field : def_fields(record)) {
+				FieldSchema entry;
+				entry.id = field.id;
+				entry.type = field_type(field.type);
+				entry.width = field.width;
+				entry.reference = reference_kind(field.reference);
+				resolve_field(field, entry);
+				entry.defines = defined_by(record, field.id);
+				for (const DefChoice &choice : field.choices)
+					entry.choices.push_back({choice.name, choice.value, choice.label});
+				entry.flags = field.flags;
+				entry.open_choices = field.open;
+				entry.read_only = field.read_only || is_present_flag(record, field.id);
+				describe(record, field, entry);
+				schema.push_back(std::move(entry));
+			}
+			out.push_back(std::move(schema));
+		}
+		return out;
+	}();
+	static const std::vector<FieldSchema> none;
+	return kind >= 0 && size_t(kind) < tables.size() ? tables[size_t(kind)] : none;
 }
 
 bool DefCatalogDocument::read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const {

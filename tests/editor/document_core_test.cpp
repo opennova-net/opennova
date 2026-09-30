@@ -21,9 +21,11 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/model/document_search.h>
 #include <editor/project/project_files.h>
 #include <editor/session/session_view.h>
 
@@ -189,6 +191,7 @@ public:
 		}
 		return result;
 	}
+	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
 	// The payload: "items" or "leaves", then the records in the file's own form.
 	std::string copy(const std::vector<NodeAddress> &records) const override {
 		if (records.empty()) return std::string();
@@ -487,6 +490,122 @@ Edit set(NodeAddress address, const char *field, Value value) {
 	edit.value = std::move(value);
 	return edit;
 }
+
+// --- a flat table of many lines (S13 D2): the core's per-call costs, counted -----------------
+
+constexpr NodeKind kLine = 0;
+// The tags a line's tag field offers: as many as an animation table's slot keys, which a use of
+// the field must never copy.
+constexpr size_t kTags = 252;
+size_t g_line_clones = 0, g_line_reads = 0;
+
+struct FlatLine : Node {
+	std::string title;
+	int64_t weight = 0;
+	std::string tag;
+	FlatLine() { kind = kLine; }
+	std::shared_ptr<Node> clone() const override {
+		++g_line_clones;
+		return std::make_shared<FlatLine>(*this);
+	}
+	std::string name() const override { return title; }
+};
+
+// One line per row, "L <title> <weight> <tag>"; each read of a field counted.
+class FlatDocument : public Document {
+public:
+	const char *kind_label(NodeKind kind) const override { return kind == kLine ? "Line" : ""; }
+	NodeKind kind_from_name(const std::string &name) const override { return name == "line" ? kLine : -1; }
+	bool is_top_kind(NodeKind kind) const override { return kind == kLine; }
+	std::vector<KindSpec> top_kinds() const override { return {{kLine, "Add line"}}; }
+	std::vector<Collection> collections(const Node &, const NodeAddress &) const override { return {}; }
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
+		static const std::vector<FieldSchema> line = [] {
+			FieldSchema title{"title", FieldType::Text, 32};
+			FieldSchema weight{"weight", FieldType::Integer};
+			FieldSchema tag{"tag", FieldType::Text, 32};
+			for (size_t i = 0; i < kTags; ++i) tag.choices.push_back({"TAG" + std::to_string(i), int64_t(i), ""});
+			tag.open_choices = true;
+			FieldSchema serial{"serial", FieldType::Integer};
+			serial.read_only = true;
+			return std::vector<FieldSchema>{title, weight, tag, serial};
+		}();
+		static const std::vector<FieldSchema> none;
+		return kind == kLine ? line : none;
+	}
+	// A line titled "own..." offers two tags of its own.
+	bool record_choices(const NodeAddress &, const FieldUse &use, std::vector<FieldChoice> &out) const override {
+		if (!use.own_choices) return false;
+		out = {{"MINE", 0, "Mine"}, {"YOURS", 1, "Yours"}};
+		return true;
+	}
+	SerializeResult serialize() const override {
+		SerializeResult result;
+		for (const auto &node : rows()) {
+			const auto &line = static_cast<const FlatLine &>(*node);
+			result.text += "L " + line.title + " " + std::to_string(line.weight) + " " + line.tag + "\n";
+		}
+		return result;
+	}
+	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FlatDocument>(*this); }
+
+protected:
+	// A refinement that would make the read-only serial writable (the base puts the schema's
+	// read_only back), and the own tags of a line titled "own...".
+	void refine_field(const NodeAddress &address, FieldUse &use) const override {
+		if (use.schema->id == "serial") use.read_only = false;
+		if (use.schema->id != "tag") return;
+		const Node *line = row(address.row);
+		use.own_choices = line && line->name().rfind("own", 0) == 0;
+	}
+	bool read(const Node &node, const NodeAddress &address, const std::string &field, Value &out) const override {
+		++g_line_reads;
+		const auto &line = static_cast<const FlatLine &>(node);
+		if (address.child) return false;
+		if (field == "title") out = line.title;
+		else if (field == "weight") out = line.weight;
+		else if (field == "tag") out = line.tag;
+		else if (field == "serial") out = int64_t(line.id);
+		else return false;
+		return true;
+	}
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows, std::shared_ptr<const FileState> &,
+	           std::vector<SourceIssue> &, Diagnostic &error) override {
+		std::istringstream in(std::string(bytes.begin(), bytes.end()));
+		std::string tag;
+		while (in >> tag) {
+			auto line = std::make_shared<FlatLine>();
+			if (tag != "L" || !(in >> line->title >> line->weight >> line->tag)) {
+				error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "Not a line.", path());
+				return false;
+			}
+			rows.push_back(line);
+		}
+		return true;
+	}
+	std::shared_ptr<Node> make_node(NodeKind, NodeId, std::string &) override { return std::make_shared<FlatLine>(); }
+	bool set_field(Node &node, const NodeAddress &, const std::string &field, const Value &value,
+	               std::string &error) override {
+		auto &line = static_cast<FlatLine &>(node);
+		const auto *text = std::get_if<std::string>(&value);
+		const auto *number = std::get_if<int64_t>(&value);
+		if (field == "title" && text) line.title = *text;
+		else if (field == "weight" && number) line.weight = *number;
+		else if (field == "tag" && text) line.tag = *text;
+		else {
+			error = "Unknown field.";
+			return false;
+		}
+		return true;
+	}
+	bool edit_collection(Node &, const Edit &, const IdAllocator &, NodeId &, std::string &error) override {
+		error = "A line holds nothing.";
+		return false;
+	}
+	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &) override { return false; }
+};
+
+std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
 } // namespace
 
@@ -1209,8 +1328,260 @@ static int test_changes_since_save() {
 	return 0;
 }
 
+// S13 D2: the model's per-call costs over a table of 5,000 lines, counted. An edit of one line
+// clones it once. What changed since the save reads no field of a line whose committed row is
+// the baseline's own, and each field of the edited line at most once a side, the answers kept
+// while the two rows compared stand (an undo gives the saved row back, a redo the same edited
+// one: neither reads a field). A record is found by its identity (test_record_index). A
+// field's use points at its schema, the same entry of the type's table for every record of every
+// document, its choices never copied; a type's refinement never makes a read-only field
+// writable; a record's own choices reach the widgets and the find (a value found by its
+// choice's name), never the graph's extraction.
+static int test_per_call_costs() {
+	using Change = Document::RecordChange;
+	constexpr size_t kRows = 5000, kEdited = 2500;
+	std::string text;
+	for (size_t i = 0; i < kRows; ++i) text += "L line" + std::to_string(i) + " " + std::to_string(i) + " TAG1\n";
+	FlatDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of(text), "lines.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(document.rows().size() == kRows);
+	const std::vector<FieldSchema> &table = document.fields(kLine);
+	const auto line = [&](size_t i) {
+		const Node &row = *document.rows()[i];
+		return NodeAddress{row.id, row.kind, 0};
+	};
+	g_line_reads = 0;
+	for (size_t i = 0; i < kRows; ++i) TEST_EXPECT(document.record_change(line(i)) == Change::Unchanged);
+	TEST_EXPECT(g_line_reads == 0);
+
+	const NodeAddress edited = line(kEdited);
+	g_line_clones = 0;
+	TEST_EXPECT(document.apply(set(edited, "weight", int64_t(-1)), error));
+	TEST_EXPECT(g_line_clones == 1);
+	g_line_reads = 0;
+	for (size_t i = 0; i < kRows; ++i) {
+		const size_t before = g_line_reads;
+		const Change change = document.record_change(line(i));
+		if (i == kEdited) TEST_EXPECT(change == Change::Changed && g_line_reads - before <= 2 * table.size());
+		else TEST_EXPECT(change == Change::Unchanged && g_line_reads == before);
+	}
+	for (const FieldSchema &field : table) TEST_EXPECT(!document.field_changed(line(kEdited + 1), field.id));
+	const size_t asked = g_line_reads;
+	TEST_EXPECT(document.record_change(edited) == Change::Changed && g_line_reads == asked);
+	TEST_EXPECT(document.field_changed(edited, "weight") && !document.field_changed(edited, "title"));
+	const size_t fields_asked = g_line_reads;
+	TEST_EXPECT(document.field_changed(edited, "weight") && g_line_reads == fields_asked);
+	document.undo();
+	TEST_EXPECT(document.record_change(edited) == Change::Unchanged && !document.field_changed(edited, "weight") &&
+	            g_line_reads == fields_asked);
+	document.redo();
+	TEST_EXPECT(document.record_change(edited) == Change::Changed && g_line_reads == fields_asked);
+	TEST_EXPECT(document.address_of(edited.row) == edited && document.address_of(line(kRows - 1).row) == line(kRows - 1) &&
+	            document.address_of(NodeId(987654321)) == NodeAddress());
+
+	// The field's use: the table's own entry, the same for every record of every document.
+	const FieldSchema &tag = table[2];
+	FlatDocument other;
+	TEST_EXPECT(other.load_bytes(bytes_of("L one 1 TAG2\n"), "other.txt", AssetKind::Unknown, "jo", error));
+	const FieldUse first = document.field_on(line(0), tag), again = document.field_on(line(0), tag);
+	const FieldUse there = other.field_on({other.rows()[0]->id, kLine, 0}, other.fields(kLine)[2]);
+	TEST_EXPECT(first.schema == &tag && again.schema == &tag && there.schema == &tag);
+	TEST_EXPECT(first.schema->choices.size() == kTags && first.schema->choices.data() == tag.choices.data());
+	TEST_EXPECT(sizeof(FieldUse) < sizeof(FieldSchema) / 2);
+	TEST_EXPECT(table[3].read_only && document.field_on(line(0), table[3]).read_only);
+	// A record's own choices: the widgets' and the find's (choices_on), a value found by its
+	// choice's name as the Inspector shows it; the graph's extraction never asks.
+	TEST_EXPECT(document.apply({set(line(3), "title", std::string("own3")), set(line(3), "tag", std::string("MINE"))},
+	                           error));
+	const FieldUse own_tag = document.field_on(line(3), tag);
+	std::vector<FieldChoice> own;
+	TEST_EXPECT(own_tag.own_choices && !first.own_choices);
+	TEST_EXPECT(&document.choices_on(line(3), own_tag, own) == &own && own.size() == 2 && own[0].label == "Mine");
+	TEST_EXPECT(&document.choices_on(line(0), first, own) == &tag.choices);
+	const std::vector<DocumentHit> mine = find_in_document(document, "Mine");
+	const std::vector<DocumentHit> named = find_in_document(document, "own3");
+	TEST_EXPECT(mine.size() == 1 && mine[0].address == line(3) && mine[0].field == "tag" && mine[0].text == "Mine");
+	TEST_EXPECT(named.size() == 1 && named[0].address == line(3));
+	return 0;
+}
+
+// S13 D2's review: a record is found by its identity through an index of every record's row that
+// each revision brings up to date one changed row at a time (its records taken out as its last
+// indexed version held them, put in as it holds them now; a row no longer there taken out), made
+// again by a save and a load. Over a Set, a nested record removed and duplicated, a row moved,
+// removed and duplicated, and every undo and redo of them; several edits asked after the last of
+// them only; a record pasted with what it holds; a save, an edit after it and undos past it; and
+// the file loaded again in place (its identities start again, so none met before counts as
+// gone), then a row moved: each record a walk meets is found where it is, and each one met
+// before that is no longer there is found nowhere.
+static int test_record_index() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	std::vector<NodeId> met;
+	const auto every_found = [&] {
+		bool found = true;
+		std::vector<NodeId> here;
+		for (const auto &row : document.rows()) {
+			here.push_back(row->id);
+			found = found && document.address_of(row->id) == NodeAddress{row->id, row->kind, 0};
+			document.walk_records(*row, [&](const NodeAddress &record, const Document::Placement &) {
+				here.push_back(record.child);
+				found = found && document.address_of(record.child) == record;
+				return true;
+			});
+		}
+		for (const NodeId id : here)
+			if (std::find(met.begin(), met.end(), id) == met.end()) met.push_back(id);
+		for (const NodeId id : met)
+			if (std::find(here.begin(), here.end(), id) == here.end()) found = found && document.address_of(id) == NodeAddress();
+		return found;
+	};
+	TEST_EXPECT(every_found());
+	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a1, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 0), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.beta), error) && every_found());
+	TEST_EXPECT(document.rows().size() == 2 && met.size() > 12);
+	while (document.can_undo()) {
+		document.undo();
+		TEST_EXPECT(every_found());
+	}
+	TEST_EXPECT(document.serialize().text == fake.original);
+	while (document.can_redo()) {
+		document.redo();
+		TEST_EXPECT(every_found());
+	}
+	// Several edits, then one lookup: the index catches up over all of them at once.
+	const auto last_row = [&] { return NodeAddress{document.rows().back()->id, document.rows().back()->kind, 0}; };
+	TEST_EXPECT(document.apply(set(fake.a1, "name", std::string("A1")), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.x), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error));
+	TEST_EXPECT(every_found());
+	// A record pasted with what it holds: every one it makes found in its new place.
+	const std::string items = document.copy({fake.a1});
+	Edit paste = make(EditOperation::Paste, {fake.alpha.row, 0, 0}, 0, SIZE_MAX);
+	paste.value = items;
+	TEST_EXPECT(!items.empty() && document.apply(paste, error) && document.last_added_records().size() == 1 &&
+	            every_found());
+	// Saved: the index is made again; an edit after the save, then undos past it.
+	TEST_EXPECT(document.save(error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a2), error) && every_found());
+	document.undo();
+	TEST_EXPECT(every_found());
+	document.undo();
+	TEST_EXPECT(every_found() && document.dirty());
+	// Loaded again in place from the file the save wrote: the identities start again.
+	TEST_EXPECT(document.load(fake.dir.file("fake.txt"), "fake.txt", AssetKind::Unknown, "jo", error));
+	met.clear();
+	TEST_EXPECT(every_found() && document.rows().size() == 2);
+	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error) && every_found());
+	return 0;
+}
+
+// S13 D2's review: a row's place among the rows depends on every row, so record_change asks it
+// on each call and never keeps it with the row's own answer. Saved a, b, c: a edited and given
+// back (its row a clone equal to the saved one); c moved to the top moves every row's place
+// among the rows both sides have, and moved back moves none. The other order: c to the top
+// first, a edited and given back while moved, c back: a is unchanged again.
+static int test_moved_rows() {
+	using Change = Document::RecordChange;
+	using Changes = std::vector<Change>;
+	const Change same = Change::Unchanged, moved = Change::Changed;
+	for (const bool move_first : {false, true}) {
+		FlatDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load_bytes(bytes_of("L a 1 TAG1\nL b 2 TAG1\nL c 3 TAG1\n"), "abc.txt", AssetKind::Unknown,
+		                                "jo", error));
+		const NodeAddress a{document.rows()[0]->id, kLine, 0}, b{document.rows()[1]->id, kLine, 0},
+		        c{document.rows()[2]->id, kLine, 0};
+		const auto changes = [&] { return Changes{document.record_change(a), document.record_change(b), document.record_change(c)}; };
+		const auto edit_and_give_back = [&] {
+			return document.apply(set(a, "title", std::string("a2")), error) &&
+			       document.apply(document.revert_edits(a, "title"), error) && !document.field_changed(a, "title");
+		};
+		if (!move_first) {
+			TEST_EXPECT(edit_and_give_back());
+			TEST_EXPECT(changes() == Changes({same, same, same}));
+		}
+		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 0), error));
+		TEST_EXPECT(changes() == Changes({moved, moved, moved}));
+		if (move_first) {
+			TEST_EXPECT(edit_and_give_back());
+			TEST_EXPECT(changes() == Changes({moved, moved, moved}));
+		}
+		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 2), error));
+		TEST_EXPECT(changes() == Changes({same, same, same}));
+	}
+	return 0;
+}
+
+// S13 D2: a snapshot is the document as it stands, for another thread: the same committed
+// rows, identity, revision, history and baseline, read only (an edit, an undo, a load and a
+// save of it do nothing or are refused, document.snapshot). A thread reads it while the
+// document edits on, and it keeps the rows it was made over.
+static int test_snapshot() {
+	using Change = Document::RecordChange;
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	const std::string edited = document.serialize().text;
+	std::unique_ptr<Document> snapshot = document.snapshot();
+	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !document.is_snapshot());
+	TEST_EXPECT(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
+	            snapshot->dirty() && snapshot->can_undo() && snapshot->rows() == document.rows());
+	TEST_EXPECT(snapshot->serialize().text == edited && snapshot->record_change(fake.x) == Change::Changed &&
+	            snapshot->field_changed(fake.x, "name") && snapshot->record_change(fake.y) == Change::Unchanged);
+	TEST_EXPECT(!snapshot->apply(set(fake.x, "name", std::string("z")), error) && error.code == "document.snapshot");
+	snapshot->undo();
+	TEST_EXPECT(snapshot->revision() == document.revision() && snapshot->serialize().text == edited);
+	TEST_EXPECT(!snapshot->save(error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->load_bytes(bytes_of(kFile), "fake.txt", AssetKind::Unknown, "jo", error) &&
+	            error.code == "document.snapshot");
+
+	std::string read_there, locator_there;
+	size_t records_there = 0;
+	bool changed_there = false;
+	std::thread reader([&] {
+		for (int pass = 0; pass < 20; ++pass) {
+			read_there = snapshot->serialize().text;
+			records_there = 0;
+			for (const auto &row : snapshot->rows())
+				snapshot->walk_records(*row, [&](const NodeAddress &, const Document::Placement &) {
+					++records_there;
+					return true;
+				});
+			changed_there = snapshot->record_change(fake.x) == Change::Changed;
+			locator_there = snapshot->locator(snapshot->address_of(fake.y.child));
+		}
+	});
+	bool edits = true;
+	for (int i = 0; i < 50; ++i) {
+		Diagnostic refused;
+		edits = document.apply(set(fake.y, "name", std::string("y") + std::to_string(i)), refused) && edits;
+		edits = document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), refused) && edits;
+		document.undo();
+	}
+	reader.join();
+	TEST_EXPECT(edits);
+	TEST_EXPECT(read_there == edited && records_there == 8 && changed_there && locator_there == "0/item:0/leaf:1");
+	TEST_EXPECT(snapshot->serialize().text == edited && document.serialize().text != edited);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_per_call_costs();
+	failures += test_moved_rows();
+	failures += test_record_index();
+	failures += test_snapshot();
 	failures += test_changes_since_save();
 	failures += test_structure();
 	failures += test_structural_edits();

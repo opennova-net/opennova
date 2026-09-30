@@ -61,20 +61,20 @@ std::string replacement(const std::string &value, const std::string &old_name, c
 bool loads_renamed(const AssetScan &scan, const GraphEdge &edge, const std::string &value, const AssetEntry &target,
                    const std::string &renamed) {
 	const auto exists = [&](const std::string &file) {
-		if (key(file) == key(renamed)) return file_serves_reference(target.kind, edge.kind, edge.material_type);
+		if (key(file) == key(renamed)) return file_serves_reference(target.kind, edge.kind, edge.loader_arg);
 		if (key(file) == key(target.logical_name)) return false;
 		const AssetEntry *asset = scan.find(file);
-		return asset && file_serves_reference(asset->kind, edge.kind, edge.material_type);
+		return asset && file_serves_reference(asset->kind, edge.kind, edge.loader_arg);
 	};
 	std::string first;
-	for (const std::string &candidate : reference_file_candidates(edge.kind, value, edge.material_type, exists))
+	for (const std::string &candidate : reference_file_candidates(edge.kind, value, edge.loader_arg, exists))
 		if (exists(candidate)) {
 			first = candidate;
 			break;
 		}
 	if (first.empty() || key(first) != key(renamed)) return false;
-	if (edge.kind != ReferenceKind::Texture || edge.material_type < 0) return true;
-	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(edge.material_type));
+	if (edge.kind != ReferenceKind::Texture || edge.loader_arg < 0) return true;
+	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(edge.loader_arg));
 	return renderer::material_texture_transform(type, value, true) == renderer::material_texture_transform(type, edge.value, true);
 }
 
