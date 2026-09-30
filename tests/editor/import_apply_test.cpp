@@ -26,6 +26,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"

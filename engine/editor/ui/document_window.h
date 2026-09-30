@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <editor/ui/catalog_view.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/find_cursor.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/record_reveal.h>
@@ -38,7 +38,7 @@ class NewProjectForm;
 // hits is its model's (FindCursor, S13 V1).
 class DocumentWindow : public devtools::Window {
 public:
-	DocumentWindow(EditorHost &host, NewProjectForm &form) : host_(host), form_(form) { open = true; }
+	DocumentWindow(Workspace &workspace, NewProjectForm &form) : workspace_(workspace), form_(form) { open = true; }
 
 	const char *title() const override { return "Document"; }
 	bool is_closeable() const override { return false; }
@@ -60,7 +60,7 @@ private:
 	// The find bar's hit `index` shown: its record selected, its field revealed.
 	void show_hit(const Document &document, size_t index);
 
-	EditorHost &host_;
+	Workspace &workspace_;
 	NewProjectForm &form_;
 	CatalogView catalog_;
 	StringsView strings_;

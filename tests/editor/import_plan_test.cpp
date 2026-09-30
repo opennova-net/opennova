@@ -29,6 +29,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>

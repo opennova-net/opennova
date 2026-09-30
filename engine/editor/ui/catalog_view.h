@@ -1,6 +1,6 @@
 #pragma once
 
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/record_reveal.h>
 
 namespace opennova::editor {
@@ -15,7 +15,7 @@ class DefCatalogDocument;
 // Record fields are the generic inspector's business.
 class CatalogView {
 public:
-	void draw(EditorHost &host, const DefCatalogDocument &document);
+	void draw(Workspace &workspace, const DefCatalogDocument &document);
 
 private:
 	char filter_[128]{};

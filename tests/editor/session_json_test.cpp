@@ -19,9 +19,11 @@
 #include <variant>
 #include <vector>
 
+#include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_json.h>
+#include <editor/session/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -323,7 +325,8 @@ static int test_settings_json() {
 	// Over a session: the result of the last one under its serial, and the runtime setting.
 	editor_test::TempProjectDir dir("opennova_session_json_settings_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	TEST_EXPECT(session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Settings")));
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":4,\"title\":\"Harbor\","
 	                          "\"runtime_executable\":\"C:/tools/opennova.exe\"}}",
@@ -423,7 +426,8 @@ static int test_problem_groups_page() {
 static int test_over_a_session() {
 	editor_test::TempProjectDir dir("opennova_session_json_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings/editor.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 
 	// No project: the view says so and carries no rows.

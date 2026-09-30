@@ -23,7 +23,9 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 
@@ -42,8 +44,9 @@ using editor_test::NoProcess;
 struct Project {
 	editor_test::TempProjectDir dir;
 	NoProcess platform;
+	MemoryPreferencesStore preferences;
 	ProjectSession session;
-	explicit Project(const char *name) : dir(name), session(platform, dir.file("settings.json")) {
+	explicit Project(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
 		editor_test::create_missing_files(session);
 	}

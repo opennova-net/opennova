@@ -8,8 +8,10 @@
 #include <editor/documents/strings_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "common/test_expect.h"
@@ -181,7 +183,8 @@ int load_edit_save() {
 int validation_and_session() {
 	editor_test::TempProjectDir dir("opennova_strings_session_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Strings"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

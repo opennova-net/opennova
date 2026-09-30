@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -25,11 +26,11 @@ void output_line(const std::string &line) {
 } // namespace
 
 void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &v = host_.view();
+	const SessionView &v = workspace_.view();
 	const bool empty = v.output.empty();
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Clear", !empty, empty ? "Nothing to clear." : "Empties the output."))
-		host_.request(make_request(EditorRequestKind::ClearOutput));
+		workspace_.request(make_request(EditorRequestKind::ClearOutput));
 	if (ui_kit::tool(row, "Copy", !empty, empty ? "Nothing to copy." : "Copies every line to the clipboard.")) {
 		std::string all;
 		for (const std::string &line : v.output) all += line + "\n";

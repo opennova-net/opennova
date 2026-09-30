@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -62,5 +63,11 @@ struct PlayLauncher {
 PlayLauncher make_play_launcher(bool source_run, const std::string &editor_executable,
                                 const std::string &godot_project_dir, int mcp_port,
                                 std::vector<std::string> engine_args);
+
+// What Play launches, as its embedder tells the session when asked (ADR 0046 S13 A2): with
+// `with_mcp_port` when the game is about to be spawned, its build landed, so the embedder allocates
+// the port of the game's MCP endpoint then (0 when it has none to give); without, for what the
+// view shows of the runtime (whether the run drives the source checkout, the binary).
+using PlayLauncherSource = std::function<PlayLauncher(bool with_mcp_port)>;
 
 } // namespace opennova::editor

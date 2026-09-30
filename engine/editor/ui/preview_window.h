@@ -4,7 +4,7 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/session/session_view.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/menu_preview_pane.h>
 #include <editor/ui/model_preview_pane.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -38,15 +38,10 @@ PreviewFamily preview_family(const SessionView &view, PreviewFamily last);
 // and the shell's devices refresh and tick whether a pane shows or not.
 class PreviewWindow : public devtools::Window {
 public:
-	explicit PreviewWindow(EditorHost &host) : host_(host), menu_(host), model_(host) { open = true; }
+	explicit PreviewWindow(Workspace &workspace) : workspace_(workspace), menu_(workspace), model_(workspace) { open = true; }
 	const char *title() const override { return "Preview"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::CenterRight; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
-	void set_menu_viewport(MenuPreviewViewport *viewport) { menu_.set_viewport(viewport); }
-	void set_model_viewport(ModelPreviewViewport *viewport) {
-		model_viewport_ = viewport;
-		model_.set_viewport(viewport);
-	}
 	void draw(devtools::ImGuiPass &pass, uint64_t frame_index) override;
 	// After each frame's windows, whether this one drew or not (the workspace's frame
 	// bracket): a pane whose canvas did not draw this frame ends its gesture.
@@ -58,10 +53,9 @@ public:
 private:
 	void header_(const SessionView &view, PreviewFamily family);
 
-	EditorHost &host_;
+	Workspace &workspace_;
 	MenuPreviewPane menu_;
 	ModelPreviewPane model_;
-	ModelPreviewViewport *model_viewport_ = nullptr; // the model pane's: the line names the rig's model
 	PreviewFamily shown_ = PreviewFamily::None;
 };
 

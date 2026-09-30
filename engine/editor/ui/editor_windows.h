@@ -7,7 +7,7 @@
 
 #include <editor/session/editor_request.h>
 #include <editor/session/session_view.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/files_window.h>
 #include <editor/ui/import_dialog.h>
 #include <editor/ui/project_find.h>
@@ -34,7 +34,7 @@ class PreviewWindow;
 // Rename everywhere (the Inspector's Rename... on a field defining a name, F2 there). Records in through set_view(), typed
 // requests out through take_request(); the shell owns the frame bracket and the OS-only
 // requests, a test drives it over a null backend.
-class EditorWindows : public EditorHost, public devtools::MenuBarContributor {
+class EditorWindows : public Workspace, public devtools::MenuBarContributor {
 public:
 	EditorWindows();
 	~EditorWindows() override;
@@ -79,9 +79,10 @@ public:
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
 	const NewProjectForm &new_project_form() const { return new_project_; }
 
-	// EditorHost
+	// Workspace
 	const SessionView &view() const override;
 	void request(EditorRequest request) override;
+	const WorkspaceDevices &devices() const override { return devices_; }
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -97,6 +98,7 @@ private:
 	devtools::ImGuiPass pass_;
 	const SessionView *view_ = nullptr;
 	SessionView empty_;
+	WorkspaceDevices devices_; // the Shell's, handed in by the set_*_preview_viewport calls
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;

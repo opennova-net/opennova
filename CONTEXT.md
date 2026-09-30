@@ -517,6 +517,13 @@ the unsaved-changes prompt), with the findings it reported. The editor MCP reads
 the request's `ok` only says it parsed.
 _Avoid_: status (the one-line text the editor shows), result
 
+**Workspace**:
+The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar
+and the modals) and their seam to the session: the view every window reads, the typed
+requests it raises, and the devices its previews draw through. The Shell (`EditorApp`) drains
+the requests into the session and hands the devices in (`ui/workspace.h`).
+_Avoid_: host, editor host (host is the game host alone), UI (too broad), project (the data)
+
 **Record / owner**:
 A row of a document or anything nested in one, at any depth; the record that holds a
 record is its owner (a menu window's owner is its parent window, a root window's is

@@ -10,19 +10,19 @@
 
 namespace opennova::editor {
 
-class EditorHost;
+class Workspace;
 
 // A canvas's requests raised as the windows raise theirs (editor_requests.h): a record selected,
 // a step's batch, a gesture's end.
 class CanvasWindowRequests final : public CanvasRequests {
 public:
-	explicit CanvasWindowRequests(EditorHost &host) : host_(host) {}
+	explicit CanvasWindowRequests(Workspace &workspace) : workspace_(workspace) {}
 	void select(const std::string &path, const NodeAddress &record, CanvasJoin join) override;
 	void edits(const std::string &path, std::vector<Edit> batch) override;
 	void end_edit(const std::string &path) override;
 
 private:
-	EditorHost &host_;
+	Workspace &workspace_;
 };
 
 // The editor's canvas (ADR 0046 S13 V2), one for the Preview window's menu pane and one for its

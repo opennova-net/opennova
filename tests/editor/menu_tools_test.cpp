@@ -23,7 +23,9 @@
 #include <base/io/json.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_report.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -103,7 +105,8 @@ int list_count(const JsonValue &window, const char *list) {
 static int test_menu_tools() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_tools");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Tools"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

@@ -205,7 +205,7 @@ struct SessionView {
 		std::vector<Diagnostic> refusals;
 	};
 	RenamePreview rename_preview;
-	// The editor's setting (EditorSettings::import_dependencies): what a preview the windows
+	// The editor's preference (Preferences::import_dependencies): what a preview the windows
 	// raise plans with.
 	bool import_dependencies = true;
 	// The project's importable sources (a PNG) with the outputs their importers made

@@ -12,6 +12,7 @@
 
 #include <editor/requirements/requirements.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 
 namespace editor_test {
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <editor/model/document.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/record_reveal.h>
 
 namespace opennova::editor {
@@ -18,6 +18,6 @@ namespace opennova::editor {
 // thousands of bullet faces draw only what shows; a deep tree scrolls sideways. The selection
 // moved there (a Go to) is revealed: the records and collections holding it open, and it
 // scrolls into view (`reveal`, the outline's across frames). The fields are the inspector's.
-void draw_document_outline(EditorHost &host, const Document &document, RecordReveal &reveal);
+void draw_document_outline(Workspace &workspace, const Document &document, RecordReveal &reveal);
 
 } // namespace opennova::editor

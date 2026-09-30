@@ -14,10 +14,14 @@
 #include <vector>
 
 #include <editor/project/project_files.h>
+#include <editor/session/editor_preferences.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
+#include <editor/session/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -97,7 +101,9 @@ OperationStatus status_of(OperationKind kind, bool cancellable) {
 static int test_slot_steps_and_finishes() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_slot");
 	FakePlatform platform;
-	ProjectSession core(platform, dir.file("settings.json"));
+	MemoryPreferencesStore store;
+	EditorPreferences preferences(store);
+	SessionCore core(platform, preferences);
 	OperationSlot slot;
 	Tally tally;
 	TEST_EXPECT(!slot.running() && !slot.status().running() && slot.last().id == 0);
@@ -155,7 +161,9 @@ static int test_slot_steps_and_finishes() {
 static int test_slot_cancels_between_steps() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_cancel");
 	FakePlatform platform;
-	ProjectSession core(platform, dir.file("settings.json"));
+	MemoryPreferencesStore store;
+	EditorPreferences preferences(store);
+	SessionCore core(platform, preferences);
 	OperationSlot slot;
 	TEST_EXPECT(!slot.cancel());
 	Tally tally;
@@ -246,7 +254,8 @@ static int test_gate_is_what_busy_refuses_says() {
 		             editor_request_kind_token(kind), busy_refuses(kind, running) ? "disable" : "enable");
 		return false;
 	};
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Every"));
 	editor_test::create_missing_files(session);
@@ -265,7 +274,8 @@ static int test_gate_is_what_busy_refuses_says() {
 			for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
 				const EditorRequestKind kind = static_cast<EditorRequestKind>(i);
 				Tally tally; // outlives the session, which drops the operation
-				ProjectSession fresh(platform, dir.file("fresh.json"));
+				MemoryPreferencesStore fresh_preferences;
+				ProjectSession fresh(platform, fresh_preferences);
 				auto operation = std::make_unique<FakeOperation>(tally, 1000, static_cast<OperationKind>(k));
 				operation->can_cancel = cancellable;
 				TEST_EXPECT(fresh.start_operation(std::move(operation)) != 0);
@@ -287,7 +297,8 @@ static int test_gate_is_what_busy_refuses_says() {
 static int test_busy_gate() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_gate");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Gate"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -296,7 +307,7 @@ static int test_busy_gate() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	session.set_poll_budget({0, 256});
@@ -463,7 +474,8 @@ static int test_uncancellable_operation() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_stubborn");
 	FakePlatform platform;
 	Tally tally, second, packed; // outlive the session, which drops the operations
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(make_request(K::NewProject, dir.file("other"), "Other"));
 	session.handle(make_request(K::NewProject, dir.file("project"), "Stubborn"));
@@ -576,7 +588,8 @@ static int test_import_plan_superseded() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_supersede");
 	FakePlatform platform;
 	Tally first, second, third; // outlive the session, which drops the operations
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Supersede"));
 	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
@@ -617,7 +630,8 @@ static int test_settings_parts_weighed() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_settings");
 	FakePlatform platform;
 	Tally tally; // outlives the session, which drops the operation
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Features"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();

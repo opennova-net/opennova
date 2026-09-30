@@ -62,7 +62,8 @@ bool model_preview_camera_from_json(const io::JsonValue &json, ModelPreviewModel
 // Preview window's model pane plans one (ModelPreviewModel::handle_edits, `snap` metres, 0
 // free), sent to the session as one batch and one undo step. False when the snapshot does not
 // show the model as it is now, the model cannot be edited (blocked), no marker is that
-// record's, or the marker has no such handle.
+// record's, the marker has no such handle, or the session did not take the batch (its outcome
+// not done: an edit the document refused).
 bool model_preview_drag(ProjectSession &session, const ModelPreviewSnapshot &snapshot, NodeId record, ModelHandle handle,
                         float x, float y, float snap);
 

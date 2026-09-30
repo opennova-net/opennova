@@ -34,6 +34,8 @@
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
 #include <editor/project/project_document.h>
+#include <editor/session/file_preferences_store.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_view.h>
@@ -601,7 +603,8 @@ void test_project_settings() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_settings");
 	NoProcess platform;
 	const std::string settings_file = dir.file("settings/editor.json");
-	ProjectSession session(platform, settings_file);
+	FilePreferencesStore preferences(settings_file);
+	ProjectSession session(platform, preferences);
 	CHECK(session.handle(make_request(EditorRequestKind::NewProject, dir.file("Armory"), "Armory")), "a project");
 	const SessionView &v = session.view();
 	const std::string armory = v.project_root;
@@ -712,7 +715,7 @@ void test_project_settings() {
 	PlayLauncher launcher;
 	launcher.source_run = true;
 	launcher.executable = "C:/checkout/godot.exe";
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	choose(ui, "File", {"Project settings..."});
 	ui.activate(item_id(dialog, {"Multiplayer"}));
 	text = logged_frame(ui);
@@ -1411,7 +1414,8 @@ void set_field(ProjectSession &session, const Document &document, const NodeAddr
 void test_preview_follows() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_follows");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	ModelDevice device;
@@ -1496,7 +1500,8 @@ void test_preview_follows() {
 void test_preview_model_gestures() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_gestures");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	ModelDevice device;
@@ -1584,7 +1589,8 @@ void test_preview_model_gestures() {
 void test_preview_model_pane_input() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_input");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
 	ModelDevice device;
@@ -1667,7 +1673,8 @@ void test_window_title() {
 void test_files_tree_kept() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_files_kept");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Kept"));
 	editor_test::create_missing_files(session);
 	Ui ui;

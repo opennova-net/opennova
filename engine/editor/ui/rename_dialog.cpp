@@ -1,6 +1,7 @@
 #include "rename_dialog.h"
 
 #include <editor/graph/reference_kinds.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -47,8 +48,8 @@ void RenameDialog::follow(const SessionView &view) {
 	asked_ = name_;
 }
 
-void RenameDialog::draw(EditorHost &host) {
-	const SessionView &view = host.view();
+void RenameDialog::draw(Workspace &workspace) {
+	const SessionView &view = workspace.view();
 	if (open_) {
 		open_ = false;
 		ImGui::OpenPopup(kTitle);
@@ -66,7 +67,7 @@ void RenameDialog::draw(EditorHost &host) {
 	const bool enter = ImGui::InputText("##name", name_, sizeof(name_), ImGuiInputTextFlags_EnterReturnsTrue);
 	if (asked_ != name_ && view.allows(EditorRequestKind::PreviewRename)) {
 		asked_ = name_;
-		host.request(preview(path_, locator_, field_, asked_, false));
+		workspace.request(preview(path_, locator_, field_, asked_, false));
 	}
 	// The plan shown is the typed name's: the one it was asked for (its new name is the name as the
 	// definition takes it: a style variable's %NAME% typed is its NAME, an item id "0100302" 100302).
@@ -105,7 +106,7 @@ void RenameDialog::draw(EditorHost &host) {
 	if ((rename || enter) && ready && allowed) {
 		EditorRequest request = preview(path_, locator_, field_, asked_, false);
 		request.kind = EditorRequestKind::RenameSymbol;
-		host.request(std::move(request));
+		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();

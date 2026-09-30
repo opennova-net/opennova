@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -80,7 +81,7 @@ float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPad
 } // namespace
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	if (view.project_open) list_.refresh(view);
 	if (!view.project_open) {
 		ui_kit::empty_state("No project open.");
@@ -239,7 +240,7 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	                      ImVec2(0.0f, ImGui::GetFrameHeight()))) {
 		list_.toggle_selected(view, line.finding);
 		const ProblemLocation location = problem_location(d, view);
-		if (!location.empty()) host_.request(location.request());
+		if (!location.empty()) workspace_.request(location.request());
 	}
 	ImGui::SameLine(0.0f, 0.0f);
 	ui_kit::severity_marker(d.severity);
@@ -362,7 +363,7 @@ void ProblemsWindow::draw_confirm(const SessionView &view) {
 	ImGui::EndDisabled();
 	if (!allowed) ui_kit::tooltip(kWaits);
 	if (applies && allowed) {
-		for (const EditorRequest &request : shown.requests) host_.request(request);
+		for (const EditorRequest &request : shown.requests) workspace_.request(request);
 		list_.close();
 		ImGui::CloseCurrentPopup();
 	}
@@ -390,7 +391,7 @@ bool ProblemsWindow::fix_pressed(const SessionView &view, size_t finding, const 
 }
 
 void ProblemsWindow::apply(const SessionView &view, size_t finding, const ProblemFix &fix) {
-	if (!ProblemsList::asks_first(fix)) return host_.request(fix.request);
+	if (!ProblemsList::asks_first(fix)) return workspace_.request(fix.request);
 	ask(view, list_.use_fix(view, finding, fix));
 }
 

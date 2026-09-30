@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/problems_list.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -26,7 +26,7 @@ namespace opennova::editor {
 // applies only when its release is on the fix the press was on.
 class ProblemsWindow : public devtools::Window {
 public:
-	explicit ProblemsWindow(EditorHost &host) : host_(host) { open = true; }
+	explicit ProblemsWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
 
 	const char *title() const override { return "Problems"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override {
@@ -57,7 +57,7 @@ private:
 	void apply(const SessionView &view, size_t finding, const ProblemFix &fix);
 	void ask(const SessionView &view, ProblemsList::Confirmation confirmation);
 
-	EditorHost &host_;
+	Workspace &workspace_;
 	ProblemsList list_;
 	char text_[128]{}; // the filter box, the query's text
 	ProblemsList::FindingRef more_; // the finding whose fixes More lists

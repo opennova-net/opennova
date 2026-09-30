@@ -4,6 +4,7 @@
 
 #include <editor/model/document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -44,7 +45,7 @@ PreviewFamily preview_family(const SessionView &view, PreviewFamily last) {
 }
 
 void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	const PreviewFamily family = preview_family(view, shown_);
 	if (family == PreviewFamily::None) {
 		ui_kit::empty_state("Open a menu, a model or an animation to preview it.");
@@ -74,8 +75,9 @@ void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
 	if (family == PreviewFamily::Menu) {
 		if (const Node *screen = document ? document->row(view.menu_preview.screen) : nullptr)
 			text += " - " + screen->name();
-	} else if (model_viewport_) {
-		const ModelPreviewModel &model = model_viewport_->model();
+	} else if (ModelPreviewViewport *device = workspace_.devices().model) {
+		// The model pane's device: the line names the rig's model.
+		const ModelPreviewModel &model = device->model();
 		if (model.shown_path() == path && model.animating() && !model.rig().model.empty()) text += " on " + model.rig().model;
 	}
 	const bool dirty = document && document->dirty();

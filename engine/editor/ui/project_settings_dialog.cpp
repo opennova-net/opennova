@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include <base/gameprofile/gameprofile.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -71,8 +72,8 @@ void ProjectSettingsDialog::set_picked(PickPurpose purpose, const std::string &p
 	else if (purpose == PickPurpose::RuntimeExecutable) copy_into(fields_.runtime, path);
 }
 
-void ProjectSettingsDialog::draw(EditorHost &host) {
-	const SessionView &v = host.view();
+void ProjectSettingsDialog::draw(Workspace &workspace) {
+	const SessionView &v = workspace.view();
 	if (open_requested_) {
 		open_requested_ = false;
 		ImGui::OpenPopup(kTitle);
@@ -112,7 +113,7 @@ void ProjectSettingsDialog::draw(EditorHost &host) {
 		pick_ = PickPurpose::RetailDirectory;
 		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
 		pick.purpose = PickPurpose::RetailDirectory;
-		host.request(pick);
+		workspace.request(pick);
 	}
 	ImGui::TextDisabled("Where the game is installed, kept with the project: its game data is imported from it.");
 	if (v.source_run) {
@@ -126,7 +127,7 @@ void ProjectSettingsDialog::draw(EditorHost &host) {
 			pick_ = PickPurpose::RuntimeExecutable;
 			EditorRequest pick = make_request(EditorRequestKind::PickFile);
 			pick.purpose = PickPurpose::RuntimeExecutable;
-			host.request(pick);
+			workspace.request(pick);
 		}
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
 		ui_kit::tooltip(v.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.runtime_executable + ".");
@@ -141,7 +142,7 @@ void ProjectSettingsDialog::draw(EditorHost &host) {
 	}
 	const bool can_apply = !waiting_ && fields_.title[0] != '\0';
 	ImGui::BeginDisabled(!can_apply);
-	if (ImGui::Button("Apply") && can_apply) apply(host);
+	if (ImGui::Button("Apply") && can_apply) apply(workspace);
 	ImGui::EndDisabled();
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel")) close();
@@ -150,8 +151,8 @@ void ProjectSettingsDialog::draw(EditorHost &host) {
 
 // Every setting as the dialog holds it, in one request: the session writes what differs
 // from the settings in effect (the runtime of a source run is not the dialog's to set).
-void ProjectSettingsDialog::apply(EditorHost &host) {
-	const SessionView &v = host.view();
+void ProjectSettingsDialog::apply(Workspace &workspace) {
+	const SessionView &v = workspace.view();
 	EditorRequest request = make_request(EditorRequestKind::ApplyProjectSettings);
 	ProjectSettingsChange &settings = request.settings;
 	serial_ = std::max(serial_, v.settings_result.serial) + 1;
@@ -164,7 +165,7 @@ void ProjectSettingsDialog::apply(EditorHost &host) {
 	settings.play_retail = fields_.play_retail;
 	waiting_ = true;
 	error_.clear();
-	host.request(std::move(request));
+	workspace.request(std::move(request));
 }
 
 } // namespace opennova::editor

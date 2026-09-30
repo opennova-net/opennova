@@ -2,7 +2,7 @@
 
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_preview_state.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/viewport_canvas.h>
 
 namespace opennova::editor {
@@ -46,8 +46,7 @@ public:
 // click on one seeks there and selects the event in the clip's document.
 class ModelPreviewPane {
 public:
-	explicit ModelPreviewPane(EditorHost &host) : host_(host), requests_(host) {}
-	void set_viewport(ModelPreviewViewport *viewport) { viewport_ = viewport; }
+	explicit ModelPreviewPane(Workspace &workspace) : workspace_(workspace), requests_(workspace) {}
 	// Into the current window, below the Preview window's line naming the model.
 	void draw();
 	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw
@@ -65,8 +64,10 @@ private:
 	void rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model);
 	void timeline_(ModelPreviewModel &model);
 
-	EditorHost &host_;
-	ModelPreviewViewport *viewport_ = nullptr;
+	// The Shell's model device (the workspace's devices), null for none.
+	ModelPreviewViewport *viewport() const { return workspace_.devices().model; }
+
+	Workspace &workspace_;
 	ViewportCanvas canvas_;
 	ModelCanvas model_canvas_;
 	CanvasWindowRequests requests_;

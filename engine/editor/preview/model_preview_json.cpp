@@ -311,8 +311,9 @@ bool model_preview_drag(ProjectSession &session, const ModelPreviewSnapshot &sna
 		EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
 		request.edits = std::move(edits);
 		session.handle(request);
+		const bool ok = session.outcome().done();
 		session.handle(make_request(EditorRequestKind::EndEdit, path));
-		return true;
+		return ok;
 	}
 	return false;
 }

@@ -25,7 +25,10 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_json.h>
 #include <editor/run/launch_plan.h>
+#include <editor/session/file_preferences_store.h>
 #include <editor/session/session_json.h>
+#include <editor/session/session_operation.h>
+#include <editor/session/session_view.h>
 
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -177,8 +180,13 @@ void EditorApp::ensure_session() {
 		return;
 	}
 	const String settings = ProjectSettings::get_singleton()->globalize_path(settings_path_);
-	session_ = std::make_unique<ProjectSession>(*platform_, opennova::to_std(settings));
-	session_->set_launcher(make_launcher(0));
+	preferences_ = std::make_unique<opennova::editor::FilePreferencesStore>(opennova::to_std(settings));
+	session_ = std::make_unique<ProjectSession>(*platform_, *preferences_);
+	// What Play launches: asked when the game is spawned, once its build lands, so the port of the
+	// game's MCP endpoint is a fresh one then, never one held while the build packs.
+	session_->set_launcher_source([this](bool p_with_mcp_port) {
+		return make_launcher(p_with_mcp_port ? allocate_mcp_port() : 0);
+	});
 #if OPENNOVA_EDITOR_UI
 	windows_->set_view(&session_->view());
 #endif
@@ -353,10 +361,6 @@ void EditorApp::drain_requests() {
 #if OPENNOVA_EDITOR_UI
 	EditorRequest request;
 	while (windows_->take_request(request)) {
-		if (request.kind == EditorRequestKind::Play) {
-			// The port is the shell's to allocate: a fresh loopback port per run.
-			session_->set_launcher(make_launcher(session_->view().play_retail ? 0 : allocate_mcp_port()));
-		}
 		if (!session_->handle(request)) {
 			serve(request);
 		}
@@ -452,7 +456,7 @@ void EditorApp::_on_picker_canceled() {
 }
 
 // A free loopback port for the game's MCP endpoint: bind an ephemeral port, read it,
-// let it go (the child binds it moments later).
+// let it go (the child binds it moments later: the session asks at spawn time).
 int EditorApp::allocate_mcp_port() {
 	Ref<TCPServer> probe;
 	probe.instantiate();
@@ -874,9 +878,6 @@ String EditorApp::request_json(const String &p_json) {
 				"or preview_import instead.";
 	}
 	if (ok) {
-		if (request.kind == EditorRequestKind::Play) {
-			session_->set_launcher(make_launcher(session_->view().play_retail ? 0 : allocate_mcp_port()));
-		}
 		served = session_->handle(request);
 		if (!served) serve(request);
 	}
@@ -955,18 +956,7 @@ String EditorApp::search_document_json(const String &p_path, const String &p_tex
 
 String EditorApp::get_problems_json(const String &p_query) {
 	ensure_session();
-	opennova::io::JsonValue json;
-	std::string error;
-	opennova::editor::ProblemQuery query;
-	size_t offset = 0, limit = 0;
-	if (!opennova::io::json_parse(opennova::to_std(p_query), json, error) ||
-			!opennova::editor::problem_query_from_json(json, query, offset, limit, error)) {
-		opennova::io::JsonValue answer = opennova::io::JsonValue::make_object();
-		answer.set("error", opennova::io::JsonValue::make_string(error));
-		return json_text(answer);
-	}
-	const SessionView &view = session_->view();
-	return json_text(opennova::editor::problems_to_json(view, problems_.answer(query, view), offset, limit, fixes_));
+	return opennova::to_gd(session_->problems_json(opennova::to_std(p_query)));
 }
 
 PackedStringArray EditorApp::get_request_kinds() const {

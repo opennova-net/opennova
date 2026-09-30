@@ -4,7 +4,7 @@
 #include <string>
 
 #include <editor/model/document.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -13,6 +13,6 @@ namespace opennova::editor {
 // "##<field>"): a coalesced Set while typing, the group closed when the cell lets go. The
 // field's schema says what it holds (its capacity in bytes, the terminator included) and
 // whether it runs over several lines (a string's text: the cell as tall as its lines).
-void text_cell(EditorHost &host, const Document &document, NodeAddress address, const char *field);
+void text_cell(Workspace &workspace, const Document &document, NodeAddress address, const char *field);
 
 } // namespace opennova::editor

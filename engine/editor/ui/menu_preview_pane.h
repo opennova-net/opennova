@@ -7,7 +7,7 @@
 #include <editor/preview/menu_canvas.h>
 #include <editor/preview/menu_preview_state.h>
 #include <editor/session/editor_request.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/viewport_canvas.h>
 #include <runtime/menu/menu_frame.h>
 
@@ -61,8 +61,7 @@ public:
 // Ctrl+wheel zooms about the mouse.
 class MenuPreviewPane {
 public:
-	explicit MenuPreviewPane(EditorHost &host);
-	void set_viewport(MenuPreviewViewport *viewport) { viewport_ = viewport; }
+	explicit MenuPreviewPane(Workspace &workspace);
 	// Into the current window, below the Preview window's line naming the screen.
 	void draw();
 	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw
@@ -87,8 +86,10 @@ private:
 	// Copy, Cut, Paste or Duplicate the selected windows (the keys and the canvas's menu).
 	void clipboard_(const Frame &frame, EditorRequestKind kind);
 
-	EditorHost &host_;
-	MenuPreviewViewport *viewport_ = nullptr;
+	// The Shell's menu device (the workspace's devices), null for none.
+	MenuPreviewViewport *viewport() const { return workspace_.devices().menu; }
+
+	Workspace &workspace_;
 	ViewportCanvas canvas_;
 	MenuCanvas menu_canvas_;
 	CanvasWindowRequests requests_;

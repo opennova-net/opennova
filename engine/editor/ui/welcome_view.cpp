@@ -3,13 +3,14 @@
 #include <algorithm>
 #include <cstring>
 
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
 
 namespace opennova::editor {
 
-bool NewProjectForm::draw(EditorHost &host) {
+bool NewProjectForm::draw(Workspace &workspace) {
 	ImGui::InputText("Name", title_, sizeof(title_));
 	// Browse... beside the folder, under it when the view is narrow.
 	ui_kit::WrapRow row;
@@ -18,12 +19,12 @@ bool NewProjectForm::draw(EditorHost &host) {
 	row.next(ui_kit::button_width("Browse...##folder"));
 	// A new project is refused while an operation that cannot be cancelled runs: its Browse... and
 	// Create wait with it (the busy gate's answer, SessionView::allows).
-	const bool allowed = host.view().allows(EditorRequestKind::NewProject);
+	const bool allowed = workspace.view().allows(EditorRequestKind::NewProject);
 	ImGui::BeginDisabled(!allowed);
 	if (ImGui::Button("Browse...##folder") && allowed) {
 		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
 		pick.purpose = PickPurpose::NewProjectLocation;
-		host.request(pick);
+		workspace.request(pick);
 	}
 	ImGui::EndDisabled();
 	ImGui::TextDisabled("The folder is created if it does not exist; it must not already hold a project.");
@@ -31,7 +32,7 @@ bool NewProjectForm::draw(EditorHost &host) {
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
-	if (create) host.request(make_request(EditorRequestKind::NewProject, folder_, title_));
+	if (create) workspace.request(make_request(EditorRequestKind::NewProject, folder_, title_));
 	return create;
 }
 
@@ -41,10 +42,10 @@ void NewProjectForm::set_folder(const std::string &path) {
 	folder_[n] = '\0';
 }
 
-void draw_welcome(EditorHost &host, NewProjectForm &form) {
-	const SessionView &v = host.view();
+void draw_welcome(Workspace &workspace, NewProjectForm &form) {
+	const SessionView &v = workspace.view();
 	ImGui::SeparatorText("New project");
-	form.draw(host);
+	form.draw(workspace);
 
 	ImGui::SeparatorText("Open project");
 	const bool opens = v.allows(EditorRequestKind::OpenProject);
@@ -52,7 +53,7 @@ void draw_welcome(EditorHost &host, NewProjectForm &form) {
 	if (ImGui::Button("Open a project folder...") && opens) {
 		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
 		pick.purpose = PickPurpose::OpenProject;
-		host.request(pick);
+		workspace.request(pick);
 	}
 	ImGui::EndDisabled();
 	if (!v.recent_projects.empty()) {
@@ -70,12 +71,12 @@ void draw_welcome(EditorHost &host, NewProjectForm &form) {
 				                             ImGuiSelectableFlags_AllowOverlap;
 				if (!opens) flags |= ImGuiSelectableFlags_Disabled;
 				if (ImGui::Selectable((shown + "###root").c_str(), false, flags) && opens)
-					host.request(make_request(EditorRequestKind::OpenProject, root));
+					workspace.request(make_request(EditorRequestKind::OpenProject, root));
 				ui_kit::tooltip(shown != root ? "Open " + root : "Open it.");
 				ImGui::TableNextColumn();
 				const bool forgets = v.allows(EditorRequestKind::ForgetRecent);
 				ImGui::BeginDisabled(!forgets);
-				if (ImGui::SmallButton("Forget") && forgets) host.request(make_request(EditorRequestKind::ForgetRecent, root));
+				if (ImGui::SmallButton("Forget") && forgets) workspace.request(make_request(EditorRequestKind::ForgetRecent, root));
 				ImGui::EndDisabled();
 				ui_kit::tooltip("Take it off this list; the project stays where it is.");
 				ImGui::PopID();

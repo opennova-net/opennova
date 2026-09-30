@@ -26,7 +26,9 @@
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_preview_json.h>
 #include <editor/preview/model_preview_state.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_o3d_read.h>
 #include <runtime/anim/adm_root_motion.h>
@@ -74,7 +76,8 @@ bool strutil_iequals(const std::string &a, const std::string &b) { return openno
 static int test_status_and_builds() {
 	editor_test::TempProjectDir dir("opennova_editor_model_preview");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Keep);
@@ -202,7 +205,8 @@ JsonValue overlay(const JsonValue &shown, const char *kind, int index) {
 static int test_overlays() {
 	editor_test::TempProjectDir dir("opennova_editor_model_preview_overlays");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Overlay Test"));
@@ -290,7 +294,8 @@ std::optional<ModelOverlay> find_overlay(const std::vector<ModelOverlay> &overla
 static int test_handles() {
 	editor_test::TempProjectDir dir("opennova_editor_model_preview_handles");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Handle Test"));
@@ -474,7 +479,8 @@ static int test_options_from_json() {
 static int test_animation() {
 	editor_test::TempProjectDir dir("opennova_editor_model_preview_animation");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Animation Test"));
@@ -612,7 +618,8 @@ event 0 0 0 0x2 0.9 1.7
 static int test_runtime_clips() {
 	editor_test::TempProjectDir dir("opennova_editor_model_preview_runtime");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Runtime Clips"));

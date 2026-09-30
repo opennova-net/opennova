@@ -297,7 +297,7 @@ io::JsonValue record_batch_request(ProjectSession &session, const std::string &p
 	JsonValue made = JsonValue::make_object(), added = JsonValue::make_array();
 	// A Rescan never runs inside an edit, so the document is still the one the batch changed.
 	const std::vector<NodeId> &records = document->last_added_records();
-	if (!batch.edits.empty() && session.last_edit_ok() && !batch.made_labels.empty() &&
+	if (!batch.edits.empty() && session.outcome().done() && !batch.made_labels.empty() &&
 	    records.size() == batch.made_labels.size()) {
 		for (size_t i = 0; i < records.size(); ++i) {
 			added.push(JsonValue::make_number(double(records[i])));

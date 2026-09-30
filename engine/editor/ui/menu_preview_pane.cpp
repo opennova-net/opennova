@@ -54,8 +54,8 @@ bool editable(mnu::WindowType type) { return type == mnu::WindowType::Edit || ty
 
 } // namespace
 
-MenuPreviewPane::MenuPreviewPane(EditorHost &host) :
-		host_(host), canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight), requests_(host) {}
+MenuPreviewPane::MenuPreviewPane(Workspace &workspace) :
+		workspace_(workspace), canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight), requests_(workspace) {}
 
 void MenuPreviewPane::end_frame() {
 	menu_canvas_.end_frame(requests_);
@@ -67,21 +67,21 @@ void MenuPreviewPane::end_frame() {
 void MenuPreviewPane::follow_selection_(const MnuDocument &document, const NodeAddress &selected) {
 	if (selected.child == followed_) return;
 	followed_ = selected.child;
-	MenuPreviewOptions options = viewport_->options();
+	MenuPreviewOptions options = viewport()->options();
 	if (!options.forcing() || !selected.child) return;
 	const mnu::WindowType type = window_type(document, selected);
 	options.force_window = selected.child;
 	options.checked = options.checked && checkable(type);
 	options.popup_open = options.popup_open && has_list(type);
 	options.focused = options.focused && editable(type);
-	viewport_->set_options(options);
+	viewport()->set_options(options);
 }
 
 // The toolbar, on a row that wraps whole controls in a narrow window.
 void MenuPreviewPane::toolbar_(const Frame &frame) {
 	const MnuDocument &document = *frame.canvas.document;
 	const NodeAddress &selected = frame.canvas.primary;
-	MenuPreviewOptions options = viewport_->options();
+	MenuPreviewOptions options = viewport()->options();
 	const MenuPreviewOptions before = options;
 	const float unit = ImGui::GetFontSize();
 	ui_kit::WrapRow row;
@@ -179,17 +179,17 @@ void MenuPreviewPane::toolbar_(const Frame &frame) {
 	if (mouse_on_picture_) ImGui::Text("x %d, y %d", mouse_design_x_, mouse_design_y_);
 	else ImGui::TextDisabled("x -, y -");
 	ui_kit::tooltip("Where the mouse is on the picture, in the menu's 800 x 600 units.");
-	if (options != before) viewport_->set_options(options);
+	if (options != before) viewport()->set_options(options);
 }
 
 void MenuPreviewPane::draw() {
-	const SessionView &view = host_.view();
-	if (!viewport_) {
+	const SessionView &view = workspace_.view();
+	if (!viewport()) {
 		ui_kit::empty_state(menu_preview_status_message(MenuPreviewStatus::NoDevice, std::string()).c_str());
 		return;
 	}
 	std::string detail;
-	const MenuPreviewStatus status = viewport_->status(&detail);
+	const MenuPreviewStatus status = viewport()->status(&detail);
 	// The screen the view keeps for the preview: the last menu screen selected, kept while
 	// another document (the stylesheet it draws with) is active.
 	Frame frame;
@@ -206,20 +206,20 @@ void MenuPreviewPane::draw() {
 	}
 	const MnuDocument &document = *canvas.document;
 	const Node &screen = *canvas.screen;
-	if (!viewport_->missing().empty() || !viewport_->unreadable().empty()) {
+	if (!viewport()->missing().empty() || !viewport()->unreadable().empty()) {
 		ImGui::PushTextWrapPos(0.0f);
-		if (!viewport_->missing().empty())
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", missing_banner(viewport_->missing()).c_str());
-		if (!viewport_->unreadable().empty())
+		if (!viewport()->missing().empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", missing_banner(viewport()->missing()).c_str());
+		if (!viewport()->unreadable().empty())
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-			                   unreadable_banner(viewport_->unreadable()).c_str());
+			                   unreadable_banner(viewport()->unreadable()).c_str());
 		ImGui::PopTextWrapPos();
 	}
-	canvas.compiler = viewport_->compiler();
-	canvas.state = viewport_->frame_state();
+	canvas.compiler = viewport()->compiler();
+	canvas.state = viewport()->frame_state();
 	// A picture of another revision (the edit lands on the next pump) maps no index.
 	canvas.current =
-			canvas.compiler && canvas.state && viewport_->shown_revision() == document.revision();
+			canvas.compiler && canvas.state && viewport()->shown_revision() == document.revision();
 	// The selection on this screen while the menu is the active document: the primary record,
 	// the window holding it, every selected window, and what the clipboard takes of it.
 	const bool active = view.active_document == document.path();
@@ -260,7 +260,7 @@ void MenuPreviewPane::draw() {
 			ImGui::PushID(int(i));
 			if (ImGui::Selectable((shown + "###note").c_str())) {
 				const NodeAddress address = menu_note_address(note, document, screen, nullptr);
-				window_requests::select(host_, document, address);
+				window_requests::select(workspace_, document, address);
 			}
 			if (shown != line) ui_kit::tooltip(line);
 			ImGui::PopID();
@@ -292,11 +292,11 @@ void MenuPreviewPane::clipboard_(const Frame &frame, EditorRequestKind kind) {
 	const MnuDocument &document = *frame.canvas.document;
 	const MenuClipboard &board = frame.clipboard;
 	if (kind != EditorRequestKind::Paste) {
-		if (board.copy) window_requests::clipboard(host_, document, kind);
+		if (board.copy) window_requests::clipboard(workspace_, document, kind);
 		return;
 	}
 	if (board.paste)
-		window_requests::paste(host_, document, board.paste_row, board.paste_parent,
+		window_requests::paste(workspace_, document, board.paste_row, board.paste_parent,
 		                       board.paste_position);
 }
 
@@ -319,10 +319,10 @@ void MenuPreviewPane::arrange_items_(const Frame &frame) {
 void MenuPreviewPane::draw_canvas_(const Frame &frame, float height) {
 	const MenuCanvasFrame &canvas = frame.canvas;
 	const MnuDocument &document = *canvas.document;
-	const MenuPreviewOptions &options = viewport_->options();
+	const MenuPreviewOptions &options = viewport()->options();
 	if (canvas_.begin(height, options.width, options.height)) {
 		const CanvasInput &in = canvas_.input();
-		canvas_.picture([this](int width, int tall) { viewport_->draw(width, tall); },
+		canvas_.picture([this](int width, int tall) { viewport()->draw(width, tall); },
 				[&] { return menu_canvas_.hover_tip(canvas, in); });
 		// Where the mouse is on the picture, in design units (the toolbar's readout).
 		const float sx = float(in.width) / float(menu::kMenuDesignWidth);
@@ -336,8 +336,8 @@ void MenuPreviewPane::draw_canvas_(const Frame &frame, float height) {
 		// what the selection can do.
 		if (canvas_.right_clicked() && !menu_canvas_.gesture().pressed()) {
 			const NodeAddress window = menu_window_at(canvas, in);
-			if (window.child && !holds(host_.view().selected, window))
-				window_requests::select(host_, document, window);
+			if (window.child && !holds(workspace_.view().selected, window))
+				window_requests::select(workspace_, document, window);
 			ImGui::OpenPopup("canvas_menu");
 		}
 		if (ImGui::BeginPopup("canvas_menu")) {

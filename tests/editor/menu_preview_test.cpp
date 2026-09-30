@@ -22,7 +22,9 @@
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_preview_state.h>
 #include <editor/preview/texture_header.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_frame_assets.h>
 
@@ -93,7 +95,8 @@ void set(ProjectSession &session, const Document &document, const NodeAddress &a
 static int test_headless_preview() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_preview");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	Device device;
 	const SessionView &view = session.view();
 	TEST_EXPECT(device.pump(view) == MenuPreviewAction::Keep);

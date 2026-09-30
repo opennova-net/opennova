@@ -107,21 +107,30 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_lease.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
-    # session — the one open project and everything the editor does to it (ADR 0046 d10),
-    # what Problems shows of its findings and offers to do about them, and the findings by
-    # file and record
+    # session — the one open project and everything the editor does to it (ADR 0046 d10):
+    # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
+    # imports, renames, the unsaved guard, the preferences over their store), what Problems
+    # shows of its findings and offers to do about them, and the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_settings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_query.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the

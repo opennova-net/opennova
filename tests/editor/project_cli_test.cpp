@@ -19,7 +19,10 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
+#include <editor/session/file_preferences_store.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/pff/pff.h>
 
 #include "commands.h"
@@ -422,7 +425,8 @@ static int test_validate_matches_the_editor() {
 		start = end + 1;
 	}
 	NoProcess platform;
-	opennova::editor::ProjectSession session(platform, dir.file("settings.json"));
+	opennova::editor::MemoryPreferencesStore preferences;
+	opennova::editor::ProjectSession session(platform, preferences);
 	session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, root));
 	std::vector<std::string> shown;
 	bool render_note = false;
@@ -467,7 +471,8 @@ static int test_one_game_install() {
 	                                                    "</SCREEN>\r\n"));
 	NoProcess platform;
 	{
-		opennova::editor::ProjectSession session(platform, dir.file("settings.json"));
+		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
+		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, root));
 		TEST_EXPECT(session.project_open() && session.view().retail_directory.empty());
 		opennova::editor::EditorRequest apply =
@@ -493,7 +498,8 @@ static int test_one_game_install() {
 	TEST_EXPECT(run({"new", other, "--title", "Other"}) == 0);
 	TEST_EXPECT(run_capture(capture, {"status", other}, text) == 0 && !has("game install:"));
 	{
-		opennova::editor::ProjectSession session(platform, dir.file("settings.json"));
+		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
+		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::make_request(opennova::editor::EditorRequestKind::OpenProject, other));
 		TEST_EXPECT(session.project_open() && session.view().retail_directory == install);
 	}

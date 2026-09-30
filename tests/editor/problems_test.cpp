@@ -28,9 +28,11 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/findings_index.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -245,7 +247,8 @@ static int test_fixes() {
 	            opennova::pff::PFF_WRITE_OK);
 
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Fixes"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -665,7 +668,8 @@ static int test_fix_index() {
 static int test_placeholders() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_placeholders");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Placeholders"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -833,7 +837,8 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Places"));
 	editor_test::create_missing_files(session);
 	editor_test::set_retail_directory(session, install);

@@ -7,6 +7,7 @@
 
 #include <editor/project/project_files.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/output_window.h>
@@ -110,7 +111,7 @@ std::string waiting_action(const SessionView::UnsavedPrompt &prompt) {
 // Quit: Save all / Discard / Cancel; Build and Play, which pack the files on disk, and an
 // import or a rename, which write over them: Save all and build (play, import, rename) /
 // Cancel.
-void draw_unsaved_prompt(EditorHost &host, const SessionView::UnsavedPrompt &prompt) {
+void draw_unsaved_prompt(Workspace &workspace, const SessionView::UnsavedPrompt &prompt) {
 	if (prompt.open) ImGui::OpenPopup("Unsaved changes");
 	if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	if (!prompt.open) { // answered another way (the editor MCP)
@@ -133,12 +134,12 @@ void draw_unsaved_prompt(EditorHost &host, const SessionView::UnsavedPrompt &pro
 	const auto answer = [&](UnsavedChoice choice) {
 		auto request = make_request(EditorRequestKind::ResolveUnsaved);
 		request.unsaved_choice = choice;
-		host.request(std::move(request));
+		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	};
 	// An answer the session would refuse while an operation runs (busy_refuses_answer) is
 	// disabled, the prompt kept: the running operation named, as the refusal names it.
-	const OperationStatus &running = host.view().operation;
+	const OperationStatus &running = workspace.view().operation;
 	const std::string wait = running.running() ? std::string("Wait for ") + operation_kind_row(running.kind).noun +
 	                                                     " to finish" + (running.cancellable ? ", or cancel it." : ".")
 	                                           : std::string();
@@ -280,11 +281,11 @@ bool EditorWindows::take_request(EditorRequest &out) {
 }
 
 void EditorWindows::set_menu_preview_viewport(MenuPreviewViewport *viewport) {
-	if (preview_window_) preview_window_->set_menu_viewport(viewport);
+	devices_.menu = viewport;
 }
 
 void EditorWindows::set_model_preview_viewport(ModelPreviewViewport *viewport) {
-	if (preview_window_) preview_window_->set_model_viewport(viewport);
+	devices_.model = viewport;
 }
 
 void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
