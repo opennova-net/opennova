@@ -820,10 +820,17 @@ static int test_retail_open() {
 	}
 	const double open_ms = ms_since(started);
 	const auto validating = clock::now();
+	// Where the validation stood before its longest poll: the files it had asked of its total (all
+	// of them: the project checks and the rows).
+	ValidationStatus before_longest;
 	while (v.activity.validation.running) {
+		const ValidationStatus before = v.activity.validation;
 		const auto poll = clock::now();
 		s.session.poll();
-		longest_validation = std::max(longest_validation, ms_since(poll));
+		if (ms_since(poll) > longest_validation) {
+			longest_validation = ms_since(poll);
+			before_longest = before;
+		}
 		++validation_polls;
 	}
 	const double validation_ms = ms_since(validating);
@@ -831,9 +838,11 @@ static int test_retail_open() {
 	TEST_EXPECT(v.project.retail_files.size() > 1000);
 	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
 	            "poll %.1f ms listing the install's %zu names, the longest poll %.1f ms); validated in %zu polls, %.0f "
-	            "ms (the longest poll %.1f ms); %zu files scanned, %zu Problems rows, %zu edges\n",
+	            "ms (the longest poll %.1f ms, from %llu of %llu files); %zu files scanned, %zu Problems rows, %zu "
+	            "edges\n",
 	            exported, double(bytes_exported) / (1024.0 * 1024.0), open_polls, open_ms, request_ms, first_open,
 	            v.project.retail_files.size(), longest_open, validation_polls, validation_ms, longest_validation,
+	            static_cast<unsigned long long>(before_longest.done), static_cast<unsigned long long>(before_longest.total),
 	            s.session.files_scanned(), v.findings.diagnostics.size(), v.findings.graph->edge_count());
 	TEST_EXPECT(open_polls > 1 && validation_polls > 1);
 	// The validation's parts, each timed over the same files afresh: the graph's update (its first
