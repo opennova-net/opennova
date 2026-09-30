@@ -2,11 +2,13 @@
 
 Every file under `fixtures/` belongs to one of three classes:
 
-- **Minted** — produced by a `tests/fixtures/minimal_*_gen.cpp` generator through
+- **Minted** — produced by a `tests/fixtures/*_gen.cpp` generator through
   one of our own writers from small integer data, and byte-compared by that
   generator's ctest on every run. To change one, change the generator, run its
   binary with `--write`, and commit the files it wrote. Never edit a minted file
-  by hand and never carve one out of retail bytes (ADR 0003).
+  by hand and never carve one out of retail bytes (ADR 0003). The one minted file
+  no generator writes is `novaworld/self-capture-session.pcap`, an opennova
+  self-capture that `nw_self_capture_test --write-fixture` regenerates.
 - **Authored** — text we wrote (test `.def` rows, menus, the one-bone `.bad`
   clips).
 - **Keep** — the small retail-interop set: original files kept as-is so the
@@ -20,14 +22,16 @@ in the private `opennova-net/opennova-reference-assets` repository.
 ## Rules (enforced by `scripts/lint/fixture_lint.py`)
 
 - Every file is one of the three classes: minted files are named (by path or
-  directory) in the `tests/fixtures/*_gen.cpp` that writes them; authored and
+  directory) in the `tests/fixtures/*_gen.cpp` that writes them (a test's
+  self-capture carries a `minted_by` row instead); authored and
   keep files carry a row in `scripts/lint/fixture_allowlist.json`. A retail blob
   outside the keep rows fails the lint, and a keep row may live only under
   `novaworld/` (the lint refuses any other): every other retail file the tests
   read comes from the reference fixture set (`docs/asset-gated-tests.md`), never
   from this tree.
-- Every file is referenced by a test, the ctest registration, a workflow, a script,
-  or a doc (this README counts): a fixture nothing reads is deleted, not kept.
+- Every file is referenced by a test, a probe, the ctest registration, a workflow,
+  a script, or this README (a `docs/` mention does not count): a fixture nothing
+  reads is deleted, not kept.
 - Every binary file is LFS-tracked (`.gitattributes` `fixtures/**`) and every
   plain-text file (`.def`, `.mnu`, `.ptl`, the manifests, ...) is a plain git blob
   that diffs and reviews normally (the per-extension carve-outs there; the lint
@@ -50,13 +54,15 @@ the reference fixture set the gated tests read (`retail::reference_fixture`,
 
 | Files | Why they stay |
 |---|---|
-| `novaworld/**` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
+| `novaworld/*.gsb`, `novaworld/*.hexcap`, `novaworld/run_*/*` | NovaWorld/in-game wire captures and manifests the codec tests replay (retail bytes are the product here) |
 
 ## Authored files
 
 `def/items.def` (test rows 106100..), `terrain/tmap/items.def`, `mnu/widgets.mnu`,
 `mnu/all_widgets.mnu`, `mns/test_style.mns`, `score/score_sample.ini`,
-`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`),
+`anim/*` (the one-bone `.bad` clips, `soldier.adm`, `US01.adm`, and
+`weapon_timing.txt`, the `opennova-3di weapon timing` input the Blender packaging
+workflow runs),
 `particle/gorehit.ptu` (the gore-set half of the effect catalog, written in the
 retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
 rig; `grm_roundtrip` pins it byte-for-byte through the writer),
@@ -98,6 +104,9 @@ control register 0, values 0..4, no speed):
 | `mount_yaw_style114` | mount | the first LOD0 track with control 113 on register 1 (the cradle's yaw) becomes style 114 | ctrl_bus wave style, normal |
 | `mount_ctrl1_lod_frac_yaw_style114` | mount | CTRL 1 renamed `LOD_FRAC` + the same track edit | ctrl_bus wave style, patched |
 | `mount_mtrl0_rgbgen113_reg1` | mount | material 0 as FF_ST_OP_LUM (emissive 2), RGB generator style 113 on register 1, black to white | ctrl_bus material alias |
+| `mount_mtrl2_ab_lum` | mount | material 2 (the heat slab) as `FF_ST_AB_LUM` | `framefx_test.gd` alpha-blend LUM adds nothing to Q3; `slot_shadow_test.gd` |
+| `person_mtrl0_ad_lum` | person | material 0 `FF_ST_AD_LUM` (emissive full) | `framefx_test.gd` skinned LUM never reaches Q3 |
+| `pump_mtrl1_mt_alphatest` | pump | material 1 (the `FF_MT_OP` post) alpha test on, threshold byte 32 | `render_swatch_pass_modes.gd` probe, the `_MT` alpha-test projshadow caster |
 | `crate_mtrl0_ad_lum_upl113` | crate | material 0 `FF_ST_AD_LUM` (emissive full), CTRL 0 `UPL_INTENSITY`, RGB generator style 113 on register 0, black to white | `celestial_test.gd` sky bodies |
 | `crate_mtrl0_ab_lum_upl113` | crate | the same edits with material 0 `FF_ST_AB_LUM` | `celestial_test.gd` Q3 glow blend |
 | `armory_lght0_colorgen113_flicker` | armory | light 0: style 113, phase 0, black to white, objects enabled | ctrl_bus light bus |

@@ -42,7 +42,6 @@ op item create --vault OpenNova-Deploy --title app-prod --category 'Server' \
   admin_api_token="$(openssl rand -hex 24)" \
   admin_basic_auth_user=admin \
   admin_basic_auth_password="$(openssl rand -hex 16)" \
-  expansion_github_token="ghp_replace_with_a_PAT_with_contents_write" \
   expansion_publish_token="$(openssl rand -hex 24)"
 
 # 1Password-generated SSH key the EC2 instance trusts.
@@ -56,12 +55,13 @@ op item create --vault OpenNova-Deploy --title github --category 'API Credential
   owner=opennova-net
 ```
 
-`app-prod`'s two `expansion_*` fields and the `github` item feed only the
+`app-prod`'s `expansion_publish_token` field and the `github` item feed only the
 `infra/github` stack, which is pending retirement (ADR 0048, `TODO.md`); the
 server no longer reads them.
 
 The `op://` reference paths the toolbox reads are listed in
-`deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
+`deploy/env/terraform.env.tpl`, `deploy/env/app.prod.env.tpl` and
+`deploy/env/github.tfvars.json.tpl`.
 
 ## 2. Mint the service-account token
 
@@ -90,7 +90,8 @@ export OP_SERVICE_ACCOUNT_TOKEN=ops_...        # the only secret you handle
 ```
 
 `secrets check` resolves every reference without printing a value. Fix any miss
-before continuing.
+before continuing (the `github.tfvars.json` line also needs the `expansions-ci`
+item that step 3 creates, so on a first deployment it fails until then).
 
 ## 3. Stand up the infrastructure
 
@@ -147,16 +148,17 @@ then apply:
 
 State lives in its own 1Password document (`tfstate-github`). The Actions secrets
 let each expansion repo's build workflow upload its package to S3 and call the
-server's `/admin/internal/.../publish` endpoint. See `infra/github/README.md` for
-the full pipeline and `infra/github/expansion-publish-workflow.yml.example` for the
-workflow the expansion repos copy in. On a brand-new GitHub org with no repos,
+server's `/admin/internal/.../publish` endpoint (now removed). See
+`infra/github/README.md` for the full pipeline and
+`infra/github/expansion-publish-workflow.yml.example` for the workflow the
+expansion repos copy in. On a brand-new GitHub org with no repos,
 skip `github import` and run `github apply` directly.
 
 ## 5. Publish and deploy the images
 
-The server and web images publish to GHCR from CI (`.github/workflows/
-novaworld-images.yml`). Make those packages public once so the target can pull
-them without credentials. Then:
+The server and web images publish to GHCR from CI
+(`.github/workflows/novaworld-images.yml`). Make those packages public once so
+the target can pull them without credentials. Then:
 
 ```bash
 ./deploy/run.sh app deploy                     # pull GHCR images + compose up

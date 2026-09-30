@@ -48,3 +48,5 @@ means adding it to this table.
   `godot/game/bundled_menu_companion.gd`. `MainGame` mounts the picked install,
   saves it as `[resources] retail_dir` in `user://opennova.cfg`, and switches
   to that install's own menus. `EXIT` quits through the document's own action.
+  On the web build the page's `WebRetailPicker` stages the pick, which is never
+  saved, and `EXIT` does nothing (ADR 0049).
