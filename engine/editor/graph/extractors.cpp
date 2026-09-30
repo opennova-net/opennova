@@ -272,9 +272,9 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
 	if (!graph_reads_file(kind, name))
 		return true;
 	if (const DocumentType *type = document_type_for(kind)) {
-		std::unique_ptr<Document> document = type->make();
+		std::unique_ptr<DocumentBase> document = type->make();
 		if (!document->load_bytes(bytes, name, kind, game, error)) return false;
-		extract_from_document(*document, out);
+		if (const Document *records = records_of(*document)) extract_from_document(*records, out);
 		return true;
 	}
 	const NativeExtractor extract = native_extractor(kind);

@@ -87,6 +87,7 @@ constexpr Token<EditOperation> kOperationTokens[] = {
 	{EditOperation::Move, "move"},
 	{EditOperation::Paste, "paste"},
 	{EditOperation::SetFileValue, "set_file_value"},
+	{EditOperation::Apply, "apply"},
 };
 
 constexpr Token<SelectMode> kSelectModeTokens[] = {
@@ -319,13 +320,21 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 
 bool edit_from_json(const JsonValue &json, Edit &out, std::string &error) {
 	if (!json.is_object()) { error = "\"edit\" must be an object."; return false; }
-	if (!members_known(json, {"operation", "row", "kind", "child", "parent", "field", "value", "position", "coalesce", "gesture"},
+	if (!members_known(json, {"operation", "row", "kind", "child", "parent", "field", "value", "position", "coalesce", "gesture",
+	                          "payload"},
 	                   "edit", error)) return false;
 	Edit edit;
 	std::string operation;
 	if (!read_string(json, "operation", operation, error)) return false;
 	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation)) {
 		error = "Unknown edit operation \"" + operation + "\".";
+		return false;
+	}
+	// An Apply's change is made in C++ by its document type (Edit::payload), which JSON names by
+	// its token alone: no request carries one yet.
+	if (edit.operation == EditOperation::Apply || json.get("payload")) {
+		error = "An apply edit carries a change its document type makes; the editor's JSON cannot "
+		        "send one.";
 		return false;
 	}
 	for (const char *key : {"row", "child", "parent"}) {
@@ -369,6 +378,7 @@ JsonValue edit_to_json(const Edit &edit) {
 	if (edit.position != SIZE_MAX) out.set("position", json_number(double(edit.position)));
 	if (edit.coalesce) out.set("coalesce", boolean(true));
 	if (edit.gesture) out.set("gesture", json_number(double(edit.gesture)));
+	if (edit.payload) out.set("payload", json_string(edit.payload->token()));
 	return out;
 }
 
@@ -1077,21 +1087,25 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	return out;
 }
 
-JsonValue document_to_json(const Document &document, bool with_rows) {
+JsonValue document_to_json(const DocumentBase &base, bool with_rows) {
+	// The record document's rows and records where it is one; the lifecycle alone for another kind.
+	const Document *records = records_of(base);
 	JsonValue out = JsonValue::make_object();
-	out.set("path", json_string(document.path()));
-	out.set("kind", json_string(asset_kind_token(document.kind())));
-	out.set("dirty", boolean(document.dirty()));
-	out.set("file_state_changed", boolean(document.file_state_changed()));
-	out.set("blocked", boolean(document.blocked()));
-	out.set("revision", json_number(double(document.revision())));
-	out.set("can_undo", boolean(document.can_undo()));
-	out.set("can_redo", boolean(document.can_redo()));
-	out.set("ignored_lines", json_number(double(document.ignored_lines())));
-	out.set("row_count", json_number(double(document.rows().size())));
-	out.set("last_added", json_number(double(document.last_added())));
+	out.set("path", json_string(base.path()));
+	out.set("kind", json_string(asset_kind_token(base.kind())));
+	out.set("dirty", boolean(base.dirty()));
+	if (records) out.set("file_state_changed", boolean(records->file_state_changed()));
+	out.set("blocked", boolean(base.blocked()));
+	out.set("revision", json_number(double(base.revision())));
+	out.set("can_undo", boolean(base.can_undo()));
+	out.set("can_redo", boolean(base.can_redo()));
+	out.set("ignored_lines", json_number(double(base.ignored_lines())));
+	if (records) {
+		out.set("row_count", json_number(double(records->rows().size())));
+		out.set("last_added", json_number(double(records->last_added())));
+	}
 	JsonValue issues = JsonValue::make_array();
-	for (const SourceIssue &issue : document.issues()) {
+	for (const SourceIssue &issue : base.issues()) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("blocks", boolean(issue.blocks));
 		entry.set("line", json_number(double(issue.line)));
@@ -1101,6 +1115,8 @@ JsonValue document_to_json(const Document &document, bool with_rows) {
 		issues.push(std::move(entry));
 	}
 	out.set("issues", std::move(issues));
+	if (!records) return out;
+	const Document &document = *records;
 	JsonValue kinds = JsonValue::make_array();
 	for (const RecordKindRow &row : document.kinds()) {
 		if (!*row.add_label) continue;

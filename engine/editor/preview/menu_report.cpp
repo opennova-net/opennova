@@ -32,7 +32,7 @@ JsonValue edges(const mnu::RectEdges &rect) {
 	return out;
 }
 
-bool names_menu(const Document &document, const std::string &path) {
+bool names_menu(const DocumentBase &document, const std::string &path) {
 	return document.path() == path ||
 	       normalized_logical_name(basename_of(document.path())) == normalized_logical_name(path);
 }

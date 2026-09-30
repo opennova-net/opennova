@@ -85,7 +85,7 @@ bool parse_edit(const JsonValue &json, size_t index, const Document &document, s
 	const std::string op = json.get_string("op", "");
 	Edit edit;
 	if (!edit_operation_from_token(op, edit.operation) || edit.operation == EditOperation::Paste ||
-	    edit.operation == EditOperation::SetFileValue) {
+	    edit.operation == EditOperation::SetFileValue || edit.operation == EditOperation::Apply) {
 		error = "Unknown edit op \"" + op + "\" (set, clear, write, add, duplicate, remove or move).";
 		return false;
 	}

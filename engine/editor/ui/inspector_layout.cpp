@@ -27,8 +27,8 @@ std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
 	// per kind, answers for every file of the kind.
 	static std::map<AssetKind, std::unique_ptr<Document>> blanks;
 	std::unique_ptr<Document> &blank = blanks[source->kind];
-	if (!blank) blank = type->make();
-	return field_title(*blank, edge.address.kind, edge.field);
+	if (!blank) blank = records_of(type->make());
+	return blank ? field_title(*blank, edge.address.kind, edge.field) : edge.field;
 }
 
 namespace {

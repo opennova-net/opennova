@@ -86,6 +86,8 @@ public:
 	// parse (session_json's problem_query_from_json and problems_to_json), each answer and its
 	// fixes kept while what they read stands.
 	std::string problems_json(const std::string &query);
+	// The open record document at `path` (project-relative, or a logical name), "" the active one:
+	// null when none is open there, or the one open is not a record document (as_records).
 	Document *document_for(const std::string &path = {});
 	bool documents_dirty() const;
 	bool project_open() const;

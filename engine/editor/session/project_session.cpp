@@ -268,7 +268,7 @@ std::string ProjectSession::problems_json(const std::string &query) {
 }
 
 Document *ProjectSession::document_for(const std::string &path) {
-	return impl_->documents.document_for(path);
+	return impl_->documents.records_for(path);
 }
 
 bool ProjectSession::documents_dirty() const {

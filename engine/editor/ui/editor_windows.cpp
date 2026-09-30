@@ -176,7 +176,7 @@ devtools::DockLayout editor_layout() {
 	return layout;
 }
 
-const Document *active_document(const SessionView &v) {
+const DocumentBase *active_document(const SessionView &v) {
 	for (const auto &document : v.documents)
 		if (document->path() == v.active_document) return document.get();
 	return nullptr;
@@ -310,7 +310,7 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	const SessionView &v = view();
-	const Document *document = active_document(v);
+	const DocumentBase *document = active_document(v);
 	draw_file_menu(v);
 	draw_edit_menu(v, document);
 	draw_build_menu(v);
@@ -376,7 +376,7 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	ImGui::EndMenu();
 }
 
-void EditorWindows::draw_edit_menu(const SessionView &v, const Document *document) {
+void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *document) {
 	if (!ImGui::BeginMenu("Edit")) return;
 	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
 		request(make_request(EditorRequestKind::Undo));
@@ -431,7 +431,7 @@ void EditorWindows::draw_new_project() {
 // Undo and Redo are the field's own then. Ctrl+Shift+Z is Redo, as Ctrl+Y is. None of them
 // while the unsaved prompt is open: an Undo behind it would make a file it does not list
 // unsaved.
-void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
+void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
 	if (v.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
@@ -473,7 +473,7 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	const SessionView &v = view();
 	if (!v.project_open) return;
-	std::vector<const Document *> unsaved;
+	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents)
 		if (document->dirty()) unsaved.push_back(document.get());
 	size_t errors = 0, warnings = 0, infos = 0;
@@ -549,7 +549,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ui_kit::unsaved_dot(height);
 		ImGui::TextUnformatted(unsaved_text.c_str());
 		if (ImGui::BeginPopup("unsaved")) {
-			for (const Document *document : unsaved)
+			for (const DocumentBase *document : unsaved)
 				if (menu_item(document->path().c_str(), nullptr, v.allows(EditorRequestKind::OpenDocument)))
 					request(make_request(EditorRequestKind::OpenDocument, document->path()));
 			ImGui::Separator();

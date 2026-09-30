@@ -54,7 +54,8 @@ struct Reveal {
 };
 
 const Document *active(const SessionView &view) {
-	for (const auto &document : view.documents) if (document->path() == view.active_document) return document.get();
+	for (const auto &document : view.documents)
+		if (document->path() == view.active_document) return records_of(*document);
 	return nullptr;
 }
 

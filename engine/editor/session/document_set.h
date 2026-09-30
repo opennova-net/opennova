@@ -39,9 +39,11 @@ public:
 	// --- what is open --------------------------------------------------------------------------
 
 	// The open document at `path` (project-relative, or a logical name), "" the active one; null
-	// when none is open.
-	Document *document_for(const std::string &path = {});
-	const std::vector<std::shared_ptr<Document>> &documents() const { return documents_; }
+	// when none is open. records_for: the record document it is (as_records), null too when the
+	// one open is of another kind: what a request that reads or edits records acts on.
+	DocumentBase *document_for(const std::string &path = {});
+	Document *records_for(const std::string &path = {});
+	const std::vector<std::shared_ptr<DocumentBase>> &documents() const { return documents_; }
 	bool documents_dirty() const;
 	// The paths of the open documents with unsaved edits, in the order they were opened.
 	std::vector<std::string> dirty_files() const;
@@ -63,7 +65,7 @@ public:
 
 	// A document of its kind's type read from the project's file; null, with `error`, when the file
 	// does not load.
-	std::shared_ptr<Document> load(const std::string &relative, AssetKind kind, Diagnostic &error) const;
+	std::shared_ptr<DocumentBase> load(const std::string &relative, AssetKind kind, Diagnostic &error) const;
 	// The open documents against their files (Rescan, an import, Build and Play): a clean one
 	// whose file changed is read again, one whose file no longer reads stays open as it was
 	// (document.stale), one with unsaved edits whose file changed keeps them (document.conflict).
@@ -123,18 +125,18 @@ private:
 		std::vector<NodeAddress> selected;
 	};
 
-	bool apply_edits(Document &document, const std::vector<Edit> &edits);
+	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
 	void copy_records(Document &document, bool cut);
 	void paste_records(Document &document, const Edit &target);
 	void duplicate_records(Document &document);
 	void rewrite_file(const std::string &path);
 	// The open document at exactly `path` (activate's), or null.
-	const Document *open_at(const std::string &path) const;
+	const DocumentBase *open_at(const std::string &path) const;
 
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
-	std::vector<std::shared_ptr<Document>> documents_;
+	std::vector<std::shared_ptr<DocumentBase>> documents_;
 	// Each open document's instance and whether it has unsaved edits, as the view last listed
 	// them: DocumentSet moves when they differ (update_view).
 	std::vector<std::pair<uint64_t, bool>> document_set_;

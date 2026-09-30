@@ -8,7 +8,7 @@
 
 #include <base/vfs/file_source.h>
 #include <editor/assets/asset_registry.h>
-#include <editor/model/document.h>
+#include <editor/model/document_base.h>
 
 namespace opennova::editor {
 
@@ -25,7 +25,7 @@ namespace opennova::editor {
 class ProjectAssetSource : public FileSource {
 public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game);
-	void set_open(const std::vector<std::shared_ptr<const Document>> &open);
+	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &open);
 	void clear();
 
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override;
@@ -46,7 +46,7 @@ private:
 		int64_t modified = 0;
 	};
 	struct Open {
-		std::shared_ptr<const Document> document;
+		std::shared_ptr<const DocumentBase> document;
 		uint64_t identity = 0;
 		uint64_t revision = 0;
 	};

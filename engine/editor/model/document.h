@@ -1,13 +1,14 @@
 #pragma once
 
-// Thread confinement (ADR 0046 S13 D2). A Document belongs to the thread that made it: its
-// memos (the rows' record indexes, the answers to what changed since the save, the records by
-// identity) fill lazily inside its const queries. Another thread reads a
-// snapshot() instead, a new instance over the same committed rows and file-wide state. That is
-// safe because nothing a committed row holds ever changes: a Node carries no memo filled inside a
-// const query (what a row derives, a model's or a menu screen's places of its identities, is built
-// when the row is made, at parse and by the edit that makes it, before it commits), and the
-// process-wide counters (a document's identity, a gesture's token) are atomic.
+// Thread confinement (ADR 0046 S13 D2). A document belongs to the thread that made it: its
+// memos (a record document's: the rows' record indexes, the answers to what changed since the
+// save, the records by identity) fill lazily inside its const queries. Another thread reads a
+// snapshot() instead (DocumentBase::snapshot), a new instance over the same committed rows and
+// file-wide state. That is safe because nothing a committed row holds ever changes: a Node
+// carries no memo filled inside a const query (what a row derives, a model's or a menu screen's
+// places of its identities, is built when the row is made, at parse and by the edit that makes
+// it, before it commits), and the process-wide counters (a document's identity and load
+// generation, a gesture's token) are atomic.
 
 #include <cstdint>
 #include <functional>
@@ -17,8 +18,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <editor/assets/asset_kind.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/document_base.h>
 #include <editor/model/edit.h>
 #include <editor/model/edit_history.h>
 #include <editor/model/field_use.h>
@@ -49,11 +50,14 @@ struct RecordKindRow {
 	bool top = false;           // a row of the file, not a record nested in one
 };
 
-// An editable file (ADR 0046 d9): the lifecycle every document type shares (load
-// and decode, the change fingerprint, undo/redo, the save checkpoint, the conflict
-// check, the atomic write) over rows a document type parses from and serializes to
-// its native format. The type supplies the record-level hooks below; the session,
-// the windows and the shell use only this interface.
+// The record document (ADR 0046 d9, S13 D6): a DocumentBase whose content is rows a document
+// type parses from and serializes to its native format, each holding records every edit
+// addresses by identity and field. The base keeps the lifecycle (the load and its decode, the
+// change fingerprint, the conflict check, the atomic write, the source findings); this keeps the
+// rows, their undo/redo and the save checkpoint over them, and everything derived from what a type
+// declares. A type supplies the record-level hooks below: eight it must (kinds, collections,
+// fields, read, set_field, parse, serialize, snapshot), the others having a default; the
+// session, the windows and the shell use only this interface and the base's.
 //
 // Records nest at any depth (ADR 0046 S9g): a row owns collections, and so may each
 // record in them; the type declares, per owner, the collections it holds
@@ -66,53 +70,24 @@ struct RecordKindRow {
 // identities across edits, so it costs a list of pointers), and answers what changed
 // since: a field, a record, the file-wide state, what a field held, and the edits that
 // give a field back.
-class Document {
+class Document : public DocumentBase {
 public:
-	Document();
-	virtual ~Document() = default;
+	Document() = default;
 
-	// The file at `absolute_path` read, then load_bytes: the document keeps the path and what
-	// the file held, which Save writes over and checks against.
-	bool load(const std::string &absolute_path, const std::string &relative_path, AssetKind kind,
-	          const std::string &game, Diagnostic &error);
-	// A file's bytes as stored (the game's loader decodes them), with the name it goes by in
-	// the project: what an import reads before anything is written (the import plan follows
-	// its references). A document loaded this way has no file: Save refuses it
-	// (document.no_file).
-	bool load_bytes(const std::vector<uint8_t> &bytes, const std::string &relative_path, AssetKind kind,
-	                const std::string &game, Diagnostic &error);
-	// Writes serialize()'s text over the file. The file's source findings are then those of
-	// the text written (the input the rewrite dropped is no longer reported); the rows, their
-	// identities and the history stay, and the saved baseline moves to them.
-	bool save(Diagnostic &error);
-	// What an explicit Save does with this document when it has no unsaved edits: nothing when
-	// it serializes to the bytes the file held when it was loaded or last saved; a write when it
-	// serializes to other bytes (the canonical rewrite: the lines the game ignores dropped, the
-	// line ends fixed, a table regrouped); a refusal when it does not serialize (Save says why,
-	// document.unserializable), never "no changes".
-	enum class RewriteNeed { None, Rewrite, Unserializable };
-	RewriteNeed rewrite_need() const;
-	// True while the file holds the bytes this document was loaded from or last saved (the
-	// conflict check Save makes); false once it changed outside the editor or is gone.
-	bool matches_file() const;
-	// True once Save wrote the file since the load: the file then holds bytes serialize()
-	// made, not the bytes the document was read from (a type whose writer normalizes what
-	// it read tells the two apart by it).
-	bool wrote_file() const { return wrote_file_; }
-	// One undoable change. Every address is checked against the document first: a stale
-	// identity, or one that names another kind than the address says, is refused
-	// (document.selection). A Move that leaves the record where it is, a Clear of a field
-	// already left out, a Write of one already written and a Set of the value a field holds
-	// (the field as the record reads it, and whether it is written, the same after the Set)
-	// succeed with no history step (the document stays clean). A coalesced Set applies to the
-	// record as its open group found it (Edit::coalesce), and one that gives the group's
-	// fields back the values they held leaves no step; edits sharing a gesture fold into one
-	// step (Edit::gesture). The type may refuse any change before it commits
-	// (accept_change).
-	bool apply(const Edit &edit, Diagnostic &error);
-	// A batch: every edit changes the same row (Sets, Clears, Writes, and Adds, Duplicates,
-	// Removes, Moves and Pastes inside it), cloned once and committed as one Change, one
-	// undo step; nothing is committed when any edit is refused or the type vetoes the change.
+	// One undoable change (the base's one-edit apply, a batch of one). Every address is checked
+	// against the document first: a stale identity, or one that names another kind than the
+	// address says, is refused (document.selection). A Move that leaves the record where it is, a
+	// Clear of a field already left out, a Write of one already written and a Set of the value a
+	// field holds (the field as the record reads it, and whether it is written, the same after the
+	// Set) succeed with no history step (the document stays clean). A coalesced Set applies to the
+	// record as its open group found it (Edit::coalesce), and one that gives the group's fields
+	// back the values they held leaves no step; edits sharing a gesture fold into one step
+	// (Edit::gesture). An Apply hands its payload to the type (apply_payload). The type may refuse
+	// any change before it commits (accept_change).
+	using DocumentBase::apply;
+	// A batch: every edit changes the same row (Sets, Clears, Writes, Applies, and Adds,
+	// Duplicates, Removes, Moves and Pastes inside it), cloned once and committed as one Change,
+	// one undo step; nothing is committed when any edit is refused or the type vetoes the change.
 	// A later edit may name a record an earlier one made (batch_made). A batch whose edits all
 	// coalesce folds with the next batch of the same fields (a drag without a gesture); one
 	// continuing its open group (typing) starts again from what the group found, the step
@@ -121,27 +96,20 @@ public:
 	// step back as it was). Adding, removing or moving rows, and a file-wide value, go one edit
 	// at a time. A record's new name is its own edit: what names it elsewhere, in its file or
 	// another, is Rename everywhere's (graph/rename_transaction, plan_symbol_rename_project).
-	bool apply(const std::vector<Edit> &edits, Diagnostic &error);
-	void undo();
-	void redo();
-	void end_edit_group() { history_.end_edit_group(); }
+	bool apply(const std::vector<Edit> &edits, Diagnostic &error) override;
+	void undo() override;
+	void redo() override;
+	void end_edit_group() override { history_.end_edit_group(); }
+	bool dirty() const override { return history_.dirty(); }
+	bool can_undo() const override { return history_.can_undo(); }
+	bool can_redo() const override { return history_.can_redo(); }
+	uint64_t revision() const override { return history_.revision(); }
+	// Not measured yet: the history budget (S13 D7) counts the rows its steps hold once a row
+	// carries its footprint; 0 until then.
+	size_t history_bytes() const override { return 0; }
+	const Document *as_records() const override { return this; }
+	Document *as_records() override { return this; }
 
-	const std::string &path() const { return relative_path_; }
-	AssetKind kind() const { return kind_; }
-	bool dirty() const { return history_.dirty(); }
-	bool can_undo() const { return history_.can_undo(); }
-	bool can_redo() const { return history_.can_redo(); }
-	uint64_t revision() const { return history_.revision(); }
-	// This instance, distinct from every other document ever made in the process but its
-	// snapshots, which share it: a reload is a new document even at the same revision (the
-	// graph caches by it).
-	uint64_t identity() const { return identity_; }
-	// True while the source holds input the typed model cannot carry: editing and
-	// saving wait for the source to be corrected and reloaded. Lines the game ignores
-	// are only reported (issues) and are dropped on save.
-	bool blocked() const { return blocked_; }
-	size_t ignored_lines() const;
-	const std::vector<SourceIssue> &issues() const { return issues_; }
 	const std::vector<std::shared_ptr<const Node>> &rows() const { return rows_; }
 	const FileState *file_state() const { return file_state_.get(); }
 	// The record the last Add, Duplicate or Paste made (a Paste's first record), and
@@ -270,17 +238,12 @@ public:
 	// which is the saved baseline), as it stands now by the identity it keeps: moved since, it is
 	// still that record; an empty address when the baseline has none there or it is gone since.
 	NodeAddress source_address(const std::string &locator) const;
-	virtual SerializeResult serialize() const = 0;
-	// This document as it stands, for another thread (the thread confinement above): a new
-	// instance of its type over the same committed rows and file-wide state, with its identity,
-	// revision, history and saved baseline. None of the base's memos come with it (it fills them
-	// again as it is read); a type's own, which its copy constructor copies (a menu's saved image
-	// and lookups, a stylesheet's evaluated sheet and its values' uses), are each kept for one
-	// revision, which the snapshot shares, so they stay true. Read only: an edit, an undo, a redo,
-	// a load and a save of it do nothing or are refused (document.snapshot). A type makes it with
-	// its copy constructor over the base's (return std::make_unique<Type>(*this)).
-	virtual std::unique_ptr<Document> snapshot() const = 0;
-	bool is_snapshot() const { return snapshot_; }
+	// serialize() and snapshot() are the base's (DocumentBase). A record document's snapshot shares
+	// its committed rows, file-wide state, history and saved baseline; none of this class's memos
+	// come with it (it fills them again as it is read); a type's own, which its copy constructor
+	// copies (a menu's saved image and lookups, a stylesheet's evaluated sheet and its values'
+	// uses), are each kept for one load generation and revision, which the snapshot shares, so
+	// they stay true.
 
 	// --- what changed since the last load or save (the saved baseline) -------------------
 	// The baseline moves only with a load or a save: an undo back to it makes the document
@@ -314,10 +277,16 @@ public:
 	using IdAllocator = std::function<NodeId()>;
 
 protected:
-	// The copy a snapshot is (snapshot()): the same rows, file-wide state, identity, history
-	// and baseline; no memo; read only.
+	// The copy a snapshot is (snapshot()): the same rows, file-wide state, history and baseline
+	// over the base's copy; no memo; read only.
 	Document(const Document &other);
 	Document &operator=(const Document &) = delete;
+	// The record half of a load (DocumentBase::read_source): parse, and when adopting, the rows
+	// given their identities, the history started again and the baseline set.
+	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
+	                 std::vector<SourceIssue> &issues, Diagnostic &error) override;
+	// After a save: the history's checkpoint and the saved baseline move to the rows written.
+	void on_saved() override;
 	// The type's part of field_on: what the record makes of the field seeded from its schema
 	// (whether the game reads it there, the reference and the scope its other fields decide,
 	// the symbol it defines, what its loader picks the file by, its own choices). The default
@@ -346,8 +315,10 @@ protected:
 	// Whether two file-wide states write the same (the baseline's and the current one). The
 	// default compares the states themselves: a committed state never changes.
 	virtual bool same_file_state(const FileState *a, const FileState *b) const { return a == b; }
-	// A new top-level record of `kind` with the type's defaults, already given `id`.
-	virtual std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) = 0;
+	// A new top-level record of `kind` with the type's defaults, already given `id`; null, with
+	// why in `error`, for a kind the type adds no row of. The default adds none (a type whose rows
+	// the file fixes).
+	virtual std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error);
 	virtual bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	                       std::string &error) = 0;
 	// An optional field left out of the file (Edit Clear, `present` false) or written again
@@ -359,13 +330,21 @@ protected:
 	// the addresses: edit.address.row is the row, edit.parent the owner (Add, Duplicate,
 	// Remove) or the destination owner (Move), 0 meaning the row itself; the collection is
 	// not fixed, a Move's destination holds the kind and is not inside the record, and a
-	// Move that would leave the record where it is never arrives.
+	// Move that would leave the record where it is never arrives. The default refuses (a type
+	// whose records are fixed, or that holds none).
 	virtual bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
-	                             std::string &error) = 0;
+	                             std::string &error);
 	// Paste (Edit Paste): the payload `copy` made (edit.value) into the owner edit.parent
 	// (0 = the row) at edit.position; `added` receives the pasted records (not their
 	// descendants). The default refuses.
 	virtual bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
+	                           std::string &error);
+	// A change the type made in C++ (Edit Apply: its EditPayload, whose token says which) to the
+	// record `address` names inside `row`, a clone the batch commits once every edit of it is
+	// applied: a record type that makes such changes takes the ones it made (S13 D6; a raster's
+	// or a text's are its own document's, through DocumentBase::apply). The default refuses
+	// (document.payload).
+	virtual bool apply_payload(Node &row, const NodeAddress &address, const EditPayload &payload,
 	                           std::string &error);
 	// A file-wide value set (Edit SetFileValue: an item table's vehicle spawn registry). The
 	// default refuses: the type has none (document.value).
@@ -393,8 +372,6 @@ protected:
 	}
 
 	NodeId allocate_id() { return next_id_++; }
-	const std::string &absolute_path() const { return absolute_path_; }
-	const std::string &game() const { return game_; }
 
 private:
 	// Every nested record of one committed row by identity, built by one walk and kept
@@ -411,10 +388,6 @@ private:
 	void index_records() const;
 	// A nested record's placement inside `row` by walking it (a clone a batch changes).
 	bool placement_in(const Node &row, NodeId child, Placement &out) const;
-	// Decoded as the game's loader decodes a stored file, then parsed (load, and the text a
-	// save wrote).
-	bool read_source(std::vector<uint8_t> bytes, std::vector<std::shared_ptr<Node>> &rows,
-	                 std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error);
 	// The rows and the file-wide state as they stand become the saved baseline.
 	void set_baseline();
 	// The committed row, or the baseline's, of identity `id` (null when that side has none).
@@ -472,14 +445,8 @@ private:
 	size_t row_index(NodeId id) const;
 	void assign_ids(Node &row);
 
-	uint64_t identity_ = 0;
-	std::string absolute_path_, relative_path_, game_;
-	AssetKind kind_ = AssetKind::Unknown;
 	std::vector<std::shared_ptr<const Node>> rows_;
 	std::shared_ptr<const FileState> file_state_;
-	std::vector<SourceIssue> issues_;
-	bool blocked_ = false, wrote_file_ = false;
-	uint64_t file_fingerprint_ = 0;
 	NodeId next_id_ = 1, last_added_ = 0;
 	std::vector<NodeId> added_;
 	mutable std::unordered_map<const Node *, RowIndex> indexes_;
@@ -489,7 +456,6 @@ private:
 	std::shared_ptr<const FileState> saved_state_;
 	// A saved row's index by its identity (set_baseline).
 	std::unordered_map<NodeId, size_t> saved_positions_;
-	bool snapshot_ = false;
 	// The memos (the thread confinement above), each forgotten by set_baseline: what changed in
 	// each row (row_changes); the rows whose place moved, for one revision; every record's row by
 	// identity and the committed version of each row it indexed (index_records), brought to a
@@ -503,5 +469,23 @@ private:
 	mutable std::unordered_map<NodeId, NodeId> record_rows_;
 	mutable std::unordered_map<NodeId, std::shared_ptr<const Node>> indexed_rows_;
 };
+
+// The record document a document is (DocumentBase::as_records), null for another kind of
+// document: what a caller that reads rows, records and fields asks of a document it holds as
+// the base; the shared form shares the document's ownership, the owning form takes it (a
+// document of another kind is destroyed).
+inline const Document *records_of(const DocumentBase &document) { return document.as_records(); }
+inline Document *records_of(DocumentBase &document) { return document.as_records(); }
+inline std::shared_ptr<const Document>
+records_of(const std::shared_ptr<const DocumentBase> &document) {
+	const Document *records = document ? document->as_records() : nullptr;
+	return records ? std::shared_ptr<const Document>(document, records) : nullptr;
+}
+inline std::unique_ptr<Document> records_of(std::unique_ptr<DocumentBase> document) {
+	Document *records = document ? document->as_records() : nullptr;
+	if (!records) return nullptr;
+	document.release();
+	return std::unique_ptr<Document>(records);
+}
 
 } // namespace opennova::editor

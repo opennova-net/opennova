@@ -27,7 +27,10 @@
 // undo still finds every record where it was and answers what changed in it as it did. S13 D5
 // adds the type's record kinds (kinds()): each named back by its token, no two sharing a kind or
 // a token, a kind the outline adds a row of being a row of the file; every row of the file of a
-// kind that is a row, and every record a collection holds of a kind the table has.
+// kind that is a row, and every record a collection holds of a kind the table has. S13 D6: the
+// type's make gives a DocumentBase whose record document (as_records) is itself; a change of a
+// kind the type did not make (an Apply of another's payload) is refused (document.payload),
+// nothing committed; and a snapshot shares its document's load generation.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -60,9 +63,10 @@ int g_failures = 0;
 // What was checked, for the summary line: records, fields set to their own value, symbols, and
 // lookups of a name in another scope that defines it too; optional fields left out and written
 // again and those a type keeps written, files with a real change and its undo, files whose field
-// took two coalesced Sets, records pasted, and snapshots.
+// took two coalesced Sets, records pasted, snapshots, and files refusing another's Apply.
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
+size_t g_foreign = 0;
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
@@ -146,7 +150,7 @@ std::vector<const DocumentType *> registered_types() {
 }
 
 // Every record: each row, then what it holds in pre-order.
-std::vector<NodeAddress> records_of(const Document &document) {
+std::vector<NodeAddress> every_record(const Document &document) {
 	std::vector<NodeAddress> out;
 	for (const auto &row : document.rows()) {
 		out.push_back({row->id, row->kind, 0});
@@ -261,7 +265,7 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 	scan.entries.push_back(entry);
 	scan.index();
 	slotted.update(ProjectPaths::for_root("."), ProjectDocument(), scan,
-			{ std::shared_ptr<const Document>(document.snapshot()) });
+			{ std::shared_ptr<const DocumentBase>(document.snapshot()) });
 	check(slotted.for_each_definition(document, [](const GraphSymbol &, bool) {}), fixture.name,
 	      "a graph holding the document's snapshot has a slot current for the document");
 	const auto find = [&](const std::string &where, const std::string &name, NodeAddress &found,
@@ -386,10 +390,10 @@ void check_places(const DocumentType &type, const Fixture &fixture, const Docume
 	for (const NodeAddress &address : records)
 		check(document.address_at(document.locator(address)) == address, where_of(fixture, document, address, ""),
 		      "a record's locator finds it again");
-	std::unique_ptr<Document> twin = type.make();
+	std::unique_ptr<Document> twin = records_of(type.make());
 	Diagnostic error;
 	const bool loaded = twin->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
-	check(loaded && records_of(*twin) == records, fixture.name, "two loads of the file give the same identities");
+	check(loaded && every_record(*twin) == records, fixture.name, "two loads of the file give the same identities");
 }
 
 // The one refusal a type gives a Clear or a Write of an optional field it keeps as its record
@@ -605,10 +609,10 @@ void check_copy_paste(const DocumentType &type, const Fixture &fixture, Document
 		++g_pastes;
 		const std::vector<NodeId> made = document.last_added_records();
 		check(!made.empty() && document.address_of(made.front()).kind == address.kind &&
-		              records_of(document).size() > records.size(),
+		              every_record(document).size() > records.size(),
 		      where, "the pasted record is there, of its kind");
 		const SerializeResult text = document.serialize();
-		std::unique_ptr<Document> read = type.make();
+		std::unique_ptr<Document> read = records_of(type.make());
 		check(text.ok() && read->load_bytes(text_bytes(text.text), fixture.name, fixture.kind, "jo", error) && !read->blocked(),
 		      where, "what a paste makes serializes and reads back");
 		while (document.can_undo()) document.undo();
@@ -638,17 +642,18 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 			}
 			done = true;
 			const std::string where = where_of(fixture, document, address, schema.id) + " (snapshot)";
-			const std::unique_ptr<Document> snapshot = document.snapshot();
+			const std::unique_ptr<Document> snapshot = records_of(document.snapshot());
 			check(snapshot && snapshot->is_snapshot() && !document.is_snapshot(), where, "snapshot() makes a snapshot");
 			if (!snapshot) {
 				while (document.can_undo()) document.undo();
 				return true;
 			}
 			++g_snapshots;
-			const std::vector<NodeAddress> now = records_of(document);
+			const std::vector<NodeAddress> now = every_record(document);
 			check(snapshot->serialize().text == after.text, where, "a snapshot serializes the document's bytes");
 			check(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
-			              snapshot->rows() == document.rows() && records_of(*snapshot) == now,
+			              snapshot->load_generation() == document.load_generation() &&
+			              snapshot->rows() == document.rows() && every_record(*snapshot) == now,
 			      where, "a snapshot shares the document's identity, revision, rows and records");
 			// Its answers, kept to hold it to after its document moves on.
 			std::vector<Document::RecordChange> records_changed;
@@ -696,7 +701,7 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 					check(snapshot->field_changed(record, field.id) == fields_changed[field_at++], there + " ." + field.id,
 					      "a snapshot answers field_changed as it did after its document's undo");
 			}
-			std::unique_ptr<Document> read = type.make();
+			std::unique_ptr<Document> read = records_of(type.make());
 			check(read->load_bytes(text_bytes(snapshot->serialize().text), fixture.name, fixture.kind, "jo", refused) &&
 			              !read->blocked() && read->serialize().text == after.text,
 			      where, "what a snapshot serializes reads back");
@@ -707,29 +712,57 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 	check(done, fixture.name, "a document with a real change in it takes a snapshot");
 }
 
+// A change of a kind no type makes (an Apply of another's payload): refused (document.payload),
+// the document as it was.
+struct ForeignPayload : EditPayload {
+	const char *token() const override { return "contract.foreign"; }
+};
+
+void check_foreign_payload(const Fixture &fixture, Document &document,
+                           const std::vector<NodeAddress> &records, const std::string &serialized) {
+	Edit apply;
+	apply.operation = EditOperation::Apply;
+	apply.address = records.front();
+	apply.payload = std::make_shared<ForeignPayload>();
+	Diagnostic refused;
+	const uint64_t revision = document.revision();
+	++g_foreign;
+	check(!document.apply(apply, refused) && refused.code == "document.payload" &&
+	              document.revision() == revision && !document.dirty() &&
+	              document.serialize().text == serialized,
+	      fixture.name,
+	      "an Apply of a change the type did not make is refused (document.payload), nothing "
+	      "committed");
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
-	std::unique_ptr<Document> document = type.make();
+	std::unique_ptr<DocumentBase> made = type.make();
+	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
+	      fixture.name, "make gives a DocumentBase whose record document (as_records) is itself");
+	std::unique_ptr<Document> document = records_of(std::move(made));
+	if (!document) return;
 	Diagnostic error;
 	const bool loaded = document->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
 	check(loaded && !document->blocked(), fixture.name + " (" + error.message + ")", "the file loads unblocked");
 	if (!loaded || document->blocked()) return;
-	const std::vector<NodeAddress> records = records_of(*document);
+	const std::vector<NodeAddress> records = every_record(*document);
 	check(!records.empty(), fixture.name, "the file has records to check");
 	g_records += records.size();
 
 	// Parse, serialize, parse again: the same bytes, the same records.
 	const SerializeResult first = document->serialize();
 	check(first.ok(), fixture.name, "the file serializes");
-	std::unique_ptr<Document> again = type.make();
+	std::unique_ptr<Document> again = records_of(type.make());
 	const bool reloaded = again->load_bytes(text_bytes(first.text), fixture.name, fixture.kind, "jo", error);
 	check(reloaded && !again->blocked(), fixture.name + " (" + error.message + ")", "what it serializes loads unblocked");
 	if (reloaded) {
 		const SerializeResult second = again->serialize();
-		check(second.ok() && second.text == first.text && records_of(*again).size() == records.size(), fixture.name,
+		check(second.ok() && second.text == first.text && every_record(*again).size() == records.size(), fixture.name,
 		      "parse, serialize, parse again serializes the same bytes and records");
 	}
 
 	check_kinds(fixture, *document, records);
+	check_foreign_payload(fixture, *document, records, first.text);
 	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
@@ -775,8 +808,9 @@ int main() {
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
 		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
-		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu record kinds)\n",
+		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu foreign "
+		            "changes refused, %zu record kinds)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
-		            g_changes, g_coalesced, g_pastes, g_snapshots, g_kinds.size());
+		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_kinds.size());
 	return g_failures == 0 ? 0 : 1;
 }

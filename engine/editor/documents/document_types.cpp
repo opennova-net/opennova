@@ -12,13 +12,15 @@
 namespace opennova::editor {
 namespace {
 
-std::unique_ptr<Document> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
-std::unique_ptr<Document> make_strings() { return std::make_unique<StringsDocument>(); }
-std::unique_ptr<Document> make_menu() { return std::make_unique<MnuDocument>(); }
-std::unique_ptr<Document> make_styles() { return std::make_unique<MnsDocument>(); }
-std::unique_ptr<Document> make_model() { return std::make_unique<ModelDocument>(); }
-std::unique_ptr<Document> make_animation() { return std::make_unique<AnimationDocument>(); }
-std::unique_ptr<Document> make_animation_map() { return std::make_unique<AnimationMapDocument>(); }
+std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
+std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }
+std::unique_ptr<DocumentBase> make_menu() { return std::make_unique<MnuDocument>(); }
+std::unique_ptr<DocumentBase> make_styles() { return std::make_unique<MnsDocument>(); }
+std::unique_ptr<DocumentBase> make_model() { return std::make_unique<ModelDocument>(); }
+std::unique_ptr<DocumentBase> make_animation() { return std::make_unique<AnimationDocument>(); }
+std::unique_ptr<DocumentBase> make_animation_map() {
+	return std::make_unique<AnimationMapDocument>();
+}
 
 constexpr DocumentType kTypes[] = {
 	{DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalogs},
@@ -56,7 +58,7 @@ bool is_editable_kind(AssetKind kind) { return document_type_for(kind) != nullpt
 
 std::vector<Diagnostic> validate_open_documents(const ProjectPaths &paths, const ProjectDocument &project,
                                                 const AssetScan &scan,
-                                                const std::vector<std::shared_ptr<const Document>> &open,
+                                                const std::vector<std::shared_ptr<const DocumentBase>> &open,
                                                 AssetGraph *graph, ValidationCache *cache) {
 	std::vector<Diagnostic> findings;
 	// The graph first: a type's validation reads what its records are used for (a

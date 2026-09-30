@@ -100,7 +100,7 @@ public:
 	// variable's name; which files the project has, for a kind whose row says its words read
 	// them). The generation moves exactly when what the graph holds changed.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
-			const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open);
+			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
 	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out

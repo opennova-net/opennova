@@ -65,8 +65,10 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// active document's (a tab a click just showed waits the frame its OpenDocument takes).
 		// The find bar first: its Ctrl+F comes before the view's own filters'.
 		if (path == view.active_document) {
-			draw_find(*document);
-			draw_view(*document);
+			if (const Document *records = records_of(*document)) {
+				draw_find(*records);
+				draw_view(*records);
+			}
 		}
 		ImGui::EndTabItem();
 	}

@@ -30,7 +30,7 @@ struct ProjectFindingsInput {
 	const ProjectDocument &project;
 	const AssetScan &scan;
 	const RequirementReport &requirements;
-	const std::vector<std::shared_ptr<const Document>> &open;
+	const std::vector<std::shared_ptr<const DocumentBase>> &open;
 	const std::vector<std::string> &boot_missing;
 	const std::vector<Diagnostic> &play;
 	const std::vector<Diagnostic> &open_findings;

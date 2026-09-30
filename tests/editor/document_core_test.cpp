@@ -14,7 +14,12 @@
 // batch filling in the records it makes (batch_made). S11a: the saved baseline and what
 // changed since it (a field, a record, the file-wide state, the edits that give a field
 // back), and the canonical rewrite. S11f: a document read from bytes alone has the rows a
-// file's load gives and no file to save to.
+// file's load gives and no file to save to. S13 D6: a change the type makes in C++ (an Apply
+// edit's payload) through apply_payload, one step with the batch's other edits and folding under
+// its gesture, a payload of another kind or none refused (document.payload); and a document of
+// another kind than records (DocumentBase alone, over a byte blob) loaded, saved with its
+// fingerprint, refusing a save over a file changed outside the editor, changed by a payload its
+// type made and undone through its own history, holding no records.
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -143,6 +148,13 @@ bool read_records(std::istream &in, int base, std::vector<FakeItem> &items, std:
 	return true;
 }
 
+// A rename of an item made in C++: the change an Apply edit carries to the fake type (S13 D6).
+struct FakeRename : EditPayload {
+	std::string name;
+	explicit FakeRename(std::string text) : name(std::move(text)) {}
+	const char *token() const override { return "fake.rename"; }
+};
+
 class FakeDocument : public Document {
 public:
 	const std::vector<RecordKindRow> &kinds() const override {
@@ -193,7 +205,7 @@ public:
 		}
 		return result;
 	}
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
 	// The payload: "items" or "leaves", then the records in the file's own form.
 	std::string copy(const std::vector<NodeAddress> &records) const override {
 		if (records.empty()) return std::string();
@@ -434,6 +446,16 @@ protected:
 		error = "Vetoed.";
 		return false;
 	}
+	// A rename made in C++ (FakeRename) of an item; any other change refused.
+	bool apply_payload(Node &node, const NodeAddress &address, const EditPayload &payload,
+	                   std::string &error) override {
+		const auto *rename = dynamic_cast<const FakeRename *>(&payload);
+		if (!rename || address.kind != kItem) {
+			error = "Not a fake change.";
+			return false;
+		}
+		return set_field(node, address, "name", rename->name, error);
+	}
 
 public:
 	std::function<bool(const Change &)> veto; // false refuses the change (unset: every change is accepted)
@@ -549,7 +571,7 @@ public:
 		}
 		return result;
 	}
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FlatDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<FlatDocument>(*this); }
 
 protected:
 	// A refinement that would make the read-only serial writable (the base puts the schema's
@@ -1565,7 +1587,7 @@ static int test_snapshot() {
 	Diagnostic error;
 	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
 	const std::string edited = document.serialize().text;
-	std::unique_ptr<Document> snapshot = document.snapshot();
+	std::unique_ptr<Document> snapshot = records_of(document.snapshot());
 	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !document.is_snapshot());
 	TEST_EXPECT(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
 	            snapshot->dirty() && snapshot->can_undo() && snapshot->rows() == document.rows());
@@ -1608,8 +1630,265 @@ static int test_snapshot() {
 	return 0;
 }
 
+// S13 D6: a change the type makes in C++ (Edit Apply, its EditPayload), applied to the record
+// through the type's apply_payload: one undo step, undone and redone byte for byte; one step with
+// the Set of its batch; a gesture's Applies folding into one; refused, nothing committed, when the
+// payload is another's or missing (document.payload, the type's words or the base's), for a batch
+// holding one too; and by a type that takes none (the default: document.payload).
+static int test_apply_payload() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	Value name;
+	const auto rename = [&](const char *text, uint64_t gesture = 0) {
+		Edit edit = make(EditOperation::Apply, fake.a1);
+		edit.payload = std::make_shared<FakeRename>(text);
+		edit.gesture = gesture;
+		return edit;
+	};
+	const auto name_of_a1 = [&] {
+		return document.get(fake.a1, "name", name) ? std::get<std::string>(name) : std::string();
+	};
+	TEST_EXPECT(document.apply(rename("renamed"), error) && name_of_a1() == "renamed");
+	TEST_EXPECT(document.revision() == 1 && document.dirty() && document.can_undo());
+	const std::string renamed = document.serialize().text;
+	TEST_EXPECT(renamed != fake.original);
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original && !document.dirty());
+	document.redo();
+	TEST_EXPECT(document.serialize().text == renamed && name_of_a1() == "renamed");
+	// With a Set in its batch: one step.
+	TEST_EXPECT(document.apply({rename("again"), set(fake.x, "name", std::string("xx"))}, error));
+	TEST_EXPECT(name_of_a1() == "again" && document.revision() == 2);
+	document.undo();
+	TEST_EXPECT(document.serialize().text == renamed);
+	// A gesture's Applies fold into one step.
+	const uint64_t gesture = next_edit_gesture();
+	for (const char *text : {"g1", "g2", "g3"})
+		TEST_EXPECT(document.apply(rename(text, gesture), error));
+	document.end_edit_group();
+	TEST_EXPECT(name_of_a1() == "g3");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == renamed && name_of_a1() == "renamed");
+	// Refused, nothing committed: another's payload (the type's words), none at all, and a batch
+	// holding one.
+	struct Other : EditPayload {
+		const char *token() const override { return "other"; }
+	};
+	const uint64_t revision = document.revision();
+	Edit other = make(EditOperation::Apply, fake.a1);
+	other.payload = std::make_shared<Other>();
+	TEST_EXPECT(!document.apply(other, error) && error.code == "document.payload" &&
+	            error.message == "Not a fake change.");
+	TEST_EXPECT(!document.apply(make(EditOperation::Apply, fake.a1), error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(!document.apply({set(fake.x, "name", std::string("zz")), other}, error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(document.revision() == revision && document.serialize().text == renamed);
+	// A type that takes none refuses every one (the default).
+	FlatDocument flat;
+	TEST_EXPECT(flat.load_bytes(bytes_of("L a 1 TAG1\n"), "flat.txt", AssetKind::Unknown, "jo",
+	                            error));
+	Edit to_flat = make(EditOperation::Apply, {flat.rows()[0]->id, kLine, 0});
+	to_flat.payload = std::make_shared<FakeRename>("b");
+	TEST_EXPECT(!flat.apply(to_flat, error) && error.code == "document.payload" &&
+	            error.message == "This document does not take that change." &&
+	            flat.revision() == 0);
+	return 0;
+}
+
+// A replacement of a blob's whole text made in C++: the one change a BlobDocument takes.
+struct BlobReplace : EditPayload {
+	std::string text;
+	explicit BlobReplace(std::string bytes) : text(std::move(bytes)) {}
+	const char *token() const override { return "blob.replace"; }
+};
+
+// A document of another kind than records (S13 D6: DocumentBase alone): a blob of text whose
+// lines starting with '#' the game ignores (each an issue, dropped on save), changed only by a
+// BlobReplace, its history a list of the blobs it held, each with its revision.
+class BlobDocument : public DocumentBase {
+public:
+	using DocumentBase::apply;
+	bool apply(const std::vector<Edit> &edits, Diagnostic &error) override {
+		if (is_snapshot())
+			return refuse(error, "document.snapshot", "A snapshot is read, never edited.");
+		std::string next = blob_;
+		for (const Edit &edit : edits) {
+			const auto *replace = edit.operation == EditOperation::Apply
+			                              ? dynamic_cast<const BlobReplace *>(edit.payload.get())
+			                              : nullptr;
+			if (!replace)
+				return refuse(error, "document.payload", "A blob takes its own replacements only.");
+			next = replace->text;
+		}
+		if (next == blob_) return true;
+		undo_.push_back({blob_, revision_});
+		redo_.clear();
+		blob_ = std::move(next);
+		revision_ = next_revision_++;
+		return true;
+	}
+	void undo() override { step(undo_, redo_); }
+	void redo() override { step(redo_, undo_); }
+	void end_edit_group() override {}
+	bool dirty() const override { return revision_ != saved_revision_; }
+	bool can_undo() const override { return !undo_.empty(); }
+	bool can_redo() const override { return !redo_.empty(); }
+	uint64_t revision() const override { return revision_; }
+	size_t history_bytes() const override {
+		size_t bytes = 0;
+		for (const std::vector<State> *list : {&undo_, &redo_})
+			for (const State &state : *list) bytes += state.blob.size();
+		return bytes;
+	}
+	SerializeResult serialize() const override {
+		SerializeResult result;
+		std::istringstream in(blob_);
+		for (std::string line; std::getline(in, line);)
+			if (line.rfind('#', 0) != 0) result.text += line + "\n";
+		return result;
+	}
+	std::unique_ptr<DocumentBase> snapshot() const override {
+		return std::make_unique<BlobDocument>(*this);
+	}
+	const std::string &blob() const { return blob_; }
+
+protected:
+	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
+	                 std::vector<SourceIssue> &issues, Diagnostic &) override {
+		const std::string text(decoded.begin(), decoded.end());
+		std::istringstream in(text);
+		size_t number = 0;
+		for (std::string line; std::getline(in, line);) {
+			++number;
+			if (line.rfind('#', 0) == 0)
+				issues.push_back({false, number, std::string(), std::string(),
+				                  "The game ignores this line."});
+		}
+		if (!adopt) return true;
+		blob_ = text;
+		undo_.clear();
+		redo_.clear();
+		revision_ = saved_revision_ = 0;
+		next_revision_ = 1;
+		return true;
+	}
+	void on_saved() override { saved_revision_ = revision_; }
+
+private:
+	struct State {
+		std::string blob;
+		uint64_t revision = 0;
+	};
+	void step(std::vector<State> &from, std::vector<State> &to) {
+		if (is_snapshot() || from.empty()) return;
+		to.push_back({blob_, revision_});
+		blob_ = from.back().blob;
+		revision_ = from.back().revision;
+		from.pop_back();
+	}
+	static bool refuse(Diagnostic &error, const char *code, const char *message) {
+		error = make_diagnostic(DiagnosticSeverity::Error, code, message);
+		return false;
+	}
+	std::string blob_;
+	std::vector<State> undo_, redo_;
+	uint64_t revision_ = 0, saved_revision_ = 0, next_revision_ = 1;
+};
+
+// S13 D6: the lifecycle alone, over a document of another kind than records: loaded (its
+// fingerprint and a load generation taken, its ignored line an issue), changed by a payload its
+// type made and by nothing else, undone and redone through its own history (dirty against its
+// saved checkpoint), saved (the file holding what it serializes, the issue gone with the line,
+// nothing more to rewrite), a save refused over a file changed outside the editor
+// (document.conflict), a snapshot sharing it and refusing an edit, a save and a load
+// (document.snapshot), loaded again in place under a new load generation, and a document read
+// from bytes with no file to save to; it holds no records (as_records, records_of).
+static int test_document_base() {
+	editor_test::TempProjectDir dir{"opennova_document_base_test"};
+	const std::string file = dir.file("blob.txt");
+	const auto file_text = [&] {
+		std::vector<uint8_t> bytes;
+		std::string message;
+		if (!read_file_bytes(file, bytes, message)) return std::string("<unread>");
+		return std::string(bytes.begin(), bytes.end());
+	};
+	const std::string original = "one\n# a note\ntwo\n", edited = "one\ntwo\nthree\n";
+	TEST_EXPECT(editor_test::write_text(file, original));
+	BlobDocument blob;
+	Diagnostic error;
+	TEST_EXPECT(blob.load_generation() == 0);
+	TEST_EXPECT(blob.load(file, "blob.txt", AssetKind::Unknown, "jo", error));
+	const uint64_t first_load = blob.load_generation();
+	TEST_EXPECT(first_load != 0 && blob.path() == "blob.txt" && blob.revision() == 0);
+	TEST_EXPECT(!blob.dirty() && !blob.can_undo() && blob.history_bytes() == 0);
+	TEST_EXPECT(blob.matches_file() && !blob.wrote_file());
+	TEST_EXPECT(blob.issues().size() == 1 && blob.ignored_lines() == 1 && !blob.blocked());
+	// The note it would drop: a rewrite.
+	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::Rewrite);
+	TEST_EXPECT(blob.as_records() == nullptr && records_of(blob) == nullptr);
+	// A payload its type made changes it; anything else is refused, nothing changed.
+	Edit replace;
+	replace.operation = EditOperation::Apply;
+	replace.payload = std::make_shared<BlobReplace>(edited);
+	TEST_EXPECT(blob.apply(replace, error) && blob.blob() == edited && blob.revision() == 1);
+	TEST_EXPECT(blob.dirty() && blob.can_undo() && blob.history_bytes() == original.size());
+	TEST_EXPECT(!blob.apply(set({1, 0, 0}, "name", std::string("x")), error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(blob.revision() == 1 && blob.blob() == edited);
+	// Its own history: undone to the file as loaded (clean again), redone.
+	blob.undo();
+	TEST_EXPECT(blob.blob() == original && blob.revision() == 0 && !blob.dirty());
+	TEST_EXPECT(blob.can_redo());
+	blob.redo();
+	TEST_EXPECT(blob.revision() == 1 && blob.dirty() && !blob.can_redo());
+	// Saved: the file holds what it serializes, the note's issue is gone with the line.
+	TEST_EXPECT(blob.save(error) && blob.wrote_file() && !blob.dirty() && blob.matches_file());
+	TEST_EXPECT(file_text() == edited && blob.issues().empty() && blob.ignored_lines() == 0);
+	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::None);
+	blob.undo();
+	TEST_EXPECT(blob.dirty());
+	blob.redo();
+	TEST_EXPECT(!blob.dirty()); // back at the saved checkpoint
+	// A file changed outside the editor: it no longer matches, and a save is refused.
+	TEST_EXPECT(editor_test::write_text(file, "changed\n") && !blob.matches_file());
+	replace.payload = std::make_shared<BlobReplace>("four\n");
+	TEST_EXPECT(blob.apply(replace, error) && !blob.save(error) &&
+	            error.code == "document.conflict");
+	TEST_EXPECT(file_text() == "changed\n" && blob.dirty());
+	// A snapshot shares it and takes nothing.
+	const std::unique_ptr<DocumentBase> snapshot = blob.snapshot();
+	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !blob.is_snapshot());
+	TEST_EXPECT(!snapshot->as_records() && snapshot->identity() == blob.identity());
+	TEST_EXPECT(snapshot->load_generation() == blob.load_generation() &&
+	            snapshot->revision() == blob.revision() && snapshot->serialize().text == "four\n");
+	TEST_EXPECT(!snapshot->apply(replace, error) && error.code == "document.snapshot");
+	snapshot->undo();
+	TEST_EXPECT(snapshot->revision() == blob.revision() &&
+	            snapshot->serialize().text == "four\n");
+	TEST_EXPECT(!snapshot->save(error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->load_bytes(bytes_of("x\n"), "blob.txt", AssetKind::Unknown, "jo",
+	                                  error) &&
+	            error.code == "document.snapshot");
+	// Loaded again in place: a new load generation, the revisions from 0, the file matching.
+	TEST_EXPECT(blob.load(file, "blob.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(blob.load_generation() > first_load && blob.revision() == 0);
+	TEST_EXPECT(!blob.dirty() && !blob.can_undo() && blob.blob() == "changed\n");
+	TEST_EXPECT(blob.matches_file() && !blob.wrote_file());
+	// Read from bytes: no file to save to.
+	BlobDocument bytes;
+	TEST_EXPECT(bytes.load_bytes(bytes_of("b\n"), "b.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(bytes.load_generation() > blob.load_generation());
+	TEST_EXPECT(!bytes.save(error) && error.code == "document.no_file");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_document_base();
+	failures += test_apply_payload();
 	failures += test_per_call_costs();
 	failures += test_moved_rows();
 	failures += test_record_index();

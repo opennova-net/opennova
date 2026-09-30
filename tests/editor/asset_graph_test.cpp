@@ -2034,7 +2034,7 @@ std::string difference(
 // A graph built fresh over the files (with the same base layer), against `graph`.
 std::string fresh_difference(const AssetGraph &graph, const ProjectPaths &paths,
 		const ProjectDocument &project, const AssetScan &scan,
-		const std::vector<std::shared_ptr<const Document>> &open, Seen &seen,
+		const std::vector<std::shared_ptr<const DocumentBase>> &open, Seen &seen,
 		const std::shared_ptr<const GraphLayer> &base = nullptr) {
 	AssetGraph fresh;
 	if (base) fresh.set_base(base);
@@ -2124,7 +2124,7 @@ static int test_incremental_equals_fresh() {
 	const std::string items_file = root + "/" + items_path;
 	const std::string menu_path = menu->relative_path;
 	const std::string weapons_file = root + "/" + weapons->relative_path;
-	std::vector<std::shared_ptr<const Document>> open;
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	AssetGraph graph;
 	uint64_t generation = graph.generation();
 	GraphUpdate update;
@@ -2781,7 +2781,7 @@ static int test_retail_incremental() {
 		++exported;
 	}
 	TEST_EXPECT(exported > 0 && !model_name.empty());
-	std::vector<std::shared_ptr<const Document>> open;
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	AssetGraph graph;
 	const auto clock = std::chrono::steady_clock::now();
 	graph.update(project.paths, project.document, project.rescan(), open);

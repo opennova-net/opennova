@@ -24,7 +24,7 @@ std::string editor_window_title(const SessionView &view) {
 	const char *const product = "OpenNova Editor";
 	if (!view.project_open) return product;
 	const bool unsaved = std::any_of(view.documents.begin(), view.documents.end(),
-	                                 [](const std::shared_ptr<const Document> &document) { return document->dirty(); });
+	                                 [](const std::shared_ptr<const DocumentBase> &document) { return document->dirty(); });
 	// U+25CF BLACK CIRCLE: the OS draws the title, not the editor's ASCII font.
 	return view.document.title + (unsaved ? " \xE2\x97\x8F - " : " - ") + product;
 }
@@ -88,7 +88,7 @@ void SessionView::update_previews() {
 	const Document *menu = nullptr;
 	bool model_open = false;
 	for (const auto &document : documents) {
-		if (document && document->path() == menu_preview.path) menu = document.get();
+		if (document && document->path() == menu_preview.path) menu = records_of(*document);
 		model_open = model_open || (document && document->path() == model_preview.path);
 	}
 	if (!menu || !menu->row(menu_preview.screen)) menu_preview = MenuPreviewTarget();

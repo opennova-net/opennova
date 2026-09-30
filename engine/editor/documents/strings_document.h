@@ -46,7 +46,7 @@ public:
 	// The ids of a section a first section of the same name shadows are inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<StringsDocument>(*this);
 	}
 	// The table as the engine reads it, rebuilt from the rows.

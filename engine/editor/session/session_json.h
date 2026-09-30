@@ -120,12 +120,13 @@ io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &ans
 // it was refused or failed (an error among the findings) or waits on the unsaved prompt;
 // `operation` names the operation it started or joined (0: none).
 io::JsonValue action_outcome_to_json(const ActionOutcome &outcome);
-// A document: its lifecycle state (with file_state_changed: its file-wide state differs from
-// the saved baseline's), the source issues and, with rows, every row with its collections
-// (kind, kind token, label, fixed) and their records (identities, names), each row and record
-// with its change since the saved baseline (Document::record_change: unchanged, changed,
-// added) and the collections it holds in turn.
-io::JsonValue document_to_json(const Document &document, bool with_rows);
+// A document: its lifecycle state and the source issues; for a record document (as_records) also
+// file_state_changed (its file-wide state differs from the saved baseline's), its row count, the
+// last record added and the kinds its outline adds, and, with rows, every row with its
+// collections (kind, kind token, label, fixed) and their records (identities, names), each row
+// and record with its change since the saved baseline (Document::record_change: unchanged,
+// changed, added) and the collections it holds in turn.
+io::JsonValue document_to_json(const DocumentBase &document, bool with_rows);
 // A record: its address, name, path and locator, its change since the saved baseline
 // (unchanged, changed, added), its owner and index there, every field of its kind as it
 // applies to this record (Document::field_on) with the value, the choices, whether an

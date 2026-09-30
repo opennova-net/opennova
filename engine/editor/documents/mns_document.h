@@ -78,7 +78,7 @@ public:
 	// reading, are inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<MnsDocument>(*this);
 	}
 
@@ -96,8 +96,8 @@ public:
 	// True for menu_style.mns and brand.mns, the stylesheets the game reads.
 	bool read_by_game() const;
 	// What a variable line's value is used as over `graph` (none: no use is known), kept for
-	// each line while the document's revision, the graph and `graph_key` (the caller's: it moves
-	// whenever the graph may have) stand.
+	// each line while the document's load generation and revision, the graph and `graph_key` (the
+	// caller's: it moves whenever the graph may have) stand.
 	const StyleValueUse &style_value_use(const NodeAddress &line, const AssetGraph *graph,
 	                                     uint64_t graph_key) const;
 
@@ -119,18 +119,18 @@ protected:
 
 private:
 	// The variables the game reads of the rows as they stand (native().evaluate()), once per
-	// revision.
+	// load generation and revision.
 	const mns::StyleSheet &game_sheet() const;
 	struct GameSheet {
 		bool made = false;
-		uint64_t revision = 0;
+		uint64_t load_generation = 0, revision = 0;
 		mns::StyleSheet sheet;
 	};
 	mutable GameSheet game_sheet_;
 	// What style_value_use made, by row, and what it was made over.
 	struct ValueUses {
 		bool made = false;
-		uint64_t revision = 0;
+		uint64_t load_generation = 0, revision = 0;
 		const AssetGraph *graph = nullptr;
 		uint64_t graph_key = 0;
 		std::unordered_map<NodeId, StyleValueUse> rows;

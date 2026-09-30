@@ -35,7 +35,8 @@ class MenuRenderCheck;
 struct SessionView {
 	ViewRevisions revisions;
 
-	std::vector<std::shared_ptr<const Document>> documents;
+	// The open documents, each as the base: a window that reads rows asks records_of.
+	std::vector<std::shared_ptr<const DocumentBase>> documents;
 	std::string active_document;
 	// The selection in the active document: the primary record (the inspector's, the one
 	// a new record goes beside) and every selected record, the primary among them, all

@@ -15,13 +15,14 @@ namespace opennova::editor {
 
 // The registry of editable file kinds (ADR 0046 d9): one row per document type, one per
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
-// document and how to validate the project's files of the kinds it opens, which are the asset
-// kinds whose row names its id (AssetKindRow::document). The session, the windows and the shell
-// reach a document type only through this table.
+// document (a DocumentBase: a record type's is its Document, as_records) and how to validate the
+// project's files of the kinds it opens, which are the asset kinds whose row names its id
+// (AssetKindRow::document). The session, the windows and the shell reach a document type only
+// through this table.
 struct DocumentType {
 	DocumentTypeId id = DocumentTypeId::None;
 	const char *name = "";
-	std::unique_ptr<Document> (*make)() = nullptr;
+	std::unique_ptr<DocumentBase> (*make)() = nullptr;
 	// The type's findings over the project's files of its kinds, with the project's asset graph
 	// (updated first: a type reads what its records are used for).
 	std::vector<Diagnostic> (*validate)(const ValidationInput &input, const AssetGraph &graph) = nullptr;
@@ -40,7 +41,7 @@ bool is_editable_kind(AssetKind kind);
 // session's); else they are read for this call alone (the command line, once).
 std::vector<Diagnostic> validate_open_documents(const ProjectPaths &paths, const ProjectDocument &project,
                                                 const AssetScan &scan,
-                                                const std::vector<std::shared_ptr<const Document>> &open,
+                                                const std::vector<std::shared_ptr<const DocumentBase>> &open,
                                                 AssetGraph *graph = nullptr, ValidationCache *cache = nullptr);
 
 } // namespace opennova::editor

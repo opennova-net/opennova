@@ -19,7 +19,7 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 	switch (request_kind_row(request.kind).guard) {
 	case GuardScope::None: return false;
 	case GuardScope::Document:
-		if (const Document *document = documents.document_for(request.path); document && document->dirty())
+		if (const DocumentBase *document = documents.document_for(request.path); document && document->dirty())
 			out.push_back(document->path());
 		return true;
 	case GuardScope::AllDirty: out = documents.dirty_files(); return true;

@@ -83,7 +83,7 @@ static int test_tokens() {
 	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
 	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
 	TEST_EXPECT(editor_request_kind_tokens().front() == "new_project");
-	for (int i = 0; i <= static_cast<int>(EditOperation::SetFileValue); ++i) {
+	for (int i = 0; i <= static_cast<int>(EditOperation::Apply); ++i) {
 		const auto operation = static_cast<EditOperation>(i);
 		EditOperation back = EditOperation::Set;
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
@@ -1010,7 +1010,7 @@ public:
 		return use.schema->id == "param";
 	}
 	SerializeResult serialize() const override { return {}; }
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
 
 protected:
 	void refine_field(const NodeAddress &, FieldUse &use) const override {
@@ -1258,8 +1258,43 @@ static int test_import_pages() {
 	return 0;
 }
 
+// S13 D6: an Apply edit's change is made in C++ by its document type (Edit::payload). A request's
+// JSON names it by the payload's token alone, and the reader takes neither an apply edit nor a
+// payload: the editor MCP cannot send one.
+static int test_apply_edit_json() {
+	struct Brush : EditPayload {
+		const char *token() const override { return "raster.brush"; }
+	};
+	EditorRequest request;
+	request.kind = EditorRequestKind::EditRecord;
+	request.path = "terrain.cpt";
+	request.edit.operation = EditOperation::Apply;
+	request.edit.address = {3, 0, 0};
+	request.edit.payload = std::make_shared<Brush>();
+	const JsonValue json = editor_request_to_json(request);
+	const JsonValue *edit = json.get("edit");
+	TEST_EXPECT(edit && edit->get_string("operation", "") == "apply" &&
+	            edit->get_string("payload", "") == "raster.brush");
+	EditorRequest back;
+	std::string error;
+	TEST_EXPECT(!editor_request_from_json(json, back, error) &&
+	            error.find("apply edit") != std::string::npos);
+	TEST_EXPECT(!request_error("{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"apply\"}}",
+	                           back).empty());
+	TEST_EXPECT(!request_error("{\"kind\":\"edit_record\","
+	                           "\"edit\":{\"field\":\"name\",\"payload\":\"raster.brush\"}}",
+	                           back).empty());
+	// No payload on any other edit's JSON.
+	request.edit = Edit();
+	const JsonValue set = editor_request_to_json(request);
+	TEST_EXPECT(set.get("edit") && !set.get("edit")->get("payload"));
+	TEST_EXPECT(editor_request_from_json(set, back, error) && !back.edit.payload);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_apply_edit_json();
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();
 	failures += test_import_pages();

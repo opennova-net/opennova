@@ -57,7 +57,7 @@ const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
 	return nullptr;
 }
 
-const Document *open_document(const SessionView &view, const std::string &path) {
+const DocumentBase *open_document(const SessionView &view, const std::string &path) {
 	for (const auto &document : view.documents)
 		if (document->path() == path) return document.get();
 	return nullptr;
@@ -376,7 +376,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	ImGui::PushID(entry.relative_path.c_str());
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
-	const Document *open = open_document(view, entry.relative_path);
+	const DocumentBase *open = open_document(view, entry.relative_path);
 	const bool dirty = open && open->dirty();
 	const auto found = counts_.find(entry.relative_path);
 	const Counts counts = found != counts_.end() ? found->second : Counts();

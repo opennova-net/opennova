@@ -33,7 +33,7 @@ std::shared_ptr<const Document> ValidationCache::closed(const ProjectPaths &path
 		entry.game = project.target_game;
 		++stats_.files_loaded;
 		const DocumentType *type = document_type_for(asset.kind);
-		std::shared_ptr<Document> loaded = type ? type->make() : nullptr;
+		std::shared_ptr<Document> loaded = type ? records_of(type->make()) : nullptr;
 		if (!loaded) {
 			entry.error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This kind of file has no editor yet.",
 			                              asset.relative_path);
@@ -67,7 +67,8 @@ void ValidationCache::end() {
 
 std::shared_ptr<const Document> ValidationInput::document(const AssetEntry &asset, Diagnostic &error) const {
 	for (const auto &candidate : open)
-		if (candidate && candidate->path() == asset.relative_path) return candidate;
+		if (candidate && candidate->path() == asset.relative_path)
+			if (std::shared_ptr<const Document> records = records_of(candidate)) return records;
 	return cache.closed(paths, project, asset, error);
 }
 

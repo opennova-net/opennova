@@ -208,9 +208,11 @@ void MnsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) 
 
 const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const AssetGraph *graph,
                                                   uint64_t graph_key) const {
-	if (!value_uses_.made || value_uses_.revision != revision() || value_uses_.graph != graph ||
+	if (!value_uses_.made || value_uses_.load_generation != load_generation() ||
+	    value_uses_.revision != revision() || value_uses_.graph != graph ||
 	    value_uses_.graph_key != graph_key) {
 		value_uses_.made = true;
+		value_uses_.load_generation = load_generation();
 		value_uses_.revision = revision();
 		value_uses_.graph = graph;
 		value_uses_.graph_key = graph_key;
@@ -252,8 +254,10 @@ const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const
 }
 
 const mns::StyleSheet &MnsDocument::game_sheet() const {
-	if (!game_sheet_.made || game_sheet_.revision != revision()) {
+	if (!game_sheet_.made || game_sheet_.load_generation != load_generation() ||
+	    game_sheet_.revision != revision()) {
 		game_sheet_.made = true;
+		game_sheet_.load_generation = load_generation();
 		game_sheet_.revision = revision();
 		game_sheet_.sheet = native().evaluate().sheet;
 	}

@@ -62,7 +62,9 @@ public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &game) {
 		assets_->set_scan(root, scan, game);
 	}
-	void set_open(const std::vector<std::shared_ptr<const Document>> &documents) { assets_->set_open(documents); }
+	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &documents) {
+		assets_->set_open(documents);
+	}
 	// The last build's own findings, Problems rows until the next build starts or the project closes.
 	void set_build_findings(std::vector<Diagnostic> findings) { build_findings_ = std::move(findings); }
 	void clear_build_findings() { build_findings_.clear(); }
