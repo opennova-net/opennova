@@ -143,6 +143,9 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	in.world = &kernel_->world;
 	in.local_marker_handle = local_marker_handle;
 	in.local_heading_bam = static_cast<int32_t>(get_local_player_heading_bam());
+	// The zone-timer list the rows' v7 entry reads (the joiner's own, the
+	// authority's HostClient loopback; none on the bare local role).
+	in.zone_timers = runtime_ ? &runtime_->zone_states() : nullptr;
 	std::vector<opennova::hud::HudMinimapMarker> markers;
 	opennova::inmatch::build_minimap_markers(in, markers);
 	std::vector<int32_t> feed;

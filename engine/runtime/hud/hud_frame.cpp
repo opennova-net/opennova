@@ -568,10 +568,14 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	//  @0x5a8530, then HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a8535,
 	//  the 3-D icon pass, and HUD_DrawMapOverlay @0x5a87bb]. The panel has NO
 	//  declutter-mask bit of its own: the call @0x5a8530 is unconditional (the
-	//  render_capture_point_labels / bay-logo pair around it likewise) and the
+	//  capture-point labels / bay-logo pair around it likewise) and the
 	//  function's head tests only g_GameType [orig: @0x5a248d..0x5a24c5], so it
 	//  draws on the shown flag alone here.
 	element_scope_details(state, surface_w, surface_h);
+	// The capture-point labels join the walk after the death-screen fork's
+	// scope details and before the zone panel, with no gate of their own
+	// [orig: Render_CapturePointLabels @0x5a852b].
+	element_capture_point_labels(state, surface_w, surface_h);
 	element_lfp_panel(state, surface_w, surface_h);
 	// The vehicle-bay logos: no mask bit, no death-screen test (the only
 	// death-screen fork in this stretch covers the scope details)

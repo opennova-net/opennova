@@ -141,6 +141,43 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 				float(layout_.combat.impact_y), w, h, half_bright_argb(active_color(s)), 0);
 	}
 }
+// HUD_DrawTexturedQuadCentered over a shader loaded alpha mode 0 by
+// sub_591750 (flag word 0x651: colour op 0x600 = MODULATE2X(TEXTURE, DIFFUSE),
+// alpha op 0x50 = MODULATE(TEXTURE, DIFFUSE)), which the fold below bakes into
+// the diffuse. The corners are the design centre +- the extent / 2 (C
+// division) scaled onto the surface by the integer
+// Viewport_ScaleToVirtualCoords; the UVs inset half a texel of the DESIGN
+// extent and widen by one output pixel. Two textured triangles, so the quad
+// keeps its place inside a kind-grouped run.
+// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners
+//  @0x590a14..0x590a33, Viewport_ScaleToVirtualCoords @0x590b04 / @0x590b18,
+//  the UVs @0x590ba6..0x590be4; flags 1617 = 0x651 sub_591750 @0x59181a]
+void HudFrameCompiler::emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw,
+		int32_t qh, int32_t texture, uint32_t diffuse, float w, float h) {
+	if (qw <= 0 || qh <= 0)
+		return;
+	const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
+	const uint32_t folded = (diffuse & 0xFF000000u) | ((diffuse & 0x7F7F7Fu) << 1);
+	const float x0 = float(design_to_screen_x(cx - qw / 2, surface_w));
+	const float x1 = float(design_to_screen_x(qw / 2 + cx, surface_w));
+	const float y0 = float(design_to_screen_y(cy - qh / 2, surface_h));
+	const float y1 = float(design_to_screen_y(cy + qh / 2, surface_h));
+	// The far edges sum the UNROUNDED insets (the x87 keeps them on the stack).
+	const double du = 0.5 / double(qw), dv = 0.5 / double(qh);
+	const float u0 = float(du), v0 = float(dv);
+	const float u1 = x1 > x0 ? float(1.0 - du + 1.0 / (double(x1) - double(x0))) : 1.0f;
+	const float v1 = y1 > y0 ? float(1.0 - dv + 1.0 / (double(y1) - double(y0))) : 1.0f;
+	HudTri first, second;
+	first.texture = second.texture = texture;
+	first.a = { x0, y0, u0, v0, folded };
+	first.b = { x1, y0, u1, v0, folded };
+	first.c = { x1, y1, u1, v1, folded };
+	second.a = { x0, y0, u0, v0, folded };
+	second.b = { x1, y1, u1, v1, folded };
+	second.c = { x0, y1, u0, v1, folded };
+	draw_list_.tris.push_back(first);
+	draw_list_.tris.push_back(second);
+}
 // The walk's logos through HUD_DrawEntityMarker types 5/6/7 with the walk's
 // arguments: scale 2.0, color alpha<<24 | palette rgb, the fill
 // (alpha & ~3) << 22 in the texture_id slot, and three empty labels.
@@ -197,16 +234,11 @@ void HudFrameCompiler::element_vehicle_bay_logos(const HudFrameState &s, float w
 		ring(draw_list_, float(double(vx) * sw * k1), float(double(vy) * sh * k2),
 				float(k1 * (sw * double(t))), 2.0f, float(k2 * (sh * 2.0)), color, fill);
 		// The logo: a centred design-space quad over the backing, the
-		// half-bright colour at full alpha under the texture's MODULATE2X
-		// (flag word 0x651: colour op 0x600 = MOD2X(TEXTURE, DIFFUSE), alpha
-		// op 0x50 = MODULATE(TEXTURE, DIFFUSE)), folded into the diffuse;
-		// UVs inset half a texel of the DESIGN extent and widened by one
-		// output pixel. A logo that failed to load draws no quad.
-		// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners
-		//  @0x590a14..0x590a33, Viewport_ScaleToVirtualCoords @0x590b04 /
-		//  @0x590b18, the UVs @0x590ba6..0x590be4; the colour
-		//  `sar 1; and 7F7F7Fh; or FF000000h` @0x59362c..0x593638; flags
-		//  1617 = 0x651 sub_591750 @0x59181a]
+		// half-bright colour at full alpha under the texture's MODULATE2X.
+		// A logo that failed to load draws no quad.
+		// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- `if (textureId)`
+		//  @0x590adf; the colour `sar 1; and 7F7F7Fh; or FF000000h`
+		//  @0x59362c..0x593638]
 		const HudSprite &sprite = logo.type == kMarkerTypeLogoHelo ? l.logo_helo
 				: logo.type == kMarkerTypeLogoHumm                 ? l.logo_humm
 																	: l.logo_boat;
@@ -215,25 +247,8 @@ void HudFrameCompiler::element_vehicle_bay_logos(const HudFrameState &s, float w
 		const int32_t texture = logo.type == kMarkerTypeLogoHelo ? kHudTexLogoHelo
 				: logo.type == kMarkerTypeLogoHumm               ? kHudTexLogoHumm
 																  : kHudTexLogoBoat;
-		const uint32_t diffuse = ((color >> 1) & 0x7F7F7Fu) | 0xFF000000u;
-		const uint32_t folded = (diffuse & 0xFF000000u) | ((diffuse & 0x7F7F7Fu) << 1);
-		const float x0 = sx(float(vx - qw / 2), w), x1 = sx(float(qw / 2 + vx), w);
-		const float y0 = sy(float(vy - qh / 2), h), y1 = sy(float(vy + qh / 2), h);
-		const float u0 = 0.5f / float(qw), v0 = 0.5f / float(qh);
-		const float u1 = x1 > x0 ? 1.0f - u0 + 1.0f / (x1 - x0) : 1.0f;
-		const float v1 = y1 > y0 ? 1.0f - v0 + 1.0f / (y1 - y0) : 1.0f;
-		// Two textured triangles, so the logo keeps the walk's order over
-		// its backing band inside the run.
-		HudTri first, second;
-		first.texture = second.texture = texture;
-		first.a = { x0, y0, u0, v0, folded };
-		first.b = { x1, y0, u1, v0, folded };
-		first.c = { x1, y1, u1, v1, folded };
-		second.a = { x0, y0, u0, v0, folded };
-		second.b = { x1, y1, u1, v1, folded };
-		second.c = { x0, y1, u0, v1, folded };
-		draw_list_.tris.push_back(first);
-		draw_list_.tris.push_back(second);
+		emit_textured_quad_centered(vx, vy, qw, qh, texture,
+				((color >> 1) & 0x7F7F7Fu) | 0xFF000000u, w, h);
 	}
 	mark_order_break();
 }

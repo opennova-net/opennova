@@ -52,6 +52,14 @@ HudMinimapMarker sample(uint16_t handle) {
     // v6: the vehicle-bay logo walk's facts.
     m.entity_z = -65536 * 3 - 17;
     m.bay_groups = 5;
+    // v7: the capture-point labels' zone-timer entry.
+    m.timer_known = 1;
+    m.timer_active = 1;
+    m.timer_team = 2;
+    m.timer_bar_team = -1;
+    m.timer_value = 31 * 65536;
+    m.timer_limit = 62 * 65536;
+    m.timer_rate = -1057;
     return m;
 }
 
@@ -67,7 +75,10 @@ bool same(const HudMinimapMarker &a, const HudMinimapMarker &b) {
            a.zone_radius == b.zone_radius && a.entity_x == b.entity_x &&
            a.entity_y == b.entity_y && a.anchor_x == b.anchor_x && a.anchor_y == b.anchor_y &&
            a.bound_radius_q16 == b.bound_radius_q16 && a.entity_z == b.entity_z &&
-           a.bay_groups == b.bay_groups;
+           a.bay_groups == b.bay_groups && a.timer_known == b.timer_known &&
+           a.timer_active == b.timer_active && a.timer_team == b.timer_team &&
+           a.timer_bar_team == b.timer_bar_team && a.timer_value == b.timer_value &&
+           a.timer_limit == b.timer_limit && a.timer_rate == b.timer_rate;
 }
 
 void test_round_trip_is_exact() {
@@ -76,6 +87,7 @@ void test_round_trip_is_exact() {
     in[1].rotate = 1;
     in[1].footprint = 0;
     in[1].medic = 0;
+    in[1].timer_active = 0; // an entry with only the window leg landed
     std::vector<int32_t> feed;
     minimap_feed_encode(in, feed);
     CHECK(feed.size() == static_cast<size_t>(kMinimapFeedHeaderSize + 2 * kMinimapFeedStride));
@@ -84,6 +96,10 @@ void test_round_trip_is_exact() {
     CHECK(feed[2] == 2);
     CHECK(feed[kMinimapFeedHeaderSize + 12] == 2); // bit1 footprint, bit0 rotate clear
     CHECK(feed[kMinimapFeedHeaderSize + 16] == 1); // v4 medic
+    CHECK(kMinimapFeedVersion == 7 && kMinimapFeedStride == 36);
+    CHECK(feed[kMinimapFeedHeaderSize + 30] == 3); // v7 timer flags: known | active
+    CHECK(feed[kMinimapFeedHeaderSize + kMinimapFeedStride + 30] == 1);
+    CHECK(feed[kMinimapFeedHeaderSize + 35] == -1057); // the signed rate rides as is
     std::vector<HudMinimapMarker> out;
     CHECK(minimap_feed_decode(feed.data(), feed.size(), out));
     CHECK(out.size() == 2);

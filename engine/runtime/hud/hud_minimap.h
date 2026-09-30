@@ -165,6 +165,19 @@ struct HudMinimapMarker {
 	//  entity+0xC @0x5a2d56, the def's +0xAD8 @0x5a2d6f].
 	int32_t entity_z = 0;   // entity+0xC, the live altitude
 	uint8_t bay_groups = 0; // ItemDef+0xAD8: 1 land, 2 air, 4 water families
+	// --- v7: the zone-timer entry keyed by the slot's entity, the capture-
+	// point labels' reads (the entry image is ClientRuntime::ZoneState::Entry;
+	// no entry = timer_known 0) [orig: Render_CapturePointLabels @0x5a2840 --
+	//  CProximityList_FindEntryById(g_ZoneTimerList, entity) @0x5a292c; entry[1]
+	//  @0x5a2a4f, [2] @0x5a2b14, [8] / [10] @0x5a2b94 / @0x5a2b97, [11]
+	//  @0x5a2a47, [12] @0x5a2b8b].
+	uint8_t timer_known = 0;
+	uint8_t timer_active = 0;   // entry[12], the value ramp's active flag
+	int32_t timer_team = 0;     // entry[1]
+	int32_t timer_bar_team = 0; // entry[2]
+	int32_t timer_value = 0;    // entry[8], ticks-fixed
+	int32_t timer_limit = 0;    // entry[10], ticks-fixed
+	int32_t timer_rate = 0;     // entry[11]
 };
 
 // HudMinimapMarker::entity_bits.

@@ -52,6 +52,13 @@ void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,
         // v6: the vehicle-bay logo walk's altitude and spawn families.
         dst[28] = m.entity_z;
         dst[29] = m.bay_groups;
+        // v7: the capture-point labels' zone-timer entry.
+        dst[30] = (m.timer_known ? 1 : 0) | (m.timer_active ? 2 : 0);
+        dst[31] = m.timer_team;
+        dst[32] = m.timer_bar_team;
+        dst[33] = m.timer_value;
+        dst[34] = m.timer_limit;
+        dst[35] = m.timer_rate;
         dst += kMinimapFeedStride;
     }
 }
@@ -103,6 +110,13 @@ bool minimap_feed_decode(const int32_t *data, std::size_t size,
         marker.bound_radius_q16 = row[27];
         marker.entity_z = row[28];
         marker.bay_groups = static_cast<uint8_t>(row[29]);
+        marker.timer_known = (row[30] & 1) != 0 ? 1 : 0;
+        marker.timer_active = (row[30] & 2) != 0 ? 1 : 0;
+        marker.timer_team = row[31];
+        marker.timer_bar_team = row[32];
+        marker.timer_value = row[33];
+        marker.timer_limit = row[34];
+        marker.timer_rate = row[35];
         out.push_back(marker);
     }
     return true;

@@ -16,7 +16,9 @@
 // drawer and the later map legs read behind the slot handle
 // (HudMinimapMarker carries the witnesses); v6 appends {entity_z,
 // bay_groups} for the vehicle-bay logo walk (hud_bay_logos.h), the bay bit
-// riding entity_bits.
+// riding entity_bits; v7 appends the zone-timer entry keyed by the slot's
+// entity {timer_flags (bit0 known, bit1 active), team, bar_team, value, limit,
+// rate} for the capture-point labels (hud_capture_labels.h).
 
 #include <cstddef>
 #include <cstdint>
@@ -26,9 +28,9 @@
 
 namespace opennova::hud {
 
-inline constexpr int32_t kMinimapFeedVersion = 6;
+inline constexpr int32_t kMinimapFeedVersion = 7;
 inline constexpr int32_t kMinimapFeedHeaderSize = 3;
-inline constexpr int32_t kMinimapFeedStride = 30;
+inline constexpr int32_t kMinimapFeedStride = 36;
 
 // {version, stride, count} + count rows.
 void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,

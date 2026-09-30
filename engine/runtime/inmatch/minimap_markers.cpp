@@ -81,9 +81,31 @@ void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &e
 
 namespace {
 
+// v7: the zone-timer entry keyed by the slot's entity, as the capture-point
+// labels read it: the entry exists once either S2C 0x6F or 0x53 landed for
+// the zone [orig: Render_CapturePointLabels @0x5a2840 --
+//  CProximityList_FindEntryById(g_ZoneTimerList, entity) @0x5a292c; the
+//  entry is appended by ZoneTimerList_SetEntryValue @0x537EC0 and
+//  ZoneTimerList_SetEntryWindow @0x537DE0 alike].
+void stamp_zone_timer(hud::HudMinimapMarker &m,
+                      const std::unordered_map<uint16_t, ClientRuntime::ZoneState> *timers) {
+    if (timers == nullptr) return;
+    const auto found = timers->find(m.handle);
+    if (found == timers->end()) return;
+    const ClientRuntime::ZoneState::Entry &entry = found->second.entry;
+    m.timer_known = 1;
+    m.timer_active = entry.value_active ? 1 : 0;
+    m.timer_team = entry.mode_a;
+    m.timer_bar_team = entry.mode_b;
+    m.timer_value = entry.value_current;
+    m.timer_limit = entry.value_limit;
+    m.timer_rate = entry.value_rate;
+}
+
 template <typename Bank>
 void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *world,
                  const world::Entity *local_player, const world::SpawnZoneRegistry *zones,
+                 const std::unordered_map<uint16_t, ClientRuntime::ZoneState> *timers,
                  std::vector<hud::HudMinimapMarker> &out) {
     for (const ClientMinimapOverlaySlot &slot : bank) {
         if (!slot.active) continue;
@@ -132,6 +154,7 @@ void append_bank(const Bank &bank, hud::HudMinimapBank bank_id, world::World *wo
         m.half_y_q16 = policy.half_y_q16;
         m.floor_px = policy.floor_px;
         m.medic = static_cast<uint8_t>(medic);
+        stamp_zone_timer(m, timers);
         out.push_back(m);
     }
 }
@@ -160,11 +183,11 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
         scan_bank(in.map->transient);
         scan_bank(in.map->persistent);
         append_bank(in.map->transient, hud::HudMinimapBank::kTransient, in.world, local_player,
-                    zones, out);
+                    zones, in.zone_timers, out);
         append_bank(in.map->persistent, hud::HudMinimapBank::kPersistent, in.world, local_player,
-                    zones, out);
+                    zones, in.zone_timers, out);
         append_bank(in.map->special, hud::HudMinimapBank::kSpecial, in.world, local_player, zones,
-                    out);
+                    in.zone_timers, out);
     }
     // Retail registers the locally deployed player in a regular retained bank.
     // The loopback client does not receive that client-local registration, so
@@ -202,6 +225,7 @@ void build_minimap_markers(const MinimapMarkerInputs &in,
                   ? 1
                   : 0;
     stamp_minimap_entity_facts(m, *local_player, local_player, zones);
+    stamp_zone_timer(m, in.zone_timers);
     out.push_back(m);
 }
 

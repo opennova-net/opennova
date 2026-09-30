@@ -7,6 +7,7 @@
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
 #include <runtime/hud/hud_bay_logos.h>
+#include <runtime/hud/hud_capture_labels.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
@@ -91,6 +92,16 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 				s.bay_logos);
 		for (HudBayLogo &logo : s.bay_logos)
 			logo.point = project(logo.position, true);
+	}
+	// The capture-point labels: the engine's walk over the same rows (each
+	// carrying its zone-timer entry) with the gametext strings, each admitted
+	// point projected here.
+	s.capture_labels.clear();
+	if (v.local_valid) {
+		capture_point_label_walk(state_.minimap.markers, v.local_team, game_text_lookup(gametext),
+				s.capture_labels);
+		for (HudCaptureLabel &label : s.capture_labels)
+			label.point = project(label.position, true);
 	}
 	if (s.service_prompt) {
 		// The templates, their miss rules and the sprintf are the engine's

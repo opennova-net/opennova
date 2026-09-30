@@ -3576,3 +3576,9 @@ add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
 target_compile_features(hud_combat_test PRIVATE cxx_std_17)
 add_test(NAME hud_combat COMMAND hud_combat_test)
+
+# The capture-point labels: the map-overlay slot walk and the marker types 8/9.
+add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
+target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
+target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
+add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)

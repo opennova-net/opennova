@@ -75,10 +75,11 @@ enum HudTexture : int32_t {
 	// The marker's 36x36 team tile behind the letter: one texture for the
 	// viewer's own zones, another for everyone else's [orig: the pick
 	//  @0x5989b9..0x5989d1 — g_HUDZoneTileOwnTexture @0x27239D4 for team == local,
-	//  dword_27239C4 otherwise; the latter is lfp_alf.tga, HUD_LoadAllTextures
-	//  @0x59e10e]. WITNESS PENDING: the loader of g_HUDZoneTileOwnTexture @0x27239D4 (no
-	//  visible writer in HUD_LoadAllTextures' xrefs) — an unresolved slot
-	//  draws no tile, the same degradation as the silhouette.
+	//  g_HUDZoneTileOtherTexture @0x27239C4 otherwise; HUD_LoadAllTextures loads
+	//  lfp_alf.tga into the record @0x27239C0 @0x59e10e and lfp_dlf.tga into
+	//  @0x27239D0 @0x59e11f, alpha mode 0, the shader at +4 being what the
+	//  drawers bind]. The capture-point labels' marker types 9 / 8 bind the
+	//  same pair [orig: HUD_DrawEntityMarker @0x593704 / @0x593724].
 	kHudTexLfpTileOwn,
 	kHudTexLfpTileOther,
 	kHudTexTarget,
@@ -1350,6 +1351,15 @@ private:
 	// drawer's types 5/6/7 [orig: HUD_DrawVehicleBayLogos @0x5a2c00 ->
 	// HUD_DrawEntityMarker @0x593140].
 	void element_vehicle_bay_logos(const HudFrameState &state, float w, float h);
+	// The capture-point labels (hud_capture_labels.h) through the marker
+	// drawer's types 8/9 [orig: Render_CapturePointLabels @0x5a2840 ->
+	// HUD_DrawEntityMarker @0x593140, HUD_DrawProgressBar @0x59B340].
+	void element_capture_point_labels(const HudFrameState &state, float w, float h);
+	// HUD_DrawTexturedQuadCentered over an alpha-mode-0 shader: design centre
+	// and extent, two textured triangles (hud_optical_cues.cpp carries the
+	// witness) [orig: HUD_DrawTexturedQuadCentered @0x5909E0].
+	void emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw, int32_t qh,
+			int32_t texture, uint32_t diffuse, float w, float h);
 	void mark_order_break();
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);

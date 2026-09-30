@@ -4322,6 +4322,95 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	return true;
 }
 
+// A numbered SpawnPoint zone's S2C 0x40 source byte ORs the recipient's
+// capture bits: 0x80 when the recipient's team may take the zone, 0x40 when
+// the other side may (2 for team 1, else 1); a zone outside the chain takes
+// both, an unnumbered one neither. The zone panel, the map tethers and the
+// capture-point labels gate on these bits.
+// [orig: Server_BuildOverlayStateForPlayer @0x5181ff..0x518248 /
+//  @0x51834f..0x518398; ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450]
+bool check_minimap_overlay_zone_capture_bits() {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 8);
+	world.registry.configure_pool(2, 4);
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+
+	auto zone = [&](uint8_t number, uint8_t team, bool chained) {
+		opennova::world::Entity e;
+		e.kind = opennova::world::EntityKind::Item;
+		e.has_item_def = true;
+		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
+				(chained ? opennova::world::kItemAttribChangeTeam : 0u);
+		e.is_spawn_point = true;
+		e.is_capture_trigger = chained;
+		e.zone_number = number;
+		e.team = team;
+		e.health = 1;
+		e.alive = true;
+		return world.registry.spawn(1, e);
+	};
+	// Team 1 holds 1, team 2 holds 3, the neutral 2 sits between them.
+	const auto z1 = zone(1, 1, true);
+	const auto z2 = zone(2, 0, true);
+	const auto z3 = zone(3, 2, true);
+	const auto loose = zone(5, 0, false);
+	const auto plain = zone(0, 1, false);
+	world.zones.build_chain_from_mission();
+
+	opennova::world::Entity player;
+	player.kind = opennova::world::EntityKind::Organic;
+	player.team = 1;
+	player.health = 100;
+	player.alive = true;
+	const auto player_h = world.registry.spawn(0, player);
+
+	opennova::replication::UdpSessionTransport transport(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player_h;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	opennova::inmatch::Server_TickUpdate(ctx);
+	std::vector<opennova::CaptureZoneOverlay> rows;
+	std::vector<uint8_t> raw;
+	while (transport.pop_outbound(raw)) {
+		if (raw.empty() || raw.front() != opennova::s2c::CAPTURE_ZONE_STATE) continue;
+		opennova::CaptureZoneOverlayBatch batch;
+		if (!opennova::decode_capture_zone_overlay(raw.data() + 1, raw.size() - 1, batch))
+			return expect(false, "the zone overlay batch decodes");
+		rows.insert(rows.end(), batch.entries.begin(), batch.entries.end());
+	}
+	auto source_of = [&](opennova::world::EntityHandle h) -> int {
+		for (const auto &row : rows)
+			if (row.handle == static_cast<uint16_t>(h.packed)) return row.source;
+		return -1;
+	};
+	bool ok = expect(source_of(z1) == 0x01,
+			"team 1's own zone 1: neither side may take it (no enemy neighbour)");
+	ok = expect(source_of(z2) == 0xC2,
+			"neutral zone 2 between both sides: capturable by the recipient and the enemy") && ok;
+	ok = expect(source_of(z3) == 0x03, "team 2's zone 3 has no team-1 neighbour") && ok;
+	ok = expect(source_of(loose) == 0xC5, "a numbered zone outside the chain takes both bits") &&
+			ok;
+	ok = expect(source_of(plain) == 0x00, "an unnumbered spawn point takes no capture bits") &&
+			ok;
+	return ok;
+}
+
 // StartDelay is a host-side seconds phase, not a second gameplay clock. The
 // ordinary 62 Hz clock and network maintenance continue, while the World
 // systems stay frozen through the boundary that changes 1 -> 0. Gameplay
@@ -4477,6 +4566,7 @@ int main() {
 	ok = check_frontier_hint_waits_for_the_play_ticks() && ok;
 	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
+	ok = check_minimap_overlay_zone_capture_bits() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

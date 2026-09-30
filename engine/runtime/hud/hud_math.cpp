@@ -30,6 +30,14 @@ int32_t screen_to_design_y(int32_t y, int32_t surface_h) {
 	return static_cast<int32_t>((static_cast<int64_t>(y) * 768 + (surface_h >> 1)) / surface_h);
 }
 
+int32_t design_to_screen_x(int32_t x, int32_t surface_w) {
+	return static_cast<int32_t>((static_cast<int64_t>(x) * surface_w + 512) / 1024);
+}
+
+int32_t design_to_screen_y(int32_t y, int32_t surface_h) {
+	return static_cast<int32_t>((static_cast<int64_t>(y) * surface_h + 384) / 768);
+}
+
 BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,
 		double bottom) {
 	// [orig: HUD_DrawTexturedQuadWithBorder @0x590D2F..0x590D8C] The x87 walk

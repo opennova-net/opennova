@@ -58,6 +58,26 @@ struct HudBayLogo {
 	uint8_t alpha = 0;   // 0..255
 	HudProjectedPoint point;
 };
+// One capture-point label the walk admitted (hud_capture_labels.h): the
+// lifted world point, the marker type, the team colour, the under-attack
+// flash eligibility, the two label strings and the zone-timer bar facts; the
+// device fills the projection, the frame compiler applies the frame
+// counter's flash phase and the binoculars gate.
+// [orig: Render_CapturePointLabels @0x5a2840]
+struct HudCaptureLabel {
+	std::array<int32_t, 3> position{}; // Q16, z already lifted by 0x20000
+	uint8_t type = 8;    // HUD_DrawEntityMarker type: 8 another team's zone, 9 the viewer's
+	uint8_t palette = 1; // g_HUDColors.palette index: 3 team 1, 5 team 2, else 1
+	// The viewer's own zone draining under its own timer: the colour flashes
+	// yellow while (g_HUDFrameCounter & 0x18) == 0.
+	bool flash = false;
+	std::string letter; // label_above: " ", or the zone letter when a timer entry exists
+	std::string name;   // label_at before the binoculars gate ("" without a timer entry)
+	bool timer = false; // a zone-timer entry exists (the progress bar's gate)
+	uint8_t bar_palette = 1; // by entry[2]: 3 team 1, 5 team 2, else 1
+	float bar_fraction = 0;  // entry[8] / entry[10] while entry[12], else 0
+	HudProjectedPoint point;
+};
 struct HudServiceState {
 	uint8_t preround_seconds = 0, reload_seconds = 0;
 	uint32_t owned_zone_mask = 0;
@@ -107,6 +127,8 @@ struct HudCombatState {
 	std::string altitude_text = "altitude";
 	// The vehicle-bay logos this frame, walk order (hud_bay_logos.h).
 	std::vector<HudBayLogo> bay_logos;
+	// The capture-point labels this frame, walk order (hud_capture_labels.h).
+	std::vector<HudCaptureLabel> capture_labels;
 };
 // Shared weapon/vehicle silhouette flash. The original keeps one stamp and
 // separate previous weapon/root identities. Zero elapsed is promoted to one.

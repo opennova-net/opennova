@@ -293,8 +293,15 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			reply.minimap_initial_scan_pending = false;
 		}
 
+		uint8_t recipient_team = 0; // retail's player slot byte +416
+		if (const world::Entity *recipient = world.registry.get(conn.link.owned_entity))
+			recipient_team = recipient->team;
 		// SpawnPoint rows from both static and actor pools are persistent and
-		// refreshed on every producer invocation.
+		// refreshed on every invocation. A numbered zone's source byte ORs the
+		// recipient's capture bits: 0x80 when its team may take the zone, 0x40
+		// when the other side (2 for team 1, else 1) may [orig:
+		// Server_BuildOverlayStateForPlayer @0x5181ff..0x518248 (pool 2),
+		// @0x51834f..0x518398 (pool 1); ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450].
 		for (const int pool : {2, 1}) {
 			const size_t capacity = world.registry.pool_capacity(pool);
 			for (size_t slot = 0; slot < capacity; ++slot) {
@@ -303,14 +310,18 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 				if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
 						(e->item_attrib & world::kItemAttribSpawnPoint) == 0)
 					continue;
-				append(*e, true);
+				world::MinimapOverlayClassification entry =
+						world::classify_minimap_overlay(*e, &world);
+				if (!entry.visible) continue;
+				entry.flags |= 0x10;
+				if (e->zone_number != 0) {
+					if (world.zones.is_capturable(recipient_team, *e)) entry.source |= 0x80;
+					if (world.zones.is_capturable(recipient_team == 1 ? 2 : 1, *e))
+						entry.source |= 0x40;
+				}
+				entries.push_back(entry);
 			}
 		}
-
-		uint8_t recipient_team = 0;
-		if (const world::Entity *recipient =
-					world.registry.get(conn.link.owned_entity))
-			recipient_team = recipient->team;
 		const size_t pool1_capacity = world.registry.pool_capacity(1);
 		for (size_t slot = reply.minimap_pool1_phase;
 				slot < pool1_capacity; slot += 128) {
