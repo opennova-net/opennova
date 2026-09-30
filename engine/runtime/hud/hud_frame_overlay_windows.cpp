@@ -4,11 +4,14 @@
 // @0x5be133..0x5be145, HUD_DrawWinConditions @0x5be163, HelpScreen_Draw
 // @0x5be179], plus the block wrapper the briefing lays its text out with
 // [orig: HUD_DrawWrappedText @0x580C00].
+// The overlay-panel pass's voice-macro menus and the SP pause text live here
+// too (HUD_DrawOverlayPanels @0x5c0060).
 
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace opennova::hud {
@@ -413,6 +416,59 @@ void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, f
 					y - label_dy, label_color, 0u);
 		if (!left) y += row_step;
 	}
+	++draw_list_.elements_drawn;
+}
+
+// The F9 / F10 voice-macro menus: the stdbox with its title, then the ten
+// numbered rows in the bold slot, half-bright, the context rows in palette
+// entry 4 [orig: HUD_DrawEmotesMenu @0x5bff00 / HUD_DrawRadioTitleMenu
+// @0x5bfb90 — HUD_DrawLabelBox(ctx, 128, 180, 896, 550, title, -1)
+// @0x5bff5c / @0x5bfbec; `display = i <= 9 ? i : i - 10` @0x5bff89..0x5bff8e;
+// sprintf "%i - %s" @0x5bffe3; the colour pick @0x5bfff7..0x5c0004 /
+// @0x5bfc84..0x5bfc91; HUD_DrawTextLeftScaled(bold, 200, y, line, colour, 1)
+// @0x5c001f, y 225..495 step 30 @0x5bff81].
+void HudFrameCompiler::element_voice_macro_menu(const HudFrameState &state,
+		const HudVoiceMacroMenuState &menu, int context_row, float w, float h) {
+	if (!menu.shown) return;
+	emit_label_box(128.0f, 180.0f, 896.0f, 550.0f, menu.title, 0xFFFFFFFFu, w, h);
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : 1.0f;
+	char line[256];
+	int y = 225;
+	for (int i = 1; i <= 10; ++i, y += 30) {
+		const int display = i <= 9 ? i : i - 10;
+		std::snprintf(line, sizeof(line), "%i - %s", display,
+				menu.texts[static_cast<size_t>(i - 1)].c_str());
+		const uint32_t color = i >= context_row ? hud_palette(4) : active_color(state);
+		emit_slot_text(bf, bscale, line, sx(200.0f, w), sy(static_cast<float>(y), h),
+				half_bright_argb(color), 0u);
+	}
+	++draw_list_.elements_drawn;
+}
+
+// The SP pause word's text: Overlays/STROVER7 through HUD_DrawTextAtVirtualPos
+// mode 1 (right-aligned, half-bright) in the Impact38 slot at PAUSEDPOS, or
+// (1000, 4) when either field is zero, in g_HUDColors.active [orig:
+// HUD_DrawPausedText @0x59d650 — the fallback @0x59d65c..0x59d670, the
+// Impact38 push @0x59d678, mode 1 @0x59d675, HUD_DrawTextAtVirtualPos
+// @0x59d699].
+void HudFrameCompiler::element_paused_text(const HudFrameState &state, float w, float h) {
+	if (!state.paused) return;
+	int x = layout_.paused_x;
+	int y = layout_.paused_y;
+	if (x == 0 || y == 0) {
+		x = 1000;
+		y = 4;
+	}
+	// The Impact38 slot falls back like the end-round overlay's.
+	const bool have_impact = label_font_impact38_.font() != nullptr;
+	const bool have_large = label_font_large_.font() != nullptr;
+	const GameFont &lf = have_impact ? label_font_impact38_
+			: have_large ? label_font_large_ : label_font_bold_;
+	const float ls = (have_impact || have_large) ? label_large_scale_ : label_scale_;
+	emit_text_at_virtual_pos(lf.font() != nullptr ? lf : font_, lf.font() != nullptr ? ls : 1.0f,
+			state.paused_text.c_str(), x, y, w, h, active_color(state), 1);
 	++draw_list_.elements_drawn;
 }
 

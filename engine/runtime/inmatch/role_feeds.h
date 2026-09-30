@@ -124,8 +124,24 @@ struct HudRoleFacts {
 	hud::HudSessionState session;
 	std::array<world::WeaponSlotBarCategory, 10> slot_bar{};
 	std::array<std::string, 10> slot_bar_icons;
+	// The F9 / F10 voice-macro menus the caller asked for (their open words;
+	// the frame compiler applies the death-screen gate): each row's key is
+	// the local player's voice-macro name (flags 0xC for the emotes, 6 for the
+	// radio) and its text the vmacros macrotext entry, the key itself on a
+	// miss; the titles are macrotext EMOTES_TITLE / RADIO_TITLE, else the
+	// literal fallbacks. No local player resolves nothing.
+	// [orig: HUD_DrawEmotesMenu @0x5bff00 (sub_5BFB00(buf, i, 0xC, local)
+	//  @0x5bff9e, the title @0x5bff25..0x5bff57); HUD_DrawRadioTitleMenu
+	//  @0x5bfb90 (sub_5BFB00(buf, i, 6, local) @0x5bfc2e, the title
+	//  @0x5bfbb5..0x5bfbe7); the dword_24C1930 & 0x10000 arms are dead: no
+	//  writer sets that bit]
+	hud::HudVoiceMacroMenuState emotes_menu;
+	hud::HudVoiceMacroMenuState radio_menu;
 };
-HudRoleFacts hud_role_facts(const RoleView &view);
+// `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
+inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
+inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
+HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
 
 // The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
 // 1): the roster joined to the frozen board, the local row resolved from the

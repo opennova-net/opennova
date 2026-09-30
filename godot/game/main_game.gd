@@ -1133,6 +1133,8 @@ func _pause() -> void:
 	_state = State.PAUSED
 	# The engine session pauses with the shell; net roles refuse natively.
 	_world.set_shell_paused(true)
+	if _hud_presenter != null:
+		_hud_presenter.set_menu_pause(true)
 	_menu_shell.open_ingame_menu()  # game.mnu overlay over the kept-loaded world
 	_menu_shell.show_menu()
 
@@ -1151,6 +1153,8 @@ func resume() -> void:
 			else State.WORLD
 	# Every resume leg lands here, so the session cannot stay stuck Paused.
 	_world.set_shell_paused(false)
+	if _hud_presenter != null:
+		_hud_presenter.set_menu_pause(false)
 
 
 func _on_return_to_menu() -> void:

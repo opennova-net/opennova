@@ -1133,6 +1133,11 @@ typedef struct DefHudPosDef {
     int lfp_flags[2];
     int lfp_takeover_dlg[2];
     int cargo_pos[2];
+    /* PAUSEDPOS x y — the SP pause text's anchor (STROVER7, right-aligned
+       Impact38); unauthored the drawer falls back to (1000, 4).
+       [orig: HUD_ParseHudposToken @0x59FC8D..0x59FCC8 -> dword_272360C /
+       dword_2723610 (atof, ftol); the reader sub_59D650 @0x59D656..0x59D670] */
+    int paused_pos[2];
     int roomtk_pos[2];
     int roomtk_txt_pos[2];
     int stance_pos[2];

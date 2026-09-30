@@ -122,10 +122,50 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 	return out;
 }
 
-HudRoleFacts hud_role_facts(const RoleView &view) {
+namespace {
+
+// One F9 / F10 menu's title and rows over the local player (hud_role_facts'
+// doc carries the witness).
+void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, bool radio,
+		hud::HudVoiceMacroMenuState &menu) {
+	const world::World &w = view.kernel->world;
+	const rtxt::File &macros = w.tables.voice_macros;
+	const auto lookup = [&macros](const std::string &key) -> const std::string * {
+		const rtxt::Entry *entry = macros.find_in_section("macrotext", key);
+		return entry != nullptr ? &entry->text : nullptr;
+	};
+	const std::string *title = lookup(radio ? "RADIO_TITLE" : "EMOTES_TITLE");
+	menu.title = title != nullptr ? *title : (radio ? "!Radio_Title" : "!EMOTES_Title");
+	const uint32_t game_type = view.runtime != nullptr ? view.runtime->game_type() : 0u;
+	const bool in_zone = game_type == 0x10010u && view.runtime != nullptr &&
+			in_active_radio_zone(w, local, *view.runtime);
+	const uint8_t flags = radio ? 6u : 0xCu;
+	for (int i = 1; i <= 10; ++i) {
+		const std::string key = world::radio_call_key(w, local, i, flags, game_type, in_zone);
+		const std::string *text = lookup(key);
+		menu.texts[static_cast<size_t>(i - 1)] = text != nullptr ? *text : key;
+	}
+}
+
+} // namespace
+
+HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	HudRoleFacts out;
 	out.breath = breath_bar_facts(view);
 	if (view.kernel == nullptr) return out;
+	if (voice_menus != 0u) {
+		const world::World &vw = view.kernel->world;
+		if (const world::Entity *local = vw.registry.get(vw.cached.local_player)) {
+			if ((voice_menus & kHudVoiceMenuEmotes) != 0u) {
+				out.emotes_menu.shown = true;
+				fill_voice_macro_menu(view, *local, false, out.emotes_menu);
+			}
+			if ((voice_menus & kHudVoiceMenuRadio) != 0u) {
+				out.radio_menu.shown = true;
+				fill_voice_macro_menu(view, *local, true, out.radio_menu);
+			}
+		}
+	}
 	const world::World &w = view.kernel->world;
 	hud::HudSessionState &s = out.session;
 	// g_NapiNPCtx.is_in_session: the session bit the world carries (our SP

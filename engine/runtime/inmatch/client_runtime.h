@@ -685,4 +685,13 @@ private:
 	bool replay_mode_ = false;
 };
 
+// The voice-macro key's A&S context: the speaker stands inside the nearest
+// active, map-visible capture entry with a nonzero Q16 coverage
+// (client_effects.cpp carries the witness). The contextual radio calls and
+// the F9/F10 menus share it.
+// [orig: Entity_FindNearestProximityEntity @0x5380C0, consumed by
+//  VMacros_BuildShaderPassName @0x5BF5D0's 0x10010 arm @0x5BF9D4..0x5BF9DE]
+bool in_active_radio_zone(const world::World &world, const world::Entity &speaker,
+		const ClientRuntime &runtime);
+
 } // namespace opennova::inmatch

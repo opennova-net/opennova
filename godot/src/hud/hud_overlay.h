@@ -249,6 +249,12 @@ public:
 	// bar's category scan with its icons, loaded only while the layout's
 	// HUDLS_SYSTEM draws the bar. No sim leaves every one empty.
 	void set_role_facts(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The overlay-panel pass's key-toggled state (engine hud_toggles.h): the F9
+	// emotes and F10 radio menus' open flags, which make the next role-facts
+	// read resolve their rows (shown only with the death screen down), and the
+	// single-player pause word, which draws Overlays/STROVER7.
+	void set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio_menu_open,
+			bool p_paused);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {
@@ -381,6 +387,7 @@ private:
 	opennova::hud::HudFrameCompiler compiler_;
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
+	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
 	// The HUDDECLUT mask table + level (engine hud_declutter carries the
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.

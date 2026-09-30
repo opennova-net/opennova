@@ -148,10 +148,11 @@ func test_help_legend_and_briefing_windows() -> void:
 	assert_true(shell.is_gameplay_input_active(), "closing a window does not open the menu")
 
 
-func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
-	# Retail H is only the secondary `pause` binding (SP-only); there is no
+func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
+	# Retail H is the secondary `pause` binding (SP-only): it flips the pause
+	# word, which pauses the session in place (no menu); there is no
 	# HUD-visibility toggle and no H color mapping.
-	# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520]
+	# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520..0x49b52d]
 	var shell := await _booted_in_world()
 	if shell == null:
 		return
@@ -163,18 +164,41 @@ func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
 	var nvg_before: bool = world.local_player_view().nvg_active
 
 	await _tap(KEY_H)
-	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no HUD presenter action")
+	assert_true(hud.toggles().is_paused(), "H flips the SP pause word")
+	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no other HUD presenter action")
 	assert_eq(hud.hud_detail_level(), detail_before, "H is not a declutter key")
 	assert_eq(hud.hud_color_index(), color_before, "H has no color mapping")
-	# H falls through the shell to the player router, whose gameplay legs
-	# (B/N/+/-/Z/X/C) carry no H arm: the observable consequence is that no
-	# shell leg (pause, picker, tools, armory) claims the key either, so play
-	# continues untouched.
 	assert_eq(shell.shell_state_name(), "world",
-			"H falls through the shell to the player router")
-	assert_true(shell.is_gameplay_input_active(), "nothing on the shell pauses on H")
+			"the key pause keeps the world state: no in-game menu opens")
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
 			"the router's NVG leg is N, not H")
+	await _tap(KEY_H)
+	assert_false(hud.toggles().is_paused(), "a second H clears the pause word")
+	assert_true(shell.is_gameplay_input_active(), "play continues after the unpause")
+
+
+# F9 / F10 open the emotes and radio menus (keep-one with each other); Esc
+# closes the pause word first, then one menu per press, before the in-game
+# menu [orig: dispatch 33 / 54 @0x49b6c9 / @0x49b6e2; the escape chain case 18
+# @0x49b24f, @0x49b267, @0x49b27a; case 25 @0x49b520].
+func test_voice_macro_menus_pause_and_escape() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F9)
+	assert_true(toggles.is_emotes_menu_open(), "F9 opens the emotes menu")
+	await _tap(KEY_F10)
+	assert_true(toggles.is_radio_menu_open(), "F10 opens the radio menu")
+	assert_false(toggles.is_emotes_menu_open(), "the radio menu's respawn init closes the emotes")
+	await _tap(KEY_PAUSE)
+	assert_true(toggles.is_paused(), "Pause flips the SP pause word")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_paused(), "Esc clears the pause word first")
+	assert_true(toggles.is_radio_menu_open(), "the pause clear consumed the key")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_radio_menu_open(), "the next Esc closes the radio menu")
+	assert_true(shell.is_gameplay_input_active(), "closing a menu does not open the in-game menu")
 
 
 func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> void:

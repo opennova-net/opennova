@@ -66,6 +66,10 @@ bool HudToggles::is_help_open() const { return state_.help_open; }
 bool HudToggles::is_map_legend_open() const { return state_.map_legend_open; }
 int HudToggles::get_briefing_mode() const { return state_.briefing_mode; }
 bool HudToggles::is_mp_verbose() const { return state_.mp_verbose; }
+bool HudToggles::is_emotes_menu_open() const { return state_.emotes_menu_open; }
+bool HudToggles::is_radio_menu_open() const { return state_.radio_menu_open; }
+bool HudToggles::is_paused() const { return state_.paused; }
+void HudToggles::set_paused(bool p_paused) { state_.paused = p_paused; }
 
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "rows_share_key", "chorded", "active",
@@ -98,6 +102,10 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_map_legend_open"), &HudToggles::is_map_legend_open);
 	ClassDB::bind_method(D_METHOD("get_briefing_mode"), &HudToggles::get_briefing_mode);
 	ClassDB::bind_method(D_METHOD("is_mp_verbose"), &HudToggles::is_mp_verbose);
+	ClassDB::bind_method(D_METHOD("is_emotes_menu_open"), &HudToggles::is_emotes_menu_open);
+	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);
+	ClassDB::bind_method(D_METHOD("is_paused"), &HudToggles::is_paused);
+	ClassDB::bind_method(D_METHOD("set_paused", "paused"), &HudToggles::set_paused);
 	BIND_ENUM_CONSTANT(EVENT_HUD_DETAIL_CYCLED);
 	BIND_ENUM_CONSTANT(EVENT_HUD_COLOR_CYCLED);
 	BIND_ENUM_CONSTANT(EVENT_SHOWHUD_CYCLED);
@@ -121,6 +129,8 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(EVENT_ESCAPE_OPEN_MENU);
 	BIND_ENUM_CONSTANT(EVENT_COMMAND_MAP_OPENED);
 	BIND_ENUM_CONSTANT(EVENT_SCOREBOARD_PAGE_RESET);
+	BIND_ENUM_CONSTANT(EVENT_PAUSE_TOGGLED);
+	BIND_ENUM_CONSTANT(EVENT_PAUSE_CLEARED);
 	BIND_ENUM_CONSTANT(ROW_HUD_DETAIL);
 	BIND_ENUM_CONSTANT(ROW_HUD_COLOR);
 	BIND_ENUM_CONSTANT(ROW_SHOWHUD);
@@ -138,5 +148,8 @@ void HudToggles::_bind_methods() {
 	BIND_ENUM_CONSTANT(ROW_BRIEFING);
 	BIND_ENUM_CONSTANT(ROW_VERBOSE);
 	BIND_ENUM_CONSTANT(ROW_COMMANDER_MENU);
+	BIND_ENUM_CONSTANT(ROW_PAUSE);
+	BIND_ENUM_CONSTANT(ROW_AUDIO_EMOTE);
+	BIND_ENUM_CONSTANT(ROW_RADIO_MACRO);
 	BIND_ENUM_CONSTANT(ROW_COUNT);
 }

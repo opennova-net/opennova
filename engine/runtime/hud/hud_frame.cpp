@@ -476,7 +476,9 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		element_spinmap(state, surface_w, surface_h);
 		// The frame drawer's panels run outside the level-3 skip: the chat
 		// input line precedes the kill banner [orig: HUD_DrawOverlayPanels
-		// @0x5c014e then HUD_DrawKillAnnounceBanner @0x5c0184].
+		// @0x5c014e then HUD_DrawKillAnnounceBanner @0x5c0184]. The voice-macro
+		// menus and the pause text are the same pass's, ahead of the input line.
+		compile_overlay_panel_menus(state, surface_w, surface_h);
 		element_chat_input(state, surface_w, surface_h);
 		element_kill_announcement(state, surface_w, surface_h);
 		compile_gameplay_overlay_windows(state, surface_w, surface_h);
@@ -494,8 +496,10 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_message_log(state, surface_w, surface_h);
 	element_scoreboard(state, surface_w, surface_h);
 	element_end_round_overlay(state, surface_w, surface_h);
-	// [orig: HUD_DrawOverlayPanels — the input line @0x5c014e, then the kill
-	// banner @0x5c0184]
+	// [orig: HUD_DrawOverlayPanels — the voice-macro menus @0x5c00d8 /
+	// @0x5c00ea and the pause text @0x5c0120 (compile_overlay_panel_menus),
+	// the input line @0x5c014e, then the kill banner @0x5c0184]
+	compile_overlay_panel_menus(state, surface_w, surface_h);
 	element_chat_input(state, surface_w, surface_h);
 	element_kill_announcement(state, surface_w, surface_h);
 	compile_gameplay_overlay_windows(state, surface_w, surface_h);
@@ -571,6 +575,21 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_feed(state, surface_w, surface_h);
+}
+
+// The overlay-panel pass's middle legs, after the message log: the F9 emotes
+// menu then the F10 radio menu, both only while the death screen is down,
+// then the SP pause text [orig: HUD_DrawOverlayPanels @0x5c00cf..0x5c00f9
+// (`cmp g_DeathScreenActive` @0x5c00cf, dword_24C18D4 @0x5c00d8,
+// dword_24C18D8 @0x5c00ea), dword_A87050 @0x5c0120]. The pass runs outside
+// the level-3 early-out (its caller is Render_ProcessMainSceneFrame
+// @0x5cae3b).
+void HudFrameCompiler::compile_overlay_panel_menus(const HudFrameState &state, float w, float h) {
+	if (!state.combat.death_screen) {
+		element_voice_macro_menu(state, state.emotes_menu, kHudEmotesMenuContextRow, w, h);
+		element_voice_macro_menu(state, state.radio_menu, kHudRadioMenuContextRow, w, h);
+	}
+	element_paused_text(state, w, h);
 }
 
 // The windows HUD_DrawGameplayOverlays draws after its level-3 skip, so they

@@ -56,6 +56,7 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     if (const auto *entity = world.registry.get(native_handle)) { out = *entity; return true; }
     return false;
 }
+} // namespace
 
 // Context flag 7: active capture entry, inside its cylinder, with a visible
 // minimap slot. The NEAREST qualifying entry (strict < on the truncated 2D
@@ -98,7 +99,6 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
     // radius == 0: retail's idiv faults; the bounded port reports no coverage.
     if (best > radius || radius == 0) return false;
     return ((int64_t(radius - best) << 16) / radius) != 0;
-}
 }
 
 void ClientRuntime::tick_remote_stance_sounds(world::World &world) {

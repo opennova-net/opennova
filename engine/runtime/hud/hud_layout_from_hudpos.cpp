@@ -125,6 +125,9 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.veh_stance_pos = pos_record2(hud.veh_stance_pos[0], hud.veh_stance_pos[1]);
 	out.clip_pos = pos_record2(hud.clip_pos[0], hud.clip_pos[1]);
 	out.stance_pos = pos_record2(hud.stance_pos[0], hud.stance_pos[1]);
+	// PAUSEDPOS x, y [orig: @0x59FCB0 / @0x59FCC8 -> dword_272360C / 10].
+	out.paused_x = hud.paused_pos[0];
+	out.paused_y = hud.paused_pos[1];
 
 	// The targeting and instrument anchors (hud_combat.h): the sprites' pixel
 	// sizes are the device's once it resolves the names below.

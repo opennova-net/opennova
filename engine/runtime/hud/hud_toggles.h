@@ -57,12 +57,31 @@ struct HudToggleState {
 	// The MP verbose toggle [orig: g_MpVerbose2 @0x24D2154, seeded verbose-on
 	// from the session settings @0x551D0F].
 	bool mp_verbose = kMpVerboseDefault;
+	// The F9 AudioEmote and F10 RadioMacro menus (catalog rows 101 / 102,
+	// dispatch 33 / 54) [orig: dword_24C18D4 / dword_24C18D8 — `xor 1` then the
+	// keeping init @0x49b6c9 / @0x49b6e2].
+	bool emotes_menu_open = false;
+	bool radio_menu_open = false;
+	// The single-player pause word's bit 0: the pause row (catalog 70,
+	// dispatch 25) flips it out of a session, the in-game menu sets it on
+	// open and clears it on resume out of a session, the escape chain clears
+	// it first, and a mission start zeroes it. Every row whose binding flags
+	// carry bit 0 is dropped while it is set. The embedder applies it to the
+	// session pause and draws Overlays/STROVER7 while it holds.
+	// [orig: dword_A87050 — case 25 `xor 1` @0x49b52d; UI_OptionsScreenInit
+	//  `or 1` @0x554dd8 / UI_IngameBackResumeCommand `and ~1` @0x55549e (both
+	//  behind !is_in_session); the escape clear @0x49b3d3;
+	//  Game_ResetSessionHudState @0x434bd7; the row gate @0x49addd..0x49ade8;
+	//  Game_ProcessMainFrame's tick gate @0x5265a0; HUD_DrawOverlayPanels
+	//  @0x5c0120]
+	bool paused = false;
 
 	HudKeyEdge huddetail, hudcolor, showhud, dotsize, goals;
 	HudKeyEdge view1st, viewwithgun, viewchase;
 	HudKeyEdge playerlist, old_messages, show_score;
 	HudKeyEdge friendly_tags, help, helpmap, briefing, verbose;
 	HudKeyEdge commander;
+	HudKeyEdge pause, audio_emote, radio_macro;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -99,12 +118,16 @@ struct HudKeyPoll {
 	bool briefing = false;      // row 54 Briefing, dispatch 53
 	bool verbose = false;       // row 75 Verbose, dispatch 37
 	bool commander_menu = false; // row 53 commander_menu, dispatch 221
+	bool pause = false;          // row 70 pause, dispatch 25
+	bool audio_emote = false;    // row 101 AudioEmote, dispatch 33
+	bool radio_macro = false;    // row 102 RadioMacro, dispatch 54
 	bool chorded = false;
 	bool active = false;
 	bool in_session = false;
 	bool objective_game = false; // g_GameType & kObjectiveBit (0x20000)
-	// The local player is alive: the commander_menu row carries the binding
-	// flag 0x1 the dispatcher tests against a dead player (Flags & 2).
+	// The local player is alive: the commander_menu, AudioEmote and
+	// RadioMacro rows carry the binding flag 0x1 the dispatcher tests against
+	// a dead player (Flags & 2).
 	bool local_alive = true;
 };
 
@@ -149,6 +172,13 @@ inline constexpr uint32_t kCommandMapOpened = 0x200000;
 // The player list's open edge zeroed its page: the embedder resets the
 // compiler's page cursor [orig: Scoreboard_TogglePlayerList @0x4244e4].
 inline constexpr uint32_t kScoreboardPageReset = 0x400000;
+// The pause row flipped HudToggleState::paused: the embedder applies it to
+// the session pause (and, pausing, the audio stop) [orig: case 25 @0x49b520
+// — Audio_ShutdownChannelsAndDeviceTable @0x49b550 when the word is now set].
+inline constexpr uint32_t kPauseToggled = 0x800000;
+// The escape chain cleared the pause word: the embedder resumes the session
+// [orig: @0x49b3cd..0x49b3d3].
+inline constexpr uint32_t kPauseCleared = 0x1000000;
 } // namespace hud_toggle_event
 
 // The catalog rows the poll samples, one bit each: the embedder reads each
@@ -172,6 +202,9 @@ enum HudToggleRow : int {
 	kRowBriefing,     // 54 Briefing
 	kRowVerbose,      // 75 Verbose
 	kRowCommanderMenu, // 53 commander_menu
+	kRowPause,        // 70 pause
+	kRowAudioEmote,   // 101 AudioEmote
+	kRowRadioMacro,   // 102 RadioMacro
 	kHudToggleRowCount,
 };
 // The row's catalog config token.
@@ -192,23 +225,28 @@ void hud_toggles_reset_mission(HudToggleState &state);
 // @0x42E410..0x42E41C — level = 3, then the visibility rebuild].
 void hud_toggles_death_screen(HudToggleState &state);
 
-// The escape action's HUD-window close chain: the first open window in the
-// witnessed order closes and consumes the key; with none open the respawn
-// init runs and the embedder opens the in-game menu. Closing the map legend
-// runs the respawn init too (its close keeps nothing else). Out of a
-// session the key is dead while the spawn gate holds (the special-key
-// handler owns it there). The chain's other legs close state the port does
-// not model (the epilog screens dword_A87050 / g_EpilogScreenActive, which
-// clear first @0x49b24f, the MP team/number menus dword_24C18D4/D8, the save/disconnect
-// dialog dword_24C1880, dword_B76494, the cine editor dword_24C18B8, the tip
-// dismiss) and the never-set dword_24C18D0 briefing twin
-// (docs/interface/hud-re.md D-HUD-31).
+// The escape action's HUD-window close chain: out of a session the key is
+// dead while the spawn gate holds (the special-key handler owns it there);
+// the pause word clears first; then the first open window in the witnessed
+// order closes and consumes the key; with none open the respawn init runs and
+// the embedder opens the in-game menu. Closing the map legend runs the
+// respawn init too (its close keeps nothing else).
+// Legs with nothing to close in the port (docs/interface/hud-re.md D-HUD-31):
+// g_EpilogScreenActive, cleared beside the pause word, is only ever raised
+// while the SP spawn gate holds (the SP round end sets the gate before the
+// epilog cine starts, and a session never runs the epilog), so this chain
+// never sees it; dword_24C1880, the quit dialog, is opened only by this
+// chain's own tail on a server-status view (is_in_session && is_authority &&
+// dword_24C1914), which the port does not have; dword_24C18D0 and
+// dword_B76494 have no reachable setter; the cine editor dword_24C18B8 opens
+// only from its own dialog; the tip is the unported CTipSystem.
 // [orig: Input_HandleActionBinding case 18 @0x49b234: the SP spawn-gate
-//  return @0x49b243; the order D4 @0x49b267, D8 @0x49b27a, 1880 @0x49b28d,
-//  message log @0x49b2a0, help @0x49b2b3, briefing & 2 @0x49b2c6, D0
-//  @0x49b2da, objectives @0x49b2ed, B76494 @0x49b300, cine @0x49b313, map
-//  legend + keeping init @0x49b32d, tip @0x49b34d; the init @0x49b36f and
-//  game.mnu INGAME @0x49b3b6]
+//  return @0x49b243; the pause/epilog clear @0x49b24f..0x49b261 ->
+//  @0x49b3cd..0x49b3d3; the order D4 @0x49b267, D8 @0x49b27a, 1880
+//  @0x49b28d, message log @0x49b2a0, help @0x49b2b3, briefing & 2 @0x49b2c6,
+//  D0 @0x49b2da, objectives @0x49b2ed, B76494 @0x49b300, cine @0x49b313, map
+//  legend + keeping init @0x49b32d, tip @0x49b34d; the init @0x49b36f, the
+//  server-view arm @0x49b377..0x49b38f and game.mnu INGAME @0x49b3b6]
 struct HudEscapeInput {
 	bool in_session = false;
 	bool spawn_gate = false; // [orig: g_SpawnSuccessGate]

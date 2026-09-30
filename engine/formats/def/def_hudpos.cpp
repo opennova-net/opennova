@@ -417,6 +417,11 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             for (int i = 0; i < 2 && i < nvals; ++i)
                 hud->cargo_pos[i] = parse_int_n(vals[i].s, vals[i].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "pausedpos", 9)) {
+            /* [orig: @0x59FC8D..0x59FCC8 -> dword_272360C / dword_2723610] */
+            for (int i = 0; i < 2 && i < nvals; ++i)
+                hud->paused_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "roomtkpos", 9) && !lower_starts_with(lower, ll, "roomtktxtpos", 12)) {
             for (int i = 0; i < 2 && i < nvals; ++i)
                 hud->roomtk_pos[i] = parse_int_n(vals[i].s, vals[i].len);

@@ -42,6 +42,8 @@ public:
 		EVENT_ESCAPE_OPEN_MENU = opennova::hud::hud_toggle_event::kEscapeOpenMenu,
 		EVENT_COMMAND_MAP_OPENED = opennova::hud::hud_toggle_event::kCommandMapOpened,
 		EVENT_SCOREBOARD_PAGE_RESET = opennova::hud::hud_toggle_event::kScoreboardPageReset,
+		EVENT_PAUSE_TOGGLED = opennova::hud::hud_toggle_event::kPauseToggled,
+		EVENT_PAUSE_CLEARED = opennova::hud::hud_toggle_event::kPauseCleared,
 	};
 	// The polled catalog rows, one bit each (engine HudToggleRow).
 	enum Row {
@@ -62,6 +64,9 @@ public:
 		ROW_BRIEFING = opennova::hud::kRowBriefing,
 		ROW_VERBOSE = opennova::hud::kRowVerbose,
 		ROW_COMMANDER_MENU = opennova::hud::kRowCommanderMenu,
+		ROW_PAUSE = opennova::hud::kRowPause,
+		ROW_AUDIO_EMOTE = opennova::hud::kRowAudioEmote,
+		ROW_RADIO_MACRO = opennova::hud::kRowRadioMacro,
 		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
@@ -104,6 +109,12 @@ public:
 	bool is_map_legend_open() const;
 	int get_briefing_mode() const;
 	bool is_mp_verbose() const;
+	bool is_emotes_menu_open() const;
+	bool is_radio_menu_open() const;
+	// The single-player pause word (engine HudToggleState::paused): the shell's
+	// in-game menu sets it on open and clears it on resume out of a session.
+	bool is_paused() const;
+	void set_paused(bool p_paused);
 
 	const opennova::hud::HudToggleState &state() const { return state_; }
 

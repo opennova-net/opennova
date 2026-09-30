@@ -391,6 +391,113 @@ void test_commander_menu_row() {
 
 } // namespace
 
+
+// The single-player pause (row 70 pause, dispatch 25): out of a session the
+// word flips on the edge; in a session the case returns. While it is set a
+// binding-flag bit-0 row (dotsize, commander_menu, AudioEmote) is dropped and
+// a bit-0-clear row (help) still runs [orig: case 25 @0x49b520..0x49b52d;
+// the row gate @0x49addd..0x49ade8].
+void test_pause_row() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowPause), "pause") == 0);
+	HudToggleState s;
+	HudKeyPoll k = keys();
+	k.pause = true;
+	CHECK(hud_toggles_poll(s, k) == kPauseToggled);
+	CHECK(s.paused);
+	CHECK(hud_toggles_poll(s, k) == 0); // held
+	k.pause = false;
+	hud_toggles_poll(s, k);
+	// Paused: the bit-0 rows drop, the others run.
+	k.dotsize = true;
+	k.commander_menu = true;
+	k.audio_emote = true;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	CHECK(!s.emotes_menu_open);
+	k.dotsize = k.commander_menu = k.audio_emote = false;
+	hud_toggles_poll(s, k);
+	k.help = true;
+	CHECK((hud_toggles_poll(s, k) & kHelpToggled) != 0);
+	CHECK(s.help_open && s.paused); // the keeping init leaves the pause word
+	k.help = false;
+	hud_toggles_poll(s, k);
+	k.pause = true;
+	CHECK(hud_toggles_poll(s, k) == kPauseToggled);
+	CHECK(!s.paused);
+	k.pause = false;
+	hud_toggles_poll(s, k);
+	// In a session the pause row does nothing.
+	k.in_session = true;
+	k.pause = true;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	CHECK(!s.paused);
+}
+
+// The F9 AudioEmote and F10 RadioMacro menus (rows 101 / 102, dispatch 33 /
+// 54): each edge flips its word and runs the keeping init, so opening one
+// closes the other and the other windows; a dead player drops both; the
+// respawn init and the mission reset close them [orig: @0x49b6c9 /
+// @0x49b6e2; Game_InitRespawnState @0x499377 / @0x49937c].
+void test_voice_macro_menus() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowAudioEmote), "AudioEmote") == 0);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowRadioMacro), "RadioMacro") == 0);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, (1u << kRowAudioEmote) | (1u << kRowRadioMacro) | (1u << kRowPause));
+	CHECK(rows.audio_emote && rows.radio_macro && rows.pause && !rows.commander_menu);
+	HudToggleState s;
+	s.help_open = true;
+	HudKeyPoll k = keys();
+	k.audio_emote = true;
+	CHECK(hud_toggles_poll(s, k) == kOverlayWindowsCleared);
+	CHECK(s.emotes_menu_open && !s.help_open);
+	k.audio_emote = false;
+	hud_toggles_poll(s, k);
+	k.radio_macro = true;
+	CHECK(hud_toggles_poll(s, k) == kOverlayWindowsCleared);
+	CHECK(s.radio_menu_open && !s.emotes_menu_open);
+	k.radio_macro = false;
+	hud_toggles_poll(s, k);
+	k.radio_macro = true;
+	hud_toggles_poll(s, k); // the second press closes it
+	CHECK(!s.radio_menu_open);
+	k.radio_macro = false;
+	hud_toggles_poll(s, k);
+	k.local_alive = false;
+	k.audio_emote = true;
+	CHECK(hud_toggles_poll(s, k) == 0);
+	CHECK(!s.emotes_menu_open);
+	s.emotes_menu_open = true;
+	s.radio_menu_open = true;
+	s.paused = true;
+	hud_toggles_reset_mission(s);
+	CHECK(!s.emotes_menu_open && !s.radio_menu_open && !s.paused);
+}
+
+// The escape chain's first legs: the pause word clears first (the embedder
+// resumes the session), then the emotes menu, then the radio menu, before the
+// message log [orig: @0x49b24f -> @0x49b3cd..0x49b3d3; D4 @0x49b267; D8
+// @0x49b27a; the message log @0x49b2a0].
+void test_escape_pause_and_voice_menus() {
+	HudToggleState s;
+	HudEscapeInput in;
+	s.paused = true;
+	s.emotes_menu_open = true;
+	s.radio_menu_open = true;
+	s.message_log_open = true;
+	CHECK(hud_toggles_escape(s, in) == (kEscapeClosedWindow | kPauseCleared));
+	CHECK(!s.paused && s.emotes_menu_open);
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow);
+	CHECK(!s.emotes_menu_open && s.radio_menu_open);
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow);
+	CHECK(!s.radio_menu_open && s.message_log_open);
+	CHECK(hud_toggles_escape(s, in) == kEscapeClosedWindow);
+	CHECK(!s.message_log_open);
+	// The SP spawn gate holds ahead of the pause word too.
+	s.paused = true;
+	in.spawn_gate = true;
+	CHECK(hud_toggles_escape(s, in) == 0);
+	CHECK(s.paused);
+}
+
 int main() {
 	test_edge_latch();
 	test_huddetail_cycle_and_shared_key_shadowing();
@@ -403,6 +510,9 @@ int main() {
 	test_briefing_and_goals_redispatch();
 	test_escape_chain();
 	test_commander_menu_row();
+	test_pause_row();
+	test_voice_macro_menus();
+	test_escape_pause_and_voice_menus();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

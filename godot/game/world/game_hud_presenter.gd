@@ -506,8 +506,12 @@ func tick(gameplay_input_active: bool = false) -> void:
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
-	# The breath bar, the MP session lines and the HUDLS scan, from the same sim
-	# and gametext table (HudOverlay.set_role_facts
+	# The overlay-panel pass's key-toggled state (the F9 / F10 menus resolve
+	# their rows in the role-facts read below; the pause word draws STROVER7).
+	_game_hud.set_overlay_panel_windows(_toggles.is_emotes_menu_open(),
+			_toggles.is_radio_menu_open(), _toggles.is_paused())
+	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
+	# from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).
 	_game_hud.set_role_facts(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()
@@ -1071,6 +1075,22 @@ func _apply_toggle_events(events: int) -> void:
 		_game_hud.reset_scoreboard_page()
 	if events & HudToggles.EVENT_COMMAND_MAP_OPENED:
 		command_map_requested.emit()
+	# The single-player pause word drives the session pause: the pause row flips
+	# it, the escape chain clears it (engine hud_toggles.h carries the witness).
+	if events & (HudToggles.EVENT_PAUSE_TOGGLED | HudToggles.EVENT_PAUSE_CLEARED):
+		if _world != null:
+			_world.set_shell_paused(_toggles.is_paused())
+
+
+## The in-game menu's share of the single-player pause word: its open sets
+## bit 0 and its resume clears it, out of a session only (the witness rides
+## engine hud_toggles.h HudToggleState::paused). The shell pauses the session
+## itself.
+func set_menu_pause(paused: bool) -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null and sim.is_mp_session():
+		return
+	_toggles.set_paused(paused)
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests

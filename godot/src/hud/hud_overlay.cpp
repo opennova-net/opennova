@@ -210,6 +210,9 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_friendly_tags);
 	ClassDB::bind_method(D_METHOD("set_radio_request_icon_viewer", "viewer"),
 			&HudOverlay::set_radio_request_icon_viewer);
+	ClassDB::bind_method(D_METHOD("set_overlay_panel_windows", "emotes_menu_open",
+								 "radio_menu_open", "paused"),
+			&HudOverlay::set_overlay_panel_windows);
 	ClassDB::bind_method(D_METHOD("set_role_facts", "sim", "gametext"),
 			&HudOverlay::set_role_facts);
 	ClassDB::bind_method(D_METHOD("set_weapon_ammo_key", "ammo_bucket", "ammo_class_id"),
@@ -1360,6 +1363,14 @@ void HudOverlay::set_friendly_tag_env(float p_fog_distance_units,
 	state_.speaking_level255 = p_speaking_level255;
 }
 
+void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio_menu_open,
+		bool p_paused) {
+	voice_menus_ = (p_emotes_menu_open ? opennova::inmatch::kHudVoiceMenuEmotes : 0u) |
+			(p_radio_menu_open ? opennova::inmatch::kHudVoiceMenuRadio : 0u);
+	state_.paused = p_paused;
+	queue_redraw();
+}
+
 void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
 	state_.radio_request_icon_viewer = p_viewer;
 	queue_redraw();
@@ -1372,8 +1383,11 @@ void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
 void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext) {
 	const opennova::inmatch::HudRoleFacts facts = p_sim.is_valid()
-			? p_sim->hud_role_facts()
+			? p_sim->hud_role_facts(voice_menus_)
 			: opennova::inmatch::HudRoleFacts();
+	state_.emotes_menu = facts.emotes_menu;
+	state_.radio_menu = facts.radio_menu;
+	state_.paused_text = opennova::to_std(overlay_text(p_gametext, "STROVER7", ""));
 	state_.breath_samples = facts.breath.samples;
 	state_.breath_time = facts.breath.breath_time;
 	state_.spawn_success_gate = facts.breath.spawn_success_gate;

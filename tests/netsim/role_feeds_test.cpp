@@ -164,6 +164,19 @@ int main() {
 		CHECK(f.session.team == 2 && f.session.attack_defend == 1 && f.session.zone_coverage == 0);
 		// No inventory: every slot-bar category empty.
 		CHECK(f.slot_bar[6].adm_index == -1 && f.slot_bar[0].count == 0);
+		// The F9 / F10 menus resolve only when asked: each row's voice-macro
+		// key (flags 0xC / 6) and, with no vmacros table, the key itself and
+		// the literal titles [orig: HUD_DrawEmotesMenu @0x5bff00 — the key
+		// @0x5bff9e, the fallbacks @0x5bffdf / @0x5bff57; HUD_DrawRadioTitleMenu
+		// @0x5bfb90 — @0x5bfc2e, @0x5bfc6f / @0x5bfbe7].
+		CHECK(!f.emotes_menu.shown && !f.radio_menu.shown);
+		const HudRoleFacts menus = hud_role_facts(view, kHudVoiceMenuEmotes | kHudVoiceMenuRadio);
+		CHECK(menus.emotes_menu.shown && menus.radio_menu.shown);
+		CHECK(menus.emotes_menu.title == "!EMOTES_Title" && menus.radio_menu.title == "!Radio_Title");
+		CHECK(menus.emotes_menu.texts[0] == "EMO_1" && menus.emotes_menu.texts[6] == "EMO_7");
+		CHECK(menus.emotes_menu.texts[7].rfind("EMO_", 0) == 0 && menus.emotes_menu.texts[7] != "EMO_8");
+		CHECK(menus.radio_menu.texts[0] == "RAD_1" && menus.radio_menu.texts[7] == "RAD_8");
+		CHECK(menus.radio_menu.texts[8].rfind("RAD_", 0) == 0 && menus.radio_menu.texts[8] != "RAD_9");
 		const HudRoleFacts none = hud_role_facts(RoleView{});
 		CHECK(!none.session.in_session && none.session.round_time_remaining == -1);
 		// The A&D side latch: the first TARGET-attrib def in pool 2 (then 1)

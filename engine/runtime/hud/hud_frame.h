@@ -338,6 +338,11 @@ struct HudLayout {
 	float map_coords_x = 0.0f;
 	float map_coords_y = 0.0f;
 	int map_coords_off = 0;
+	// PAUSEDPOS: the SP pause text's anchor, BSS zero unauthored (the drawer
+	// then uses (1000, 4)) [orig: dword_272360C / dword_2723610, parse
+	// @0x59FCB0 / @0x59FCC8].
+	int paused_x = 0;
+	int paused_y = 0;
 	// The six stance frames' authored per-frame offsets + frame-0 dims.
 	std::array<int, 6> stance_offset_x{};
 	std::array<int, 6> stance_offset_y{};
@@ -852,6 +857,16 @@ struct HudFrameState {
 	HudHelpScreenState help_screen;
 	HudMapLegendState map_legend;
 	HudBriefingState briefing;
+	// The overlay-panel pass's voice-macro menus (hud_overlay_windows.h).
+	HudVoiceMacroMenuState emotes_menu;
+	HudVoiceMacroMenuState radio_menu;
+	// THE SP PAUSE TEXT: while the pause word is set the overlay-panel pass
+	// draws gametext Overlays/STROVER7 (resolved by the embedder) right-aligned
+	// in the Impact38 slot at PAUSEDPOS, or (1000, 4) when either field is
+	// zero, in g_HUDColors.active [orig: HUD_DrawOverlayPanels @0x5c0120 ->
+	// HUD_DrawPausedText @0x59d650 (ex sub_59D650)].
+	bool paused = false;
+	std::string paused_text;
 	// THE END-OF-ROUND OVERLAY (net-re §5.68): the resolved Impact38 text
 	// ladder the presenter built from hud/end_round_overlay.h, drawn inside
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
@@ -1196,6 +1211,12 @@ private:
 	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
 	void element_message_log(const HudFrameState &state, float w, float h);
+	// The overlay-panel pass's voice-macro menus and the pause text
+	// (hud_frame_overlay_windows.cpp).
+	void element_voice_macro_menu(const HudFrameState &state, const HudVoiceMacroMenuState &menu,
+			int context_row, float w, float h);
+	void element_paused_text(const HudFrameState &state, float w, float h);
+	void compile_overlay_panel_menus(const HudFrameState &state, float w, float h);
 	void element_briefing(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);

@@ -11,9 +11,9 @@
 using namespace opennova::def;
 
 /* The synthetic legs: the HUDLS weapon slot bar tokens and ZONEINFO's
-   three-field form, parsed from authored text (no retail bytes).
-   [orig: HUD_ParseHudposToken — HUDLS_* @0x59FE41..0x59FF9C; ZONEINFO
-   @0x5A0642..0x5A0676] */
+   three-field form and PAUSEDPOS, parsed from authored text (no retail
+   bytes). [orig: HUD_ParseHudposToken — HUDLS_* @0x59FE41..0x59FF9C; ZONEINFO
+   @0x5A0642..0x5A0676; PAUSEDPOS @0x59FC8D..0x59FCC8] */
 static int synthetic_legs(void) {
     int failures = 0;
     static const char text[] =
@@ -25,7 +25,8 @@ static int synthetic_legs(void) {
         "HUDLS_SLOT\t10 180 700\n"
         "HUDLS_SLOT\t0 11 12\n"
         "HUDLS_SLOT\t11 13 14\n"
-        "ZONEINFO\t1013,386,Right\n";
+        "ZONEINFO\t1013,386,Right\n"
+        "PAUSEDPOS\t980 12\n";
     DefHudPosFile f;
     memset(&f, 0, sizeof(f));
     if (def_parse_hudpos_memory((const unsigned char *)text, sizeof(text) - 1, &f) != 0) {
@@ -69,8 +70,13 @@ static int synthetic_legs(void) {
                 h->zone_info[2]);
         ++failures;
     }
+    /* PAUSEDPOS x y: the pause text's anchor [orig: @0x59FC8D..0x59FCC8]. */
+    if (h->paused_pos[0] != 980 || h->paused_pos[1] != 12) {
+        fprintf(stderr, "FAIL: PAUSEDPOS = %d,%d\n", h->paused_pos[0], h->paused_pos[1]);
+        ++failures;
+    }
     def_free_hudpos(&f);
-    if (failures == 0) printf("HUDLS + ZONEINFO synthetic legs OK\n");
+    if (failures == 0) printf("HUDLS + ZONEINFO + PAUSEDPOS synthetic legs OK\n");
     return failures;
 }
 

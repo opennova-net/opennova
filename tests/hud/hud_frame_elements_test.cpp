@@ -431,6 +431,91 @@ void test_flash_key(const fnt_font_t *font) {
 
 } // namespace
 
+
+// THE OVERLAY-PANEL MENUS AND THE PAUSE TEXT: the F9 emotes menu's ten
+// "%i - %s" rows (the tenth numbered 0) in the bold slot, the context rows
+// from 8 in palette entry 4, none on the death screen; the pause word's
+// STROVER7 right-aligned in the Impact38 slot at (1000, 4) unless PAUSEDPOS
+// authors both fields [orig: HUD_DrawEmotesMenu @0x5bff00;
+// HUD_DrawRadioTitleMenu @0x5bfb90; HUD_DrawOverlayPanels @0x5c00cf /
+// @0x5c0120; HUD_DrawPausedText @0x59d650].
+void test_overlay_panel_menus(const fnt_font_t *font) {
+	HudLayout layout;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f, font);
+	// The first glyph of each drawn line, in draw order (one per distinct y).
+	const auto line_heads = [](const std::vector<GameFontQuad> &glyphs) {
+		std::vector<GameFontQuad> out;
+		for (const GameFontQuad &g : glyphs)
+			if (out.empty() || out.back().y_top != g.y_top) out.push_back(g);
+		return out;
+	};
+	HudFrameState state;
+	state.emotes_menu.shown = true;
+	for (size_t i = 0; i < 10; ++i) state.emotes_menu.texts[i] = "e";
+	{
+		const std::vector<GameFontQuad> rows = line_heads(
+				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold));
+		// Ten rows 30 design px apart from y 225 (an untitled box draws no title).
+		CHECK(rows.size() == 10);
+		CHECK(rows.size() == 10 && rows[1].y_top - rows[0].y_top == 30.0f &&
+				rows[9].y_top - rows[0].y_top == 270.0f);
+		// Rows 1..7 in the active colour, 8..10 in palette entry 4.
+		CHECK(rows.size() == 10 && rows[6].color == rows[0].color &&
+				rows[7].color != rows[0].color && rows[9].color == rows[7].color);
+	}
+	state.combat.death_screen = true;
+	CHECK(glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold).empty());
+	state.combat.death_screen = false;
+	state.emotes_menu.shown = false;
+	state.radio_menu.shown = true;
+	for (size_t i = 0; i < 10; ++i) state.radio_menu.texts[i] = "r";
+	{
+		const std::vector<GameFontQuad> rows = line_heads(
+				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold));
+		// The radio menu's context rows start at 9.
+		CHECK(rows.size() == 10 && rows[7].color == rows[0].color &&
+				rows[8].color != rows[0].color);
+	}
+	state.radio_menu.shown = false;
+	state.paused = true;
+	state.paused_text = "P";
+	const auto pause_glyphs = [&]() {
+		return glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotImpact38);
+	};
+	float right0 = 0.0f;
+	float top0 = 0.0f;
+	{
+		// Right-aligned on design x 1000 (the half-pixel quad bias and the
+		// glyph's advance keep the edge within a few pixels), at y 4.
+		const std::vector<GameFontQuad> text = pause_glyphs();
+		CHECK(text.size() == 1);
+		if (!text.empty()) {
+			right0 = text[0].x_top_right;
+			top0 = text[0].y_top;
+		}
+		CHECK(right0 > 990.0f && right0 <= 1000.0f);
+	}
+	layout.paused_x = 900;
+	layout.paused_y = 0; // a zero field falls back to (1000, 4) too
+	compiler.update_layout(layout);
+	{
+		const std::vector<GameFontQuad> text = pause_glyphs();
+		CHECK(text.size() == 1 && text[0].x_top_right == right0 && text[0].y_top == top0);
+	}
+	layout.paused_y = 40;
+	compiler.update_layout(layout);
+	{
+		// Both fields authored: the anchor moves by (-100, +36).
+		const std::vector<GameFontQuad> text = pause_glyphs();
+		CHECK(text.size() == 1 && text[0].x_top_right == right0 - 100.0f &&
+				text[0].y_top == top0 + 36.0f);
+	}
+	state.paused = false;
+	CHECK(pause_glyphs().empty());
+}
+
 int main() {
 	fnt_font_t font = minimal_fnt::uniform_test_font();
 	test_game_info(&font);
@@ -441,6 +526,7 @@ int main() {
 	test_no_hud(&font);
 	test_squad_colors();
 	test_flash_key(&font);
+	test_overlay_panel_menus(&font);
 	opennova::fnt::fnt_free(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

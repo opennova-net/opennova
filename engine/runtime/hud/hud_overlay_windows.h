@@ -8,6 +8,7 @@
 // tables; the compiler owns the witnessed layout and the briefing's page
 // state (its drawer writes the next page's start line).
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -79,6 +80,26 @@ struct HudMapLegendState {
 // 0x5badb9; a joiner draws the text its world state delivered
 // (byte_A86120)]. Out of a session only: in a session the same window flag
 // draws HUD_DrawEndGameScreen @0x5be13e instead.
+// The F9 AudioEmote and F10 RadioMacro menus, drawn by the overlay-panel
+// pass while the death screen is down: a stdbox (128, 180)..(896, 550)
+// titled from vmacros macrotext EMOTES_TITLE / RADIO_TITLE, then ten rows
+// "%i - %s" at x 200 from y 225 in steps of 30 (the tenth numbered 0), each
+// the macrotext of the row's voice-macro key (the key itself on a miss) in
+// the bold slot, the context rows from kHudEmotesMenuContextRow /
+// kHudRadioMenuContextRow on in palette entry 4. The embedder resolves the
+// title and the ten texts (inmatch hud_role_facts).
+// [orig: HUD_DrawOverlayPanels @0x5c00cf..0x5c00f9 (both behind
+//  !g_DeathScreenActive); HUD_DrawEmotesMenu @0x5bff00 (the box @0x5bff5c,
+//  the rows @0x5bff81..0x5c002a); HUD_DrawRadioTitleMenu @0x5bfb90 (the box
+//  @0x5bfbec, the rows @0x5bfc11..0x5bfcb4)]
+struct HudVoiceMacroMenuState {
+	bool shown = false;
+	std::string title;
+	std::array<std::string, 10> texts;
+};
+inline constexpr int kHudEmotesMenuContextRow = 8; // [orig: `cmp esi, 8` @0x5c0002]
+inline constexpr int kHudRadioMenuContextRow = 9;  // [orig: `cmp esi, 9` @0x5bfc8f]
+
 struct HudBriefingState {
 	bool shown = false;
 	std::string text;
