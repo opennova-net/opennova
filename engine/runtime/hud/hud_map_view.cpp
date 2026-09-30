@@ -2,6 +2,7 @@
 
 #include <base/io/crt_ftol.h>
 #include <runtime/hud/hud_math.h>
+#include <runtime/hud/hud_minimap_view.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -76,6 +77,58 @@ void add_label(HudMapPass &pass, int32_t x, int32_t y, const char *text, uint32_
 	pass.labels.push_back(label);
 }
 
+// The zone walk's segments reset with the pass (the vectors keep capacity).
+void clear_window_zones(HudMapWindowPass &out) {
+	HudMapPass &zones = out.zones;
+	zones.visible = false;
+	zones.clear.clear();
+	zones.terrain.clear();
+	zones.terrain_water.clear();
+	zones.overlays.clear();
+	zones.sprites.clear();
+	zones.geom.clear();
+	zones.lines_under.clear();
+	zones.lines.clear();
+	zones.labels.clear();
+	zones.ring_tris.clear();
+	zones.ring_tris_before_sprite = 0;
+	out.segments.clear();
+}
+
+// sub_597FD0's darkened blink: an arithmetic halving of the whole ARGB word
+// with every byte's top bit cleared [orig: `sar esi, 1; and esi, 7F7F7F7Fh`
+// @0x598147..0x598149].
+uint32_t halve_argb(uint32_t argb) {
+	return static_cast<uint32_t>(static_cast<int32_t>(argb) >> 1) & 0x7F7F7F7Fu;
+}
+
+// Minimap_GetCapturePointInfo: the CTF flag and flag-base colour/size pick,
+// in session on game types 0x10004 / 0x10008 for an entity without the +0x24
+// bit 0. The bases (4098 / 4100 / 4102 / 4103) draw size 6, the flags (4091
+// / 4093 / 4095) size 2 and only while carried by nobody or by the HUD
+// entity's team; 4098/4091 blue, 4100/4093 red, the rest green.
+// [orig: Minimap_GetCapturePointInfo @0x5971c0 — gates @0x5971c6..0x5971ec,
+//  bases @0x5972a7..0x5972f6, flags @0x597226..0x5972a1]
+bool capture_point_info(const DeathMapZone &zone, const DeathMapFacts &facts, uint8_t &size,
+		uint32_t &color) {
+	if (!facts.in_session || zone.carried ||
+			(facts.game_type != 0x10004u && facts.game_type != 0x10008u))
+		return false;
+	const int32_t id = zone.def_id;
+	if (id == 4098 || id == 4100 || id == 4102 || id == 4103) {
+		size = 6;
+		color = id == 4098 ? 0xFF304080u : (id == 4100 ? 0xFF802020u : 0xFF208020u);
+		return true;
+	}
+	if (id == 4091 || id == 4093 || id == 4095) {
+		size = 2;
+		if (zone.occupant_present && zone.occupant_team != facts.hud_team) return false;
+		color = id == 4091 ? 0xFF304080u : (id == 4093 ? 0xFF802020u : 0xFF208020u);
+		return true;
+	}
+	return false;
+}
+
 // The zone team colours [orig: g_MapOverlayTeamColor @0x840A38 = 0xFF304080
 // (team 1), dword_840A34 = 0xFF802020 (team 2), dword_840A40 = 0xFF208020
 // (else), read @0x5a5ae9..0x5a5b11; the local player's wave zone
@@ -87,6 +140,68 @@ uint32_t zone_color(uint8_t team) {
 }
 
 } // namespace
+
+DeathMapZoneBlip death_map_zone_blip(const DeathMapZone &zone, const DeathMapFacts &facts,
+		int32_t frame) {
+	DeathMapZoneBlip out;
+	if (!zone.has_def) return out; // [orig: @0x597fdb]
+	const uint32_t attrib = zone.def_attrib;
+	uint32_t color = 0;
+	uint8_t cell = 0;
+	if (zone.def_type == 5 && (attrib & 0x20000u) == 0) {
+		// [orig: @0x597fe4..0x598018 — 0xFF304080 / 0xFF802020 (@0x598121) /
+		//  0xFF707070, size 0]
+		color = zone.team == 1 ? 0xFF304080u : (zone.team == 2 ? 0xFF802020u : 0xFF707070u);
+	} else if (zone.def_type == 3) {
+		// [orig: @0x59801d..0x598060 — size 3; the dead local player halves on
+		//  `test byte ptr dword_A87060, 10h`]
+		cell = 3;
+		color = zone.team == 1 ? 0xFF304080u : (zone.team == 2 ? 0xFF802020u : 0xFF208020u);
+		if (zone.dead && zone.local_player && (frame & 0x10) != 0) color = halve_argb(color);
+	} else if (zone.def_type == 2) {
+		return out; // [orig: @0x598068]
+	} else {
+		if ((attrib & 0x20u) != 0) {
+			// An attached item: nothing on a vehicle parent or while dead,
+			// else the orange cell 4 [orig: @0x598076..0x598099].
+			if (zone.parent_item || zone.dead) return out;
+			cell = 4;
+			color = 0xFF907000u;
+		} else {
+			uint8_t size = 0;
+			uint32_t pick = 0;
+			if (capture_point_info(zone, facts, size, pick)) {
+				cell = size;
+				color = pick;
+			} else {
+				// [orig: @0x5980b7..0x5980e3 — team 0 0xFF208020, any other
+				//  team past 2 `neg al; sbb; and 4FF050h; add` = 0xFF707070]
+				color = zone.team == 1 ? 0xFF304080u
+						: (zone.team == 2 ? 0xFF802020u
+								: (zone.team == 0 ? 0xFF208020u : 0xFF707070u));
+			}
+		}
+		if ((attrib & 0x20000u) != 0) {
+			// A capture zone draws cell 0; a neutral zone being taken blinks
+			// to the taker's colour, a zone with no zone number blinks dark.
+			// [orig: @0x5980ef..0x598149 — entity+0x162, +0x223, +0x21A;
+			//  `test byte ptr dword_A87060, 20h` @0x59810c / @0x59813e]
+			cell = 0;
+			if (zone.team == 0 && zone.capture_team != 0) {
+				if ((frame & 0x20) != 0) {
+					if (zone.capture_team == 1) color = 0xFF304080u;
+					else if (zone.capture_team == 2) color = 0xFF802020u;
+				}
+			} else if (zone.zone_number == 0 && (frame & 0x20) != 0) {
+				color = halve_argb(color);
+			}
+		}
+	}
+	out.draw = true;
+	out.color = color;
+	out.cell = cell;
+	return out;
+}
 
 double map_view_integer_pow(double base, int exponent) {
 	// [orig: Math_IntegerPow @0x54b500 — |exponent| @0x54b50a..0x54b50e, the
@@ -108,6 +223,13 @@ int32_t map_view_design_to_device(int32_t design, float scale) {
 	// [orig: CUIScene_ScaleRectDesignToDevice @0x63b210 — (int)(v * scale)]
 	return io::retail_ftol_sse2(static_cast<double>(pc24(
 			static_cast<double>(design) * static_cast<double>(scale))));
+}
+
+int32_t map_view_device_to_design(int32_t device, float scale) {
+	// [orig: UI_DispatchMouseEvent @0x63ab00 — (int)(v / scale)]
+	if (scale == 0.0f) return 0;
+	return io::retail_ftol_sse2(static_cast<double>(pc24(
+			static_cast<double>(device) / static_cast<double>(scale))));
 }
 
 void MapViewPan::stamp_window(const MapViewRect &rect, int32_t scaled_800) {
@@ -325,35 +447,35 @@ void CommandMapView::on_load() {
 	initialized = true;
 }
 
-void CommandMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t buttons,
-		int32_t wheel) {
+CommandMapView::EventResult CommandMapView::on_event(MapViewEvent event, int32_t x, int32_t y,
+		uint32_t buttons, int32_t wheel) {
 	switch (event) {
 	case MapViewEvent::kLeftDown:
-		// CREATE_WAYPOINTS routes the click to the waypoint-name dialog
-		// (unported); otherwise the point and the pan latch — the right latch
-		// is left as it is [orig: @0x549eaa, @0x549fe4..0x54a000].
-		if (toggles.create_waypoints) return;
+		// CREATE_WAYPOINTS routes the click to the waypoint-name dialog;
+		// otherwise the point and the pan latch — the right latch is left as
+		// it is [orig: @0x549eaa, @0x549fe4..0x54a000].
+		if (toggles.create_waypoints) return EventResult::kPlaceWaypoint;
 		view.last_x = x;
 		view.last_y = y;
 		view.left_drag = true;
-		return;
+		return EventResult::kNone;
 	case MapViewEvent::kLeftUp:
 		view.left_drag = false; // [orig: @0x54a04f]
-		return;
+		return EventResult::kNone;
 	case MapViewEvent::kRightDown:
 		// [orig: @0x54a01b..0x54a02b]
 		view.last_x = x;
 		view.last_y = y;
 		view.right_drag = true;
-		return;
+		return EventResult::kNone;
 	case MapViewEvent::kRightUp:
 		view.right_drag = false; // [orig: @0x54a03d]
-		return;
+		return EventResult::kNone;
 	case MapViewEvent::kWheel:
 		// Ignored while the right drag runs [orig: @0x54a05e..0x54a087].
-		if (view.right_drag) return;
+		if (view.right_drag) return EventResult::kNone;
 		view.zoom_step(wheel > 0 ? 1 : (wheel < 0 ? -1 : 0));
-		return;
+		return EventResult::kNone;
 	case MapViewEvent::kMove:
 		if (view.left_drag && (buttons & kMapViewButtonLeft) != 0) {
 			// [orig: @0x549c64..0x549cd3]
@@ -361,14 +483,114 @@ void CommandMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t
 			view.drag_pan(x, y, dx, dy);
 			view.pan_x = wrap_add(view.pan_x, dx);
 			view.pan_y = wrap_add(view.pan_y, dy);
-		} else if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
-			view.drag_zoom(x, y); // [orig: @0x549cfe..0x549d72]
-		} else {
-			view.left_drag = false; // [orig: @0x549d89..0x549d90]
-			view.right_drag = false;
+			return EventResult::kNone;
 		}
-		return;
+		if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
+			view.drag_zoom(x, y); // [orig: @0x549cfe..0x549d72]
+			return EventResult::kNone;
+		}
+		view.left_drag = false; // [orig: @0x549d89..0x549d90]
+		view.right_drag = false;
+		return EventResult::kHoverTest; // [orig: @0x549da5]
 	}
+	return EventResult::kNone;
+}
+
+CommandMapTabGates command_map_tab_gates(const DeathMapFacts &facts) {
+	CommandMapTabGates gates;
+	gates.orders = facts.has_squad_members;
+	gates.players = facts.in_session;
+	gates.team = facts.in_session && !facts.death_screen_active;
+	gates.rules = gates.team;
+	return gates;
+}
+
+MapViewRect command_map_waypoint_dialog_rect(int32_t click_x, int32_t click_y,
+		const MapViewRect &dialog, const MapViewRect &map) {
+	// [orig: @0x549f1f..0x549f7d — half = (R - L) >> 1 per axis, the rect
+	//  centred on the click, then OffsetRect by (map.left - left) when the
+	//  left overhangs, else by (map.right - right) when the right does]
+	const int32_t half_w = wrap_sub(dialog.right, dialog.left) >> 1;
+	const int32_t half_h = wrap_sub(dialog.bottom, dialog.top) >> 1;
+	MapViewRect out;
+	out.left = wrap_sub(click_x, half_w);
+	out.right = wrap_add(half_w, click_x);
+	out.top = wrap_sub(click_y, half_h);
+	out.bottom = wrap_add(half_h, click_y);
+	int32_t dx = 0;
+	if (out.left < map.left) dx = wrap_sub(map.left, out.left);
+	else if (out.right > map.right) dx = wrap_sub(map.right, out.right);
+	out.left = wrap_add(out.left, dx);
+	out.right = wrap_add(out.right, dx);
+	return out;
+}
+
+void command_map_waypoint_world(const CommandMapView &cmap, int32_t player_x, int32_t player_y,
+		int32_t &out_x, int32_t &out_y) {
+	const MapViewPan &v = cmap.view;
+	// [orig: @0x54a11e..0x54a14b — inv = 1 / S; Wd = W x inv; P = (Z x 65536)
+	//  / (Wd x 200) x 65536]
+	const float inv = pc24(1.0 / static_cast<double>(v.pixel_ratio));
+	const float wd = pc24(static_cast<double>(v.window_w) * static_cast<double>(inv));
+	const float zoom = pc24(static_cast<double>(v.zoom) * 65536.0);
+	const float k = pc24(static_cast<double>(zoom) / static_cast<double>(pc24(
+			static_cast<double>(wd) * 200.0)));
+	const float p = pc24(static_cast<double>(k) * 65536.0);
+	// [orig: @0x54a14d..0x54a161 — (Wd x 0.5 - click x) x P, _ftol2]
+	const float half_w = pc24(static_cast<double>(wd) * 0.5);
+	const float dx = pc24(static_cast<double>(pc24(static_cast<double>(half_w) -
+			static_cast<double>(v.last_x))) * static_cast<double>(p));
+	// [orig: @0x54a166..0x54a18b — (H x inv x 0.5 - click y) x P, _ftol2]
+	const float hd = pc24(static_cast<double>(v.window_h) * static_cast<double>(inv));
+	const float half_h = pc24(static_cast<double>(hd) * 0.5);
+	const float dy = pc24(static_cast<double>(pc24(static_cast<double>(half_h) -
+			static_cast<double>(v.last_y))) * static_cast<double>(p));
+	// [orig: @0x54a172..0x54a193 — x = X - dx + pan x; y = dy + Y + pan y]
+	out_x = wrap_add(wrap_sub(player_x, io::retail_ftol_sse2(static_cast<double>(dx))), v.pan_x);
+	out_y = wrap_add(wrap_add(io::retail_ftol_sse2(static_cast<double>(dy)), player_y), v.pan_y);
+}
+
+namespace {
+
+// sub_63B1E0: a device point into the menu design space, truncated.
+int32_t to_design(int32_t device, float scale) {
+	if (scale == 0.0f) return 0;
+	return static_cast<int32_t>(static_cast<double>(device) / static_cast<double>(scale));
+}
+
+} // namespace
+
+void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *hover, int count,
+		int32_t mouse_x, int32_t mouse_y, float scale_x, float scale_y, int32_t close_w) {
+	for (int i = 0; i < count; ++i) {
+		hover[i] = false; // [orig: @0x549dc0]
+		const CommandMapWaypointAnchor &a = anchors[i];
+		if (!a.live) continue;
+		// [orig: @0x549e28..0x549e63 — sub_63B1E0 on the anchor, then
+		//  `mouse > x - (R - L) - 5 && mouse < x + text_w` and
+		//  `mouse > y && mouse < y + text_h`]
+		const int32_t x = to_design(a.x, scale_x);
+		const int32_t y = to_design(a.y, scale_y);
+		if (mouse_x > x - close_w - 5 && mouse_x < x + a.text_w && mouse_y > y &&
+				mouse_y < y + a.text_h) {
+			hover[i] = true; // [orig: @0x549e7b]
+			return;
+		}
+	}
+}
+
+bool command_map_close_button_position(const CommandMapWaypointAnchor *anchors,
+		const bool *hover, int count, float scale_x, float scale_y, int32_t close_w,
+		int32_t &out_x, int32_t &out_y) {
+	for (int i = 0; i < count; ++i) {
+		if (!anchors[i].live || !hover[i]) continue;
+		// [orig: @0x549ba5..0x549c01 — x + (rect.left - rect.right) - 5, then
+		//  sub_63B1E0, then sub_646580 at that corner]
+		out_x = to_design(anchors[i].x - close_w - 5, scale_x);
+		out_y = to_design(anchors[i].y, scale_y);
+		return true;
+	}
+	return false;
 }
 
 void CommandMapView::toggle_changed(int which, bool checked) {
@@ -442,6 +664,7 @@ void CommandMapView::render(const MapViewRect &rect, int32_t scaled_800, int32_t
 void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &frame,
 		const DeathMapFacts &facts, HudMapWindowPass &out) {
 	out.over_lines.clear();
+	clear_window_zones(out);
 	// MapOverlay_DrawView's view: the payload rect, the pan-shifted centre,
 	// the caller's scale, north-up 0x40000000 with no g_MapYaw180 term, and
 	// the walk angle 0x3FFFFFC0 (64 BAM short of the view).
@@ -481,37 +704,24 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		}
 	}
 
-	// Each zone's blip redraws through sub_597FD0 -> Minimap_DrawBlip at the
-	// view angle 0x40000000 less the heading, alpha arg 0 (opaque). The port
-	// draws it from the zone's own bank slot through the same walk, appended
-	// after the pass (the letters still draw above every blip).
-	// [orig: sub_597FD0(entity, rect, 0x40000000 - heading, 0) @0x5a5ab9..0x5a5adc;
-	//  Minimap_DrawBlip @0x597890]
-	if (!walk_.empty()) {
-		zone_input_ = input;
-		zone_input_.markers.clear();
-		for (const ZoneSlot &slot : walk_) {
-			// sub_597FD0 calls Minimap_DrawBlip directly: no persistent-bank
-			// model gate and no Render_MinimapSlotBlip zone ring / palette
-			// swap, so the redraw copy clears what would route it through
-			// those bank-walk legs [orig: MapOverlay_RenderAllByLayer
-			// @0x5BE6C4; Render_MinimapSlotBlip @0x5be4b8].
-			HudMinimapMarker redraw = *slot.marker;
-			redraw.entity_bits = static_cast<uint8_t>(redraw.entity_bits |
-					kMarkerEntityHasModel);
-			redraw.zone_number = 0;
-			zone_input_.markers.push_back(redraw);
-		}
-		zone_input_.flags = 0x2u;
-		zone_input_.window_marker_angle_bias_bam = 0;
-		compiler_.compile(zone_input_, zone_pass_);
-		out.map.overlays.insert(out.map.overlays.end(), zone_pass_.overlays.begin(),
-				zone_pass_.overlays.end());
-		out.map.sprites.insert(out.map.sprites.end(), zone_pass_.sprites.begin(),
-				zone_pass_.sprites.end());
-		out.map.lines.insert(out.map.lines.end(), zone_pass_.lines.begin(),
-				zone_pass_.lines.end());
+	// The per-zone draws share the pass's view; the windowed views lay no
+	// bit0 depth mask, so nothing crops to a disc.
+	HudMapPass &zones = out.zones;
+	zones.visible = true;
+	zones.clip_x1 = out.map.clip_x1;
+	zones.clip_y1 = out.map.clip_y1;
+	zones.clip_x2 = out.map.clip_x2;
+	zones.clip_y2 = out.map.clip_y2;
+	const uint32_t flags = minimap_detail::effective_flags(input);
+	const minimap_detail::MapView view = minimap_detail::make_view(input, flags);
+	footprint_index_.clear();
+	if (input.footprints != nullptr) {
+		footprint_index_.reserve(input.footprints->size());
+		for (const HudMinimapFootprint &footprint : *input.footprints)
+			footprint_index_.push_back(&footprint);
 	}
+	minimap_detail::MapCompile blip_ctx{input, view, flags, zones, clip_a_, clip_b_, geom_a_,
+			geom_b_, footprint_index_, false, {}, false, tracked_color_, tracked_alpha_, {}, 10};
 
 	// The label offsets: 8 x 16 design pixels through the viewport scaler
 	// [orig: @0x5a5923..0x5a5937 — Viewport_ScaleToVirtualCoords(&g_OverlayCtx,
@@ -522,8 +732,31 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 			scale_axis(16.0, input.surface_h, kDesignHeight));
 	const int32_t frame_counter = input.ticks;
 	char text[16];
+	const auto close_segment = [&zones, &out]() {
+		HudMapWindowSegment segment;
+		segment.overlay_end = zones.overlays.size();
+		segment.sprite_end = zones.sprites.size();
+		segment.line_end = zones.lines.size();
+		segment.label_end = zones.labels.size();
+		out.segments.push_back(segment);
+	};
 	for (const ZoneSlot &slot : walk_) {
 		const DeathMapZone &zone = *slot.zone;
+		// The blip first: sub_597FD0 picks the colour and cell from the zone
+		// entity (not from its bank slot) and calls Minimap_DrawBlip at the
+		// view angle 0x40000000 less the heading with alpha arg 0; the draw
+		// batch is flushed before the letters.
+		// [orig: sub_597FD0(entity, rect, 0x40000000 - heading, 0)
+		//  @0x5a5ab9..0x5a5adc; Minimap_DrawBlip @0x597890; the flush
+		//  sub_596780 @0x5a5ae4]
+		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, frame_counter);
+		if (blip.draw) {
+			HudMinimapMarker entity = *slot.marker;
+			entity.icon = blip.cell;
+			const int32_t angle = static_cast<int32_t>(
+					0x40000000u - static_cast<uint32_t>(entity.heading_bam));
+			minimap_detail::draw_blip(blip_ctx, entity, blip.color, blip.cell, angle, 0, 0);
+		}
 		uint32_t color = zone_color(zone.team);
 		if (facts.self_zone_handle != 0xFFFFu && facts.self_zone_handle == zone.handle)
 			color = 0xFFC8C814u;
@@ -534,7 +767,10 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		// Drawn only on game type 0x50010 or a ready zone timer
 		// [orig: CProximityList_FindEntryById(g_ZoneTimerList, e) @0x5a5b6e;
 		//  EntryById[9] >= [10] @0x5a5b77..0x5a5b7f; @0x5a5b84..0x5a5b95].
-		if (facts.game_type != 0x50010u && !zone.timer_ready) continue;
+		if (facts.game_type != 0x50010u && !zone.timer_ready) {
+			close_segment();
+			continue;
+		}
 		color = brighten(color, phase);
 		// The letter at the anchor less half the 8 x 16 cell
 		// [orig: sprintf("%c", idx + 'A') @0x5a5bfa; sub_59C300 @0x5a5c05;
@@ -544,20 +780,24 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		const float lx = pc24(static_cast<double>(anchor_x) - static_cast<double>(label_w >> 1));
 		const float ly = pc24(static_cast<double>(anchor_y) - static_cast<double>(label_h >> 1));
 		std::snprintf(text, sizeof(text), "%c", static_cast<char>(zone.index + 'A'));
-		add_label(out.map, io::retail_ftol_sse2(lx), io::retail_ftol_sse2(ly), text, color);
-		if (zone.team != facts.player_team) continue;
-		// Own-team zones add the hold seconds above and the queued / countdown
-		// pair below [orig: "%ld" dword_A85B68 @0x5a5c79..0x5a5cbf; "%ld/%ld"
-		// (entity+550 byte, entity+548 word) @0x5a5cc7..0x5a5d14].
-		if (facts.hold_seconds != 0) {
-			std::snprintf(text, sizeof(text), "%ld", static_cast<long>(facts.hold_seconds));
-			add_label(out.map, io::retail_ftol_sse2(lx),
-					io::retail_ftol_sse2(pc24(static_cast<double>(ly) - label_h)), text, color);
+		add_label(zones, io::retail_ftol_sse2(lx), io::retail_ftol_sse2(ly), text, color);
+		if (zone.team == facts.player_team) {
+			// Own-team zones add the hold seconds above and the queued /
+			// countdown pair below [orig: "%ld" dword_A85B68
+			// @0x5a5c79..0x5a5cbf; "%ld/%ld" (entity+550 byte, entity+548
+			// word) @0x5a5cc7..0x5a5d14].
+			if (facts.hold_seconds != 0) {
+				std::snprintf(text, sizeof(text), "%ld", static_cast<long>(facts.hold_seconds));
+				add_label(zones, io::retail_ftol_sse2(lx),
+						io::retail_ftol_sse2(pc24(static_cast<double>(ly) - label_h)), text,
+						color);
+			}
+			std::snprintf(text, sizeof(text), "%ld/%ld", static_cast<long>(zone.queued),
+					static_cast<long>(zone.countdown));
+			add_label(zones, io::retail_ftol_sse2(lx),
+					io::retail_ftol_sse2(pc24(static_cast<double>(ly) + label_h)), text, color);
 		}
-		std::snprintf(text, sizeof(text), "%ld/%ld", static_cast<long>(zone.queued),
-				static_cast<long>(zone.countdown));
-		add_label(out.map, io::retail_ftol_sse2(lx),
-				io::retail_ftol_sse2(pc24(static_cast<double>(ly) + label_h)), text, color);
+		close_segment();
 	}
 
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
@@ -583,11 +823,30 @@ void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
 
 void CommandMapCompiler::compile(HudMinimapInput &input, CommandMapView &cmap,
 		const MapViewRect &rect, int32_t scaled_800, const DeathMapFacts &facts,
-		HudMapWindowPass &out) {
+		HudMapWindowPass &out, CommandMapWaypointAnchor *anchors) {
 	out.over_lines.clear();
+	clear_window_zones(out);
+	for (int i = 0; i < kCommandMapWaypointSlots; ++i) anchors[i] = CommandMapWaypointAnchor{};
 	cmap.render(rect, scaled_800, facts.player_x, facts.player_y, facts.player_z, input);
 	compiler_.compile(input, out.map);
 	if (!out.map.visible) return;
+	// Each placed waypoint's position through the transform the render left
+	// in the default-rotation globals, truncated: the hover and delete-button
+	// anchors.
+	// [orig: CMapWindow_HandleEvent @0x549dd7..0x549dfa (the move) and
+	//  @0x549ba0..0x549bc4 (the render) — Terrain_FixedPointToWorldFloat_Default
+	//  @0x6070e0 on entity +4, _ftol2_sse on each axis]
+	const minimap_detail::MapView view =
+			minimap_detail::make_view(input, minimap_detail::effective_flags(input));
+	for (int i = 0; i < kCommandMapWaypointSlots; ++i) {
+		const DeathMapFacts::UserWaypoint &wp = facts.user_waypoints[static_cast<size_t>(i)];
+		if (!wp.live) continue;
+		float fx = 0.0f, fy = 0.0f;
+		minimap_detail::view_project(view, input, wp.x, wp.y, fx, fy);
+		anchors[i].live = true;
+		anchors[i].x = io::retail_ftol_sse2(static_cast<double>(fx));
+		anchors[i].y = io::retail_ftol_sse2(static_cast<double>(fy));
+	}
 	// The clear: colour 0x00000018 written straight into the target (no
 	// blend), so the rect reads opaque (0, 0, 0x18) under the map
 	// [orig: @0x549826..0x54985c — `lea esi, [ebx+17h]` = 24].

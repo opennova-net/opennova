@@ -108,6 +108,8 @@ public:
 	virtual void set_widget_hover_item(int index, int row) = 0;
 	virtual void set_widget_popup_open(int index, bool open) = 0;
 	virtual void set_widget_focused(int index, bool focused) = 0;
+	// CWnd_SetRect: the widget's own (parent-relative) design rect replaced.
+	virtual void set_widget_rect(int index, int left, int top, int right, int bottom) = 0;
 	virtual void set_widget_caret(int index, int caret) = 0;
 
 	virtual int get_widget_caret(int index) const = 0;
@@ -152,6 +154,7 @@ struct MenuEvent {
 		ListActivated,   // id, value = row
 		HoverChanged,    // id, flag = hovered
 		ShownChanged,    // id, flag = shown
+		EditCommitted,   // id, text = widget name: an edit's Enter (event 0x7000002)
 	};
 	Kind kind = Kind::ScreenChanged;
 	int id = -1;
@@ -197,12 +200,15 @@ struct MenuWidgetRuntimeState {
 	bool has_table_rows = false;
 	std::vector<std::vector<std::string>> table_rows;
 	std::vector<int> table_selected;
+	// A runtime rect (CWnd_SetRect), parent-relative design units.
+	bool has_rect = false;
+	int rect_left = 0, rect_top = 0, rect_right = 0, rect_bottom = 0;
 
 	// True while no override has been written (a replay skips the widget).
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows);
+				has_table_rows || has_rect);
 	}
 };
 
@@ -264,6 +270,10 @@ public:
 	bool is_widget_checked(int id) const;
 	void set_widget_text(int id, const std::string &text);
 	std::string get_widget_text(int id) const;
+	// Move a widget: its own rect (relative to its parent's origin, design
+	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,
+	// sub_646580 @0x646580 (the same at the widget's own square size)].
+	void set_widget_rect(int id, int left, int top, int right, int bottom);
 	// Persist an edit widget's text for cross-screen reads.
 	void remember_widget_text(int id, const std::string &text);
 	void set_widget_items(int id, const std::vector<std::string> &items);

@@ -742,9 +742,9 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
 		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
 	if (field_flags & kPlayerSyncHasSquad)
-		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
+		w.u8(ctx.squad_leader); // the squad leader [orig: slot+100576, seeded 0xFF by Server_PlayerAdd @0x51cf0a]
 	if (field_flags & kPlayerSyncHasSide)
-		w.u8(0);        // side [orig: slot+100577]
+		w.u8(ctx.fireteam);     // the fireteam [orig: slot+100577]
 	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(ctx.quality); // quality [orig: slot+418 @0x506213; client clamps <=4 @0x431370]
 	if (field_flags & kPlayerSyncHasAccountId)
@@ -1165,24 +1165,6 @@ std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign
 
 // [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the link byte @0x510797, the member
 //  slot @0x5107A4]
-std::vector<uint8_t> encode_squad_join(const SquadJoin &join) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u8(join.leader);
-	w.u8(join.member);
-	return out;
-}
-
-// [orig: NetPacket_WriteByteAndCString @0x5107B0 — the byte @0x5107CD, then the
-//  string with its terminator]
-std::vector<uint8_t> encode_team_name(const TeamName &name) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u8(name.index);
-	w.cstr(name.name);
-	return out;
-}
-
 // [orig: NetPacket_SerializeEntityEventToBuffer @0x5055A0]
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event) {
     std::vector<uint8_t> out;

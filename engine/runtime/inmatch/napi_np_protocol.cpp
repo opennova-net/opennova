@@ -1,4 +1,5 @@
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 
 #include <runtime/inmatch/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
 #include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
@@ -254,6 +255,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			ctx.world->ai.release(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
+		// The leaver's squad breaks up after its entity is gone and before its
+		// removal record [orig: Server_SendPlayerStateAndSquad from
+		// Server_HandlePlayerDisconnect @0x51b837].
+		Server_DissolveSquadOf(ctx, *it);
 		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's
 		// ROSTER BOOKKEEPING ONLY — PlayerSlot_ClearAndUnlink @0x434730 never
 		// destroys the entity (@0x431411..0x43144c; the entity-field wipes @0x431437

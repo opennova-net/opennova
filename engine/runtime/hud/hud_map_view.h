@@ -14,13 +14,16 @@
 
 #include <runtime/hud/hud_minimap.h>
 
+#include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace opennova::hud {
 
 // The mouse-class menu events both map callbacks switch on (the payload
-// carries the device mouse x/y at +8/+12 and the button mask at +16).
+// carries the menu DESIGN mouse x/y at +8/+12 — the device point divided by
+// the menu scale, map_view_device_to_design — and the button mask at +16).
 // [orig: CMap_OverlayInputHandler @0x554310 — the jump table @0x55455a and
 //  the move leg @0x5543c4; CMapWindow_HandleEvent @0x5497f0 — @0x549e9c]
 enum class MapViewEvent : uint32_t {
@@ -67,6 +70,11 @@ struct MapViewRect {
 // truncated [orig: CUIScene_ScaleRectDesignToDevice @0x63b210 — (int)(v *
 // scale) per edge]. The menu scale is surface / 800 (x) or / 600 (y).
 int32_t map_view_design_to_device(int32_t design, float scale);
+// One device mouse coordinate onto the menu design space the mouse-class
+// events carry: v / the scene's scale factor, truncated [orig:
+// UI_DispatchMouseEvent @0x63ab00 — `fild g_MouseState.x; fdiv [ebx+4];
+// _ftol2_sse`, the same for y over [ebx+8]].
+int32_t map_view_device_to_design(int32_t device, float scale);
 
 // The pan/zoom view both map callbacks keep: the zoom multiplier, the pan
 // offset from the local player (16.16 mission units), the drag latches and
@@ -213,18 +221,20 @@ struct CommandMapView {
 	bool initialized = false;
 
 	// The screen's first open: zoom 4.0, every draw toggle on, a zero pan.
-	// The same init clears the waypoint table and allocates the orders list
-	// (both unported with the rest of the screen).
+	// The same init clears the waypoint table (world/user_waypoints.h, held
+	// per mission) and allocates the orders list (the presenter's).
 	// [orig: sub_54B280 @0x54b280]
 	void on_load();
-	// The mouse-class events. A left press with CREATE_WAYPOINTS set places a
-	// waypoint (the WAYPOINTNAME_DLG flow, unported) and does not pan; the
-	// wheel is ignored while the right drag runs. A move with neither drag
-	// armed clears both latches (the waypoint hover test beside it is part
-	// of the unported waypoint flow).
+	// The mouse-class events. A left press with CREATE_WAYPOINTS set asks for
+	// the waypoint-name dialog instead of panning (kPlaceWaypoint: the
+	// embedder runs the dialog leg and stores the click point); the wheel is
+	// ignored while the right drag runs. A move with neither drag armed clears
+	// both latches and asks for the waypoint hover test (kHoverTest).
 	// [orig: CMapWindow_HandleEvent @0x5497f0 — @0x549e9c..0x54a087, the move
 	//  @0x549c47..0x549e7b]
-	void on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t buttons, int32_t wheel);
+	enum class EventResult { kNone, kPlaceWaypoint, kHoverTest };
+	EventResult on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t buttons,
+			int32_t wheel);
 	// The ZOOMIN / ZOOMOUT button pair (user data 1 / -1).
 	// [orig: loc_548230 registered by CCommandMap_RegisterAllControls]
 	void zoom_button(int direction) { view.zoom_step(direction); }
@@ -253,6 +263,60 @@ struct CommandMapView {
 			int32_t player_y, int32_t player_z, HudMinimapInput &base);
 };
 
+// THE CMAP USER-WAYPOINT LEGS (world/user_waypoints.h holds the table).
+
+// The WAYPOINTNAME_DLG placement: the dialog's authored size centred on the
+// click, pushed right onto the map control's left edge or left onto its right
+// edge (the vertical is not clamped). Design units.
+// [orig: CMapWindow_HandleEvent @0x549ef0..0x549f8a — CWnd_GetRect of the
+//  dialog and of the map control, OffsetRect]
+MapViewRect command_map_waypoint_dialog_rect(int32_t click_x, int32_t click_y,
+		const MapViewRect &dialog, const MapViewRect &map);
+
+// The confirm's world point: the click (the map control's local design
+// point, the view's last point) against the view the last render stamped:
+// P = Z x 65536 / ((W / S) x 200) x 65536, x = player x - trunc((W / S / 2 -
+// click x) x P) + pan x, y = player y + trunc((H / S / 2 - click y) x P) + pan
+// y, each product at single precision.
+// [orig: CMap_HandleWaypointCreateConfirm @0x54a11e..0x54a193]
+void command_map_waypoint_world(const CommandMapView &cmap, int32_t player_x, int32_t player_y,
+		int32_t &out_x, int32_t &out_y);
+
+// The placed-waypoint table's slot count [orig: g_ConnectionSlotTable
+// @0x252dcd0, 16 x 8 bytes; the `dword_252DD50 < 16` gates].
+inline constexpr int kCommandMapWaypointSlots = 16;
+
+// One placed waypoint as the last CMAP render projected it: the device point
+// of its position through the map transform and its name's bold-label size
+// (device pixels). `live` false for an empty table slot.
+struct CommandMapWaypointAnchor {
+	bool live = false;
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t text_w = 0;
+	int32_t text_h = 0;
+};
+
+// The move leg's hover test over the table slots: each slot's hover byte
+// clears, then a live slot whose design-space box (from 5 pixels plus the
+// delete button's width left of the anchor to the name's device width right
+// of it, from the anchor down the name's device height) holds the mouse sets
+// its byte and ends the walk; the slots after it keep their bytes. The
+// device anchor divides by the menu scale into design units (truncated).
+// [orig: CMapWindow_HandleEvent @0x549da5..0x549e7b — Terrain_FixedPointToWorldFloat_Default,
+//  HUD_MeasureTextWH(name, g_HUDLabelFont[1]), sub_63B1E0 @0x63b1e0]
+void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *hover, int count,
+		int32_t mouse_x, int32_t mouse_y, float scale_x, float scale_y, int32_t close_w);
+
+// The render leg's delete-button placement: the first live hovered slot's
+// device anchor less the button's width and 5 pixels, into design units (the
+// button takes that corner at its own square size). False: nothing hovered,
+// the button hides.
+// [orig: CMapWindow_HandleEvent @0x549b6e..0x549c23 — sub_646580 @0x646580]
+bool command_map_close_button_position(const CommandMapWaypointAnchor *anchors,
+		const bool *hover, int count, float scale_x, float scale_y, int32_t close_w,
+		int32_t &out_x, int32_t &out_y);
+
 // The mode-4 content mask HUD_BuildMapOverlayView derives from the CMAP
 // params: 0xAF937 (0xAE937 without GRID), TEXT off clears bits 11/14/17,
 // WAYPOINTS off clears bit 17; mode 4 never carries bit 16.
@@ -274,8 +338,27 @@ struct DeathMapZone {
 	// Math_FixedPointTransformPoint22 @0x615810].
 	int32_t anchor_x = 0;
 	int32_t anchor_y = 0;
-	uint8_t queued = 0;     // entity +550, the 0x6E queued count
-	uint16_t countdown = 0; // entity +548, the 0x6E wave countdown
+	// The zone ENTITY's +550 / +548 words, which every S2C 0x6E group naming
+	// the zone rewrites (the member count, the wave countdown) and a later
+	// 0x6E that leaves the zone out keeps: they stay the last values written
+	// [orig: NapiNPClientMsg_HandleSquadRosterSync @0x429880 — the stores
+	// @0x4299bf / @0x4299c5, no reset of an unlisted zone].
+	uint8_t queued = 0;
+	uint16_t countdown = 0;
+	// The entity reads the per-zone blip selector makes (sub_597FD0 and
+	// Minimap_GetCapturePointInfo; death_map_zone_blip below).
+	bool has_def = true;        // entity+0x20
+	uint32_t def_type = 0;      // ItemDef+0x5C
+	uint32_t def_attrib = 0;    // ItemDef+0x54
+	int32_t def_id = 0;         // ItemDef+0x50
+	bool dead = false;          // entity+0x24 & 2
+	bool carried = false;       // entity+0x24 & 1
+	bool local_player = false;  // the entity is g_LocalPlayerEntity
+	bool parent_item = false;   // entity+0x28 set, its def type 1
+	uint8_t zone_number = 0;    // entity+0x21A
+	uint8_t capture_team = 0;   // entity+0x223, the S2C 0x53 mode_b
+	bool occupant_present = false; // entity+0x170
+	uint8_t occupant_team = 0;  // the occupant's +0x162
 };
 
 // The world facts the DEATH pass reads beyond the spinmap input.
@@ -294,19 +377,93 @@ struct DeathMapFacts {
 	std::vector<DeathMapZone> zones;
 	// The local player's height: the CMAP params' position Z (params+0x14).
 	int32_t player_z = 0;
+	// g_NapiNPCtx.is_in_session and the HUD info entity's team byte, the
+	// capture-point colour pick's gates [orig: Minimap_GetCapturePointInfo
+	// @0x5971c0 — @0x5971ec, g_HUDInfoCurrentEntity+354 @0x597263].
+	bool in_session = false;
+	uint8_t hud_team = 0;
 	// The spawn-zone AABB for the show-event fit.
 	int32_t bounds_min_x = 0;
 	int32_t bounds_min_y = 0;
 	int32_t bounds_max_x = 0;
 	int32_t bounds_max_y = 0;
+	// The CMAP's placed-waypoint table (world/user_waypoints.h) as the hover
+	// and delete-button legs read it: each slot's position and name, `live`
+	// false for an empty slot [orig: g_ConnectionSlotTable @0x252dcd0 — the
+	// entity's +4 position and +244 name].
+	struct UserWaypoint {
+		bool live = false;
+		int32_t x = 0;
+		int32_t y = 0;
+		std::string name;
+	};
+	std::array<UserWaypoint, kCommandMapWaypointSlots> user_waypoints;
+	// The CMAP tab gates' inputs: g_DeathScreenActive, and whether a live,
+	// non-spectator roster slot of the local player's team with an entity
+	// names the local slot its squad leader (+48).
+	bool death_screen_active = false;
+	bool has_squad_members = false;
 };
 
-// The DEATH window's compiled pass: the spinmap-shaped pass plus the player
-// crosshair, which draws after the zone letters (the device submits it last).
+// The CMAP tab radios' interactive states the screen's show leaves: ORDERS
+// while the local player leads anyone, PLAYERS in a session, TEAM and RULES
+// in a session off the death screen.
+// [orig: CMap_PopulateTeamList @0x547a50 — the row walk's `+48 == local`
+//  latch @0x547c4d, UIWidget_SetInteractiveRecursive @0x547d3f (ORDERS),
+//  @0x547d6e (PLAYERS, g_NapiNPCtx.is_in_session), @0x547d9c..0x547da6
+//  (TEAM), @0x547dd4..0x547de8 (RULES); from sub_54B320 @0x54b480]
+struct CommandMapTabGates {
+	bool orders = false;
+	bool players = false;
+	bool team = false;
+	bool rules = false;
+};
+CommandMapTabGates command_map_tab_gates(const DeathMapFacts &facts);
+
+// The DEATH window's compiled pass: the spinmap-shaped pass, then the zone
+// walk's segments, then the player crosshair (the device submits them in that
+// order). The walk draws each zone's blip and then that zone's letters before
+// the next zone, so a later zone's blip covers an earlier zone's letters: one
+// segment per walked zone, each the half-open end of its blip overlays /
+// sprites / lines and of its labels inside `zones`.
+// [orig: MapOverlay_DrawView @0x5a5a4d..0x5a5d2c — sub_597FD0 @0x5a5adc then
+//  the HUD_DrawTextCentered_HalfBright calls @0x5a5c59..0x5a5d14 per slot]
+struct HudMapWindowSegment {
+	size_t overlay_end = 0;
+	size_t sprite_end = 0;
+	size_t line_end = 0;
+	size_t label_end = 0;
+};
 struct HudMapWindowPass {
 	HudMapPass map;
+	HudMapPass zones;
+	std::vector<HudMapWindowSegment> segments;
 	std::vector<HudMapLine> over_lines;
 };
+
+// sub_597FD0's pick for one zone: whether Minimap_DrawBlip runs, and its
+// colour and cell (the size argument). By def type: 5 without attrib 0x20000
+// the team colour or 0xFF707070, cell 0; 3 (a person) the team colour, cell
+// 3, halved while it is the dead local player on the 0x10 blink phase; 2
+// nothing; else attrib 0x20 (an attached item) 0xFF907000 cell 4 unless its
+// parent is a vehicle or it is dead, otherwise the capture-point pick or the
+// team colour (0xFF707070 past team 2), cell 0. Attrib 0x20000 (a capture
+// zone) then forces cell 0 and, for a neutral zone being taken (+0x223), the
+// taker's colour on the 0x20 blink phase, or for a zone without a zone number
+// the halved colour on that phase. `frame` is the unpaused main-frame
+// counter (dword_A87060).
+// [orig: sub_597FD0 @0x597fd0 — type 5 @0x597fe1..0x598018, type 3
+//  @0x59801d..0x598060, type 2 @0x598065, attrib 0x20 @0x598071..0x59809e,
+//  Minimap_GetCapturePointInfo @0x5980ab, the team fallback @0x5980b7..0x5980e5,
+//  attrib 0x20000 @0x5980ef..0x598149, the halving `sar esi, 1; and esi,
+//  7F7F7F7Fh` @0x598147, Minimap_DrawBlip @0x598170]
+struct DeathMapZoneBlip {
+	bool draw = false;
+	uint32_t color = 0;
+	uint8_t cell = 0;
+};
+DeathMapZoneBlip death_map_zone_blip(const DeathMapZone &zone, const DeathMapFacts &facts,
+		int32_t frame);
 
 // The player crosshair both windows draw after their map: two full-window
 // lines through the projected local player, the team colour pulsed at alpha
@@ -333,12 +490,12 @@ inline constexpr uint32_t kDeathMapMask = 0x2022u;
 
 // Compiles the DEATH MAP window: the terrain + marker walk through the
 // spinmap compiler's windowed mode (the device rect, north-up, the caller's
-// float scale), then the view's own legs in order — every zone's blip redrawn
-// from its bank slot, the zone letters with their colours / pulse / score
-// lines, and the player crosshair. Lives across frames so its scratch keeps
-// capacity. Residuals: the letters draw above every zone blip (retail
-// interleaves blip, letters per zone), and the tracked-target call draws
-// nothing (no tracked-target source).
+// float scale), then the zone walk — per zone, in bank-slot order, the blip
+// Minimap_DrawBlip draws from the zone entity with sub_597FD0's colour and
+// cell (death_map_zone_blip), then that zone's letters with their colours /
+// pulse / score lines — and the player crosshair. Lives across frames so its
+// scratch keeps capacity. The tracked-target call draws only what the frame's
+// tracked-target feed holds (D-HUD-34 owns its missing sources).
 // [orig: MapOverlay_DrawView @0x5a58e0]
 class DeathMapCompiler {
 public:
@@ -354,22 +511,32 @@ private:
 		const DeathMapZone *zone;
 	};
 	HudMinimapCompiler compiler_;
-	HudMinimapInput zone_input_;
-	HudMapPass zone_pass_;
 	std::vector<ZoneSlot> walk_;
+	// Minimap_DrawBlip's clip / crop scratch for the per-zone redraw.
+	std::vector<HudMapVertex> clip_a_;
+	std::vector<HudMapVertex> clip_b_;
+	std::vector<HudMapGeomVertex> geom_a_;
+	std::vector<HudMapGeomVertex> geom_b_;
+	std::vector<const HudMinimapFootprint *> footprint_index_;
+	uint32_t tracked_color_ = 0;
+	uint8_t tracked_alpha_ = 0;
 };
 
 // Compiles the CMAP MAP / ORDERS_MAP window: the render pass clears the rect
 // (colour 0x18 into the target), HUD_BuildMapOverlayView mode 4 draws the map
 // through the spinmap compiler (CommandMapView::render builds its input),
-// then the player crosshair. The waypoint hover labels the pass also places
-// are the unported waypoint flow's.
+// then the player crosshair; each placed waypoint's anchor comes out for the
+// hover test and the delete button (command_map_waypoint_hover /
+// command_map_close_button_position).
 // [orig: CMapWindow_HandleEvent render @0x54981c..0x549b4a — the clear
 //  CGfxDevice_SetClearColor(24) + CGfxDevice_Clear(rect, 3) @0x549826..0x54985c]
 class CommandMapCompiler {
 public:
+	// `anchors` (kCommandMapWaypointSlots entries) receive each live table
+	// slot's projected device point; the caller measures the names.
 	void compile(HudMinimapInput &input, CommandMapView &cmap, const MapViewRect &rect,
-			int32_t scaled_800, const DeathMapFacts &facts, HudMapWindowPass &out);
+			int32_t scaled_800, const DeathMapFacts &facts, HudMapWindowPass &out,
+			CommandMapWaypointAnchor *anchors);
 
 private:
 	HudMinimapCompiler compiler_;

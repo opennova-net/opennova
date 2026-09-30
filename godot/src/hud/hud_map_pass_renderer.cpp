@@ -133,7 +133,8 @@ void HudMapPassRenderer::set_transform(const Transform2D &transform) {
 void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 		const std::vector<opennova::hud::GameFontQuad> &p_map_glyphs,
 		const HudMapPassTextures &p_textures,
-		const std::vector<opennova::hud::HudMapLine> *p_over_lines) {
+		const std::vector<opennova::hud::HudMapLine> *p_over_lines,
+		const HudMapSegmentsView *p_segments) {
 	if (!p_map.visible || !is_ready()) return;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const RID base_item = base_item_;
@@ -291,109 +292,152 @@ void HudMapPassRenderer::render(const opennova::hud::HudMapPass &p_map,
 	};
 
 	// Sprites batch by consecutive texture slot (insertion order is the
-	// compiler layer order, so only same-texture runs may merge).
-	int run_texture_slot = -1;
-	Ref<Texture2D> run_texture;
-	RID run_item = top_item;
-	size_t sprite_index = 0;
-	for (const opennova::hud::HudMapSprite &sprite : p_map.sprites) {
-		if (sprite_index++ == p_map.ring_tris_before_sprite && !p_map.ring_tris.empty()) {
-			flush_tris(run_item, run_texture);
-			run_texture_slot = -2;
-			run_item = top_item;
-			submit_ring();
-		}
-		// kHudMapTextureNone draws untextured (the ring bands).
-		const int texture_slot = sprite.texture == opennova::hud::kHudMapTextureNone
-				? -1
-				: opennova::hud::kHudTexMapIcons + sprite.texture;
-		// A MODULATE2X sprite rides its own item; the first one moves every
-		// later top-layer submission onto the post item.
-		const RID sprite_item = sprite.modulate2x ? modulate2x_item_ : top_item;
-		if (sprite.modulate2x && top_item != post_item_) {
-			flush_tris(top_item, run_texture);
-			run_texture_slot = -2;
-			top_item = post_item_;
-		}
-		if (texture_slot != run_texture_slot || sprite_item != run_item) {
-			flush_tris(run_item, run_texture);
-			run_item = sprite_item;
-			run_texture_slot = texture_slot;
-			run_texture = texture_slot >= 0 && texture_slot < p_textures.slot_count &&
-							p_textures.slots != nullptr
-					? p_textures.slots[texture_slot]
-					: Ref<Texture2D>();
-		}
-		if (sprite.geom_count != 0) {
-			// The compiler's cropped/banded triangle list replaces the quad.
-			const size_t end = std::min<size_t>(p_map.geom.size(),
-					static_cast<size_t>(sprite.geom_first) + sprite.geom_count);
-			for (size_t gi = sprite.geom_first; gi + 3 <= end; gi += 3) {
-				const int base = static_cast<int>(points.size());
-				for (size_t k = 0; k < 3; ++k) {
-					const opennova::hud::HudMapGeomVertex &v = p_map.geom[gi + k];
-					points.push_back(Vector2(v.x, v.y));
-					uvs.push_back(Vector2(v.u, v.v));
-					colors.push_back(opennova::color_from_argb(v.color));
-					indices.push_back(base + static_cast<int>(k));
-				}
+	// compiler layer order, so only same-texture runs may merge). `with_ring`
+	// submits the pass's ring strips at their split. A MODULATE2X sprite rides
+	// its own item; the first one moves every later top-layer submission onto
+	// the post item.
+	const auto submit_sprites = [&](const opennova::hud::HudMapPass &pass, size_t begin,
+			size_t end, bool with_ring) {
+		int run_texture_slot = -1;
+		Ref<Texture2D> run_texture;
+		RID run_item = top_item;
+		for (size_t sprite_index = begin; sprite_index < end; ++sprite_index) {
+			const opennova::hud::HudMapSprite &sprite = pass.sprites[sprite_index];
+			if (with_ring && sprite_index == pass.ring_tris_before_sprite &&
+					!pass.ring_tris.empty()) {
+				flush_tris(run_item, run_texture);
+				run_texture_slot = -2;
+				run_item = top_item;
+				submit_ring();
 			}
-			continue;
+			// kHudMapTextureNone draws untextured (the ring bands).
+			const int texture_slot = sprite.texture == opennova::hud::kHudMapTextureNone
+					? -1
+					: opennova::hud::kHudTexMapIcons + sprite.texture;
+			const RID sprite_item = sprite.modulate2x ? modulate2x_item_ : top_item;
+			if (sprite.modulate2x && top_item != post_item_) {
+				flush_tris(top_item, run_texture);
+				run_texture_slot = -2;
+				top_item = post_item_;
+			}
+			if (texture_slot != run_texture_slot || sprite_item != run_item) {
+				flush_tris(run_item, run_texture);
+				run_item = sprite_item;
+				run_texture_slot = texture_slot;
+				run_texture = texture_slot >= 0 && texture_slot < p_textures.slot_count &&
+								p_textures.slots != nullptr
+						? p_textures.slots[texture_slot]
+						: Ref<Texture2D>();
+			}
+			if (sprite.geom_count != 0) {
+				// The compiler's cropped/banded triangle list replaces the quad.
+				const size_t geom_end = std::min<size_t>(pass.geom.size(),
+						static_cast<size_t>(sprite.geom_first) + sprite.geom_count);
+				for (size_t gi = sprite.geom_first; gi + 3 <= geom_end; gi += 3) {
+					const int base = static_cast<int>(points.size());
+					for (size_t k = 0; k < 3; ++k) {
+						const opennova::hud::HudMapGeomVertex &v = pass.geom[gi + k];
+						points.push_back(Vector2(v.x, v.y));
+						uvs.push_back(Vector2(v.u, v.v));
+						colors.push_back(opennova::color_from_argb(v.color));
+						indices.push_back(base + static_cast<int>(k));
+					}
+				}
+				continue;
+			}
+			const float c = std::cos(sprite.rotation_rad);
+			const float s = std::sin(sprite.rotation_rad);
+			auto corner = [&](float x, float y) {
+				return Vector2(sprite.center_x + x * c - y * s,
+						sprite.center_y + x * s + y * c);
+			};
+			const Vector2 corners[4] = {
+				corner(-sprite.half_w, -sprite.half_h),
+				corner(sprite.half_w, -sprite.half_h),
+				corner(sprite.half_w, sprite.half_h),
+				corner(-sprite.half_w, sprite.half_h),
+			};
+			const Vector2 quad_uvs[4] = {
+				Vector2(sprite.u0, sprite.v0),
+				Vector2(sprite.u1, sprite.v0),
+				Vector2(sprite.u1, sprite.v1),
+				Vector2(sprite.u0, sprite.v1),
+			};
+			push_quad(corners, quad_uvs, sprite.color);
 		}
-		const float c = std::cos(sprite.rotation_rad);
-		const float s = std::sin(sprite.rotation_rad);
-		auto corner = [&](float x, float y) {
-			return Vector2(sprite.center_x + x * c - y * s,
-					sprite.center_y + x * s + y * c);
-		};
-		const Vector2 corners[4] = {
-			corner(-sprite.half_w, -sprite.half_h),
-			corner(sprite.half_w, -sprite.half_h),
-			corner(sprite.half_w, sprite.half_h),
-			corner(-sprite.half_w, sprite.half_h),
-		};
-		const Vector2 quad_uvs[4] = {
-			Vector2(sprite.u0, sprite.v0),
-			Vector2(sprite.u1, sprite.v0),
-			Vector2(sprite.u1, sprite.v1),
-			Vector2(sprite.u0, sprite.v1),
-		};
-		push_quad(corners, quad_uvs, sprite.color);
-	}
-	flush_tris(run_item, run_texture);
-	if (p_map.ring_tris_before_sprite >= p_map.sprites.size() && !p_map.ring_tris.empty())
-		submit_ring();
+		flush_tris(run_item, run_texture);
+		if (with_ring && pass.ring_tris_before_sprite >= end && !pass.ring_tris.empty())
+			submit_ring();
+	};
+	submit_sprites(p_map, 0, p_map.sprites.size(), true);
 
 	submit_lines(p_map.lines);
 
 	// Map text: the map passes compile per-pass GameFont glyph quads; they
 	// render LAST on this pass top item, above its grid rules and markers.
 	// Batched by consecutive font page.
-	uint32_t run_page = 0xFFFFFFFFu;
-	Ref<Texture2D> run_page_texture;
-	for (const opennova::hud::GameFontQuad &glyph : p_map_glyphs) {
-		if (p_textures.pages == nullptr || glyph.page >= p_textures.page_count) continue;
-		if (glyph.page != run_page) {
-			flush_tris(top_item, run_page_texture);
-			run_page = glyph.page;
-			run_page_texture = p_textures.pages[glyph.page];
+	const auto submit_glyphs = [&](const std::vector<opennova::hud::GameFontQuad> &glyphs,
+			size_t begin, size_t end) {
+		uint32_t run_page = 0xFFFFFFFFu;
+		Ref<Texture2D> run_page_texture;
+		for (size_t gi = begin; gi < end && gi < glyphs.size(); ++gi) {
+			const opennova::hud::GameFontQuad &glyph = glyphs[gi];
+			if (p_textures.pages == nullptr || glyph.page >= p_textures.page_count) continue;
+			if (glyph.page != run_page) {
+				flush_tris(top_item, run_page_texture);
+				run_page = glyph.page;
+				run_page_texture = p_textures.pages[glyph.page];
+			}
+			if (run_page_texture.is_null()) continue;
+			const Vector2 corners[4] = {
+				Vector2(glyph.x_top_left, glyph.y_top),
+				Vector2(glyph.x_top_right, glyph.y_top),
+				Vector2(glyph.x_bottom_right, glyph.y_bottom),
+				Vector2(glyph.x_bottom_left, glyph.y_bottom),
+			};
+			const Vector2 quad_uvs[4] = {
+				Vector2(glyph.u0, glyph.v0),
+				Vector2(glyph.u1, glyph.v0),
+				Vector2(glyph.u1, glyph.v1),
+				Vector2(glyph.u0, glyph.v1),
+			};
+			push_quad(corners, quad_uvs, glyph.color);
 		}
-		if (run_page_texture.is_null()) continue;
-		const Vector2 corners[4] = {
-			Vector2(glyph.x_top_left, glyph.y_top),
-			Vector2(glyph.x_top_right, glyph.y_top),
-			Vector2(glyph.x_bottom_right, glyph.y_bottom),
-			Vector2(glyph.x_bottom_left, glyph.y_bottom),
-		};
-		const Vector2 quad_uvs[4] = {
-			Vector2(glyph.u0, glyph.v0),
-			Vector2(glyph.u1, glyph.v0),
-			Vector2(glyph.u1, glyph.v1),
-			Vector2(glyph.u0, glyph.v1),
-		};
-		push_quad(corners, quad_uvs, glyph.color);
+		flush_tris(top_item, run_page_texture);
+	};
+	submit_glyphs(p_map_glyphs, 0, p_map_glyphs.size());
+
+	// The DEATH window's zone walk: each zone's blip (its overlays, sprites
+	// and lines), then that zone's letters, before the next zone's blip
+	// (hud_map_view.h HudMapWindowSegment).
+	if (p_segments != nullptr && p_segments->pass != nullptr && p_segments->segments != nullptr &&
+			p_segments->glyphs != nullptr && p_segments->glyph_ends != nullptr) {
+		const opennova::hud::HudMapPass &zones = *p_segments->pass;
+		size_t overlay_begin = 0, sprite_begin = 0, line_begin = 0, glyph_begin = 0;
+		const size_t count =
+				std::min(p_segments->segments->size(), p_segments->glyph_ends->size());
+		std::vector<opennova::hud::HudMapLine> segment_lines;
+		for (size_t i = 0; i < count; ++i) {
+			const opennova::hud::HudMapWindowSegment &segment = (*p_segments->segments)[i];
+			for (size_t oi = overlay_begin;
+					oi < segment.overlay_end && oi < zones.overlays.size(); ++oi)
+				push_map_tri(zones.overlays[oi]);
+			flush_tris(top_item, empty_texture);
+			submit_sprites(zones, sprite_begin,
+					std::min(segment.sprite_end, zones.sprites.size()), false);
+			if (segment.line_end > line_begin && segment.line_end <= zones.lines.size()) {
+				segment_lines.assign(zones.lines.begin() + static_cast<std::ptrdiff_t>(line_begin),
+						zones.lines.begin() + static_cast<std::ptrdiff_t>(segment.line_end));
+				submit_lines(segment_lines);
+			}
+			const size_t glyph_end = (*p_segments->glyph_ends)[i];
+			submit_glyphs(*p_segments->glyphs, glyph_begin, glyph_end);
+			overlay_begin = segment.overlay_end;
+			sprite_begin = segment.sprite_end;
+			line_begin = segment.line_end;
+			glyph_begin = glyph_end;
+		}
 	}
-	flush_tris(top_item, run_page_texture);
 
 	// The DEATH window's player crosshair draws after its zone letters.
 	if (p_over_lines != nullptr) submit_lines(*p_over_lines);

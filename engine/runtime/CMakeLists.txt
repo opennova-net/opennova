@@ -91,6 +91,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
@@ -197,6 +198,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/user_waypoints.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_aircraft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_handlers.cpp   # scoring, state names, per-state handlers + the table
@@ -335,6 +337,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_death.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_endround.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_lifecycle.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
@@ -362,6 +365,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
@@ -381,6 +385,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp

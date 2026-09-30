@@ -233,6 +233,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::push_chat_line);
 	ClassDB::bind_method(D_METHOD("post_feed_lines", "sim", "gametext", "mp_verbose"),
 			&HudOverlay::post_feed_lines);
+	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text", "frame"),
+			&HudOverlay::send_command_map_chat);
 	ClassDB::bind_method(D_METHOD("set_end_round_statistics", "shown", "raised",
 			"title", "labels", "values"),
 			&HudOverlay::set_end_round_statistics);
@@ -873,6 +875,22 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 	return announcement;
 }
 
+int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
+		const String &p_text, int64_t p_frame) {
+	if (p_sim.is_null()) return static_cast<int>(opennova::hud::ChatSendResult::Refused);
+	const int dispatch =
+			p_all ? opennova::hud::kChatDispatchGlobal : opennova::hud::kChatDispatchTeam;
+	std::string text = opennova::to_std(p_text);
+	const opennova::hud::ChatSendResult result =
+			p_sim->send_chat_line(dispatch, text, static_cast<uint32_t>(p_frame));
+	if (result == opennova::hud::ChatSendResult::Flooded) {
+		compiler_.push_chat_line(text, opennova::hud::chat_dispatch_flood_color(dispatch),
+				state_.ticks);
+		queue_redraw();
+	}
+	return static_cast<int>(result);
+}
+
 void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,
 		float p_fov_deg) {
 	state_.ticks = p_ticks;
@@ -1468,6 +1486,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.spawn_success_gate = facts.breath.spawn_success_gate;
 	state_.breath_label = opennova::to_std(overlay_text(p_gametext, "STROVER91", ""));
 	state_.session = facts.session;
+	state_.squad_orders = facts.squad_orders;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];

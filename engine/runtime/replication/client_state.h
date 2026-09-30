@@ -49,13 +49,26 @@ struct ClientRosterSlot {
 	// PlayerSlotTable_Create(.., 9) @0x434bb0]. The kill feed's <ch>..<co>
 	// suffix and the Tab row's label read it.
 	std::string registry_clan;
-	// The squad colour index (slot+0x33) the map's bit-5 loop 1 and the
-	// friendly-tag drawer swap into g_SquadColors. Its one writer is the
-	// client-local CMAP team-list click, (index + 1) % 14; neither the slot
-	// create nor the 0x46 fold touches it [orig: CMap_EntityWidgetHandler
-	// @0x5485d1..0x5485e4; PlayerSlotTable_GetOrInitSlot @0x4346c0 leaves
-	// +0x33].
+	// THE COMMAND MAP'S SQUAD BYTES. The squad leader's slot (+48; 0xFF
+	// none) the 0x46 0x0040 field and S2C 0x71 write, the fireteam (+49; 0
+	// none, 1..3 A..C) the 0x0080 field, S2C 0x73 and a 0x71 (reset to 0)
+	// write, the 0x0020 byte (+45) and the spectator byte (+46, field
+	// 0x1000). The local-only squad colour index (+51, the TEAMLIST Map
+	// column's (i + 1) % 14 cycle) and the PLAYERS tab's punt mark (+52,
+	// the voted slot's own index, 0xFF none). A slot's first activation
+	// seeds +48 = +52 = 0xFF and +45/+46/+49 = 0; the mute flags (+50,
+	// radio_mute_flags) and the colour (+51) survive a removal and a
+	// re-activation — nothing but the table's (re)creation clears them.
+	// [orig: PlayerSlotTable_GetOrInitSlot @0x4346c0 — @0x4346f6..0x43470e;
+	//  PlayerSlot_ClearAndUnlink @0x434730 leaves +48..+52;
+	//  NapiNPClientMsg_PlayerSync @0x431370 — 0x20 -> +45, 0x1000 -> +46,
+	//  0x40 -> +48, 0x80 -> +49]
+	uint8_t squad_leader = 0xFF;
+	uint8_t fireteam = 0;
+	uint8_t vehicle_score = 0;
+	bool spectator = false;
 	uint8_t squad_color = 0;
+	uint8_t punt_mark = 0xFF;
 };
 
 // One S2C 0x4C entry of the player-slot pointer table: the roster slot the
@@ -232,6 +245,36 @@ struct ClientChatLine {
 	uint8_t sender_slot = 0; // body[1], the roster index
 	std::string text;
 	uint32_t feed_order = 0;
+};
+
+// One command-map squad or waypoint consequence an S2C fold leaves for the
+// embedding role (the world rows and the sounds, inmatch client_squad.cpp)
+// and for the HUD (the lines, hud/squad_feed.h).
+// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600, NapiNPClientMsg_0x072
+//  @0x425710, NapiNPClientMsg_0x073 @0x425770, NapiNPClientMsg_PlayerRecruited
+//  @0x4258b0, NapiNPClientMsg_0x078 @0x425970, NapiNPClientMsg_0x033 @0x425fa0,
+//  NapiNPClientMsg_0x07C @0x426020]
+struct ClientSquadEvent {
+	enum class Kind : uint8_t {
+		MemberJoined,   // S2C 0x71 naming the local slot as leader
+		SquadLeft,      // S2C 0x71 with leader 0xFF
+		FireteamSet,    // S2C 0x73 on the local slot
+		Recruited,      // S2C 0x74
+		GoCode,         // S2C 0x78
+		OrderSound,     // S2C 0x72 with a non-empty line
+		WaypointCreate, // S2C 0x33
+		EntityDestroy,  // S2C 0x7C
+	};
+	Kind kind = Kind::OrderSound;
+	uint8_t slot = 0;         // the subject's roster slot
+	int16_t entity_slot = -1; // that slot's pool-0 entity index (-1 none)
+	std::string name;         // the subject's name / the waypoint's name
+	uint8_t value = 0;        // the fireteam / the go code
+	uint8_t mute = 0;         // the mute flags the handler reads (+50)
+	int32_t x = 0;            // the shared waypoint's position
+	int32_t y = 0;
+	uint16_t handle = 0xFFFF; // 0x7C's packed handle / 0x33's owner index
+	uint32_t feed_order = 0;  // the dispatch stamp (ClientGameEvent::feed_order)
 };
 
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
@@ -812,6 +855,19 @@ struct ClientSpawnWaveStatus {
 	uint16_t self_zone_handle = 0xFFFF;
 };
 
+// One zone ENTITY's two 0x6E-written words: the member-count byte (+550) and
+// the wave countdown (+548). Each group whose zone handle resolves inside the
+// pool tables rewrites them; a later 0x6E that leaves the zone out writes
+// nothing, so the DEATH map keeps showing the last values.
+// [orig: NapiNPClientMsg_HandleSquadRosterSync @0x429880 — the resolve
+//  @0x429985..0x4299bd (`handle & 0xF000 < 0x5000`, slot < capacity), the
+//  stores @0x4299bf / @0x4299c5]
+struct ClientZoneWaveCounts {
+	uint16_t zone_handle = 0xFFFF;
+	uint8_t member_count = 0;   // entity+550
+	uint16_t wave_countdown = 0; // entity+548
+};
+
 // Latest victim-local S2C 0x52 camera anchor. Retail stores the three fixed
 // coordinates globally and Camera_ComputeThirdPersonPositions consumes them.
 // [orig: NapiNPClientMsg_0x052 @0x428A80; consumer @0x438B80]
@@ -1034,6 +1090,18 @@ struct ClientState {
 	// ladder, hud/score_fanfare.h) [orig: g_SessionVarExpFanfare @0x24d5a10].
 	uint16_t exp_fanfare = 0;
 	ClientSpawnWaveStatus spawn_waves;
+	std::vector<ClientZoneWaveCounts> zone_wave_counts;
+	// The two HUD order lines S2C 0x72 writes: [0] the individual order, [1]
+	// the fireteam order, 127 characters each; an empty line cancels. They
+	// hold until overwritten or the next mission start clears them.
+	// [orig: Team_SetNameByIndex @0x59c2d0 (a misnomer: the order-line
+	//  store) — strncpy(byte_2721DB8 + kind*128, str, 127) for kind < 2;
+	//  cleared by HUD_InitOverlaySystem @0x5a49b0]
+	std::array<std::string, 2> squad_orders;
+	// Bumps on every S2C 0x71 / 0x73 fold: the CMAP team list re-populates
+	// on it [orig: j_cmap_populate_team_list_0 @0x54e3c0 from @0x4256e5 /
+	// @0x425892].
+	uint32_t squad_revision = 0;
 	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
 	// The S2C 0x6A clan registry, in node insertion order (retail walks its

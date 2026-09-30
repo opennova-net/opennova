@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/transform2d.hpp>
 
 #include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_map_view.h>
 #include <runtime/hud/hud_minimap.h>
 
 #include <vector>
@@ -21,6 +22,16 @@ struct HudMapPassTextures {
 	int slot_count = 0;
 	const Ref<Texture2D> *pages = nullptr;
 	size_t page_count = 0;
+};
+
+// The DEATH window's zone-walk segments (hud_map_view.h HudMapWindowPass::
+// zones / segments) and their per-segment glyph ends: drawn after the pass's
+// own glyphs, each zone's blip then its letters.
+struct HudMapSegmentsView {
+	const opennova::hud::HudMapPass *pass = nullptr;
+	const std::vector<opennova::hud::HudMapWindowSegment> *segments = nullptr;
+	const std::vector<opennova::hud::GameFontQuad> *glyphs = nullptr;
+	const std::vector<size_t> *glyph_ends = nullptr;
 };
 
 // The device leg of one compiled map pass (engine/runtime/hud/hud_minimap.h
@@ -59,7 +70,8 @@ public:
 	void render(const opennova::hud::HudMapPass &map,
 			const std::vector<opennova::hud::GameFontQuad> &glyphs,
 			const HudMapPassTextures &textures,
-			const std::vector<opennova::hud::HudMapLine> *over_lines = nullptr);
+			const std::vector<opennova::hud::HudMapLine> *over_lines = nullptr,
+			const HudMapSegmentsView *segments = nullptr);
 
 	bool water_sampling_configured() const { return water_sampling_configured_; }
 	bool top_sampling_configured() const { return top_sampling_configured_; }

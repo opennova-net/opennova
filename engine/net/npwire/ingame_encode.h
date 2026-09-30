@@ -293,25 +293,6 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = tr
 //  @0x506C24, the identity pair @0x506C26..0x506C5C (zero @0x506C7C..0x506C9D)]
 std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign &assign);
 
-// tag=0x71 SQUAD JOIN — `[u8 leader][u8 member]` (2 B): the member slot's squad link, 0xFF =
-// no squad. A team change clears the changed player's link and sends [0xFF][its slot] to its new
-// team. [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the stores @0x510797 / @0x5107A4; client
-// NapiNPClientMsg_HandleSquadJoin @0x425600]
-struct SquadJoin {
-	uint8_t leader = 0xFF;
-	uint8_t member = 0;
-};
-std::vector<uint8_t> encode_squad_join(const SquadJoin &join);
-
-// tag=0x72 TEAM NAME — `[u8 index][cstr name]`; a team change sends [0][""] and [1][""] to the
-// changed player. [orig: NetPacket_WriteByteAndCString @0x5107B0; client NapiNPClientMsg_0x072
-// @0x425710]
-struct TeamName {
-	uint8_t index = 0;
-	std::string name;
-};
-std::vector<uint8_t> encode_team_name(const TeamName &name);
-
 // One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
 struct PlayerListEntry {
 	uint8_t slot = 0;

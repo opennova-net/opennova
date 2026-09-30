@@ -313,6 +313,9 @@ void MenuRuntime::replay_state_() {
 					state->scroll_range.value);
 		if (state->has_selected_set) frame_->set_widget_selected_set(index, state->selected_set);
 		if (state->has_table_rows) frame_->set_widget_table_rows(index, state->table_rows);
+		if (state->has_rect)
+			frame_->set_widget_rect(index, state->rect_left, state->rect_top, state->rect_right,
+					state->rect_bottom);
 	}
 }
 
@@ -424,6 +427,17 @@ void MenuRuntime::set_widget_text(int id, const std::string &text) {
 	state.has_text = true;
 	const int index = frame_index(id);
 	if (index >= 0) frame_->set_widget_text(index, text);
+}
+
+void MenuRuntime::set_widget_rect(int id, int left, int top, int right, int bottom) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	state.has_rect = true;
+	state.rect_left = left;
+	state.rect_top = top;
+	state.rect_right = right;
+	state.rect_bottom = bottom;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_rect(index, left, top, right, bottom);
 }
 
 std::string MenuRuntime::get_widget_text(int id) const {
@@ -1135,11 +1149,17 @@ bool MenuRuntime::route_edit_key_(const MenuKeyInput &key) {
 	if (vk != 0) {
 		const int result = frame_->edit_key(index, vk, key.shift);
 		if (result == static_cast<int>(EditKeyResult::kCommit)) {
-			// Enter commits: the value fires and focus releases (menu_edit.h
-			// EditKeyResult::kCommit — clears g_UIFocusWnd and fires the commit
-			// event 0x7000002).
+			// Enter commits: focus releases, then the edit's own callback takes
+			// event 0x7000002 (the embedder's EditCommitted).
+			// [orig: CEditWnd_HandleKeyEvent @0x6623a0 — g_UIFocusWnd = 0
+			//  @0x66249f, the widget event 0x7000002 @0x6624e3]
 			clear_edit_focus_();
 			play_widget_state_sound(id, "SELECTED");
+			MenuEvent committed;
+			committed.kind = MenuEvent::Kind::EditCommitted;
+			committed.id = id;
+			committed.text = widget_name_of(id);
+			emit_(committed);
 		} else if (result == static_cast<int>(EditKeyResult::kChanged)) {
 			emit_edit_changed(id);
 		}

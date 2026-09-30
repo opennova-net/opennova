@@ -449,6 +449,9 @@ int MenuFrameCompiler::appearance_state_with_fallback(const WidgetNode &node,
 // [orig: the parse tail @ 0x648120 -> CStaticWnd_AdjustRectToTextSize @ 0x6575f0].
 mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
+	// A moved widget keeps the rect it was given [orig: CWnd_SetRect
+	// @0x646560 — CopyRect into +0xD0].
+	if (ws != nullptr && ws->has_rect) return ws->rect;
 	const mnu::Window &w = *node.window;
 	int max_w = 0;
 	int max_h = 0;
@@ -1659,6 +1662,13 @@ bool MenuFrameCompiler::widget_rect(int index, const MenuFrameState &state,
 	return true;
 }
 
+bool MenuFrameCompiler::widget_local_rect(int index, const MenuFrameState &state,
+		mnu::RectEdges *out) const {
+	if (out == nullptr || index < 0 || index >= static_cast<int>(nodes_.size())) return false;
+	*out = solve_rect(nodes_[static_cast<size_t>(index)], state_for(state, index));
+	return true;
+}
+
 int MenuFrameCompiler::item_count(int index, const MenuFrameState &state) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
 		return 0;
@@ -2232,6 +2242,8 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 	for (size_t c = 0; c < w.children.size(); ++c) {
 		next = walk_widget(next, rect.left, rect.top, state, s);
 	}
+	if (index == state.mount_index && mount_split_ < 0)
+		mount_split_ = static_cast<int32_t>(draw_list_.draw_ops.size());
 	return next;
 }
 
@@ -2310,9 +2322,13 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	s.x = scale_x;
 	s.y = scale_y;
 	deferred_popups_.clear();
+	mount_split_ = -1;
 	walk_widget(0, 0, 0, state, s);
-	// Everything from here on is the menu-top overlay (popups, then cursor).
-	draw_list_.overlay_op_start = static_cast<int32_t>(draw_list_.draw_ops.size());
+	// Everything from here on is the menu-top overlay (popups, then cursor),
+	// and with a mounted widget everything after its subtree too.
+	draw_list_.overlay_op_start = mount_split_ >= 0
+			? mount_split_
+			: static_cast<int32_t>(draw_list_.draw_ops.size());
 	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
 	// walk paint after every widget, before the cursor.
 	for (int index : deferred_popups_) {

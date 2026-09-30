@@ -211,6 +211,10 @@ public:
 	// rect scaled by the frame's current size); zero when off-screen.
 	Rect2 widget_frame_rect(int p_id) const;
 	Vector2 design_scale() const;
+	// The widget's own design rect relative to its parent's origin
+	// (CWnd_GetRect), and its replacement (CWnd_SetRect).
+	Rect2 widget_local_rect(int p_id) const;
+	void set_widget_rect(int p_id, const Rect2i &p_rect);
 
 	void set_widget_shown(int p_id, bool p_shown);
 	bool is_widget_shown(int p_id) const;
@@ -255,6 +259,8 @@ public:
 	void close_active_combo_popup();
 	bool is_combo_popup_open(int p_id) const;
 	int get_focused_widget() const;
+	// Give an edit the keyboard focus (UI_SetFocusWnd; read-only refuses).
+	void focus_widget(int p_id);
 
 	// Advance the blink/marquee clock; the shell's _process forwards its clock.
 	void tick(int64_t p_time_ms);

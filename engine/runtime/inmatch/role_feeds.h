@@ -135,6 +135,8 @@ BreathBarFacts breath_bar_facts(const RoleView &view);
 struct HudRoleFacts {
 	BreathBarFacts breath;
 	hud::HudSessionState session;
+	// The two squad order lines the role's replica folded from S2C 0x72.
+	std::array<std::string, 2> squad_orders;
 	std::array<world::WeaponSlotBarCategory, 10> slot_bar{};
 	std::array<std::string, 10> slot_bar_icons;
 	// The F9 / F10 voice-macro menus the caller asked for (their open words;
@@ -233,6 +235,14 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 //  @0x59c300; entity+550/+548 from the 0x6E fold @0x429880]
 bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		hud::DeathMapFacts &out);
+
+// Whether the DEATH screen's shroud shows this main frame (world/
+// deploy_screen_feed.h death_shroud_revealed): the role's deploy-overlay
+// latch, or more than 240 logic ticks since the local player view's death
+// stamp. False without a kernel.
+// [orig: DeathScreen_UpdateShroudReveal @0x554737..0x554752 —
+//  g_DeployScreenActive, g_CurrentTick - g_CameraLerpStartTick]
+bool death_shroud_revealed(const RoleView &view);
 
 // THE PER-DRAWN-ENTITY LIGHTING FEED (D-RLIT-3 plus the interior lerp).
 // Retail pushes a render-state stack level around every drawn entity's

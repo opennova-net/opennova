@@ -50,7 +50,7 @@ struct LocalChatSpeaker {
 };
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker>;
+        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent>;
 
 class ClientReplicaPipeline {
 public:
@@ -265,6 +265,9 @@ public:
 		line.feed_order = next_feed_order_++;
 		pending_chat_lines_.push_back(std::move(line));
 	}
+	// A ring line the client raises itself (the CMAP go code) takes the next
+	// dispatch stamp, so it lands after every line already dispatched.
+	uint32_t claim_feed_order() { return next_feed_order_++; }
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns
@@ -369,6 +372,9 @@ public:
 	static constexpr int kSpectateActionPrevTarget = 502;
 	void spectate_action(int code);
 
+	// The local player's roster slot (entity+0x154): the bound slot driving
+	// the viewer's pool-0 entity, -1 when none.
+	int local_roster_slot() const;
 private:
 	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].
 	void spectate_on_entity_removed(uint16_t handle);
@@ -409,6 +415,14 @@ private:
 	void apply_chat_broadcast(const std::vector<uint8_t> &body); // 0x14 (player chat)
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
 	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
+	// The command map's squad and waypoint legs (client_replica_squad.cpp).
+	void apply_squad_join(const std::vector<uint8_t> &body);      // 0x71
+	void apply_squad_order(const std::vector<uint8_t> &body);     // 0x72
+	void apply_fireteam_set(const std::vector<uint8_t> &body);    // 0x73
+	void apply_squad_recruited(const std::vector<uint8_t> &body); // 0x74
+	void apply_go_code(const std::vector<uint8_t> &body);         // 0x78
+	void apply_waypoint_create(const std::vector<uint8_t> &body); // 0x33
+	void apply_destroy_entity(const std::vector<uint8_t> &body);  // 0x7C
 	void apply_clan_roster(const std::vector<uint8_t> &body);  // 0x6A (the clan registry)
 	void apply_visible_players(const std::vector<uint8_t> &body); // 0x4C (the slot pointer table)
 	void apply_spawn_slot_notice(const std::vector<uint8_t> &body); // 0x4D (a player joined)

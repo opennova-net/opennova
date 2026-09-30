@@ -69,6 +69,14 @@ bool Simulation::fill_death_map_facts(opennova::hud::DeathMapFacts &r_out) {
 	return opennova::inmatch::death_map_facts(role_view(), deploy_zone_registry(), r_out);
 }
 
+bool Simulation::is_death_shroud_revealed() const {
+	return kernel_ && opennova::inmatch::death_shroud_revealed(role_view());
+}
+
+bool Simulation::deploy_refresh_due(int64_t p_prev_tick, int64_t p_tick) {
+	return opennova::world::deploy_refresh_due(p_prev_tick, p_tick);
+}
+
 TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_default_key,
 		const String &p_default_home, const Dictionary &p_zone_names) {
 	// The compiled SPAWNPOINTS_LIST: the engine builder runs both witnessed

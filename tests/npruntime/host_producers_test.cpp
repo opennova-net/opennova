@@ -953,7 +953,7 @@ bool check_change_team() {
 	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
 	std::vector<uint8_t> tags;
 	for (const ns::Datagram &d : to_p1) tags.push_back(d.tag);
-	ok = expect(tags == std::vector<uint8_t>({s2c::SQUAD_JOIN, s2c::TEAM_NAME, s2c::TEAM_NAME,
+	ok = expect(tags == std::vector<uint8_t>({s2c::SQUAD_JOIN, s2c::SQUAD_ORDER, s2c::SQUAD_ORDER,
 					s2c::TEAM_ASSIGN, s2c::CHAT_BROADCAST}),
 			"the changed player gets 0x71, the 0x72 pair, 0x50, then the chat") && ok;
 	if (tags.size() == 5) {

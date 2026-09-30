@@ -106,6 +106,8 @@ public:
 	void set_widget_focused(int p_index, bool p_focused);
 	void set_widget_caret(int p_index, int p_caret);
 	void set_widget_text(int p_index, const String &p_text);
+	// CWnd_SetRect: the widget's own rect (parent-relative design units).
+	void set_widget_rect(int p_index, const Rect2i &p_rect);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
 			int p_scroll_row);
 	// Standalone type=scroll range/page/value. Page is the original inclusive
@@ -131,6 +133,12 @@ public:
 	// shell overlays mounted over a widget must follow it.
 	bool is_widget_shown(int p_index) const;
 	Rect2 widget_rect(int p_index) const;
+	// The widget's own rect relative to its parent's origin (CWnd_GetRect).
+	Rect2 widget_local_rect(int p_index) const;
+	// The widget a companion mounts a Control over (-1 none): the widgets
+	// after it paint on the menu-top overlay, above the mount.
+	void set_mount_widget(int p_index);
+	int get_mount_widget() const { return state_.mount_index; }
 	int item_count(int p_index) const;
 	String get_widget_text(int p_index) const; // effective: runtime else authored
 	int get_widget_caret(int p_index) const;

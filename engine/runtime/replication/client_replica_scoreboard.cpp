@@ -216,13 +216,26 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 		// A live slot vanishing is presenter state like the rows (the board
 		// reads the LIVE slot's quality/binding), so it moves the revision —
 		// edge-triggered, like the entity-team write.
+		// The mute flags (+50) and the local squad colour (+51) are the two
+		// bytes neither the clear nor a later activation touches.
 		const bool was_bound = slot.bound;
+		const uint8_t mute = slot.radio_mute_flags;
+		const uint8_t color = slot.squad_color;
 		slot = ClientRosterSlot{};
+		slot.radio_mute_flags = mute;
+		slot.squad_color = color;
 		if (was_bound) state_.mark_changed();
 		return;
 	}
 	bool changed = !slot.bound; // a (re)bind
-	if (!slot.bound) slot = ClientRosterSlot{}; // re-bind re-init [orig: @0x4346c0]
+	if (!slot.bound) {
+		// re-bind re-init [orig: @0x4346c0], keeping +50 / +51
+		const uint8_t mute = slot.radio_mute_flags;
+		const uint8_t color = slot.squad_color;
+		slot = ClientRosterSlot{};
+		slot.radio_mute_flags = mute;
+		slot.squad_color = color;
+	}
 	slot.bound = true;
 	// The entity binding is NOT bitmask-gated: every non-removal sync restamps
 	// it [orig: @0x431477/@0x431480; the no-entity -1 form @0x431489].
@@ -256,6 +269,23 @@ void ClientReplicaPipeline::apply_player_sync(const std::vector<uint8_t> &body) 
 				slot.medic_request_active != request;
 		slot.downed_revive_seconds = seconds;
 		slot.medic_request_active = request;
+	}
+	// The command map's squad bytes [orig: 0x20 -> +45, 0x1000 -> +46, 0x40 ->
+	// +48, 0x80 -> +49 in NapiNPClientMsg_PlayerSync @0x431370]. No team-list
+	// refresh rides these.
+	if ((sync.field_bitmask & kPlayerSyncHasVehicleScore) != 0u)
+		slot.vehicle_score = sync.field_0020;
+	if ((sync.field_bitmask & kPlayerSyncHasLateJoinFlag) != 0u) {
+		changed |= slot.spectator != (sync.field_1000 != 0);
+		slot.spectator = sync.field_1000 != 0;
+	}
+	if ((sync.field_bitmask & kPlayerSyncHasSquad) != 0u) {
+		changed |= slot.squad_leader != sync.field_0040;
+		slot.squad_leader = sync.field_0040;
+	}
+	if ((sync.field_bitmask & kPlayerSyncHasSide) != 0u) {
+		changed |= slot.fireteam != sync.field_0080;
+		slot.fireteam = sync.field_0080;
 	}
 	if ((sync.field_bitmask & kPlayerSyncHasQuality) != 0u) {
 		const uint8_t quality = sync.quality > 4u ? uint8_t{4} : sync.quality; // [orig: @0x43170d]

@@ -61,6 +61,7 @@
 #include <runtime/world/powerup.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/waypoint_track.h>
+#include <runtime/world/user_waypoints.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/zone_capture.h>
 #include <formats/rtxt/rtxt.h>
@@ -576,6 +577,13 @@ struct MissionTables {
     bool map_grid_origin_present = false;
     int32_t map_grid_origin_x = 0;
     int32_t map_grid_origin_y = 0;
+    // The items.def "user waypoint" row (type id 6089, items.def 106089)
+    // Waypoint_CreateForPlayer seeds its pool-4 rows from: the row's ordinal
+    // (0 when the row is missing — ItemList_FindIndexByTypeId's miss) and its
+    // type. Stamped by the item-traits sweep.
+    // [orig: Waypoint_CreateForPlayer @0x4dfcb0 — ItemList_FindIndexByTypeId(6089)]
+    int32_t user_waypoint_type_index = 0;
+    uint8_t user_waypoint_item_type = 0;
 };
 
 // The session/game-option bits the host stamps at bring-up; the SP defaults
@@ -819,6 +827,8 @@ public:
     VehicleSystem vehicles;
 	RotorWashSystem rotor_wash;
 	ZoneSystem zones;
+	// The command map's placed-waypoint table (world/user_waypoints.h).
+	UserWaypointTable user_waypoints;
 	// Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in

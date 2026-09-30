@@ -110,6 +110,10 @@ struct FakeFrame : MenuFrameSeam {
 	void set_widget_focused(int i, bool f) override {
 		note("focused " + std::to_string(i) + (f ? " 1" : " 0"));
 	}
+	void set_widget_rect(int i, int l, int t, int r, int b) override {
+		note("rect " + std::to_string(i) + " " + std::to_string(l) + " " + std::to_string(t) +
+				" " + std::to_string(r) + " " + std::to_string(b));
+	}
 	void set_widget_caret(int i, int caret) override {
 		note("caret " + std::to_string(i) + " " + std::to_string(caret));
 		carets[i] = caret;
@@ -568,11 +572,22 @@ void test_input() {
 	key = MenuKeyInput();
 	key.key = MenuKeyInput::Key::Enter;
 	frame.edit_key_result = static_cast<int>(EditKeyResult::kCommit);
+	rec.events.clear();
 	CHECK(rt.handle_key(key, 0, false) && rt.focused_widget() == -1 && frame.saw("focused 8 0"));
+	// The commit reaches the edit's own callback (event 0x7000002).
+	CHECK(rec.last(MenuEvent::Kind::EditCommitted) != nullptr &&
+			rec.last(MenuEvent::Kind::EditCommitted)->id == 10 &&
+			rec.last(MenuEvent::Kind::EditCommitted)->text == "NAME");
+	// A moved widget keeps its rect across a screen round trip.
+	frame.log.clear();
+	rt.set_widget_rect(10, 5, 6, 205, 56);
+	CHECK(frame.saw("rect 8 5 6 205 56"));
 	// The committed text survives a screen round trip through the store.
 	rt.show_screen("OPTIONS");
 	CHECK(rt.get_widget_text(10) == "h\xC3\xA9");
+	frame.log.clear();
 	rt.show_screen("MAIN");
+	CHECK(frame.saw("rect 8 5 6 205 56"));
 
 	// Hotkeys: the virtual-key scan, then the character scan (with the
 	// printable-keycode fallback); a disabled target consumes without firing;

@@ -170,7 +170,9 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
 
 void ClientRuntime::apply_received_effects(world::World &world) {
     for (const auto &request : view_.drain_effect_commands()) {
-        if (const auto *death = std::get_if<replication::EntityDeathEvent>(&request)) {
+        if (const auto *squad = std::get_if<replication::ClientSquadEvent>(&request)) {
+            apply_squad_event(world, *squad);
+        } else if (const auto *death = std::get_if<replication::EntityDeathEvent>(&request)) {
             // Authority already ran its callback. Remote organics use the
             // compact pose; pools 1..3 carry the materialized item/vehicle twin.
             // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50;

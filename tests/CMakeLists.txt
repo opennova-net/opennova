@@ -3381,6 +3381,16 @@ target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennov
 target_include_directories(npruntime_host_producers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_producers COMMAND npruntime_host_producers_test)
 
+add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
+target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_squad_relay COMMAND npruntime_squad_relay_test)
+
+add_executable(npruntime_squad_client_test npruntime/squad_client_test.cpp)
+target_link_libraries(npruntime_squad_client_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_squad_client_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_squad_client COMMAND npruntime_squad_client_test)
+
 # The `_NSTMOUT.TXT` connection-template override (CNapiNetwork_Init's NEVER / seconds /
 # negative legs) and the joiner's 0x82 CS overlay of the host's timeout_ms / msg_out_max:
 # the reap runs from the accepted 0x82, -1 disables it, and the pool bound follows the host.

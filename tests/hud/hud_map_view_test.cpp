@@ -50,6 +50,13 @@ void test_integer_pow() {
 }
 
 void test_design_to_device() {
+    // The mouse leg's inverse: the device point over the scale, truncated.
+    CHECK(map_view_device_to_design(800, 1.0f) == 800);
+    CHECK(map_view_device_to_design(72, 2.0f) == 36);
+    // 72 / 2.4f lands a hair under 30 in single precision and truncates.
+    CHECK(map_view_device_to_design(72, 2.4f) == 29);
+    CHECK(map_view_device_to_design(1365, 1366.0f / 800.0f) == 799);
+    CHECK(map_view_device_to_design(0, 0.0f) == 0);
     CHECK(map_view_design_to_device(800, 1.0f) == 800);
     CHECK(map_view_design_to_device(30, 2.4f) == 72);
     // The product rounds to single precision (the x87 precision control)
@@ -334,19 +341,29 @@ void test_death_compile() {
     CHECK(out.map.visible);
     // The window view: mode 4 north-up, the payload rect on 1024x768.
     CHECK(out.map.center_x == 295.0f && out.map.center_y == 260.0f);
-    // Three walked blips plus each zone's redraw.
-    CHECK(out.map.sprites.size() == 6);
+    // Three walked blips in the pass, then the zone walk's own segments: each
+    // zone's redrawn blip and that zone's letters, zone by zone.
+    CHECK(out.map.sprites.size() == 3);
+    CHECK(out.zones.sprites.size() == 3);
+    CHECK(out.map.labels.empty());
+    CHECK(out.segments.size() == 3);
+    if (out.segments.size() == 3) {
+        CHECK(out.segments[0].sprite_end == 1 && out.segments[0].label_end == 2);
+        CHECK(out.segments[1].sprite_end == 2 && out.segments[1].label_end == 3);
+        CHECK(out.segments[2].sprite_end == 3 && out.segments[2].label_end == 3);
+    }
     // Zone A: the wave zone's colour, the letter at the anchor less half the
     // 8x16 cell, and its queued/countdown pair one cell below (no hold).
-    CHECK(has_label(out.map, "A", 291.0f, 252.0f, 0xFFC8C814u));
-    CHECK(has_label(out.map, "2/17", 291.0f, 268.0f, 0xFFC8C814u));
+    CHECK(has_label(out.zones, "A", 291.0f, 252.0f, 0xFFC8C814u));
+    CHECK(has_label(out.zones, "2/17", 291.0f, 268.0f, 0xFFC8C814u));
     // Zone B: the other team brightens 20/32 and has no score lines.
     const float bx = static_cast<float>(static_cast<int>(295.0f +
             20.0f / frame.scale - 4.0f));
-    CHECK(has_label(out.map, "B", bx, 252.0f, 0xFFCFABABu));
-    // Zone C: timer not ready on a non-0x50010 game type -> nothing.
-    for (const HudMapLabel &l : out.map.labels) CHECK(std::strcmp(l.text, "C") != 0);
-    CHECK(out.map.labels.size() == 3);
+    CHECK(has_label(out.zones, "B", bx, 252.0f, 0xFFCFABABu));
+    // Zone C: timer not ready on a non-0x50010 game type -> no letter (its
+    // blip still draws).
+    for (const HudMapLabel &l : out.zones.labels) CHECK(std::strcmp(l.text, "C") != 0);
+    CHECK(out.zones.labels.size() == 3);
     // The crosshair: two full-window lines through the player, team 1 blue at
     // alpha 0x70.
     CHECK(out.over_lines.size() == 2);
@@ -361,13 +378,13 @@ void test_death_compile() {
     // brightening.
     facts.hold_seconds = 9;
     compiler.compile(in, frame, facts, out);
-    CHECK(has_label(out.map, "9", 291.0f, 236.0f, 0xFFC8C814u));
-    CHECK(has_label(out.map, "B", bx, 252.0f, 0xFF802020u));
+    CHECK(has_label(out.zones, "9", 291.0f, 236.0f, 0xFFC8C814u));
+    CHECK(has_label(out.zones, "B", bx, 252.0f, 0xFF802020u));
     // Game type 0x50010 letters every zone.
     facts.game_type = 0x50010;
     compiler.compile(in, frame, facts, out);
     bool has_c = false;
-    for (const HudMapLabel &l : out.map.labels) has_c = has_c || std::strcmp(l.text, "C") == 0;
+    for (const HudMapLabel &l : out.zones.labels) has_c = has_c || std::strcmp(l.text, "C") == 0;
     CHECK(has_c);
     // The deploy overlay suppresses the crosshair.
     facts.deploy_screen_active = true;
@@ -379,13 +396,101 @@ void test_death_compile() {
     facts.game_type = 0x30020;
     facts.hold_seconds = 0;
     compiler.compile(in, frame, facts, out);
-    for (const HudMapLabel &l : out.map.labels) CHECK(std::strcmp(l.text, "A") != 0);
+    for (const HudMapLabel &l : out.zones.labels) CHECK(std::strcmp(l.text, "A") != 0);
     // The pulse: an own-team zone at phase 16 moves half-way to white.
     in.markers[0].flags = 0;
     facts.self_zone_handle = 0xFFFF;
     in.ticks = 8 + 16;
     compiler.compile(in, frame, facts, out);
-    CHECK(has_label(out.map, "A", 291.0f, 252.0f, 0xFF979FBFu));
+    CHECK(has_label(out.zones, "A", 291.0f, 252.0f, 0xFF979FBFu));
+    // A def-type-2 zone draws no blip but keeps its letter segment.
+    facts.zones[0].def_type = 2;
+    compiler.compile(in, frame, facts, out);
+    CHECK(out.zones.sprites.size() == 2);
+    CHECK(out.segments.size() == 3 && out.segments[0].sprite_end == 0);
+    // The stale 0x6E pair: the zone row carries whatever the fold last wrote.
+    facts.zones[0].def_type = 0;
+    facts.zones[0].queued = 0;
+    facts.zones[0].countdown = 0;
+    compiler.compile(in, frame, facts, out);
+    CHECK(has_label(out.zones, "0/0", 291.0f, 268.0f, 0xFF979FBFu));
+}
+
+// sub_597FD0's colour / cell pick, branch by branch.
+void test_zone_blip_pick() {
+    DeathMapFacts facts;
+    DeathMapZone z;
+    // No def: nothing.
+    z.has_def = false;
+    CHECK(!death_map_zone_blip(z, facts, 0).draw);
+    z.has_def = true;
+    // Type 5 without attrib 0x20000: team colour or grey, cell 0.
+    z.def_type = 5;
+    z.team = 2;
+    DeathMapZoneBlip b = death_map_zone_blip(z, facts, 0);
+    CHECK(b.draw && b.color == 0xFF802020u && b.cell == 0);
+    z.team = 3;
+    CHECK(death_map_zone_blip(z, facts, 0).color == 0xFF707070u);
+    // Type 3: cell 3; the dead local player halves on the 0x10 phase.
+    z.def_type = 3;
+    z.team = 1;
+    b = death_map_zone_blip(z, facts, 0);
+    CHECK(b.draw && b.color == 0xFF304080u && b.cell == 3);
+    z.dead = true;
+    z.local_player = true;
+    CHECK(death_map_zone_blip(z, facts, 0x10).color == 0x7F182040u);
+    CHECK(death_map_zone_blip(z, facts, 0x0F).color == 0xFF304080u);
+    z.dead = false;
+    z.local_player = false;
+    // Type 2: nothing.
+    z.def_type = 2;
+    CHECK(!death_map_zone_blip(z, facts, 0).draw);
+    // Attrib 0x20: orange cell 4, nothing on a vehicle parent or dead.
+    z.def_type = 1;
+    z.def_attrib = 0x20u;
+    b = death_map_zone_blip(z, facts, 0);
+    CHECK(b.draw && b.color == 0xFF907000u && b.cell == 4);
+    z.parent_item = true;
+    CHECK(!death_map_zone_blip(z, facts, 0).draw);
+    z.parent_item = false;
+    z.dead = true;
+    CHECK(!death_map_zone_blip(z, facts, 0).draw);
+    z.dead = false;
+    // The team fallback: team 0 green, past team 2 grey.
+    z.def_attrib = 0;
+    z.team = 0;
+    CHECK(death_map_zone_blip(z, facts, 0).color == 0xFF208020u);
+    z.team = 4;
+    CHECK(death_map_zone_blip(z, facts, 0).color == 0xFF707070u);
+    // The capture-point pick: in session on 0x10004, a flag base draws size 6.
+    facts.in_session = true;
+    facts.game_type = 0x10004u;
+    z.def_id = 4100;
+    b = death_map_zone_blip(z, facts, 0);
+    CHECK(b.color == 0xFF802020u && b.cell == 6);
+    // A flag carried by the other team is not a capture point.
+    z.def_id = 4091;
+    z.occupant_present = true;
+    z.occupant_team = 2;
+    facts.hud_team = 1;
+    CHECK(death_map_zone_blip(z, facts, 0).cell == 0);
+    z.occupant_team = 1;
+    b = death_map_zone_blip(z, facts, 0);
+    CHECK(b.color == 0xFF304080u && b.cell == 2);
+    // Attrib 0x20000: cell 0; a neutral zone being taken blinks the taker's
+    // colour, an unnumbered owned zone blinks dark.
+    facts.in_session = false;
+    z.def_attrib = 0x20000u;
+    z.team = 0;
+    z.capture_team = 2;
+    CHECK(death_map_zone_blip(z, facts, 0x20).color == 0xFF802020u);
+    CHECK(death_map_zone_blip(z, facts, 0).color == 0xFF208020u);
+    CHECK(death_map_zone_blip(z, facts, 0x20).cell == 0);
+    z.capture_team = 0;
+    z.team = 1;
+    CHECK(death_map_zone_blip(z, facts, 0x20).color == 0x7F182040u);
+    z.zone_number = 3;
+    CHECK(death_map_zone_blip(z, facts, 0x20).color == 0xFF304080u);
 }
 
 void test_command_toggles_and_compile() {
@@ -417,10 +522,19 @@ void test_command_toggles_and_compile() {
     r.top = 50;
     r.right = 700;
     r.bottom = 550;
+    // A placed waypoint on the player projects to the view centre.
+    facts.user_waypoints[3].live = true;
+    facts.user_waypoints[3].x = facts.player_x;
+    facts.user_waypoints[3].y = facts.player_y;
+    facts.user_waypoints[3].name = "HQ";
     CommandMapCompiler compiler;
     HudMapWindowPass out;
-    compiler.compile(in, c, r, 800, facts, out);
+    CommandMapWaypointAnchor anchors[kCommandMapWaypointSlots];
+    compiler.compile(in, c, r, 800, facts, out, anchors);
     CHECK(out.map.visible);
+    CHECK(!anchors[0].live && anchors[3].live);
+    CHECK(anchors[3].x == static_cast<int32_t>(out.map.center_x));
+    CHECK(anchors[3].y == static_cast<int32_t>(out.map.center_y));
     CHECK(in.map_mode == 4);
     CHECK(in.flags == 0xAF937u);
     CHECK(out.map.clear.size() >= 2);
@@ -443,8 +557,74 @@ void test_command_toggles_and_compile() {
     in2.surface_h = 768.0f;
     const float before = in.window_scale;
     c.on_event(MapViewEvent::kWheel, 0, 0, 0, 1);
-    compiler.compile(in2, c, r, 800, facts, out);
+    compiler.compile(in2, c, r, 800, facts, out, anchors);
     CHECK(in2.window_scale < before);
+}
+
+// The CMAP user-waypoint legs: the event routing, the name dialog's
+// placement, the confirm's world point, the hover box and the delete button.
+void test_command_waypoints() {
+    using R = CommandMapView::EventResult;
+    CommandMapView c;
+    c.on_load();
+    CHECK(c.on_event(MapViewEvent::kMove, 5, 5, 0, 0) == R::kHoverTest);
+    CHECK(c.on_event(MapViewEvent::kLeftDown, 5, 5, 0, 0) == R::kNone);
+    CHECK(c.on_event(MapViewEvent::kMove, 6, 5, kMapViewButtonLeft, 0) == R::kNone);
+    c.on_event(MapViewEvent::kLeftUp, 6, 5, 0, 0);
+    c.toggles.create_waypoints = true;
+    CHECK(c.on_event(MapViewEvent::kLeftDown, 5, 5, 0, 0) == R::kPlaceWaypoint);
+
+    // WAYPOINTNAME_DLG (0,0,200,50) against the MAP control's own rect.
+    const MapViewRect dialog{0, 0, 200, 50};
+    const MapViewRect map{0, 0, 730, 440};
+    MapViewRect d = command_map_waypoint_dialog_rect(400, 200, dialog, map);
+    CHECK(d.left == 300 && d.right == 500 && d.top == 175 && d.bottom == 225);
+    d = command_map_waypoint_dialog_rect(10, 100, dialog, map);
+    CHECK(d.left == 0 && d.right == 200 && d.top == 75 && d.bottom == 125);
+    d = command_map_waypoint_dialog_rect(700, 300, dialog, map);
+    CHECK(d.left == 530 && d.right == 730 && d.top == 275 && d.bottom == 325);
+
+    // The confirm: S 1, an 800x600 window, zoom 1: P = 65536 / 160000 x
+    // 65536; 100 design units off the centre is 2684354 world units.
+    CommandMapView v;
+    v.view.pixel_ratio = 1.0f;
+    v.view.window_w = 800;
+    v.view.window_h = 600;
+    v.view.zoom = 1.0f;
+    v.view.pan_x = 7;
+    v.view.pan_y = -9;
+    v.view.last_x = 300;
+    v.view.last_y = 200;
+    int32_t wx = 0, wy = 0;
+    command_map_waypoint_world(v, 1000000, 2000000, wx, wy);
+    CHECK(wx == 1000000 - 2684354 + 7);
+    CHECK(wy == 2000000 + 2684354 - 9);
+    v.view.last_x = 400;
+    v.view.last_y = 300;
+    command_map_waypoint_world(v, 1000000, 2000000, wx, wy);
+    CHECK(wx == 1000007 && wy == 1999991);
+
+    // The hover box: the device anchor (200, 100) at scale 2 is design
+    // (100, 50); the box runs from 5 + the 12-wide button left of it to the
+    // name's device width right, down the name's height.
+    CommandMapWaypointAnchor anchors[kCommandMapWaypointSlots];
+    anchors[0] = {true, 200, 100, 50, 10};
+    anchors[2] = {true, 600, 400, 50, 10};
+    bool hover[kCommandMapWaypointSlots] = {};
+    hover[2] = true;
+    command_map_waypoint_hover(anchors, hover, kCommandMapWaypointSlots, 90, 55, 2.0f, 2.0f, 12);
+    CHECK(hover[0] && hover[2]); // the walk stops at the first hit
+    command_map_waypoint_hover(anchors, hover, kCommandMapWaypointSlots, 83, 55, 2.0f, 2.0f, 12);
+    CHECK(!hover[0] && !hover[2]); // strict edges; every slot cleared
+    command_map_waypoint_hover(anchors, hover, kCommandMapWaypointSlots, 149, 59, 2.0f, 2.0f, 12);
+    CHECK(hover[0]);
+    int32_t bx = 0, by = 0;
+    CHECK(command_map_close_button_position(anchors, hover, kCommandMapWaypointSlots, 2.0f, 2.0f,
+            12, bx, by));
+    CHECK(bx == 91 && by == 50); // (200 - 12 - 5) / 2, 100 / 2
+    hover[0] = false;
+    CHECK(!command_map_close_button_position(anchors, hover, kCommandMapWaypointSlots, 2.0f,
+            2.0f, 12, bx, by));
 }
 
 } // namespace
@@ -458,7 +638,9 @@ int main() {
     test_death_fit_and_ease();
     test_command_map();
     test_death_compile();
+    test_zone_blip_pick();
     test_command_toggles_and_compile();
+    test_command_waypoints();
     if (failures == 0) std::printf("hud_map_view: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

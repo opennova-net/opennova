@@ -546,6 +546,44 @@ void test_overlay_panel_menus(const fnt_font_t *font) {
 	CHECK(pause_glyphs().empty());
 }
 
+// THE SQUAD ORDER LINES: the two S2C 0x72 lines right-aligned at the
+// HUDORDERS anchor in the bold slot, 18 design px apart (an empty line keeps
+// its rung), palette[4] less one alpha step through the half-bright drawer;
+// the /NOTEXT declutter bit and a detail level above 1 hide them.
+// [orig: sub_59AEE0 @0x59aee0]
+void test_squad_orders(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.squad_orders = {1000, 300, 0, 0, true};
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
+	state.squad_orders[1] = "GO";
+	{
+		const std::vector<GameFontQuad> bold =
+				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+		CHECK(bold.size() == 2);
+		// Right-aligned: the run ends at the anchor x.
+		CHECK(bold.size() == 2 && bold[1].x_top_right <= 1000.0f &&
+				bold[1].x_top_right > 990.0f);
+		CHECK(bold.size() == 2 &&
+				bold[0].color == half_bright_argb(0xFFF0F000u - 0x01000000u));
+	}
+	state.squad_orders[0] = "HOLD";
+	{
+		const std::vector<GameFontQuad> bold =
+				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+		CHECK(bold.size() == 6);
+		// The second rung sits 18 design px (768 high) below the first.
+		CHECK(bold.size() == 6 && bold[4].y_top - bold[0].y_top == 18.0f);
+	}
+	state.hud_detail_level = 2;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
+	state.hud_detail_level = 1;
+	state.declutter_visible[kDeclutterChat] = false;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
+}
+
 int main() {
 	fnt_font_t font = minimal_fnt::uniform_test_font();
 	test_game_info(&font);
@@ -558,6 +596,7 @@ int main() {
 	test_squad_colors();
 	test_flash_key(&font);
 	test_overlay_panel_menus(&font);
+	test_squad_orders(&font);
 	opennova::fnt::fnt_free(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

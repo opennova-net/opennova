@@ -165,3 +165,63 @@ func test_the_command_kind_compiles_the_cmap_view() -> void:
 	assert_true(window.is_pass_visible())
 	assert_gt(window.get_pass_terrain_tris(), 0)
 	assert_eq(window.get_pass_over_lines(), 2)
+
+
+# The window drives the MapViewState it is handed (the presenters hold one for
+# the process, like the retail globals): two windows on one state share the
+# view, and the load seed runs once per state.
+func test_windows_share_a_handed_view_state() -> void:
+	var state := MapViewState.new()
+	var sim := _offline_sim()
+	var hud := _configured_overlay()
+	var first := _mounted_window(hud, sim)
+	first.set_view_kind(MapViewWindow.VIEW_COMMAND)
+	first.set_view_state(state)
+	first.screen_load()
+	first.zoom_button(1)
+	var second := _mounted_window(hud, sim)
+	second.set_view_kind(MapViewWindow.VIEW_COMMAND)
+	second.set_view_state(state)
+	second.screen_load()
+	assert_eq(second.get_view_state(), state)
+	assert_almost_eq(second.get_zoom(), 3.4, 0.0001, "the second load keeps the stepped zoom")
+
+
+# The CMAP user-waypoint legs over the bare local role (no wire, the world
+# halves alone): the CREATE_WAYPOINTS press asks for the name dialog, the
+# confirm places at the stored click, CLEAR_WAYPOINTS removes them all.
+func test_the_command_waypoint_legs() -> void:
+	var window := _mounted_window(_configured_overlay(), _offline_sim())
+	window.set_view_kind(MapViewWindow.VIEW_COMMAND)
+	window.screen_load()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	window.command_toggle_changed(MapViewWindow.COMMAND_TOGGLE_CREATE_WAYPOINTS, true)
+	assert_true(window.get_command_toggle(MapViewWindow.COMMAND_TOGGLE_CREATE_WAYPOINTS))
+	watch_signals(window)
+	window.push_map_event(MapViewWindow.MAP_EVENT_LEFT_DOWN, Vector2i(295, 260), 0, 0)
+	assert_signal_emitted_with_parameters(window, "waypoint_dialog_requested",
+			[Vector2i(295, 260)])
+	window.store_waypoint_click(Vector2i(295, 260))
+	assert_true(window.confirm_waypoint("RALLY"), "the confirm places a waypoint")
+	assert_eq(window.get_waypoint_count(), 1)
+	window.clear_create_waypoints()
+	assert_false(window.get_command_toggle(MapViewWindow.COMMAND_TOGGLE_CREATE_WAYPOINTS))
+	assert_false(window.delete_hovered_waypoint(), "nothing is hovered")
+	window.clear_waypoints()
+	assert_eq(window.get_waypoint_count(), 0)
+	# The name dialog centres on the click and is pushed onto the map's rect.
+	assert_eq(MapViewWindow.waypoint_dialog_rect(Vector2i(10, 100), Rect2i(0, 0, 200, 50),
+			Rect2i(0, 0, 730, 440)), Rect2i(0, 75, 200, 50))
+	assert_eq(MapViewWindow.waypoint_dialog_rect(Vector2i(700, 300), Rect2i(0, 0, 200, 50),
+			Rect2i(0, 0, 730, 440)), Rect2i(530, 275, 200, 50))
+	# The bare local role is in no session and leads nobody: every gated tab
+	# is off.
+	for tab in [MapViewWindow.COMMAND_TAB_ORDERS, MapViewWindow.COMMAND_TAB_PLAYERS,
+			MapViewWindow.COMMAND_TAB_TEAM, MapViewWindow.COMMAND_TAB_RULES]:
+		assert_false(window.is_command_tab_enabled(tab))
+	# Without a bound delete button the idle move runs no hover test and the
+	# render reports no button.
+	window.push_map_event(MapViewWindow.MAP_EVENT_MOVE, Vector2i(300, 260), 0, 0)
+	assert_false(window.is_close_button_shown())
+

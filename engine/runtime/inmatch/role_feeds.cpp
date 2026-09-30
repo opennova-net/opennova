@@ -154,6 +154,7 @@ void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, boo
 HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	HudRoleFacts out;
 	out.breath = breath_bar_facts(view);
+	if (view.runtime != nullptr) out.squad_orders = view.runtime->state().squad_orders;
 	if (view.kernel == nullptr) return out;
 	if (voice_menus != 0u) {
 		const world::World &vw = view.kernel->world;
@@ -550,6 +551,40 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		out.game_type = runtime->game_type();
 		if (cs.spawn_waves.known) out.self_zone_handle = cs.spawn_waves.self_zone_handle;
 	}
+	// g_NapiNPCtx.is_in_session and the HUD info entity's team (the capture-
+	// point pick's gates [orig: Minimap_GetCapturePointInfo @0x5971ec /
+	// @0x597263]).
+	out.in_session = view.joiner ? (runtime != nullptr && runtime->in_session())
+			: w.rules.mp_session;
+	out.hud_team = out.player_team;
+	// The CMAP legs: the placed-waypoint table's entities, the death-screen
+	// latch, and the squad walk CMap_PopulateTeamList runs for the ORDERS
+	// gate [orig: @0x547ab1..0x547c4f — `+13 && +14 == local team && !+46 &&
+	//  +36` rows, `+48 == local slot`].
+	for (int i = 0; i < world::UserWaypointTable::kCapacity; ++i) {
+		const world::Entity *wp =
+				w.registry.get(w.user_waypoints.entries[static_cast<size_t>(i)].handle);
+		if (wp == nullptr) continue;
+		hud::DeathMapFacts::UserWaypoint &fact = out.user_waypoints[static_cast<size_t>(i)];
+		fact.live = true;
+		fact.x = io::float_to_fp16_16_sat(wp->position.x);
+		fact.y = io::float_to_fp16_16_sat(wp->position.y);
+		fact.name = wp->display_name;
+	}
+	out.death_screen_active = local_death_screen_active(view);
+	if (runtime != nullptr) {
+		const int local_slot = runtime->local_roster_slot();
+		for (const replication::ClientRosterSlot &slot : runtime->state().roster) {
+			if (local_slot < 0) break;
+			if (!slot.bound || slot.team != out.player_team || slot.spectator ||
+					slot.entity_slot < 0)
+				continue;
+			if (slot.squad_leader == static_cast<uint8_t>(local_slot)) {
+				out.has_squad_members = true;
+				break;
+			}
+		}
+	}
 	for (size_t i = 0; i < zones.entries.size(); ++i) {
 		const world::Entity *e = w.registry.get(zones.entries[i]);
 		if (e == nullptr) continue;
@@ -564,13 +599,34 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 				zone.timer_ready = !(live->second.entry.value_target <
 						live->second.entry.value_limit);
 			}
-			if (runtime->state().spawn_waves.known) {
-				for (const SpawnWaveGroup &g : runtime->state().spawn_waves.value.groups) {
-					if (g.zone_handle != e->handle.packed) continue;
-					zone.queued = g.queued_count;
-					zone.countdown = static_cast<uint16_t>(g.wave_countdown);
-				}
+			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
+			//  handler @0x428AE0].
+			if (live != runtime->zone_states().end() && live->second.has_window)
+				zone.capture_team = live->second.window.mode_b;
+			// The zone entity's +550 / +548 words keep the last 0x6E values
+			// (replication ClientZoneWaveCounts).
+			for (const replication::ClientZoneWaveCounts &c : runtime->state().zone_wave_counts) {
+				if (c.zone_handle != e->handle.packed) continue;
+				zone.queued = c.member_count;
+				zone.countdown = c.wave_countdown;
 			}
+		}
+		// sub_597FD0's entity reads (hud_map_view.h death_map_zone_blip).
+		zone.has_def = e->has_item_def;
+		zone.def_type = e->has_item_def ? e->item_type : 0u;
+		zone.def_attrib = e->has_item_def ? e->item_attrib : 0u;
+		zone.def_id = e->item_id;
+		const uint32_t eflags = e->flags | e->engine_flags;
+		zone.dead = (eflags & world::kEntityFlagDead) != 0;
+		zone.carried = (eflags & world::kEntityFlagCarried) != 0;
+		zone.local_player = e->handle == w.cached.local_player;
+		if (const world::Entity *parent = w.registry.get(e->ground_target))
+			zone.parent_item = parent->has_item_def && parent->item_type == 1;
+		zone.zone_number = e->zone_number;
+		if (const world::Entity *occupant = w.registry.get(e->primary_occupant)) {
+			zone.occupant_present = true;
+			zone.occupant_team = occupant->team;
 		}
 		// The anchor: the Euler matrix (no scale) about the position applied
 		// to the bbox centre [orig: sub_59C300 @0x59c311..0x59c327].
@@ -591,6 +647,19 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		out.zones.push_back(zone);
 	}
 	return true;
+}
+
+bool death_shroud_revealed(const RoleView &view) {
+	if (view.kernel == nullptr) return false;
+	const bool deploy_active =
+			view.runtime != nullptr && view.runtime->state().deploy_overlay_active;
+	// The death stamp is the local player view's (world/local_player_view.cpp
+	// death_cam.start_tick, stamped on the local dead edge); the difference
+	// is retail's signed int.
+	const uint32_t now = view.kernel->world.logic_tick;
+	const int32_t since_death =
+			static_cast<int32_t>(now - view.kernel->local.view.death_cam.start_tick);
+	return world::death_shroud_revealed(deploy_active, since_death);
 }
 
 hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view) {

@@ -164,6 +164,10 @@ struct MenuWidgetState {
 	// Additional selected rows for MULTI lists (drawn with the selection
 	// style alongside selected_item); the single-select widgets ignore it.
 	std::vector<int32_t> selected_items;
+	// A runtime rect replacing the POSITION solve (CWnd_SetRect), relative to
+	// the parent's origin.
+	bool has_rect = false;
+	mnu::RectEdges rect;
 	// TABLE data rows (runtime content the embedder seeds — the Control-tree
 	// path seeded these from the shell): one vector of cell strings per row,
 	// in column order [orig: the 40-byte row records, CUITable_Render
@@ -187,6 +191,13 @@ struct MenuFrameState {
 	bool cursor_visible = false;
 	float cursor_x = 0.0f;
 	float cursor_y = 0.0f;
+	// The custom-draw widget an embedder mounts its own Control over (a map
+	// window), -1 none: every op the walk emits after that widget's subtree
+	// joins the menu-top overlay, so the later siblings still paint over the
+	// custom draw like the retail walk [orig: the forward child walk —
+	// CMapWindow_HandleEvent's pass runs inside MAP's draw, before
+	// WAYPOINTNAME_DLG / USERWP_CLOSE paint].
+	int32_t mount_index = -1;
 };
 
 // Deep in-process module: configure() walks the screen once (interning every
@@ -285,6 +296,10 @@ public:
 	// offset by every ancestor's solved origin — the rect the draw walk and
 	// the hit walk both use. False when the index is out of range.
 	bool widget_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
+	// The widget's own solved rect, relative to its parent's origin (no
+	// ancestor offsets) [orig: CWnd_GetRect @0x6465c0 — the rect at +0xD0].
+	bool widget_local_rect(int index, const MenuFrameState &state,
 			mnu::RectEdges *out) const;
 	// The item-row count the draw uses (runtime rows when seeded, else the
 	// authored <ITEM> rows; combo popups prefer the authored LIST_BOX rows).
@@ -554,6 +569,8 @@ private:
 	// (the D-MNU-12 menu-top decision — retail's inline tree order visibly
 	// renders popups on top via a still-unwalked mechanism).
 	std::vector<int> deferred_popups_;
+	// The draw-op count when the mount widget's subtree closed (-1 not yet).
+	int32_t mount_split_ = -1;
 	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &owner, int fallback_top,
 			int fallback_height, int fallback_width,

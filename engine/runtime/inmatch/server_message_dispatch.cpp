@@ -11,6 +11,7 @@
 #include <runtime/inmatch/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/inmatch/server_chat.h>         // the C2S 0x0D fan-out
+#include <runtime/inmatch/server_squad.h>        // the command map's squad legs
 #include <runtime/inmatch/server_net_quality.h>  // the 0x2C return leg / 0x4C store
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
@@ -590,6 +591,8 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
 		ctx.quality = conn.reply.client_quality;
+		ctx.squad_leader = conn.squad_leader; // +100576 (field 0x0040)
+		ctx.fireteam = conn.fireteam;         // +100577 (field 0x0080)
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
 				ctx.team = e->team;
@@ -2404,7 +2407,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			}
 			default:
-				// 0x09 checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
+				// The command map's squad / waypoint / punt legs (server_squad.h); 0x09
+				// checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
+				if (inputs.server_ctx != nullptr && world != nullptr)
+					Server_HandleSquadMessage(*inputs.server_ctx, conn, msg.tag, msg.payload, *world);
 				break;
 		}
 	}

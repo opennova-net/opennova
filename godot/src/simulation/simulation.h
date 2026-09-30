@@ -548,6 +548,7 @@ private:
 	// (reset_world) and NEVER null after construction; this binding converts
 	// Godot Refs into the kernel's sources and orders device work around it.
 	friend class EffectSectionSource; // the effect section gate's kernel reads
+	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and
@@ -1152,12 +1153,8 @@ public:
 		return opennova::world::kEpilogFadeInTicks *
 				opennova::world::TickAccumulator::kTickDt;
 	}
-	// The DEATH deploy screen's content refresh cadence in seconds
-	// (world/deploy_screen_feed.h kDeployRefreshTicks).
-	static double deploy_refresh_interval_seconds() {
-		return opennova::world::kDeployRefreshTicks *
-				opennova::world::TickAccumulator::kTickDt;
-	}
+	// The DEATH screen refresh: a refresh tick in (prev, tick] (deploy_screen_feed.h).
+	static bool deploy_refresh_due(int64_t p_prev_tick, int64_t p_tick);
 
 	// --- Portable session frame (ADR 0035) --------------------------------
 	// The input and outcomes are typed values. The one temporary tick sink
@@ -1315,6 +1312,8 @@ public:
 			const String &p_medic_key_label);
 	// The DEATH MAP window's world facts (inmatch/role_feeds.h death_map_facts).
 	bool fill_death_map_facts(opennova::hud::DeathMapFacts &r_out);
+	bool is_death_shroud_revealed() const; // inmatch/role_feeds.h death_shroud_revealed
+	void send_go_code(int p_code); // the CMAP GOCODE_* buttons (ClientRuntime::send_go_code)
 	// The dead player's medic call (C2S 0x2E): gated on a dead local player and
 	// the 310-tick cooldown; a joiner queues it, the listen host loops it back.
 	// (engine: runtime/inmatch/client_runtime.h)

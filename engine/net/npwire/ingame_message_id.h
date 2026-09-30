@@ -159,9 +159,14 @@ inline constexpr uint8_t TRACKED_PLAYER_VOICE = 0x6D;
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutList @0x429A30;
 //  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105A0]
 inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY = 0x70;
+// The command map's squad legs (net/npwire/squad_messages.h): a member's
+// leader, an order line, a member's fireteam, a recruit notice, a go code.
+// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600, NapiNPClientMsg_0x072
+//  @0x425710, NapiNPClientMsg_0x073 @0x425770, NapiNPClientMsg_PlayerRecruited
+//  @0x4258b0, NapiNPClientMsg_0x078 @0x425970]
 inline constexpr uint8_t SQUAD_JOIN = 0x71;
-inline constexpr uint8_t TEAM_NAME = 0x72;
-inline constexpr uint8_t SQUAD_LEAVE = 0x73;
+inline constexpr uint8_t SQUAD_ORDER = 0x72;
+inline constexpr uint8_t FIRETEAM_SET = 0x73;
 inline constexpr uint8_t SQUAD_RECRUITED = 0x74;
 inline constexpr uint8_t GO_CODE = 0x78;
 inline constexpr uint8_t DESTROY_ENTITY = 0x7C;
@@ -222,7 +227,11 @@ inline constexpr uint8_t ADMIN_NETLOG_COMMAND = 0x04;
 inline constexpr uint8_t RESERVED_NOOP_07 = 0x07;
 inline constexpr uint8_t SECTOR_ACTION = 0x13;
 inline constexpr uint8_t EMOTE_REQUEST = 0x14;              // i16 Emotes-menu digit -> s2c::EMOTE_BROADCAST (retired misnomer: "object sound")
-inline constexpr uint8_t WEAPON_OVERLAY_ACTION = 0x17;
+// A user waypoint shared to the sender's subordinates (target 0xFF) or one
+// squad joiner (squad_messages.h WaypointShare).
+// [orig: NetPacket_SendChatMessage @0x42DDC0 (a misnomer) ->
+//  NapiNPServerMsg_HandleChatOrWhisper @0x514850 (a misnomer)]
+inline constexpr uint8_t WAYPOINT_SHARE = 0x17;
 inline constexpr uint8_t WEAPON_SPAWN = 0x18;
 inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;
 // A non-authority's door-row request: the same [u16 handle][i16 state][u8 number]
@@ -241,7 +250,8 @@ inline constexpr uint8_t RESERVED_NOOP_38 = 0x38;
 inline constexpr uint8_t RESERVED_NOOP_39 = 0x39;
 inline constexpr uint8_t CLIENT_CRC_VALIDATION = 0x3C;
 inline constexpr uint8_t RESERVED_NOOP_3E = 0x3E;
-inline constexpr uint8_t VOTE_KICK_TARGET = 0x3F;
+// The PLAYERS tab's punt vote [u8 target]. [orig: NapiNPServerMsg_VoteKick @0x518F10]
+inline constexpr uint8_t PUNT_VOTE = 0x3F;
 // Vehicle-spawn pick: [u16 sourceHandle][u8 typeIndex] (3 B; the type index is
 // the source def's pcvehicle_spawnlist bit). [orig: NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C4C0]
 inline constexpr uint8_t VEHICLE_SPAWN_REQUEST = 0x40;
@@ -249,14 +259,22 @@ inline constexpr uint8_t DEATH_TIMEOUT_RESET = 0x41;
 // No fields read; the host answers s2c::VEHICLE_SPAWN_AVAILABILITY to the requester.
 // [orig: NapiNPServerMsg_SendWeaponSlotStates @0x510930]
 inline constexpr uint8_t VEHICLE_SPAWN_AVAILABILITY_REQUEST = 0x42;
-inline constexpr uint8_t SQUAD_ENTITY_SYNC = 0x43;
-inline constexpr uint8_t SQUAD_CHAT_BROADCAST = 0x44;
-inline constexpr uint8_t SQUAD_TEAM_ASSIGNMENT = 0x45;
-inline constexpr uint8_t SQUAD_VOTE_KICK = 0x46;
+// The command map's squad requests (net/npwire/squad_messages.h): join a
+// leader, order subordinates, assign a fireteam, recruit a player.
+// [orig: Server_HandleEntitySync @0x510990, NapiNPServerMsg_HandleChatBroadcast
+//  @0x510AE0, NapiNPServerMsg_0x045_HandleTeamAssignment @0x510C00,
+//  NapiNPServerMsg_HandleVoteKick @0x510D20 — all IDB misnomers]
+inline constexpr uint8_t SQUAD_JOIN_REQUEST = 0x43;
+inline constexpr uint8_t SQUAD_ORDER_REQUEST = 0x44;
+inline constexpr uint8_t FIRETEAM_ASSIGN = 0x45;
+inline constexpr uint8_t SQUAD_RECRUIT = 0x46;
 inline constexpr uint8_t PLAYER_PROFILE = 0x49;
-inline constexpr uint8_t PLAYER_PROFILE_BROADCAST = 0x4B;
+// A leader's go code [u8 leader][u8 code].
+// [orig: NapiNPServer_BroadcastPlayerProfileUpdate @0x510DC0 (a misnomer)]
+inline constexpr uint8_t GO_CODE = 0x4B;
 inline constexpr uint8_t TEAM_CHANGE_REQUEST = 0x4D;
-inline constexpr uint8_t WEAPON_SLOT_UPDATE = 0x4F;
+// A user waypoint deleted [u16 handle]. [orig: NapiNPServerMsg_0x04F @0x514A40]
+inline constexpr uint8_t WAYPOINT_DELETE = 0x4F;
 inline constexpr uint8_t CLIENT_METRICS = 0x50;
 inline constexpr uint8_t SPECTATOR_RESPAWN = 0x51;
 

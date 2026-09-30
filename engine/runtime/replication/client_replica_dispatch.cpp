@@ -280,6 +280,27 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::PLAYER_SYNC: // §5.21 the connection-slot roster (0x46)
 		apply_player_sync(body);
 		break;
+	case s2c::SQUAD_JOIN:
+		apply_squad_join(body);
+		break;
+	case s2c::SQUAD_ORDER:
+		apply_squad_order(body);
+		break;
+	case s2c::FIRETEAM_SET:
+		apply_fireteam_set(body);
+		break;
+	case s2c::SQUAD_RECRUITED:
+		apply_squad_recruited(body);
+		break;
+	case s2c::GO_CODE:
+		apply_go_code(body);
+		break;
+	case s2c::WAYPOINT_CREATE:
+		apply_waypoint_create(body);
+		break;
+	case s2c::DESTROY_ENTITY:
+		apply_destroy_entity(body);
+		break;
 	case s2c::GAME_EVENT: // §5.26 the kill/objective/medic feed lane (0x1E)
 		apply_game_event(body);
 		break;

@@ -23,6 +23,7 @@
 #include <net/npwire/ingame_message_catalog.h>
 #include <net/npwire/emote_wire.h>
 #include <net/npwire/visible_players.h>
+#include <net/npwire/squad_messages.h>
 #include <formats/wac/command.h>
 
 #include <cstdint>
@@ -1872,6 +1873,102 @@ int check_S_3A_medic_reviving() {
 	return 0;
 }
 
+// The command map's squad and waypoint legs (net/npwire/squad_messages.h):
+// each round-trips its retail layout, and a short body reads 0 (the retail
+// handlers' lenient cursors) instead of failing.
+int check_squad_and_waypoint_legs() {
+	WaypointShare share;
+	share.target = 0xFF;
+	share.name = "Alpha";
+	share.x = 0x10000;
+	share.y = -0x20000;
+	share.z = 7;
+	std::vector<uint8_t> wire = encode_waypoint_share(share);
+	EXPECT(wire.size() == 1 + 6 + 12);
+	const WaypointShare share_out = decode_waypoint_share(wire.data(), wire.size());
+	EXPECT(share_out.target == 0xFF && share_out.name == "Alpha" && share_out.x == 0x10000 &&
+			share_out.y == -0x20000 && share_out.z == 7);
+	cover('C', 0x17);
+	WaypointCreate create;
+	create.name = "WP";
+	create.x = 5;
+	create.y = 6;
+	create.z = 7;
+	create.owner_index = 3;
+	wire = encode_waypoint_create(create);
+	EXPECT(wire.size() == 3 + 12 + 1);
+	const WaypointCreate create_out = decode_waypoint_create(wire.data(), wire.size());
+	EXPECT(create_out.name == "WP" && create_out.x == 5 && create_out.y == 6 &&
+			create_out.owner_index == 3);
+	cover('S', 0x33);
+	wire = encode_entity_handle16(0x4003);
+	EXPECT(decode_entity_handle16(wire.data(), wire.size()) == 0x4003);
+	EXPECT(decode_entity_handle16(wire.data(), 1) == 0);
+	cover('C', 0x4F);
+	cover('S', 0x7C);
+	wire = encode_squad_join_request(4);
+	EXPECT(decode_squad_join_request(wire.data(), wire.size()) == 4);
+	cover('C', 0x43);
+	SquadJoin join;
+	join.leader = 2;
+	join.member = 5;
+	wire = encode_squad_join(join);
+	EXPECT(wire == std::vector<uint8_t>({2, 5}));
+	EXPECT(decode_squad_join(wire.data(), wire.size()).member == 5);
+	cover('S', 0x71);
+	SquadOrderRequest order;
+	order.kind = 1;
+	order.text = "A-Attack";
+	order.targets = {3, 4};
+	wire = encode_squad_order_request(order);
+	EXPECT(wire.size() == 2 + 9 + 2);
+	const SquadOrderRequest order_out = decode_squad_order_request(wire.data(), wire.size());
+	EXPECT(order_out.kind == 1 && order_out.text == "A-Attack" && order_out.targets.size() == 2 &&
+			order_out.targets[1] == 4);
+	cover('C', 0x44);
+	SquadOrder line;
+	line.kind = 1;
+	line.text = "A-Attack";
+	wire = encode_squad_order(line);
+	EXPECT(decode_squad_order(wire.data(), wire.size()).text == "A-Attack");
+	cover('S', 0x72);
+	FireteamAssign assign;
+	assign.fireteam = 2;
+	assign.members = {6};
+	wire = encode_fireteam_assign(assign);
+	EXPECT(wire == std::vector<uint8_t>({2, 1, 6}));
+	EXPECT(decode_fireteam_assign(wire.data(), wire.size()).members[0] == 6);
+	cover('C', 0x45);
+	FireteamSet set;
+	set.member = 6;
+	set.fireteam = 2;
+	wire = encode_fireteam_set(set);
+	EXPECT(decode_fireteam_set(wire.data(), wire.size()).fireteam == 2);
+	cover('S', 0x73);
+	SquadRecruit recruit;
+	recruit.recruiter = 1;
+	recruit.target = 2;
+	wire = encode_squad_recruit(recruit);
+	EXPECT(decode_squad_recruit(wire.data(), wire.size()).target == 2);
+	cover('C', 0x46);
+	wire = encode_squad_recruited(1);
+	EXPECT(decode_squad_recruited(wire.data(), wire.size()) == 1);
+	cover('S', 0x74);
+	GoCode code;
+	code.leader = 1;
+	code.code = 5;
+	wire = encode_go_code(code);
+	EXPECT(decode_go_code(wire.data(), wire.size()).code == 5);
+	EXPECT(decode_go_code(wire.data(), 1).code == 0);
+	cover('C', 0x4B);
+	cover('S', 0x78);
+	wire = encode_punt_vote(9);
+	EXPECT(decode_punt_vote(wire.data(), wire.size()) == 9);
+	EXPECT(decode_punt_vote(nullptr, 0) == 0);
+	cover('C', 0x3F);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -2049,6 +2146,7 @@ int main() {
 	if (check_S_4C_visible_players()) return 1;
 	if (check_S_4D_spawn_slot_notice()) return 1;
 	if (check_emote_pair()) return 1;
+	if (check_squad_and_waypoint_legs()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

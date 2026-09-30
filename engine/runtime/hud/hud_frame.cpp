@@ -585,6 +585,10 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
 	//  @0x5a87d1, after HUD_DrawFriendlyTagsPass @0x5a87cc].
 	element_feed(state, surface_w, surface_h);
+	// The squad order lines right after the feed [orig: sub_59AEE0 @0x5a87d6;
+	//  the earlier call @0x5a8508 off the death screen draws the same two
+	//  lines at the same place first].
+	element_squad_orders(state, surface_w, surface_h);
 }
 
 // The overlay-panel pass's middle legs, after the message log: the F9 emotes
@@ -769,6 +773,11 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 
 void HudFrameCompiler::layout_map_labels(const HudMapPass &pass,
 		std::vector<GameFontQuad> &out) const {
+	layout_map_labels(pass, 0, pass.labels.size(), out);
+}
+
+void HudFrameCompiler::layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
+		std::vector<GameFontQuad> &out) const {
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bold_font = have_bold ? label_font_bold_ : font_;
 	const float bold_scale = have_bold ? label_scale_ : 1.0f;
@@ -780,7 +789,9 @@ void HudFrameCompiler::layout_map_labels(const HudMapPass &pass,
 	const bool have_regular = label_font_.font() != nullptr;
 	const GameFont &regular_font = have_regular ? label_font_ : bold_font;
 	const float regular_scale = have_regular ? label_scale_ : bold_scale;
-	for (const HudMapLabel &label : pass.labels) {
+	end = std::min(end, pass.labels.size());
+	for (size_t li = begin; li < end; ++li) {
+		const HudMapLabel &label = pass.labels[li];
 		const GameFont &lf = label.font == 1 ? large_font
 				: (label.font == 2 ? regular_font : bold_font);
 		const float ls = label.font == 1 ? large_scale
@@ -841,9 +852,22 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_death_map(
 	map_window_input_.hudpos_text_color = layout_.hud_text;
 	map_window_input_.overlay_color = active_color(state);
 	death_map_draw_.glyphs.clear();
+	death_map_draw_.zone_glyphs.clear();
+	death_map_draw_.zone_glyph_ends.clear();
 	death_map_compiler_.compile(map_window_input_, frame, facts, death_map_draw_.pass);
-	if (death_map_draw_.pass.map.visible)
+	if (death_map_draw_.pass.map.visible) {
 		layout_map_labels(death_map_draw_.pass.map, death_map_draw_.glyphs);
+		// Each zone's letters lay out on their own so the device can draw them
+		// right after that zone's blip [orig: MapOverlay_DrawView — the blip
+		// @0x5a5adc, then the letters @0x5a5c59..0x5a5d14, per zone].
+		size_t label_begin = 0;
+		for (const HudMapWindowSegment &segment : death_map_draw_.pass.segments) {
+			layout_map_labels(death_map_draw_.pass.zones, label_begin, segment.label_end,
+					death_map_draw_.zone_glyphs);
+			death_map_draw_.zone_glyph_ends.push_back(death_map_draw_.zone_glyphs.size());
+			label_begin = segment.label_end;
+		}
+	}
 	return death_map_draw_;
 }
 
@@ -855,9 +879,24 @@ const HudFrameCompiler::MapWindowDraw &HudFrameCompiler::compile_command_map(
 	map_window_input_.overlay_color = active_color(state);
 	command_map_draw_.glyphs.clear();
 	command_map_compiler_.compile(map_window_input_, cmap, rect, scaled_800, facts,
-			command_map_draw_.pass);
+			command_map_draw_.pass, command_map_draw_.waypoint_anchors.data());
 	if (command_map_draw_.pass.map.visible)
 		layout_map_labels(command_map_draw_.pass.map, command_map_draw_.glyphs);
+	// The hover box's extent: the name measured in the bold label slot
+	// [orig: CMapWindow_HandleEvent @0x549e15 — HUD_MeasureTextWH(entity +244,
+	//  &g_HUDLabelFont[1], ..)].
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bold = have_bold ? label_font_bold_ : font_;
+	const float bold_scale = have_bold ? label_scale_ : hud_font_scale_;
+	for (size_t i = 0; i < command_map_draw_.waypoint_anchors.size(); ++i) {
+		CommandMapWaypointAnchor &anchor = command_map_draw_.waypoint_anchors[i];
+		if (!anchor.live) continue;
+		int text_w = 0, text_h = 0;
+		bold.measure(facts.user_waypoints[i].name.c_str(), bold_scale, bold_scale, &text_w,
+				&text_h);
+		anchor.text_w = text_w;
+		anchor.text_h = text_h;
+	}
 	return command_map_draw_;
 }
 

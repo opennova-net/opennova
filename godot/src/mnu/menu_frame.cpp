@@ -438,6 +438,16 @@ void MenuFrame::set_widget_text(int p_index, const String &p_text) {
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_rect = true;
+	ws.rect.left = p_rect.position.x;
+	ws.rect.top = p_rect.position.y;
+	ws.rect.right = p_rect.position.x + p_rect.size.x;
+	ws.rect.bottom = p_rect.position.y + p_rect.size.y;
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_hover_item(int p_index, int p_row) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
 	if (ws.hover_item == p_row) {
@@ -570,6 +580,19 @@ Rect2 MenuFrame::widget_rect(int p_index) const {
 	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
 			static_cast<float>(rect.right - rect.left),
 			static_cast<float>(rect.bottom - rect.top));
+}
+
+void MenuFrame::set_mount_widget(int p_index) {
+	if (state_.mount_index == p_index) return;
+	state_.mount_index = p_index;
+	queue_redraw();
+}
+
+Rect2 MenuFrame::widget_local_rect(int p_index) const {
+	opennova::mnu::RectEdges rect;
+	if (!compiler_.widget_local_rect(p_index, state_, &rect)) return Rect2();
+	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
+			static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top));
 }
 
 int MenuFrame::item_count(int p_index) const {
@@ -1111,6 +1134,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::is_widget_shown);
 	ClassDB::bind_method(D_METHOD("widget_rect", "index"),
 			&MenuFrame::widget_rect);
+	ClassDB::bind_method(D_METHOD("widget_local_rect", "index"),
+			&MenuFrame::widget_local_rect);
+	ClassDB::bind_method(D_METHOD("set_mount_widget", "index"), &MenuFrame::set_mount_widget);
+	ClassDB::bind_method(D_METHOD("get_mount_widget"), &MenuFrame::get_mount_widget);
 	ClassDB::bind_method(D_METHOD("item_count", "index"),
 			&MenuFrame::item_count);
 	ClassDB::bind_method(D_METHOD("get_widget_text", "index"),

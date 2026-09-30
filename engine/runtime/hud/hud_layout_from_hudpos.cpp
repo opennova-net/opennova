@@ -111,6 +111,7 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
 	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
 	out.sys_text = pos_record2(hud.sys_text[0], hud.sys_text[1]);
+	out.squad_orders = pos_record2(hud.orders[0], hud.orders[1]);
 	// BREATHTIME x, y, align: three fields, no hidden dword; an unauthored
 	// line leaves the zero record (0, 0, left) the bar still draws at
 	// [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18].

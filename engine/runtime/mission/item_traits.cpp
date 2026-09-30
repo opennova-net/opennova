@@ -138,6 +138,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     const int player_def_id =
             static_cast<int>(world::kPlayerInfantryTypeId) + mission::kItemIdOffset;
     const DefItemDef *player_def = find_item(by_id, player_def_id);
+    // The user-waypoint row Waypoint_CreateForPlayer seeds pool 4 from
+    // (world/user_waypoints.h) [orig: ItemList_FindIndexByTypeId(6089) @0x4dfcf0].
+    const DefItemDef *waypoint_def = find_item(by_id,
+            static_cast<int>(world::kUserWaypointTypeId) + mission::kItemIdOffset);
+    world.tables.user_waypoint_type_index =
+            waypoint_def != nullptr ? static_cast<int32_t>(waypoint_def - items.entries) : 0;
+    world.tables.user_waypoint_item_type =
+            static_cast<uint8_t>(waypoint_def != nullptr ? waypoint_def->type : 0);
     world.tables.player.has_item_def = player_def != nullptr;
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;

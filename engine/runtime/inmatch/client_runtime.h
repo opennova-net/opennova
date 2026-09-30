@@ -3,6 +3,7 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
+#include <runtime/hud/squad_feed.h>     // SquadFeedLine (the squad folds' HUD lines)
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
@@ -276,6 +277,32 @@ public:
 	// clients retain the authority's already-applied gameplay state.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	void apply_received_effects(world::World &world);
+
+	// THE COMMAND MAP'S SQUAD AND WAYPOINT SENDS (client_squad.cpp): each
+	// queues its one reliable C2S (a joiner on its held one-shot queue, the
+	// listen host's client on its loopback to its own server); false when no
+	// session carries it. [orig: NetPacket_SendChatMessage @0x42ddc0 (0x17),
+	//  NetPacket_SendEntityUpdate @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
+	//  @0x42dc10 (0x43), NetPacket_SendCommandType44 @0x42dc70 (0x44),
+	//  NetPacket_SendWeaponAction @0x42dcc0 (0x45), NetPacket_SendTeamChange
+	//  @0x42dd00 (0x46), NetPacket_SendVoteKick @0x42dd50 (0x4B), the punt vote
+	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
+	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
+	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
+	// The local player's roster slot (entity+0x154), -1 when unbound.
+	int local_roster_slot() const { return view_.local_roster_slot(); }
+	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
+	std::vector<hud::SquadFeedLine> drain_squad_lines();
+	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
+	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
+	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F
+	// [orig: @0x5479e6; @0x548137]. A go-code button: C2S 0x4B [local
+	// slot][code], then the leader's own sound set and line with no mute
+	// [orig: sub_548290 @0x548290].
+	bool place_user_waypoint(world::World &world, int32_t x, int32_t y, const std::string &name);
+	bool delete_hovered_user_waypoint(world::World &world);
+	void clear_user_waypoints(world::World &world);
+	void send_go_code(world::World &world, uint8_t code);
 	void tick_remote_stance_sounds(world::World &world);
 	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
 	// joiner role runs each registry row's handler against its world.
@@ -645,6 +672,9 @@ private:
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.
 	std::vector<WeaponReload> pending_reload_notifications_;
+	// The squad folds' consequences once applied (client_squad.cpp).
+	void apply_squad_event(world::World &world, const replication::ClientSquadEvent &event);
+	std::vector<hud::SquadFeedLine> pending_squad_lines_;
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;

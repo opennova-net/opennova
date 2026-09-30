@@ -457,8 +457,11 @@ void Simulation::_bind_methods() {
 			D_METHOD("epilog_fade_in_seconds"),
 			&Simulation::epilog_fade_in_seconds);
 	ClassDB::bind_static_method("Simulation",
-			D_METHOD("deploy_refresh_interval_seconds"),
-			&Simulation::deploy_refresh_interval_seconds);
+			D_METHOD("deploy_refresh_due", "prev_tick", "tick"),
+			&Simulation::deploy_refresh_due);
+	ClassDB::bind_method(D_METHOD("is_death_shroud_revealed"),
+			&Simulation::is_death_shroud_revealed);
+	ClassDB::bind_method(D_METHOD("send_go_code", "code"), &Simulation::send_go_code);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("spawn_origin_pack", "kind", "index"),
 			&Simulation::spawn_origin_pack);

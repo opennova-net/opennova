@@ -45,6 +45,35 @@ std::string format_team_timer(int32_t remaining, const std::string &label, int32
 
 } // namespace
 
+void HudFrameCompiler::element_squad_orders(const HudFrameState &state, float w, float h) {
+	// THE SQUAD ORDER LINES (a misnamed sub_59AEE0): off under the /NOTEXT
+	// declutter bit and above detail level 1; the HUDORDERS anchor and the
+	// 18-px pitch each through Viewport_ScaleToVirtualCoords; both 128-byte
+	// lines right-aligned in the bold slot in palette[4] less one alpha step,
+	// which the half-bright drawer halves and forces opaque; an empty line
+	// still takes its rung. They hold until overwritten, cancelled with an
+	// empty line or cleared at the mission start.
+	// [orig: sub_59AEE0 @0x59aee0 — the gates @0x59aee5..0x59aefb, the anchor
+	//  @0x59af06..0x59af2a, the loop @0x59af30..0x59af68 over byte_2721DB8 up
+	//  to g_HUDTrackedTarget, HUD_DrawTextRightAligned_HalfBright
+	//  (g_HUDLabelFont[1], x, y, line, palette[4] - 0x1000000, 0x101)]
+	if (!state.declutter_visible[kDeclutterChat] || state.hud_detail_level > 1) return;
+	const HudPosRecord &anchor = layout_.squad_orders;
+	const int x = virtual_scale(anchor.x, static_cast<int>(w), 1024);
+	int y = virtual_scale(anchor.y, static_cast<int>(h), 768);
+	const int pitch = virtual_scale(18, static_cast<int>(h), 768);
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bold = have_bold ? label_font_bold_ : font_;
+	const float bold_scale = have_bold ? label_scale_ : hud_font_scale_;
+	const uint32_t color = hud_palette(4) - 0x01000000u;
+	for (const std::string &line : state.squad_orders) {
+		if (!line.empty())
+			emit_half_bright_text(bold, bold_scale, line.c_str(), static_cast<float>(x),
+					static_cast<float>(y), color, 1);
+		y += pitch;
+	}
+}
+
 void HudFrameCompiler::emit_half_bright_text(const GameFont &slot, float slot_scale,
 		const char *text, float screen_x, float screen_y, uint32_t argb, int mode) {
 	// [orig: sub_5D2EA0 @0x5d2ea0 — 0 HUD_DrawTextLeft_HalfBright, 1

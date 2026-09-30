@@ -130,6 +130,11 @@ opennova::hud::ChatSendResult Simulation::send_chat_line(int p_dispatch, std::st
 	return runtime_->queue_chat_message(static_cast<uint8_t>(channel), r_text, p_frame);
 }
 
+void Simulation::send_go_code(int p_code) {
+	if (runtime_ == nullptr || !kernel_ || p_code < 0 || p_code > 0xFF) return;
+	runtime_->send_go_code(kernel_->world, static_cast<uint8_t>(p_code));
+}
+
 void Simulation::raise_chat_denied_sound() {
 	if (!kernel_) return;
 	// The crew key's denied tone rides the interface channel like the other
@@ -181,6 +186,13 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 		if (line.text.empty()) continue;
 		r_posts.push_back({line.feed_order, opennova::hud::chat_channel_sink(line.channel),
 				opennova::hud::chat_channel_color(line.channel), line.text, false});
+	}
+	for (const opennova::hud::SquadFeedLine &line : runtime_->drain_squad_lines()) {
+		opennova::hud::SquadFeedPost post = opennova::hud::squad_feed_post(line, p_gametext);
+		if (!post.post) continue;
+		r_posts.push_back({line.order,
+				post.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
+				post.argb, std::move(post.text), false});
 	}
 	const uint32_t game_type = runtime_->game_type();
 	for (const opennova::replication::ClientGameText &text : runtime_->view().drain_game_texts()) {

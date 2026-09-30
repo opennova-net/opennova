@@ -590,6 +590,9 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
 
 int def_parse_hudpos(const char *path, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
+    /* HUDORDERS defaults to -1 / -1, the globals' static value
+       [orig: dword_2723D84 / dword_2723D88] */
+    out->hud.orders[0] = out->hud.orders[1] = -1;
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
@@ -600,6 +603,9 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out) {
 
 int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
+    /* HUDORDERS defaults to -1 / -1, the globals' static value
+       [orig: dword_2723D84 / dword_2723D88] */
+    out->hud.orders[0] = out->hud.orders[1] = -1;
     if (!data) return -1;
     return parse_hudpos_buf((const char *)data, size, out);
 }

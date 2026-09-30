@@ -103,6 +103,7 @@
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
+#include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
 #include "hud/hud_toggles.h"
 #include "hud/hud_chat_entry.h"
@@ -305,6 +306,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
 	GDREGISTER_CLASS(HudToggles);
 	GDREGISTER_CLASS(HudChatEntry);

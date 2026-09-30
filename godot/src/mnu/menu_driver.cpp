@@ -171,6 +171,10 @@ public:
 	void set_widget_focused(int index, bool focused) override {
 		if (MenuFrame *f = frame()) f->set_widget_focused(index, focused);
 	}
+	void set_widget_rect(int index, int left, int top, int right, int bottom) override {
+		if (MenuFrame *f = frame())
+			f->set_widget_rect(index, Rect2i(left, top, right - left, bottom - top));
+	}
 	void set_widget_caret(int index, int caret) override {
 		if (MenuFrame *f = frame()) f->set_widget_caret(index, caret);
 	}
@@ -375,6 +379,9 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 		case Kind::ShownChanged:
 			sync_credits_();
 			break;
+		case Kind::EditCommitted:
+			emit_signal("edit_committed", p_event.id, to_gd(p_event.text));
+			break;
 	}
 }
 
@@ -491,6 +498,22 @@ Rect2 MenuDriver::widget_frame_rect(int p_id) const {
 	const Rect2 design = frame->widget_rect(index);
 	const Vector2 scale = design_scale();
 	return Rect2(design.position * scale, design.size * scale);
+}
+
+Rect2 MenuDriver::widget_local_rect(int p_id) const {
+	const int index = frame_index(p_id);
+	MenuFrame *frame = frame_();
+	if (index < 0 || frame == nullptr) return Rect2();
+	return frame->widget_local_rect(index);
+}
+
+void MenuDriver::set_widget_rect(int p_id, const Rect2i &p_rect) {
+	runtime_.set_widget_rect(p_id, p_rect.position.x, p_rect.position.y,
+			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
+}
+
+void MenuDriver::focus_widget(int p_id) {
+	runtime_.focus_edit(p_id);
 }
 
 Vector2 MenuDriver::design_scale() const {
@@ -877,6 +900,9 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_widget", "name"), &MenuDriver::has_widget);
 	ClassDB::bind_method(D_METHOD("frame_index", "id"), &MenuDriver::frame_index);
 	ClassDB::bind_method(D_METHOD("widget_frame_rect", "id"), &MenuDriver::widget_frame_rect);
+	ClassDB::bind_method(D_METHOD("widget_local_rect", "id"), &MenuDriver::widget_local_rect);
+	ClassDB::bind_method(D_METHOD("set_widget_rect", "id", "rect"), &MenuDriver::set_widget_rect);
+	ClassDB::bind_method(D_METHOD("focus_widget", "id"), &MenuDriver::focus_widget);
 
 	ClassDB::bind_method(D_METHOD("set_widget_shown", "id", "shown"), &MenuDriver::set_widget_shown);
 	ClassDB::bind_method(D_METHOD("is_widget_shown", "id"), &MenuDriver::is_widget_shown);
@@ -961,6 +987,9 @@ void MenuDriver::_bind_methods() {
 	// The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 	ADD_SIGNAL(MethodInfo("widget_hover_changed", PropertyInfo(Variant::INT, "id"),
 			PropertyInfo(Variant::BOOL, "hovered")));
+	// An edit's Enter commit, after the focus released (event 0x7000002).
+	ADD_SIGNAL(MethodInfo("edit_committed", PropertyInfo(Variant::INT, "id"),
+			PropertyInfo(Variant::STRING, "widget_name")));
 }
 
 } // namespace godot

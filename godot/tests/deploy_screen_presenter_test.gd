@@ -165,6 +165,17 @@ func _make_presenter(sim: Simulation) -> DeployPresenter:
 	return presenter
 
 
+# The show hides DEATH_SHROUD and fills nothing: the per-frame reveal (the
+# death is over 240 ticks old here, so at once) runs the content refresh on
+# the next 16-tick boundary [orig: DeathScreen_UpdateShroudReveal @0x554730].
+func _await_refresh(pair: Dictionary) -> void:
+	for _i in range(20):
+		pair.host.step()
+		pair.joiner.step()
+		OS.delay_msec(2)
+	await get_tree().process_frame
+
+
 # The visible list row carrying a node PARAM (the sorted list's row order is
 # retail's text sort, so tests never assume fixed indices).
 func _row_index_for_param(presenter: DeployPresenter, param: int) -> int:
@@ -219,6 +230,7 @@ func test_map_window_mounts_over_the_map_widget() -> void:
 	if map_window == null:
 		return
 	var driver := presenter.get_menu_driver()
+	await _await_refresh(pair)
 	var rect := driver.widget_frame_rect(driver.widget_id("MAP"))
 	assert_eq(map_window.position, rect.position, "placed at the widget's frame rect")
 	assert_eq(map_window.size, rect.size)
@@ -231,6 +243,48 @@ func test_map_window_mounts_over_the_map_widget() -> void:
 	assert_almost_eq(map_window.get_zoom(), maxf(zoom * 0.85, 0.1), 0.0001)
 	presenter.close()
 	assert_false(presenter.is_open())
+
+
+# DEATH_SHROUD (the window around the map, the list and the statics): the
+# show hides it; it reveals 240 ticks after the death (or at once under the
+# deploy overlay), and only then does the content refresh fill the list.
+# [orig: DeathScreen_UpdateUI @0x553150 (the hide); DeathScreen_UpdateShroudReveal
+#  @0x554730 (the reveal, UI_UpdateDeathScreenContent on (tick & 0xF) == 0)]
+func test_the_shroud_hides_on_show_and_reveals_after_the_death_delay() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open())
+	var driver := presenter.get_menu_driver()
+	var shroud := driver.widget_id("DEATH_SHROUD")
+	assert_gte(shroud, 0, "death.mnu authors the shroud")
+	assert_false(driver.is_widget_shown(shroud), "the show hides the shroud")
+	assert_eq(presenter.get_spawn_rows().size(), 0, "the show fills nothing")
+	assert_true(pair.joiner.is_death_shroud_revealed(),
+			"the death is past the 240-tick delay")
+	await _await_refresh(pair)
+	assert_true(driver.is_widget_shown(shroud), "the per-frame reveal shows it")
+	assert_gt(presenter.get_spawn_rows().size(), 0, "the refresh fills the list")
+
+
+# The DEATH map's pan/zoom state is the presenter's (the process's), not the
+# menu's: the window a menu rebuild mounts drives the same state (the show's
+# zoom fit re-runs on it; the load seed does not).
+func test_the_map_view_state_survives_the_menu_rebuild() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var presenter := _make_presenter(pair.joiner)
+	assert_true(presenter.open())
+	var first := presenter.get_map_window()
+	if first == null:
+		fail_test("no map window")
+		return
+	var state := first.get_view_state()
+	presenter.teardown()
+	assert_true(presenter.open(), "the rebuilt screen opens")
+	var second := presenter.get_map_window()
+	assert_not_null(second)
+	if second != null:
+		assert_ne(second, first, "the menu rebuild mounts a new window")
+		assert_eq(second.get_view_state(), state, "the view state carries over")
 
 
 func test_open_refuses_when_no_pick_is_owed() -> void:
@@ -378,6 +432,7 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 		return
 	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
 	assert_gte(list_id, 0, "death.mnu authors the spawn list")
+	await _await_refresh(pair)
 	var zone_rows: Array = pair.joiner.get_deploy_spawn_zones()
 	assert_eq(zone_rows.size(), 1,
 			"the fixture exposes one team-owned non-default spawn-zone row")
@@ -395,7 +450,7 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 	assert_eq(_row_param(presenter, zone_row), zone_param,
 			"the zone row is selected by deploy param")
 
-	await get_tree().create_timer(DeployPresenter.REFRESH_INTERVAL_S + 0.05).timeout
+	await _await_refresh(pair)
 
 	var reselected := driver.selected_row(list_id)
 	assert_gte(reselected, 0, "the selected spawn survives the periodic rebuild")
@@ -424,6 +479,7 @@ func test_occupant_rows_carry_node_minus_one_and_never_pick() -> void:
 	assert_not_null(driver)
 	if driver == null:
 		return
+	await _await_refresh(pair)
 	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
 	# Even an empty team zone contributes a non-selectable blank separator.
 	var separator_count := 0
@@ -479,6 +535,7 @@ func test_a_reopened_death_screen_repicks_and_the_release_closes_it() -> void:
 		return
 	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
 	assert_gte(list_id, 0, "death.mnu authors the spawn list")
+	await _await_refresh(pair)
 
 	# Close and reopen WITHOUT a release: the once-configured menu and its
 	# selected row must come back (the death-edge reopen shape).
@@ -525,6 +582,7 @@ func test_instruction_widgets_follow_retained_death_text() -> void:
 	var presenter := _make_presenter(pair.joiner)
 	assert_true(presenter.open())
 	var driver := presenter.get_menu_driver()
+	await _await_refresh(pair)
 	var first := driver.widget_id("STATIC_INSTRUCTIONS_MSG")
 	var second := driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
 	assert_gte(first, 0)

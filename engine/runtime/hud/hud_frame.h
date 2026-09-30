@@ -315,6 +315,9 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
+	// HUDORDERS — the right edge of the two squad order lines; -1 / -1 when
+	// unauthored [orig: dword_2723D84 / dword_2723D88].
+	HudPosRecord squad_orders{-1, -1};
 	// BREATHTIME — the breath bar's anchor: x, y and the alignment word, three
 	// fields with no hidden dword. Unauthored it keeps the BSS zero (0, 0,
 	// left): the bar has no presence gate [orig: HUD_ParseHudposToken
@@ -831,6 +834,9 @@ struct HudFrameState {
 	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
 	uint32_t overlay_master = kHudOverlayMasterDefault;
 	HudSessionState session;
+	// The two squad order lines S2C 0x72 wrote (replication ClientState
+	// squad_orders) [orig: byte_2721DB8, two 128-byte lines].
+	std::array<std::string, 2> squad_orders;
 	std::array<HudSlotBarSlot, 10> slot_bar;
 	// THE RECENT MESSAGES (J) WINDOW: the OldMessages toggle and its stdbox
 	// title (Overlays/STROVER43, resolved by the embedder like the scoreboard's)
@@ -1146,6 +1152,14 @@ public:
 	struct MapWindowDraw {
 		HudMapWindowPass pass;
 		std::vector<GameFontQuad> glyphs;
+		// The zone walk's letters, laid out per segment: zone_glyph_ends[i] is
+		// the end of segment i's glyphs (hud_map_view.h HudMapWindowSegment).
+		std::vector<GameFontQuad> zone_glyphs;
+		std::vector<size_t> zone_glyph_ends;
+		// The CMAP's placed waypoints as this render projected them, each
+		// name measured in the bold label slot (hud_map_view.h
+		// command_map_waypoint_hover / command_map_close_button_position).
+		std::array<CommandMapWaypointAnchor, kCommandMapWaypointSlots> waypoint_anchors;
 	};
 	// The DEATH deploy screen's MAP window [orig: CMap_OverlayInputHandler
 	// event 1 @0x554310 -> MapOverlay_DrawView @0x5a58e0].
@@ -1242,6 +1256,9 @@ private:
 	// A map pass's labels through the CPU half-bright drawer and the
 	// fixed-function MODULATE2X fold, bold or large slot per label.
 	void layout_map_labels(const HudMapPass &pass, std::vector<GameFontQuad> &out) const;
+	// The same over pass.labels[begin, end) (the DEATH zone walk's segments).
+	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
+			std::vector<GameFontQuad> &out) const;
 	bool corner_spinmap_visible(const HudFrameState &state) const;
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
@@ -1253,6 +1270,7 @@ private:
 	void element_team_id_line(const HudFrameState &state, float w, float h);
 	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	void element_squad_orders(const HudFrameState &state, float w, float h);
 	void element_message_log(const HudFrameState &state, float w, float h);
 	// The overlay-panel pass's voice-macro menus and the pause text
 	// (hud_frame_overlay_windows.cpp).
