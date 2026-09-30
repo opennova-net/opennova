@@ -94,12 +94,13 @@ FieldSchema channel(const char *id, const char *label) {
 // review).
 void test_choices_of_one_name() {
 	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
 	FieldSchema field;
 	field.id = "unit_type";
 	field.type = FieldType::Integer;
 	field.choices = {{"5", 5, "Boat"}, {"6", 6, "Boat"}};
 	Value value = int64_t(0);
-	const auto draw = [&] { widgets::choice(field, field.choices, value); };
+	const auto draw = [&] { widgets::choice(field, field.choices, value, typed); };
 	widget_frame(draw, 2);
 	const ImGuiID list = ImHashStr("##Combo_00");
 	for (const int index : {1, 0}) {
@@ -115,6 +116,7 @@ void test_choices_of_one_name() {
 // the unit after the value, and the words its tooltip and its column say.
 void test_ranged_number() {
 	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
 	FieldSchema field;
 	field.id = "alpha_test";
 	field.label = "Alpha-test threshold";
@@ -158,6 +160,7 @@ void test_ranged_number() {
 // changes green alone), the group's unit once after them.
 void test_group_row() {
 	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
 	std::vector<FieldSchema> fields = {channel("start.r", "Start red"), channel("start.g", "Start green"),
 	                                   channel("start.b", "Start blue")};
 	// Each as it applies to a record, its schema's own (FieldUse).
@@ -170,7 +173,7 @@ void test_group_row() {
 	const auto draw = [&] {
 		top = ImGui::GetCursorScreenPos().y;
 		size_t at = SIZE_MAX;
-		if (widgets::group(uses, choices, values, at).changed) changed = at;
+		if (widgets::group(uses, choices, values, at, typed).changed) changed = at;
 		bottom = ImGui::GetCursorScreenPos().y;
 	};
 	widget_frame(draw, 2);
@@ -199,7 +202,7 @@ void test_group_row() {
 	std::vector<Value> at = {1.0, 2.0, 3.0};
 	const auto place = [&] {
 		size_t which = SIZE_MAX;
-		widgets::group(placed, placed_choices, at, which);
+		widgets::group(placed, placed_choices, at, which, typed);
 	};
 	widget_frame(place);
 	CHECK(count_of(logged_widgets(place), "m") == 1, "a unit the members share shows once");
@@ -210,6 +213,7 @@ void test_group_row() {
 // its value by the choice's name and takes a pick of another, its neighbour given none its number.
 void test_group_choices() {
 	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
 	std::vector<FieldSchema> fields(2);
 	fields[0].id = "spawn.team";
 	fields[1].id = "spawn.count";
@@ -225,7 +229,7 @@ void test_group_choices() {
 	size_t changed = SIZE_MAX;
 	const auto draw = [&] {
 		size_t at = SIZE_MAX;
-		if (widgets::group(uses, choices, values, at).changed) changed = at;
+		if (widgets::group(uses, choices, values, at, typed).changed) changed = at;
 	};
 	widget_frame(draw, 2);
 	CHECK(logged_widgets(draw).find("Red team") != std::string::npos, "a member shows its value by its own choice's name");
@@ -241,6 +245,7 @@ void test_group_choices() {
 // it; a closed long list narrows to what is typed and takes the one left.
 void test_open_choice() {
 	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
 	FieldSchema field;
 	field.id = "charfilter[0]";
 	field.type = FieldType::Text;
@@ -250,7 +255,7 @@ void test_open_choice() {
 	Value value = std::string("medic");
 	int picks = 0;
 	const auto draw = [&] {
-		if (widgets::choice(field, field.choices, value).changed) ++picks;
+		if (widgets::choice(field, field.choices, value, typed).changed) ++picks;
 	};
 	widget_frame(draw);
 	ImGui::ActivateItemByID(widget({"##value"}));
@@ -273,7 +278,7 @@ void test_open_choice() {
 	const char *names[] = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine"};
 	for (int i = 0; i < 9; ++i) closed.choices.push_back({names[i], i + 1});
 	Value number = int64_t(1);
-	const auto list = [&] { widgets::choice(closed, closed.choices, number); };
+	const auto list = [&] { widgets::choice(closed, closed.choices, number, typed); };
 	widget_frame(list);
 	ImGui::ActivateItemByID(widget({"##value"}));
 	widget_frame(list, 3);
@@ -294,8 +299,9 @@ void test_open_choice() {
 // (a 150-byte token into a 256-byte field whole, a long one into an 8-byte field cut to 7).
 void test_typed_values() {
 	NullBackend backend;
-	auto typed = [](FieldSchema field, Value value, const char *text) {
-		const auto draw = [&] { widgets::choice(field, field.choices, value); };
+	std::string box; // what an open list's box holds: the window's
+	auto typed = [&box](FieldSchema field, Value value, const char *text) {
+		const auto draw = [&] { widgets::choice(field, field.choices, value, box); };
 		widget_frame(draw);
 		ImGui::ActivateItemByID(widget({"##value"}));
 		widget_frame(draw, 3);
@@ -338,6 +344,63 @@ void test_typed_values() {
 	      "a long token a wide field holds is taken whole");
 }
 
+// S13 V3: a text box over a value longer than its field holds (a UTF-8 text past the schema's
+// width, which the format may store in fewer bytes: five e-acutes are ten bytes of UTF-8, five of
+// Windows-1252) shows it whole and never cuts it (ui/text_edit): drawn, nothing is set; a Backspace
+// at its end takes its last character whole (eight bytes left, no half sequence), and once it is
+// no longer than the field, a typed character past the width is refused whole. A box of a field
+// wide enough takes what is typed.
+void test_long_value_whole() {
+	NullBackend backend;
+	std::string typed; // what an open list's box holds: the window's
+	FieldSchema field;
+	field.id = "text";
+	field.type = FieldType::Text;
+	field.width = 9; // eight bytes and the terminator
+	const FieldUse use = field_use(field);
+	const std::vector<FieldChoice> none;
+	const std::string e = "\xC3\xA9"; // one e-acute, two bytes of UTF-8
+	Value value = e + e + e + e + e;
+	int sets = 0;
+	const auto draw = [&] {
+		if (widgets::value(use, none, value, false, typed).changed) ++sets;
+	};
+	widget_frame(draw, 3);
+	CHECK(sets == 0 && std::get<std::string>(value) == e + e + e + e + e, "drawn, the value is whole and nothing is set");
+	const auto press = [&](ImGuiKey key) {
+		ImGui::GetIO().AddKeyEvent(key, true);
+		widget_frame(draw);
+		ImGui::GetIO().AddKeyEvent(key, false);
+		widget_frame(draw);
+	};
+	type_into(widget({"##value"}), draw);
+	press(ImGuiKey_End);
+	press(ImGuiKey_Backspace);
+	CHECK(sets == 1 && std::get<std::string>(value) == e + e + e + e,
+	      "a Backspace takes the last character whole: eight bytes, no half sequence");
+	ImGui::GetIO().AddInputCharactersUTF8("x");
+	widget_frame(draw, 2);
+	CHECK(sets == 1 && std::get<std::string>(value) == e + e + e + e, "a character past the field's width is refused");
+	ImGui::ClearActiveID();
+	widget_frame(draw);
+	// Wide enough: typed at the end, one Set a character.
+	field.width = 64;
+	const FieldUse wide = field_use(field);
+	const auto draw_wide = [&] {
+		if (widgets::value(wide, none, value, false, typed).changed) ++sets;
+	};
+	type_into(widget({"##value"}), draw_wide);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_End, true);
+	widget_frame(draw_wide);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_End, false);
+	widget_frame(draw_wide);
+	ImGui::GetIO().AddInputCharactersUTF8("x");
+	widget_frame(draw_wide, 2);
+	CHECK(std::get<std::string>(value) == e + e + e + e + "x", "a field wide enough takes it");
+	ImGui::ClearActiveID();
+	widget_frame(draw_wide);
+}
+
 } // namespace
 
 void run_field_widget_tests() {
@@ -347,6 +410,7 @@ void run_field_widget_tests() {
 	test_group_choices();
 	test_open_choice();
 	test_typed_values();
+	test_long_value_whole();
 }
 
 } // namespace editor_ui_test

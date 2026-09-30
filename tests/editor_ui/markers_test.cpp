@@ -514,7 +514,9 @@ void test_reveal_in_views() {
 	const auto go_to = [&](const std::string &path, const std::string &locator, const char *field) {
 		session.handle(request::open_document(path, locator, field));
 	};
-	const char *const list = "Document/strings_";
+	// The string table's view is master and detail (S13 V3's outline): its strings are the detail
+	// table, which scrolls in its own window.
+	const char *const list = "Document/records_";
 	go_to(strings_path, strings->locator(first), "key");
 	Ui ui;
 	ui.windows.set_view(&v);

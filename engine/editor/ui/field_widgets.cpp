@@ -4,6 +4,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/text_edit.h>
 #include <editor/ui/ui_kit.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
@@ -13,7 +14,6 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <system_error>
 #include <vector>
 
@@ -60,22 +60,17 @@ bool shows_swatch(FieldColor color, const Value &value) {
 	return color == FieldColor::PackedRgb && std::holds_alternative<int64_t>(value);
 }
 
-// A text field's box: several lines where the field runs over them (not in a table cell),
-// a hint where the targets differ.
+// A text field's box over the value (text_edit: the whole value, never cut): several lines where
+// the field runs over them (not in a table cell), a hint where the targets differ.
 Edited text(const FieldSchema &field, Value &value, bool compact, bool mixed) {
 	Edited out;
-	const std::string current = mixed ? std::string() : std::get<std::string>(value);
-	std::vector<char> buffer(std::max<size_t>(field.width, 2), 0);
-	std::memcpy(buffer.data(), current.data(), std::min(current.size(), buffer.size() - 1));
-	const bool changed =
-	        field.multiline && !compact
-	                ? ImGui::InputTextMultiline("##value", buffer.data(), buffer.size(),
-	                                            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 4.0f +
-	                                                                     ImGui::GetStyle().FramePadding.y * 2.0f))
-	        : mixed ? ImGui::InputTextWithHint("##value", "(mixed)", buffer.data(), buffer.size())
-	                : ImGui::InputText("##value", buffer.data(), buffer.size());
-	if (changed) {
-		value = std::string(buffer.data());
+	std::string current = mixed ? std::string() : std::get<std::string>(value);
+	text_edit::Box box;
+	box.multiline = field.multiline && !compact;
+	box.height = ImGui::GetTextLineHeight() * 4.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
+	box.hint = mixed ? "(mixed)" : nullptr;
+	if (text_edit::edit("##value", current, field.width, box)) {
+		value = std::move(current);
 		out.changed = true;
 	}
 	out.finished = ImGui::IsItemDeactivatedAfterEdit();
@@ -188,27 +183,28 @@ Edited number(const FieldSchema &field, Value &value, bool unit) {
 }
 
 Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices, Value &value,
-		bool mixed) {
+		std::string &typed, bool mixed) {
 	Edited out;
 	out.coalesce = false;
 	const FieldChoice *current = mixed ? nullptr : choice_of(choices, value);
 	const std::string shown = mixed ? std::string("(mixed)") : current ? choice_title(*current) : shown_value(field, choices, value);
 	if (ImGui::BeginCombo("##value", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
-		// One list is open at a time: the box starts empty each time one opens, as long as the
-		// field it types for holds.
-		static std::vector<char> typed;
+		// One list is open at a time: the box (the caller's `typed`) starts empty each time one
+		// opens, and holds no more than the field it types for does.
 		const bool narrowed = field.open_choices || choices.size() > kFilterFrom;
 		bool enter = false;
-		if (ImGui::IsWindowAppearing() || typed.size() != typed_capacity(field)) {
-			typed.assign(typed_capacity(field), '\0');
+		if (ImGui::IsWindowAppearing()) {
+			typed.clear();
 			if (narrowed) ImGui::SetKeyboardFocusHere();
 		}
 		if (narrowed) {
 			ImGui::SetNextItemWidth(-FLT_MIN);
-			enter = ImGui::InputTextWithHint("##typed", field.open_choices ? "Filter, or type a value" : "Filter",
-			                                 typed.data(), typed.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+			text_edit::Box box;
+			box.hint = field.open_choices ? "Filter, or type a value" : "Filter";
+			box.enter_returns = true;
+			enter = text_edit::edit("##typed", typed, typed_capacity(field), box);
 		}
-		const std::string token = typed.data();
+		const std::string token = typed;
 		auto take = [&](Value picked) {
 			value = std::move(picked);
 			out.changed = true;
@@ -290,7 +286,7 @@ Edited channel_swatch(std::vector<Value> &values) {
 }
 
 Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Value &value,
-		bool compact, bool mixed) {
+		bool compact, std::string &typed, bool mixed) {
 	const FieldSchema &schema = *field.schema;
 	if (is_yes_no(schema)) {
 		Edited out;
@@ -302,7 +298,7 @@ Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Val
 		}
 		return out;
 	}
-	if (!choices.empty()) return choice(schema, choices, value, mixed);
+	if (!choices.empty()) return choice(schema, choices, value, typed, mixed);
 	// A colour's swatch first, its value in what is left of the width.
 	float width = ImGui::CalcItemWidth();
 	Edited picked;
@@ -312,14 +308,14 @@ Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Val
 		width -= swatch_width();
 	}
 	ImGui::SetNextItemWidth(std::max(1.0f, width));
-	const Edited typed = schema.type == FieldType::Text ? text(schema, value, compact, mixed)
-	                                                    : number(schema, value, !compact);
-	return picked.changed || picked.finished ? picked : typed;
+	const Edited entered = schema.type == FieldType::Text ? text(schema, value, compact, mixed)
+	                                                      : number(schema, value, !compact);
+	return picked.changed || picked.finished ? picked : entered;
 }
 
 Edited group(const std::vector<FieldUse> &fields,
 		const std::vector<const std::vector<FieldChoice> *> &choices, std::vector<Value> &values,
-		size_t &changed, const std::vector<bool> &mixed) {
+		size_t &changed, std::string &typed, const std::vector<bool> &mixed) {
 	Edited out;
 	changed = SIZE_MAX;
 	if (fields.empty() || values.size() != fields.size() || choices.size() != fields.size())
@@ -351,7 +347,7 @@ Edited group(const std::vector<FieldUse> &fields,
 		ImGui::BeginDisabled(fields[i].read_only);
 		ImGui::SetNextItemWidth(cell);
 		const Edited one =
-				value(fields[i], *choices[i], values[i], true, i < mixed.size() && mixed[i]);
+				value(fields[i], *choices[i], values[i], true, typed, i < mixed.size() && mixed[i]);
 		ui_kit::tooltip_lazy([&] { return field_title(schema) + "\n" + details(schema); });
 		ImGui::EndDisabled();
 		ImGui::PopID();

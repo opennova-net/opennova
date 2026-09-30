@@ -37,12 +37,24 @@ std::string written_type(const std::string &token) { return "The file writes it 
 
 } // namespace
 
-void MenuView::draw(Workspace &workspace, const MnuDocument &document) {
-	draw_document_toolbar(workspace, document);
-	ImGui::BeginDisabled(document.blocked());
-	if (const Node *screen = draw_screens(workspace, document)) draw_windows(workspace, document, *screen);
+void MenuView::draw(Workspace &workspace, const DocumentBase &base) {
+	// A RevealRecord taken: the tree opens the selection's owners and scrolls to it again.
+	if (!take_events().empty()) revealed_ = NodeAddress();
+	const auto *document = dynamic_cast<const MnuDocument *>(records_of(base));
+	if (!document) return ui_kit::empty_state("This file holds no menu screens to list.");
+	draw_document_toolbar(workspace, *document);
+	ImGui::BeginDisabled(document->blocked());
+	if (const Node *screen = draw_screens(workspace, *document)) draw_windows(workspace, *document, *screen);
 	else ui_kit::empty_state("Select a screen to see its windows.");
 	ImGui::EndDisabled();
+}
+
+void MenuView::rebind(const DocumentBase &) {
+	// A range's anchor and the tree name the old document's records; the prompt's question keeps
+	// the old one's identity, so it closes (draw_modals) with nothing removed.
+	anchor_ = 0;
+	tree_document_ = 0;
+	revealed_ = NodeAddress();
 }
 
 // The screens in file order with their tools (Add / Duplicate / Remove / Up / Down for the
@@ -101,17 +113,24 @@ const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &docu
 // Removing a screen asks first: it takes every window on it (Undo brings it back). The prompt
 // is about the menu it was asked in, that very document (one read again, or closed, closes
 // it), and a screen of it while the menu keeps a second one.
-void MenuView::draw_remove_prompt(Workspace &workspace) {
+void MenuView::draw_modals(Workspace &workspace) {
+	// Each open menu has its view, whose prompts share the one name: only the view asking draws
+	// it.
+	if (!ask_remove_ && !removing_document_) return;
 	if (ask_remove_) {
 		ask_remove_ = false;
 		ImGui::OpenPopup(kRemovePrompt);
 	}
-	if (!ImGui::BeginPopupModal(kRemovePrompt, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+	if (!ImGui::BeginPopupModal(kRemovePrompt, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		removing_document_ = 0; // closed another way (Escape outside its buttons): no longer asking
+		return;
+	}
 	const MnuDocument *document = nullptr;
 	for (const auto &open : workspace.view().documents.open)
 		if (open->identity() == removing_document_) document = dynamic_cast<const MnuDocument *>(open.get());
 	const Node *screen = document ? document->row(removing_screen_) : nullptr;
 	if (!screen || document->rows().size() < 2) {
+		removing_document_ = 0;
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -120,10 +139,14 @@ void MenuView::draw_remove_prompt(Workspace &workspace) {
 	ImGui::TextDisabled("Undo brings it back.");
 	if (ImGui::Button("Remove")) {
 		edit(workspace, *document, EditOperation::Remove, {screen->id, kScreen, 0});
+		removing_document_ = 0;
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+	if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+		removing_document_ = 0;
+		ImGui::CloseCurrentPopup();
+	}
 	ImGui::EndPopup();
 }
 

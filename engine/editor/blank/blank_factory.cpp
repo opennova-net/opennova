@@ -87,30 +87,6 @@ bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t
 	return factory->make(request, out, error);
 }
 
-const char *blank_placement_dir(AssetKind kind) {
-	switch (kind) {
-	case AssetKind::Menu:
-	case AssetKind::MenuStyle: return "menus";
-	case AssetKind::Strings:
-	case AssetKind::StringTableCoo: return "strings";
-	case AssetKind::Font: return "fonts";
-	case AssetKind::Model: return "models";
-	case AssetKind::Animation:
-	case AssetKind::AnimationMap: return "anims";
-	case AssetKind::ItemDefs:
-	case AssetKind::WeaponDefs:
-	case AssetKind::AmmoDefs:
-	case AssetKind::HudPosDefs:
-	case AssetKind::HudFxDefs:
-	case AssetKind::AvatarDefs:
-	case AssetKind::SoundProfileDefs:
-	case AssetKind::CharAttrDefs:
-	case AssetKind::PowerupDefs:
-	case AssetKind::OtherDefs: return "defs";
-	default: return "";
-	}
-}
-
 std::string blank_crlf(const std::string &text) {
 	std::string out;
 	out.reserve(text.size() + text.size() / 16);

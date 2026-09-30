@@ -124,7 +124,7 @@ std::vector<Document::Collection> AnimationMapDocument::collections(const Node &
 	return {{clips, row.collections[0]}};
 }
 
-const std::vector<FieldSchema> &AnimationMapDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &AnimationMapDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> row_fields = [] {
 		FieldSchema key;
 		key.id = "key";

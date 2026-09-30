@@ -145,7 +145,7 @@ std::vector<Document::Collection> StringsDocument::collections(const Node &row, 
 	return {{{kString, "Strings", "key"}, row.collections[0]}};
 }
 
-const std::vector<FieldSchema> &StringsDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &StringsDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	return kind == kSection ? section_fields() : kind == kString ? string_fields() : none;
 }

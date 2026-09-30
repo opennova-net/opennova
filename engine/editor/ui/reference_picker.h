@@ -30,7 +30,9 @@ inline constexpr const char *kFileDragPayload = "opennova.file";
 // finding the graph would make: Create, Import, a placeholder; the variable's, for a %NAME% the
 // stylesheets do not define). Each popup keeps its own filter and its own "Show unreachable", by
 // its id, its document and its record (every field of every record its own); a picker instance
-// holds them for the window drawing it, and forgets a document's once it is closed.
+// holds them for the window drawing it, and forgets a document's once it is closed. S13 V3: the
+// list draws only the names that show (clipped), and a popup that closes lets its list go (the
+// graph's choices, the finding and its fixes), keeping its filter: it is made again as it opens.
 class ReferencePicker {
 public:
 	// Out of line: a popup's fixes (problem_fixes.h) are the picker's own.
@@ -52,9 +54,11 @@ public:
 	// is highlighted and nothing happens on release.
 	static bool accept_file(const SessionView &view, const FieldUse &field, std::string &picked);
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
-	// its fixes): once per opening while what it reads stands (ListKey), never for a change of
-	// anything else (a line of Output, a build's step).
+	// its fixes): once per opening, and again while it is open only when what it reads moves
+	// (ListKey), never for a change of anything else (a line of Output, a build's step).
 	size_t lists_made() const { return lists_made_; }
+	// The lists the popups hold now: an open popup's (none once it closes).
+	size_t lists_held() const;
 
 private:
 	// What a popup's list reads: of the view, the graph (the choices, the finding), the files, the
@@ -97,6 +101,8 @@ private:
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
 	             const FieldUse &field, const Value &value, bool others);
+	// A popup closed: its list goes, its filter and its "Show unreachable" stay.
+	static void drop_list(Popup &popup);
 	bool draw_popup(Workspace &workspace, Popup &popup, std::string &picked);
 	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);

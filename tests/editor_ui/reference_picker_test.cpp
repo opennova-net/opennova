@@ -241,7 +241,8 @@ void test_missing_value_fixes() {
 // S13 D1: a popup's list (the graph's choices, a missing value's finding and its fixes) is made
 // when it opens and kept while what it reads stands: a line of Output and the status line leave
 // it; an edit of its document, an edit of another that changes what the graph holds (the files
-// as they were), or a file the graph gains, make it again. A picker of the test's own, on the
+// as they were), or a file the graph gains, make it again. S13 V3: closed, the popup lets its list
+// go (none held), and opened again it makes it once more. A picker of the test's own, on the
 // item's model field, in a window of its own.
 void test_list_kept() {
 	PickerProject project;
@@ -314,6 +315,14 @@ void test_list_kept() {
 	draw(false);
 	draw(false);
 	CHECK(picker.lists_made() == 4, "a model the graph gains: the list made again");
+	CHECK(picker.lists_held() == 1, "the open popup holds its list");
+	ImGui::ClosePopupsExceptModals();
+	draw(false);
+	draw(false);
+	CHECK(picker.lists_held() == 0 && picker.lists_made() == 4, "closed: its list let go, nothing made");
+	draw(true);
+	draw(false);
+	CHECK(picker.lists_held() == 1 && picker.lists_made() == 5, "opened again: its list made once more");
 	ImGui::ClosePopupsExceptModals();
 	draw(false);
 }

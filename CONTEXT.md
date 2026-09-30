@@ -586,6 +586,17 @@ its type makes (an Apply edit's payload).
 _Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
 project file by its logical name)
 
+**Document view**:
+What a document's tab in the Document window shows of it: its type's row of the editor's view
+table, one view per open document, which keeps its filter, its order and what it has open for as
+long as the document is open. Most types show their records as an outline (a tree of the rows and
+what they hold, a list of the rows, or master and detail: the rows beside the selected row's
+records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
+menu's screens and windows), and the mission's will be a viewport filling the tab with the outline
+and the Inspector beside it. The selected record's fields are the Inspector's, whatever the type.
+_Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
+generic form beside it)
+
 **View event**:
 A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
 until the window it is for has had it: show a record's field (a Problems row, a Go to), show a

@@ -78,6 +78,16 @@ struct Kind {
 		out.row.names_files = true;
 		return out;
 	}
+	constexpr Kind folder(const char *name) const {
+		Kind out = *this;
+		out.row.folder = name;
+		return out;
+	}
+	constexpr Kind new_name(const char *name) const {
+		Kind out = *this;
+		out.row.new_name = name;
+		return out;
+	}
 };
 
 constexpr AssetKindRow kRows[] = {
@@ -89,15 +99,18 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("object_model")
 	        .edited_by(DocumentTypeId::Model)
 	        .names_files()
+	        .folder("models")
 	        .row,
 	Kind(AssetKind::Animation, "animation", "Animation", ArchiveSlot::Resource)
 	        .extensions(kAnimation)
 	        .edited_by(DocumentTypeId::Animation)
+	        .folder("anims")
 	        .row,
 	Kind(AssetKind::AnimationMap, "animation_map", "Animation map", ArchiveSlot::Resource)
 	        .extensions(kAnimationMap)
 	        .edited_by(DocumentTypeId::AnimationMap)
 	        .names_files()
+	        .folder("anims")
 	        .row,
 	// Its base and eye textures by name (formats/grm).
 	Kind(AssetKind::FaceAnimation, "face_animation", "Face animation", ArchiveSlot::Resource)
@@ -107,12 +120,21 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
 	        .extensions(kAiProfile)
 	        .row,
-	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource).extensions(kTexture).row,
-	Kind(AssetKind::Font, "font", "Font", ArchiveSlot::Localres).runtime("font").row,
+	Kind(AssetKind::Texture, "texture", "Texture", ArchiveSlot::Resource)
+	        .extensions(kTexture)
+	        .new_name("newtexture.tga")
+	        .row,
+	Kind(AssetKind::Font, "font", "Font", ArchiveSlot::Localres)
+	        .runtime("font")
+	        .folder("fonts")
+	        .new_name("newfont.fnt")
+	        .row,
 	// The boot text bins, the menu tables and the per-mission text sidecars.
 	Kind(AssetKind::Strings, "strings", "String table", ArchiveSlot::Language)
 	        .runtime("strings")
 	        .edited_by(DocumentTypeId::Strings)
+	        .folder("strings")
+	        .new_name("newtable.bin")
 	        .row,
 	Kind(AssetKind::MusicScript, "music_script", "Music script", ArchiveSlot::Localres)
 	        .runtime("music_script")
@@ -161,11 +183,14 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("menu")
 	        .edited_by(DocumentTypeId::Menu)
 	        .names_files()
+	        .folder("menus")
+	        .new_name("newmenu.mnu")
 	        .row,
 	Kind(AssetKind::MenuStyle, "menu_style", "Menu style", ArchiveSlot::Localres)
 	        .runtime("menu_style")
 	        .edited_by(DocumentTypeId::Styles)
 	        .names_files()
+	        .folder("menus")
 	        .row,
 	// Streamed by path, never through the archives (ArchiveSlot).
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank", ArchiveSlot::Loose)
@@ -200,48 +225,59 @@ constexpr AssetKindRow kRows[] = {
 	        .file("items.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::WeaponDefs, "weapon_defs", "Weapon definitions", ArchiveSlot::Localres)
 	        .file("weapon.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::AmmoDefs, "ammo_defs", "Ammo definitions", ArchiveSlot::Localres)
 	        .file("ammo.def")
 	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::HudPosDefs, "hudpos_defs", "HUD layout", ArchiveSlot::Localres)
 	        .runtime("hudpos")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::HudFxDefs, "hudfx_defs", "HUD effects", ArchiveSlot::Localres)
 	        .file("hudfx.def")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::AvatarDefs, "avatar_defs", "Avatars", ArchiveSlot::Localres)
 	        .runtime("avatar")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::SoundProfileDefs, "sound_profile_defs", "Sound profiles", ArchiveSlot::Localres)
 	        .file("sndprof.def")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::CharAttrDefs, "charattr_defs", "Character attributes", ArchiveSlot::Localres)
 	        .file("charattr.def")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::PowerupDefs, "powerup_defs", "Powerup definitions", ArchiveSlot::Localres)
 	        .file("powerup.def")
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::OtherDefs, "other_defs", "Definitions", ArchiveSlot::Localres)
 	        .extensions(kOtherDefs)
 	        .names_files()
+	        .folder("defs")
 	        .row,
 	Kind(AssetKind::StringTableCoo, "string_table_coo", "NovaWorld string table",
 	     ArchiveSlot::Loose)
 	        .extensions(kStringTableCoo)
+	        .folder("strings")
 	        .row,
 	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose).extensions(kVideo).row,
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
@@ -275,9 +311,31 @@ constexpr bool lists(const char *const *names, const char *name) {
 	return false;
 }
 
+constexpr size_t text_length(const char *text) {
+	size_t length = 0;
+	while (text[length]) ++length;
+	return length;
+}
+
+// Whether `name` ends with `tail`.
+constexpr bool ends_with(const char *name, const char *tail) {
+	const size_t n = text_length(name), t = text_length(tail);
+	return n >= t && same_text(name + (n - t), tail);
+}
+
+// A new file's name of a kind that lists its extensions ends with one of them (a kind the
+// runtime's classifier types by its bytes has no list to hold it to).
+constexpr bool new_name_fits(const AssetKindRow &row) {
+	if (!*row.new_name || !row.extensions) return true;
+	for (const char *const *extension = row.extensions; *extension; ++extension)
+		if (ends_with(row.new_name, *extension)) return true;
+	return false;
+}
+
 // One row per kind, at the kind's own index; no two rows share a token, a runtime token, a file
 // name or an extension (a name gives one kind); an import source packs nowhere, and every other
-// kind but an archive somewhere; a kind is edited by a type the registry has.
+// kind but an archive somewhere; a kind is edited by a type the registry has; a new file's name
+// ends with one of the kind's extensions where it lists them.
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKindRow &row = kRows[i];
@@ -286,6 +344,7 @@ constexpr bool rows_well_formed() {
 		        row.archive_slot == ArchiveSlot::None && row.kind != AssetKind::Archive;
 		if (row.import_source != packs_nowhere) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
+		if (!row.folder || !row.new_name || !new_name_fits(row)) return false;
 		for (size_t j = 0; j < i; ++j) {
 			const AssetKindRow &other = kRows[j];
 			if (same_text(row.token, other.token)) return false;

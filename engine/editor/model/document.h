@@ -239,9 +239,8 @@ public:
 	// serialize() and snapshot() are the base's (DocumentBase). A record document's snapshot shares
 	// its committed rows, file-wide state, history and saved baseline; none of this class's memos
 	// come with it (it fills them again as it is read); a type's own, which its copy constructor
-	// copies (a menu's saved image and lookups, a stylesheet's evaluated sheet and its values'
-	// uses), are each kept for one load generation and revision, which the snapshot shares, so
-	// they stay true.
+	// copies (a menu's saved image and lookups, a stylesheet's evaluated sheet), are each kept for
+	// one load generation and revision, which the snapshot shares, so they stay true.
 
 	// --- what changed since the last load or save (the saved baseline) -------------------
 	// The baseline moves only with a load or a save: an undo back to it makes the document
