@@ -528,8 +528,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		std::vector<NodeAddress> records;
 		for (size_t i = 0; i < json.array.size(); ++i) {
 			NodeAddress address;
-			if (!address_from_json(json.array[i], address, error, "records[" + std::to_string(i) + "]"))
-				return false;
+			const std::string place = "records[" + std::to_string(i) + "]";
+			if (!address_from_json(json.array[i], address, error, place)) return false;
 			records.push_back(address);
 		}
 		request.records = std::move(records);

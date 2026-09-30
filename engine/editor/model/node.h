@@ -14,7 +14,9 @@ namespace opennova::editor {
 // elements as they stand (their sizes, not what the allocator reserved, so the same on every
 // platform's library but for the elements' own sizes).
 inline size_t footprint_of(const std::string &text) { return text.size(); }
-template <class T> size_t footprint_of(const std::vector<T> &items) { return items.size() * sizeof(T); }
+template <class T> size_t footprint_of(const std::vector<T> &items) {
+	return items.size() * sizeof(T);
+}
 
 // A row of a document: the native record behind it belongs to the document type.
 // Rows are immutable once committed (shared as `const`); an edit clones the row,
@@ -39,8 +41,9 @@ struct Node {
 	}
 	// The bytes this version of the row holds of its own (ADR 0046 S13 D7): what its clone copies,
 	// so what an undo step keeping it costs (EditHistory's budget). What it shares with its other
-	// versions (a model's or a clip's parsed base) is not its own. An estimate from the sizes of what
-	// it holds (footprint_of), never less than the row's own object; a committed row's never changes.
+	// versions (a model's or a clip's parsed base) is not its own. An estimate from the sizes of
+	// what it holds (footprint_of), never less than the row's own object; a committed row's never
+	// changes.
 	virtual size_t footprint() const = 0;
 
 protected:

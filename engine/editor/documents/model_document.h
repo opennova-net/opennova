@@ -166,7 +166,8 @@ protected:
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	// A model keeps its two rows: a step adding or removing a row is refused.
-	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
+	bool accept_step(const EditStep &step, const StagedRows &rows,
+	                 std::string &error) const override;
 };
 
 bool is_model_kind(AssetKind kind);

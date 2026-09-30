@@ -248,7 +248,8 @@ size_t CatalogRow::footprint() const {
 		bytes += p->emplacement_attachments_count * sizeof(*p->emplacement_attachments);
 	if (const auto *p = std::get_if<DefWeaponDef>(&data))
 		bytes += p->actions_count * sizeof(*p->actions) + p->sights_count * sizeof(*p->sights);
-	if (const auto *p = std::get_if<DefAmmoDef>(&data)) bytes += p->effects_table_count * sizeof(*p->effects_table);
+	if (const auto *p = std::get_if<DefAmmoDef>(&data))
+		bytes += p->effects_table_count * sizeof(*p->effects_table);
 	return bytes;
 }
 
@@ -362,9 +363,9 @@ SerializeResult DefCatalogDocument::serialize() const {
 	return result;
 }
 
-std::shared_ptr<Node> DefCatalogDocument::make_node(NodeKind kind, NodeId id,
-                                                    const std::vector<std::shared_ptr<const Node>> &rows,
-                                                    std::string &error) {
+std::shared_ptr<Node> DefCatalogDocument::make_node(
+		NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
+		std::string &error) {
 	const RecordKindRow *top = kind_row(kind);
 	if (!top || !top->top) {
 		error = "This catalog cannot add that kind of record.";

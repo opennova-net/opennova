@@ -380,8 +380,8 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 	int variant = clip_variant_;
 	if (view.documents.active == document.path() &&
 			(!skeleton_ ||
-					!preview_clip_of(
-							document, view.documents.selection.primary, rig_, *skeleton_, key, variant)))
+					!preview_clip_of(document, view.documents.selection.primary, rig_, *skeleton_,
+							key, variant)))
 		key.clear();
 	if (key != clip_key_ || variant != clip_variant_ || rig_moved || document_moved) {
 		if (key != clip_key_ || variant != clip_variant_) seek_ticks(0);
@@ -399,7 +399,8 @@ ModelPreviewAction ModelPreviewModel::follow_animation_(const SessionView &view,
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
 	if (clip_document && view.documents.active == document.path() &&
 			view.documents.selection.primary.kind == node_kind(AnimationKind::Event) &&
-			view.documents.selection.primary.child && view.documents.selection.primary.child != sought_event_) {
+			view.documents.selection.primary.child &&
+			view.documents.selection.primary.child != sought_event_) {
 		sought_event_ = view.documents.selection.primary.child;
 		if (const Node *row = clip_document->row(view.documents.selection.primary.row)) {
 			const std::vector<NodeId> &events = row->collections[1];

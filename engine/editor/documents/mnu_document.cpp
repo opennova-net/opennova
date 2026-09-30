@@ -591,16 +591,20 @@ namespace {
 // What a window holds of its own beyond its object: its words, its lists, its children and its
 // parts (each window it holds counted whole).
 size_t window_content(const mnu::Window &window) {
-	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) + footprint_of(window.orientation) +
-	               footprint_of(window.text_rsrc) + footprint_of(window.private_data) + footprint_of(window.appearances) +
-	               footprint_of(window.sounds) + footprint_of(window.actions) + footprint_of(window.datasources) +
-	               footprint_of(window.hotkeys) + footprint_of(window.shuttle) + footprint_of(window.scrollup) +
+	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) +
+	               footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
+	               footprint_of(window.private_data) + footprint_of(window.appearances) +
+	               footprint_of(window.sounds) + footprint_of(window.actions) +
+	               footprint_of(window.datasources) + footprint_of(window.hotkeys) +
+	               footprint_of(window.shuttle) + footprint_of(window.scrollup) +
 	               footprint_of(window.scrolldown) + footprint_of(window.extras) +
 	               footprint_of(window.extra_attributes) + footprint_of(window.children);
 	for (const std::string &source : window.datasources) bytes += footprint_of(source);
 	for (const mnu::Window &child : window.children) bytes += window_content(child);
-	for (const mnu::WindowPart *part : {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
-		if (const mnu::Window *held = part->latent()) bytes += sizeof(mnu::Window) + window_content(*held);
+	for (const mnu::WindowPart *part :
+	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
+		if (const mnu::Window *held = part->latent())
+			bytes += sizeof(mnu::Window) + window_content(*held);
 	return bytes;
 }
 
@@ -1098,7 +1102,8 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	return true;
 }
 
-std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
+std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id,
+                                             const std::vector<std::shared_ptr<const Node>> &rows,
                                              std::string &error) {
 	if (kind != kScreen) { error = "A menu adds screens at the top level; windows nest under a screen."; return nullptr; }
 	auto row = std::make_shared<MenuScreen>();
@@ -1316,14 +1321,16 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 // "the last of a name is the one found"), so a copy keeping the original's name would take
 // its place for every ACTION naming it: the copy is renamed, compared as the lookups
 // compare names.
-void MnuDocument::prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
+void MnuDocument::prepare_duplicate(Node &copy,
+                                    const std::vector<std::shared_ptr<const Node>> &rows) const {
 	mnu::Screen &screen = screen_of(copy).screen;
 	screen.name = unique_name(menu_screen_names(rows), screen.name);
 }
 
 // An editor rule, as a screen keeps one root window: a menu with no screen has nothing
 // to show, so the last screen stays (the menu view's Remove waits for a second one).
-bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
+bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows,
+                              std::string &error) const {
 	if (rows.size() != 0) return true;
 	for (const RowSwap &swap : step.swaps) {
 		if (!swap.before || swap.after) continue;

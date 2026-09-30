@@ -122,8 +122,8 @@ public:
 private:
 	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
 	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
-	// redo: the active selection repaired against the rows that changed since (changes_since; all of
-	// them when the document cannot say), a gone primary giving way to `owner`.
+	// redo: the active selection repaired against the rows that changed since (changes_since; all
+	// of them when the document cannot say), a gone primary giving way to `owner`.
 	void repair_selection(const DocumentBase &document, uint64_t load_generation, uint64_t revision,
 	                      const NodeAddress &owner);
 	// A request that acts on records with none to act on: refused as the file not open

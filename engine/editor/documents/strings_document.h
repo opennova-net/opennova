@@ -66,7 +66,8 @@ protected:
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	// A duplicated section is named anew: under its original's name no lookup would find it.
-	void prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const override;
+	void prepare_duplicate(Node &copy,
+	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 
 private:
 	// A string's index in its section as the document's index places it (SIZE_MAX for none):

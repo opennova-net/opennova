@@ -108,8 +108,8 @@ uint32_t known_trigger_bits() {
 } // namespace
 
 size_t ClipRow::footprint() const {
-	return sizeof(ClipRow) + collections_footprint() + footprint_of(clip_name) + footprint_of(bones) +
-	       footprint_of(events);
+	return sizeof(ClipRow) + collections_footprint() + footprint_of(clip_name) +
+	       footprint_of(bones) + footprint_of(events);
 }
 
 ClipRow::ClipRow() {
@@ -252,7 +252,8 @@ bool AnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 	return true;
 }
 
-std::shared_ptr<Node> AnimationDocument::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+std::shared_ptr<Node> AnimationDocument::make_node(NodeKind, NodeId,
+                                                   const std::vector<std::shared_ptr<const Node>> &,
                                                    std::string &error) {
 	error = "A clip is one record: import a clip set (.o3a) for another.";
 	return nullptr;
@@ -374,7 +375,8 @@ bool AnimationDocument::edit_collection(Node &, const Edit &, const IdAllocator 
 	return false;
 }
 
-bool AnimationDocument::accept_step(const EditStep &step, const StagedRows &, std::string &error) const {
+bool AnimationDocument::accept_step(const EditStep &step, const StagedRows &,
+                                    std::string &error) const {
 	for (const RowSwap &swap : step.swaps) {
 		if (swap.before && swap.after) continue;
 		error = "A clip is one record.";

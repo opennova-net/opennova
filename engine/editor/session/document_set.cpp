@@ -157,7 +157,8 @@ void DocumentSet::reload_changed() {
 		}
 		forget_file_state(path);
 		remembered_.erase(path); // read again: its records' identities are gone
-		if (path == view_.documents.active) view_.documents.selection.select_only(path, NodeAddress());
+		if (path == view_.documents.active)
+			view_.documents.selection.select_only(path, NodeAddress());
 		document = loaded;
 		changed = true;
 		core_.note("Reloaded " + path + ": it changed outside the editor.");
@@ -418,7 +419,8 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 	const uint64_t before = document->revision(), generation = document->load_generation();
 	const uint64_t serial = view_.documents.selection.serial;
 	if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
-	if (document->revision() != before) repair_selection(*document, generation, before, NodeAddress());
+	if (document->revision() != before)
+		repair_selection(*document, generation, before, NodeAddress());
 	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);
 	update_view();
 	// An undo or a redo ends a gesture: the validation its edits left waiting runs now.
@@ -566,8 +568,8 @@ bool DocumentSet::position_after(const Document &document, const NodeAddress &re
 
 // --- the edits, the clipboard ------------------------------------------------------------------
 
-void DocumentSet::repair_selection(const DocumentBase &document, uint64_t load_generation, uint64_t revision,
-                                   const NodeAddress &owner) {
+void DocumentSet::repair_selection(const DocumentBase &document, uint64_t load_generation,
+                                   uint64_t revision, const NodeAddress &owner) {
 	const Document *records = records_of(document);
 	if (!records) return; // a document of another kind holds no records to select
 	ChangeSet changes;
@@ -627,9 +629,10 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 
 void DocumentSet::copy_records(Document &document, bool cut) {
 	last_edit_ok_ = false;
-	const std::vector<NodeAddress> records = document.path() == view_.documents.active
-	                                                 ? document.outermost(view_.documents.selection.records)
-	                                                 : std::vector<NodeAddress>();
+	const std::vector<NodeAddress> records =
+	        document.path() == view_.documents.active
+	                ? document.outermost(view_.documents.selection.records)
+	                : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now("document.copy", "Select the records to copy first.", document.path());
 	std::string payload = document.copy(records);
@@ -683,9 +686,10 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 // in one batch, one step.
 void DocumentSet::duplicate_records(Document &document) {
 	last_edit_ok_ = false;
-	const std::vector<NodeAddress> records = document.path() == view_.documents.active
-	                                                 ? document.outermost(view_.documents.selection.records)
-	                                                 : std::vector<NodeAddress>();
+	const std::vector<NodeAddress> records =
+	        document.path() == view_.documents.active
+	                ? document.outermost(view_.documents.selection.records)
+	                : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now("document.duplicate", "Select the records to duplicate first.", document.path());
 	// In document order: the rows among the rows, the records in their owner's collection. A copy
@@ -719,7 +723,8 @@ void DocumentSet::duplicate_records(Document &document) {
 	std::vector<Edit> edits;
 	for (size_t i = 0; i < items.size(); ++i) {
 		size_t before = 0; // copies already made in this record's list, ahead of it
-		for (size_t j = 0; j < i; ++j) before += items[j].owner == items[i].owner && items[j].kind == items[i].kind;
+		for (size_t j = 0; j < i; ++j)
+			before += items[j].owner == items[i].owner && items[j].kind == items[i].kind;
 		Edit edit;
 		edit.operation = EditOperation::Duplicate;
 		edit.address = items[i].record;
@@ -727,8 +732,9 @@ void DocumentSet::duplicate_records(Document &document) {
 		edits.push_back(edit);
 	}
 	if (apply_edits(document, edits))
-		view_.activity.status = edits.size() == 1 ? std::string("Duplicated a record.")
-		                                          : "Duplicated " + std::to_string(edits.size()) + " record(s).";
+		view_.activity.status =
+		        edits.size() == 1 ? std::string("Duplicated a record.")
+		                          : "Duplicated " + std::to_string(edits.size()) + " record(s).";
 }
 
 } // namespace opennova::editor

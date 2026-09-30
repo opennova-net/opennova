@@ -97,11 +97,11 @@ public:
 	virtual size_t history_bytes() const = 0;
 	// What changed from the state a caller last read (the load_generation() and revision() it read
 	// then) to this one, in the words of the document's kind (ChangeSet, ADR 0046 S13 D7): a record
-	// document's rows, a text's spans, a raster's regions; empty when it is that state. False when the
-	// document cannot say, and the caller takes everything as changed: another load's state (the
-	// document read again in place), a state its history no longer holds (given up to the history's
-	// budget, or on a branch an edit after an undo discarded), and, by the base's default, a kind
-	// that does not say.
+	// document's rows, a text's spans, a raster's regions; empty when it is that state. False when
+	// the document cannot say, and the caller takes everything as changed: another load's state
+	// (the document read again in place), a state its history no longer holds (given up to the
+	// history's budget, or on a branch an edit after an undo discarded), and, by the base's
+	// default, a kind that does not say.
 	virtual bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const {
 		(void)load_generation;
 		(void)revision;

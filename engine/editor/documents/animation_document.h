@@ -73,7 +73,8 @@ protected:
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	// A clip is one record: a step adding or removing a row is refused.
-	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
+	bool accept_step(const EditStep &step, const StagedRows &rows,
+	                 std::string &error) const override;
 };
 
 bool is_animation_kind(AssetKind kind);

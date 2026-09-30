@@ -127,11 +127,12 @@ std::string style_code(const std::string &code) {
 
 size_t StyleRow::footprint() const {
 	size_t bytes = sizeof(StyleRow) + collections_footprint() + footprint_of(native.leading_ws) +
-	               footprint_of(native.text) + footprint_of(native.eol) + footprint_of(native.directive_arg) +
-	               footprint_of(native.define_lines);
+	               footprint_of(native.text) + footprint_of(native.eol) +
+	               footprint_of(native.directive_arg) + footprint_of(native.define_lines);
 	for (const mns::DefineLine &line : native.define_lines)
-		bytes += footprint_of(line.leading_ws) + footprint_of(line.name) + footprint_of(line.sep_ws) +
-		         footprint_of(line.chunk) + footprint_of(line.pre_comment_ws) + footprint_of(line.post_backslash_ws) +
+		bytes += footprint_of(line.leading_ws) + footprint_of(line.name) +
+		         footprint_of(line.sep_ws) + footprint_of(line.chunk) +
+		         footprint_of(line.pre_comment_ws) + footprint_of(line.post_backslash_ws) +
 		         footprint_of(line.comment) + footprint_of(line.eol);
 	return bytes;
 }
@@ -383,7 +384,8 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	return true;
 }
 
-std::shared_ptr<Node> MnsDocument::make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &,
+std::shared_ptr<Node> MnsDocument::make_node(NodeKind kind, NodeId id,
+                                             const std::vector<std::shared_ptr<const Node>> &,
                                              std::string &error) {
 	auto row = std::make_shared<StyleRow>();
 	row->kind = kind;
@@ -451,7 +453,8 @@ bool MnsDocument::edit_collection(Node &, const Edit &, const IdAllocator &, Nod
 	return false;
 }
 
-bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged, std::string &error) const {
+bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged,
+                              std::string &error) const {
 	// A frozen row keeps its place: only a change of its own fields, in place, passes.
 	for (const RowSwap &swap : step.swaps) {
 		if (swap.in_place()) continue;

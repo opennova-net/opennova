@@ -85,7 +85,8 @@ adm::AdmEntry entry_of(const AnimationMapRow &row) {
 } // namespace
 
 size_t AnimationMapRow::footprint() const {
-	size_t bytes = sizeof(AnimationMapRow) + collections_footprint() + footprint_of(key) + footprint_of(clips);
+	size_t bytes = sizeof(AnimationMapRow) + collections_footprint() + footprint_of(key) +
+	               footprint_of(clips);
 	for (const std::string &clip : clips) bytes += footprint_of(clip);
 	return bytes;
 }
@@ -229,9 +230,9 @@ bool AnimationMapDocument::parse(const std::vector<uint8_t> &bytes, std::vector<
 	return true;
 }
 
-std::shared_ptr<Node> AnimationMapDocument::make_node(NodeKind kind, NodeId,
-                                                      const std::vector<std::shared_ptr<const Node>> &rows,
-                                                      std::string &error) {
+std::shared_ptr<Node> AnimationMapDocument::make_node(
+		NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &rows,
+		std::string &error) {
 	if (kind != kRow) {
 		error = "A table adds rows at the top level.";
 		return nullptr;

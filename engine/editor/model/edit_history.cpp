@@ -8,17 +8,25 @@ namespace opennova::editor {
 
 namespace {
 
-size_t footprint(const std::shared_ptr<const Node> &row) { return row ? row->footprint() : 0; }
-size_t swap_bytes(const RowSwap &swap) { return footprint(swap.before) + footprint(swap.after); }
+size_t footprint(const std::shared_ptr<const Node> &row) {
+	return row ? row->footprint() : 0;
+}
+size_t swap_bytes(const RowSwap &swap) {
+	return footprint(swap.before) + footprint(swap.after);
+}
 
-bool by_id(const RowSwap &a, const RowSwap &b) { return a.id() < b.id(); }
+bool by_id(const RowSwap &a, const RowSwap &b) {
+	return a.id() < b.id();
+}
 
 // The index of the row `id`: `hint` when the row is there, else wherever it is (rows.size() for
 // none).
 size_t find_row(const std::vector<std::shared_ptr<const Node>> &rows, NodeId id, size_t hint) {
-	if (hint < rows.size() && rows[hint]->id == id) return hint;
+	if (hint < rows.size() && rows[hint]->id == id)
+		return hint;
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == id) return i;
+		if (rows[i]->id == id)
+			return i;
 	return rows.size();
 }
 
@@ -26,7 +34,8 @@ size_t find_row(const std::vector<std::shared_ptr<const Node>> &rows, NodeId id,
 std::vector<NodeId> ids_of(const EditStep &step) {
 	std::vector<NodeId> ids;
 	ids.reserve(step.swaps.size());
-	for (const RowSwap &swap : step.swaps) ids.push_back(swap.id());
+	for (const RowSwap &swap : step.swaps)
+		ids.push_back(swap.id());
 	return ids;
 }
 
@@ -34,11 +43,13 @@ std::vector<NodeId> ids_of(const EditStep &step) {
 
 bool EditStep::changes_rows() const {
 	for (const RowSwap &swap : swaps)
-		if (!swap.in_place()) return true;
+		if (!swap.in_place())
+			return true;
 	return false;
 }
 
-void apply_step(std::vector<std::shared_ptr<const Node>> &rows, const EditStep &step, bool forward) {
+void apply_step(
+		std::vector<std::shared_ptr<const Node>> &rows, const EditStep &step, bool forward) {
 	struct Place {
 		const RowSwap *swap;
 		size_t position;
@@ -47,26 +58,34 @@ void apply_step(std::vector<std::shared_ptr<const Node>> &rows, const EditStep &
 	for (const RowSwap &swap : step.swaps) {
 		const auto &from = forward ? swap.before : swap.after;
 		const auto &to = forward ? swap.after : swap.before;
-		if (from && (!to || swap.moved)) out.push_back({&swap, forward ? swap.before_position : swap.after_position});
-		if (to && (!from || swap.moved)) in.push_back({&swap, forward ? swap.after_position : swap.before_position});
+		if (from && (!to || swap.moved))
+			out.push_back({ &swap, forward ? swap.before_position : swap.after_position });
+		if (to && (!from || swap.moved))
+			in.push_back({ &swap, forward ? swap.after_position : swap.before_position });
 	}
 	// Taken out from the last index down, so every index taken is still the one the step recorded;
 	// then the rows kept stand in their order, and each row put in, from the first index up, lands
 	// where the step leaves it.
-	std::sort(out.begin(), out.end(), [](const Place &a, const Place &b) { return a.position > b.position; });
+	std::sort(out.begin(), out.end(),
+			[](const Place &a, const Place &b) { return a.position > b.position; });
 	for (const Place &place : out) {
 		const size_t at = find_row(rows, place.swap->id(), place.position);
-		if (at < rows.size()) rows.erase(rows.begin() + std::ptrdiff_t(at));
+		if (at < rows.size())
+			rows.erase(rows.begin() + std::ptrdiff_t(at));
 	}
-	std::sort(in.begin(), in.end(), [](const Place &a, const Place &b) { return a.position < b.position; });
+	std::sort(in.begin(), in.end(),
+			[](const Place &a, const Place &b) { return a.position < b.position; });
 	for (const Place &place : in) {
 		const auto &to = forward ? place.swap->after : place.swap->before;
 		rows.insert(rows.begin() + std::ptrdiff_t(std::min(place.position, rows.size())), to);
 	}
 	for (const RowSwap &swap : step.swaps) {
-		if (!swap.in_place()) continue;
-		const size_t at = find_row(rows, swap.id(), forward ? swap.after_position : swap.before_position);
-		if (at < rows.size()) rows[at] = forward ? swap.after : swap.before;
+		if (!swap.in_place())
+			continue;
+		const size_t at =
+				find_row(rows, swap.id(), forward ? swap.after_position : swap.before_position);
+		if (at < rows.size())
+			rows[at] = forward ? swap.after : swap.before;
 	}
 }
 
@@ -84,13 +103,16 @@ bool EditHistory::open(const std::string &key) const {
 	// A group never swallows the saved checkpoint: undo must be able to return to exactly what is
 	// on disk.
 	return !key.empty() && key == key_ && cursor_ && cursor_ == steps_.size() &&
-	       steps_.back().after_revision != saved_revision_;
+			steps_.back().after_revision != saved_revision_;
 }
 
-bool EditHistory::folds(const std::string &key) const { return open(key) && !steps_.back().changes_rows; }
+bool EditHistory::folds(const std::string &key) const {
+	return open(key) && !steps_.back().changes_rows;
+}
 
 void EditHistory::forget_redo() {
-	for (size_t i = cursor_; i < steps_.size(); ++i) bytes_ -= steps_[i].bytes;
+	for (size_t i = cursor_; i < steps_.size(); ++i)
+		bytes_ -= steps_[i].bytes;
 	steps_.erase(steps_.begin() + std::ptrdiff_t(cursor_), steps_.end());
 }
 
@@ -100,17 +122,18 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 	const bool changes_rows = step.changes_rows();
 	const bool fold = !changes_rows && folds(key);
 	const uint64_t before = revision_, revision = next_revision_++;
-	Mark mark{revision, ids_of(step), step.before_state != step.after_state};
+	Mark mark{ revision, ids_of(step), step.before_state != step.after_state };
 	std::vector<Mark> carried;
 	if (cursor_ < steps_.size() && reopened_) {
-		// The reopened step gives its place to this one, which starts from what its group found: the
-		// revisions it took are this step's, and a row it changed that this one leaves as the group
-		// found it changed since them too.
+		// The reopened step gives its place to this one, which starts from what its group found:
+		// the revisions it took are this step's, and a row it changed that this one leaves as the
+		// group found it changed since them too.
 		Entry &replaced = steps_[cursor_];
 		carried = std::move(replaced.marks);
 		std::vector<NodeId> rows;
 		const std::vector<NodeId> earlier = ids_of(replaced.step);
-		std::set_union(mark.rows.begin(), mark.rows.end(), earlier.begin(), earlier.end(), std::back_inserter(rows));
+		std::set_union(mark.rows.begin(), mark.rows.end(), earlier.begin(), earlier.end(),
+				std::back_inserter(rows));
 		mark.rows = std::move(rows);
 		mark.state = mark.state || replaced.step.before_state != replaced.step.after_state;
 	}
@@ -127,7 +150,8 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		merged.reserve(last.step.swaps.size() + step.swaps.size());
 		auto kept = last.step.swaps.begin();
 		for (RowSwap &swap : step.swaps) {
-			while (kept != last.step.swaps.end() && kept->id() < swap.id()) merged.push_back(std::move(*kept++));
+			while (kept != last.step.swaps.end() && kept->id() < swap.id())
+				merged.push_back(std::move(*kept++));
 			if (kept != last.step.swaps.end() && kept->id() == swap.id()) {
 				RowSwap folded = std::move(*kept++);
 				folded.after = std::move(swap.after);
@@ -136,13 +160,15 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 				merged.push_back(std::move(swap));
 			}
 		}
-		while (kept != last.step.swaps.end()) merged.push_back(std::move(*kept++));
+		while (kept != last.step.swaps.end())
+			merged.push_back(std::move(*kept++));
 		last.step.swaps = std::move(merged);
 		last.step.after_state = step.after_state;
 		last.after_revision = revision;
 		last.marks.push_back(std::move(mark));
 		last.bytes = 0;
-		for (const RowSwap &swap : last.step.swaps) last.bytes += swap_bytes(swap);
+		for (const RowSwap &swap : last.step.swaps)
+			last.bytes += swap_bytes(swap);
 		bytes_ += last.bytes;
 	} else {
 		Entry entry;
@@ -151,7 +177,8 @@ void EditHistory::commit(EditStep step, const std::string &key) {
 		entry.marks = std::move(carried);
 		entry.marks.push_back(std::move(mark));
 		entry.changes_rows = changes_rows;
-		for (const RowSwap &swap : step.swaps) entry.bytes += swap_bytes(swap);
+		for (const RowSwap &swap : step.swaps)
+			entry.bytes += swap_bytes(swap);
 		entry.step = std::move(step);
 		bytes_ += entry.bytes;
 		steps_.push_back(std::move(entry));
@@ -170,14 +197,16 @@ void EditHistory::trim() {
 }
 
 bool EditHistory::reopen(const std::string &key) {
-	if (!open(key)) return false;
+	if (!open(key))
+		return false;
 	step_back();
 	reopened_ = true;
 	return true;
 }
 
 void EditHistory::resume() {
-	if (cursor_ < steps_.size()) step_forward();
+	if (cursor_ < steps_.size())
+		step_forward();
 	reopened_ = false;
 }
 
@@ -202,14 +231,16 @@ void EditHistory::step_forward() {
 }
 
 void EditHistory::undo() {
-	if (!cursor_) return;
+	if (!cursor_)
+		return;
 	step_back();
 	end_edit_group();
 	reopened_ = false;
 }
 
 void EditHistory::redo() {
-	if (cursor_ >= steps_.size()) return;
+	if (cursor_ >= steps_.size())
+		return;
 	step_forward();
 	end_edit_group();
 	reopened_ = false;
@@ -217,8 +248,10 @@ void EditHistory::redo() {
 
 bool EditHistory::changes_since(uint64_t revision, RowChanges &out) const {
 	out = RowChanges();
-	if (revision == revision_) return true;
-	if (steps_.empty()) return false;
+	if (revision == revision_)
+		return true;
+	if (steps_.empty())
+		return false;
 	// Where the state `revision` is: a boundary between the steps (after `boundary` of them; 0 the
 	// state before the first one kept), or inside step `inside` at its mark `mark`, a state a fold
 	// took into it (always a step that changes rows in place).
@@ -227,15 +260,17 @@ bool EditHistory::changes_since(uint64_t revision, RowChanges &out) const {
 		boundary = 0;
 	} else {
 		const auto step = std::lower_bound(steps_.begin(), steps_.end(), revision,
-		                                   [](const Entry &entry, uint64_t r) { return entry.after_revision < r; });
-		if (step == steps_.end()) return false;
+				[](const Entry &entry, uint64_t r) { return entry.after_revision < r; });
+		if (step == steps_.end())
+			return false;
 		const size_t index = size_t(step - steps_.begin());
 		if (step->after_revision == revision) {
 			boundary = index + 1;
 		} else {
 			const auto found = std::lower_bound(step->marks.begin(), step->marks.end(), revision,
-			                                    [](const Mark &m, uint64_t r) { return m.revision < r; });
-			if (found == step->marks.end() || found->revision != revision) return false;
+					[](const Mark &m, uint64_t r) { return m.revision < r; });
+			if (found == step->marks.end() || found->revision != revision)
+				return false;
 			inside = index;
 			mark = size_t(found - step->marks.begin());
 		}
@@ -261,7 +296,8 @@ bool EditHistory::changes_since(uint64_t revision, RowChanges &out) const {
 			}
 			track.has = bool(to);
 			track.end = to.get();
-			if (swap.moved && from && to) out.reordered = true;
+			if (swap.moved && from && to)
+				out.reordered = true;
 		}
 	};
 	const auto folded = [&](const Entry &entry, size_t first, size_t last) {
@@ -291,15 +327,20 @@ bool EditHistory::changes_since(uint64_t revision, RowChanges &out) const {
 		}
 	}
 	if (boundary < cursor_)
-		for (size_t i = boundary; i < cursor_; ++i) walk(steps_[i], true);
+		for (size_t i = boundary; i < cursor_; ++i)
+			walk(steps_[i], true);
 	else
-		for (size_t i = boundary; i > cursor_; --i) walk(steps_[i - 1], false);
+		for (size_t i = boundary; i > cursor_; --i)
+			walk(steps_[i - 1], false);
 	state_changed = state_changed || state_at(boundary) != state_;
 
 	for (const auto &[id, track] : tracks) {
-		if (!track.had && track.has) out.added.push_back(id);
-		else if (track.had && !track.has) out.removed.push_back(id);
-		else if (track.had && track.has && (!track.known || track.start != track.end)) out.changed.push_back(id);
+		if (!track.had && track.has)
+			out.added.push_back(id);
+		else if (track.had && !track.has)
+			out.removed.push_back(id);
+		else if (track.had && track.has && (!track.known || track.start != track.end))
+			out.changed.push_back(id);
 	}
 	out.file_state = state_changed;
 	return true;

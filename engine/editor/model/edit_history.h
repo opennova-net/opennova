@@ -13,11 +13,11 @@
 namespace opennova::editor {
 
 // One row's part of an undo step (ADR 0046 S13 D7): the row's version before the step and after it
-// (either empty: a row the step adds or removes), with its index among the rows on each side, a hint
-// the undo and the redo try first (a row not found there is looked for by its identity). A row the
-// step moves among the rows it keeps is taken out and put back (`moved`: its two versions may be one);
-// any other row both sides have is swapped in place, so a step that changes the fields of k rows
-// undoes and redoes in k swaps, however many rows the document holds.
+// (either empty: a row the step adds or removes), with its index among the rows on each side, a
+// hint the undo and the redo try first (a row not found there is looked for by its identity). A row
+// the step moves among the rows it keeps is taken out and put back (`moved`: its two versions may
+// be one); any other row both sides have is swapped in place, so a step that changes the fields of
+// k rows undoes and redoes in k swaps, however many rows the document holds.
 struct RowSwap {
 	std::shared_ptr<const Node> before, after;
 	size_t before_position = 0, after_position = 0;
@@ -37,8 +37,9 @@ struct EditStep {
 	bool empty() const { return swaps.empty() && before_state == after_state; }
 };
 
-// A step's swaps done to a row list, forward (its before to its after) or back: the rows it takes out
-// from the last index down, the rows it puts in from the first index up, the rest swapped in place.
+// A step's swaps done to a row list, forward (its before to its after) or back: the rows it takes
+// out from the last index down, the rows it puts in from the first index up, the rest swapped in
+// place.
 void apply_step(std::vector<std::shared_ptr<const Node>> &rows, const EditStep &step, bool forward);
 
 // What a history keeps (ADR 0046 S13 D7): at most `bytes` of rows (each step's rows' footprints,
@@ -58,27 +59,36 @@ struct HistoryBudget {
 // history gives up its oldest steps.
 class EditHistory {
 public:
-	EditHistory(std::vector<std::shared_ptr<const Node>> &rows, std::shared_ptr<const FileState> &state,
-	            HistoryBudget budget = {})
-	    : rows_(rows), state_(state), budget_(budget) {}
+	EditHistory(std::vector<std::shared_ptr<const Node>> &rows,
+			std::shared_ptr<const FileState> &state, HistoryBudget budget = {}) :
+			rows_(rows), state_(state), budget_(budget) {}
 	// The journal another keeps, as it stands, over another document's row list and file-wide
 	// state (a snapshot's: Document::snapshot).
 	EditHistory(const EditHistory &other, std::vector<std::shared_ptr<const Node>> &rows,
-	            std::shared_ptr<const FileState> &state)
-	    : rows_(rows), state_(state), budget_(other.budget_), steps_(other.steps_), cursor_(other.cursor_),
-	      revision_(other.revision_), saved_revision_(other.saved_revision_),
-	      next_revision_(other.next_revision_), key_(other.key_), bytes_(other.bytes_) {}
+			std::shared_ptr<const FileState> &state) :
+			rows_(rows),
+			state_(state),
+			budget_(other.budget_),
+			steps_(other.steps_),
+			cursor_(other.cursor_),
+			revision_(other.revision_),
+			saved_revision_(other.saved_revision_),
+			next_revision_(other.next_revision_),
+			key_(other.key_),
+			bytes_(other.bytes_) {}
 	EditHistory(const EditHistory &) = delete;
 	EditHistory &operator=(const EditHistory &) = delete;
 
 	void reset();
-	// The step done forward and recorded, the redo branch discarded. It folds into the last step while
-	// the group `key` is open and neither changes rows; a step that changes rows ends the group.
+	// The step done forward and recorded, the redo branch discarded. It folds into the last step
+	// while the group `key` is open and neither changes rows; a step that changes rows ends the
+	// group.
 	void commit(EditStep step, const std::string &key);
-	// While the group `key` is open (its step is the last one and not the saved checkpoint), undo that
-	// step and keep it as the redo branch, the group still open: the next commit replaces it (a
-	// coalesced batch starting again from what its group found; the revisions it took are the new
-	// step's) and resume() puts it back. False, with nothing undone, when the group is not open.
+	// While the group `key` is open (its step is the last one and not the saved checkpoint), undo
+	// that step and keep it as the redo branch, the group still open: the next commit replaces it
+	// (a coalesced batch starting again from what its group found; the revisions it took are the
+	// new step's) and resume() puts it back. False, with nothing undone, when the group is not
+	// open.
 	bool reopen(const std::string &key);
 	void resume();
 	// After reopen(), the step it undid forgotten instead and the group ended: what the group
@@ -98,10 +108,11 @@ public:
 	size_t bytes() const { return bytes_; }
 	size_t steps() const { return steps_.size(); }
 	const HistoryBudget &budget() const { return budget_; }
-	// The rows that changed from the state `revision` to the one the history is at, walking the steps
-	// between (undone or redone); a state a fold took into a step answers the rows the step's later
-	// folds changed. Empty for the state it is at. False when it holds no such state: one of a branch
-	// an edit after an undo discarded, of a coalesced group dropped, or older than the steps it kept.
+	// The rows that changed from the state `revision` to the one the history is at, walking the
+	// steps between (undone or redone); a state a fold took into a step answers the rows the step's
+	// later folds changed. Empty for the state it is at. False when it holds no such state: one of
+	// a branch an edit after an undo discarded, of a coalesced group dropped, or older than the
+	// steps it kept.
 	bool changes_since(uint64_t revision, RowChanges &out) const;
 
 private:
@@ -120,12 +131,17 @@ private:
 		bool changes_rows = false;
 	};
 
-	bool open(const std::string &key) const;  // the group `key` is open: its step is the last
-	bool folds(const std::string &key) const; // the next commit under `key` folds into the last step
-	void step_back();    // the step before the cursor undone
-	void step_forward(); // the step at the cursor redone
-	void forget_redo();  // the steps past the cursor forgotten
-	void trim();         // the oldest steps given up while the history is past its budget
+	// The group `key` is open: its step is the last.
+	bool open(const std::string &key) const;
+	// The next commit under `key` folds into the last step.
+	bool folds(const std::string &key) const;
+	// The step before the cursor undone; the step at the cursor redone.
+	void step_back();
+	void step_forward();
+	// The steps past the cursor forgotten.
+	void forget_redo();
+	// The oldest steps given up while the history is past its budget.
+	void trim();
 
 	std::vector<std::shared_ptr<const Node>> &rows_;
 	std::shared_ptr<const FileState> &state_;

@@ -78,40 +78,41 @@ public:
 	Document() = default;
 
 	// What apply (the base's) does with a record document's edits (apply_edits, ADR 0046 S13 D7): a
-	// batch is one undoable step over any rows of the document, each edit applied to the rows as the
-	// edits before it left them (StagedRows: each row an edit touches cloned once), nothing committed
-	// when any edit is refused or the type vetoes the step (accept_step). A batch may mix the edits of
-	// records (a Set, Clear, Write or Apply of a record's field, and the Adds, Duplicates, Removes,
-	// Moves and Pastes inside a row) with the rows' own (a row added, duplicated, removed or moved, the
-	// rows a Paste at the top level makes: paste_rows) and the file-wide state's (a SetFileValue, an
-	// Apply naming no row). Every address is checked against the rows as the batch has left them: a
-	// stale identity, or one naming another kind than the address says, is refused
-	// (document.selection), and so is an edit naming a row an earlier edit of the batch removed
-	// (document.batch). A later edit may name what an earlier one made, a row or a record
-	// (batch_made). A Move that leaves a record where it is, a Clear of a field already left out, a
-	// Write of one already written, a Set of the value a field holds (the field as the record reads it,
-	// and whether it is written, the same after the Set) and an Apply whose payload changes nothing
-	// change nothing; a batch that changes nothing takes no history step (the document stays clean).
-	// A batch whose edits are all coalesced Sets (typing) applies to the rows as its open group found
-	// them (Edit::coalesce), the group's step undone first, so a value typed on the way (an empty image
-	// or hotkey, a name) leaves nothing behind and the whole group stays one step (a refused one puts
-	// the group's step back as it was; one typed back to what the group found leaves none). Batches
-	// sharing a gesture fold into one step over every row they change, each building on the last
-	// (Edit::gesture); a batch that adds, removes or moves a row is a step of its own and ends the
-	// group. A record's new name is its own edit: what names it elsewhere, in its file or another, is
-	// Rename everywhere's (graph/rename_transaction, plan_symbol_rename_project).
+	// batch is one undoable step over any rows of the document, each edit applied to the rows as
+	// the edits before it left them (StagedRows: each row an edit touches cloned once), nothing
+	// committed when any edit is refused or the type vetoes the step (accept_step). A batch may mix
+	// the edits of records (a Set, Clear, Write or Apply of a record's field, and the Adds,
+	// Duplicates, Removes, Moves and Pastes inside a row) with the rows' own (a row added,
+	// duplicated, removed or moved, the rows a Paste at the top level makes: paste_rows) and the
+	// file-wide state's (a SetFileValue, an Apply naming no row). Every address is checked against
+	// the rows as the batch has left them: a stale identity, or one naming another kind than the
+	// address says, is refused (document.selection), and so is an edit naming a row an earlier edit
+	// of the batch removed (document.batch). A later edit may name what an earlier one made, a row
+	// or a record (batch_made). A Move that leaves a record where it is, a Clear of a field already
+	// left out, a Write of one already written, a Set of the value a field holds (the field as the
+	// record reads it, and whether it is written, the same after the Set) and an Apply whose
+	// payload changes nothing change nothing; a batch that changes nothing takes no history step
+	// (the document stays clean). A batch whose edits are all coalesced Sets (typing) applies to
+	// the rows as its open group found them (Edit::coalesce), the group's step undone first, so a
+	// value typed on the way (an empty image or hotkey, a name) leaves nothing behind and the whole
+	// group stays one step (a refused one puts the group's step back as it was; one typed back to
+	// what the group found leaves none). Batches sharing a gesture fold into one step over every
+	// row they change, each building on the last (Edit::gesture); a batch that adds, removes or
+	// moves a row is a step of its own and ends the group. A record's new name is its own edit:
+	// what names it elsewhere, in its file or another, is Rename everywhere's
+	// (graph/rename_transaction, plan_symbol_rename_project).
 	void end_edit_group() override { history_.end_edit_group(); }
 	bool dirty() const override { return history_.dirty(); }
 	bool can_undo() const override { return history_.can_undo(); }
 	bool can_redo() const override { return history_.can_redo(); }
 	uint64_t revision() const override { return history_.revision(); }
-	// What the history holds: its steps' rows' footprints (Node::footprint), under the history's budget
-	// (HistoryBudget: past it the oldest steps are given up, never the last one).
+	// What the history holds: its steps' rows' footprints (Node::footprint), under the history's
+	// budget (HistoryBudget: past it the oldest steps are given up, never the last one).
 	size_t history_bytes() const override { return history_.bytes(); }
 	// The rows added, removed and changed, whether rows moved among the others and whether the
-	// file-wide state changed, from the state (load_generation, revision) to this one (RowChanges, the
-	// history's changes_since): false for another load's state, and for one the history no longer
-	// holds.
+	// file-wide state changed, from the state (load_generation, revision) to this one (RowChanges,
+	// the history's changes_since): false for another load's state, and for one the history no
+	// longer holds.
 	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	const Document *as_records() const override { return this; }
 	Document *as_records() override { return this; }
@@ -119,8 +120,8 @@ public:
 	const std::vector<std::shared_ptr<const Node>> &rows() const { return rows_; }
 	const FileState *file_state() const { return file_state_.get(); }
 	// What the last batch that made records made: its first, and every one in its edits' order (the
-	// rows and records added, the copies a Duplicate made, the rows and records a Paste made; not what
-	// they hold).
+	// rows and records added, the copies a Duplicate made, the rows and records a Paste made; not
+	// what they hold).
 	NodeId last_added() const { return last_added_; }
 	const std::vector<NodeId> &last_added_records() const { return added_; }
 	// The address of a row or nested record by identity (kind 0 / row 0 when unknown): its row
@@ -329,8 +330,8 @@ protected:
 	virtual bool same_file_state(const FileState *a, const FileState *b) const { return a == b; }
 	// A new top-level record of `kind` with the type's defaults, already given `id`, beside `rows`
 	// (the rows as its batch has left them: a name or an id no other row has); null, with why in
-	// `error`, for a kind the type adds no row of. The default adds none (a type whose rows the file
-	// fixes).
+	// `error`, for a kind the type adds no row of. The default adds none (a type whose rows the
+	// file fixes).
 	virtual std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
 	                                        const std::vector<std::shared_ptr<const Node>> &rows,
 	                                        std::string &error);
@@ -354,11 +355,11 @@ protected:
 	// descendants). The default refuses.
 	virtual bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                           std::string &error);
-	// A Paste at the top level (Edit Paste naming no row and no owner, ADR 0046 S13 D7): the payload
-	// `copy` made (edit.value) as rows of the file, in order, their identity stores sized and their
-	// identities left to the base (as parse leaves them), each told apart from `rows` (the rows as the
-	// batch has left them) where the type tells a copy apart (a name no row has). The base puts them
-	// in at edit.position. The default refuses: no type copies rows yet.
+	// A Paste at the top level (Edit Paste naming no row and no owner, ADR 0046 S13 D7): the
+	// payload `copy` made (edit.value) as rows of the file, in order, their identity stores sized
+	// and their identities left to the base (as parse leaves them), each told apart from `rows`
+	// (the rows as the batch has left them) where the type tells a copy apart (a name no row has).
+	// The base puts them in at edit.position. The default refuses: no type copies rows yet.
 	virtual bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
 	                        std::vector<std::shared_ptr<Node>> &out, std::string &error);
 	// A change the type made in C++ (Edit Apply: its EditPayload, whose token says which) to the
@@ -392,17 +393,19 @@ protected:
 	// has left them, still hold the original): the type may tell the copy apart (a menu names the
 	// screen anew, since the game finds the last of two screens of one name). The default keeps it
 	// as is.
-	virtual void prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
+	virtual void prepare_duplicate(Node &copy,
+	                               const std::vector<std::shared_ptr<const Node>> &rows) const {
 		(void)copy;
 		(void)rows;
 	}
-	// The veto on a batch's step before it commits (S13 D7, which replaced S9's accept_change of one
-	// row): its swaps (a row added, removed, moved or changed in place) and the file-wide state on
-	// both sides, with the rows as the step leaves them (StagedRows::rows), for every batch, the rows
-	// added, duplicated, removed and moved included (which never reach the type otherwise). A refusal
-	// commits nothing, leaves the history and last_added as they were, and fails the batch with
-	// `error` (document.structure). The default accepts.
-	virtual bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
+	// The veto on a batch's step before it commits (S13 D7, which replaced S9's accept_change of
+	// one row): its swaps (a row added, removed, moved or changed in place) and the file-wide state
+	// on both sides, with the rows as the step leaves them (StagedRows::rows), for every batch, the
+	// rows added, duplicated, removed and moved included (which never reach the type otherwise). A
+	// refusal commits nothing, leaves the history and last_added as they were, and fails the batch
+	// with `error` (document.structure). The default accepts.
+	virtual bool accept_step(const EditStep &step, const StagedRows &rows,
+	                         std::string &error) const {
 		(void)step;
 		(void)rows;
 		(void)error;
@@ -460,8 +463,8 @@ private:
 	// Whether a row's index among the rows both sides have differs from the baseline's.
 	bool row_moved(NodeId id) const;
 	// The undo step a batch continues: batches sharing a gesture fold into one step over every row
-	// they change until the group ends (`builds`: each builds on the last); a batch of coalesced Sets
-	// folds with the next one of the same fields; "" folds with nothing.
+	// they change until the group ends (`builds`: each builds on the last); a batch of coalesced
+	// Sets folds with the next one of the same fields; "" folds with nothing.
 	static std::string step_key(const std::vector<Edit> &edits, bool &builds);
 	// A batch's edits applied to `staged` in order, nothing committed: false, with `error`, at the
 	// first one refused; `added` receives what each edit made, in order (last_added_records).
