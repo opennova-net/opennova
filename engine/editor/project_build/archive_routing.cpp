@@ -18,16 +18,6 @@ const char *archive_slot_file_name(ArchiveSlot slot) {
 	return "";
 }
 
-const char *archive_slot_label(ArchiveSlot slot) {
-	switch (slot) {
-	case ArchiveSlot::Language: return "language archive";
-	case ArchiveSlot::Localres: return "local resource archive";
-	case ArchiveSlot::Resource: return "resource archive";
-	case ArchiveSlot::Loose: return "loose file";
-	}
-	return "";
-}
-
 bool asset_is_packable(const AssetEntry &asset) {
 	return asset.kind != AssetKind::Archive;
 }

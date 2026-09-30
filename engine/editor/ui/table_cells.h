@@ -14,8 +14,5 @@ namespace opennova::editor {
 // field's schema says what it holds (its capacity in bytes, the terminator included) and
 // whether it runs over several lines (a string's text: the cell as tall as its lines).
 void text_cell(EditorHost &host, const Document &document, NodeAddress address, const char *field);
-// The tooltip of the item just drawn, a disabled one too ("" = none): the document
-// windows' one hover helper.
-void hover_tip(const std::string &text);
 
 } // namespace opennova::editor

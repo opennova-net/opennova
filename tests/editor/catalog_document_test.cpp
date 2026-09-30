@@ -4,22 +4,14 @@
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "common/test_expect.h"
 #include <cstring>
 
 using namespace opennova::editor;
 using namespace opennova::def;
 
-struct NoProcess : ProcessPlatform {
-	int spawns = 0;
-	int64_t spawn(const LaunchPlan &) override { ++spawns; return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 static const CatalogRow &row_at(const Document &document, size_t index) {
 	return static_cast<const CatalogRow &>(*document.rows()[index]);

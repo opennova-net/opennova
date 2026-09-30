@@ -8,6 +8,7 @@
 
 #include <imgui.h>
 
+#include <base/io/strutil.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
@@ -29,12 +30,6 @@ constexpr ImU32 kUserPointColor = IM_COL32(255, 220, 90, 255);
 constexpr ImU32 kPivotColor = IM_COL32(110, 220, 255, 255);
 constexpr ImU32 kSelectedColor = IM_COL32(255, 200, 60, 255);
 constexpr ImU32 kHoverColor = IM_COL32(120, 190, 255, 220);
-
-std::string fixed_name(const char *name, size_t size) {
-	size_t length = 0;
-	while (length < size && name[length]) ++length;
-	return std::string(name, length);
-}
 
 ImU32 light_color(uint32_t rgb) {
 	return IM_COL32((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, 255);
@@ -116,9 +111,8 @@ void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &mod
 				options.rig_model = entry.logical_name;
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("The model the animation plays on. Auto takes the graphic of an item whose anim_def "
-		                  "names the table.");
+	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
+	                "anim_def names the table.");
 	if (options != model.options()) model.set_options(options);
 }
 
@@ -136,13 +130,13 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	const int32_t ticks = model.clip_ticks();
 	const int32_t shown = model.clip_loops() ? ticks % length : std::min(ticks, length);
 	if (ImGui::Button(options.playing ? "Pause##clip" : "Run##clip")) options.playing = !options.playing;
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip(options.playing ? "Hold the clip where it is." : "Run the clip.");
+	ui_kit::tooltip(options.playing ? "Hold the clip where it is." : "Run the clip.");
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##back", ImGuiDir_Left)) model.seek_ticks(std::max(shown - 1, 0));
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("A tick back.");
+	ui_kit::tooltip("A tick back.");
 	ImGui::SameLine();
 	if (ImGui::ArrowButton("##forward", ImGuiDir_Right)) model.seek_ticks(shown + 1);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("A tick on.");
+	ui_kit::tooltip("A tick on.");
 	ImGui::SameLine();
 	// The frame the clip shows after the track, its width kept for it; in a window too
 	// narrow for both, in the track's tooltip.
@@ -158,7 +152,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 		model.seek_ticks(scrub);
 		options.playing = false;
 	}
-	if (!frame_beside && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", frame);
+	if (!frame_beside) ui_kit::tooltip(frame);
 	const ImVec2 track_min = ImGui::GetItemRectMin(), track_max = ImGui::GetItemRectMax();
 	if (frame_beside) {
 		ImGui::SameLine();
@@ -190,7 +184,9 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	std::string bits;
 	for (const anim::AnimEventBit &bit : anim::kAnimEventBits)
 		if (under->trigger & bit.mask) bits += (bits.empty() ? "" : ", ") + std::string(bit.name);
-	ImGui::SetTooltip("frame %d, tick %d: %s", under->frame, under->tick, bits.empty() ? "no named bit" : bits.c_str());
+	ui_kit::tooltip("frame " + std::to_string(under->frame) + ", tick " +
+	                std::to_string(under->tick) + ": " +
+	                (bits.empty() ? std::string("no named bit") : bits));
 	if (!clicked) return;
 	model.seek_ticks(under->tick);
 	ModelPreviewOptions held = model.options();
@@ -231,24 +227,23 @@ void ModelPreviewPane::toolbar_(ModelPreviewModel &model) {
 		}
 		ImGui::EndCombo();
 	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Auto draws the level the game picks at this distance: the model's projected radius "
-		                  "against each level's threshold. A level held stays at any distance.");
+	ui_kit::tooltip("Auto draws the level the game picks at this distance: the model's projected "
+	                "radius against each level's threshold. A level held stays at any distance.");
 	char radius[32];
 	std::snprintf(radius, sizeof(radius), "%.1f px", projected / 65536.0);
 	row.next(ui_kit::text_width(radius));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", radius);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("The model's projected radius, the size Auto measures.");
+	ui_kit::tooltip("The model's projected radius, the size Auto measures.");
 	// The clock: Run or Pause (Play is the game's).
 	const char *clock = options.playing ? "Pause" : "Run";
 	row.next(ui_kit::button_width(clock));
 	if (ImGui::Button(clock)) options.playing = !options.playing;
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Run or hold the model's clock: its part animations, flipbooks and colour generators.");
+	ui_kit::tooltip("Run or hold the model's clock: its part animations, flipbooks and colour "
+	                "generators.");
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("What the preview marks over the model.");
+	ui_kit::tooltip("What the preview marks over the model.");
 	if (ImGui::BeginPopup("marks")) {
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
@@ -259,20 +254,18 @@ void ModelPreviewPane::toolbar_(ModelPreviewModel &model) {
 	row.next(ui_kit::field_width(unit * 5.0f, "Snap"));
 	ImGui::SetNextItemWidth(unit * 5.0f);
 	ImGui::Combo("Snap", &snap_, kSnapNames, IM_ARRAYSIZE(kSnapNames));
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold Alt to "
-		                  "place freely.");
+	ui_kit::tooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold "
+	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
 	if (ImGui::Button("Frame")) frame_(model);
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Look at the selected marker, or at the whole model (F).");
+	ui_kit::tooltip("Look at the selected marker, or at the whole model (F).");
 	row.next(ui_kit::button_width("Registers"));
 	ImGui::BeginDisabled(shown.ctrl.count == 0);
 	if (ImGui::Button("Registers")) ImGui::OpenPopup("registers");
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-		ImGui::SetTooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
-		                                        : "Hold the model's CTRL registers at a value, as the game's "
-		                                          "entity would drive them.");
+	ui_kit::tooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
+	                                      : "Hold the model's CTRL registers at a value, as the game's "
+	                                        "entity would drive them.");
 	if (options != model.options()) model.set_options(options);
 	if (ImGui::BeginPopup("registers")) {
 		registers_(model);
@@ -285,7 +278,7 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 	ModelPreviewOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
 	for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
-		const std::string name = fixed_name(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
+		const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
 		if (name.empty()) continue;
 		const auto held = options.ctrl.find(name);
 		int64_t value = held == options.ctrl.end() ? 0 : held->second;
@@ -297,7 +290,7 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 		}
 	}
 	if (ImGui::Button("Reset all")) options.ctrl.clear();
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("Let every register go back to 0.");
+	ui_kit::tooltip("Let every register go back to 0.");
 	if (options != model.options()) model.set_options(options);
 }
 

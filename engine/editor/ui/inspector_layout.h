@@ -59,4 +59,12 @@ std::vector<InspectorSection> plan_shared_inspector(const Document &document, co
 // written on some of them and left out on others.
 bool field_mixed(const Document &document, const std::vector<NodeAddress> &records, const std::string &field);
 
+// --- a change the Inspector makes --------------------------------------------------------
+
+// A flags field's bit `bit` set (`on`) or cleared on each of `records`, each keeping its own
+// other bits (one whose value does not read keeps the first record's): the Sets of one batch,
+// one undo step. A signed 32-bit field keeps its word signed.
+std::vector<Edit> flag_bit_edits(const Document &document, const std::vector<NodeAddress> &records,
+                                 const FieldSchema &field, int64_t bit, bool on);
+
 } // namespace opennova::editor

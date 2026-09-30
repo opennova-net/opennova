@@ -29,9 +29,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
-    # documents — the document types: the def catalogs, their symbol tables and validation
+    # documents — the document types: the def catalogs, their symbol tables and validation;
+    # the menu clipboard's one rule for the tree and the canvas
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_ids.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
@@ -100,8 +102,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10),
-    # and what Problems shows of its findings and offers to do about them
+    # what Problems shows of its findings and offers to do about them, and the findings by
+    # file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_settings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/findings_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
@@ -122,6 +126,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/find_cursor.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/import_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_window.cpp
@@ -130,6 +135,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_preview_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/preview_window.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_list.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/project_find.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/project_settings_dialog.cpp

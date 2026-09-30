@@ -78,6 +78,15 @@ bool is_png(const std::vector<uint8_t> &bytes) {
 	return bytes.size() >= 8 && std::memcmp(bytes.data(), kSignature, 8) == 0;
 }
 
+bool png_header_size(const std::vector<uint8_t> &bytes, uint32_t &width, uint32_t &height) {
+	// The signature, then the IHDR chunk's length and type, then its width and height.
+	if (!is_png(bytes) || bytes.size() < 24 || std::memcmp(bytes.data() + 12, "IHDR", 4) != 0)
+		return false;
+	width = read_be32(bytes.data() + 16);
+	height = read_be32(bytes.data() + 20);
+	return true;
+}
+
 bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error) {
 	error.clear();
 	if (!is_png(bytes)) {

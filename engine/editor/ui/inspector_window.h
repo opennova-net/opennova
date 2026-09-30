@@ -3,6 +3,7 @@
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/session/findings_index.h>
 #include <editor/ui/editor_host.h>
 #include <editor/ui/reference_picker.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -49,6 +50,7 @@ private:
 
 	EditorHost &host_;
 	ReferencePicker picker_;
+	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	char filter_[128]{};
 	// The field the view last asked to show, on its record: the ask's serial and the document
 	// it was in (another ask of either shows it again); whether the form still has to scroll to

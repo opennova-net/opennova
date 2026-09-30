@@ -218,6 +218,51 @@ void MnsDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol)
 	symbol.value = sheet.get(node->name());
 }
 
+const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const AssetGraph *graph,
+                                                  uint64_t graph_key) const {
+	if (!value_uses_.made || value_uses_.revision != revision() || value_uses_.graph != graph ||
+	    value_uses_.graph_key != graph_key) {
+		value_uses_.made = true;
+		value_uses_.revision = revision();
+		value_uses_.graph = graph;
+		value_uses_.graph_key = graph_key;
+		value_uses_.rows.clear();
+	}
+	const auto kept = value_uses_.rows.find(line.row);
+	if (kept != value_uses_.rows.end()) return kept->second;
+	StyleValueUse &out = value_uses_.rows[line.row];
+	const Node *row = this->row(line.row);
+	if (!row || row->kind != kVariable) return out;
+	// The uses of the definition the game reads, by what its value must be there.
+	out.winner = winning_row(row->name()) == row->id;
+	bool colour = false, font = false, image = false;
+	if (out.winner && read_by_game() && graph) {
+		const GraphSymbol *binding = graph->style_binding(row->name());
+		out.bound = binding && binding->file == path();
+	}
+	if (out.bound)
+		for (const GraphEdge *edge : graph->referrers_of(ReferenceKind::StyleVar, row->name())) {
+			if (edge->through == ReferenceKind::None) colour = true;
+			else if (edge->through == ReferenceKind::Font) font = true;
+			else image = true;
+		}
+	const NodeAddress address{row->id, row->kind, 0};
+	FieldSchema value;
+	for (const FieldSchema &schema : fields(kVariable))
+		if (schema.id == "value") value = field_on(address, schema);
+	Value text;
+	const std::string shown = get(address, "value", text) ? std::get<std::string>(text) : "";
+	const bool fixed = frozen(*row);
+	out.colour = !fixed && (colour || (!font && !image && mnu::color_reads_whole(shown)));
+	out.file = value;
+	if (font || value.reference == ReferenceKind::Font) out.file.reference = ReferenceKind::Font;
+	else if (image || value.reference == ReferenceKind::MenuTexture)
+		out.file.reference = ReferenceKind::MenuTexture;
+	else out.file.reference = ReferenceKind::None;
+	out.picks = !fixed && !out.colour && graph && out.file.reference != ReferenceKind::None;
+	return out;
+}
+
 const mns::StyleSheet &MnsDocument::game_sheet() const {
 	if (!game_sheet_.made || game_sheet_.revision != revision()) {
 		game_sheet_.made = true;

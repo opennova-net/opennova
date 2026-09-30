@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/strutil.h>
 #include <editor/documents/model_document.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm_pose.h>
@@ -12,12 +13,6 @@ namespace opennova::editor {
 namespace {
 
 using threedi::ThreediMatrix4x4;
-
-std::string fixed_name(const char *name, size_t size) {
-	size_t length = 0;
-	while (length < size && name[length]) ++length;
-	return std::string(name, length);
-}
 
 // p * M (the row-vector convention of the part matrices), a point or a direction.
 void transform(const ThreediMatrix4x4 &m, const float in[3], bool point, float out[3]) {
@@ -91,7 +86,7 @@ std::vector<ModelOverlay> model_overlays(const threedi::Threedi3di3 &model, int 
 			ModelOverlay row;
 			row.kind = ModelOverlayKind::UserPoint;
 			row.index = int(i);
-			row.name = fixed_name(point.name, sizeof(point.name));
+			row.name = strutil::fixed_string(point.name, sizeof(point.name));
 			place(first_live ? first : std::vector<ThreediMatrix4x4>(), point.subobject_index, at, axis, row);
 			out.push_back(std::move(row));
 		}

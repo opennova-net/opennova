@@ -1,11 +1,11 @@
 #include "menu_view.h"
 
+#include <editor/documents/mnu_clipboard.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
-#include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -22,12 +22,7 @@ constexpr const char *kWindowPayload = "OPENNOVA_MENU_WINDOW";
 
 using window_requests::clipboard;
 using window_requests::edit;
-using window_requests::paste;
 using window_requests::select;
-
-bool is_selected(const SessionView &view, const NodeAddress &address) {
-	return std::find(view.selected.begin(), view.selected.end(), address) != view.selected.end();
-}
 
 // The window field a type picker takes its choices from.
 const FieldSchema *type_field(const Document &document) {
@@ -95,7 +90,8 @@ const Node *MenuView::draw_screens(EditorHost &host, const MnuDocument &document
 		const Document::RecordChange change = document.record_change(at);
 		ui_kit::change_dot(change, x);
 		const std::string words = ui_kit::change_words(change);
-		hover_tip(shown != name ? screen->name() + (words.empty() ? "" : "\n" + words) : words);
+		ui_kit::tooltip(shown != name ? screen->name() + (words.empty() ? "" : "\n" + words)
+		                              : words);
 		ImGui::PopID();
 	}
 	return current;
@@ -165,14 +161,9 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 	const NodeAddress &selection = view.selection;
 	const bool here = selection.row == screen.id;
 	const RecordTree::Entry *selected = here && selection.kind == kWindow ? tree_.find(selection.child) : nullptr;
-	// The window a new one goes into: the selected window, or the one holding the selected
-	// record, else the first root window.
-	NodeId holder = selected ? selected->address.child : 0;
-	if (here && !holder && selection.child) {
-		const std::vector<NodeAddress> owners = document.ancestors(selection);
-		for (auto owner = owners.rbegin(); owner != owners.rend() && !holder; ++owner)
-			if (owner->kind == kWindow && tree_.find(owner->child)) holder = owner->child;
-	}
+	// The window a new one goes into: the listed window that is the selected record or holds
+	// it (the one a Paste goes after), else the first root window.
+	const NodeId holder = here ? listed_window(document, screen.id, selection).child : 0;
 	if (selection != revealed_) {
 		revealed_ = selection;
 		reveal_.clear();
@@ -197,12 +188,12 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 			if (ImGui::BeginCombo("##new_type", current ? choice_title(*current).c_str() : add_type_.c_str())) {
 				for (const FieldChoice &choice : type->choices) {
 					if (ImGui::Selectable(choice_title(choice).c_str(), current == &choice)) add_type_ = choice.name;
-					hover_tip(written_type(choice.name));
+					ui_kit::tooltip(written_type(choice.name));
 				}
 				ImGui::EndCombo();
 			}
-			hover_tip("The type of the window Add window makes." +
-			          (current ? std::string(" ") + written_type(current->name) : std::string()));
+			ui_kit::tooltip("The type of the window Add window makes." +
+			                (current ? " " + written_type(current->name) : std::string()));
 		}
 		const NodeId parent = holder ? holder : tree_.roots.empty() ? 0 : tree_.entries[tree_.roots.front()].address.child;
 		if (ui_kit::tool(row, "Add window", true, "A window of this type inside the selected window (else inside the first root window)."))
@@ -218,7 +209,16 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 	const std::vector<NodeAddress> outer = document.outermost(windows);
 	size_t outer_roots = 0;
 	for (const NodeAddress &window : outer) outer_roots += tree_.find(window.child)->owner == 0;
-	const bool only_windows = here && !view.selected.empty() && windows.size() == view.selected.size();
+	// The clipboard (the canvas asks the same rule): Copy, Cut and Duplicate take the selection
+	// while it is windows the tree lists; a Paste goes after the selected window, or after the
+	// window holding the selected record (a list row's index is no place among windows), else
+	// at the end of the screen's root windows.
+	const std::vector<NodeAddress> none;
+	const NodeAddress primary = here ? selection : NodeAddress();
+	const std::vector<NodeAddress> &records = here ? view.selected : none;
+	const MenuClipboard board =
+	        menu_clipboard(document, screen.id, primary, records, !view.clipboard.empty());
+	const bool only_windows = board.copy;
 
 	{
 		// Duplicate and Remove take every selected window; the rest the primary one among its
@@ -262,14 +262,13 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 			edit(host, document, outdent);
 	}
 
-	// The clipboard: the selected windows (Ctrl+C / X), pasted (Ctrl+V) after the selected
-	// window, or after the window holding the selected record (a list row's index is no
-	// place among windows), else at the end of the screen's root windows.
-	const bool can_copy = only_windows;
-	const bool can_paste = here && !view.clipboard.empty();
-	const RecordTree::Entry *paste_after = tree_.find(holder);
-	const NodeId paste_parent = paste_after ? paste_after->owner : 0;
-	const size_t paste_position = paste_after ? paste_after->index + 1 : SIZE_MAX;
+	// The clipboard: the selected windows (Ctrl+C / X), pasted (Ctrl+V) where the rule says.
+	const bool can_copy = board.copy;
+	const bool can_paste = board.paste;
+	const auto paste = [&] {
+		window_requests::paste(host, document, board.paste_row, board.paste_parent,
+		                       board.paste_position);
+	};
 	{
 		ui_kit::WrapRow row;
 		const char *windows_only = "Select windows only to copy them.";
@@ -281,13 +280,12 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 		                 can_paste ? "Pastes the copied windows after the selected window, or after the window holding the "
 		                             "selected record (Ctrl+V); they work across screens and menus."
 		                           : "Copy windows first (Ctrl+C)."))
-			paste(host, document, {screen.id, kWindow, 0}, paste_parent, paste_position);
+			paste();
 	}
 	if (!document.blocked() && !ImGui::GetIO().WantTextInput) {
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C) && can_copy) clipboard(host, document, EditorRequestKind::Copy);
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X) && can_copy) clipboard(host, document, EditorRequestKind::Cut);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V) && can_paste)
-			paste(host, document, {screen.id, kWindow, 0}, paste_parent, paste_position);
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V) && can_paste) paste();
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D) && can_copy)
 			clipboard(host, document, EditorRequestKind::Duplicate);
 	}
@@ -333,7 +331,7 @@ void MenuView::draw_window_node(EditorHost &host, const MnuDocument &document, s
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
 	                           ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen;
 	if (entry.children.empty()) flags |= ImGuiTreeNodeFlags_Leaf;
-	if (is_selected(view, entry.address)) flags |= ImGuiTreeNodeFlags_Selected;
+	if (holds(view.selected, entry.address)) flags |= ImGuiTreeNodeFlags_Selected;
 	if (std::find(reveal_.begin(), reveal_.end(), id) != reveal_.end()) ImGui::SetNextItemOpen(true);
 	ImGui::PushID(static_cast<int>(id));
 	const float x = ImGui::GetCursorScreenPos().x;
@@ -345,9 +343,10 @@ void MenuView::draw_window_node(EditorHost &host, const MnuDocument &document, s
 		scroll_to_ = 0;
 	}
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) click_window(host, document, index);
+	// Made only while it shows, after a moment: the tree is swept by the mouse.
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
 		const char *words = ui_kit::change_words(change);
-		ImGui::SetTooltip("%s%s%s", tips_[index].c_str(), *words ? "\n" : "", words);
+		ui_kit::tooltip(tips_[index] + (*words ? "\n" : "") + words);
 	}
 	if (ImGui::BeginDragDropSource()) {
 		ImGui::SetDragDropPayload(kWindowPayload, &id, sizeof id);

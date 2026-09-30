@@ -3,7 +3,6 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
-#include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -87,7 +86,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 		const Document::RecordChange change = document.record_change(address);
 		ui_kit::change_dot(change, x);
 		const std::string words = ui_kit::change_words(change);
-		hover_tip(shown != ui_kit::kChangeRoom + name ? name + (words.empty() ? "" : "\n" + words) : words);
+		ui_kit::tooltip(shown != ui_kit::kChangeRoom + name ? name + (words.empty() ? "" : "\n" + words) : words);
 		ImGui::PopID();
 	}
 	ImGui::EndDisabled();
@@ -98,7 +97,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 	        document.file_state_changed() ? Document::RecordChange::Changed : Document::RecordChange::Unchanged;
 	const bool open = ImGui::TreeNode("spawn", "%sVehicle spawn IDs", ui_kit::kChangeRoom);
 	ui_kit::change_dot(registry, x + ImGui::GetTreeNodeToLabelSpacing());
-	hover_tip(ui_kit::change_words(registry));
+	ui_kit::tooltip(ui_kit::change_words(registry));
 	if (!open) return;
 	ImGui::BeginDisabled(document.blocked());
 	const std::vector<int> &spawn = document.spawn_ids();
@@ -109,7 +108,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 		const float room = ImGui::GetContentRegionAvail().x - ui_kit::field_width(0.0f, label.c_str());
 		ImGui::SetNextItemWidth(std::clamp(room, ImGui::GetFontSize() * 4.0f, ImGui::GetFontSize() * 10.0f));
 		if (ImGui::InputInt(label.c_str(), &id)) set_spawn(host, document, i, id);
-		hover_tip("The item id the game spawns in this vehicle slot.");
+		ui_kit::tooltip("The item id the game spawns in this vehicle slot.");
 		ImGui::PopID();
 	}
 	ui_kit::WrapRow row;
