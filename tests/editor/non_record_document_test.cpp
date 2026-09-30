@@ -9,7 +9,9 @@
 // find it (document_base_for), the rows' do not (document_for null); it takes an Apply of its
 // type's payload and nothing else, undoes, redoes and saves; Copy, Cut, Paste, Duplicate and
 // Revert to saved refuse it (document.no_records); the record batch refuses it without opening it
-// again; its JSON is the base's alone. The stand-in gone, the stylesheet's own type answers again.
+// again (S13 A5: a request's edits on the wire); the document query answers its lifecycle alone
+// and the record query refuses it; its JSON is the base's alone. The stand-in gone, the
+// stylesheet's own type answers again.
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -25,7 +27,6 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
-#include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
@@ -168,14 +169,32 @@ static int test_non_record_type() {
 			TEST_EXPECT(!session.outcome().done());
 			TEST_EXPECT(has_finding(session.outcome(), "document.no_records"));
 		}
-		// The record batch refuses it, and sends no OpenDocument to try again.
+		// A batch on the wire (S13 A5: an edit_record's edits) refuses it as it is read, and sends
+		// no OpenDocument to try again.
 		const uint64_t before_batch = session.handle_entries();
-		const JsonValue answer = record_batch_request(session, path, JsonValue::make_object());
+		JsonValue batch;
+		std::string refusal;
+		TEST_EXPECT(opennova::io::json_parse(
+		        "{\"kind\":\"edit_record\",\"path\":\"" + path +
+		                "\",\"open_first\":true,\"edits\":[{\"op\":\"set\",\"id\":1,"
+		                "\"field\":\"name\",\"value\":\"X\"}]}",
+		        batch, refusal));
+		const JsonValue answer = session.handle_json(batch);
 		TEST_EXPECT(!answer.get_bool("ok", true) &&
 		            answer.get_string("error", "").find("holds no records") != std::string::npos);
 		TEST_EXPECT(session.handle_entries() == before_batch);
+		// The queries: the document answers its lifecycle alone; what reads records refuses it.
+		JsonValue args = JsonValue::make_object();
+		args.set("path", opennova::io::json_string(path));
+		const JsonValue lifecycle = session.query("document", args, refusal);
+		TEST_EXPECT(lifecycle.get_string("path", "") == path && lifecycle.get("revision") &&
+		            !lifecycle.get("rows") && !lifecycle.get("row_count"));
+		args.set("id", opennova::io::json_number(1.0));
+		TEST_EXPECT(session.query("record", args, refusal).is_null() &&
+		            refusal.find("holds no records") != std::string::npos);
 		// Its JSON is the base's alone: the lifecycle, no rows.
-		const JsonValue json = document_to_json(*opened, true);
+		const JsonPage rows;
+		const JsonValue json = document_to_json(*opened, &rows);
 		TEST_EXPECT(json.get_string("path", "") == path && json.get_bool("dirty", false));
 		TEST_EXPECT(json.get("revision") && json.get("issues"));
 		TEST_EXPECT(!json.get("row_count") && !json.get("rows"));

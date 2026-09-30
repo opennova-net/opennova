@@ -414,9 +414,10 @@ constexpr RequestKindRow kRows[] = {
 			.names_active()
 			.row,
 	Request(K::RevertToSaved, "revert_to_saved", serve_revert_to_saved,
-			"Each field the edits name (by address and field) of the document at path given back "
-			"the value and presence the saved file holds, one undo step; refused when none has "
-			"anything to go back to (the Inspector's Revert to saved).")
+			"Each field the edits name ({id, field}: a record by its identity, a field by its id) "
+			"of the document at path given back the value and presence the saved file holds, one "
+			"undo step; refused when none has anything to go back to (the Inspector's Revert to "
+			"saved).")
 			.takes(request_params({ F::Edits }, { F::Path }))
 			.holds(kNone, kDocuments)
 			.names_active()

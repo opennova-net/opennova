@@ -30,8 +30,8 @@ struct SessionView;
 // finding never validates: the validation an edit had left due when it was reported keeps it (it
 // ran first, when report() validated), and a later one drops it. A kept finding is compared with
 // the composed rows alone: one the composition makes too is shown once, and a finding reported
-// twice is two rows. It keeps the Problems query and the fixes the editor MCP asks for
-// (problems_json), each until what it reads moves.
+// twice is two rows. It keeps the Problems query and the fixes the query seam's problems row
+// asks for (answer, fixes), each until what it reads moves.
 class ProblemsService {
 public:
 	explicit ProblemsService(SessionCore &core);
@@ -87,12 +87,11 @@ public:
 	// moved composes none (for the tests).
 	size_t compositions() const { return compositions_; }
 
-	// The Problems query as the editor MCP asks it, as JSON text (session_json's
-	// problem_query_from_json, problems_to_json): {total, shown, counts, groups when grouped,
-	// problems with their fixes}, or {error} for a query that does not parse. The answer and the
-	// fixes are kept while what they read stands. (S13 A5's query seam takes it as its `problems`
-	// row.)
-	std::string problems_json(const std::string &query);
+	// The Problems query as the query seam's problems row asks it (editor_queries.h, S13 A5): the
+	// rows the query shows, kept while the view and the query stand, and their fixes, kept while
+	// what they read stands.
+	const ProblemAnswer &answer(const ProblemQuery &query) { return query_cache_.answer(query, view_); }
+	ProblemFixCache &fixes() { return fix_cache_; }
 
 private:
 	// A reported finding, and whether the validation due when it was reported keeps it (none was
@@ -138,7 +137,7 @@ private:
 	std::vector<Reported> reported_;        // reported since the last validation
 	bool validation_due_ = false;           // an edit since the last validation
 	bool validation_held_ = false;          // a pump holds validation until its poll
-	ProblemQueryCache query_cache_;         // problems_json's answer while the view and query stand
+	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands
 };
 

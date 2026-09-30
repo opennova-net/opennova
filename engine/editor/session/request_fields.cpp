@@ -21,8 +21,8 @@ constexpr RequestField kFields[] = {
 			"again; "
 			"for reveal_path, a file or folder on disk." },
 	{ F::Locator, "locator", J::String,
-			"A record by its locator, the place a reload finds it again by (as editor_graph gives "
-			"it)." },
+			"A record by its locator, the place a reload finds it again by (as the record and the "
+			"reference queries give it)." },
 	{ F::Field, "field", J::String, "A field of that record, by its id." },
 	{ F::NewName, "new_name", J::String,
 			"The name a rename gives: a file's new logical name, or a defined name's new name." },
@@ -41,9 +41,12 @@ constexpr RequestField kFields[] = {
 			"(install: the path is the game install; native: a loose file copied as the game's "
 			"own)." },
 	{ F::Edits, "edits", J::Objects,
-			"Edits on any rows of one document, one undo step: {operation (set, clear, write, add, "
-			"duplicate, remove, move, paste, set_file_value), row, kind, child, parent, field, "
-			"value, position, coalesce, gesture}." },
+			"Edits over any rows of one document in the batch form, one undo step: [{op, id, parent, "
+			"kind, field, value, position, as, coalesce, gesture}], op one of set, clear, write, "
+			"add, duplicate, remove, move, set_file_value or replace_list ({op, id, list, records}: "
+			"the list of that kind the record holds replaced by records, each {field: value}); a "
+			"record or a row by its identity or by the label (as) an earlier add or duplicate of the "
+			"batch gave it, an add's kind by its token. revert_to_saved's: [{id, field}]." },
 	{ F::Address, "address", J::Object, "A record by its address, {row, kind, child}." },
 	{ F::Records, "records", J::Objects,
 			"Records by their addresses, [{row, kind, child}]: those a selection takes with the "

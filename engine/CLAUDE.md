@@ -44,11 +44,14 @@
     the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
     the request table (S13 A4, `request_kinds`: one row per request kind, its token, who
     serves it, the typed fields it takes (`request_fields`), its policy; a request of each
-    kind from `request_factories.h`); its wire form, the view the windows read
-    (`session/view`, S13 V4: sub-views of the project, the documents, the findings, the
-    activity and the dialogs, and the events a request posts for one window to take once),
-    the selection (S13 D7: one document's records over any of its rows), and the record batch
-    the editor MCP names records by), `model` (the
+    kind from `request_factories.h`); the query table (S13 A5, `editor_queries`: one row per
+    question asked of the session without a request, its params, the list it pages, the concern
+    whose revision it answers with; `ProjectSession::query`); its wire form (`session_json`: the
+    documents, the records, a request with its edits in the batch form the editor MCP names
+    records by (`record_batch`), the findings; `view_json`: the view by section), the view the
+    windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
+    the activity and the dialogs, and the events a request posts for one window to take once),
+    the selection (S13 D7: one document's records over any of its rows)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
     over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
@@ -75,8 +78,9 @@
     level the game draws, what it shows and when the device builds again, its JSON; the
     shell's `ObjectModel` is its device; and the render check: every menu screen compiled headless,
     its compiler notes as Problems rows, a menu rendered again only when it, a file it read or a
-    variable it names changes; a menu's tree and findings as the editor
-    MCP's `editor_menu` reads them, and the batch it sends, on the same menu; and the
+    variable it names changes; a menu's tree, its findings and a screen as the render check
+    compiled it, as the menu_tree, menu_findings and menu_render queries read them;
+    and the
     canvas's portable half: its one gesture machine, its overlay shapes, and what a press
     on the menu's or the model's picture takes, what a drag writes and what is drawn), `ui`
     (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
