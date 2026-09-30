@@ -999,7 +999,10 @@ static int test_typing_burst() {
 
 // One step over several changes (EditHistory::commit of several, each joined to the one before
 // it), which a batch over several rows commits through: undone and redone whole, and nothing
-// folds into it, a change under its key after it being a step of its own.
+// folds into it, a change under its key after it being a step of its own. With no production
+// caller since S13 D5 (S13 D7's multi-row step is the next), its group rules are held here: its
+// key's reopen() undoes the whole step, back to the revision before it, and resume() redoes it;
+// drop() forgets it and ends the group; the saved checkpoint is never reopened.
 static int test_joined_step() {
 	std::vector<std::shared_ptr<const Node>> rows;
 	std::shared_ptr<const FileState> state;
@@ -1038,6 +1041,32 @@ static int test_joined_step() {
 	TEST_EXPECT(titles() == "AB" && history.can_redo());
 	history.redo();
 	TEST_EXPECT(titles() == "ZB" && !history.can_redo());
+
+	std::vector<std::shared_ptr<const Node>> rows2 = {group(1, "a"), group(2, "b")};
+	std::shared_ptr<const FileState> state2;
+	EditHistory group_history(rows2, state2);
+	const auto titles2 = [&] {
+		std::string out;
+		for (const auto &row : rows2) out += row->name();
+		return out;
+	};
+	const auto commit_both = [&] {
+		group_history.commit(std::vector<Change>{change(rows2[0], group(1, "A"), 0),
+		                                         change(rows2[1], group(2, "B"), 1)},
+		                     "k");
+	};
+	commit_both();
+	TEST_EXPECT(titles2() == "AB" && group_history.revision() != 0);
+	TEST_EXPECT(group_history.reopen("k") && titles2() == "ab" && group_history.revision() == 0);
+	group_history.resume();
+	TEST_EXPECT(titles2() == "AB" && group_history.can_undo() && !group_history.can_redo());
+	TEST_EXPECT(group_history.reopen("k") && titles2() == "ab");
+	group_history.drop();
+	TEST_EXPECT(titles2() == "ab" && !group_history.can_undo() && !group_history.can_redo() &&
+	            !group_history.dirty() && !group_history.reopen("k"));
+	commit_both();
+	group_history.mark_saved();
+	TEST_EXPECT(!group_history.reopen("k") && titles2() == "AB" && !group_history.dirty());
 	return 0;
 }
 

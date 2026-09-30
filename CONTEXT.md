@@ -522,10 +522,11 @@ A `.wav` the game loads from its archives by name, as a sound bank's sets name i
 thousands, its localized voice lines in language.pff): a native file the build packs as it is.
 _Avoid_: wave source (it is no import source), sample, sound (a sound is a bank's set)
 
-**Face**:
-A character's facial animation file (`.grm`): the texture mesh the face deforms, its gestures'
+**Face animation**:
+A character's facial animation file (`.grm`): the texture meshes the face deforms, its gestures'
 offsets and its eyes, which the game loads beside an item's model by the model's name.
-_Avoid_: grm (the format's name), face mesh (the mesh is one part of it)
+_Avoid_: face (a model's bullet face is a record kind of that name), grm (the format's name), face
+mesh (the meshes are one part of it)
 
 **Score table**:
 `score.ini`: the scoring values per game type, which retail reads from the install folder.

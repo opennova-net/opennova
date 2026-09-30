@@ -79,7 +79,7 @@ static int test_classification() {
 	// score.ini by its whole name, before the .ini extension; the name without case.
 	TEST_EXPECT(classify_asset("score.ini", nullptr) == AssetKind::Score);
 	TEST_EXPECT(classify_asset("SCORE.INI", nullptr) == AssetKind::Score);
-	TEST_EXPECT(classify_asset("head.grm", nullptr) == AssetKind::Face);
+	TEST_EXPECT(classify_asset("head.grm", nullptr) == AssetKind::FaceAnimation);
 	TEST_EXPECT(classify_asset("DltB086C.wav", nullptr) == AssetKind::Wave);
 	TEST_EXPECT(classify_asset("ASP_G7.npz", nullptr) == AssetKind::MapProject);
 	TEST_EXPECT(classify_asset("x.npj", nullptr) == AssetKind::MapProject);
@@ -115,8 +115,8 @@ static int test_classification() {
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::MusicBank)) == "music_bank" &&
 	            std::string(asset_kind_label(AssetKind::MusicBank)) == "Music bank");
 	TEST_EXPECT(asset_kind_from_token("wave_bank") == AssetKind::Unknown); // no alias, pre-1.0
-	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Face)) == "face" &&
-	            std::string(asset_kind_label(AssetKind::Face)) == "Face");
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::FaceAnimation)) == "face_animation" &&
+	            std::string(asset_kind_label(AssetKind::FaceAnimation)) == "Face animation");
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Score)) == "score" &&
 	            std::string(asset_kind_label(AssetKind::Score)) == "Score table");
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Wave)) == "wave" &&

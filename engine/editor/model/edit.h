@@ -37,8 +37,7 @@ struct Edit {
 	// kind (SIZE_MAX = the end).
 	size_t position = SIZE_MAX;
 	// Consecutive Sets of the same field fold into one undo step, each applied to the record
-	// as the group's first Set found it (the step is that record plus the latest value, and
-	// what follows from it, Document::apply's follow, is planned from there too).
+	// as the group's first Set found it (the step is that record plus the latest value).
 	bool coalesce = false;
 	// Sets, Clears, Writes and edits inside a row carrying the same nonzero gesture (a drag) fold into
 	// one undo step on that row until the edit group ends (EndEdit); each applies to the

@@ -24,8 +24,11 @@ bool asset_classification_needs_bytes(const std::string &logical_name) {
 }
 
 bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind) {
+	// A `.bin` name is what its content makes it, or the kind a row knows the whole name by
+	// (CC.BIN's).
 	if (asset_classification_needs_bytes(logical_name))
-		return kind == AssetKind::Strings || kind == AssetKind::MusicScript || kind == AssetKind::RawBin;
+		return kind == AssetKind::Strings || kind == AssetKind::MusicScript ||
+		       kind == AssetKind::RawBin || kind == asset_kind_for_name(logical_name);
 	const AssetKind named = classify_asset(logical_name, nullptr);
 	// A PNG is a texture the game loads as it is unless an import record makes it a source
 	// (scan_project_assets): its name fits either. A name no extension types may be a
@@ -52,8 +55,11 @@ AssetKind classify_asset(const std::string &logical_name, const std::vector<uint
 AssetKind expected_asset_kind_for_required_name(const std::string &name) {
 	const std::string extension = resource_extension_for_name(name);
 	if (extension != ".bin") return classify_asset(name, nullptr);
-	// The witnessed `.bin` rows: the music-script pair (and its expansion forms), the
-	// three raw markers/credential stores, and string tables for everything else.
+	// The witnessed `.bin` rows: a kind a row knows by its whole name (CC.BIN, the country
+	// code), the music-script pair (and its expansion forms), the three raw markers/credential
+	// stores, and string tables for everything else.
+	const AssetKind named = asset_kind_for_name(name);
+	if (named != AssetKind::RawBin && named != AssetKind::Unknown) return named;
 	const std::string basename = lower_basename(name);
 	if (basename == "menumus.bin" || basename == "gamemus.bin") return AssetKind::MusicScript;
 	if (basename == "fgn2.bin" || basename == "epass.bin" || basename == "passgen.bin")

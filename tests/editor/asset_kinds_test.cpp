@@ -9,7 +9,8 @@
 // shape (one row per kind, in order; a token, a runtime token, a file name or an extension named
 // once) is its static_asserts'; here, what they cannot say: every document type is a row's, an
 // import source packs nowhere and is no runtime format, and Unknown is no runtime format (it packs
-// into resource.pff until S13 A8 stops packing it).
+// into resource.pff until S13 A8 stops packing it). A slot is pinned where the game reads a file
+// apart from the archives: game.cfg, assets.cd, CC.BIN and filter.txt loose, fgn2.bin packed.
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -142,6 +143,47 @@ static int test_required_files() {
 	return 0;
 }
 
+// Where the build puts the files the boot reads apart from the archives: those it opens with the
+// C library, or reads before any archive mounts, must reach the build loose, and one it reads
+// through the archives after they mount must be packed. Each is a manifest row, and the kind the
+// requirement expects is the kind the scan gives it (a `.bin` by raw content).
+static int test_boot_files() {
+	struct Pinned {
+		const char *name;
+		bool loose;
+	};
+	const Pinned pinned[] = {
+	        // Before the mount [orig: Game_LoadConfig @ 0x551480 via
+	        // File_ParseASCIIFileWithCallback @ 0x53d980].
+	        {"game.cfg", true},
+	        {"assets.cd", true}, // [orig: Game_ReadAssetsCDFile @ 0x4a5800]
+	        // fopen on every read, never the archives [orig: Game_ReadCCBinFile @ 0x4a5860].
+	        {"CC.BIN", true},
+	        {"filter.txt", true}, // [orig: ChatFilter_LoadFromFile @ 0x4fd640]
+	        // After the mount, through the archives alone [orig: CEffectSystem_Init @ 0x5f6070
+	        // through FileSystem_FileExists @ 0x75aa50].
+	        {"fgn2.bin", false},
+	};
+	const std::vector<uint8_t> raw = {0x12, 0x34};
+	for (const Pinned &file : pinned) {
+		TEST_EXPECT(gameprofile::gameprofile_required_resource_find(file.name) != nullptr);
+		const AssetKind expected = expected_asset_kind_for_required_name(file.name);
+		const bool peeked = asset_classification_needs_bytes(file.name);
+		const AssetKind scanned = classify_asset(file.name, peeked ? &raw : nullptr);
+		const ArchiveSlot slot = asset_kind_row(scanned).archive_slot;
+		const bool packed = slot == ArchiveSlot::Language || slot == ArchiveSlot::Localres ||
+		                    slot == ArchiveSlot::Resource;
+		if (expected != scanned || (file.loose ? slot != ArchiveSlot::Loose : !packed))
+			std::fprintf(stderr, "%s is %s, expected %s, in slot %d\n", file.name,
+			             asset_kind_token(scanned), asset_kind_token(expected), int(slot));
+		TEST_EXPECT(expected == scanned);
+		TEST_EXPECT(file.loose ? slot == ArchiveSlot::Loose : packed);
+	}
+	TEST_EXPECT(expected_asset_kind_for_required_name("CC.BIN") == AssetKind::CountryCode);
+	TEST_EXPECT(expected_asset_kind_for_required_name("fgn2.bin") == AssetKind::RawBin);
+	return 0;
+}
+
 // What the static_asserts cannot say: every document type is a row's (and opens it), an import
 // source packs nowhere and no runtime format is one, and Unknown is no runtime format.
 static int test_the_table() {
@@ -178,6 +220,7 @@ int main() {
 	int failures = 0;
 	failures += test_runtime_formats();
 	failures += test_required_files();
+	failures += test_boot_files();
 	failures += test_the_table();
 	if (failures == 0)
 		std::printf("editor_asset_kinds: every runtime format and required file has a kind and a "

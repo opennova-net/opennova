@@ -364,7 +364,8 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "BASE_TEXTURE face.tga\r\n") &&
 	            editor_test::write_text(art + "/boom.wav", "RIFF"));
 	const ImportPlan face_plan = project.plan({{art + "/head.grm", {}}, {art + "/boom.wav", {}}});
-	const ImportNotFollowed *face = not_followed(face_plan, ReferenceKind::None, AssetKind::Face);
+	const ImportNotFollowed *face =
+	        not_followed(face_plan, ReferenceKind::None, AssetKind::FaceAnimation);
 	TEST_EXPECT(face && face->count == 1 && face->first == "head.grm");
 	TEST_EXPECT(face_plan.not_followed.size() == 1 && row_named(face_plan, "head.grm"));
 	const ImportPlanRow *wave = row_named(face_plan, "boom.wav");
@@ -382,7 +383,8 @@ static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
 	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
-	        AssetKind::PowerupDefs, AssetKind::OtherDefs, AssetKind::Face, AssetKind::MapProject};
+	        AssetKind::PowerupDefs, AssetKind::OtherDefs, AssetKind::FaceAnimation,
+	        AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";

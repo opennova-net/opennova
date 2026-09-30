@@ -12,7 +12,7 @@ namespace {
 constexpr const char *kArchive[] = {".pff", nullptr};
 constexpr const char *kAnimation[] = {".bad", nullptr};
 constexpr const char *kAnimationMap[] = {".adm", nullptr};
-constexpr const char *kFace[] = {".grm", nullptr};
+constexpr const char *kFaceAnimation[] = {".grm", nullptr};
 constexpr const char *kAiProfile[] = {".aip", nullptr};
 // A model's normal map made ahead is an .mdt: a TGA the object loader decodes as it does a
 // .tga [orig: Texture_LoadByNameWithChannel @ 0x58B66F..0x58B6E6; Texture_LoadAndRegister @
@@ -100,8 +100,8 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .row,
 	// Its base and eye textures by name (formats/grm).
-	Kind(AssetKind::Face, "face", "Face", ArchiveSlot::Resource)
-	        .extensions(kFace)
+	Kind(AssetKind::FaceAnimation, "face_animation", "Face animation", ArchiveSlot::Resource)
+	        .extensions(kFaceAnimation)
 	        .names_files()
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile", ArchiveSlot::Resource)
@@ -117,8 +117,16 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::MusicScript, "music_script", "Music script", ArchiveSlot::Localres)
 	        .runtime("music_script")
 	        .row,
+	// A raw table read through the archives, fgn2.bin among them: its only reader asks after the
+	// archives mount [orig: CEffectSystem_Init @ 0x5f6070 through FileSystem_FileExists @
+	// 0x75aa50].
 	Kind(AssetKind::RawBin, "raw_bin", "Binary table", ArchiveSlot::Language)
 	        .extensions(kRawBin)
+	        .row,
+	// The country code the boot opens with the C library's fopen, never through the archives,
+	// on every read [orig: Game_ReadCCBinFile @ 0x4a5860]: loose, as retail ships it.
+	Kind(AssetKind::CountryCode, "country_code", "Country code", ArchiveSlot::Loose)
+	        .file("cc.bin")
 	        .row,
 	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres).runtime("credits").row,
 	// A .bms in localres: retail's mission list walks only the localres/language volumes [orig:
@@ -127,8 +135,9 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("mission")
 	        .names_files()
 	        .row,
-	// Where retail keeps its own (localres.pff holds ASP_G7.npz), beside the missions the list
-	// holds.
+	// Where retail keeps its own (localres.pff holds ASP_G7.npz): its mission list's archive walk
+	// takes a .npj or .npz as it takes a .bms [orig: Mission_BuildMapListFromPFF @ 0x562910]
+	// (OpenNova's lists none yet: runtime/mission/mission_catalog.h).
 	Kind(AssetKind::MapProject, "map_project", "Map project", ArchiveSlot::Localres)
 	        .extensions(kMapProject)
 	        .names_files()

@@ -18,13 +18,14 @@ enum class AssetKind {
 	Model,          // .3di
 	Animation,      // .bad
 	AnimationMap,   // .adm
-	Face,           // .grm (a head's facial texture mesh and its gesture offsets)
+	FaceAnimation,  // .grm (a character's facial texture meshes and gesture offsets)
 	AiProfile,      // .aip
 	Texture,        // .tga .pcx .dds .mdt, and a model's material chunk container by its content
 	Font,           // .fnt
 	Strings,        // RTXT .bin
 	MusicScript,    // SCR0 .bin
 	RawBin,         // .bin with neither magic (raw tables, exp_info style)
+	CountryCode,    // CC.BIN (the country code the boot reads loose)
 	Credits,        // .kda
 	Mission,        // .bms .mis
 	MapProject,     // .npj .npz (the mission editor's project, the mission list's other scan)
