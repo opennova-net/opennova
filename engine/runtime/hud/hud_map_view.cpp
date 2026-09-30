@@ -496,15 +496,6 @@ CommandMapView::EventResult CommandMapView::on_event(MapViewEvent event, int32_t
 	return EventResult::kNone;
 }
 
-CommandMapTabGates command_map_tab_gates(const DeathMapFacts &facts) {
-	CommandMapTabGates gates;
-	gates.orders = facts.has_squad_members;
-	gates.players = facts.in_session;
-	gates.team = facts.in_session && !facts.death_screen_active;
-	gates.rules = gates.team;
-	return gates;
-}
-
 MapViewRect command_map_waypoint_dialog_rect(int32_t click_x, int32_t click_y,
 		const MapViewRect &dialog, const MapViewRect &map) {
 	// [orig: @0x549f1f..0x549f7d — half = (R - L) >> 1 per axis, the rect

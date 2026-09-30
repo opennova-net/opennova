@@ -4,6 +4,7 @@
 #include <godot_cpp/core/class_db.hpp>
 
 #include <runtime/hud/hud_map_view.h>
+#include <runtime/menu/command_map_screen.h>
 
 namespace godot {
 
@@ -20,6 +21,10 @@ class MapViewState : public RefCounted {
 public:
 	opennova::hud::DeathMapView death;
 	opennova::hud::CommandMapView command;
+	// The CMAP order store beside the view globals it sits among in retail
+	// (dword_252DD80..88 next to the 0x252DD60.. view block); CommandMapScreen
+	// empties it at the session's end.
+	opennova::menu::CommandMapOrders orders;
 
 protected:
 	static void _bind_methods() {}

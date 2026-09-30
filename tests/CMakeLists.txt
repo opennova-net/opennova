@@ -1477,6 +1477,14 @@ add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+add_executable(menu_table_test menu/menu_table_test.cpp)
+target_link_libraries(menu_table_test PRIVATE opennova_runtime)
+target_include_directories(menu_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_table COMMAND menu_table_test)
+add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
+target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
+target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
+add_test(NAME command_map_screen COMMAND command_map_screen_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

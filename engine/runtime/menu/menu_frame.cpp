@@ -395,6 +395,7 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 		};
 		build_items(w.items.items, node.items);
 		build_items(w.list_box.items.items, node.popup_items);
+		if (w.type == mnu::WindowType::Table) build_table_columns_(node);
 		nodes_[static_cast<size_t>(index)] = std::move(node);
 	}
 	for (const mnu::Window &child : w.children) {
@@ -2045,6 +2046,9 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 	const bool checked =
 			ws != nullptr && ws->has_checked ? ws->checked : w.checked;
 	++draw_list_.widgets_drawn;
+	const int32_t clip_first = ws != nullptr && ws->has_clip
+			? static_cast<int32_t>(draw_list_.draw_ops.size())
+			: -1;
 	switch (w.type) {
 		case mnu::WindowType::Static:
 		case mnu::WindowType::Label:
@@ -2237,6 +2241,10 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			break;
 		}
 	}
+	// The widget's own passes ran inside its clip viewport; the viewport is
+	// restored before the children draw [orig: CStaticWnd_Render @ 0x657b10 —
+	// CWnd_ApplyClipViewport @0x657b22, CWnd_RestoreViewport @0x657be8].
+	if (clip_first >= 0) clip_ops_(clip_first, ws->clip, s);
 	// Children in authored array order [orig: the forward child walk — later
 	// siblings paint over earlier ones].
 	for (size_t c = 0; c < w.children.size(); ++c) {

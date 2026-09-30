@@ -5,7 +5,8 @@ extends GutTest
 # control, the zoom buttons step the shared view, the GRID toggle stores its
 # control's state and re-checks its ORDERS_ twin, the tab radios take their
 # gates, the CREATE_WAYPOINTS press runs the name dialog through to a placed
-# waypoint, the chat send reads and clears its line, and OK closes the screen.
+# waypoint, the chat send reads and clears its line, the ORDERS composer lists
+# and cancels an order, and OK closes the screen.
 # The shipped cmap.mnu stays covered by the retail menu-corpus compilation.
 
 const TMP_DIR := "res://.godot/command_map_presenter_test"
@@ -40,6 +41,22 @@ func before_each() -> void:
 	dialog += MenuDriverFixture.wnd("button", "WPNAME_OK", 0, hide)
 	body += MenuDriverFixture.wnd("window", "WAYPOINTNAME_DLG", 520, dialog, " HIDDEN")
 	body += MenuDriverFixture.wnd("button", "USERWP_CLOSE", 550, "", " HIDDEN")
+	# The TEAM / PLAYERS tables and the ORDERS composer's controls.
+	body += MenuDriverFixture.wnd("table", "TEAMLIST", 380,
+			'<COLUMN count="10"><HEADER column="0" width="50">R</HEADER></COLUMN>')
+	body += MenuDriverFixture.wnd("table", "PLAYERLIST", 400,
+			'<COLUMN count="7"><HEADER column="0" width="50">N</HEADER></COLUMN>')
+	body += MenuDriverFixture.wnd("table", "CURRENT_ORDERS", 420,
+			'<COLUMN count="2"><HEADER column="0" width="50">D</HEADER>'
+			+ '<HEADER column="1" width="150">O</HEADER></COLUMN>')
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>80</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	body += MenuDriverFixture.wnd("combobox", "GROUP", 440, list_box % "")
+	body += MenuDriverFixture.wnd("combobox", "COMMAND_ORDER", 460, list_box %
+			'<ITEM value="0">Halt</ITEM><ITEM value="1">Attack</ITEM>')
+	body += MenuDriverFixture.wnd("combobox", "LOCATION", 480, list_box % "")
+	body += MenuDriverFixture.wnd("button", "NEW_ORDER", 500)
+	body += MenuDriverFixture.wnd("button", "ADDTO_FIRETEAM_A", 510)
 	_write(dir.path_join("cmap.mnu"), MenuDriverFixture.screen_xml("CMAP", body).to_utf8_buffer())
 	_write(dir.path_join("menutxt.BIN"), RtxtStringFile.new().to_byte_array())
 
@@ -231,3 +248,44 @@ func test_the_view_state_outlives_the_menu() -> void:
 	if map_window != null:
 		assert_eq(map_window.get_view_state(), presenter.get_map_view_state())
 		assert_almost_eq(map_window.get_zoom(), 3.4, 0.0001)
+
+
+# The ORDERS radio fills LOCATION (My Position first; the bare local role has
+# no squad, banks or locations); NEW_ORDER composes the group, command and
+# location rows into a CURRENT_ORDERS row (the delete box "0", the text); the
+# delete box's press cancels the order and removes its row; ADDTO_* with no
+# selected member sends nothing [orig: CMap_OnOpenPopulate @0x5492a0;
+# CMap_BuildAndSendOrderCommand @0x5472d0; CCommandMap_HandleOrderAction
+# @0x548990].
+func test_the_orders_composer() -> void:
+	var presenter := _make_presenter()
+	assert_true(presenter.open())
+	var driver := presenter.get_menu_driver()
+	driver.activate(driver.widget_id("RADIO_TAB_ORDERS"))
+	var location := driver.widget_id("LOCATION")
+	assert_eq(driver.get_widget_items(location), PackedStringArray(["My Position"]))
+	driver.activate(driver.widget_id("NEW_ORDER"))
+	var orders := driver.widget_id("CURRENT_ORDERS")
+	assert_eq(driver.table_row_count(orders), 1, "NEW_ORDER lists the order")
+	assert_eq(driver.table_cell_text(orders, 0, 0), "0")
+	assert_eq(driver.table_cell_text(orders, 0, 1), "-Halt-My Position")
+	driver.activate(driver.widget_id("ADDTO_FIRETEAM_A"))
+	driver.emit_signal("table_cell_clicked", orders, "CURRENT_ORDERS", 0, 0, 3, 0, false)
+	assert_eq(driver.table_row_count(orders), 0, "the delete box cancels the order")
+	assert_true(presenter.is_open())
+
+
+# The show populates both tables (empty on the bare local role) and the
+# session's end empties the order store: a reopened screen lists nothing.
+func test_the_tables_populate_and_the_store_ends_with_the_session() -> void:
+	var presenter := _make_presenter()
+	assert_true(presenter.open())
+	var driver := presenter.get_menu_driver()
+	assert_eq(driver.table_row_count(driver.widget_id("TEAMLIST")), 0)
+	assert_eq(driver.table_row_count(driver.widget_id("PLAYERLIST")), 0)
+	driver.activate(driver.widget_id("RADIO_TAB_ORDERS"))
+	driver.activate(driver.widget_id("NEW_ORDER"))
+	presenter.teardown()
+	assert_true(presenter.open())
+	driver = presenter.get_menu_driver()
+	assert_eq(driver.table_row_count(driver.widget_id("CURRENT_ORDERS")), 0)

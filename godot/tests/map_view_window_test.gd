@@ -215,11 +215,6 @@ func test_the_command_waypoint_legs() -> void:
 			Rect2i(0, 0, 730, 440)), Rect2i(0, 75, 200, 50))
 	assert_eq(MapViewWindow.waypoint_dialog_rect(Vector2i(700, 300), Rect2i(0, 0, 200, 50),
 			Rect2i(0, 0, 730, 440)), Rect2i(530, 275, 200, 50))
-	# The bare local role is in no session and leads nobody: every gated tab
-	# is off.
-	for tab in [MapViewWindow.COMMAND_TAB_ORDERS, MapViewWindow.COMMAND_TAB_PLAYERS,
-			MapViewWindow.COMMAND_TAB_TEAM, MapViewWindow.COMMAND_TAB_RULES]:
-		assert_false(window.is_command_tab_enabled(tab))
 	# Without a bound delete button the idle move runs no hover test and the
 	# render reports no button.
 	window.push_map_event(MapViewWindow.MAP_EVENT_MOVE, Vector2i(300, 260), 0, 0)

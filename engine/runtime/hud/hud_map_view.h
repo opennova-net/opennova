@@ -398,27 +398,7 @@ struct DeathMapFacts {
 		std::string name;
 	};
 	std::array<UserWaypoint, kCommandMapWaypointSlots> user_waypoints;
-	// The CMAP tab gates' inputs: g_DeathScreenActive, and whether a live,
-	// non-spectator roster slot of the local player's team with an entity
-	// names the local slot its squad leader (+48).
-	bool death_screen_active = false;
-	bool has_squad_members = false;
 };
-
-// The CMAP tab radios' interactive states the screen's show leaves: ORDERS
-// while the local player leads anyone, PLAYERS in a session, TEAM and RULES
-// in a session off the death screen.
-// [orig: CMap_PopulateTeamList @0x547a50 — the row walk's `+48 == local`
-//  latch @0x547c4d, UIWidget_SetInteractiveRecursive @0x547d3f (ORDERS),
-//  @0x547d6e (PLAYERS, g_NapiNPCtx.is_in_session), @0x547d9c..0x547da6
-//  (TEAM), @0x547dd4..0x547de8 (RULES); from sub_54B320 @0x54b480]
-struct CommandMapTabGates {
-	bool orders = false;
-	bool players = false;
-	bool team = false;
-	bool rules = false;
-};
-CommandMapTabGates command_map_tab_gates(const DeathMapFacts &facts);
 
 // The DEATH window's compiled pass: the spinmap-shaped pass, then the zone
 // walk's segments, then the player crosshair (the device submits them in that

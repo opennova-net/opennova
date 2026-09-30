@@ -122,6 +122,46 @@ void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
 	apply_squad_event(world, event);
 }
 
+void ClientRuntime::send_squad_recruit(uint8_t target) {
+	// NetPacket_SendTeamChange(local entity+0x154, the row's slot) (a
+	// misnomer: the recruit) [orig: @0x54864e..0x54865c].
+	const int slot = local_roster_slot();
+	SquadRecruit recruit;
+	recruit.recruiter = static_cast<uint8_t>(slot < 0 ? 0xFF : slot);
+	recruit.target = target;
+	queue_squad_message(c2s::SQUAD_RECRUIT, encode_squad_recruit(recruit));
+}
+
+void ClientRuntime::send_squad_join(uint8_t leader) {
+	// [orig: NetPacket_SendWeaponSlotSwitch(slot) @0x548616 (a misnomer: the join)]
+	queue_squad_message(c2s::SQUAD_JOIN_REQUEST, encode_squad_join_request(leader));
+}
+
+void ClientRuntime::send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members) {
+	// [orig: NetPacket_SendWeaponAction(fireteam, count, slots) @0x548d67]
+	FireteamAssign assign;
+	assign.fireteam = fireteam;
+	assign.members = members;
+	queue_squad_message(c2s::FIRETEAM_ASSIGN, encode_fireteam_assign(assign));
+}
+
+void ClientRuntime::send_squad_order(uint8_t kind, const std::string &text,
+		const std::vector<uint8_t> &targets) {
+	// [orig: NetPacket_SendCommandType44(kind, count, targets, text) @0x547839 /
+	//  @0x548c25]
+	SquadOrderRequest order;
+	order.kind = kind;
+	order.text = text;
+	order.targets = targets;
+	queue_squad_message(c2s::SQUAD_ORDER_REQUEST, encode_squad_order_request(order));
+}
+
+void ClientRuntime::send_punt_vote(uint8_t target) {
+	// NetPacket_WriteByte(target) then CNapiNetwork_QueueReliableMessage(0x3F,
+	// 1, 0) [orig: @0x54889b..0x5488b9].
+	queue_squad_message(c2s::PUNT_VOTE, encode_punt_vote(target));
+}
+
 void ClientRuntime::apply_squad_event(world::World &world,
 		const replication::ClientSquadEvent &event) {
 	using Kind = replication::ClientSquadEvent::Kind;

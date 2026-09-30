@@ -105,6 +105,7 @@
 #include "hud/hud_overlay.h"
 #include "hud/map_view_state.h"
 #include "hud/map_view_window.h"
+#include "hud/command_map_screen.h"
 #include "hud/hud_toggles.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
@@ -308,6 +309,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(MapViewState);
 	GDREGISTER_CLASS(MapViewWindow);
+	GDREGISTER_CLASS(CommandMapScreen);
 	GDREGISTER_CLASS(HudToggles);
 	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);

@@ -10,13 +10,13 @@ extends Node
 ## process-lifetime MapViewState, like the retail globals) — plus the zoom
 ## buttons, the GRID / TEXT / WAYPOINTS / CREATE_WAYPOINTS toggles (each with
 ## its ORDERS_ twin), the placed-waypoint legs (the WAYPOINTNAME_DLG dialog, the
-## USERWP_CLOSE delete button, CLEAR_WAYPOINTS), the six go-code buttons, the
-## chat panel's two send buttons, the tab radios' gates and the OK close. The
+## USERWP_CLOSE delete button with its clip to the bound map, CLEAR_WAYPOINTS),
+## the six go-code buttons, the chat panel's two send buttons, the TEAM tab's
+## TEAMLIST and ADDTO_* buttons, the PLAYERS tab's PLAYERLIST, the ORDERS tab's
+## combos, NEW_ORDER and CURRENT_ORDERS (CommandMapScreen over the engine's
+## menu/command_map_screen.h), the tab radios' gates and the OK close. The
 ## witnessed models and the mode-4 compile are the engine's (hud/hud_map_view.h,
-## inmatch/client_squad.cpp); witness record hud-re D-HUD-19. The TEAM /
-## PLAYERS tables, the ORDERS composer and its CURRENT_ORDERS table, the RULES
-## text and the CHAT_MSGS draw are not ported yet (hud-re D-HUD-19): those
-## controls show their authored chrome only.
+## inmatch/client_squad.cpp); witness record hud-re D-HUD-19.
 
 const MENU_FILE := "cmap.mnu"
 const MENU_SCREEN := "CMAP"
@@ -37,12 +37,11 @@ const MAP_TAB_WIDGET := "RADIO_TAB_MAP"
 const ORDERS_TAB_WIDGET := "RADIO_TAB_ORDERS"
 # The tabs whose radio unbinds the delete button.
 const UNBINDING_TABS: Array[String] = ["RADIO_TAB_TEAM", "RADIO_TAB_PLAYERS", "RADIO_TAB_RULES"]
-# The gated tab radios, each paired with its MapViewWindow gate.
+# The gated tab radios, each paired with its CommandMapScreen gate bit.
 const GATED_TABS: Array[String] = ["RADIO_TAB_ORDERS", "RADIO_TAB_PLAYERS", "RADIO_TAB_TEAM",
 		"RADIO_TAB_RULES"]
-const GATED_TAB_INDICES: Array[int] = [MapViewWindow.COMMAND_TAB_ORDERS,
-		MapViewWindow.COMMAND_TAB_PLAYERS, MapViewWindow.COMMAND_TAB_TEAM,
-		MapViewWindow.COMMAND_TAB_RULES]
+const GATED_TAB_BITS: Array[int] = [CommandMapScreen.GATE_ORDERS, CommandMapScreen.GATE_PLAYERS,
+		CommandMapScreen.GATE_TEAM, CommandMapScreen.GATE_RULES]
 const DIALOG_WIDGET := "WAYPOINTNAME_DLG"
 const NAME_WIDGET := "WPNAME"
 const NAME_OK_WIDGET := "WPNAME_OK"
@@ -56,6 +55,12 @@ const CHAT_ALL_WIDGET := "CHAT_ALL"
 # The go-code buttons, codes 0..5.
 const GO_CODE_WIDGETS: Array[String] = ["GOCODE_UNIFORM", "GOCODE_VICTOR", "GOCODE_WHISKEY",
 		"GOCODE_XRAY", "GOCODE_YANKEE", "GOCODE_ZULU"]
+# The fireteam buttons, fireteams 0 (none) .. 3 (C).
+const FIRETEAM_WIDGETS: Array[String] = ["ADDTO_NO_FIRETEAM", "ADDTO_FIRETEAM_A",
+		"ADDTO_FIRETEAM_B", "ADDTO_FIRETEAM_C"]
+const NEW_ORDER_WIDGET := "NEW_ORDER"
+const TEAM_TAB_WIDGET := "RADIO_TAB_TEAM"
+const PLAYERS_TAB_WIDGET := "RADIO_TAB_PLAYERS"
 
 signal opened
 signal closed
@@ -67,6 +72,7 @@ var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
 var _map_window: MapViewWindow = null
+var _screen: CommandMapScreen = null
 var _hud_source: Callable = Callable()
 # The views outlive the per-mission menu rebuild, like the retail globals.
 var _map_view_state := MapViewState.new()
@@ -135,6 +141,7 @@ func open() -> bool:
 		map_window.set_hud_overlay(hud)
 		map_window.set_simulation(sim)
 		map_window.screen_load()
+	_screen.set_simulation(sim)
 	# The show (hud-re "The windowed map views"): the map tab selected (its
 	# authored actions show TAB_MAP and hide the others; its callback binds the
 	# delete button to MAP), the toggle controls re-checked from the view's
@@ -145,7 +152,8 @@ func open() -> bool:
 		_driver.activate(tab_id)
 	_sync_toggle_checks()
 	_bind_delete_button("MAP")
-	_apply_tab_gates()
+	_apply_tab_gates(_screen.populate_team_list(true))
+	_screen.populate_player_list()
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
 	_place_map_window()
@@ -166,10 +174,14 @@ func teardown() -> void:
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):
 		_audio.queue_free()
+	# The session's end empties the order store the next session starts from.
+	if _screen != null:
+		_screen.clear_orders()
 	_frame = null
 	_audio = null
 	_driver = null
 	_map_window = null
+	_screen = null
 	_bound_map = ""
 	_delete_bound = false
 	_delete_shown = false
@@ -186,6 +198,9 @@ func _process(_delta: float) -> void:
 		return
 	_place_map_window()
 	_place_delete_button()
+	var gates := _screen.refresh(Time.get_ticks_msec())
+	if gates >= 0:
+		_apply_tab_gates(gates)
 
 
 func _ensure_menu() -> bool:
@@ -197,12 +212,18 @@ func _ensure_menu() -> bool:
 			_on_frame_gui_input,
 			func(driver: MenuDriver) -> void:
 				driver.widget_activated.connect(_on_widget_activated)
-				driver.edit_committed.connect(_on_edit_committed))
+				driver.edit_committed.connect(_on_edit_committed)
+				driver.table_cell_clicked.connect(_on_table_cell_clicked))
 	if surface == null:
 		return false
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
+	_screen = CommandMapScreen.new()
+	_screen.setup(_driver, _map_view_state, Strings.get_table(Strings.TABLE_GAMETEXT),
+			Strings.get_table(Strings.TABLE_GAMEUI))
+	_screen.install_painters()
+	_screen.seed_current_orders()
 	for widget_name in MAP_WIDGETS:
 		if _driver.widget_id(widget_name) >= 0:
 			_map_window = MapViewWindow.new()
@@ -285,15 +306,25 @@ func _bind_delete_button(map_name: String) -> void:
 				int(_driver.widget_local_rect(_driver.widget_id(DELETE_WIDGET)).size.x))
 
 
-# The show's tab gates.
-func _apply_tab_gates() -> void:
-	var map_window := get_map_window()
+# A team-list populate's tab gates (RULES only from the show's full one).
+func _apply_tab_gates(gates: int) -> void:
 	for i in GATED_TABS.size():
-		var id := _driver.widget_id(GATED_TABS[i])
-		if id < 0:
+		if GATED_TAB_BITS[i] == CommandMapScreen.GATE_RULES \
+				and (gates & CommandMapScreen.GATE_SETS_RULES) == 0:
 			continue
-		var enabled := map_window != null and map_window.is_command_tab_enabled(GATED_TAB_INDICES[i])
-		_driver.set_widget_disabled(id, not enabled)
+		var id := _driver.widget_id(GATED_TABS[i])
+		if id >= 0:
+			_driver.set_widget_disabled(id, (gates & GATED_TAB_BITS[i]) == 0)
+
+
+# USERWP_CLOSE clipped to a map control's screen rect (the MAP / ORDERS
+# radios; the engine's MenuRuntime clip).
+func _clip_delete_button(map_name: String) -> void:
+	var delete_id := _driver.widget_id(DELETE_WIDGET)
+	var map_index := _driver.frame_index(_driver.widget_id(map_name))
+	if delete_id < 0 or map_index < 0:
+		return
+	_driver.set_widget_clip_rect(delete_id, Rect2i(_frame.widget_rect(map_index)))
 
 
 # The checkboxes mirror the view's toggle bytes on every show (both twins).
@@ -323,12 +354,25 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 		return
 	if upper == MAP_TAB_WIDGET:
 		_bind_delete_button("MAP")
+		_clip_delete_button("MAP")
 		return
 	if upper == ORDERS_TAB_WIDGET:
 		_bind_delete_button("ORDERS_MAP")
+		_clip_delete_button("ORDERS_MAP")
+		_screen.populate_orders()
 		return
 	if upper in UNBINDING_TABS:
 		_bind_delete_button("")
+		if upper == TEAM_TAB_WIDGET:
+			_apply_tab_gates(_screen.populate_team_list(false))
+		elif upper == PLAYERS_TAB_WIDGET:
+			_screen.populate_player_list()
+		return
+	if upper in FIRETEAM_WIDGETS:
+		_screen.assign_fireteam(FIRETEAM_WIDGETS.find(upper))
+		return
+	if upper == NEW_ORDER_WIDGET:
+		_screen.new_order()
 		return
 	if map_window == null:
 		return
@@ -370,6 +414,15 @@ func _on_waypoint_dialog_requested(point: Vector2i) -> void:
 	if name_id >= 0:
 		_driver.focus_widget(name_id)
 	map_window.store_waypoint_click(point)
+
+
+# A TEAMLIST / PLAYERLIST / CURRENT_ORDERS press after the table's own
+# selection write (the engine's click handlers read the row's new state).
+func _on_table_cell_clicked(_id: int, widget_name: String, row: int, column: int, state: int,
+		cell_value: int, _double_click: bool) -> void:
+	if _screen != null:
+		_screen.table_cell_clicked(widget_name, row, column, state, cell_value,
+				Time.get_ticks_msec())
 
 
 # WPNAME's Enter presses WPNAME_OK.

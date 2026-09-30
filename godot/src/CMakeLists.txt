@@ -148,6 +148,7 @@ add_library(${TARGET_NAME} SHARED
     hud/hud_overlay_windows.cpp
     hud/hud_map_pass_renderer.cpp
     hud/map_view_window.cpp
+    hud/command_map_screen.cpp
     hud/hud_toggles.cpp
     hud/hud_chat_entry.cpp
     hud/end_round_transition.cpp

@@ -53,6 +53,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
@@ -63,6 +65,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world

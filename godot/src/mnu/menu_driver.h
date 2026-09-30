@@ -243,6 +243,21 @@ public:
 	int table_row_count(int p_id) const;
 	String table_cell_text(int p_id, int p_row, int p_col) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
+	// The CTableWnd operations (engine menu_table_row.h).
+	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
+			int p_insert_index);
+	void table_set_cell_text(int p_id, int p_row, int p_col, const String &p_text);
+	void table_set_cell_value(int p_id, int p_row, int p_col, int p_value);
+	int table_cell_value(int p_id, int p_row, int p_col) const;
+	void table_remove_row(int p_id, int p_row);
+	int table_row_state(int p_id, int p_row) const;
+	void table_set_row_selected(int p_id, int p_row, bool p_selected);
+	PackedInt32Array table_selected_rows(int p_id) const;
+	// CWnd_SetClipRect (absolute design units) and its removal.
+	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
+	void clear_widget_clip_rect(int p_id);
+	// The engine runtime, for native screen companions (C++ only).
+	opennova::menu::MenuRuntime &runtime() { return runtime_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);

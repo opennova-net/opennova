@@ -314,6 +314,20 @@ public:
 	bool delete_hovered_user_waypoint(world::World &world);
 	void clear_user_waypoints(world::World &world);
 	void send_go_code(world::World &world, uint8_t code);
+	// THE CMAP TABLES' SENDS (menu/command_map_screen.h asks for them): the
+	// recruit [local slot][target] (C2S 0x46), the join [leader] (0x43), the
+	// fireteam assignment [fireteam][count][members] (0x45), the order
+	// [kind][count][text][targets] (0x44) and the punt vote [target] (0x3F).
+	// [orig: CMap_EntityWidgetHandler @0x54865c / @0x548616;
+	//  CCommandMap_SendWeaponActionToTeammates @0x548d67;
+	//  CMap_BuildAndSendOrderCommand @0x547839; CCommandMap_HandleOrderAction
+	//  @0x548c25; CMap_HandlePlayerListCallback @0x54889b..0x5488b9]
+	void send_squad_recruit(uint8_t target);
+	void send_squad_join(uint8_t leader);
+	void send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members);
+	void send_squad_order(uint8_t kind, const std::string &text,
+			const std::vector<uint8_t> &targets);
+	void send_punt_vote(uint8_t target);
 	void tick_remote_stance_sounds(world::World &world);
 	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
 	// joiner role runs each registry row's handler against its world.

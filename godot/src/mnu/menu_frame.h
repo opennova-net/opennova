@@ -119,7 +119,13 @@ public:
 	// add_row_values / marquee content, now engine state).
 	void set_widget_items(int p_index, const PackedStringArray &p_items);
 	void set_widget_selected_set(int p_index, const PackedInt32Array &p_rows);
-	void set_widget_table_rows(int p_index, const TypedArray<PackedStringArray> &p_rows);
+	// TABLE rows (menu_table_row.h) and the table's custom-draw handler (the
+	// CUSTOM_DRAW cells' control callback), C++ only.
+	void set_widget_table_rows(int p_index,
+			const std::vector<opennova::menu::MenuTableRow> &p_rows);
+	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
+	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
+	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
 	void set_widget_marquee_lines(int p_index, const PackedStringArray &p_lines);
 
 	// Widget queries over the configured screen (design-space rects; the
@@ -150,7 +156,10 @@ public:
 	bool combo_popup_contains(int p_index, const Vector2 &p_position) const;
 	int combo_popup_row_at(int p_index, const Vector2 &p_position) const;
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
-	int table_row_at(int p_index, const Vector2 &p_position) const;
+	// A list-like widget's displayed row text (C++ only).
+	std::string item_display_text(int p_index, int p_row) const;
+	// CTableWnd_HitTest: the data row (-1 the header) and column (-1 none).
+	bool table_hit(int p_index, const Vector2 &p_position, int *r_row, int *r_column) const;
 	int hotkey_widget(const String &p_key, bool p_virtual) const;
 
 	// Edit-input routing over the engine module (menu/menu_edit.h): applies

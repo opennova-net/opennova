@@ -248,21 +248,6 @@ Rect2i MapViewWindow::waypoint_dialog_rect(const Vector2i &p_click, const Rect2i
 	return Rect2i(out.left, out.top, out.right - out.left, out.bottom - out.top);
 }
 
-bool MapViewWindow::is_command_tab_enabled(int p_tab) const {
-	Simulation *sim = sim_();
-	if (sim == nullptr) return false;
-	opennova::hud::DeathMapFacts facts;
-	sim->fill_death_map_facts(facts);
-	const opennova::hud::CommandMapTabGates gates = opennova::hud::command_map_tab_gates(facts);
-	switch (p_tab) {
-	case COMMAND_TAB_ORDERS: return gates.orders;
-	case COMMAND_TAB_PLAYERS: return gates.players;
-	case COMMAND_TAB_TEAM: return gates.team;
-	case COMMAND_TAB_RULES: return gates.rules;
-	default: return false;
-	}
-}
-
 void MapViewWindow::hover_test_(const Vector2i &p_design_point) {
 	Simulation *sim = sim_();
 	if (!close_bound_ || sim == nullptr || !sim->kernel_) return;
@@ -460,8 +445,6 @@ void MapViewWindow::_bind_methods() {
 	ClassDB::bind_static_method("MapViewWindow",
 			D_METHOD("waypoint_dialog_rect", "click", "dialog", "map"),
 			&MapViewWindow::waypoint_dialog_rect);
-	ClassDB::bind_method(D_METHOD("is_command_tab_enabled", "tab"),
-			&MapViewWindow::is_command_tab_enabled);
 	ADD_SIGNAL(MethodInfo("waypoint_dialog_requested",
 			PropertyInfo(Variant::VECTOR2I, "design_point")));
 	ClassDB::bind_method(D_METHOD("get_zoom"), &MapViewWindow::get_zoom);
@@ -479,10 +462,6 @@ void MapViewWindow::_bind_methods() {
 	BIND_ENUM_CONSTANT(COMMAND_TOGGLE_TEXT);
 	BIND_ENUM_CONSTANT(COMMAND_TOGGLE_WAYPOINTS);
 	BIND_ENUM_CONSTANT(COMMAND_TOGGLE_CREATE_WAYPOINTS);
-	BIND_ENUM_CONSTANT(COMMAND_TAB_ORDERS);
-	BIND_ENUM_CONSTANT(COMMAND_TAB_PLAYERS);
-	BIND_ENUM_CONSTANT(COMMAND_TAB_TEAM);
-	BIND_ENUM_CONSTANT(COMMAND_TAB_RULES);
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAP_EVENT_MOVE",
 			static_cast<int>(MapViewEvent::kMove));
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MAP_EVENT_LEFT_DOWN",

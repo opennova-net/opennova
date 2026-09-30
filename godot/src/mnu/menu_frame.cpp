@@ -520,19 +520,23 @@ void MenuFrame::set_widget_selected_set(int p_index,
 }
 
 void MenuFrame::set_widget_table_rows(int p_index,
-		const TypedArray<PackedStringArray> &p_rows) {
+		const std::vector<opennova::menu::MenuTableRow> &p_rows) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.table_rows.clear();
-	ws.table_rows.reserve(static_cast<size_t>(p_rows.size()));
-	for (int64_t r = 0; r < p_rows.size(); ++r) {
-		const PackedStringArray row = p_rows[r];
-		std::vector<std::string> cells;
-		cells.reserve(static_cast<size_t>(row.size()));
-		for (int64_t c = 0; c < row.size(); ++c) {
-			cells.push_back(opennova::to_std(row[c]));
-		}
-		ws.table_rows.push_back(std::move(cells));
-	}
+	ws.table_rows = p_rows;
+	queue_redraw();
+}
+
+void MenuFrame::set_table_cell_painter(int p_index,
+		opennova::menu::MenuTableCellPainter p_painter) {
+	compiler_.set_table_cell_painter(p_index, std::move(p_painter));
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_clip = p_enabled;
+	ws.clip = { p_rect.position.x, p_rect.position.y, p_rect.position.x + p_rect.size.x,
+		p_rect.position.y + p_rect.size.y };
 	queue_redraw();
 }
 
@@ -673,13 +677,23 @@ int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
 			scale.x, scale.y);
 }
 
-int MenuFrame::table_row_at(int p_index, const Vector2 &p_position) const {
+std::string MenuFrame::item_display_text(int p_index, int p_row) const {
 	if (!configured_) {
-		return -1;
+		return std::string();
+	}
+	return compiler_.item_display_text(p_index, state_, p_row);
+}
+
+bool MenuFrame::table_hit(int p_index, const Vector2 &p_position, int *r_row,
+		int *r_column) const {
+	*r_row = -1;
+	*r_column = -1;
+	if (!configured_) {
+		return false;
 	}
 	const Vector2 scale = design_scale_();
-	return compiler_.table_row_at(p_index, state_, p_position.x, p_position.y,
-			scale.x, scale.y);
+	return compiler_.table_hit(p_index, state_, p_position.x, p_position.y, scale.x, scale.y,
+			r_row, r_column);
 }
 
 int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {

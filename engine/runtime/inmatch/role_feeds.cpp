@@ -10,12 +10,14 @@
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
+#include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
 #include <runtime/world/radio_call.h> // capture_zone_max_coverage
+#include <runtime/world/user_waypoints.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -557,10 +559,7 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 	out.in_session = view.joiner ? (runtime != nullptr && runtime->in_session())
 			: w.rules.mp_session;
 	out.hud_team = out.player_team;
-	// The CMAP legs: the placed-waypoint table's entities, the death-screen
-	// latch, and the squad walk CMap_PopulateTeamList runs for the ORDERS
-	// gate [orig: @0x547ab1..0x547c4f — `+13 && +14 == local team && !+46 &&
-	//  +36` rows, `+48 == local slot`].
+	// The CMAP's placed-waypoint table's entities.
 	for (int i = 0; i < world::UserWaypointTable::kCapacity; ++i) {
 		const world::Entity *wp =
 				w.registry.get(w.user_waypoints.entries[static_cast<size_t>(i)].handle);
@@ -571,25 +570,16 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 		fact.y = io::float_to_fp16_16_sat(wp->position.y);
 		fact.name = wp->display_name;
 	}
-	out.death_screen_active = local_death_screen_active(view);
-	if (runtime != nullptr) {
-		const int local_slot = runtime->local_roster_slot();
-		for (const replication::ClientRosterSlot &slot : runtime->state().roster) {
-			if (!slot.bound || slot.team != out.player_team || slot.spectator ||
-					slot.entity_slot < 0)
-				continue;
-			if (slot.squad_leader == static_cast<uint8_t>(local_slot)) {
-				out.has_squad_members = true;
-				break;
-			}
-		}
-	}
-	for (size_t i = 0; i < zones.entries.size(); ++i) {
-		const world::Entity *e = w.registry.get(zones.entries[i]);
+	// The zone walk is the minimap banks' (banked_spawn_zones) [orig:
+	// MapOverlay_DrawView @0x5a5a4d..0x5a5d2c].
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked) {
+		const world::Entity *e = w.registry.get(handle);
 		if (e == nullptr) continue;
 		hud::DeathMapZone zone;
 		zone.handle = e->handle.packed;
-		zone.index = static_cast<int32_t>(i);
+		zone.index = static_cast<int32_t>(world::spawn_zone_index_of(zones, handle));
 		zone.team = e->team;
 		if (runtime != nullptr) {
 			const auto live = runtime->zone_states().find(e->handle.packed);
@@ -648,6 +638,82 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 	return true;
 }
 
+void banked_spawn_zones(const RoleView &view, std::vector<world::EntityHandle> &out) {
+	out.clear();
+	if (view.kernel == nullptr || view.runtime == nullptr) return;
+	const world::World &w = view.kernel->world;
+	const replication::ClientMinimapState &banks = view.runtime->state().minimap;
+	auto walk = [&](const auto &bank) {
+		for (const replication::ClientMinimapOverlaySlot &slot : bank) {
+			if (slot.handle == 0xFFFFu || (slot.flags & 0x40u) != 0) continue;
+			const world::EntityHandle handle{slot.handle};
+			const world::Entity *e = w.registry.get(handle);
+			// The def (+32) and its spawn-zone attribute (+84 & 0x40000).
+			if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
+			out.push_back(handle);
+		}
+	};
+	walk(banks.transient);
+	walk(banks.persistent);
+	walk(banks.special);
+}
+
+bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out) {
+	out = menu::CommandMapRoster{};
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	const ClientRuntime &runtime = *view.runtime;
+	const replication::ClientState &cs = runtime.state();
+	const int local_slot = runtime.local_roster_slot();
+	out.local_slot = static_cast<uint8_t>(local_slot < 0 ? 0xFF : local_slot);
+	if (const world::Entity *player = w.registry.get(w.cached.local_player))
+		out.local_team = static_cast<int8_t>(player->team);
+	out.death_screen = local_death_screen_active(view);
+	out.in_session = view.joiner ? runtime.in_session() : w.rules.mp_session;
+	for (size_t i = 0; i < cs.roster.size(); ++i) {
+		const replication::ClientRosterSlot &slot = cs.roster[i];
+		if (!slot.bound) continue;
+		menu::CommandMapPlayer p;
+		p.slot = static_cast<uint8_t>(i);
+		p.team = slot.team;
+		p.name = slot.name;
+		p.has_entity = slot.entity_slot >= 0;
+		if (p.has_entity) {
+			if (const world::Entity *e = w.registry.get(world::EntityHandle::make(
+						0, static_cast<uint16_t>(slot.entity_slot))))
+				p.player_class = e->player_class;
+		}
+		p.spectator = slot.spectator;
+		p.leader = slot.squad_leader;
+		p.fireteam = slot.fireteam;
+		p.mute = slot.radio_mute_flags;
+		p.squad_color = slot.squad_color;
+		p.punt_mark = slot.punt_mark;
+		out.players.push_back(std::move(p));
+	}
+	return true;
+}
+
+bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		menu::CommandMapLocations &out) {
+	out = menu::CommandMapLocations{};
+	if (view.kernel == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	for (const world::UserWaypointTable::Entry &entry : w.user_waypoints.entries) {
+		const world::Entity *wp = w.registry.get(entry.handle);
+		out.user_waypoints.push_back(wp != nullptr ? wp->display_name : std::string());
+	}
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked)
+		out.zone_indices.push_back(world::spawn_zone_index_of(zones, handle));
+	if (view.runtime != nullptr && !view.runtime->state().location_names.empty())
+		out.location_names = view.runtime->state().location_names;
+	else if (view.host != nullptr)
+		out.location_names = view.host->mission_location_names;
+	return true;
+}
+
 bool death_shroud_revealed(const RoleView &view) {
 	if (view.kernel == nullptr) return false;
 	const bool deploy_active =
@@ -694,9 +760,15 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 	const uint8_t team = runtime.assigned_team();
 	const replication::ClientState &cs = runtime.state();
 	const uint16_t self_handle = runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu;
-	for (size_t i = 0; i < zones.entries.size(); ++i) {
-		const world::Entity *e = w.registry.get(zones.entries[i]);
-		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
+	// The zone walk is the minimap banks' (banked_spawn_zones): a zone the
+	// server never sent is not listed, the rows follow first arrival, and a
+	// banked zone outside the SpawnZoneList lists as index -1.
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked) {
+		const world::Entity *e = w.registry.get(handle);
+		if (e == nullptr) continue;
+		const int index = world::spawn_zone_index_of(zones, handle);
 		uint8_t effective_team = e->team;
 		int32_t effective_control = e->zone_control;
 		int32_t effective_limit = 0x10000;
@@ -714,10 +786,12 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		}
 		if (effective_team != team) continue;
 		world::DeployZoneRow row;
-		row.index = static_cast<int>(i);
-		row.letter = static_cast<char>('A' + static_cast<int>(i));
+		// No -1 guard in the first loop: an unregistered zone lists as '@'
+		// with STRWPNAME000 and value 0 [orig: @0x553bd6..0x553c1f].
+		row.index = index;
+		row.letter = static_cast<char>('A' + index);
 		char name_key[32];
-		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", static_cast<int>(i) + 1);
+		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", index + 1);
 		row.name_key = name_key;
 		// The first-loop gate: a zone whose live timer entry sits below its limit
 		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-

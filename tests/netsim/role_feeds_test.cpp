@@ -300,9 +300,12 @@ int main() {
 		CHECK(!joiner_in_match_ready(jv, false)); // no local player, not in match
 	}
 
-	// The DEATH screen's zone rows: a joiner's feed over the local BMS zone
-	// facts (team, control) with the 0x6E wave group's occupants named through
-	// the roster; every other role emits nothing.
+	// The DEATH screen's zone rows: a joiner's feed over the zones its minimap
+	// banks hold (transient, persistent, special in that order; a 0x40 slot
+	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
+	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
+	// occupants named through the roster; every other role emits nothing
+	// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -319,8 +322,21 @@ int main() {
 		zone.team = 1;
 		zone.zone_control = 0x10000;
 		const world::EntityHandle theirs = kernel.world.registry.spawn(2, zone);
+		zone.team = 0;
+		const world::EntityHandle unlisted = kernel.world.registry.spawn(2, zone);
 		world::SpawnZoneRegistry reg;
 		reg.entries = { secured, contested, theirs };
+		auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h,
+							uint8_t flags) {
+			slot.active = true;
+			slot.handle = h.packed;
+			slot.flags = flags;
+		};
+		bank(cs.minimap.transient[0], unlisted, 0x00);
+		bank(cs.minimap.persistent[0], contested, 0x10);
+		bank(cs.minimap.persistent[1], secured, 0x10);
+		bank(cs.minimap.persistent[2], theirs, 0x10);
+		bank(cs.minimap.special[0], secured, 0x40); // a local-person/probe slot
 		SpawnWaveGroup group;
 		group.zone_handle = secured.packed;
 		group.wave_countdown = 42;
@@ -342,14 +358,21 @@ int main() {
 		jv.joiner = true;
 		std::vector<world::DeployZoneRow> rows;
 		CHECK(deploy_zone_rows(jv, reg, rows));
-		CHECK(rows.size() == 2); // the other team's zone is not a row
-		CHECK(rows.size() == 2 && rows[0].index == 0 && rows[0].letter == 'A' &&
-				rows[0].name_key == "STRWPNAME001" && rows[0].secured);
-		CHECK(rows.size() == 2 && rows[0].wave_countdown == 42 && rows[0].occupants.size() == 2);
-		CHECK(rows.size() == 2 && rows[0].occupants.size() == 2 && rows[0].occupants[0].name == "Ace" &&
-				rows[0].occupants[1].name == "Bravo" && !rows[0].occupants[0].self);
-		CHECK(rows.size() == 2 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
+		CHECK(rows.size() == 3); // the other team's zone is not a row, the 0x40 slot is skipped
+		CHECK(rows.size() == 3 && rows[0].index == -1 && rows[0].letter == '@' &&
+				rows[0].name_key == "STRWPNAME000" && rows[0].secured);
+		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
 				rows[1].occupants.empty());
+		CHECK(rows.size() == 3 && rows[2].index == 0 && rows[2].letter == 'A' &&
+				rows[2].name_key == "STRWPNAME001" && rows[2].secured);
+		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
+		CHECK(rows.size() == 3 && rows[2].occupants.size() == 2 && rows[2].occupants[0].name == "Ace" &&
+				rows[2].occupants[1].name == "Bravo" && !rows[2].occupants[0].self);
+		// No bank slots, no rows (nothing is listed before the first 0x40 lands).
+		const replication::ClientMinimapState banks = cs.minimap;
+		cs.minimap = replication::ClientMinimapState();
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.empty());
+		cs.minimap = banks;
 		// The authority's view (the listen host) lists nothing through this feed.
 		RoleView hv;
 		hv.kernel = &kernel;
@@ -358,6 +381,7 @@ int main() {
 		cs.spawn_waves = replication::ClientSpawnWaveStatus();
 		cs.roster[0] = replication::ClientRosterSlot();
 		cs.entities.clear();
+		cs.minimap = replication::ClientMinimapState();
 	}
 
 	// The per-drawn-entity lighting feed's CONTAINED leg: an entity whose first

@@ -63,8 +63,8 @@ struct DeployOccupant {
 // EntryById[9] >= [10]) with attrib 0x40000; text "<team color>'<letter>' <name>",
 // row value = index + 1].
 struct DeployZoneRow {
-    int index = 0;        // SpawnZoneList index (0-based)
-    char letter = 'A';    // 'A' + index
+    int index = 0;        // SpawnZoneList index (0-based; -1 for a banked zone outside it)
+    char letter = 'A';    // 'A' + index ('@' for -1)
     std::string name_key; // WPNames/STRWPNAME%03d (index + 1)
     bool secured = false; // the first loop's listing gate
     uint16_t wave_countdown = 0; // entity+548 from the 0x6E fold

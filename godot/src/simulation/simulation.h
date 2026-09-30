@@ -549,6 +549,7 @@ private:
 	// Godot Refs into the kernel's sources and orders device work around it.
 	friend class EffectSectionSource; // the effect section gate's kernel reads
 	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
+	friend class CommandMapScreen; // the CMAP tables' roster and sends (menu/command_map_screen.h)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and

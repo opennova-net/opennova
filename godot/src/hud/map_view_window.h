@@ -44,14 +44,6 @@ public:
 		COMMAND_TOGGLE_WAYPOINTS = opennova::hud::kCommandToggleWaypoints,
 		COMMAND_TOGGLE_CREATE_WAYPOINTS = opennova::hud::kCommandToggleCreateWaypoints,
 	};
-	// The CMAP tab radios the screen's show gates (hud_map_view.h
-	// command_map_tab_gates).
-	enum CommandTab {
-		COMMAND_TAB_ORDERS = 0,
-		COMMAND_TAB_PLAYERS = 1,
-		COMMAND_TAB_TEAM = 2,
-		COMMAND_TAB_RULES = 3,
-	};
 
 	MapViewWindow();
 	~MapViewWindow();
@@ -119,8 +111,6 @@ public:
 	Vector2i get_close_button_position() const { return close_position_; }
 	static Rect2i waypoint_dialog_rect(const Vector2i &p_click, const Rect2i &p_dialog,
 			const Rect2i &p_map);
-	// The tab radios' interactive states from this frame's facts.
-	bool is_command_tab_enabled(int p_tab) const;
 
 	// Read seams (ADR 0018): the view state and the last compiled pass.
 	float get_zoom() const { return pan_view_().zoom; }
@@ -184,4 +174,3 @@ private:
 
 VARIANT_ENUM_CAST(godot::MapViewWindow::ViewKind);
 VARIANT_ENUM_CAST(godot::MapViewWindow::CommandToggle);
-VARIANT_ENUM_CAST(godot::MapViewWindow::CommandTab);

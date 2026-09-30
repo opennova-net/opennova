@@ -37,6 +37,10 @@ class MissionKernel;
 namespace opennova::hud {
 struct HudScoreboardState;
 }
+namespace opennova::menu {
+struct CommandMapRoster;
+struct CommandMapLocations;
+}
 
 namespace opennova::inmatch {
 
@@ -208,6 +212,41 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy);
 // of the populate has no secured gate, so the list builder
 // (world/deploy_screen_feed.h) decides which rows list and where the
 // occupants land. A joiner's feed: false (nothing emitted) on every other role.
+// THE MINIMAP BANKS' SPAWN ZONES: the 1160 overlay slots in address order
+// (transient, persistent, special), each whose handle is set and whose flag
+// byte lacks 0x40, resolved to its pool entity and kept when the entity's def
+// carries the spawn-zone attribute 0x40000 — the zone walk of the DEATH list,
+// the DEATH map and the CMAP LOCATION combo. The banks are the replica's (S2C
+// 0x40 on every client, the listen host's loopback included; the bare local
+// role has none, and neither does a dedicated host). A zone reaches a bank
+// only when the server's overlay pass sends it, in first-arrival order.
+// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e / @0x553c5f..0x553de3,
+//  MapOverlay_DrawView @0x5a5a4d, CMap_OnOpenPopulate @0x5495b0..0x549676 — the
+//  walk from word_28E5620 (transient 328 @0x28E5620, persistent 328
+//  @0x28E7F20, special 504 @0x28EA820, 32-byte slots); the 0x40 writers
+//  MapOverlay_AllocSlot @0x5be970 (only local people and the laser probe,
+//  never a zone: Server_BuildOverlayStateForPlayer @0x517fc0 sends the zones
+//  with `dead | 0x10`)]
+void banked_spawn_zones(const RoleView &view, std::vector<world::EntityHandle> &out);
+
+// The CMAP tables' roster snapshot: the bound connection slots in slot order
+// with their squad bytes and the entity's class, the local slot and team, the
+// death-screen latch and the session bit.
+// [orig: g_PlayerSlotTable[5] (PlayerSlotTable_RebuildLinkedLists links the
+//  active slots in index order); g_LocalPlayerEntity+0x154 / +0x162;
+//  g_DeathScreenActive; g_NapiNPCtx.is_in_session]
+bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out);
+
+// What the CMAP LOCATION combo lists besides My Position and the squad: the
+// placed-waypoint table's names (the entity's +244, "" for a free slot), the
+// banked spawn zones' SpawnZoneList indices, and the mission's location names
+// (the replica's 0x0F copy, else the authority's own).
+// [orig: CMap_OnOpenPopulate @0x549544..0x549575 (the table), @0x5495b0..0x549676
+//  (the banks), @0x549682..0x5496ab (g_LocationNames @0xa2ed10 /
+//  g_LocationNameCount @0xa77644)]
+bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		menu::CommandMapLocations &out);
+
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out);
 
