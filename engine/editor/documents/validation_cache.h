@@ -63,9 +63,9 @@ public:
 	// The validation ends: the files it did not ask (gone from the scan) leave the cache.
 	void end();
 	const ValidationStats &stats() const { return stats_; }
-	// The closed files' documents this cache loaded that are alive, anywhere: none once their
-	// findings are made (nothing keeps a closed file resident).
-	size_t documents_alive() const { return *alive_; }
+	// The closed files' documents the current validation loaded that are alive, anywhere: none
+	// once their findings are made (nothing keeps a closed file resident).
+	size_t documents_alive() const;
 
 private:
 	struct Entry {
@@ -85,7 +85,7 @@ private:
 	};
 	std::map<std::string, Entry> entries_; // by project-relative path
 	ValidationStats stats_;
-	std::shared_ptr<size_t> alive_ = std::make_shared<size_t>(0);
+	std::vector<std::weak_ptr<const Document>> loaded_; // the closed files this validation read
 };
 
 } // namespace opennova::editor

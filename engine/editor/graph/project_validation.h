@@ -27,7 +27,9 @@ class AssetGraph;
 // each file of validation_files, one step at a time, then run_use_checks (use_checks.h),
 // ValidationCache::end and AssetGraph::diagnostics. Only the graph's update and file_findings read
 // files; the use checks read the graph the update made and which files' records their own checks
-// read, so they run after the last file.
+// read, so they run after the last file. The scan and the open documents (their revisions) stay
+// as the update saw them until the use checks ran: an edit between two steps starts the
+// validation again, or a file's findings would be of another revision than the graph's.
 std::vector<Diagnostic> validate_project(
 		const ValidationInput &input, AssetGraph &graph, ValidationCache &cache);
 

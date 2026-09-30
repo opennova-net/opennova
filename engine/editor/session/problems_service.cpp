@@ -22,9 +22,9 @@ ProblemsService::ProblemsService(SessionCore &core) :
 
 // The project's findings now, composed as `opennova-project validate` composes them
 // (project/project_findings): the scan's, the requirements', the files the last Play's game
-// reported missing and its nonzero exit, every document type's over the files (the open
-// documents standing in for theirs, the closed ones from the cache) with the graph's and the
-// open documents' own (a file changed outside the editor that was not read again), the menu
+// reported missing and its nonzero exit, each file's own (the open documents standing in for
+// theirs, every file's kept in the cache until it changes) with the use checks', the graph's and
+// the open documents' own (a file changed outside the editor that was not read again), the menu
 // render check's notes and the last build's own findings (after the gate the build reads: a
 // note never blocks a build, nor does the last Play's report, which only the next Play can
 // clear, nor the last build's, which the next build replaces). They replace the Problems rows:
@@ -74,12 +74,13 @@ void ProblemsService::add_reported(const Diagnostic &d) {
 	core_.touch(ViewConcern::Findings);
 }
 
-std::vector<Diagnostic> ProblemsService::gate_findings() const {
-	const std::vector<Diagnostic> &rows = view_.diagnostics;
-	const size_t after = gate_tail_ + trailing_;
-	if (after + gate_size_ > rows.size())
-		return {};
-	const auto end = rows.end() - static_cast<std::ptrdiff_t>(after);
+std::vector<Diagnostic> ProblemsService::gate_findings() {
+	// Every writer of the rows keeps the range where it is (compose, add_reported, and the Play's
+	// drop of its own rows, which sit before it); rows that no longer hold it are composed again,
+	// never a build planned on another gate.
+	if (gate_size_ + gate_tail_ + trailing_ > view_.diagnostics.size())
+		compose(false);
+	const auto end = view_.diagnostics.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
 	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
 }
 

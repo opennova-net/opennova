@@ -76,7 +76,7 @@ public:
 	// The last validation's gate, which the build plan gates on: every document type's findings
 	// over the files, the use checks' and the graph's, then the open documents' own (the render
 	// check's notes are not: they never block a build). A copy of those Problems rows.
-	std::vector<Diagnostic> gate_findings() const;
+	std::vector<Diagnostic> gate_findings();
 	// What the last validation did: the files whose own findings it made and kept, the closed
 	// files it read.
 	const ValidationStats &validation_stats() const { return validation_cache_.stats(); }

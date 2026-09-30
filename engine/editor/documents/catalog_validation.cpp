@@ -44,9 +44,10 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 }
 std::vector<Diagnostic> validate_catalog_file(const Document &document) {
 	std::vector<Diagnostic> findings;
-	if (!dynamic_cast<const DefCatalogDocument *>(&document)) return findings;
+	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
+	if (!catalog) return findings;
 	auto locate = [&](Diagnostic &diagnostic) {
-		for (const auto &row : document.rows()) {
+		for (const auto &row : catalog->rows()) {
 			if (row->name() == diagnostic.record) {
 				diagnostic.row_id = row->id; diagnostic.record_kind = row->kind; return;
 			}
@@ -62,7 +63,7 @@ std::vector<Diagnostic> validate_catalog_file(const Document &document) {
 	// Input the game ignores is dropped on save: a warning. Input the typed model cannot
 	// carry blocks the file: an error. On the record the issue names, found by its name.
 	source_issue_findings(
-			document, "catalog.invalid_input", "catalog.ignored_input", findings, locate);
+			*catalog, "catalog.invalid_input", "catalog.ignored_input", findings, locate);
 	if (document.blocked()) return findings;
 	for (const auto &issue : document.serialize().issues) {
 		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable",
@@ -75,7 +76,7 @@ std::vector<Diagnostic> validate_catalog_file(const Document &document) {
 	// table the scan lists earlier has is graph/use_checks' finding (check_item_ids).
 	std::map<int, const Node *> first_of_id;
 	std::map<std::string, const Node *> named; // the first record of each kind and name
-	for (const auto &row : document.rows()) {
+	for (const auto &row : catalog->rows()) {
 		auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message,
 			const std::string &field, NodeAddress address) {
 			auto diagnostic = make_diagnostic(severity, code, message, document.path(), field);

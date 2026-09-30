@@ -10,9 +10,10 @@
 // stylesheets' uses, the item ids, both with open documents edited), the rows validate_project
 // makes are the rows the trunk's per-type validators (validate_open_documents) made before the
 // split, every member of every row, their count and digest pinned from that run (the order is
-// not: a file's own rows come first, the use checks' after every file's). What the split changed
-// on purpose is pinned apart: the ids of a table a source error blocks, an id of 0 across tables,
-// and a repeat inside a table of an id an earlier table has. The retail leg (OPENNOVA_JO_DIR)
+// not: a file's own rows come first, the use checks' after every file's). The ids across item
+// tables are pinned apart: what the split keeps (a table a source error blocks counts for no other
+// table) and what it changed on purpose (an id of 0 across tables, and a repeat inside a table of
+// an id an earlier table has). The retail leg (OPENNOVA_JO_DIR)
 // exports the install's files a document type opens into a project and times a first
 // validation, one with nothing changed and one after an edit of the open item table.
 #include <editor/assets/asset_import.h>
@@ -301,6 +302,7 @@ static int test_what_a_validation_reads() {
 	validate();
 	TEST_EXPECT(stats.passes == 1 && stats.files_validated == files &&
 			stats.files_loaded == files && stats.files_reused == 0 && stats.files_failed == 0);
+	// A guard more than a measure: a cache that kept a closed file's document would hold it alive.
 	TEST_EXPECT(cache.documents_alive() == 0);
 	validate();
 	TEST_EXPECT(stats.passes == 2 && stats.files_validated == 0 && stats.files_loaded == 0 &&
@@ -394,12 +396,44 @@ static int test_use_check_table() {
 	return 0;
 }
 
+// A stylesheet line whose name is written as a %NAME% itself is no definition its file reads of
+// that name (MnsDocument::winning_row looks a name up by its variable_name), so the stylesheet's
+// use checks make nothing of it: FOO, which a menu uses, is used, and "%FOO%" is not unused. The
+// line is the file's own finding (style.invalid_name_char: the game stops reading there), which
+// asset_graph_test pins.
+static int test_style_name_as_reference() {
+	Project project;
+	TEST_EXPECT(project.make({
+			{ "menus/menu_style.mns", "FOO FF00FF00\r\n%FOO% 1\r\n" },
+			{ "menus/main.mnu",
+					"<SCREEN>\r\n<NAME>MAIN</NAME>\r\n" +
+							window("A",
+									"<APPEARANCE STATE=\"DEFAULT\" "
+									"TYPE=\"COLOR\">%FOO%</APPEARANCE>\r\n") +
+							"</SCREEN>\r\n" },
+	}));
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const Document>> open;
+	size_t style_rows = 0;
+	for (const Diagnostic &d :
+			validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
+		if (d.code == "style.unused" || d.code == "style.overridden_by_brand" ||
+				d.code == "style.not_a_color" || d.code == "style.mixed_use") {
+			std::printf("  %s %s: %s\n", d.code.c_str(), d.record.c_str(), d.message.c_str());
+			++style_rows;
+		}
+	TEST_EXPECT(style_rows == 0);
+	return 0;
+}
+
 // Ids across item tables (ADR 0046 S13 D4): an id a table the scan lists earlier has is a finding
 // on the first item of the id in the later table, naming the earlier table's item, after every
-// file's own rows; a later repeat inside that table is the table's own finding, naming its first;
-// a table a source error blocks reports that alone, and its ids count for no other table; an id of
-// 0 names no item and defines none, so items of 0 in two tables are no finding, where two in one
-// table are its own.
+// file's own rows; a later repeat inside that table is the table's own finding, naming its first
+// (it named the earlier table's before the split); a table a source error blocks reports that
+// alone, and its ids count for no other table (as before); an id of 0 names no item and defines
+// none, so items of 0 in two tables are no finding (they were), where two in one table are its
+// own.
 static int test_item_ids_across_tables() {
 	Project project;
 	TEST_EXPECT(project.make({
@@ -530,6 +564,7 @@ int main(int argc, char **argv) {
 	failures += test_what_a_validation_reads();
 	failures += test_findings_keep_their_records();
 	failures += test_use_check_table();
+	failures += test_style_name_as_reference();
 	failures += test_item_ids_across_tables();
 	failures += test_retail_validation();
 	return failures == 0 ? 0 : 1;

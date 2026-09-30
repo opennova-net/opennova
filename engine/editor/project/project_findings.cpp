@@ -31,7 +31,7 @@ ProjectFindings compose_project_findings(const ProjectFindingsInput &input, Asse
 	std::vector<Diagnostic> &rows = out.rows;
 	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
 	std::vector<Diagnostic> documents = validate_project(validation, graph, cache);
-	render_check.update(validation, graph, files);
+	render_check.update(validation, files);
 	rows.reserve(input.scan.diagnostics.size() + input.requirements.diagnostics.size() +
 			input.boot_missing.size() + input.play.size() + documents.size() +
 			input.open_findings.size() + render_check.diagnostics().size() + input.build.size());

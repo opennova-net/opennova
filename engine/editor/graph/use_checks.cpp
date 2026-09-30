@@ -9,6 +9,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
+#include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>
 
@@ -50,8 +51,11 @@ void check_style_uses(
 			last[symbols[i]->name] = symbols[i];
 		for (size_t i = begin; i < end; ++i) {
 			const GraphSymbol &symbol = *symbols[i];
-			// An empty value: a name the game ignores.
-			if (last[symbol.name] != &symbol || symbol.value.empty())
+			// An empty value: a name the game ignores. A name written as a %NAME% itself is no
+			// definition the file reads of that name (MnsDocument::winning_row looks the name up
+			// by its variable_name).
+			if (last[symbol.name] != &symbol || symbol.value.empty() ||
+					mns::is_variable_reference(symbol.display))
 				continue;
 			const std::string &name = symbol.display;
 			const std::string &value = symbol.value;

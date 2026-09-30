@@ -1340,15 +1340,17 @@ void action_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings)
 
 std::vector<Diagnostic> validate_menu_file(const Document &document) {
 	std::vector<Diagnostic> findings;
+	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
+	if (!menu) return findings;
 	// What retail's reader leaves out (a warning: a save drops it) and what the file
 	// cannot hold or retail faults on (an error: it blocks the save and the build), on the
 	// screen or window the reader found it in (its locator, in the file as loaded: wherever
 	// that record is now, source_address; gone since, the file), so Problems selects it,
 	// named by its path when the reader named none.
-	source_issue_findings(document, "menu.invalid_input", "menu.ignored_input", findings,
+	source_issue_findings(*menu, "menu.invalid_input", "menu.ignored_input", findings,
 			[&](Diagnostic &finding) {
 				if (finding.row_id && finding.record.empty())
-					finding.record = document.record_path(
+					finding.record = menu->record_path(
 							{ finding.row_id, finding.record_kind, finding.child_id });
 			});
 	if (document.blocked()) return findings;
@@ -1358,16 +1360,14 @@ std::vector<Diagnostic> validate_menu_file(const Document &document) {
 		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "menu.unserializable", issue.message,
 		                                  document.path(), issue.field);
 		diagnostic.record = issue.record;
-		const NodeAddress address = issue.locator.empty() ? NodeAddress() : document.address_at(issue.locator);
+		const NodeAddress address = issue.locator.empty() ? NodeAddress() : menu->address_at(issue.locator);
 		diagnostic.row_id = address.row;
 		diagnostic.child_id = address.child;
 		diagnostic.record_kind = address.kind;
 		findings.push_back(std::move(diagnostic));
 	}
-	if (const auto *menu = dynamic_cast<const MnuDocument *>(&document)) {
-		name_findings(*menu, findings);
-		action_findings(*menu, findings);
-	}
+	name_findings(*menu, findings);
+	action_findings(*menu, findings);
 	return findings;
 }
 

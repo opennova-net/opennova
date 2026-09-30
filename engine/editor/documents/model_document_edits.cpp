@@ -282,7 +282,7 @@ std::vector<Diagnostic> validate_model_file(const Document &document) {
 		d.record_kind = node_kind(kind);
 		if (collection < row->collections.size() && index < row->collections[collection].size()) {
 			d.child_id = row->collections[collection][index];
-			d.record = document.record_path({row->id, node_kind(kind), d.child_id});
+			d.record = model->record_path({row->id, node_kind(kind), d.child_id});
 		}
 		findings.push_back(std::move(d));
 	};
@@ -412,7 +412,7 @@ std::vector<Diagnostic> validate_model_file(const Document &document) {
 				d.row_id = row->id;
 				d.record_kind = node_kind(ModelKind::PartAnimation);
 				d.child_id = lod.panm_ids[p];
-				d.record = document.record_path({row->id, d.record_kind, d.child_id});
+				d.record = model->record_path({row->id, d.record_kind, d.child_id});
 				findings.push_back(std::move(d));
 			};
 			// The frame the pose turns the part through, by the pose's own rule

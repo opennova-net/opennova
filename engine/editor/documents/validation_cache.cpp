@@ -12,6 +12,7 @@ void ValidationCache::begin() {
 	const size_t passes = stats_.passes;
 	stats_ = ValidationStats();
 	stats_.passes = passes + 1;
+	loaded_.clear();
 	for (auto &[path, entry] : entries_)
 		entry.asked = false;
 }
@@ -60,14 +61,11 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry.game = input.project.target_game;
 	if (!type)
 		return entry.findings;
-	// The closed file, loaded for its findings alone: it goes when they are made.
+	// The closed file, loaded for its findings alone: it goes when they are made (watched until
+	// it does, so a cache that kept one would show it: documents_alive).
 	++stats_.files_loaded;
-	++*alive_;
-	const std::shared_ptr<Document> document(
-			type->make().release(), [alive = alive_](Document *made) {
-				--*alive;
-				delete made;
-			});
+	const std::shared_ptr<Document> document = type->make();
+	loaded_.push_back(document);
 	Diagnostic error;
 	if (!document->load(
 				(std::filesystem::path(input.paths.root) / asset.relative_path).generic_string(),
@@ -78,6 +76,13 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	}
 	validate(*document);
 	return entry.findings;
+}
+
+size_t ValidationCache::documents_alive() const {
+	size_t alive = 0;
+	for (const auto &document : loaded_)
+		alive += document.expired() ? 0 : 1;
+	return alive;
 }
 
 bool ValidationCache::records_checked(const std::string &path) const {

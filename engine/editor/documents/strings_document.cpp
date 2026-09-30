@@ -372,19 +372,20 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 
 std::vector<Diagnostic> validate_strings_file(const Document &document) {
 	std::vector<Diagnostic> findings;
-	if (!dynamic_cast<const StringsDocument *>(&document)) return findings;
+	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
+	if (!strings) return findings;
 	// On the string it names, when the table holds it, wherever it is now (source_address; a
 	// string of a section the table does not have, or one removed since: the file alone).
-	source_issue_findings(document, "strings.invalid_input", "strings.regrouped", findings);
+	source_issue_findings(*strings, "strings.invalid_input", "strings.regrouped", findings);
 	if (document.blocked()) return findings;
 	// The sections by the reader's rule (rtxt::File::section_index): a lookup finds the first
 	// section of a name, in any case, so a later one of the name is never read by section (the
 	// flat key walk still reads its strings [orig: TextResource_FindEntryByKey @ 0x75D450]). An
 	// empty name is the editor's rule, as an empty key is.
 	rtxt::File names;
-	for (const auto &node : document.rows()) names.sections.push_back({section_of(*node).section_name, 0});
+	for (const auto &node : strings->rows()) names.sections.push_back({section_of(*node).section_name, 0});
 	for (size_t s = 0; s < names.sections.size(); ++s) {
-		const Node &node = *document.rows()[s];
+		const Node &node = *strings->rows()[s];
 		const std::string &name = names.sections[s].name;
 		const size_t found = names.section_index(name);
 		if (!name.empty() && found == s) continue;
@@ -401,7 +402,7 @@ std::vector<Diagnostic> validate_strings_file(const Document &document) {
 		diagnostic.record_kind = kSection;
 		findings.push_back(std::move(diagnostic));
 	}
-	for (const auto &node : document.rows()) {
+	for (const auto &node : strings->rows()) {
 		const StringsSection &section = section_of(*node);
 		std::set<std::string> keys;
 		for (size_t i = 0; i < section.entries.size(); ++i) {

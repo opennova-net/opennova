@@ -27,6 +27,7 @@
 #include <base/vfs/file_source.h>
 #include <base/vfs/vfs.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_preview_json.h>
@@ -211,8 +212,11 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	edit(session, *menu, title, "position.top", int64_t(130));
 	TEST_EXPECT(check.rendered() == 1);
-	// A second menu, closed, naming TRIM_COLOR alone (which the blank STARTUP does not name): the
-	// check reads it itself and renders it, and a rescan finding it as it was renders nothing.
+	// Two more menus, closed, each naming one variable the blank STARTUP does not: trim.mnu
+	// TRIM_COLOR as a colour, label.mnu SEMIOPAQUE_BLACK as a label's text, which no StyleVar
+	// edge reads and the frame compiler resolves all the same. The check reads each itself and
+	// renders it; a rescan finding them as they were renders nothing, a validation having run.
+	const ValidationStats &stats = session.validation_stats();
 	const std::string root = view.project_root;
 	TEST_EXPECT(editor_test::write_text(root + "/menus/trim.mnu",
 			"<SCREEN>\r\n<NAME>TRIM</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"BAND\">\r\n"
@@ -220,22 +224,33 @@ static int test_render_again_only_when_moved() {
 			"</POSITION>\r\n"
 			"<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"
 			"</WINDOW>\r\n</SCREEN>\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/menus/label.mnu",
+			"<SCREEN>\r\n<NAME>LABEL</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
+			"</POSITION>\r\n"
+			"<STRING>%SEMIOPAQUE_BLACK%</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	size_t passes = stats.passes;
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(check.rendered() == 1 && check.document("menus/trim.mnu") != nullptr);
+	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 2 &&
+			check.document("menus/trim.mnu") != nullptr &&
+			check.document("menus/label.mnu") != nullptr);
+	passes = stats.passes;
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(check.rendered() == 0);
+	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 0);
 	// A stylesheet edit that changes no variable's value (its comment) renders nothing; a
 	// variable changed renders again the menus naming it, and those alone.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
-	NodeAddress fg, trim;
+	NodeAddress fg, trim, black;
 	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg) &&
-			find_definition(AssetGraph(), *style, "TRIM_COLOR", trim));
+			find_definition(AssetGraph(), *style, "TRIM_COLOR", trim) &&
+			find_definition(AssetGraph(), *style, "SEMIOPAQUE_BLACK", black));
 	if (!style)
 		return 1;
 	const NodeAddress comment{ style->rows()[0]->id, style->rows()[0]->kind, 0 };
+	passes = stats.passes;
 	edit(session, *style, comment, "text", std::string("// The shell's variables."));
-	TEST_EXPECT(style->dirty() && check.rendered() == 0);
+	TEST_EXPECT(style->dirty() && stats.passes == passes + 1 && check.rendered() == 0);
 	edit(session, *style, fg, "value", std::string("FFFF0000"));
 	TEST_EXPECT(check.rendered() == 1);
 	TEST_EXPECT(render_findings(view, "menu.render.color_transparent").empty());
@@ -245,6 +260,9 @@ static int test_render_again_only_when_moved() {
 	const std::vector<const Diagnostic *> band =
 			render_findings(view, "menu.render.color_transparent");
 	TEST_EXPECT(band.size() == 1 && band[0]->asset == "menus/trim.mnu");
+	// The label's variable: label.mnu alone renders again.
+	edit(session, *style, black, "value", std::string("A longer label than the window holds"));
+	TEST_EXPECT(check.rendered() == 1);
 	// Closed with the project (its edits discarded): nothing kept.
 	TEST_EXPECT(check.render("menus/main.mnu", title.row));
 	session.handle(make_request(EditorRequestKind::CloseProject));

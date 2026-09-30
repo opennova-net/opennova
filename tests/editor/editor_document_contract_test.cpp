@@ -797,6 +797,7 @@ int main() {
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
 	check(g_other_scopes > 0, "the files", "a name defined in two scopes is looked up in the other");
 	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
+	check(g_findings > 0, "the files", "validate_file makes a finding to check");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract "
 					"(%zu files, %zu records, %zu fields set to their own value, %zu symbols, "

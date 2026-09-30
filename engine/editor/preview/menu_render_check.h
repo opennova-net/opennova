@@ -16,7 +16,6 @@
 
 namespace opennova::editor {
 
-class AssetGraph;
 class MnuDocument;
 
 // The sentence a compiler note shows (the engine keeps codes only): what the game does,
@@ -51,9 +50,9 @@ public:
 	// itself and keeps while the scan lists its file as it was (its size, last write and kind,
 	// and the project's game). A menu renders again only when its document state or a file one
 	// of its screens read moved, or when the shell's stylesheets moved and a variable the menu
-	// names (its StyleVar edges in `graph`, as the validation's update left it) came, went or
+	// names (every %NAME% its saved text holds, as the game's expansion finds them) came, went or
 	// took another value: a stylesheet edit that changes no variable's value renders nothing.
-	void update(const ValidationInput &input, const AssetGraph &graph, const FileSource &files);
+	void update(const ValidationInput &input, const FileSource &files);
 	void clear();
 	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
 	// The render of a screen row of the menu at `path`, null when there is none.
@@ -73,16 +72,17 @@ private:
 		// The closed file as the check read it (null: it does not load, or a source error blocks
 		// it), and the scan's row it was read at; nothing while the menu is open.
 		bool read = false;
-		std::shared_ptr<const Document> closed;
+		std::shared_ptr<const MnuDocument> closed;
 		uint64_t size = 0;
 		int64_t modified = 0;
 		AssetKind kind = AssetKind::Unknown;
 		std::string game;
 		// The document the renders are of.
-		std::shared_ptr<const Document> document;
+		std::shared_ptr<const MnuDocument> document;
 		uint64_t identity = 0, revision = 0;
 		std::vector<Screen> screens;
 		std::vector<menu::MenuDependency> dependencies;
+		std::vector<std::string> variables; // the variables its text names, sorted (upper case)
 		std::vector<Diagnostic> findings;
 		bool seen = false;
 	};

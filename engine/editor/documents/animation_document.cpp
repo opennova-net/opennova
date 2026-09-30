@@ -408,7 +408,7 @@ std::vector<Diagnostic> validate_animation_file(const Document &document) {
 		d.row_id = row->id;
 		d.record_kind = kBone;
 		d.child_id = row->collections[0][i];
-		d.record = document.record_path({row->id, kBone, d.child_id});
+		d.record = clip_document->record_path({row->id, kBone, d.child_id});
 		findings.push_back(std::move(d));
 	}
 	for (size_t i = 0; i < row->events.size(); ++i) {
@@ -419,7 +419,7 @@ std::vector<Diagnostic> validate_animation_file(const Document &document) {
 		d.row_id = row->id;
 		d.record_kind = kEvent;
 		d.child_id = row->collections[1][i];
-		d.record = document.record_path({row->id, kEvent, d.child_id});
+		d.record = clip_document->record_path({row->id, kEvent, d.child_id});
 		findings.push_back(std::move(d));
 	}
 	return findings;

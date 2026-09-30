@@ -296,21 +296,22 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 
 std::vector<Diagnostic> validate_animation_map_file(const Document &document) {
 	std::vector<Diagnostic> findings;
-	if (!dynamic_cast<const AnimationMapDocument *>(&document)) return findings;
+	const auto *table = dynamic_cast<const AnimationMapDocument *>(&document);
+	if (!table) return findings;
 	// The lines the table leaves out, each on its line (Problems shows it) and on the row it
 	// was read into, wherever that row is now (source_address; gone: the file): input the
 	// game ignores is dropped on save (a warning, Rewrite drops it); a row the table cannot
 	// hold blocks the file (an error).
 	source_issue_findings(
-			document, "animation_map.invalid_input", "animation_map.ignored_input", findings);
+			*table, "animation_map.invalid_input", "animation_map.ignored_input", findings);
 	if (document.blocked()) return findings;
-	if (!has_reset(document.rows())) {
+	if (!has_reset(table->rows())) {
 		// On the first row's key, where a row takes the name (its Add anim_reset row fix
 		// adds one instead).
 		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "animation_map.no_reset",
 		                               "The table has no anim_reset row: the game cannot load it.", document.path(), "key");
-		if (!document.rows().empty()) {
-			const Node &first = *document.rows().front();
+		if (!table->rows().empty()) {
+			const Node &first = *table->rows().front();
 			d.row_id = first.id;
 			d.record_kind = kRow;
 			d.record = row_of(first).key;
@@ -319,8 +320,8 @@ std::vector<Diagnostic> validate_animation_map_file(const Document &document) {
 	}
 	// The first row naming each slot, by the slot's index.
 	std::unordered_map<int, size_t> first_of_slot;
-	for (size_t i = 0; i < document.rows().size(); ++i) {
-		const Node *node = document.rows()[i].get();
+	for (size_t i = 0; i < table->rows().size(); ++i) {
+		const Node *node = table->rows()[i].get();
 		const AnimationMapRow &r = row_of(*node);
 		const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
 			Diagnostic d = make_diagnostic(severity, code, message, document.path(), "key");
