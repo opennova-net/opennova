@@ -13,6 +13,8 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `env/` — `*.env.tpl` carry `op://` references; `app.prod.env` carries the
   committed non-secret prod values.
 - `backup/` — the nightly sqlite backup sidecar.
+- `game/` — the web build's image (ADR 0049): the wasm GDExtension, the Godot
+  Web export and the nginx the portal routes `game.<domain>` to.
 
 The only secret an operator handles is `OP_SERVICE_ACCOUNT_TOKEN`. The target
 host needs only docker.
