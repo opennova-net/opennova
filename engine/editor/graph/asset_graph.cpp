@@ -3,11 +3,11 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
+#include <editor/project/project_files.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/menu/menu_text_tables.h>
 #include <runtime/renderer/material_texture.h>
@@ -33,8 +33,6 @@ Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
 std::string symbol_key(ReferenceKind kind, const std::string &name) {
 	return std::string(reference_row(kind).token) + '\n' + name;
 }
-
-std::string basename_of(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
 bool same_edge(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
@@ -118,7 +116,7 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 				!same_extracted(cached->second.content, entry.content);
 	};
 	for (const AssetEntry &asset : scan.entries) {
-		if (!graph_reads_kind(asset.kind)) continue;
+		if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
 		const Document *document = nullptr;
 		for (const auto &candidate : open)
 			if (candidate && candidate->path() == asset.relative_path) document = candidate.get();

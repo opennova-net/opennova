@@ -4,6 +4,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/documents/source_issue_findings.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
 #include <editor/session/session_view.h>
@@ -1331,22 +1332,14 @@ std::vector<Diagnostic> validate_menus(const ValidationInput &input, const Asset
 		// What retail's reader leaves out (a warning: a save drops it) and what the file
 		// cannot hold or retail faults on (an error: it blocks the save and the build), on the
 		// screen or window the reader found it in (its locator, in the file as loaded: wherever
-		// that record is now, source_address; gone since, the file), so Problems selects it.
-		for (const SourceIssue &issue : document->issues()) {
-			auto diagnostic = make_diagnostic(issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-			                                  issue.blocks ? "menu.invalid_input" : "menu.ignored_input", issue.message,
-			                                  document->path(), issue.field);
-			diagnostic.line = issue.line;
-			diagnostic.record = issue.record;
-			const NodeAddress address = issue.locator.empty() ? NodeAddress() : document->source_address(issue.locator);
-			if (address.row) {
-				diagnostic.row_id = address.row;
-				diagnostic.child_id = address.child;
-				diagnostic.record_kind = address.kind;
-				if (diagnostic.record.empty()) diagnostic.record = document->record_path(address);
-			}
-			findings.push_back(std::move(diagnostic));
-		}
+		// that record is now, source_address; gone since, the file), so Problems selects it,
+		// named by its path when the reader named none.
+		source_issue_findings(*document, "menu.invalid_input", "menu.ignored_input", findings,
+				[&](Diagnostic &finding) {
+					if (finding.row_id && finding.record.empty())
+						finding.record = document->record_path(
+								{ finding.row_id, finding.record_kind, finding.child_id });
+				});
 		if (document->blocked()) continue;
 		// On the record and the field that cause it, so the inspector shows it there and
 		// Problems selects it.

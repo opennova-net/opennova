@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/hash.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
@@ -19,9 +20,7 @@ uint64_t mix(uint64_t value) {
 }
 
 uint64_t text_hash(const std::string &text) {
-	uint64_t hash = 0xCBF29CE484222325ull;
-	for (const unsigned char c : text) hash = (hash ^ c) * 0x100000001B3ull;
-	return hash;
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size());
 }
 
 // The flat name a lookup names, however the caller spelled a path.
