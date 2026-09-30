@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <utility>
 
-#include <editor/preview/menu_render_check.h>
+#include <editor/documents/project_checks.h>
 #include <editor/project/project_findings.h>
 #include <editor/session/document_set.h>
 #include <editor/session/session_core.h>
@@ -12,21 +12,22 @@
 namespace opennova::editor {
 
 ProblemsService::ProblemsService(SessionCore &core) :
-		core_(core), view_(core.view()), render_check_(std::make_shared<MenuRenderCheck>()) {
+		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()) {
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
-	view_.findings.render_check = render_check_;
+	view_.findings.project_checks = checks_;
 }
 
 // The project's findings now, composed as `opennova-project validate` composes them
 // (project/project_findings): the scan's, the requirements', the files the last Play's game
 // reported missing and its nonzero exit, each file's own (the open documents standing in for
 // theirs, every file's kept in the cache until it changes) with the use checks', the graph's and
-// the open documents' own (a file changed outside the editor that was not read again), the menu
-// render check's notes and the last build's own findings (after the gate the build reads: a
-// note never blocks a build, nor does the last Play's report, which only the next Play can
-// clear, nor the last build's, which the next build replaces). They replace the Problems rows:
-// Findings moves only when they differ, and Graph only when the graph's update changed it.
+// the open documents' own (a file changed outside the editor that was not read again), the
+// document types' project checks' findings (the menu render check's notes) and the last build's
+// own findings (after the gate the build reads: a project check's finding never blocks a build,
+// nor does the last Play's report, which only the next Play can clear, nor the last build's,
+// which the next build replaces). They replace the Problems rows: Findings moves only when they
+// differ, and Graph only when the graph's update changed it.
 void ProblemsService::validate_documents() {
 	compose(false);
 }
@@ -44,14 +45,14 @@ void ProblemsService::compose(bool keep_reported) {
 	const ProjectFindingsInput input{core_.paths(),        *view_.project.document,    *view_.project.scan,
 	                                 *view_.project.requirements, view_.documents.open, view_.activity.boot_missing,
 	                                 play_findings_,              open,                 build_findings_};
-	// The graph, each file's own findings and the render check first: when none of them moved, no
+	// The graph, each file's own findings and the project checks first: when none of them moved, no
 	// other input the rows are made of did, no reported finding waits on this validation and the
 	// rows are as it left them, they stand. No row is composed, copied or compared then; the small
 	// inputs are compared with their copies (Composed::same), and the open documents' own findings
 	// are made again for it.
-	const bool moved = refresh_project_findings(input, *graph_, validation_cache_, *render_check_, *assets_);
+	const bool moved = refresh_project_findings(input, *graph_, validation_cache_, *checks_, *assets_);
 	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.findings.diagnostics.size())) return;
-	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *render_check_);
+	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *checks_);
 	++compositions_;
 	gate_size_ = findings.gate_end - findings.gate_begin;
 	gate_tail_ = findings.rows.size() - findings.gate_end;
@@ -111,7 +112,7 @@ std::vector<Diagnostic> ProblemsService::gate_findings() {
 void ProblemsService::clear() {
 	graph_->clear();
 	assets_->clear();
-	render_check_->clear();
+	checks_->clear();
 	validation_cache_ = ValidationCache();
 	composed_ = Composed();
 	gate_size_ = gate_tail_ = trailing_ = 0;

@@ -47,10 +47,14 @@ void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan
 void ProjectAssetSource::set_open(const std::vector<std::shared_ptr<const DocumentBase>> &open) {
 	std::map<std::string, Open> next;
 	for (const auto &document : open)
-		if (document) next[document->path()] = Open{document, document->identity(), document->revision()};
+		if (document)
+			next[document->path()] =
+					Open{document, document->identity(), document->load_generation(), document->revision()};
 	bool moved = next.size() != open_.size();
 	for (auto a = next.begin(), b = open_.begin(); !moved && a != next.end(); ++a, ++b)
-		moved = a->first != b->first || a->second.identity != b->second.identity || a->second.revision != b->second.revision;
+		moved = a->first != b->first || a->second.identity != b->second.identity ||
+				a->second.load_generation != b->second.load_generation ||
+				a->second.revision != b->second.revision;
 	open_ = std::move(next);
 	for (auto it = serialized_by_path_.begin(); it != serialized_by_path_.end();) {
 		if (open_.count(it->first)) ++it;
@@ -73,13 +77,18 @@ const ProjectAssetSource::Entry *ProjectAssetSource::entry_(const std::string &n
 }
 
 const ProjectAssetSource::Serialized *ProjectAssetSource::serialized_(const Open &open, const std::string &relative) const {
-	// The document as it is now (its identity and revision are live, not the ones set_open saw).
+	// The document as it is now (its identity, load and revision are live, not the ones set_open
+	// saw). A load in place keeps the identity and starts the revision again, so the load is kept
+	// too.
 	Serialized &memo = serialized_by_path_[relative];
-	const uint64_t identity = open.document->identity(), revision = open.document->revision();
-	if (!memo.made || memo.identity != identity || memo.revision != revision) {
+	const uint64_t identity = open.document->identity(), load = open.document->load_generation(),
+	               revision = open.document->revision();
+	if (!memo.made || memo.identity != identity || memo.load_generation != load ||
+			memo.revision != revision) {
 		memo.made = true;
 		const SerializeResult result = open.document->serialize();
 		memo.identity = identity;
+		memo.load_generation = load;
 		memo.revision = revision;
 		memo.ok = result.ok();
 		memo.bytes.assign(result.text.begin(), result.text.end());
@@ -106,7 +115,10 @@ uint64_t ProjectAssetSource::stamp(const std::string &name) const {
 	const Entry *entry = entry_(name);
 	if (!entry) return 0;
 	const auto open = open_.find(entry->relative);
-	if (open != open_.end()) return mix(mix(open->second.document->identity()) ^ open->second.document->revision()) | 1;
+	if (open != open_.end()) {
+		const DocumentBase &document = *open->second.document;
+		return mix(mix(mix(document.identity()) ^ document.load_generation()) ^ document.revision()) | 1;
+	}
 	return mix(mix(entry->size ^ text_hash(entry->relative)) ^ static_cast<uint64_t>(entry->modified)) | 1;
 }
 
