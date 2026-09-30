@@ -129,7 +129,7 @@ EDITOR_RANK_ALLOWED = {
     # MnsDocument::style_value_use reads a variable's uses from the graph (S13
     # V1); S13 V3 moves it under field_on. (S13 D4 moved the stylesheet's use
     # checks into graph/use_checks and gave DocumentType a per-file
-    # validate_file(const Document &) that takes no graph.)
+    # validate_file that takes no graph.)
     ("engine/editor/documents/mns_document.h", "editor/graph/asset_graph.h"),
 }
 
