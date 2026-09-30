@@ -772,9 +772,12 @@ struct HudSlotBarSlot {
 	bool icon_valid = false;
 	int icon_w = 0;       // def+0x1C0
 	int icon_h = 0;       // def+0x1C4
-	// KeyBinding_FormatDisplayString of binding row 119 + category
-	// (0x81AE08 + 108*def[0]) — a runtime-filled row whose writer is
-	// unwitnessed; empty until it is.
+	// KeyBinding_FormatDisplayString of binding record 200 + the def's
+	// category (0x81AE08 + 108*def[0]): after the start-up re-lay that is the
+	// catalog row dispatching 200 + category (controls action_for_code), the
+	// zero record's "" where none does; the embedder resolves it from the live
+	// bindings [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f;
+	// KeyBinding_SortBySequentialId @0x498260].
 	std::string key_label;
 };
 

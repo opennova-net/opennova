@@ -80,6 +80,12 @@ public:
 	// "call a medic" hint formatter (engine controls format_display_string;
 	// retail KeyBinding_FormatDisplayString @0x496bd0). "" when unbound.
 	String display_text_for_token(const String &p_token) const;
+	// The same display string for the binding record read BY ACTION CODE (the
+	// start-up re-lay puts the row dispatching `code` at record `code`; engine
+	// controls action_for_code): "" when no row carries the code (the zero
+	// record), " *" appended when the row's flags carry 0x200. The HUDLS key
+	// label reads record 200 + category.
+	String display_text_for_action_code(int p_code) const;
 
 	// The capture button->mask translation (0 = unmappable). The witnessed
 	// mask values are the engine's kMouse* constants (controls/binding_set.h

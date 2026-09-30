@@ -82,3 +82,17 @@ func test_persist_stamps_the_file() -> void:
 	assert_eq(seat1[2], 17, "the persisted seat1 carries the Ctrl modifier")
 	var fresh := ControlsModel.new()
 	assert_true(ControlsBindings.load_saved_records(fresh), "the stamped file round-trips")
+
+
+# The by-code binding read (the HUDLS key label's record 200 + category): the
+# row the start-up re-lay puts at record `code` formats exactly like its token,
+# and a code no row carries is the zero record's empty string (engine controls
+# action_for_code carries the witness).
+func test_display_text_by_action_code() -> void:
+	var model := ControlsModel.new()
+	assert_eq(model.display_text_for_action_code(201), model.display_text_for_token("Knife"),
+			"record 201 is the Knife row's binding")
+	assert_eq(model.display_text_for_action_code(211), model.display_text_for_token("magazine"),
+			"record 211 is the magazine row's binding")
+	assert_ne(model.display_text_for_action_code(201), "", "the Knife row is bound by default")
+	assert_eq(model.display_text_for_action_code(200), "", "no row dispatches 200")

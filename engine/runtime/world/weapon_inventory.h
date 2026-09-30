@@ -319,10 +319,13 @@ WeaponSwitchOutcome weapon_cycle_slot(const WeaponTable &table, WeaponInventory 
 // slot is recorded and the walk then jumps its def's loadout_subclasses
 // variant slots (`i += def+0x3AC`), while EVERY def-bearing slot the walk
 // visits counts — so a later weapon's own variants count too. `adm_index`
-// -1 = no weapon in the category.
+// -1 = no weapon in the category. `def_category` is the recorded def's
+// category dword (def+0x00), the index the key label's binding record is
+// read at (200 + it) [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e99].
 struct WeaponSlotBarCategory {
     int16_t adm_index = -1;
     int32_t count = 0;
+    int32_t def_category = -1;
 };
 std::array<WeaponSlotBarCategory, 10> weapon_inventory_slot_bar_scan(const WeaponTable &table,
                                                                      const WeaponInventory &inv);

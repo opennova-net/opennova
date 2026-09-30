@@ -120,6 +120,23 @@ static_assert(static_cast<int>(WeaponCategory::kMedpack) == kWeaponCategoryCount
 // The config token of weapon category `index` (0..8), nullptr out of range.
 const char *weapon_category_token(int index);
 
+// The action code a static catalog row dispatches: the record's +0x00 word,
+// the case Input_HandleActionBinding switches on (e.g. row 64 MedicReq 217,
+// row 67 escape 18, rows 28..36 the weapon categories 201..209); -1 past the
+// 119 static rows [orig: word_8159A8 + 108 * row].
+int action_code(int row);
+// The catalog action a binding record read BY ACTION CODE resolves to.
+// KeyBinding_SortBySequentialId, run once at start-up, re-lays the 768-record
+// binding table so record i holds the static row whose code is i (a code no
+// row carries leaves the zero record there, whose display string is empty),
+// and every by-code reader depends on it: the dispatcher's flags word, the
+// death screen's MedicReq record 217, the HUDLS key label's record
+// 200 + category. nullptr when no row carries `code`.
+// [orig: KeyBinding_SortBySequentialId @0x498260 (Game_InitSubsystems
+//  @0x4a6de7); Input_HandleActionBinding @0x49ad8d; g_BindingRowMedicReq
+//  @0x81B534 = record 217; HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f]
+const ActionDef *action_for_code(int code);
+
 // Whether an action is shown in the player-facing remap table — the witnessed
 // per-entry gate (*entry & 0x20) == 0 && (*entry & 0x800) != 0, applied to the
 // catalog flag word (D-CTRL-2 closed: the class-category approximation is

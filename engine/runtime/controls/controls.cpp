@@ -312,6 +312,43 @@ std::vector<ControlRow> build_rows(Device device) {
   return BindingSet{}.build_rows(device);
 }
 
+namespace {
+
+// The static rows' +0x00 action codes, row 0..118, byte-read from the
+// catalog [orig: word_8159A8 + 108 * row]. The port's catalog carries rows
+// 0..112 (row 66 and rows 113..118 are not modelled); the codes cover all 119.
+constexpr int16_t k_action_codes[119] = {
+    166, 164, 152, 151, 156, 157, 148, 147, 153, 170,
+    169, 172, 154, 155, 158, 159, 425, 182, 183, 184,
+    185, 186, 187, 188, 189, 190, 191, 14, 201, 202,
+    203, 204, 205, 206, 207, 208, 209, 220, 216, 212,
+    214, 223, 222, 149, 177, 56, 57, 211, 361, 360,
+    19, 23, 32, 221, 53, 31, 29, 112, 111, 101,
+    100, 110, 109, 102, 217, 0, 36, 18, 55, 2,
+    25, 1, 20, 234, 49, 37, 10, 3, 4, 9,
+    12, 16, 17, 11, 119, 47, 48, 34, 38, 103,
+    104, 105, 106, 107, 108, 438, 497, 176, 28, 422,
+    30, 33, 54, 26, 41, 6, 8, 400, 401, 402,
+    500, 501, 502, 120, 121, 122, 123, 40, 74,
+};
+
+}  // namespace
+
+int action_code(int row) {
+  return row >= 0 && row < 119 ? k_action_codes[row] : -1;
+}
+
+const ActionDef *action_for_code(int code) {
+  // [orig: KeyBinding_SortBySequentialId @0x498260 — record i ends up as the
+  //  row whose code is i; the codes are unique across the static rows]
+  if (code < 0 || code >= 768) return nullptr;
+  std::size_t count = 0;
+  const ActionDef *defs = catalog(&count);
+  for (std::size_t i = 0; i < count; ++i)
+    if (action_code(defs[i].id) == code) return &defs[i];
+  return nullptr;
+}
+
 const char *weapon_category_token(int index) {
   if (index < 0 || index >= kWeaponCategoryCount) return nullptr;
   std::size_t count = 0;

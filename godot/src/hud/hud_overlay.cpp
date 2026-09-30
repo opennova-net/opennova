@@ -213,6 +213,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_overlay_panel_windows", "emotes_menu_open",
 								 "radio_menu_open", "paused"),
 			&HudOverlay::set_overlay_panel_windows);
+	ClassDB::bind_method(D_METHOD("set_slot_bar_key_labels", "labels_by_category"),
+			&HudOverlay::set_slot_bar_key_labels);
 	ClassDB::bind_method(D_METHOD("set_role_facts", "sim", "gametext"),
 			&HudOverlay::set_role_facts);
 	ClassDB::bind_method(D_METHOD("set_weapon_ammo_key", "ammo_bucket", "ammo_class_id"),
@@ -1371,6 +1373,13 @@ void HudOverlay::set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio
 	queue_redraw();
 }
 
+void HudOverlay::set_slot_bar_key_labels(const PackedStringArray &p_labels_by_category) {
+	for (size_t c = 0; c < slot_bar_key_labels_.size(); ++c)
+		slot_bar_key_labels_[c] = static_cast<int64_t>(c) < p_labels_by_category.size()
+				? opennova::to_std(p_labels_by_category[static_cast<int64_t>(c)])
+				: std::string();
+}
+
 void HudOverlay::set_radio_request_icon_viewer(bool p_viewer) {
 	state_.radio_request_icon_viewer = p_viewer;
 	queue_redraw();
@@ -1406,6 +1415,10 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 		slot.icon_valid = icon.valid;
 		slot.icon_w = icon.width;
 		slot.icon_h = icon.height;
+		// The key label: binding record 200 + the recorded def's category.
+		const int32_t def_category = facts.slot_bar[c].def_category;
+		if (def_category >= 0 && def_category < static_cast<int32_t>(slot_bar_key_labels_.size()))
+			slot.key_label = slot_bar_key_labels_[static_cast<size_t>(def_category)];
 	}
 	queue_redraw();
 }

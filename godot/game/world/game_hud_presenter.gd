@@ -11,6 +11,9 @@ extends Node
 ##  gametext Game_InitSubsystems @0x4a6cd0; mission .bin
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
+## The HUDLS key label's binding records: 200 + the weapon category 0..11.
+const SLOT_BAR_KEY_RECORD_BASE := 200
+const SLOT_BAR_CATEGORY_COUNT := 12
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 
 ## The commander_menu row fired (the poll ran its gates and the respawn init):
@@ -510,6 +513,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# their rows in the role-facts read below; the pause word draws STROVER7).
 	_game_hud.set_overlay_panel_windows(_toggles.is_emotes_menu_open(),
 			_toggles.is_radio_menu_open(), _toggles.is_paused())
+	# The HUDLS key labels by weapon category: the live binding of the row the
+	# start-up re-lay puts at record 200 + category (engine controls
+	# action_for_code carries the witness).
+	var key_labels := PackedStringArray()
+	for category in SLOT_BAR_CATEGORY_COUNT:
+		key_labels.append(ControlsBindings.model().display_text_for_action_code(
+				SLOT_BAR_KEY_RECORD_BASE + category))
+	_game_hud.set_slot_bar_key_labels(key_labels)
 	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
 	# from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).

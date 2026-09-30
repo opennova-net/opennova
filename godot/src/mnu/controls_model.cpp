@@ -123,6 +123,20 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	return opennova::to_gd(opennova::controls::format_display_string(*r));
 }
 
+String ControlsModel::display_text_for_action_code(int p_code) const {
+	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+	if (def == nullptr) {
+		return opennova::to_gd(
+				opennova::controls::format_display_string(opennova::controls::BindingRecord{}));
+	}
+	const opennova::controls::BindingRecord *r = bindings_.record(bindings_.index_of_token(def->token));
+	if (r == nullptr) {
+		return String();
+	}
+	return opennova::to_gd(
+			opennova::controls::format_display_string(*r, (def->flags & 0x200u) != 0u));
+}
+
 void ControlsModel::build_help_screen() { help_screen_.build(bindings_); }
 void ControlsModel::cycle_help_page(bool p_forward) { help_screen_.cycle_page(p_forward); }
 String ControlsModel::get_help_title() const { return opennova::to_gd(help_screen_.title()); }
@@ -347,6 +361,8 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_static_method("ControlsModel", D_METHOD("help_footer"), &ControlsModel::help_footer);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
+	ClassDB::bind_method(D_METHOD("display_text_for_action_code", "code"),
+			&ControlsModel::display_text_for_action_code);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);

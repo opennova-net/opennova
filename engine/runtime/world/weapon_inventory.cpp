@@ -583,6 +583,7 @@ std::array<WeaponSlotBarCategory, 10> weapon_inventory_slot_bar_scan(const Weapo
             if (def == nullptr) continue;
             if (cat.adm_index < 0) {
                 cat.adm_index = inv.slot(combo)->adm_index;
+                cat.def_category = def->category; // the label's def[0] [orig: @0x599e8f]
                 i += def->loadout_subclasses;
             }
             ++cat.count;

@@ -594,6 +594,36 @@ bool test_joystick_pov_dispatch() {
 
 }  // namespace
 
+// The static rows' action codes and the by-code record re-lay: record i is
+// the row whose +0x00 code is i, so the death screen's record 217 is
+// MedicReq and the HUDLS key label's record 200 + category is the weapon
+// category row (201..209 Knife..medpack, 211 magazine); 200 and 210 hold the
+// zero record, which formats to "" [orig: word_8159A8 + 108 * row;
+// KeyBinding_SortBySequentialId @0x498260; g_BindingRowMedicReq @0x81B534;
+// HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
+bool test_action_codes() {
+  CHECK(action_code(64) == 217 && action_code(67) == 18 && action_code(70) == 25,
+        "MedicReq / escape / pause carry their dispatch codes");
+  CHECK(action_code(101) == 33 && action_code(102) == 54 && action_code(99) == 422,
+        "AudioEmote / RadioMacro / ShowScore carry their dispatch codes");
+  CHECK(action_code(118) == 74 && action_code(119) == -1 && action_code(-1) == -1,
+        "the 119 static rows, nothing past them");
+  const ActionDef *medic = action_for_code(217);
+  CHECK(medic != nullptr && std::string(medic->token) == "MedicReq", "record 217 is MedicReq");
+  const ActionDef *knife = action_for_code(201);
+  const ActionDef *medpack = action_for_code(209);
+  const ActionDef *magazine = action_for_code(211);
+  CHECK(knife != nullptr && std::string(knife->token) == "Knife", "record 201 is Knife");
+  CHECK(medpack != nullptr && std::string(medpack->token) == "medpack", "record 209 is medpack");
+  CHECK(magazine != nullptr && std::string(magazine->token) == "magazine",
+        "record 211 is magazine");
+  CHECK(action_for_code(200) == nullptr && action_for_code(210) == nullptr,
+        "no row dispatches 200 or 210");
+  CHECK(action_for_code(768) == nullptr, "past the 768-record table");
+  CHECK(format_display_string(BindingRecord{}).empty(), "the zero record formats to \"\"");
+  return true;
+}
+
 int main() {
   int failed = 0;
 
@@ -624,6 +654,7 @@ int main() {
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_action_codes);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

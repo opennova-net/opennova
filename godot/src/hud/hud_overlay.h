@@ -255,6 +255,10 @@ public:
 	// single-player pause word, which draws Overlays/STROVER7.
 	void set_overlay_panel_windows(bool p_emotes_menu_open, bool p_radio_menu_open,
 			bool p_paused);
+	// The HUDLS key labels by weapon category 0..11: the display string of the
+	// binding record 200 + category (ControlsModel.display_text_for_action_code
+	// of 200 + category); each drawn slot takes its recorded def's category's.
+	void set_slot_bar_key_labels(const PackedStringArray &p_labels_by_category);
 	// The friendly-tags mode (hud_math.h FriendlyTagMode carries the
 	// witness): OFF / FARBRIEF (text under 300 m) / FULL (text always) / BRIEF (tick marks).
 	enum FriendlyTagMode {
@@ -388,6 +392,7 @@ private:
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
+	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
 	// The HUDDECLUT mask table + level (engine hud_declutter carries the
 	// witness map); apply_declutter_() restamps the compiler input's
 	// visibility table after any mask or level change.

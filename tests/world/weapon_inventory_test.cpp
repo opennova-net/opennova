@@ -630,6 +630,10 @@ void test_slot_bar_scan() {
     CHECK(scan[0].adm_index == c0 && scan[0].count == 1);
     CHECK(scan[3].adm_index == -1 && scan[3].count == 0);
     CHECK(scan[7].adm_index == -1 && scan[7].count == 0);
+    // The recorded def's category dword, the key label's record index
+    // (200 + it) [orig: @0x599e8c..0x599e99].
+    CHECK(scan[6].def_category == 6 && scan[9].def_category == 9 && scan[0].def_category == 0);
+    CHECK(scan[7].def_category == -1);
 }
 
 int main() {
