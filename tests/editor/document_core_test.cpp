@@ -1408,10 +1408,13 @@ static int test_per_call_costs() {
 
 // S13 D2's review: a record is found by its identity through an index of every record's row that
 // each revision brings up to date one changed row at a time (its records taken out as its last
-// indexed version held them, put in as it holds them now; a row no longer there taken out). Over
-// a Set, a nested record removed and duplicated, a row moved, removed and duplicated, and every
-// undo and redo of them: each record a walk meets is found where it is, and each one met before
-// that is no longer there is found nowhere.
+// indexed version held them, put in as it holds them now; a row no longer there taken out), made
+// again by a save and a load. Over a Set, a nested record removed and duplicated, a row moved,
+// removed and duplicated, and every undo and redo of them; several edits asked after the last of
+// them only; a record pasted with what it holds; a save, an edit after it and undos past it; and
+// the file loaded again in place (its identities start again, so none met before counts as
+// gone), then a row moved: each record a walk meets is found where it is, and each one met
+// before that is no longer there is found nowhere.
 static int test_record_index() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -1453,6 +1456,31 @@ static int test_record_index() {
 		document.redo();
 		TEST_EXPECT(every_found());
 	}
+	// Several edits, then one lookup: the index catches up over all of them at once.
+	const auto last_row = [&] { return NodeAddress{document.rows().back()->id, document.rows().back()->kind, 0}; };
+	TEST_EXPECT(document.apply(set(fake.a1, "name", std::string("A1")), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.x), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
+	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error));
+	TEST_EXPECT(every_found());
+	// A record pasted with what it holds: every one it makes found in its new place.
+	const std::string items = document.copy({fake.a1});
+	Edit paste = make(EditOperation::Paste, {fake.alpha.row, 0, 0}, 0, SIZE_MAX);
+	paste.value = items;
+	TEST_EXPECT(!items.empty() && document.apply(paste, error) && document.last_added_records().size() == 1 &&
+	            every_found());
+	// Saved: the index is made again; an edit after the save, then undos past it.
+	TEST_EXPECT(document.save(error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a2), error) && every_found());
+	document.undo();
+	TEST_EXPECT(every_found());
+	document.undo();
+	TEST_EXPECT(every_found() && document.dirty());
+	// Loaded again in place from the file the save wrote: the identities start again.
+	TEST_EXPECT(document.load(fake.dir.file("fake.txt"), "fake.txt", AssetKind::Unknown, "jo", error));
+	met.clear();
+	TEST_EXPECT(every_found() && document.rows().size() == 2);
+	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error) && every_found());
 	return 0;
 }
 

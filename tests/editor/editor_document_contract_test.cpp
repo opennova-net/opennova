@@ -13,15 +13,17 @@
 // again, and two loads of the file give every record the same identity; an optional field the
 // game reads on its record left out and written again (Clear, Write), a Clear of one left out
 // and a Write of one written no step, the undo giving the bytes back (a type refuses one only as
-// always written, and a type with such fields leaves one of them out); a real change of a value,
+// always written; how many each type is asked and does is pinned); a real change of a value,
 // the bytes before, after, after its undo and after its redo; the record and the field changed
 // since the save (no other row's record), and the edits that give the field back (revert_edits)
-// giving it its saved value, the record and the bytes as the file held them (but for a def
-// member whose Set changes another of its record's, def_sync_derived); two coalesced Sets of a
-// field one undo step; a record copied and pasted where the type copies records, the undo giving
-// the bytes back; and a snapshot of the changed document, which serializes its bytes, shares its
-// identity, revision and records, answers record_change and field_changed as it does, and
-// refuses an edit, a save and a load (document.snapshot).
+// giving it its saved value, and the record and the bytes as the file held them, which every
+// file reaches (a def member whose Set changes another of its record's, def_sync_derived, an open
+// item, is checked but for its bytes, and the clause goes on to another field); two coalesced
+// Sets of a field one undo step; a record copied and pasted where the type copies records, the
+// undo giving the bytes back; and a snapshot of the changed document, which serializes its
+// bytes, shares its identity, revision and records, answers record_change and field_changed as
+// it does, refuses an edit, a save and a load (document.snapshot), and after its document's
+// undo still finds every record where it was and answers what changed in it as it did.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -60,6 +62,15 @@ size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0
 struct TypeCounts {
 	size_t optional = 0, presences = 0;
 };
+
+// What each type's files ask of the presence clause and what the type does, as ADR 0046 S13 D2
+// states them: every one left out and written again. A type not named has none. A change of a
+// file above, or of a type's optional fields, moves them here and in the ADR together.
+struct PinnedPresence {
+	const char *type;
+	size_t optional, presences;
+};
+const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -409,17 +420,19 @@ template <class Try> void each_alternative(Document &document, const std::vector
 		}
 }
 
-// The def members whose Set changes another member of their record (def_sync_derived,
-// def_schema.cpp): an item's armor_kz its armor_blast, its powerup_def and default_aip bits of
-// its attrib, an action's function_args_count the arguments past it, a weapon's filter counts
-// the names past them. revert_edits gives the member back alone, so the other one stays as the
-// Set made it (for powerup_def and default_aip an open item, ADR 0046 S13 D2).
+// The def members whose Set changes another member of their record for good (def_sync_derived,
+// def_schema.cpp): an item's powerup_def and default_aip set a bit of its attrib, an action's
+// function_args_count clears the arguments past it, a weapon's filter counts the names past
+// them. revert_edits gives the member back alone, so the other one stays as the Set made it: an
+// open item each (ADR 0046 S13 D2), and the one reason a revert here is not held to the file's
+// bytes. (An item's armor_kz also sets armor_blast, a mirror its armor line writes equal, so its
+// revert gives the bytes back.)
 bool derives_others(const Document &document, const NodeAddress &address, const std::string &field) {
 	using opennova::def::DefRecordKind;
 	static const std::pair<DefRecordKind, const char *> kCoupled[] = {
-	        {DefRecordKind::Item, "armor_kz"},           {DefRecordKind::Item, "powerup_def"},
-	        {DefRecordKind::Item, "default_aip"},        {DefRecordKind::Action, "function_args_count"},
-	        {DefRecordKind::Weapon, "charfilter_count"}, {DefRecordKind::Weapon, "teamfilter_count"}};
+	        {DefRecordKind::Item, "powerup_def"},        {DefRecordKind::Item, "default_aip"},
+	        {DefRecordKind::Action, "function_args_count"}, {DefRecordKind::Weapon, "charfilter_count"},
+	        {DefRecordKind::Weapon, "teamfilter_count"}};
 	if (!dynamic_cast<const DefCatalogDocument *>(&document)) return false;
 	return std::any_of(std::begin(kCoupled), std::end(kCoupled), [&](const std::pair<DefRecordKind, const char *> &member) {
 		return member.first == def_kind(address.kind) && field == member.second;
@@ -428,13 +441,15 @@ bool derives_others(const Document &document, const NodeAddress &address, const 
 
 // A real change of one value: the bytes before, after, after its undo and after its redo; the
 // record and the field changed since the save and no record of another row; revert_edits giving
-// the field its saved value back as one step, and the record and the bytes as the file held them
-// (but for a member that changes another of its record's, derives_others).
+// the field its saved value back as one step, and the record and the bytes as the file held them.
+// A member that changes another of its record's (derives_others) is checked but for those bytes,
+// and the clause goes on to the next field, so every file reaches the bytes of a revert.
 void check_real_change(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
                        const std::string &serialized) {
-	bool done = false;
+	bool done = false, given_back = false;
 	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
 	                                        const std::vector<Value> &options) {
+		const bool coupled = derives_others(document, address, schema.id);
 		for (const Value &option : options) {
 			Diagnostic error;
 			if (!document.apply(edit_of(EditOperation::Set, address, schema.id, option), error)) continue;
@@ -459,10 +474,12 @@ void check_real_change(const Fixture &fixture, Document &document, const std::ve
 			              document.saved_value(address, schema.id, saved) && document.get(address, schema.id, reverted) &&
 			              reverted == saved,
 			      where, "revert_edits gives the field its saved value back");
-			if (!derives_others(document, address, schema.id))
+			if (!coupled) {
+				given_back = true;
 				check(document.record_change(address) == Document::RecordChange::Unchanged &&
 				              document.serialize().text == serialized,
 				      where, "a field given back leaves its record and the bytes as the file held them");
+			}
 			document.undo();
 			check(document.serialize().text == after.text, where, "the revert is one step");
 			document.undo();
@@ -470,11 +487,12 @@ void check_real_change(const Fixture &fixture, Document &document, const std::ve
 			document.redo();
 			check(document.serialize().text == after.text, where, "its redo gives the change back");
 			while (document.can_undo()) document.undo();
-			return true;
+			return !coupled;
 		}
 		return false;
 	});
 	check(done, fixture.name, "a writable field takes another value");
+	check(given_back, fixture.name, "a field given back is held to the bytes the file held");
 }
 
 // Two coalesced Sets of one field (typing): one undo step.
@@ -541,7 +559,8 @@ void check_copy_paste(const DocumentType &type, const Fixture &fixture, Document
 // A snapshot of the document with a real change in it: it serializes the document's bytes,
 // shares its identity, revision, rows and records, answers record_change and field_changed as it
 // does for every record and field, and refuses an edit, a save and a load (document.snapshot), its
-// undo and redo doing nothing; the document's own undo after leaves the snapshot as it was.
+// undo and redo doing nothing; after the document's own undo it serializes what it did, finds
+// every record where it was (address_of) and answers what changed in each as it did.
 void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &document,
                     const std::vector<NodeAddress> &records, const std::string &serialized) {
 	bool done = false;
@@ -569,12 +588,18 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 			check(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
 			              snapshot->rows() == document.rows() && records_of(*snapshot) == now,
 			      where, "a snapshot shares the document's identity, revision, rows and records");
+			// Its answers, kept to hold it to after its document moves on.
+			std::vector<Document::RecordChange> records_changed;
+			std::vector<bool> fields_changed;
 			for (const NodeAddress &record : now) {
-				check(snapshot->record_change(record) == document.record_change(record), where_of(fixture, document, record, ""),
+				records_changed.push_back(snapshot->record_change(record));
+				check(records_changed.back() == document.record_change(record), where_of(fixture, document, record, ""),
 				      "a snapshot answers record_change as its document does");
-				for (const FieldSchema &field : document.fields(record.kind))
-					check(snapshot->field_changed(record, field.id) == document.field_changed(record, field.id),
+				for (const FieldSchema &field : document.fields(record.kind)) {
+					fields_changed.push_back(snapshot->field_changed(record, field.id));
+					check(fields_changed.back() == document.field_changed(record, field.id),
 					      where_of(fixture, document, record, field.id), "a snapshot answers field_changed as its document does");
+				}
 			}
 			Value saved;
 			check(document.saved_value(address, schema.id, saved), where, "the changed field has its saved value");
@@ -595,9 +620,20 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 			              document.serialize().text == after.text,
 			      where, "a snapshot's undo, redo and refusals leave it and its document as they were");
 			while (document.can_undo()) document.undo();
-			check(document.serialize().text == serialized && snapshot->serialize().text == after.text &&
-			              snapshot->record_change(address) == Document::RecordChange::Changed,
-			      where, "the document's undo leaves its snapshot as it was");
+			check(document.serialize().text == serialized && snapshot->serialize().text == after.text, where,
+			      "the document's undo leaves its snapshot's bytes as they were");
+			size_t field_at = 0;
+			for (size_t i = 0; i < now.size(); ++i) {
+				const NodeAddress &record = now[i];
+				const std::string there = where_of(fixture, *snapshot, record, "") + " (snapshot, its document undone)";
+				check(snapshot->address_of(record.child ? record.child : record.row) == record, there,
+				      "a snapshot finds each record where it was after its document's undo");
+				check(snapshot->record_change(record) == records_changed[i], there,
+				      "a snapshot answers record_change as it did after its document's undo");
+				for (const FieldSchema &field : snapshot->fields(record.kind))
+					check(snapshot->field_changed(record, field.id) == fields_changed[field_at++], there + " ." + field.id,
+					      "a snapshot answers field_changed as it did after its document's undo");
+			}
 			std::unique_ptr<Document> read = type.make();
 			check(read->load_bytes(text_bytes(snapshot->serialize().text), fixture.name, fixture.kind, "jo", refused) &&
 			              !read->blocked() && read->serialize().text == after.text,
@@ -660,8 +696,11 @@ int main() {
 			++checked;
 		}
 		check(checked > 0, type->name, "the document type has a file here to check");
-		check(counts.optional == 0 || counts.presences > 0, type->name,
-		      "a type with optional fields the game reads leaves one out and writes it again");
+		PinnedPresence pinned{type->name, 0, 0};
+		for (const PinnedPresence &pin : kPinnedPresence)
+			if (std::string(pin.type) == type->name) pinned = pin;
+		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
+		      "a type's optional fields asked and left out and written again are the ones pinned");
 		std::printf("  %s: %zu optional fields asked, %zu left out and written again\n", type->name, counts.optional,
 		            counts.presences);
 	}

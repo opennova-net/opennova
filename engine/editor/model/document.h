@@ -323,10 +323,10 @@ public:
 	// instance of its type over the same committed rows and file-wide state, with its identity,
 	// revision, history and saved baseline. None of the base's memos come with it (it fills them
 	// again as it is read); a type's own, which its copy constructor copies (a menu's saved image
-	// and lookups, a stylesheet's evaluated sheet), are each kept for one revision, which the
-	// snapshot shares, so they stay true. Read only: an edit, an undo, a redo, a load and a save
-	// of it do nothing or are refused (document.snapshot). A type makes it with its copy
-	// constructor over the base's (return std::make_unique<Type>(*this)).
+	// and lookups, a stylesheet's evaluated sheet and its values' uses), are each kept for one
+	// revision, which the snapshot shares, so they stay true. Read only: an edit, an undo, a redo,
+	// a load and a save of it do nothing or are refused (document.snapshot). A type makes it with
+	// its copy constructor over the base's (return std::make_unique<Type>(*this)).
 	virtual std::unique_ptr<Document> snapshot() const = 0;
 	bool is_snapshot() const { return snapshot_; }
 

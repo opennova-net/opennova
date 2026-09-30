@@ -78,7 +78,9 @@ int check_self_search(const Document &document) {
 			Value value;
 			if (schema.optional && !document.present(address, schema.id)) continue;
 			if (applied.applies == Applicability::Ignored || !document.get(address, schema.id, value)) continue;
-			const std::string shown = field_text(schema, value);
+			// As the find shows it: a record's own choice by its name (Document::choices_on).
+			std::vector<FieldChoice> offered;
+			const std::string shown = field_text(schema, document.choices_on(address, applied, offered), value);
 			if (shown.size() < 3 || shown.find('\n') != std::string::npos) continue;
 			record = address;
 			field = schema;
