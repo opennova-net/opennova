@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/rename_operation.h>
@@ -152,10 +153,10 @@ SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
 		SymbolRenamePlan none;
 		none.file = request.path;
 		none.new_name = request.new_name;
-		none.refusals.push_back(make_diagnostic(DiagnosticSeverity::Error, "rename.unknown_symbol",
-		                                        request.path + " defines no name in field " + request.field +
-		                                                " of the record at " + request.locator + ".",
-		                                        request.path, request.field));
+		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
+		                                     request.path + " defines no name in field " + request.field +
+		                                             " of the record at " + request.locator + ".",
+		                                     request.path, request.field));
 		return none;
 	}
 	return plan_symbol_rename_project(*view_.project.scan, graph, *symbol, request.new_name);
@@ -242,25 +243,25 @@ void RenameController::assign_requirement(const std::string &role, const std::st
 	if (!view_.project.open) return;
 	const RequirementRow *row = core_.requirement_row(role);
 	if (!row) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.unknown", "No requirement has the role '" + role + "'."));
+		core_.report(make_finding(CoreFinding::RequirementUnknown, DiagnosticSeverity::Error, "No requirement has the role '" + role + "'."));
 		return;
 	}
 	// Nothing is renamed: a refusal, so whoever asked learns the assignment did not happen.
 	if (row->state == RequirementState::Present) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.assigned",
-		                             row->name + " is already in the project: nothing was assigned.", row->asset_path));
+		core_.report(make_finding(CoreFinding::RequirementAssigned, DiagnosticSeverity::Error,
+		                          row->name + " is already in the project: nothing was assigned.", row->asset_path));
 		return;
 	}
 	const AssetEntry *asset = core_.project_file(file);
 	if (!asset) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.unknown_file", "The project has no file named '" + file + "'.", file));
+		core_.report(make_finding(CoreFinding::RequirementUnknownFile, DiagnosticSeverity::Error, "The project has no file named '" + file + "'.", file));
 		return;
 	}
 	if (asset->kind != row->expected_kind) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.kind",
-		                             asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
-		                                     " must be " + asset_kind_label(row->expected_kind) + ".",
-		                             asset->relative_path));
+		core_.report(make_finding(CoreFinding::RequirementKind, DiagnosticSeverity::Error,
+		                          asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
+		                                  " must be " + asset_kind_label(row->expected_kind) + ".",
+		                          asset->relative_path));
 		return;
 	}
 	rename_asset(asset->relative_path, row->name);

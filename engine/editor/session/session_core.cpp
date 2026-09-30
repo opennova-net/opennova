@@ -29,7 +29,7 @@ namespace opennova::editor {
 namespace {
 
 bool same_finding(const Diagnostic &a, const Diagnostic &b) {
-	return a.severity == b.severity && a.code == b.code && a.message == b.message && a.asset == b.asset &&
+	return a.severity == b.severity && a.row() == b.row() && a.message == b.message && a.asset == b.asset &&
 	       a.field == b.field && a.record == b.record && a.line == b.line;
 }
 
@@ -42,7 +42,7 @@ void SessionCore::start() {
 	// A store that cannot be read, or a settings file set aside (another schema): said, the
 	// defaults in effect.
 	Diagnostic finding;
-	if (!preferences_.load(finding) || !finding.code.empty())
+	if (!preferences_.load(finding) || !finding.code().empty())
 		report(finding);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
@@ -89,8 +89,8 @@ void SessionCore::record_outcome(const Diagnostic &d) {
 // A request that cannot run now (a build is packing the project's files, the document it
 // names is not open): nothing is wrong with the project, so the row is a warning, but the
 // request did nothing and its outcome says so.
-void SessionCore::refuse_now(const char *code, const std::string &message, const std::string &asset) {
-	report(make_diagnostic(DiagnosticSeverity::Warning, code, message, asset));
+void SessionCore::refuse_now(CoreFinding code, const std::string &message, const std::string &asset) {
+	report(make_finding(code, DiagnosticSeverity::Warning, message, asset));
 	if (in_request_) outcome_.refused = true;
 }
 
@@ -124,7 +124,7 @@ std::string SessionCore::busy_message(const std::string &until) const {
 }
 
 void SessionCore::refuse_busy(const std::string &asset) {
-	refuse_now("operation.busy", busy_message("first"), asset);
+	refuse_now(CoreFinding::OperationBusy, busy_message("first"), asset);
 }
 
 // The running operation stopped between two steps, its work discarded (a build's staging
@@ -133,12 +133,12 @@ void SessionCore::refuse_busy(const std::string &asset) {
 bool SessionCore::cancel_operation(bool asked) {
 	const SessionOperation *running = operations_.running();
 	if (!running) {
-		if (asked) refuse_now("operation.none", "Nothing is running to cancel.");
+		if (asked) refuse_now(CoreFinding::OperationNone, "Nothing is running to cancel.");
 		return true;
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
 	if (!operations_.cancel()) {
-		if (asked) refuse_now("operation.not_cancellable", "This cannot be cancelled now: wait for " + noun + " to finish.");
+		if (asked) refuse_now(CoreFinding::OperationNotCancellable, "This cannot be cancelled now: wait for " + noun + " to finish.");
 		return false;
 	}
 	const std::string line = "Cancelled " + noun + ".";
@@ -211,7 +211,7 @@ bool SessionCore::open_project(const std::string &dir) {
 	LocalSettings local;
 	Diagnostic local_finding;
 	if (!open_local_settings(paths, preferences_.values().game_install, local, local_finding) ||
-			!local_finding.code.empty())
+			!local_finding.code().empty())
 		report(local_finding);
 	const std::string title = doc.title;
 	const uint64_t id = start_operation(std::make_unique<OpenOperation>(paths, std::move(local), std::move(doc)));
@@ -359,13 +359,13 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	std::vector<Diagnostic> failures;
 	const auto refuse_part = [this, &failures](const std::string &until) {
-		failures.push_back(make_diagnostic(DiagnosticSeverity::Warning, "operation.busy", busy_message(until)));
+		failures.push_back(make_finding(CoreFinding::OperationBusy, DiagnosticSeverity::Warning, busy_message(until)));
 	};
 	ProjectDocument project = *view_.project.document;
 	bool project_changed = false, features_changed = false;
 	if (change.title && *change.title != project.title) {
 		if (change.title->empty()) {
-			failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.title_empty", "A project needs a name."));
+			failures.push_back(make_finding(CoreFinding::ProjectTitleEmpty, DiagnosticSeverity::Error, "A project needs a name."));
 		} else if (busy_for(HoldsNothing, HoldsProject)) {
 			refuse_part("before renaming the project");
 		} else {
@@ -383,8 +383,8 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (mission || multiplayer) project_changed = features_changed = true;
 	}
 	if (project_changed && !view_.project.open) {
-		failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.none",
-		                                   "Open a project to change its name or its features."));
+		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
+		                                "Open a project to change its name or its features."));
 		project_changed = features_changed = false;
 	}
 	if (project_changed) {

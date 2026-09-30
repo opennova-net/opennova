@@ -278,7 +278,7 @@ static int test_project_scan_steps() {
 	TEST_EXPECT(logo && logo->kind == AssetKind::ImageSource && pcx && pcx->imported_from == "art/logo.png" && plain &&
 	            plain->kind == AssetKind::Texture);
 	TEST_EXPECT(std::any_of(imports.diagnostics.begin(), imports.diagnostics.end(),
-	                        [](const Diagnostic &d) { return d.code == "import.orphan_record"; }));
+	                        [](const Diagnostic &d) { return d.code() == "import.orphan_record"; }));
 	return 0;
 }
 
@@ -346,7 +346,7 @@ static int test_scan_update() {
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const ProjectDocument document = document_of(root);
 	AssetScan scan = scan_project_assets(paths, document);
-	scan.set_import_findings({make_diagnostic(DiagnosticSeverity::Error, "import.read", "kept by an update", "art/x.png")});
+	scan.set_import_findings({make_finding(CoreFinding::ImportRead, DiagnosticSeverity::Error, "kept by an update", "art/x.png")});
 	struct Change {
 		const char *what;
 		std::vector<std::string> changed;
@@ -399,7 +399,7 @@ static int test_scan_update() {
 		TEST_EXPECT(same && read == change.read);
 	}
 	TEST_EXPECT(std::any_of(scan.diagnostics.begin(), scan.diagnostics.end(),
-	                        [](const Diagnostic &d) { return d.code == "import.read" && d.message == "kept by an update"; }));
+	                        [](const Diagnostic &d) { return d.code() == "import.read" && d.message == "kept by an update"; }));
 	return 0;
 }
 
@@ -554,9 +554,9 @@ static int test_open_cancelled() {
 	// While it runs: an edit and a save wait, a selection and a query go on.
 	s.session.handle(request::edit_record("defs/items.def", Edit()));
 	TEST_EXPECT(!s.session.outcome().done() && s.session.outcome().findings.size() == 1 &&
-	            s.session.outcome().findings[0].code == "operation.busy");
+	            s.session.outcome().findings[0].code() == "operation.busy");
 	s.session.handle(request::save_all());
-	TEST_EXPECT(!s.session.outcome().done() && s.session.outcome().findings[0].code == "operation.busy");
+	TEST_EXPECT(!s.session.outcome().done() && s.session.outcome().findings[0].code() == "operation.busy");
 	s.session.handle(request::select_record(std::string(), NodeAddress()));
 	TEST_EXPECT(s.session.outcome().done());
 	std::string error;
@@ -568,7 +568,7 @@ static int test_open_cancelled() {
 	            v.activity.last_operation.end == OperationEnd::Cancelled);
 	TEST_EXPECT(!v.project.open && v.project.root.empty() && v.project.scan->entries.empty() &&
 	            v.project.requirements->rows.empty() && v.documents.open.empty() && !v.activity.validation.running);
-	for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code == "operation.busy");
+	for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code() == "operation.busy");
 	TEST_EXPECT(v.project.recent_projects.empty());
 	for (int i = 0; i < 3; ++i) s.session.poll(); // nothing finishes later
 	TEST_EXPECT(!v.project.open && !v.activity.operation.running() && v.activity.last_operation.id == id);
@@ -679,7 +679,7 @@ static int test_stale_import_refused() {
 	TEST_EXPECT(polls >= 4 && snapshot(root) == before);
 	TEST_EXPECT(v.activity.last_operation.id == id && v.activity.last_operation.end == OperationEnd::Failed &&
 	            v.activity.last_operation.findings.size() == 1 &&
-	            v.activity.last_operation.findings[0].code == "import.changed");
+	            v.activity.last_operation.findings[0].code() == "import.changed");
 	TEST_EXPECT(v.dialogs.import_preview.open && v.dialogs.import_preview.changed);
 	const std::vector<ViewEvent> planned = editor_test::events_after(v, seen, ViewEventKind::ImportPlanned);
 	TEST_EXPECT(planned.size() == 1 && planned[0].flag);

@@ -22,6 +22,11 @@ namespace fs = std::filesystem;
 using opennova::editor::Diagnostic;
 using opennova::editor::diagnostic_severity_label;
 using opennova::editor::reference_row;
+using opennova::editor::reference_subject;
+using opennova::editor::ReferenceSubject;
+using opennova::editor::requirement_subject;
+using opennova::editor::RequirementSubject;
+using opennova::editor::subject_target;
 
 inline std::string repo() {
 	return std::string(test_paths_repo_root(__FILE__));
@@ -32,14 +37,21 @@ inline std::string text_of(const std::vector<uint8_t> &bytes) {
 }
 
 // A finding as one line, every member of it (its reference kind by its token, which a new kind
-// leaves as it is).
+// leaves as it is; what it is about as the line wrote it before S13 A6 gave the finding its
+// subject: a role, a target, a reference kind, a scope and a loader's argument, each its default
+// where the subject has none).
 inline std::string row_of(const Diagnostic &d) {
-	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code + "|" + d.asset + "|" +
+	static const RequirementSubject no_requirement;
+	static const ReferenceSubject no_reference;
+	const RequirementSubject &requirement =
+			requirement_subject(d) ? *requirement_subject(d) : no_requirement;
+	const ReferenceSubject &reference = reference_subject(d) ? *reference_subject(d) : no_reference;
+	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code() + "|" + d.asset + "|" +
 			std::to_string(d.line) + "|" + d.record + "|" + d.field + "|" +
 			std::to_string(d.row_id) + "|" + std::to_string(d.child_id) + "|" +
-			std::to_string(d.record_kind) + "|" + d.role + "|" + d.target + "|" +
-			reference_row(d.reference).token + "|" + d.scope + "|" + std::to_string(d.loader_arg) +
-			"|" + d.message;
+			std::to_string(d.record_kind) + "|" + requirement.role + "|" + subject_target(d) + "|" +
+			reference_row(reference.kind).token + "|" + reference.scope + "|" +
+			std::to_string(reference.loader_arg) + "|" + d.message;
 }
 
 using Files = std::vector<std::pair<std::string, std::string>>;

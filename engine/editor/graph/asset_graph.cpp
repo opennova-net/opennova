@@ -12,6 +12,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
@@ -31,8 +32,8 @@ using Ref = GraphIndex::Ref;
 Diagnostic unreadable(const AssetEntry &asset, const Diagnostic &error) {
 	std::string reason = error.message.empty() ? std::string("The file could not be read.") : error.message;
 	if (reason.back() != '.') reason += '.';
-	return make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable",
-	                       reason + " The references in it are not checked.", asset.relative_path);
+	return make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Warning,
+	                    reason + " The references in it are not checked.", asset.relative_path);
 }
 
 // An edge as its file's reading makes it: every field but the target, which its resolution sets.
@@ -345,7 +346,7 @@ void AssetGraph::drop(uint32_t id, Patch &patch) {
 	patch.files.push_back(slot.path);
 	patch.file_set = true;
 	// Its findings and its failure go out of the diagnostics.
-	if (!slot.failure.code.empty() ||
+	if (!slot.failure.code().empty() ||
 			std::any_of(slot.resolutions.begin(), slot.resolutions.end(),
 					[](const EdgeResolution &resolution) { return resolution.missing; }))
 		patch.diagnostics_moved = true;
@@ -632,7 +633,7 @@ void AssetGraph::list_diagnostics() {
 	std::vector<const GraphSlot *> failed;
 	index_.for_each_slot([&](uint32_t id) {
 		const GraphSlot &slot = index_.slot(id);
-		if (!slot.ok && !slot.failure.code.empty()) failed.push_back(&slot);
+		if (!slot.ok && !slot.failure.code().empty()) failed.push_back(&slot);
 	});
 	std::sort(failed.begin(), failed.end(),
 			[](const GraphSlot *a, const GraphSlot *b) { return a->path < b->path; });
@@ -1013,17 +1014,16 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	const std::string message = who + " names " + row.phrase + " '" + edge.value + "'" +
 	                            (row.missing_message ? row.missing_message(*this, edge)
 	                                                 : std::string(", which the project does not have."));
-	Diagnostic d = make_diagnostic(row.severity_when_missing, "reference.missing", message, edge.source, edge.field);
+	Diagnostic d = make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
 	d.row_id = edge.address.row;
 	d.child_id = edge.address.child;
 	d.record_kind = edge.address.kind;
 	// What is missing: a file by the name the game loads (the style variable's value where one
 	// stands), a symbol as written.
-	d.reference = edge.kind;
-	d.target = row.resolution == ReferenceResolution::File ? resolve_style(edge.value) : edge.value;
-	d.scope = edge.scope;
-	d.loader_arg = edge.loader_arg;
+	d.subject = ReferenceSubject{ edge.kind,
+		row.resolution == ReferenceResolution::File ? resolve_style(edge.value) : edge.value,
+		edge.scope, edge.loader_arg };
 	return d;
 }
 

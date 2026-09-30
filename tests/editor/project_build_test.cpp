@@ -185,7 +185,7 @@ static int test_filled_project_builds_and_mounts() {
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok);
 	// The optional files the project lacks are notes the game does without: not the gate's.
-	for (const Diagnostic &d : plan.diagnostics) TEST_EXPECT(d.code != "requirement.optional_missing");
+	for (const Diagnostic &d : plan.diagnostics) TEST_EXPECT(d.code() != "requirement.optional_missing");
 	TEST_EXPECT(plan.archives.size() == 3);
 	TEST_EXPECT(plan.archives[0].file_name == "language.pff" && !plan.archives[0].entries.empty());
 	TEST_EXPECT(plan.archives[1].file_name == "localres.pff" && !plan.archives[1].entries.empty());
@@ -193,7 +193,7 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
 
 	const BuildReport report = run_build(plan, p.output_root());
-	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(report.ok);
 	TEST_EXPECT(!report.reused_existing);
 	TEST_EXPECT(report.build_id.size() == 16);
@@ -231,7 +231,7 @@ static int test_filled_project_builds_and_mounts() {
 	// One changed file: a new build in which only its archive is re-packed.
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one")); // a valid table with new content
 	const BuildReport changed = run_build(p.plan(), p.output_root());
-	for (const Diagnostic &d : changed.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	for (const Diagnostic &d : changed.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(changed.ok && !changed.reused_existing);
 	TEST_EXPECT(changed.build_id != report.build_id);
 	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
@@ -279,7 +279,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(!plan.ok);
 	bool reported = false;
-	for (const Diagnostic &d : plan.diagnostics) reported = reported || d.code == "build.archive_in_project";
+	for (const Diagnostic &d : plan.diagnostics) reported = reported || d.code() == "build.archive_in_project";
 	TEST_EXPECT(reported);
 	return 0;
 }
@@ -296,7 +296,7 @@ static int test_long_names_bind_packed_files_only() {
 	const BuildPlan loose = p.plan();
 	if (!loose.ok)
 		for (const Diagnostic &d : loose.diagnostics)
-			std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+			std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(loose.ok);
 	bool listed = false;
 	for (const BuildEntry &entry : loose.loose)
@@ -311,7 +311,7 @@ static int test_long_names_bind_packed_files_only() {
 	TEST_EXPECT(!packed.ok);
 	std::vector<std::string> too_long;
 	for (const Diagnostic &d : packed.diagnostics)
-		if (d.code == "asset.name.too_long")
+		if (d.code() == "asset.name.too_long")
 			too_long.push_back(d.asset);
 	TEST_EXPECT(too_long == std::vector<std::string>{ texture });
 	return 0;
@@ -329,7 +329,7 @@ static int test_new_kinds_land_where_their_rows_say() {
 	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "VERSION 40\r\n"));
 	const BuildPlan plan = p.plan();
 	for (const Diagnostic &d : plan.diagnostics)
-		std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+		std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(plan.ok && plan.archives.size() == 3);
 	const auto in = [](const std::vector<BuildEntry> &entries, const char *name) {
 		for (const BuildEntry &entry : entries)
@@ -387,7 +387,7 @@ static int test_steps_are_bounded() {
 		TEST_EXPECT(steps < 100000);
 		if (steps >= 100000) break;
 	}
-	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(run.report().ok && !run.cancelled());
 	TEST_EXPECT(steps >= 80);
 	TEST_EXPECT(upward && largest <= budget);
@@ -505,7 +505,7 @@ static int test_file_rewritten_mid_read_fails() {
 		}
 		TEST_EXPECT(rewritten && run.done() && !run.cancelled() && !run.report().ok);
 		const std::vector<Diagnostic> &found = run.report().diagnostics;
-		TEST_EXPECT(found.size() == 1 && found[0].code == "build.changed" && found[0].asset == name);
+		TEST_EXPECT(found.size() == 1 && found[0].code() == "build.changed" && found[0].asset == name);
 		TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0 &&
 		            last_good_build_dir(p.output_root()).empty());
 	}

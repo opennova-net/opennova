@@ -96,8 +96,8 @@ bool menu_bytes(const std::string &xml, const BlankRequest &request, std::vector
 	mnu::Document doc;
 	std::string parse_error;
 	if (!mnu::parse(xml, doc, parse_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.menu", "The new screen did not parse: " + parse_error,
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankMenu, DiagnosticSeverity::Error, "The new screen did not parse: " + parse_error,
+		                     request.logical_name);
 		return false;
 	}
 	blank_text_to_bytes(mnu::serialize(doc, true, 2), out);

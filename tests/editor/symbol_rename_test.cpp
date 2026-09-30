@@ -106,7 +106,7 @@ size_t sites_in(const DialogsView::RenamePreview &plan, const std::string &file)
 
 bool refused(const DialogsView::RenamePreview &plan, const char *code, const std::string &file) {
 	return std::any_of(plan.refusals.begin(), plan.refusals.end(),
-	                   [&](const Diagnostic &d) { return d.code == code && d.asset == file; });
+	                   [&](const Diagnostic &d) { return d.code() == code && d.asset == file; });
 }
 
 std::string window(const char *type, const char *name, const std::string &body = std::string()) {
@@ -394,7 +394,7 @@ static int test_item_id_refused() {
 	TEST_EXPECT(project.read(items) == before);
 	bool reported = false;
 	for (const Diagnostic &d : project.session.outcome().findings)
-		reported = reported || (d.code == "rename.site" && d.asset == "missions/place.bms");
+		reported = reported || (d.code() == "rename.site" && d.asset == "missions/place.bms");
 	TEST_EXPECT(reported);
 	return 0;
 }
@@ -587,7 +587,7 @@ static int test_written_together() {
 	TEST_EXPECT((replaced == std::vector<std::string>{"items.def", "weapon.def"}));
 	TEST_EXPECT(project.read(items) == items_before && project.read(weapons) == weapons_before);
 	TEST_EXPECT(!fs::exists(project.root() + "/" + items + ".tmp") && !fs::exists(project.root() + "/" + weapons + ".tmp"));
-	TEST_EXPECT(!findings.empty() && findings[0].code == "rename.write" &&
+	TEST_EXPECT(!findings.empty() && findings[0].code() == "rename.write" &&
 	            findings[0].message.find("write-protected") != std::string::npos);
 	findings.clear();
 	TEST_EXPECT(apply_symbol_rename(paths, *project.view().project.document, *project.view().project.scan, project.graph(), plan, findings));

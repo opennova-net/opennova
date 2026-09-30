@@ -34,7 +34,7 @@ const char *sheet_status(const SessionView &view, const FindingsIndex &findings,
 	if (!document.read_by_game()) return "Not read by the game: it reads menu_style.mns and brand.mns only.";
 	for (const size_t i : findings.of_file(document.path())) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		if (d.severity == DiagnosticSeverity::Error && d.code.rfind("style.", 0) == 0)
+		if (d.severity == DiagnosticSeverity::Error && d.row() && d.row()->group == FindingGroup::Stylesheets)
 			return "The game reads it only in part: see Problems.";
 	}
 	return "Read by the game.";

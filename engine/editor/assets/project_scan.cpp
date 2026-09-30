@@ -9,6 +9,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -56,8 +57,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		// A record whose source is gone lists nothing: its outputs would otherwise
 		// outlive the source and still pack.
 		if (!fs::is_regular_file(root / source_relative, ec)) {
-			out.findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.orphan_record",
-					"The import record names " + source_relative + ", which is not in the project: delete the record.",
+			out.findings.push_back(make_finding(CoreFinding::ImportOrphanRecord, DiagnosticSeverity::Warning, "The import record names " + source_relative + ", which is not in the project: delete the record.",
 					key));
 			return;
 		}
@@ -66,7 +66,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		ImportSidecar sidecar;
 		Diagnostic error;
 		if (!load_import_sidecar(path.generic_string(), sidecar, error)) {
-			if (!error.code.empty()) {
+			if (!error.code().empty()) {
 				error.asset = key;
 				out.findings.push_back(error);
 			}
@@ -78,8 +78,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 			if (!fs::is_regular_file(output_path, ec)) {
 				// Only the import pass makes outputs: one missing after it ran means the
 				// last import did not finish (its finding says why).
-				out.findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.output_missing",
-						output + " (imported from " + source_relative + ") has not been made: the game will not see it.",
+				out.findings.push_back(make_finding(CoreFinding::ImportOutputMissing, DiagnosticSeverity::Warning, output + " (imported from " + source_relative + ") has not been made: the game will not see it.",
 						source_relative));
 				continue;
 			}
@@ -116,7 +115,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		} else {
 			asset.kind = classify_asset(filename, nullptr);
 			out.findings.push_back(
-					make_diagnostic(DiagnosticSeverity::Warning, "asset.unreadable", io_error, asset.relative_path));
+					make_finding(CoreFinding::AssetUnreadable, DiagnosticSeverity::Warning, io_error, asset.relative_path));
 		}
 	} else {
 		asset.kind = classify_asset(filename, nullptr);
@@ -168,8 +167,7 @@ bool ProjectScan::step(uint64_t budget) {
 			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
 			if (ec) {
 				AssetScan::Visit root;
-				root.findings.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.root.unreadable",
-						"Cannot read the project directory " + paths_.root + ": " + ec.message()));
+				root.findings.push_back(make_finding(CoreFinding::ProjectRootUnreadable, DiagnosticSeverity::Error, "Cannot read the project directory " + paths_.root + ": " + ec.message()));
 				visits_[std::string()] = std::move(root);
 				scan_.set_visits(std::move(visits_));
 				phase_ = Phase::Done;

@@ -83,7 +83,7 @@ struct RefusingStore : PreferencesStore {
 		return true;
 	}
 	bool save(const Preferences &, Diagnostic &error) override {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.write", "refused");
+		error = editor_test::finding_of(DiagnosticSeverity::Error, "editor_settings.write", "refused");
 		return false;
 	}
 };
@@ -147,7 +147,7 @@ static int test_file_store_writes_the_settings_file() {
 	TEST_EXPECT(FilePreferencesStore(older_editor).load(loaded, finding) &&
 			same(loaded, Preferences()));
 	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
-			finding.code == "editor_settings.schema_version.unsupported" &&
+			finding.code() == "editor_settings.schema_version.unsupported" &&
 			finding.message.find(older_editor + " is set aside") == 0);
 	for (const char *held : { "(schema 1; this editor reads schema 2)", "import_dependencies false",
 				 "play_retail true", "recent_projects (2 entries)",
@@ -169,17 +169,17 @@ static int test_file_store_writes_the_settings_file() {
 	Diagnostic newer;
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
 			same(loaded, Preferences()) &&
-			newer.code == "editor_settings.schema_version.unsupported" &&
+			newer.code() == "editor_settings.schema_version.unsupported" &&
 			newer.message.find("(schema 99; this editor reads schema 2)") != std::string::npos &&
 			newer.message.find("what it held is gone: nothing.") != std::string::npos);
 	TEST_EXPECT(editor_test::write_text(dir.file("broken.json"), "not json"));
-	TEST_EXPECT(!FilePreferencesStore(dir.file("broken.json")).load(loaded, error) && error.code == "editor_settings.json");
+	TEST_EXPECT(!FilePreferencesStore(dir.file("broken.json")).load(loaded, error) && error.code() == "editor_settings.json");
 
 	// A file that cannot be written (its path a directory) is an error, the file untouched.
 	std::error_code ec;
 	fs::create_directories(dir.file("taken.json"), ec);
 	TEST_EXPECT(!FilePreferencesStore(dir.file("taken.json")).save(every_preference(), error) &&
-	            error.code == "editor_settings.write");
+	            error.code() == "editor_settings.write");
 	return 0;
 }
 
@@ -210,7 +210,7 @@ static int test_editor_preferences() {
 	refusing.kept = every_preference();
 	EditorPreferences held(refusing);
 	TEST_EXPECT(held.load(error) && same(held.values(), every_preference()));
-	TEST_EXPECT(!held.write(Preferences(), error) && error.code == "editor_settings.write" &&
+	TEST_EXPECT(!held.write(Preferences(), error) && error.code() == "editor_settings.write" &&
 	            same(held.values(), every_preference()));
 
 	// A store that cannot be read: the defaults, and why. One that set aside what it kept: the
@@ -219,15 +219,15 @@ static int test_editor_preferences() {
 	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "not json"));
 	FilePreferencesStore bad(dir.file("bad.json"));
 	EditorPreferences unread(bad);
-	TEST_EXPECT(!unread.load(error) && error.code == "editor_settings.json" &&
+	TEST_EXPECT(!unread.load(error) && error.code() == "editor_settings.json" &&
 			same(unread.values(), Preferences()));
 	TEST_EXPECT(editor_test::write_text(dir.file("aside.json"), "{\"schema_version\": 1}"));
 	FilePreferencesStore aside(dir.file("aside.json"));
 	EditorPreferences set_aside(aside);
 	TEST_EXPECT(set_aside.load(error) && error.severity == DiagnosticSeverity::Warning &&
-			error.code == "editor_settings.schema_version.unsupported" &&
+			error.code() == "editor_settings.schema_version.unsupported" &&
 			same(set_aside.values(), Preferences()));
-	TEST_EXPECT(preferences.load(error) && error.code.empty());
+	TEST_EXPECT(preferences.load(error) && error.code().empty());
 	return 0;
 }
 
@@ -270,7 +270,7 @@ static int test_session_over_a_store() {
 		const SessionView &v = session.view();
 		bool said = false;
 		for (const Diagnostic &d : v.findings.diagnostics)
-			said = said || d.code == "editor_settings.json";
+			said = said || d.code() == "editor_settings.json";
 		TEST_EXPECT(said && v.project.recent_projects.empty() && v.project.import_dependencies);
 	}
 	{
@@ -284,7 +284,7 @@ static int test_session_over_a_store() {
 		const SessionView &v = session.view();
 		size_t said = 0;
 		for (const Diagnostic &d : v.findings.diagnostics)
-			said += d.code == "editor_settings.schema_version.unsupported" &&
+			said += d.code() == "editor_settings.schema_version.unsupported" &&
 					d.severity == DiagnosticSeverity::Warning &&
 					d.message.find("retail_directory \"D:/Joint Operations\"") != std::string::npos;
 		TEST_EXPECT(said == 1 && v.project.recent_projects.empty() &&

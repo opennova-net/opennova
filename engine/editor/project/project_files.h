@@ -61,11 +61,18 @@ std::string basename_of(const std::string &path);
 // `kind` by itself (asset_name_fits_kind) and, placed in `dir` (project-relative, "" =
 // the root), stays inside the project at `root`. Unknown (a kind not decided yet: an
 // import before its bytes are read) skips the archive and kind checks. Otherwise
-// `problem` is "name", "kind" or "path" (a caller's finding code is "<area>.<problem>")
-// and `message` says what is wrong. check_file_name is the same rule without the place:
-// the name alone, nothing read from the disk (what a fix offers is checked with it).
+// `problem` says which rule it breaks (a caller reports it under its own area's code: an
+// import's import.name, a rename's rename.kind, a new document's document.path) and `message`
+// what is wrong. check_file_name is the same rule without the place: the name alone, nothing
+// read from the disk (what a fix offers is checked with it).
+enum class FileNameProblem {
+	None,
+	Name, // not a plain file name, or past the archives' name limit for a kind the build packs
+	Kind, // not a name of its kind
+	Path, // placed where it would land outside the project
+};
 bool check_project_file_name(const std::string &root, const std::string &dir, const std::string &name, AssetKind kind,
-                             std::string &problem, std::string &message);
-bool check_file_name(const std::string &name, AssetKind kind, std::string &problem, std::string &message);
+                             FileNameProblem &problem, std::string &message);
+bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &problem, std::string &message);
 
 } // namespace opennova::editor

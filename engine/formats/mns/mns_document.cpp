@@ -391,6 +391,45 @@ bool Document::is_valid_value(const std::string &value) {
 	return true;
 }
 
+namespace {
+
+// In DiagnosticCode's order (diagnostic_code_token indexes it).
+const char *const kDiagnosticCodeTokens[] = {
+	"line-ending",
+	"directive-form",
+	"if-without-argument",
+	"noncanonical-if-arg",
+	"unbalanced-else",
+	"duplicate-else",
+	"unbalanced-endif",
+	"unknown-directive",
+	"directive-tail",
+	"lone-backslash",
+	"value-is-directive",
+	"value-starts-with-hash",
+	"value-on-next-line",
+	"duplicate-name",
+	"continued-duplicate",
+	"nul-byte",
+	"invalid-name-char",
+	"missing-value-delimiter",
+	"no-value",
+	"continuation-at-eof",
+	"unterminated-if",
+	"hangs",
+	"stops",
+};
+static_assert(sizeof(kDiagnosticCodeTokens) / sizeof(kDiagnosticCodeTokens[0]) ==
+                      kDiagnosticCodeCount,
+              "every DiagnosticCode has exactly one token");
+
+} // namespace
+
+const char *diagnostic_code_token(DiagnosticCode code) {
+	const size_t at = static_cast<size_t>(code);
+	return at < kDiagnosticCodeCount ? kDiagnosticCodeTokens[at] : "";
+}
+
 Document Document::parse(const std::string &text) {
 	return parse(text.data(), text.size());
 }
@@ -431,7 +470,7 @@ Document Document::parse(const char *data, size_t size) {
 	std::unordered_map<std::string, int> seen; // uppercase active name -> first line
 	bool eol_reported = false, nul_reported = false;
 
-	auto diag = [&](int line, Severity sev, const char *code, const std::string &message) {
+	auto diag = [&](int line, Severity sev, DiagnosticCode code, const std::string &message) {
 		doc.diagnostics_.push_back(Diagnostic{line, sev, code, message});
 	};
 
@@ -451,7 +490,7 @@ Document Document::parse(const char *data, size_t size) {
 		}
 		if ((out_eol == "\n" || out_eol == "\r") && !eol_reported) {
 			eol_reported = true;
-			diag(line, Severity::Error, "line-ending",
+			diag(line, Severity::Error, DiagnosticCode::LineEnding,
 			     std::string("this line ends in a lone ") + (out_eol == "\n" ? "LF" : "CR") +
 			             ": the game stops responding on a stylesheet whose lines do not end in CR LF");
 		}
@@ -489,7 +528,7 @@ Document Document::parse(const char *data, size_t size) {
 		while (token_end < line_end && !is_hws(*token_end)) ++token_end;
 		const std::string token(hash + 1, token_end);
 		auto misspelled = [&](const char *as) {
-			diag(line, Severity::Error, "directive-form",
+			diag(line, Severity::Error, DiagnosticCode::DirectiveForm,
 			     "the game reads '#" + token + "' as '#" + as +
 			             "' followed by the rest of the word: write #if 0, #if 1, #else or #endif");
 		};
@@ -502,7 +541,7 @@ Document Document::parse(const char *data, size_t size) {
 			if (!suppressed) {
 				while (after < line_end && is_hws(*after)) ++after;
 				if (after == line_end) {
-					diag(line, Severity::Error, "if-without-argument",
+					diag(line, Severity::Error, DiagnosticCode::IfWithoutArgument,
 					     "'#if' has no 0 or 1 on its line: the game takes the first character of the next line as its condition");
 				} else {
 					arg.assign(1, *after);
@@ -510,7 +549,7 @@ Document Document::parse(const char *data, size_t size) {
 						suppressed = true;
 						suppressed_depth = depth;
 					} else if (*after != '1') {
-						diag(line, Severity::Warning, "noncanonical-if-arg",
+						diag(line, Severity::Warning, DiagnosticCode::NoncanonicalIfArg,
 						     "'#if' reads only its first character, '" + arg +
 						             "', and anything but 0 keeps the lines on: write 0 or 1");
 					}
@@ -523,11 +562,11 @@ Document Document::parse(const char *data, size_t size) {
 			kind = DirectiveKind::Else;
 			if (token != "else") misspelled("else");
 			if (open.empty()) {
-				diag(line, Severity::Warning, "unbalanced-else",
+				diag(line, Severity::Warning, DiagnosticCode::UnbalancedElse,
 				     "'#else' has no '#if' before it: the game still switches the lines after it on or off, "
 				     "until the next '#else' or '#endif'");
 			} else if (open.back().had_else) {
-				diag(line, Severity::Warning, "duplicate-else",
+				diag(line, Severity::Warning, DiagnosticCode::DuplicateElse,
 				     "a second '#else' in one '#if' block switches the lines after it back");
 			} else {
 				open.back().had_else = true;
@@ -542,7 +581,7 @@ Document Document::parse(const char *data, size_t size) {
 			kind = DirectiveKind::Endif;
 			if (token != "endif") misspelled("endif");
 			if (open.empty()) {
-				diag(line, Severity::Warning, "unbalanced-endif",
+				diag(line, Severity::Warning, DiagnosticCode::UnbalancedEndif,
 				     "'#endif' has no '#if' before it; a second one switches the lines after it off");
 			} else {
 				open.pop_back();
@@ -555,7 +594,7 @@ Document Document::parse(const char *data, size_t size) {
 			return std::min(hash + 6, line_end);
 		}
 		kind = DirectiveKind::Unknown;
-		diag(line, Severity::Error, "unknown-directive",
+		diag(line, Severity::Error, DiagnosticCode::UnknownDirective,
 		     "the game stops responding on '#" + token +
 		             "': only #if, #else and #endif are directives (a comment starts with //)");
 		return line_end;
@@ -570,11 +609,11 @@ Document Document::parse(const char *data, size_t size) {
 			return;
 		}
 		if (!suppressed) {
-			diag(line, Severity::Error, "directive-tail",
+			diag(line, Severity::Error, DiagnosticCode::DirectiveTail,
 			     "the game reads '" + std::string(t, line_end) + "' after the directive as a variable");
 			seeking = false;
 		} else if (find_hash(t, line_end) != nullptr) {
-			diag(line, Severity::Error, "directive-tail",
+			diag(line, Severity::Error, DiagnosticCode::DirectiveTail,
 			     "the game reads the '#' after this directive as another directive");
 			seeking = false;
 		} else {
@@ -606,7 +645,7 @@ Document Document::parse(const char *data, size_t size) {
 				}
 				// A lone '\' inside the line: the reader ends the segment there and appends the
 				// text after the blanks [orig: @ 0x639d27..0x639d6b].
-				diag(line, Severity::Warning, "lone-backslash",
+				diag(line, Severity::Warning, DiagnosticCode::LoneBackslash,
 				     "the game drops a lone '\\' and the blanks after it, joining the text around it "
 				     "(write '\\\\' for a backslash)");
 				// The reader meets the '#' at a token boundary: a directive runs there, and the
@@ -614,12 +653,12 @@ Document Document::parse(const char *data, size_t size) {
 				// [orig: @ 0x639944..0x639a38, @ 0x639a11].
 				if (*j == '#') {
 					if (const char *directive = directive_named(j))
-						diag(line, Severity::Error, "value-is-directive",
+						diag(line, Severity::Error, DiagnosticCode::ValueIsDirective,
 						     std::string("the game runs the '#") + directive +
 						             "' after the lone '\\' as a directive and joins the next text it reads onto "
 						             "the value, so the lines below are not read as shown");
 					else
-						diag(line, Severity::Error, "value-starts-with-hash",
+						diag(line, Severity::Error, DiagnosticCode::ValueStartsWithHash,
 						     "the game stops responding on the '#' that follows the lone '\\'");
 				}
 				q = j;
@@ -654,7 +693,7 @@ Document Document::parse(const char *data, size_t size) {
 		if (first.chunk.empty() && !first.continued && first.sep_ws.find('\\') == std::string::npos) {
 			for (size_t i = 1; i < node.define_lines.size(); ++i) {
 				if (!node.define_lines[i].contributes_value) continue;
-				diag(node.line, Severity::Warning, "value-on-next-line",
+				diag(node.line, Severity::Warning, DiagnosticCode::ValueOnNextLine,
 				     "nothing follows '" + name + "' on its line, so the game reads line " +
 				             std::to_string(node.line + int(i)) + " as its value");
 				break;
@@ -663,11 +702,11 @@ Document Document::parse(const char *data, size_t size) {
 		const std::string upper = strutil::to_upper(name);
 		auto it = seen.find(upper);
 		if (it != seen.end()) {
-			diag(node.line, Severity::Warning, "duplicate-name",
+			diag(node.line, Severity::Warning, DiagnosticCode::DuplicateName,
 			     "duplicate macro name '" + name + "' (first defined at line " + std::to_string(it->second) +
 			             "): the game reads this value under the first spelling");
 			if (joins_segments(node)) {
-				diag(node.line, Severity::Error, "continued-duplicate",
+				diag(node.line, Severity::Error, DiagnosticCode::ContinuedDuplicate,
 				     "'" + name + "' is defined again and its value continues: the game adds the continued "
 				     "text to the last new variable before it instead");
 			}
@@ -681,7 +720,7 @@ Document Document::parse(const char *data, size_t size) {
 		const char *const line_end = line_end_from(p);
 		if (!nul_reported && std::memchr(p, 0, size_t(line_end - p)) != nullptr) {
 			nul_reported = true;
-			diag(line, Severity::Error, "nul-byte", "the game stops reading the stylesheet at the NUL byte on this line");
+			diag(line, Severity::Error, DiagnosticCode::NulByte, "the game stops reading the stylesheet at the NUL byte on this line");
 		}
 		// The leading blanks; at a token boundary also the backslashes the reader steps over.
 		const char *rest = p;
@@ -758,7 +797,7 @@ Document Document::parse(const char *data, size_t size) {
 			first.name.assign(rest, q);
 			for (char c : first.name) {
 				if (!is_invalid_name_char(c)) continue;
-				diag(line, Severity::Error, "invalid-name-char",
+				diag(line, Severity::Error, DiagnosticCode::InvalidNameChar,
 				     "macro name '" + first.name + "' contains '" + std::string(1, c) +
 				             "': the game stops reading the stylesheet there, and every variable after it stays undefined");
 				break;
@@ -769,7 +808,7 @@ Document Document::parse(const char *data, size_t size) {
 			if (s == line_end || is_comment_at(s, line_end)) {
 				first.comment.assign(s, line_end);
 				if (first.sep_ws.empty()) {
-					diag(line, Severity::Error, "missing-value-delimiter",
+					diag(line, Severity::Error, DiagnosticCode::MissingValueDelimiter,
 					     "macro '" + first.name + "' has no value: the game stops reading the stylesheet here, "
 					     "and every variable after it stays undefined");
 				} else {
@@ -781,12 +820,12 @@ Document Document::parse(const char *data, size_t size) {
 				// 0x639944..0x639a38, @ 0x639a11].
 				if (*s == '#') {
 					if (const char *directive = directive_named(s))
-						diag(line, Severity::Error, "value-is-directive",
+						diag(line, Severity::Error, DiagnosticCode::ValueIsDirective,
 						     "'" + first.name + "' has no value on its line: the game runs '#" + directive +
 						             "' as a directive and takes the next text it reads as the value, so the lines "
 						             "below are not read as shown");
 					else
-						diag(line, Severity::Error, "value-starts-with-hash",
+						diag(line, Severity::Error, DiagnosticCode::ValueStartsWithHash,
 						     "the game stops responding on a value that starts with '#' (write colors as AARRGGBB)");
 				}
 				pending = scan_value(s, line_end, first, line) ? Pending::Continuation : Pending::None;
@@ -802,14 +841,14 @@ Document Document::parse(const char *data, size_t size) {
 
 	if (pending == Pending::Value) {
 		const Node &node = doc.nodes_.back();
-		diag(node.line, Severity::Warning, "no-value",
+		diag(node.line, Severity::Warning, DiagnosticCode::NoValue,
 		     "the file ends before '" + define_name(node) + "' has a value: the game ignores it");
 	} else if (pending == Pending::Continuation) {
-		diag(line_no - 1, Severity::Warning, "continuation-at-eof", "line continuation at end of file");
+		diag(line_no - 1, Severity::Warning, DiagnosticCode::ContinuationAtEof, "line continuation at end of file");
 		finish_define();
 	}
 	for (const Open &frame : open) {
-		diag(frame.line, Severity::Warning, "unterminated-if",
+		diag(frame.line, Severity::Warning, DiagnosticCode::UnterminatedIf,
 		     "'#if' is never closed: the rest of the file stays inside it");
 	}
 	return doc;
@@ -858,7 +897,8 @@ EvaluationResult Document::evaluate() const {
 	for (const Diagnostic &d : diagnostics_)
 		if (d.severity == Severity::Error && d.line <= result.stopped_line) return result;
 	result.diagnostics.push_back(Diagnostic{
-	        result.stopped_line, Severity::Error, result.hangs ? "hangs" : "stops",
+	        result.stopped_line, Severity::Error,
+	        result.hangs ? DiagnosticCode::Hangs : DiagnosticCode::Stops,
 	        result.hangs ? "the game stops responding reading this line"
 	                     : "the game stops reading the stylesheet on this line, and every variable after it stays undefined"});
 	return result;

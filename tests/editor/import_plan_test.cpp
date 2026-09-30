@@ -135,7 +135,7 @@ static int test_plan_folder() {
 	TEST_EXPECT(editor_test::write_bytes(art + "/broken.mnu", {0xFF, 0xFE, 0x41}));
 	const ImportPlan broken = project.plan({{art + "/c.mnu", {}}});
 	size_t unreadable = 0;
-	for (const Diagnostic &d : broken.diagnostics) unreadable += d.code == "import.unreadable" && d.asset == "broken.mnu" ? 1 : 0;
+	for (const Diagnostic &d : broken.diagnostics) unreadable += d.code() == "import.unreadable" && d.asset == "broken.mnu" ? 1 : 0;
 	const ImportPlanRow *broken_row = row_named(broken, "broken.mnu");
 	TEST_EXPECT(unreadable == 1 && broken_row && broken_row->state == State::Found && broken.rows.size() == 2);
 	return 0;
@@ -362,7 +362,7 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(text_plan.rows.size() == 1 && row_named(text_plan, "m.mis") &&
 			row_named(text_plan, "m.mis")->kind == AssetKind::Mission);
 	for (const Diagnostic &d : text_plan.diagnostics)
-		TEST_EXPECT(d.code != "import.unreadable");
+		TEST_EXPECT(d.code() != "import.unreadable");
 	// A face names its textures, which nothing reads yet: taken, listed; a wave names nothing.
 	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "BASE_TEXTURE face.tga\r\n") &&
 	            editor_test::write_text(art + "/boom.wav", "RIFF"));

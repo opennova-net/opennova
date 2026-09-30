@@ -11,6 +11,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/project_scan.h>
 #include <editor/import/importer.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 
@@ -54,26 +55,20 @@ void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnosti
 		const AssetEntry &asset = entries[i];
 		const bool packed = archive_name_limit_binds(asset.kind);
 		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
-			out.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.too_long",
-			        "The file name " + asset.logical_name + " is longer than " +
+			out.push_back(make_finding(CoreFinding::AssetNameTooLong, DiagnosticSeverity::Error, "The file name " + asset.logical_name + " is longer than " +
 			                std::to_string(pff::PFF_NAME_SIZE) +
 			                " characters; the game cannot store it in an archive.",
 			        asset.relative_path));
 		} else if (packed && asset.key.empty()) {
-			out.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
-			                              "The file name is blank once normalized.", asset.relative_path));
+			out.push_back(make_finding(CoreFinding::AssetNameEmpty, DiagnosticSeverity::Error, "The file name is blank once normalized.", asset.relative_path));
 		}
 		if (i > 0 && entries[i - 1].key == asset.key) {
-			out.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.duplicate",
-			        "Two files share the name " + asset.logical_name + " (" + entries[i - 1].relative_path + " and " +
+			out.push_back(make_finding(CoreFinding::AssetNameDuplicate, DiagnosticSeverity::Error, "Two files share the name " + asset.logical_name + " (" + entries[i - 1].relative_path + " and " +
 			                asset.relative_path + "); the game resolves names without folders, so only one can exist.",
 			        asset.relative_path));
 		}
 		if (asset.kind == AssetKind::Unknown) {
-			out.push_back(make_diagnostic(DiagnosticSeverity::Warning, "asset.kind.unknown",
-			                              "The game does not use files of this type.", asset.relative_path));
+			out.push_back(make_finding(CoreFinding::AssetKindUnknown, DiagnosticSeverity::Warning, "The game does not use files of this type.", asset.relative_path));
 		}
 	}
 }
@@ -82,7 +77,7 @@ void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnosti
 // the walk's too, one finding.
 bool listed(const std::vector<Diagnostic> &rows, const Diagnostic &d) {
 	return std::any_of(rows.begin(), rows.end(), [&d](const Diagnostic &row) {
-		return row.severity == d.severity && row.code == d.code && row.asset == d.asset && row.message == d.message;
+		return row.severity == d.severity && row.row() == d.row() && row.asset == d.asset && row.message == d.message;
 	});
 }
 

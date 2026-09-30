@@ -11,6 +11,22 @@
 namespace opennova::editor {
 using namespace def;
 namespace {
+constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
+	{ CatalogFinding::InvalidInput, { "catalog.invalid_input", FindingFix::None, nullptr, true } },
+	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
+	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
+	{ CatalogFinding::NameEmpty, { "catalog.name_empty" } },
+	{ CatalogFinding::NameDuplicate, { "catalog.name_duplicate" } },
+	{ CatalogFinding::ItemIdentity, { "catalog.item_identity" } },
+	{ CatalogFinding::ItemType, { "catalog.item_type" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::kCount),
+		"every CatalogFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the catalog's rows follow CatalogFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Catalogs);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
+
 const CatalogRow &catalog_row(const Node &node) { return static_cast<const CatalogRow &>(node); }
 
 // What the game does with a record whose name an earlier record of its kind has, in the
@@ -43,6 +59,12 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 	}
 }
 }
+const FindingCodeRow &finding_code(CatalogFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable catalog_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
@@ -74,10 +96,11 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	// Input the game ignores is dropped on save: a warning. Input the typed model cannot
 	// carry blocks the file: an error. On the record the issue names, found by its name.
 	source_issue_findings(
-			*catalog, "catalog.invalid_input", "catalog.ignored_input", findings, locate);
+			*catalog, finding_code(CatalogFinding::InvalidInput),
+			finding_code(CatalogFinding::IgnoredInput), findings, locate);
 	if (document.blocked()) return findings;
 	for (const auto &issue : document.serialize().issues) {
-		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable",
+		auto diagnostic = make_finding(CatalogFinding::Unserializable, DiagnosticSeverity::Error,
 			issue.message, document.path(), issue.field);
 		diagnostic.record = issue.record; locate(diagnostic); findings.push_back(std::move(diagnostic));
 	}
@@ -89,9 +112,9 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	std::map<int, const Node *> first_of_id;
 	std::map<std::string, const Node *> named; // the first record of each kind and name
 	for (const auto &row : catalog->rows()) {
-		auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message,
+		auto add = [&](DiagnosticSeverity severity, CatalogFinding code, const std::string &message,
 			const std::string &field, NodeAddress address) {
-			auto diagnostic = make_diagnostic(severity, code, message, document.path(), field);
+			auto diagnostic = make_finding(code, severity, message, document.path(), field);
 			diagnostic.record = row->name(); diagnostic.row_id = address.row;
 			diagnostic.child_id = address.child; diagnostic.record_kind = address.kind;
 			findings.push_back(std::move(diagnostic));
@@ -101,22 +124,22 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 		const DefRecordKind kind = def_kind(row->kind);
 		const char *name_field = catalog_name_field(kind);
 		if (row->name().empty()) {
-			add(DiagnosticSeverity::Error, "catalog.name_empty", "Enter a name for this record.", name_field, address);
+			add(DiagnosticSeverity::Error, CatalogFinding::NameEmpty, "Enter a name for this record.", name_field, address);
 		} else {
 			const auto first = named.emplace(std::to_string(int(row->kind)) + "/" + strutil::to_upper(row->name()), row.get());
 			if (!first.second)
-				add(DiagnosticSeverity::Warning, "catalog.name_duplicate", repeated_name(kind, *first.first->second), name_field,
+				add(DiagnosticSeverity::Warning, CatalogFinding::NameDuplicate, repeated_name(kind, *first.first->second), name_field,
 				    address);
 		}
 		if (kind == DefRecordKind::Item) {
 			const auto &item = std::get<DefItemDef>(catalog_row(*row).data);
 			const auto first = first_of_id.emplace(item.id, row.get());
 			if (!first.second)
-				add(DiagnosticSeverity::Warning, "catalog.item_identity",
+				add(DiagnosticSeverity::Warning, CatalogFinding::ItemIdentity,
 				    "An earlier item, \"" + first.first->second->name() + "\", has id " + std::to_string(item.id) +
 				            ": the game keeps both, and a lookup by the id finds the earlier one.",
 				    "id", address);
-			if (!item.type) add(DiagnosticSeverity::Error, "catalog.item_type", "Choose an item type.", "type", address);
+			if (!item.type) add(DiagnosticSeverity::Error, CatalogFinding::ItemType, "Choose an item type.", "type", address);
 		}
 	}
 	return findings;

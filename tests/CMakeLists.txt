@@ -3641,8 +3641,9 @@ add_test(NAME editor_session COMMAND editor_session_test)
 # Per-file validation (S13 D4): each file's own findings kept in the validation cache by what
 # they were made from, a closed file read and let go; what other files make of what one defines
 # (graph/use_checks); the project's rows as the one pass makes them, the trunk's before the
-# split pinned over the fixtures. Retail leg (OPENNOVA_JO_DIR): the install's files a document
-# type opens validated, then an edit of one validating it alone.
+# split pinned over the fixtures; every finding composed carries a finding code's row (S13 A6).
+# Retail leg (OPENNOVA_JO_DIR): the install's files a document type opens validated, every
+# finding composed a row's, then an edit of one validating it alone.
 add_executable(editor_project_validation_test editor/project_validation_test.cpp)
 target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
 target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3709,6 +3710,16 @@ add_executable(editor_session_json_test editor/session_json_test.cpp)
 target_link_libraries(editor_session_json_test PRIVATE opennova_editor)
 target_include_directories(editor_session_json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session_json COMMAND editor_session_json_test)
+
+# The finding codes (S13 A6): every token its own across the editor's table and the document
+# types' as registered (a stand-in hiding none), each row found by its token, a type's rows its
+# group's family, the render check's a row per compiler note and the stylesheet reader's a row
+# per reader code, the columns deciding what the codes' spelling decided before (and the
+# spelling agreeing), a finding keeping its row, and its subject on the wire under the keys it had.
+add_executable(editor_finding_codes_test editor/finding_codes_test.cpp)
+target_link_libraries(editor_finding_codes_test PRIVATE opennova_editor)
+target_include_directories(editor_finding_codes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_finding_codes COMMAND editor_finding_codes_test)
 
 # The Problems core (S11b): the query the window and the editor MCP share (severities,
 # text, scope, only the fixable, grouping), the fixes for each finding and a Fix all

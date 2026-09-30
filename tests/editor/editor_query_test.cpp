@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -26,6 +27,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/editor_queries.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -413,7 +415,7 @@ static int test_problems_params() {
 		std::vector<std::string> rows;
 		for (const size_t index : answer_problems(query, view).rows) {
 			const Diagnostic &d = view.findings.diagnostics[index];
-			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code + " " +
+			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code() + " " +
 					d.asset);
 		}
 		return rows;
@@ -611,9 +613,15 @@ static int test_catalog() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
+	// Every finding code the session and the types know (S13 A6), before a project too, none held.
 	const JsonValue before_project = ask(session, "catalog");
-	TEST_EXPECT(before_project.get("finding_codes") &&
-			before_project.get("finding_codes")->array.empty());
+	const JsonValue *known = before_project.get("finding_codes");
+	size_t rows = 0;
+	for (const NamedFindingTable &table : finding_tables())
+		rows += table.rows.count;
+	TEST_EXPECT(known && known->array.size() == rows && rows > 0);
+	for (size_t i = 0; known && i < known->array.size(); ++i)
+		TEST_EXPECT(known->array[i].get_number("count", -1.0) == 0.0);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	session.run_operations();
 	const JsonValue catalog = ask(session, "catalog");
@@ -694,15 +702,48 @@ static int test_catalog() {
 	TEST_EXPECT(concerns && concerns->array.size() == kViewConcernCount);
 	for (size_t i = 0; concerns && i < concerns->array.size(); ++i)
 		TEST_EXPECT(concerns->array[i].string == kViewConcernRows[i].token);
-	// The codes of the findings the session holds, each once with its rows.
-	std::set<std::string> codes;
+	// Every code with its row's columns, in the tables' order (the editor's own, then each type's),
+	// each with how many of the findings the session holds carry it: every finding held is counted
+	// under the row it keeps, each a table's (none listed as table none).
+	std::map<const FindingCodeRow *, size_t> counts;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		codes.insert(d.code);
-	const JsonValue *held = catalog.get("finding_codes");
-	TEST_EXPECT(held && held->array.size() == codes.size() && !codes.empty());
-	for (size_t i = 0; held && i < held->array.size(); ++i)
-		TEST_EXPECT(codes.count(held->array[i].get_string("code", "")) == 1 &&
-				held->array[i].get_number("count", 0.0) > 0);
+		++counts[d.row()];
+	const JsonValue *codes = catalog.get("finding_codes");
+	TEST_EXPECT(codes && codes->array.size() == rows && !counts.empty());
+	size_t at = 0, held = 0;
+	for (const NamedFindingTable &table : finding_tables()) {
+		for (const FindingCodeRow &row : table.rows) {
+			if (!codes || at >= codes->array.size())
+				return 1;
+			const JsonValue &entry = codes->array[at++];
+			const auto count = counts.find(&row);
+			const size_t expected = count == counts.end() ? 0 : count->second;
+			held += expected;
+			TEST_EXPECT(entry.get_string("code", "") == row.token &&
+					entry.get_string("table", "") == table.owner &&
+					entry.get_string("fixes", "") == finding_fix_token(row.fixes) &&
+					(entry.get("rewrite_does") != nullptr) == (row.rewrite_does != nullptr) &&
+					entry.get_string("rewrite_does", "") ==
+							(row.rewrite_does ? row.rewrite_does : "") &&
+					entry.get_bool("blocks_save", !row.blocks_save) == row.blocks_save &&
+					entry.get_string("place", "") == finding_place_token(row.place) &&
+					entry.get_string("group", "") == finding_group_key(row.group) &&
+					entry.get_string("source", "") == finding_source_token(row) &&
+					(entry.get("problem") != nullptr) == (row.problem != FindingProblem::None) &&
+					entry.get_string("problem", "none") == finding_problem_token(row.problem) &&
+					entry.get_number("count", -1.0) == double(expected));
+		}
+	}
+	TEST_EXPECT(held == session.view().findings.diagnostics.size());
+	// The two sources that are not a group's: the graph's rows and the render check's.
+	for (size_t i = 0; codes && i < codes->array.size(); ++i) {
+		const JsonValue &entry = codes->array[i];
+		const std::string code = entry.get_string("code", "");
+		const std::string source = entry.get_string("source", "");
+		TEST_EXPECT((source == "graph") == (code == "reference.missing" || code == "graph.unreadable"));
+		TEST_EXPECT((source == "render") == (code.rfind("menu.render.", 0) == 0));
+		TEST_EXPECT(source == "graph" || source == "render" || source == entry.get_string("group", "-"));
+	}
 	TEST_EXPECT(catalog.get_number("page_max", 0.0) == double(kQueryPageMax));
 	return 0;
 }

@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
+#include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
@@ -216,57 +217,18 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 }
 
 bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severity) {
-	switch (code) {
-	case Code::AppearanceStateUnknown:
-	case Code::AppearanceTypeUnknown:
-	case Code::AppearanceReplaced:
-	case Code::ColorUnparsed:
-	case Code::ColorTransparent:
-	case Code::TypeUnknown:
-	case Code::FontUnreadable:
-	case Code::TextureUnreadable:
-	case Code::TextTableUnreadable:
-	case Code::RectEmpty:
-	case Code::TextTruncated:
-	case Code::TextNoRoom:
-	case Code::TextNoFont:
-	case Code::ImageBandEmpty:
-	case Code::CheckedNoArt:
-	case Code::FrameAbsent:
-	case Code::FrameNoStencil:
-	case Code::FrameTileZero:
-	case Code::SpinArrowEmpty:
-	case Code::TableHeaderClipped:
-	case Code::TableHeaderWidthZero:
+	// The note's row says it (the menu type's table, mnu_document.cpp: a render check's row).
+	switch (finding_code(code).problem) {
+	case FindingProblem::Warning:
 		*severity = DiagnosticSeverity::Warning;
 		return true;
-	case Code::TypeInteriorDeferred:
-	case Code::ItemKindNotDrawn:
-	case Code::TableCellsDeferred:
-	case Code::ImageHeightShared:
-	case Code::ListRowsClipped:
+	case FindingProblem::Info:
 		*severity = DiagnosticSeverity::Info;
 		return true;
-	// The asset graph's findings (a name the project lacks), and what only explains the
-	// picture.
-	case Code::StyleVarUnresolved:
-	case Code::FontMissing:
-	case Code::TextureMissing:
-	case Code::TextTableMissing:
-	case Code::TextIdMissing:
-	case Code::AppearanceCustom:
-	case Code::ScrollExtentDefault:
-	case Code::StateFallback:
-	case Code::FrameStencilUnloaded:
-	case Code::TableNoColumns:
-	case Code::MarqueeRuntimeContent:
-		return false;
+	case FindingProblem::None:
+		break;
 	}
 	return false;
-}
-
-std::string menu_note_code(menu::MenuFrameNoteCode code) {
-	return std::string("menu.render.") + menu::menu_frame_note_token(code);
 }
 
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
@@ -296,7 +258,7 @@ Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocume
                                 DiagnosticSeverity severity) {
 	std::string field;
 	const NodeAddress address = menu_note_address(note, document, screen_row, &field);
-	Diagnostic d = make_diagnostic(severity, menu_note_code(note.code), menu_note_message(note), document.path(), field);
+	Diagnostic d = make_finding(finding_code(note.code), severity, menu_note_message(note), document.path(), field);
 	d.row_id = address.row;
 	d.child_id = address.child;
 	d.record_kind = address.kind;
@@ -429,10 +391,10 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 				         std::get<std::string>(name) == compiler.widget_name(index);
 			}
 			if (!mapped) {
-				Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "menu.render.mapping",
-				                               "The menu the game would read has other windows on this screen than "
-				                               "the editor shows, so the screen's render notes are left out.",
-				                               document.path());
+				Diagnostic d = make_finding(MenuFinding::RenderMapping, DiagnosticSeverity::Error,
+				                            "The menu the game would read has other windows on this screen than "
+				                            "the editor shows, so the screen's render notes are left out.",
+				                            document.path());
 				d.row_id = row->id;
 				d.record_kind = node_kind(MenuKind::Screen);
 				d.record = row->name();

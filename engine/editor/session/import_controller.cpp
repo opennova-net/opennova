@@ -6,6 +6,7 @@
 
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_operation.h>
@@ -48,8 +49,8 @@ void ImportController::preview_install(const EditorRequest &request) {
 		});
 		if (found == sources.end()) {
 			if (diagnostics.empty())
-				diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.source",
-				                                      "The game data has no file named " + name + "."));
+				diagnostics.push_back(make_finding(CoreFinding::ImportSource, DiagnosticSeverity::Error,
+				                                   "The game data has no file named " + name + "."));
 			continue;
 		}
 		named.push_back(*found);
@@ -209,8 +210,7 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 			view_.activity.status = "The files changed since the preview: nothing was imported.";
 			core_.touch(ViewConcern::Dialogs);
 			core_.touch(ViewConcern::Output);
-			return refused(make_diagnostic(DiagnosticSeverity::Warning, "import.changed",
-			                               "The files changed since the preview: nothing was imported. Check the import again."));
+			return refused(make_finding(CoreFinding::ImportChanged, DiagnosticSeverity::Warning, "The files changed since the preview: nothing was imported. Check the import again."));
 		}
 		if (!operation.refusals().empty()) return refused(operation.refusals().front());
 	}

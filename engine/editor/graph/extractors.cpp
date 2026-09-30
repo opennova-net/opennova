@@ -16,6 +16,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/env/env.h>
@@ -135,7 +136,7 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 	env::Config config;
 	std::string message;
 	if (!env::load_env(input, config, message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "graph.unreadable", message, name);
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
 		return false;
 	}
 	auto edge = [&](const char *field, ReferenceKind kind, const std::string &value) {
@@ -153,7 +154,7 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "graph.unreadable", "The avatar table could not be read.", name);
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The avatar table could not be read.", name);
 		return false;
 	}
 	for (size_t i = 0; i < file.parts_count; ++i) {
@@ -175,7 +176,7 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	particle::ParticleFile file;
 	particle::ParseError parse_error;
 	if (!particle::load_particles_from_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), file, parse_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "graph.unreadable", "The particle file could not be read.", name);
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The particle file could not be read.", name);
 		return false;
 	}
 	for (const particle::EffectDef &effect : file.effects)
@@ -195,7 +196,7 @@ bool extract_mission(const std::string &name, const std::vector<uint8_t> &bytes,
 	bms::File file;
 	std::string message;
 	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "graph.unreadable", message, name);
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
 		return false;
 	}
 	if (!file.get_terrain().empty())
@@ -312,7 +313,7 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
 	std::vector<uint8_t> bytes;
 	std::string message;
 	if (!read_file_bytes((std::filesystem::path(paths.root) / asset.relative_path).generic_string(), bytes, message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "graph.unreadable", message, asset.relative_path);
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, asset.relative_path);
 		return false;
 	}
 	return extract_from_bytes(asset.relative_path, asset.kind, bytes, project.target_game, out, error);

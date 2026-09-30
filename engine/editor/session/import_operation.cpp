@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include <editor/model/diagnostic.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/session_core.h>
 
@@ -38,8 +39,7 @@ bool ImportOperation::step(const StepBudget &budget) {
 				return row.state != ImportPlanRow::State::NotFound && row.source == import;
 			});
 			if (!planned) {
-				refusals_.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.not_planned",
-						import.name() + " is not in the import preview: plan it first.", import.name()));
+				refusals_.push_back(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error, import.name() + " is not in the import preview: plan it first.", import.name()));
 				phase_ = Phase::Done;
 				return true;
 			}

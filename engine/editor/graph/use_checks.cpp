@@ -5,8 +5,10 @@
 #include <unordered_map>
 
 #include <base/io/strutil.h>
+#include <editor/documents/mns_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
@@ -18,9 +20,9 @@ namespace {
 
 // A finding on the record a symbol's definition is in, on `field` (and on the definition's line
 // where the finding names one: a stylesheet's).
-Diagnostic on_definition(const GraphSymbol &symbol, DiagnosticSeverity severity, const char *code,
+Diagnostic on_definition(const GraphSymbol &symbol, DiagnosticSeverity severity, const FindingCodeRow &code,
 		const std::string &message, const char *field, size_t line) {
-	Diagnostic d = make_diagnostic(severity, code, message, symbol.file, field);
+	Diagnostic d = make_finding(code, severity, message, symbol.file, field);
 	d.line = line;
 	d.record = symbol.record;
 	d.row_id = symbol.address.row;
@@ -58,15 +60,15 @@ void check_style_uses(
 				continue;
 			const std::string &name = symbol.display;
 			const std::string &value = symbol.value;
-			const auto add = [&](DiagnosticSeverity severity, const char *code,
+			const auto add = [&](DiagnosticSeverity severity, StyleFinding code,
 									 const std::string &message) {
-				out.push_back(on_definition(symbol, severity, code, message, "value", symbol.line));
+				out.push_back(on_definition(symbol, severity, finding_code(code), message, "value", symbol.line));
 			};
 			const GraphSymbol *binding = graph.style_binding(name);
 			const bool is_binding = binding && binding->file == path;
 			if (binding && !is_binding && menu::is_shell_stylesheet(basename_of(binding->file)) &&
 					strutil::iequals(basename_of(path), menu::kShellStylesheets[0].name))
-				add(DiagnosticSeverity::Info, "style.overridden_by_brand",
+				add(DiagnosticSeverity::Info, StyleFinding::OverriddenByBrand,
 						basename_of(binding->file) + " defines " + name +
 								" too: the game reads its value, '" + binding->value + "'.");
 			if (!is_binding)
@@ -88,15 +90,15 @@ void check_style_uses(
 			// means no menu uses it. A %NAME% inside a longer text is no edge: the frame compiler
 			// reads a whole value alone.
 			if (uses.empty())
-				add(DiagnosticSeverity::Info, "style.unused",
+				add(DiagnosticSeverity::Info, StyleFinding::Unused,
 						"No menu of the project names %" + name + "%.");
 			if (color && !mnu::color_reads_whole(value))
-				add(DiagnosticSeverity::Warning, "style.not_a_color",
+				add(DiagnosticSeverity::Warning, StyleFinding::NotAColor,
 						name + " is used as a colour, but '" + value +
 								"' is not one (AARRGGBB hex digits): the game reads only its "
 								"leading hex digits.");
 			if (int(color) + int(font) + int(image) > 1)
-				add(DiagnosticSeverity::Warning, "style.mixed_use",
+				add(DiagnosticSeverity::Warning, StyleFinding::MixedUse,
 						name + " is used as more than one of a colour, a font and an image.");
 		}
 	}

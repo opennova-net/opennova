@@ -111,7 +111,7 @@ bool has_symbol(const AssetGraph &graph, ReferenceKind kind, const std::string &
 
 size_t count_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
 	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) if (d.code == code) ++n;
+	for (const Diagnostic &d : diagnostics) if (d.code() == code) ++n;
 	return n;
 }
 
@@ -244,7 +244,7 @@ static int test_menu_text_scope() {
 	};
 	const auto missing_message = [&](const char *needle) {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "reference.missing" && d.field == "string.value" && d.message.find(needle) != std::string::npos)
+			if (d.code() == "reference.missing" && d.field == "string.value" && d.message.find(needle) != std::string::npos)
 				return true;
 		return false;
 	};
@@ -407,7 +407,7 @@ static int test_native_extractors() {
 	const auto unreadable = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
 		for (const Diagnostic &d : diagnostics)
-			n += d.code == "graph.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+			n += d.code() == "graph.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return n;
 	};
 	TEST_EXPECT(unreadable("broken.bms") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
@@ -658,7 +658,7 @@ static int test_rename() {
 	session.run_operations();
 	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
 	session.run_operations();
-	TEST_EXPECT(view.findings.diagnostics.back().code == "rename.site" || view.findings.diagnostics.back().code == "rename.refused");
+	TEST_EXPECT(view.findings.diagnostics.back().code() == "rename.site" || view.findings.diagnostics.back().code() == "rename.refused");
 	TEST_EXPECT(fs::exists(root + "/logo2.tga") && !fs::exists(root + "/logo3.tga"));
 	// Through a style variable: the variable's value is the site. (A Rescan keeps an open
 	// document whose file did not change: the same one.)
@@ -706,7 +706,7 @@ static int test_rename() {
 	                    ReferenceStatus::Present &&
 	            resolved_font == renamed_font);
 	for (const Diagnostic &d : view.findings.diagnostics)
-		TEST_EXPECT(!(d.code == "reference.missing" && d.field == "font.name"));
+		TEST_EXPECT(!(d.code() == "reference.missing" && d.field == "font.name"));
 	font_file = renamed_font;
 	// A value without the extension is no site the rename rewrites: refused, the variable named.
 	session.handle(request::open_document(style_asset->relative_path));
@@ -716,7 +716,7 @@ static int test_rename() {
 	edit_window(session, *style, large, "value", std::string("zz"));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
 	const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, font_file, "zz2.fnt");
-	TEST_EXPECT(!through_style.ok() && through_style.refusals.front().code == "rename.style");
+	TEST_EXPECT(!through_style.ok() && through_style.refusals.front().code() == "rename.style");
 	session.handle(request::undo());
 	session.handle(request::close_document(style_asset->relative_path));
 	// And back: the required font is the project's again.
@@ -738,7 +738,7 @@ static int test_rename() {
 		EditorRequest assign = request::assign_requirement(missing_role, "spare.pcx");
 		session.handle(assign);
 		session.run_operations();
-		TEST_EXPECT(view.findings.diagnostics.back().code == "requirement.kind");
+		TEST_EXPECT(view.findings.diagnostics.back().code() == "requirement.kind");
 		TEST_EXPECT(view.project.requirements->required_missing == 1);
 	}
 	// A table of the right kind, copied from another required table.
@@ -763,7 +763,7 @@ static int test_rename() {
 	session.handle(request::assign_requirement(missing_role, "spare.pcx"));
 	session.run_operations();
 	TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
-	            session.outcome().findings.back().code == "requirement.assigned");
+	            session.outcome().findings.back().code() == "requirement.assigned");
 	TEST_EXPECT(fs::exists(root + "/spare.pcx"));
 	return 0;
 }
@@ -841,7 +841,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	// The error names what the file still says (the site's own spelling), not the renamed file.
 	bool partial_error = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		partial_error = partial_error || (d.code == "rename.partial" && d.severity == DiagnosticSeverity::Error &&
+		partial_error = partial_error || (d.code() == "rename.partial" && d.severity == DiagnosticSeverity::Error &&
 		                                  d.message.find("still names 'm16b' in 1 of its 1") != std::string::npos);
 	TEST_EXPECT(partial_error);
 	TEST_EXPECT(fs::exists(root + "/m16b.adm") && fs::exists(root + "/m16c.adm"));
@@ -987,7 +987,7 @@ static int test_stylesheet_bindings() {
 	edit_window(session, *menu, exit, "font.name", std::string("%STRAY_ONLY%"));
 	bool stray_message = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		stray_message = stray_message || (d.code == "reference.missing" && d.message.find("does not read") != std::string::npos);
+		stray_message = stray_message || (d.code() == "reference.missing" && d.message.find("does not read") != std::string::npos);
 	TEST_EXPECT(stray_message);
 	session.handle(request::undo());
 
@@ -997,10 +997,10 @@ static int test_stylesheet_bindings() {
 	session.run_operations();
 	size_t missing_fonts = 0;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == "reference.missing" && d.message.find("nofont.fnt") != std::string::npos) {
+		if (d.code() == "reference.missing" && d.message.find("nofont.fnt") != std::string::npos) {
 			++missing_fonts;
 			TEST_EXPECT(fs::path(d.asset).filename() == "brand.mns" && d.record == "DEF_FONTNAME_LG");
-			TEST_EXPECT(d.reference == ReferenceKind::Font && d.target == "nofont.fnt");
+			TEST_EXPECT(editor_test::reference_of(d).kind == ReferenceKind::Font && subject_target(d) == "nofont.fnt");
 		}
 	TEST_EXPECT(missing_fonts == 1);
 
@@ -1029,7 +1029,7 @@ static int test_stylesheet_bindings() {
 	const auto nowhere_findings = [&view]() {
 		size_t n = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "reference.missing" && d.message.find("Nowhere.fnt") != std::string::npos) ++n;
+			if (d.code() == "reference.missing" && d.message.find("Nowhere.fnt") != std::string::npos) ++n;
 		return n;
 	};
 	TEST_EXPECT(nowhere_findings() == 0);
@@ -1058,7 +1058,7 @@ const GraphSymbol *symbol_at(const AssetGraph &graph, const std::string &file, R
 const Diagnostic *finding(const std::vector<Diagnostic> &diagnostics, const char *code, const std::string &record,
                           const char *needle = "") {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code && d.record == record && d.message.find(needle) != std::string::npos) return &d;
+		if (d.code() == code && d.record == record && d.message.find(needle) != std::string::npos) return &d;
 	return nullptr;
 }
 
@@ -1253,7 +1253,7 @@ static int test_menu_names_and_targets() {
 	            graph.resolve(ReferenceKind::MenuWindow, "TITLE", "GRAPH.MNU/HOME") == ReferenceStatus::Present);
 	bool hidden = false, elsewhere = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (d.code != "reference.missing" || d.field != "target") continue;
+		if (d.code() != "reference.missing" || d.field != "target") continue;
 		hidden = hidden || d.message.find("'HIDDEN_KID'") != std::string::npos &&
 		                           d.message.find("never finds it") != std::string::npos;
 		elsewhere = elsewhere || d.message.find("'ELSEWHERE', which no window of screen HOME is named") != std::string::npos;
@@ -1270,14 +1270,14 @@ static int test_menu_names_and_targets() {
 			view.findings.diagnostics, "menu.action_inert", "HOME/PANEL/Window 4", "no NAME"));
 	bool unknown_type = false, no_state = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (d.code != "menu.action_inert") continue;
+		if (d.code() != "menu.action_inert") continue;
 		unknown_type = unknown_type || (d.field == "type" && d.message.find("'JUMP'") != std::string::npos);
 		no_state = no_state || (d.field == "state" && d.record == "HOME/PANEL/GO/Action 8");
 	}
 	TEST_EXPECT(unknown_type && no_state);
 	TEST_EXPECT(count_code(view.findings.diagnostics, "menu.action_inert") == 3);
 	// style.unused leaves TRIM_COLOR, which the colour names.
-	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code == "style.unused" && d.record == "TRIM_COLOR"));
+	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code() == "style.unused" && d.record == "TRIM_COLOR"));
 	return 0;
 }
 
@@ -1413,7 +1413,7 @@ static int test_user_point_references() {
 	TEST_EXPECT(slot_uses == 1);
 	size_t missing_points = 0, stray = 0;
 	for (const Diagnostic &d : session.view().findings.diagnostics) {
-		if (d.code != "reference.missing") continue;
+		if (d.code() != "reference.missing") continue;
 		if (d.message.find("Nowhere") != std::string::npos && d.severity == DiagnosticSeverity::Warning) ++missing_points;
 		if (d.message.find("Anything") != std::string::npos) ++stray;
 	}
@@ -1675,11 +1675,11 @@ static int test_model_texture_references() {
 	// (in its JSON too).
 	const auto finding_for = [&](const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "reference.missing" && d.asset == model && d.target == target) return &d;
+			if (d.code() == "reference.missing" && d.asset == model && subject_target(d) == target) return &d;
 		return nullptr;
 	};
 	const Diagnostic *plain = finding_for("plain.tga");
-	TEST_EXPECT(plain && plain->reference == ReferenceKind::Texture && plain->loader_arg == 1);
+	TEST_EXPECT(plain && editor_test::reference_of(*plain).kind == ReferenceKind::Texture && editor_test::reference_of(*plain).loader_arg == 1);
 	TEST_EXPECT(plain && diagnostic_to_json(*plain).get("loader_arg") &&
 	            diagnostic_to_json(*plain).get("loader_arg")->number == 1.0 &&
 	            !diagnostic_to_json(*plain).get("material_type"));
@@ -1705,7 +1705,7 @@ static int test_model_texture_references() {
 	TEST_EXPECT(resolved("ready.mdt", &file) == ReferenceStatus::Present && file == "textures/ready.mdt");
 	TEST_EXPECT(resolved("field.nq8", &file) == ReferenceStatus::Present && file == "textures/field.nq8");
 	TEST_EXPECT(!finding_for("ready.mdt") && !finding_for("field.nq8"));
-	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
+	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code() == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
 	// No other texture takes a file the scan cannot type: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.

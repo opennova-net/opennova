@@ -82,7 +82,7 @@ std::string text(const Document &document, NodeAddress address, const char *fiel
 
 bool has_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code) return true;
+		if (d.code() == code) return true;
 	return false;
 }
 
@@ -223,7 +223,7 @@ static int test_edits() {
 		TEST_EXPECT(load(document, dir, "FOO a\r\n", "conflict.mns"));
 		TEST_EXPECT(document.apply(set(row_at(document, 0), "value", std::string("b")), error));
 		TEST_EXPECT(editor_test::write_text(dir.file("conflict.mns"), "FOO other\r\n"));
-		TEST_EXPECT(!document.save(error) && error.code == "document.conflict");
+		TEST_EXPECT(!document.save(error) && error.code() == "document.conflict");
 	}
 	std::printf("test_edits passed\n");
 	return 0;
@@ -240,7 +240,7 @@ static int test_refusals() {
 		TEST_EXPECT(load(document, dir, src));
 		const uint64_t revision = document.revision();
 		TEST_EXPECT(!document.apply(structural(EditOperation::Add, {0, kVariable, 0}, 1), error));
-		TEST_EXPECT(error.code == "document.structure" && error.message.find("switched-off") != std::string::npos);
+		TEST_EXPECT(error.code() == "document.structure" && error.message.find("switched-off") != std::string::npos);
 		TEST_EXPECT(!document.apply(structural(EditOperation::Move, row_at(document, 3), 1), error));
 		// The directive rows and the lines they switch off stay put: Remove, Move, Duplicate.
 		TEST_EXPECT(!document.apply(structural(EditOperation::Remove, row_at(document, 0)), error));
@@ -303,14 +303,14 @@ static int test_validation() {
 	const auto unused = [&view]() {
 		std::vector<std::string> names;
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "style.unused" && d.severity == DiagnosticSeverity::Info && d.field == "value")
+			if (d.code() == "style.unused" && d.severity == DiagnosticSeverity::Info && d.field == "value")
 				names.push_back(d.record);
 		std::sort(names.begin(), names.end());
 		return names;
 	};
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code.rfind("style.", 0) == 0 && d.code != "style.unused") {
-			std::fprintf(stderr, "blank project: %s %s\n", d.code.c_str(), d.message.c_str());
+		if (d.code().rfind("style.", 0) == 0 && d.code() != "style.unused") {
+			std::fprintf(stderr, "blank project: %s %s\n", d.code().c_str(), d.message.c_str());
 			return 1;
 		}
 	// The blank menus name the large font and the four text colours.
@@ -338,7 +338,7 @@ static int test_validation() {
 	session.run_operations();
 	bool line_ending = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (d.code == "style.line_ending") {
+		if (d.code() == "style.line_ending") {
 			line_ending = true;
 			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.line == 1 && d.record == "A");
 		}
@@ -375,7 +375,7 @@ static int test_validation() {
 	session.run_operations();
 	for (const Diagnostic &d : view.activity.last_build->diagnostics)
 		if (d.severity == DiagnosticSeverity::Error)
-			std::fprintf(stderr, "build: %s %s %s\n", d.code.c_str(), d.asset.c_str(), d.message.c_str());
+			std::fprintf(stderr, "build: %s %s %s\n", d.code().c_str(), d.asset.c_str(), d.message.c_str());
 	TEST_EXPECT(view.activity.last_build->ok);
 	// A clean sheet with LF line ends: an explicit Save of it (no edit) rewrites it CR LF,
 	// and its finding is gone.
@@ -388,7 +388,7 @@ static int test_validation() {
 	const std::string note_path = note->relative_path;
 	const auto line_ending_on = [&](const std::string &asset) {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "style.line_ending" && d.asset == asset) return true;
+			if (d.code() == "style.line_ending" && d.asset == asset) return true;
 		return false;
 	};
 	TEST_EXPECT(line_ending_on(note_path));

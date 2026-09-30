@@ -392,7 +392,7 @@ using editor_test::NoProcess;
 
 // A finding as `validate` prints it.
 std::string printed(const opennova::editor::Diagnostic &d) {
-	std::string line = std::string(opennova::editor::diagnostic_severity_label(d.severity)) + " " + d.code + ": " + d.message;
+	std::string line = std::string(opennova::editor::diagnostic_severity_label(d.severity)) + " " + d.code() + ": " + d.message;
 	if (!d.asset.empty()) line += " [" + d.asset + "]";
 	if (d.line) line += " line " + std::to_string(d.line);
 	if (!d.record.empty()) line += " record " + d.record;
@@ -436,7 +436,7 @@ static int test_validate_matches_the_editor() {
 	bool render_note = false;
 	for (const opennova::editor::Diagnostic &d : session.view().findings.diagnostics) {
 		shown.push_back(printed(d));
-		render_note = render_note || d.code.rfind("menu.render.", 0) == 0;
+		render_note = render_note || d.code().rfind("menu.render.", 0) == 0;
 	}
 	TEST_EXPECT(session.project_open() && render_note && !shown.empty());
 	TEST_EXPECT(listed == shown);
@@ -540,7 +540,7 @@ static int test_older_local_settings() {
 	session.run_operations();
 	size_t warnings = 0;
 	for (const opennova::editor::Diagnostic &d : session.outcome().findings)
-		warnings += d.code == "local_settings.schema_version.unsupported" &&
+		warnings += d.code() == "local_settings.schema_version.unsupported" &&
 				d.severity == opennova::editor::DiagnosticSeverity::Warning;
 	TEST_EXPECT(session.project_open() && session.outcome().done() && warnings == 1 &&
 			session.view().project.retail_directory.empty());
