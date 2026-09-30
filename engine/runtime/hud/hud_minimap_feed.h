@@ -14,7 +14,9 @@
 // pool-entity facts {team, zone_number, def_type, entity_bits, zone_index,
 // zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius_q16} the
 // drawer and the later map legs read behind the slot handle
-// (HudMinimapMarker carries the witnesses).
+// (HudMinimapMarker carries the witnesses); v6 appends {entity_z,
+// bay_groups} for the vehicle-bay logo walk (hud_bay_logos.h), the bay bit
+// riding entity_bits.
 
 #include <cstddef>
 #include <cstdint>
@@ -24,9 +26,9 @@
 
 namespace opennova::hud {
 
-inline constexpr int32_t kMinimapFeedVersion = 5;
+inline constexpr int32_t kMinimapFeedVersion = 6;
 inline constexpr int32_t kMinimapFeedHeaderSize = 3;
-inline constexpr int32_t kMinimapFeedStride = 28;
+inline constexpr int32_t kMinimapFeedStride = 30;
 
 // {version, stride, count} + count rows.
 void minimap_feed_encode(const std::vector<HudMinimapMarker> &markers,

@@ -85,14 +85,16 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# {bank, handle, x, y, z, heading, icon, argb, flags, source,
 	#  remaining_ticks, entity_known, policy_flags, half_x, half_y, floor,
 	#  medic, team, zone_number, def_type, entity_bits, zone_index,
-	#  zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius}.
+	#  zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius,
+	#  entity_z, bay_groups}.
 	# entity_bits 1: the slot entity carries a model (the persistent bank
 	# draws only those); the blip centres on its anchor.
 	var snapshot := PackedInt32Array([
-		5, 28, 1,
+		6, 30, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
 		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+		0, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
 	var stats := hud.get_draw_list_stats()
@@ -140,10 +142,11 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  @0x5a4cd6..0x5a4d48 replacing the blip].
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				5, 28, 1,
+				6, 30, 1,
 				0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 				1, 0, 0, 6, 1,
 				0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_sprites, 2,
@@ -163,10 +166,11 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	]))
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				5, 28, 1,
+				6, 30, 1,
 				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
 				2, 0, 0, 6, 0,
 				0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0,
+				0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_gt(stats.map_footprint_tris, 0,
@@ -178,7 +182,7 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# The M-cycle pass owns a separate canvas sandwich and carries the same
 	# sampler contract as the corner spinmap.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 3, false,
-			PackedInt32Array([5, 28, 0]))
+			PackedInt32Array([6, 30, 0]))
 	await get_tree().process_frame
 	stats = hud.get_draw_list_stats()
 	assert_true(stats.big_map_visible,

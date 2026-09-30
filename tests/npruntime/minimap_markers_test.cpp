@@ -152,9 +152,49 @@ void test_no_session_and_no_world() {
     CHECK(rows[0].half_x_q16 == 0 && rows[0].half_y_q16 == 0);
 }
 
+// v6: a vehicle bay's row carries the attrib2 bay bit, its spawn families
+// (ItemDef+0xAD8) and the live altitude the logo walk lifts.
+// [orig: HUD_DrawVehicleBayLogos @0x5a2c00 -- def+0x58 bit 0 @0x5a2c9e,
+//  def+0xAD8 @0x5a2d6f, entity+0xC @0x5a2d56]
+void test_a_vehicle_bay_row_carries_the_logo_facts() {
+    LocalWorld lw;
+    world::Entity bay;
+    bay.kind = world::EntityKind::Item;
+    bay.item_id = 0x1500;
+    bay.net_id = 2;
+    bay.position = {30.0f, 40.0f, 5.5f};
+    bay.alive = true;
+    bay.team = 1;
+    bay.has_item_def = true;
+    bay.item_attrib2 = 1u;
+    bay.vehicle_bay_flags = 2u;
+    const world::EntityHandle bay_handle = lw.w.registry.spawn(0, bay);
+    world::Entity plain = bay;
+    plain.net_id = 3;
+    plain.item_attrib2 = 0u;
+    plain.vehicle_bay_flags = 0u;
+    const world::EntityHandle plain_handle = lw.w.registry.spawn(0, plain);
+    replication::ClientMinimapState map;
+    map.persistent[0] = slot(static_cast<uint16_t>(bay_handle.packed), 19, true);
+    map.persistent[1] = slot(static_cast<uint16_t>(plain_handle.packed), 10, true);
+    inmatch::MinimapMarkerInputs in;
+    in.map = &map;
+    in.world = &lw.w;
+    in.local_marker_handle = lw.wire_handle();
+    std::vector<hud::HudMinimapMarker> rows;
+    inmatch::build_minimap_markers(in, rows);
+    CHECK(rows.size() == 3);
+    CHECK((rows[0].entity_bits & hud::kMarkerEntityVehicleBay) != 0);
+    CHECK(rows[0].bay_groups == 2);
+    CHECK(rows[0].entity_z == static_cast<int32_t>(5.5 * 65536.0));
+    CHECK((rows[1].entity_bits & hud::kMarkerEntityVehicleBay) == 0);
+    CHECK(rows[1].bay_groups == 0);
+}
+
 } // namespace
 
 int main() {
+    test_a_vehicle_bay_row_carries_the_logo_facts();
     test_banks_walk_in_order_and_the_local_row_is_restored();
     test_a_decoded_regular_row_for_the_local_handle_suppresses_the_restore();
     test_no_session_and_no_world();

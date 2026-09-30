@@ -48,6 +48,13 @@ void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &e
     if (entity.has_item_def && (entity.item_attrib & world::kItemAttribArmory) == 0 &&
         (entity.item_attrib2 & 0x2000u) != 0)
         bits |= hud::kMarkerEntityFarp;
+    // v6: the vehicle bay (ItemDefAttrib2 bit 0) and its spawn families, the
+    // logo walk's def gate and type pick, plus the live altitude it lifts
+    // [orig: HUD_DrawVehicleBayLogos @0x5a2c00 -- `test byte [def+58h], 1`
+    //  @0x5a2c9e, def+0xAD8 @0x5a2d6f, entity+0xC @0x5a2d56].
+    if (entity.has_item_def && (entity.item_attrib2 & 1u) != 0)
+        bits |= hud::kMarkerEntityVehicleBay;
+    m.bay_groups = entity.vehicle_bay_flags;
     m.entity_bits = bits;
     m.zone_index = zones != nullptr
                        ? static_cast<int16_t>(world::spawn_zone_index_of(*zones, entity.handle))
@@ -57,6 +64,7 @@ void stamp_minimap_entity_facts(hud::HudMinimapMarker &m, const world::Entity &e
                             world::to_fixed(entity.position.z)};
     m.entity_x = pos[0];
     m.entity_y = pos[1];
+    m.entity_z = pos[2];
     int32_t euler[3] = {};
     world::entity_live_euler_bam(entity, euler);
     const world::CollisionMatrix placement =

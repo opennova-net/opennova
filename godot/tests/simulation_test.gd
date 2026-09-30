@@ -442,13 +442,13 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 			"A fresh Simulation publishes an empty minimap snapshot.")
 	assert_eq(snapshot[0], int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION),
 			"Snapshot version leads the header.")
-	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 5,
-			"Row layout v5: the draw-policy tail, the medic bit and the live entity facts ride each row.")
+	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 6,
+			"Row layout v6: the draw-policy tail, the medic bit, the live entity facts and the vehicle-bay logo facts ride each row.")
 	assert_eq(snapshot[1], int(Simulation.HUD_MINIMAP_STRIDE))
 	assert_eq(snapshot[2], 0, "No retained rows without a mission.")
 	assert_eq(int(Simulation.HUD_MINIMAP_HEADER_SIZE), 3)
-	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 28,
-			"v5 appends the eleven live pool-entity facts the map legs read.")
+	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 30,
+			"v6 appends the live altitude and the bay's spawn families the logo walk reads.")
 	assert_eq(sim.get_local_player_heading_bam(), 0,
 			"No local player -> heading zero.")
 	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,

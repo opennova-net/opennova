@@ -1845,7 +1845,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	below.lines_end = std::min(top.lines, p_list.lines.size());
 	below.glyphs_end = std::min(top.glyphs, p_list.glyphs.size());
 	below.underlines_end = std::min(top.underlines, p_list.underlines.size());
-	render_flat_(get_canvas_item(), p_list, below);
+	render_flat_runs_(get_canvas_item(), p_list, below);
 	FlatRange above;
 	above.quads_begin = below.quads_end;
 	above.quads_end = p_list.quads.size();
@@ -1873,6 +1873,31 @@ void HudOverlay::ensure_top_item_() {
 	rs->canvas_item_set_parent(top_item_, get_canvas_item());
 	// Above the big-map sandwich (draw indices 5..8).
 	rs->canvas_item_set_draw_index(top_item_, 9);
+}
+
+void HudOverlay::render_flat_runs_(const RID &p_item, const HudDrawList &p_list,
+		const FlatRange &p_range) {
+	FlatRange run = p_range;
+	for (const HudDrawList::TopBegin &mark : p_list.order_breaks) {
+		run.quads_end = std::clamp(mark.quads, run.quads_begin, p_range.quads_end);
+		run.tris_end = std::clamp(mark.tris, run.tris_begin, p_range.tris_end);
+		run.lines_end = std::clamp(mark.lines, run.lines_begin, p_range.lines_end);
+		run.glyphs_end = std::clamp(mark.glyphs, run.glyphs_begin, p_range.glyphs_end);
+		run.underlines_end =
+				std::clamp(mark.underlines, run.underlines_begin, p_range.underlines_end);
+		render_flat_(p_item, p_list, run);
+		run.quads_begin = run.quads_end;
+		run.tris_begin = run.tris_end;
+		run.lines_begin = run.lines_end;
+		run.glyphs_begin = run.glyphs_end;
+		run.underlines_begin = run.underlines_end;
+	}
+	run.quads_end = p_range.quads_end;
+	run.tris_end = p_range.tris_end;
+	run.lines_end = p_range.lines_end;
+	run.glyphs_end = p_range.glyphs_end;
+	run.underlines_end = p_range.underlines_end;
+	render_flat_(p_item, p_list, run);
 }
 
 void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, const FlatRange &p_range) {

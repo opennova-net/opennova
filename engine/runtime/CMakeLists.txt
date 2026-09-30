@@ -93,6 +93,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid

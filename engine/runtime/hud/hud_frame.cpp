@@ -414,6 +414,11 @@ bool hud_stance_group_visible(const HudFrameState &state) {
         state.declutter_visible[kDeclutterWpnGrp];
 }
 
+void HudFrameCompiler::mark_order_break() {
+	draw_list_.order_breaks.push_back({ draw_list_.quads.size(), draw_list_.tris.size(),
+			draw_list_.lines.size(), draw_list_.glyphs.size(), draw_list_.underlines.size() });
+}
+
 const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 		float surface_w, float surface_h) {
 	draw_list_.quads.clear();
@@ -426,6 +431,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.map_glyphs.clear();
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.top_begin = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+	draw_list_.order_breaks.clear();
 	draw_list_.elements_drawn = 0;
 
 	// The SIGHTS card draws first — the HUD overlays land on top of it
@@ -549,14 +555,18 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	element_weapon_slot_bar(state, surface_w, surface_h);
 	// The AAS zone status panel draws BEFORE the map overlay in the retail
 	// walk [orig: HUD_RenderAllOverlays @0x5a8070 — HUD_DrawZoneStatusPanel
-	//  @0x5a8530, then Radar_DrawBlips @0x5a8535, the 3-D icon pass, and
-	//  HUD_DrawMapOverlay @0x5a87bb]. The panel has NO declutter-mask bit of
-	//  its own: the call @0x5a8530 is unconditional (the render_capture_point_
-	//  labels / Radar_DrawBlips pair around it likewise) and the function's
-	//  head tests only g_GameType [orig: @0x5a248d..0x5a24c5], so it draws on
-	//  the shown flag alone here.
+	//  @0x5a8530, then HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a8535,
+	//  the 3-D icon pass, and HUD_DrawMapOverlay @0x5a87bb]. The panel has NO
+	//  declutter-mask bit of its own: the call @0x5a8530 is unconditional (the
+	//  render_capture_point_labels / bay-logo pair around it likewise) and the
+	//  function's head tests only g_GameType [orig: @0x5a248d..0x5a24c5], so it
+	//  draws on the shown flag alone here.
 	element_scope_details(state, surface_w, surface_h);
 	element_lfp_panel(state, surface_w, surface_h);
+	// The vehicle-bay logos: no mask bit, no death-screen test (the only
+	// death-screen fork in this stretch covers the scope details)
+	// [orig: HUD_DrawVehicleBayLogos @0x5a8535; the fork @0x5a850d..0x5a852b].
+	element_vehicle_bay_logos(state, surface_w, surface_h);
 	element_spinmap(state, surface_w, surface_h);
 	element_attach_labels(state);
 	// Friendly tags draw after the overlay cluster and before the console

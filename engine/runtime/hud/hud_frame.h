@@ -93,6 +93,12 @@ enum HudTexture : int32_t {
 	kHudTexDriverCrosshair,
 	kHudTexVehicleFixed,
 	kHudTexVehicleLag,
+	// The vehicle-bay logos HUD_DrawEntityMarker types 5/6/7 bind
+	// [orig: dword_2723A84 / dword_2723A94 / dword_2723AA4 @0x593642 /
+	//  @0x593662 / @0x593686; loaded HUD_LoadAllTextures @0x59de7a..0x59deab].
+	kHudTexLogoHelo,
+	kHudTexLogoHumm,
+	kHudTexLogoBoat,
 	// The HUDLS weapon slot bar: the bracket and the more-available marker
 	// (hudpos-named, loaded alpha mode 0) and one icon per weapon category
 	// 0..9 — the category's first def's hud_loadout_select texture
@@ -975,6 +981,13 @@ struct HudDrawList {
 		size_t glyphs = 0;
 		size_t underlines = 0;
 	} top_begin;
+	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
+	// submits each run between consecutive breaks as its own quads / tris /
+	// lines / glyphs group, so an element that must layer in the walk's
+	// order (the vehicle-bay logos over what came before and under what
+	// comes after) is not lifted above the later quads. Each break is the
+	// kind cursors at the point it was marked.
+	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
 };
 
@@ -1244,6 +1257,11 @@ private:
 	void element_service_prompt(const HudFrameState &state, float w, float h);
 	void element_inset_cues(const HudFrameState &state, float w, float h);
 	void element_optical_cues(const HudFrameState &state, float w, float h);
+	// The in-world vehicle-bay logos (hud_bay_logos.h) through the marker
+	// drawer's types 5/6/7 [orig: HUD_DrawVehicleBayLogos @0x5a2c00 ->
+	// HUD_DrawEntityMarker @0x593140].
+	void element_vehicle_bay_logos(const HudFrameState &state, float w, float h);
+	void mark_order_break();
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);

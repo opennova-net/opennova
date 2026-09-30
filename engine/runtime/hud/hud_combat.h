@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace opennova::hud {
 // The targeting and instrument inputs of HUD_BuildEntityInfo. Projection is
@@ -13,6 +14,11 @@ struct HudProjectedPoint {
 	float x = 0, y = 0; // surface pixels
 	uint8_t clip = 0; // left/right/top/bottom/near = 1/2/4/8/16
 	bool valid = false;
+	// The view-space forward distance, Q16: the transformed point's first
+	// component, read before the frustum clip [orig: HUD_DrawEntityMarker
+	// @0x593168..0x59317c -- Math_FixedPointTransformPoint22 then the near
+	// test against dword_A783D8].
+	int32_t depth_q16 = 0;
 };
 struct HudSprite {
 	int width = 0, height = 0;
@@ -20,6 +26,12 @@ struct HudSprite {
 };
 struct HudCombatLayout {
 	HudSprite driver_crosshair, vehicle_fixed, vehicle_lag;
+	// The vehicle-bay logos, loaded alpha mode 0 like the combat cues; only
+	// the loaded flag is read (the quad size comes from the depth)
+	// [orig: HUD_LoadAllTextures @0x59de7a..0x59deab -- LogoHelo.tga ->
+	//  dword_2723A80, LogoHumm.tga -> dword_2723A90, LogoBoat.tga ->
+	//  dword_2723AA0 (the shader at +4 is what HUD_DrawEntityMarker binds)].
+	HudSprite logo_helo, logo_humm, logo_boat;
 	HudSprite target, target_friendly, custom_aim, commander;
 	HudSprite weapon, vehicle, cargo, parachute, armor;
 	int impact_x = 0, impact_y = 0;
@@ -34,6 +46,17 @@ struct HudCombatLayout {
 struct HudDesignationPoint {
 	int32_t x = 0, y = 0, radius_q16 = 0;
 	uint8_t team = 0;
+};
+// One vehicle-bay logo the walk admitted (hud_bay_logos.h): the lifted world
+// point, the marker type, the palette entry and the distance alpha; the
+// device fills the projection.
+// [orig: HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a2c00]
+struct HudBayLogo {
+	std::array<int32_t, 3> position{}; // Q16, z already lifted by 0x80000
+	uint8_t type = 0;    // HUD_DrawEntityMarker type: 5 LogoHelo, 6 LogoHumm, 7 LogoBoat
+	uint8_t palette = 1; // g_HUDColors.palette index: 3 team 1, 5 team 2, else 1
+	uint8_t alpha = 0;   // 0..255
+	HudProjectedPoint point;
 };
 struct HudServiceState {
 	uint8_t preround_seconds = 0, reload_seconds = 0;
@@ -82,6 +105,8 @@ struct HudCombatState {
 	std::array<std::string, 3> gear_text = { "!Med", "!Low", "!High" };
 	int32_t altitude_agl_q16 = 0, altitude_q16 = 0, vertical_velocity_q16 = 0;
 	std::string altitude_text = "altitude";
+	// The vehicle-bay logos this frame, walk order (hud_bay_logos.h).
+	std::vector<HudBayLogo> bay_logos;
 };
 // Shared weapon/vehicle silhouette flash. The original keeps one stamp and
 // separate previous weapon/root identities. Zero elapsed is promoted to one.

@@ -49,6 +49,9 @@ HudMinimapMarker sample(uint16_t handle) {
     m.anchor_x = 65536 * 14;
     m.anchor_y = -65536 * 9;
     m.bound_radius_q16 = 65536 * 2;
+    // v6: the vehicle-bay logo walk's facts.
+    m.entity_z = -65536 * 3 - 17;
+    m.bay_groups = 5;
     return m;
 }
 
@@ -63,7 +66,8 @@ bool same(const HudMinimapMarker &a, const HudMinimapMarker &b) {
            a.entity_bits == b.entity_bits && a.zone_index == b.zone_index &&
            a.zone_radius == b.zone_radius && a.entity_x == b.entity_x &&
            a.entity_y == b.entity_y && a.anchor_x == b.anchor_x && a.anchor_y == b.anchor_y &&
-           a.bound_radius_q16 == b.bound_radius_q16;
+           a.bound_radius_q16 == b.bound_radius_q16 && a.entity_z == b.entity_z &&
+           a.bay_groups == b.bay_groups;
 }
 
 void test_round_trip_is_exact() {

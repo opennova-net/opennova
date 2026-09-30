@@ -4,6 +4,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/geom.h>
 #include <runtime/world/hud_combat_feed.h>
 #include <runtime/world/hud_impact.h>
 #include <runtime/world/local_player.h>
@@ -18,8 +19,12 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	auto &out = view.hud_combat;
 	auto &s = out.state;
 	const Entity *player = world.registry.get(world.cached.local_player);
+	out.local_valid = player != nullptr;
 	if (!player)
 		return;
+	out.local_position = { to_fixed(player->position.x), to_fixed(player->position.y),
+		to_fixed(player->position.z) };
+	out.local_team = player->team;
 	const AiEntity *body = world.ai.for_handle(player->handle);
 	const Entity *mount = world.registry.get(player->mount_target);
 	const int def_index = world.tables.weapons.index_of(weapon.def_name.c_str());

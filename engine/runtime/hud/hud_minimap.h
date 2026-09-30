@@ -160,6 +160,11 @@ struct HudMinimapMarker {
 	int32_t anchor_x = 0;
 	int32_t anchor_y = 0;
 	int32_t bound_radius_q16 = 0; // entity+0, the early-cull margin source
+	// --- v6: the facts the vehicle-bay logo walk reads behind the handle
+	// [orig: HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a2c00 --
+	//  entity+0xC @0x5a2d56, the def's +0xAD8 @0x5a2d6f].
+	int32_t entity_z = 0;   // entity+0xC, the live altitude
+	uint8_t bay_groups = 0; // ItemDef+0xAD8: 1 land, 2 air, 4 water families
 };
 
 // HudMinimapMarker::entity_bits.
@@ -169,6 +174,7 @@ inline constexpr uint8_t kMarkerEntityZoneDef = 0x04;   // ItemDef attrib & 0x40
 inline constexpr uint8_t kMarkerEntityDead = 0x08;      // entity+0x24 & 2
 inline constexpr uint8_t kMarkerEntityHud = 0x10;       // the HUD entity itself
 inline constexpr uint8_t kMarkerEntityFarp = 0x20;      // ItemDef attrib2 & 0x2000
+inline constexpr uint8_t kMarkerEntityVehicleBay = 0x40; // ItemDef attrib2 (+0x58) & 1
 
 // The retail HUD colour table entries the map legs read [orig:
 // g_MinimapOverlayColorTable @0x840A10 — [9] 0xFF802020, [10]

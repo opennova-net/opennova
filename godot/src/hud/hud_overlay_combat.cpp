@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
+#include <runtime/hud/hud_bay_logos.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
 
@@ -29,6 +30,9 @@ void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets)
 	combat_texture_(kHudTexTargetFriendly, "comlck2x.tga", l.target_friendly);
 	combat_texture_(kHudTexParachute, opennova::to_gd(assets.parachute_icon), l.parachute);
 	combat_texture_(kHudTexArmor, opennova::to_gd(assets.armor_icon), l.armor);
+	combat_texture_(kHudTexLogoHelo, "LogoHelo.tga", l.logo_helo);
+	combat_texture_(kHudTexLogoHumm, "LogoHumm.tga", l.logo_humm);
+	combat_texture_(kHudTexLogoBoat, "LogoBoat.tga", l.logo_boat);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
@@ -55,6 +59,8 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 		const Vector3 local = camera.xform_inv(position);
 		const Plane clip = projection.xform4(Plane(local, 1));
 		out.clip = -local.z < projection.get_z_near() ? 16 : 0;
+		const double depth = -double(local.z) * 65536.0;
+		out.depth_q16 = static_cast<int32_t>(std::clamp(depth, -2147483647.0, 2147483647.0));
 		if (clip.d == 0 || !std::isfinite(clip.d))
 			return out;
 		const float x = clip.normal.x / clip.d, y = clip.normal.y / clip.d;
@@ -77,6 +83,15 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	s.target_point = project(v.target, v.target_valid);
 	s.aim_point = project(v.aim, v.aim_valid);
 	s.commander_point = project(v.commander, v.commander_valid);
+	// The vehicle-bay logos: the engine's walk over this frame's marker rows
+	// (set_minimap_state fed them), each admitted point projected here.
+	s.bay_logos.clear();
+	if (v.local_valid) {
+		vehicle_bay_logo_walk(state_.minimap.markers, v.local_position, v.local_team,
+				s.bay_logos);
+		for (HudBayLogo &logo : s.bay_logos)
+			logo.point = project(logo.position, true);
+	}
 	if (s.service_prompt) {
 		// The templates, their miss rules and the sprintf are the engine's
 		// (hud/hud_game_text.h service_prompt_text).

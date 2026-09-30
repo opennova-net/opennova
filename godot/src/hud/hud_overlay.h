@@ -491,6 +491,10 @@ private:
 	};
 	void render_flat_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
 			const FlatRange &p_range);
+	// The range split at the compiler's order breaks (HudDrawList::order_breaks),
+	// each run submitted kind-grouped in turn.
+	void render_flat_runs_(const RID &p_item, const opennova::hud::HudDrawList &p_list,
+			const FlatRange &p_range);
 	void ensure_top_item_();
 	// p_big selects the sandwich: the corner map's base rides the control's
 	// own item (under the flat HUD) with its add/top children just above the

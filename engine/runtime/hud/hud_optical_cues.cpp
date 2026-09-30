@@ -2,31 +2,51 @@
 #include <base/io/bam.h>
 #include <cmath>
 #include <cstdio>
+#include <runtime/hud/hud_bay_logos.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/inset_scope.h>
 namespace opennova::hud {
 namespace {
-// Four radial stops: transparent fringe, two solid edges, transparent fringe.
-// The original ring uses at most 95 segments and Q22 table samples.
-// [orig: Render_DrawRingOverlay @0x5D4270]
+// Render_DrawRingOverlay's record {x, y, 0.5, radius, stroke, fill, color,
+// x-scale}: four radial stops -- R0 in the fill colour (the ring RGB at
+// alpha 0 without a fill), R1 and R2 in the ring colour, R3 the ring RGB at
+// alpha 0 -- with R0 = max(r - i - 1, 0), R1 = max(r - i, 0), R2 = r + i,
+// R3 = r + i + 1 and i = max(stroke/2 - 1, 0); six triangles a segment plus
+// a centre fan in the fill colour when the fill is nonzero. The segments are
+// clamp(trunc(r * 1/3 * 4pi), 4, 95); the angle starts at 0x200000 BAM and
+// steps 16 * (0x10000000 / n) + 1 through the Q22 table, x taking the SINE
+// times the x-scale and y the cosine.
+// [orig: Render_DrawRingOverlay @0x5D4270 -- the fill arm @0x5d4292..0x5d42a4,
+//  radii @0x5d42c9..0x5d431d, flt_7CA274 / flt_7DC650 @0x5d4322, clamp
+//  @0x5d4335..0x5d434a, step @0x5d4353, g_BamSinTableQ22 x @0x5d43d2 /
+//  off_849934 y @0x5d43db, the x-scale @0x5d4513, the fan @0x5d43fb..0x5d441e,
+//  the band indices @0x5d4426..0x5d4510]
 void ring(HudDrawList &draw, float x, float y, float radius, float aspect, float thickness,
-		uint32_t color) {
+		uint32_t color, uint32_t fill = 0) {
 	const int n = std::clamp(int(radius * 0.3333333432674408f * 12.56637954711914f), 4, 95);
 	const float inner = std::max(thickness * 0.5f - 1, 0.0f);
 	const float radii[] = { std::max(radius - inner - 1, 0.0f), std::max(radius - inner, 0.0f),
 		radius + inner, radius + inner + 1 };
-	const uint32_t colors[] = { color & 0xFFFFFFu, color, color, color & 0xFFFFFFu };
+	const uint32_t inner_color = fill != 0 ? fill : (color & 0xFFFFFFu);
+	const uint32_t colors[] = { inner_color, color, color, color & 0xFFFFFFu };
 	const uint32_t step = 16 * (0x10000000u / uint32_t(n)) + 1;
 	auto vertex = [&](int i, int band) {
-		const uint32_t index = (0x200000u + uint32_t(i) * step) >> 22;
-		const double a = (index % 1024) * (2 * io::kPi / 1024);
-		const float cs = float(int32_t(std::cos(a) * 4194304)) / 4194304;
-		const float sn = float(int32_t(std::sin(a) * 4194304)) / 4194304;
-		return HudTriVertex{ x + cs * radii[band] * aspect, y + sn * radii[band], 0, 0,
+		const int index = io::bam_table_index(0x200000u + uint32_t(i) * step);
+		const float sn = float(io::bam_table_sin(index));
+		const float cs = float(io::bam_table_cos(index));
+		return HudTriVertex{ x + sn * aspect * radii[band], y + cs * radii[band], 0, 0,
 			colors[band] };
 	};
-	for (int i = 0; i < n; ++i)
+	const HudTriVertex center{ x, y, 0, 0, inner_color };
+	for (int i = 0; i < n; ++i) {
+		if (fill != 0) {
+			HudTri fan;
+			fan.a = center;
+			fan.b = vertex(i, 0);
+			fan.c = vertex(i + 1, 0);
+			draw.tris.push_back(fan);
+		}
 		for (int b = 0; b < 3; ++b) {
 			HudTri a, btri;
 			a.a = vertex(i, b);
@@ -38,6 +58,7 @@ void ring(HudDrawList &draw, float x, float y, float radius, float aspect, float
 			draw.tris.push_back(a);
 			draw.tris.push_back(btri);
 		}
+	}
 }
 } // namespace
 void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, float h) {
@@ -119,5 +140,101 @@ void HudFrameCompiler::element_optical_cues(const HudFrameState &s, float w, flo
 		emit_text(text.c_str(), float(layout_.combat.impact_x - (width >> 1)),
 				float(layout_.combat.impact_y), w, h, half_bright_argb(active_color(s)), 0);
 	}
+}
+// The walk's logos through HUD_DrawEntityMarker types 5/6/7 with the walk's
+// arguments: scale 2.0, color alpha<<24 | palette rgb, the fill
+// (alpha & ~3) << 22 in the texture_id slot, and three empty labels.
+// [orig: HUD_DrawVehicleBayLogos @0x5a2d50..0x5a2e0d -> HUD_DrawEntityMarker
+//  @0x593140]
+void HudFrameCompiler::element_vehicle_bay_logos(const HudFrameState &s, float w, float h) {
+	const auto &c = s.combat;
+	if (w <= 0 || h <= 0 || c.bay_logos.empty())
+		return;
+	const auto &l = layout_.combat;
+	const int32_t surface_w = int32_t(w), surface_h = int32_t(h);
+	// Retail submits each logo in the walk's order between the zone panel and
+	// the map: its own kind-grouping run keeps the logo over its backing and
+	// under everything the walk draws later.
+	mark_order_break();
+	for (const HudBayLogo &logo : c.bay_logos) {
+		// Behind the near plane, or clipped by any frustum plane, the marker
+		// draws nothing [orig: `jz loc_593810` @0x593189 on the near test;
+		//  HUD_ClipPointToFrustumAndProject @0x593194 nonzero -> return 0].
+		if (!logo.point.valid || logo.point.clip != 0 || logo.point.depth_q16 <= 0)
+			continue;
+		const uint32_t color =
+				(uint32_t(logo.alpha) << 24) + (hud_palette(logo.palette) & 0xFFFFFFu);
+		const uint32_t fill = (uint32_t(logo.alpha) & 0xFFFFFFFCu) << 22;
+		// The projected pixel is integral (the projection's `>> 16`).
+		// [orig: HUD_ClipPointToFrustumAndProject @0x592566..0x592570]
+		const int32_t x = int32_t(std::floor(logo.point.x));
+		const int32_t y = int32_t(std::floor(logo.point.y));
+		// With an empty label_above the stem is scale * 20.0 = 40 screen
+		// pixels, straight up [orig: flt_7D8E60 @0x5931e4; the stem
+		//  Render_ClipAndDrawLine2DToRect @0x59321d].
+		const int32_t half = int32_t(2.0f * 20.0f);
+		draw_list_.lines.push_back(
+				{ float(x), float(y), float(x), float(y - half), 1, color });
+		// The stem's top in design space, the depth-scaled quad, and the
+		// backing's radius t = trunc(h * 0.66) lifting the centre by t.
+		// [orig: Viewport_ScreenToVirtual @0x59357e; 0x10000000 / depth
+		//  clamped 32..256 @0x593586..0x5935af; h = w/2 @0x5935b4..0x5935bb;
+		//  dbl_7D8E58 = 0.66 @0x5935c5; y -= t @0x5935d4]
+		const int32_t vx = screen_to_design_x(x, surface_w);
+		int32_t vy = screen_to_design_y(y - half, surface_h);
+		const int32_t qw = std::clamp(int32_t(0x10000000 / logo.point.depth_q16), 32, 256);
+		const int32_t qh = qw / 2;
+		const int32_t t = int32_t(double(qh) * 0.66);
+		vy -= t;
+		// The backing: the ring record {vx, vy, 0.5, t, 2.0, fill, color, 2.0}
+		// scaled out of design space, x and the radius by W/1024, y and the
+		// stroke by H/768.
+		// [orig: the record @0x5935e0..0x59361f; Render_DrawRingOverlayVirtual
+		//  (ex sub_5D50A0) @0x5d50a0 -- flt_7D68F4 = 1/1024, flt_7D68F8 =
+		//  0x3AAAAAAB, the float 1/768]
+		const double k1 = double(1.0f / 1024.0f), k2 = double(1.0f / 768.0f);
+		const double sw = double(surface_w), sh = double(surface_h);
+		ring(draw_list_, float(double(vx) * sw * k1), float(double(vy) * sh * k2),
+				float(k1 * (sw * double(t))), 2.0f, float(k2 * (sh * 2.0)), color, fill);
+		// The logo: a centred design-space quad over the backing, the
+		// half-bright colour at full alpha under the texture's MODULATE2X
+		// (flag word 0x651: colour op 0x600 = MOD2X(TEXTURE, DIFFUSE), alpha
+		// op 0x50 = MODULATE(TEXTURE, DIFFUSE)), folded into the diffuse;
+		// UVs inset half a texel of the DESIGN extent and widened by one
+		// output pixel. A logo that failed to load draws no quad.
+		// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners
+		//  @0x590a14..0x590a33, Viewport_ScaleToVirtualCoords @0x590b04 /
+		//  @0x590b18, the UVs @0x590ba6..0x590be4; the colour
+		//  `sar 1; and 7F7F7Fh; or FF000000h` @0x59362c..0x593638; flags
+		//  1617 = 0x651 sub_591750 @0x59181a]
+		const HudSprite &sprite = logo.type == kMarkerTypeLogoHelo ? l.logo_helo
+				: logo.type == kMarkerTypeLogoHumm                 ? l.logo_humm
+																	: l.logo_boat;
+		if (!sprite.valid)
+			continue;
+		const int32_t texture = logo.type == kMarkerTypeLogoHelo ? kHudTexLogoHelo
+				: logo.type == kMarkerTypeLogoHumm               ? kHudTexLogoHumm
+																  : kHudTexLogoBoat;
+		const uint32_t diffuse = ((color >> 1) & 0x7F7F7Fu) | 0xFF000000u;
+		const uint32_t folded = (diffuse & 0xFF000000u) | ((diffuse & 0x7F7F7Fu) << 1);
+		const float x0 = sx(float(vx - qw / 2), w), x1 = sx(float(qw / 2 + vx), w);
+		const float y0 = sy(float(vy - qh / 2), h), y1 = sy(float(vy + qh / 2), h);
+		const float u0 = 0.5f / float(qw), v0 = 0.5f / float(qh);
+		const float u1 = x1 > x0 ? 1.0f - u0 + 1.0f / (x1 - x0) : 1.0f;
+		const float v1 = y1 > y0 ? 1.0f - v0 + 1.0f / (y1 - y0) : 1.0f;
+		// Two textured triangles, so the logo keeps the walk's order over
+		// its backing band inside the run.
+		HudTri first, second;
+		first.texture = second.texture = texture;
+		first.a = { x0, y0, u0, v0, folded };
+		first.b = { x1, y0, u1, v0, folded };
+		first.c = { x1, y1, u1, v1, folded };
+		second.a = { x0, y0, u0, v0, folded };
+		second.b = { x1, y1, u1, v1, folded };
+		second.c = { x0, y1, u0, v1, folded };
+		draw_list_.tris.push_back(first);
+		draw_list_.tris.push_back(second);
+	}
+	mark_order_break();
 }
 } // namespace opennova::hud
