@@ -11,7 +11,8 @@ namespace opennova::editor {
 // describe the current draft. Input the game ignores is reported as a warning (saving drops it);
 // input the typed model cannot carry is an error. A record whose name an earlier record of its
 // kind has, and an item whose id an earlier item of the file has, are warnings naming the one a
-// lookup finds; an id a table the scan lists earlier has is graph/use_checks'. The references a
+// lookup finds (two item tables are two files of one name, of which the game reads one:
+// asset.name.duplicate, so an id is compared within its table). The references a
 // record makes (models, animation maps, ammo and weapon names, item ids, string ids) are the
 // asset graph's.
 std::vector<Diagnostic> validate_catalog_file(const Document &document);

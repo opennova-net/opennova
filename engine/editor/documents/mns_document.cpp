@@ -231,9 +231,10 @@ const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const
 	}
 	if (out.bound)
 		for (const GraphEdge *edge : graph->referrers_of(ReferenceKind::StyleVar, row->name())) {
-			if (edge->through == ReferenceKind::None) colour = true;
-			else if (edge->through == ReferenceKind::Font) font = true;
-			else image = true;
+			const StyleVariableUse use = style_variable_use(edge->through);
+			colour = colour || use == StyleVariableUse::Colour;
+			font = font || use == StyleVariableUse::Font;
+			image = image || use == StyleVariableUse::Image;
 		}
 	const NodeAddress address{row->id, row->kind, 0};
 	FieldUse value;

@@ -6,6 +6,7 @@
 #include <base/io/strutil.h>
 
 #include <map>
+#include <unordered_map>
 
 namespace opennova::editor {
 using namespace def;
@@ -46,19 +47,29 @@ std::vector<Diagnostic> validate_catalog_file(const Document &document) {
 	std::vector<Diagnostic> findings;
 	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
 	if (!catalog) return findings;
+	// A finding's record by its name: the first record of the name as a walk of the rows meets it,
+	// a row's own name before its weapon's actions'. The names are read once, for the first finding
+	// its locator left unplaced (a walk per finding read every row's name for each).
+	std::unordered_map<std::string, NodeAddress> by_name;
+	bool indexed = false;
 	auto locate = [&](Diagnostic &diagnostic) {
-		for (const auto &row : catalog->rows()) {
-			if (row->name() == diagnostic.record) {
-				diagnostic.row_id = row->id; diagnostic.record_kind = row->kind; return;
-			}
-			if (def_kind(row->kind) == DefRecordKind::Weapon) {
+		if (diagnostic.row_id) return; // placed by its locator, wherever that record is now
+		if (!indexed) {
+			indexed = true;
+			for (const auto &row : catalog->rows()) {
+				by_name.emplace(row->name(), NodeAddress{row->id, row->kind, 0});
+				if (def_kind(row->kind) != DefRecordKind::Weapon) continue;
 				const auto &weapon = std::get<DefWeaponDef>(catalog_row(*row).data);
-				for (size_t i = 0; i < weapon.actions_count; ++i) if (weapon.actions[i].name == diagnostic.record) {
-					diagnostic.row_id = row->id; diagnostic.child_id = row->collections[0][i];
-					diagnostic.record_kind = node_kind(DefRecordKind::Action); return;
-				}
+				for (size_t i = 0; i < weapon.actions_count; ++i)
+					by_name.emplace(weapon.actions[i].name,
+					                NodeAddress{row->id, node_kind(DefRecordKind::Action), row->collections[0][i]});
 			}
 		}
+		const auto found = by_name.find(diagnostic.record);
+		if (found == by_name.end()) return;
+		diagnostic.row_id = found->second.row;
+		diagnostic.child_id = found->second.child;
+		diagnostic.record_kind = found->second.kind;
 	};
 	// Input the game ignores is dropped on save: a warning. Input the typed model cannot
 	// carry blocks the file: an error. On the record the issue names, found by its name.
@@ -72,8 +83,9 @@ std::vector<Diagnostic> validate_catalog_file(const Document &document) {
 	}
 	// The first item of each id in the file: both of a repeated id are kept (the load logs
 	// "Duplicate ID number" @0x4a1e96 and goes on) [orig: ItemDefs_LoadAndValidate @ 0x4a1da0], and
-	// the lookup by id returns the first [orig: ItemList_FindIndexByTypeId @ 0x49e100]. An id a
-	// table the scan lists earlier has is graph/use_checks' finding (check_item_ids).
+	// the lookup by id returns the first [orig: ItemList_FindIndexByTypeId @ 0x49e100]. Two item
+	// tables are two files of one name, of which the game reads one (asset.name.duplicate): an id
+	// is compared within its table alone.
 	std::map<int, const Node *> first_of_id;
 	std::map<std::string, const Node *> named; // the first record of each kind and name
 	for (const auto &row : catalog->rows()) {

@@ -83,7 +83,9 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 	};
 	for (const FieldSchema &schema : document.fields(address.kind)) {
 		const FieldUse field = document.field_on(address, schema);
-		if (field.reference == ReferenceKind::None && field.defines == ReferenceKind::None) continue;
+		if (field.reference == ReferenceKind::None && field.defines == ReferenceKind::None &&
+		    field.variable_through == ReferenceKind::None)
+			continue;
 		if (field.applies == Applicability::Ignored || !document.present(address, schema.id)) continue;
 		Value value;
 		if (!document.get(address, schema.id, value)) continue;
@@ -101,6 +103,20 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 			symbol.inert_reason = std::move(facts.inert_reason);
 			symbol.line = facts.line;
 			out.symbols.push_back(std::move(symbol));
+		}
+		// A text shown as written that is one %NAME% stands for the variable's value: a use of the
+		// variable alone (FieldUse::variable_through), which Rename rewrites with it.
+		if (field.reference == ReferenceKind::None) {
+			const std::string text = value_name(value);
+			if (field.variable_through == ReferenceKind::None || !is_style_reference(text)) continue;
+			place();
+			GraphEdge var = edge_of(document.path(), record, schema.id, ReferenceKind::StyleVar, text, std::string(),
+			                        !field.read_only);
+			var.locator = locator;
+			var.address = address;
+			var.through = field.variable_through;
+			out.edges.push_back(std::move(var));
+			continue;
 		}
 		ReferenceKind kind;
 		std::string name, scope;

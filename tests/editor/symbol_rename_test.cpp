@@ -189,6 +189,27 @@ static int test_style_variable() {
 	return 0;
 }
 
+// A menu's text that is one %NAME% (a STRING of no id type) shows the variable's value: a use of
+// the variable, renamed with it (S13 D4's review: no edge read it, and a rename left it stale).
+static int test_style_variable_as_text() {
+	Project project("opennova_rename_style_text");
+	const std::string sheet = project.path("menu_style.mns");
+	TEST_EXPECT(!sheet.empty());
+	TEST_EXPECT(project.write(sheet, project.read(sheet) + "GREETING Hello\r\n"));
+	TEST_EXPECT(project.write("menus/t.mnu", screen("T", window("STATIC", "W", "<STRING>%GREETING%</STRING>\r\n"))));
+	project.rescan();
+	const GraphSymbol *greeting = project.defined(ReferenceKind::StyleVar, "GREETING", sheet);
+	TEST_EXPECT(greeting != nullptr);
+	if (!greeting) return 1;
+	const GraphEdge *use = edge_to(project.graph(), "menus/t.mnu", ReferenceKind::StyleVar, "%GREETING%");
+	TEST_EXPECT(use && use->through == ReferenceKind::MenuText);
+	const SessionView::RenamePreview &plan = project.preview(*greeting, "SALUTE");
+	TEST_EXPECT(plan.refusals.empty() && sites_in(plan, "menus/t.mnu") == 1);
+	TEST_EXPECT(project.rename(*greeting, "SALUTE"));
+	TEST_EXPECT(project.read("menus/t.mnu").find("<STRING>%SALUTE%</STRING>") != std::string::npos);
+	return 0;
+}
+
 // A string key two sections of gametext.bin define: WepDes's is the weapon's loadout label, the
 // "menu" section's the menu's string. Each renamed with its own use alone; the table's unsaved
 // edits are saved first, through the unsaved prompt.
@@ -610,6 +631,7 @@ int main() {
 	failures += test_item_id_sent_as_a_number();
 	failures += test_menu_screen();
 	failures += test_style_variable();
+	failures += test_style_variable_as_text();
 	failures += test_string_key();
 	failures += test_weapon_name();
 	failures += test_ammo_name();

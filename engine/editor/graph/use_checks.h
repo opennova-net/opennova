@@ -13,7 +13,7 @@ class ValidationCache;
 // What other files make of what a file defines (ADR 0046 S13 D4): the findings about a file that
 // its own validation (DocumentType::validate_file, over its document alone) cannot make, since
 // they read the whole project through the asset graph: what the menus use a stylesheet's
-// variables as, an item id a table the scan lists earlier defines too. One row per asset kind
+// variables as. One row per asset kind
 // with such a check, in AssetKind's order (kUseChecks, use_checks.cpp); a new cross-file check is
 // one row. Each reads the graph as its last update left it (its symbols carry a definition's
 // record, line and value) and, of the files the validation asked, only those whose own checks

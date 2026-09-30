@@ -27,11 +27,24 @@ Diagnostic boot_finding(const std::string &name) {
 
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                                          MenuRenderCheck &render_check, const FileSource &files) {
+	refresh_project_findings(input, graph, cache, render_check, files);
+	return collect_project_findings(input, graph, cache, render_check);
+}
+
+bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
+                              MenuRenderCheck &render_check, const FileSource &files) {
+	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
+	const bool files_moved = refresh_project(validation, graph, cache);
+	const bool notes_moved = render_check.update(validation, files);
+	return files_moved || notes_moved;
+}
+
+ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
+                                         const ValidationCache &cache, const MenuRenderCheck &render_check) {
 	ProjectFindings out;
 	std::vector<Diagnostic> &rows = out.rows;
 	const ValidationInput validation{ input.paths, input.project, input.scan, input.open };
-	std::vector<Diagnostic> documents = validate_project(validation, graph, cache);
-	render_check.update(validation, files);
+	std::vector<Diagnostic> documents = project_rows(validation, graph, cache);
 	rows.reserve(input.scan.diagnostics.size() + input.requirements.diagnostics.size() +
 			input.boot_missing.size() + input.play.size() + documents.size() +
 			input.open_findings.size() + render_check.diagnostics().size() + input.build.size());

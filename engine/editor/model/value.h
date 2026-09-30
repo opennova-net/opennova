@@ -61,6 +61,7 @@ enum class ReferenceKind {
 	MenuScreen,  // a menu screen by NAME, in the menu file the scope names (an ACTION SCREEN's target)
 	MenuWindow,  // a menu window by NAME, on the screen the scope names (an ACTION WINDOW's target)
 	Animation,   // a .bad clip by file name, its extension optional (an animation map row's variant)
+	MenuText,    // a menu's text shown as written: never a name, what a style variable stands for there
 	UserPoint,   // a model's user point by name, on the model file the scope names (an item's particle slot)
 };
 

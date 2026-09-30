@@ -29,7 +29,8 @@
 // a token, a kind the outline adds a row of being a row of the file; every row of the file of a
 // kind that is a row, and every record a collection holds of a kind the table has. S13 D4 adds the
 // type's validate_file: the file's own findings from its document alone, each on the file and on
-// a record the document holds, the same findings from a second load of the file.
+// a record the document holds, the same findings from a second load of the file, and a finding
+// over each type's files (a flawed file of its own where its fixture has no flaw).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -49,7 +50,10 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
+#include <formats/bad/bad.h>
+#include <formats/bad/bad_write.h>
 #include <formats/def/def_schema.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
 #include "common/test_paths.h"
@@ -72,6 +76,7 @@ std::set<std::string> g_kinds; // each type's record kinds, by the type and the 
 // it did.
 struct TypeCounts {
 	size_t optional = 0, presences = 0;
+	size_t findings = 0; // what validate_file made over the type's files
 };
 
 // What each type's files ask of the presence clause and what the type does, as ADR 0046 S13 D2
@@ -135,6 +140,48 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Model, "armory.3di", file("threedi/synth/armory.3di")},
 	        {AssetKind::Animation, "walk.bad", file("anim/walk.bad")},
 	        {AssetKind::AnimationMap, "soldier.adm", file("anim/soldier.adm")},
+	};
+}
+
+// walk.bad's frames at 25 frames per second (every retail clip plays at 30): the clip's own
+// finding (animation.fps). Empty when the clip does not read or write.
+std::vector<uint8_t> clip_at_25fps(const std::vector<uint8_t> &walk) {
+	opennova::bad::BadFile clip{};
+	std::vector<uint8_t> out;
+	if (walk.empty() || opennova::bad::bad_parse_buffer(walk.data(), walk.size(), &clip) != 0) return out;
+	clip.fps = 25;
+	if (opennova::bad::bad_write_buffer(&clip, out) != 0) out.clear();
+	opennova::bad::bad_free(&clip);
+	return out;
+}
+
+// A string table whose one section holds a key twice (strings.key_duplicate). Empty when the
+// table does not write.
+std::vector<uint8_t> table_with_a_key_twice() {
+	opennova::rtxt::File table;
+	table.sections.push_back({"menu", 2});
+	table.entries.push_back({"KEY", "one", {}, 0});
+	table.entries.push_back({"KEY", "two", {}, 0});
+	std::vector<uint8_t> out;
+	std::string error;
+	if (!opennova::rtxt::write(table, out, error)) out.clear();
+	return out;
+}
+
+// A file of each type whose fixture above makes no finding, holding a flaw the type's
+// validate_file reports (a key twice in a section, two screens of one NAME, a CTRL register the
+// engine does not know, a clip at 25 frames per second, a slot named twice): what the per-type
+// findings clause reads with the fixtures, through check_validate_file alone.
+std::vector<Fixture> flawed_files(const std::string &repo) {
+	const auto file = [&](const char *relative) { return test_io::read_file(repo + "/fixtures/" + relative); };
+	const std::string pop = "<ACTION type=\"POP_SCREEN\"></ACTION>";
+	return {
+	        {AssetKind::Strings, "key_twice.bin", table_with_a_key_twice()},
+	        {AssetKind::Menu, "twin_screens.mnu", text_bytes(exit_screen("A", pop.c_str()) + "\n" + exit_screen("A", pop.c_str()))},
+	        {AssetKind::Model, "mount_ctrl1_not_retail.3di", file("threedi/synth/mount_ctrl1_not_retail.3di")},
+	        {AssetKind::Animation, "walk_25fps.bad", clip_at_25fps(file("anim/walk.bad"))},
+	        {AssetKind::AnimationMap, "slot_twice.adm",
+	         text_bytes("anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\nanim_idle\t\"walk.bad\"\r\n")},
 	};
 }
 
@@ -713,8 +760,8 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 // The type's validate_file (S13 D4): the file's own findings from its document alone, each on the
 // file and, where it names a record, on one the document holds; a second load of the file, which
 // gives its records the same identities, validates to the same findings.
-void check_validate_file(
-		const DocumentType &type, const Fixture &fixture, const Document &document) {
+void check_validate_file(const DocumentType &type, const Fixture &fixture,
+		const Document &document, TypeCounts &counts) {
 	const std::vector<Diagnostic> findings = type.validate_file(document);
 	for (const Diagnostic &d : findings) {
 		const std::string where = fixture.name + " " + d.code;
@@ -730,6 +777,7 @@ void check_validate_file(
 					type.validate_file(*twin) == findings,
 			fixture.name, "a second load of the file validates to the same findings");
 	g_findings += findings.size();
+	counts.findings += findings.size();
 }
 
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
@@ -755,7 +803,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 	}
 
 	check_kinds(fixture, *document, records);
-	check_validate_file(type, fixture, *document);
+	check_validate_file(type, fixture, *document, counts);
 	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
@@ -773,6 +821,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 int main() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::vector<Fixture> files = fixtures(repo);
+	const std::vector<Fixture> flawed = flawed_files(repo);
 	const std::vector<const DocumentType *> types = registered_types();
 	for (const DocumentType *type : types) {
 		size_t checked = 0;
@@ -785,19 +834,30 @@ int main() {
 			++checked;
 		}
 		check(checked > 0, type->name, "the document type has a file here to check");
+		for (const Fixture &fixture : flawed) {
+			if (document_type_for(fixture.kind) != type) continue;
+			std::unique_ptr<Document> document = type->make();
+			Diagnostic error;
+			const bool loaded = !fixture.bytes.empty() &&
+			                    document->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
+			check(loaded, fixture.name + " (" + error.message + ")", "the flawed file is made and loads");
+			if (loaded) check_validate_file(*type, fixture, *document, counts);
+		}
+		// Per type: a validate_file that never took its own documents (its cast to another type)
+		// would make nothing over its files.
+		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
 		PinnedPresence pinned{type->name, 0, 0};
 		for (const PinnedPresence &pin : kPinnedPresence)
 			if (std::string(pin.type) == type->name) pinned = pin;
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
-		std::printf("  %s: %zu optional fields asked, %zu left out and written again\n", type->name, counts.optional,
-		            counts.presences);
+		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings\n", type->name,
+		            counts.optional, counts.presences, counts.findings);
 	}
 	for (const Fixture &fixture : files)
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
 	check(g_other_scopes > 0, "the files", "a name defined in two scopes is looked up in the other");
 	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
-	check(g_findings > 0, "the files", "validate_file makes a finding to check");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract "
 					"(%zu files, %zu records, %zu fields set to their own value, %zu symbols, "

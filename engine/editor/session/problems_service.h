@@ -17,6 +17,7 @@ namespace opennova::editor {
 
 class MenuRenderCheck;
 class SessionCore;
+struct ProjectFindingsInput;
 struct SessionView;
 
 // The Problems rows of the project session (ADR 0046 S13 A2): when the project validates (an edit
@@ -80,6 +81,9 @@ public:
 	// What the last validation did: the files whose own findings it made and kept, the closed
 	// files it read.
 	const ValidationStats &validation_stats() const { return validation_cache_.stats(); }
+	// How many times the rows were composed: a validation that finds nothing they are made of
+	// moved composes none (for the tests).
+	size_t compositions() const { return compositions_; }
 
 	// The Problems query as the editor MCP asks it, as JSON text (session_json's
 	// problem_query_from_json, problems_to_json): {total, shown, counts, groups when grouped,
@@ -96,6 +100,18 @@ private:
 		bool kept = false;
 	};
 
+	// What the last composition read beside the graph, the files' own findings and the render
+	// check (whose refresh says whether they moved): the rows stand while these do and the rows
+	// are as many as it left.
+	struct Composed {
+		bool made = false;
+		size_t rows = 0;
+		std::vector<Diagnostic> scan, requirements, play, open, build;
+		std::vector<std::string> boot_missing;
+		bool same(const ProjectFindingsInput &input, size_t rows_now) const;
+		void keep(const ProjectFindingsInput &input, size_t rows_now);
+	};
+
 	void validate_pending_now();
 	void compose(bool keep_reported);
 
@@ -110,6 +126,8 @@ private:
 	// the composed rows after it (the render check's notes, the last build's own) and the rows
 	// after those (the reported findings a validation kept, and those reported since).
 	size_t gate_size_ = 0, gate_tail_ = 0, trailing_ = 0;
+	Composed composed_;
+	size_t compositions_ = 0;
 	// The last build's own findings (those its report adds to the Problems rows it was gated on:
 	// the plan's own, a step that failed), Problems rows until the next build starts or the
 	// project closes.

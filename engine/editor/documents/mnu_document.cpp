@@ -107,6 +107,20 @@ FieldColor colour_of(ReferenceKind reference) {
 	return reference == ReferenceKind::StyleVar ? FieldColor::HexArgb : FieldColor::None;
 }
 
+// A text the game shows as written takes a whole %NAME% as the stylesheet variable's value: a
+// STRING's or a TOGGLE_STRING's value, an ITEM's or a HEADER's text, each where its TYPE makes it
+// no string id, image or colour (mnu::schema_reference answers None) [orig:
+// NapiXML_ExpandVariablesInText @ 0x63a000; the frame compiler's resolve_text_value].
+bool shows_text(SchemaShape shape, const std::string &field) {
+	switch (shape) {
+	case SchemaShape::Window:
+	case SchemaShape::Part: return field == "string.value" || field == "toggle_string.value";
+	case SchemaShape::Item:
+	case SchemaShape::Header: return field == "text";
+	default: return false;
+	}
+}
+
 const std::vector<FieldChoice> &yes_no() {
 	static const std::vector<FieldChoice> choices = {{"no", 0}, {"yes", 1}};
 	return choices;
@@ -722,6 +736,8 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	if (schema && schema->reference == mnu::SchemaReference::Dynamic) {
 		out.reference = reference_of(mnu::schema_reference(at.record, field.id));
 		out.color = colour_of(out.reference);
+		if (out.reference == ReferenceKind::None && shows_text(at.record.shape, field.id))
+			out.variable_through = ReferenceKind::MenuText;
 	}
 	// A string id resolves in the "menu" section of the table the window reads: its own
 	// TEXT_RSRC, else the one it falls back to (the runtime's rule, menu_screen_inputs.h).
@@ -940,7 +956,8 @@ std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<Source
 		saved_ = SavedImage();
 		saved_.made = true;
 		saved_.revision = revision();
-		const SerializeResult result = serialize();
+		saved_.serialized = serialize();
+		const SerializeResult &result = saved_.serialized;
 		if (result.ok()) {
 			auto image = std::make_shared<mnu::Document>();
 			std::string error;
@@ -954,6 +971,11 @@ std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<Source
 	}
 	if (issues) *issues = saved_.issues;
 	return saved_.image;
+}
+
+const SerializeResult &MnuDocument::saved_serialization() const {
+	saved_image();
+	return saved_.serialized;
 }
 
 size_t MnuDocument::screen_position(NodeId row_id) const {
@@ -1356,7 +1378,7 @@ std::vector<Diagnostic> validate_menu_file(const Document &document) {
 	if (document.blocked()) return findings;
 	// On the record and the field that cause it, so the inspector shows it there and
 	// Problems selects it.
-	for (const SourceIssue &issue : document.serialize().issues) {
+	for (const SourceIssue &issue : menu->saved_serialization().issues) {
 		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "menu.unserializable", issue.message,
 		                                  document.path(), issue.field);
 		diagnostic.record = issue.record;

@@ -90,9 +90,20 @@ bool ValidationCache::records_checked(const std::string &path) const {
 	return found != entries_.end() && found->second.asked && found->second.checked;
 }
 
+const std::vector<Diagnostic> *ValidationCache::kept_findings(const std::string &path) const {
+	const auto found = entries_.find(path);
+	return found != entries_.end() && found->second.asked ? &found->second.findings : nullptr;
+}
+
 void ValidationCache::end() {
-	for (auto it = entries_.begin(); it != entries_.end();)
-		it = it->second.asked ? std::next(it) : entries_.erase(it);
+	for (auto it = entries_.begin(); it != entries_.end();) {
+		if (it->second.asked) {
+			++it;
+			continue;
+		}
+		++stats_.files_dropped;
+		it = entries_.erase(it);
+	}
 }
 
 std::shared_ptr<const Document> ValidationInput::open_document(const AssetEntry &asset) const {

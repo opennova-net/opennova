@@ -214,9 +214,15 @@ static int test_render_again_only_when_moved() {
 	edit(session, *menu, title, "position.top", int64_t(130));
 	TEST_EXPECT(check.rendered() == 1);
 	// Two more menus, closed, each naming one variable the blank STARTUP does not: trim.mnu
-	// TRIM_COLOR as a colour, label.mnu SEMIOPAQUE_BLACK as a label's text, which no StyleVar
-	// edge reads and the frame compiler resolves all the same. The check reads each itself and
-	// renders it; a rescan finding them as they were renders nothing, a validation having run.
+	// TRIM_COLOR as a colour, label.mnu SEMIOPAQUE_BLACK as a label's text, which the frame
+	// compiler resolves as the game shows it (a use: no style.unused names the variable once the
+	// menu is there). The check reads each itself and renders it; a rescan finding them as they
+	// were renders nothing, a validation having run.
+	const auto unused = [&view](const char *name) {
+		return std::any_of(view.diagnostics.begin(), view.diagnostics.end(),
+				[&](const Diagnostic &d) { return d.code == "style.unused" && d.record == name; });
+	};
+	TEST_EXPECT(unused("SEMIOPAQUE_BLACK"));
 	const ValidationStats &stats = session.validation_stats();
 	const std::string root = view.project_root;
 	TEST_EXPECT(editor_test::write_text(root + "/menus/trim.mnu",
@@ -235,6 +241,7 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 2 &&
 			check.document("menus/trim.mnu") != nullptr &&
 			check.document("menus/label.mnu") != nullptr);
+	TEST_EXPECT(!unused("SEMIOPAQUE_BLACK"));
 	passes = stats.passes;
 	session.handle(request::rescan());
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 0);

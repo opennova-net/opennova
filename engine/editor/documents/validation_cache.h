@@ -17,13 +17,15 @@ namespace opennova::editor {
 
 // What the last validation over a cache did (ADR 0046 S13 D4): the files whose own findings it
 // made and those whose findings it kept, the closed files it read from disk to make theirs and of
-// those the ones that did not load; and every validation run over the cache.
+// those the ones that did not load, and the files it let go; and every validation run over the
+// cache.
 struct ValidationStats {
 	size_t passes = 0; // validations run over this cache, all told
 	size_t files_validated = 0; // files whose own findings the last validation made
 	size_t files_reused = 0; // files whose findings it kept: nothing they were made from moved
 	size_t files_loaded = 0; // closed files it read from disk to make theirs
 	size_t files_failed = 0; // of those, the ones that did not load
+	size_t files_dropped = 0; // files it did not ask (gone from the scan), whose findings went
 };
 
 // The project's files as one validation reads them (graph/project_validation.h): the scan's
@@ -60,6 +62,9 @@ public:
 	// error blocks it (a blocked file's findings are its source findings alone). What another
 	// file's check reads of its records follows (graph/use_checks.h).
 	bool records_checked(const std::string &path) const;
+	// A file's own findings as this validation made or kept them (file_findings); null for a
+	// file it did not ask.
+	const std::vector<Diagnostic> *kept_findings(const std::string &path) const;
 	// The validation ends: the files it did not ask (gone from the scan) leave the cache.
 	void end();
 	const ValidationStats &stats() const { return stats_; }

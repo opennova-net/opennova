@@ -2,18 +2,21 @@
 // validate_file over its document alone, kept in the validation cache by what they were made
 // from (an open document's instance, revision, unsaved state and written file; a closed file's
 // size, last write, kind and game), a closed file loaded for them and let go; what other files
-// make of what one defines is graph/use_checks (a stylesheet's variables through the menus' uses,
-// an item id an earlier table has); validate_project runs the graph's update, the files, the use
-// checks and the graph's findings in one pass.
+// make of what one defines is graph/use_checks (a stylesheet's variables through the menus'
+// uses); validate_project runs the graph's update, the files, the use checks and the graph's
+// findings in one pass.
 //
 // The rows are the trunk's: over the validator fixtures and four projects made here (the
 // stylesheets' uses, the item ids, both with open documents edited), the rows validate_project
 // makes are the rows the trunk's per-type validators (validate_open_documents) made before the
-// split, every member of every row, their count and digest pinned from that run (the order is
-// not: a file's own rows come first, the use checks' after every file's). The ids across item
-// tables are pinned apart: what the split keeps (a table a source error blocks counts for no other
-// table) and what it changed on purpose (an id of 0 across tables, and a repeat inside a table of
-// an id an earlier table has). The retail leg (OPENNOVA_JO_DIR)
+// split, every member of every row (the order is not: a file's own rows come first, the use
+// checks' after every file's), but for the ids across item tables, which S13 D4's review dropped:
+// two item tables are two files of one name (asset.name.duplicate), of which the game reads one,
+// so an id is compared within its table (the trunk's rows of those projects less their
+// cross-table catalog.item_identity rows: Golf and India of the item tables, Golf and Hotel with
+// them open). Their count and digest were pinned from the trunk's run and pinned again, the rows
+// compared member for member, when the review wrote a row's reference kind by its token (its
+// number moved with MenuText) and dropped those rows. The retail leg (OPENNOVA_JO_DIR)
 // exports the install's files a document type opens into a project and times a first
 // validation, one with nothing changed and one after an edit of the open item table.
 #include <editor/assets/asset_import.h>
@@ -21,6 +24,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/graph/project_validation.h>
 #include <editor/graph/use_checks.h>
 #include <editor/import/import_plan.h>
@@ -60,13 +64,14 @@ std::string text_of(const std::vector<uint8_t> &bytes) {
 	return std::string(bytes.begin(), bytes.end());
 }
 
-// A finding as one line, every member of it.
+// A finding as one line, every member of it (its reference kind by its token, which a new kind
+// leaves as it is).
 std::string row_of(const Diagnostic &d) {
 	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code + "|" + d.asset + "|" +
 			std::to_string(d.line) + "|" + d.record + "|" + d.field + "|" +
 			std::to_string(d.row_id) + "|" + std::to_string(d.child_id) + "|" +
 			std::to_string(d.record_kind) + "|" + d.role + "|" + d.target + "|" +
-			std::to_string(int(d.reference)) + "|" + d.scope + "|" + std::to_string(d.loader_arg) +
+			reference_row(d.reference).token + "|" + d.scope + "|" + std::to_string(d.loader_arg) +
 			"|" + d.message;
 }
 
@@ -169,7 +174,8 @@ std::string item(const std::string &name, int id) {
 }
 
 // The item ids: repeated inside a table (0 among them), and a second table repeating the
-// first's; the weapon and ammo names repeated in their tables.
+// first's (no finding: the game reads one of the two); the weapon and ammo names repeated in
+// their tables.
 Files item_files() {
 	return {
 		{ "defs/items.def",
@@ -252,13 +258,14 @@ struct PinnedRows {
 
 } // namespace
 
-// The rows the trunk's validators made, per project: validate_project makes the same.
+// The rows the trunk's validators made, per project: validate_project makes the same (the item
+// projects less their cross-table rows, which the review dropped).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
-		{ "fixtures", fixture_files, false, 238, 0xe08a207f1c43c6d6ull },
-		{ "styles", style_files, false, 14, 0x7cca1adb7f034360ull },
-		{ "items", item_files, false, 6, 0x51a340bd721824a4ull },
-		{ "open", style_and_item_files, true, 20, 0x0fbbf3c0f64abfafull },
+		{ "fixtures", fixture_files, false, 238, 0x57832e00899f75e7ull },
+		{ "styles", style_files, false, 14, 0x8a3d7521d4f40d63ull },
+		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
+		{ "open", style_and_item_files, true, 18, 0x626d6c867164ff5aull },
 	};
 	for (const PinnedRows &pin : pinned) {
 		Project project;
@@ -381,7 +388,8 @@ static int test_findings_keep_their_records() {
 }
 
 // The cross-file checks are a table (graph/use_checks): one row per asset kind that has one, the
-// stylesheet's and the item table's, each on a kind a document type opens.
+// stylesheet's, on a kind a document type opens (the item table's is gone: two item tables are
+// two files of one name).
 static int test_use_check_table() {
 	size_t rows = 0;
 	for (size_t k = 0; k < kAssetKindCount; ++k) {
@@ -392,7 +400,7 @@ static int test_use_check_table() {
 		TEST_EXPECT(row->kind == static_cast<AssetKind>(k) && row->check &&
 				document_type_for(row->kind));
 	}
-	TEST_EXPECT(rows == 2 && use_check(AssetKind::MenuStyle) && use_check(AssetKind::ItemDefs));
+	TEST_EXPECT(rows == 1 && use_check(AssetKind::MenuStyle) && !use_check(AssetKind::ItemDefs));
 	return 0;
 }
 
@@ -427,14 +435,49 @@ static int test_style_name_as_reference() {
 	return 0;
 }
 
-// Ids across item tables (ADR 0046 S13 D4): an id a table the scan lists earlier has is a finding
-// on the first item of the id in the later table, naming the earlier table's item, after every
-// file's own rows; a later repeat inside that table is the table's own finding, naming its first
-// (it named the earlier table's before the split); a table a source error blocks reports that
-// alone, and its ids count for no other table (as before); an id of 0 names no item and defines
-// none, so items of 0 in two tables are no finding (they were), where two in one table are its
-// own.
-static int test_item_ids_across_tables() {
+// What a use of a variable is, by the field that names it (S13 D4's review): a label's text that
+// is one %NAME% (a STRING of no id type) is a use of the variable, whose value the game shows
+// there, so the variable is no style.unused; a colour's variable a string id's STRING names too is
+// no style.mixed_use (a string id is none of a colour, a font and an image).
+static int test_style_uses_by_what_names_them() {
+	Project project;
+	TEST_EXPECT(project.make({
+			{ "menus/menu_style.mns", "LABEL_TEXT Hello\r\nFG FF00FF00\r\n" },
+			{ "menus/main.mnu",
+					"<SCREEN>\r\n<NAME>MAIN</NAME>\r\n" +
+							window("A", "<STRING>%LABEL_TEXT%</STRING>\r\n") +
+							window("B",
+									"<APPEARANCE STATE=\"DEFAULT\" "
+									"TYPE=\"COLOR\">%FG%</APPEARANCE>\r\n") +
+							window("C", "<STRING TYPE=\"ID\">%FG%</STRING>\r\n") +
+							"</SCREEN>\r\n" },
+	}));
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const Document>> open;
+	size_t style_rows = 0;
+	for (const Diagnostic &d :
+			validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
+		if (d.code == "style.unused" || d.code == "style.mixed_use" ||
+				d.code == "style.not_a_color") {
+			std::printf("  %s %s: %s\n", d.code.c_str(), d.record.c_str(), d.message.c_str());
+			++style_rows;
+		}
+	TEST_EXPECT(style_rows == 0);
+	// The label's text is the variable's edge through the shown text.
+	const std::vector<const GraphEdge *> uses =
+			graph.referrers_of(ReferenceKind::StyleVar, "LABEL_TEXT");
+	TEST_EXPECT(uses.size() == 1 && uses[0]->through == ReferenceKind::MenuText &&
+			uses[0]->field == "string.value");
+	return 0;
+}
+
+// Item ids within a table (S13 D4's review): two item tables are two files of one name, of which
+// the game reads one (the scan's asset.name.duplicate), so an id is compared within its table
+// alone, as the load compares them: a repeat names the table's first item of the id, an id of 0
+// too (the load logs "Duplicate ID number" for each); an id an earlier table has is no finding (it
+// was, before the review); a table a source error blocks reports that alone.
+static int test_item_ids_within_a_table() {
 	Project project;
 	TEST_EXPECT(project.make({
 			{ "a/items.def", item("Alpha", 5) + item("Zero", 0) },
@@ -459,10 +502,11 @@ static int test_item_ids_across_tables() {
 			std::vector<std::string>({
 					"b/items.def Bravo2 id: An earlier item, \"Bravo\", has id 5" + tail,
 					"b/items.def Nil2 id: An earlier item, \"Nil\", has id 0" + tail,
-					"b/items.def Bravo id: An earlier item, \"Alpha\", has id 5" + tail,
 			}));
 	TEST_EXPECT(blocked && !cache.records_checked("c/items.def") &&
 			cache.records_checked("d/items.def"));
+	TEST_EXPECT(std::any_of(project.scan.diagnostics.begin(), project.scan.diagnostics.end(),
+			[](const Diagnostic &d) { return d.code == "asset.name.duplicate"; }));
 	return 0;
 }
 
@@ -565,7 +609,8 @@ int main(int argc, char **argv) {
 	failures += test_findings_keep_their_records();
 	failures += test_use_check_table();
 	failures += test_style_name_as_reference();
-	failures += test_item_ids_across_tables();
+	failures += test_style_uses_by_what_names_them();
+	failures += test_item_ids_within_a_table();
 	failures += test_retail_validation();
 	return failures == 0 ? 0 : 1;
 }

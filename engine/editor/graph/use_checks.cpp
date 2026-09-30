@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <base/io/strutil.h>
 #include <editor/documents/validation_cache.h>
@@ -72,20 +71,22 @@ void check_style_uses(
 								" too: the game reads its value, '" + binding->value + "'.");
 			if (!is_binding)
 				continue;
-			// The uses of the variable, by what its value must be there.
+			// The uses of the variable, by what its value must be there (a string id, a screen's
+			// or a window's NAME and a shown text are none of a colour, a font and an image).
 			bool color = false, font = false, image = false;
 			const std::vector<const GraphEdge *> uses =
 					graph.referrers_of(ReferenceKind::StyleVar, name);
 			for (const GraphEdge *edge : uses) {
-				if (edge->through == ReferenceKind::None)
-					color = true;
-				else if (edge->through == ReferenceKind::Font)
-					font = true;
-				else
-					image = true;
+				const StyleVariableUse use = style_variable_use(edge->through);
+				color = color || use == StyleVariableUse::Colour;
+				font = font || use == StyleVariableUse::Font;
+				image = image || use == StyleVariableUse::Image;
 			}
-			// Every colour, font and image a menu names through a variable is an edge (every
-			// APPEARANCE, ITEM and FONT field), so none means no menu uses it.
+			// Every field value a menu names a variable by whole is an edge: a colour, a font, an
+			// image, a string id, a screen's or a window's NAME, and a text shown as written (a
+			// STRING's, an ITEM's or a HEADER's: FieldUse::variable_through), so none means no
+			// menu uses it. A %NAME% inside a longer text is no edge: the frame compiler reads a
+			// whole value alone.
 			if (uses.empty())
 				add(DiagnosticSeverity::Info, "style.unused",
 						"No menu of the project names %" + name + "%.");
@@ -101,40 +102,9 @@ void check_style_uses(
 	}
 }
 
-// An item whose id an item of a table the scan lists earlier has, on the first item of the id in
-// its own table (a later one there is that table's own finding, validate_catalog_file): both are
-// kept (the load logs "Duplicate ID number" @0x4a1e96 and goes on) [orig: ItemDefs_LoadAndValidate
-// @ 0x4a1da0], and the lookup by id returns the first [orig: ItemList_FindIndexByTypeId @
-// 0x49e100]. The ids are the graph's item symbols, in the files' order (an id of 0 names no item
-// and defines none).
-void check_item_ids(
-		const AssetGraph &graph, const ValidationCache &files, std::vector<Diagnostic> &out) {
-	std::unordered_map<std::string, const GraphSymbol *> first; // by id: its first item
-	std::unordered_set<std::string> in_file; // the ids the file walked has
-	const std::string *file = nullptr;
-	for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::Item)) {
-		if (!files.records_checked(symbol->file))
-			continue;
-		if (!file || *file != symbol->file) {
-			file = &symbol->file;
-			in_file.clear();
-		}
-		const bool first_in_file = in_file.insert(symbol->name).second;
-		const auto earlier = first.emplace(symbol->name, symbol);
-		if (earlier.second || !first_in_file)
-			continue;
-		out.push_back(on_definition(*symbol, DiagnosticSeverity::Warning, "catalog.item_identity",
-				"An earlier item, \"" + earlier.first->second->record + "\", has id " +
-						symbol->display +
-						": the game keeps both, and a lookup by the id finds the earlier one.",
-				"id", 0));
-	}
-}
-
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
 	{ AssetKind::MenuStyle, check_style_uses },
-	{ AssetKind::ItemDefs, check_item_ids },
 };
 
 constexpr bool rows_in_kind_order() {

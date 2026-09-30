@@ -99,4 +99,11 @@ bool reference_kind_from_token(const std::string &token, ReferenceKind &out);
 // (the kinds a style variable may stand for: also_offers); None for any other file.
 ReferenceKind style_value_reference(AssetKind file);
 
+// What a style variable is used as where a StyleVar edge names it (GraphEdge::through, what its
+// value must be there): a colour (None: an APPEARANCE's, an ITEM's or a FONT's colour), a font's
+// file (Font), an image's file (MenuTexture), or none of the three (a string id, a screen's or a
+// window's NAME, a menu's shown text), which no stylesheet check reads the value as.
+enum class StyleVariableUse { Colour, Font, Image, Other };
+StyleVariableUse style_variable_use(ReferenceKind through);
+
 } // namespace opennova::editor

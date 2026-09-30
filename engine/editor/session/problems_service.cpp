@@ -43,10 +43,15 @@ void ProblemsService::compose(bool keep_reported) {
 	validation_due_ = false;
 	const uint64_t graph_generation = graph_->generation();
 	const std::vector<Diagnostic> open = core_.documents().findings();
-	ProjectFindings findings = compose_project_findings(
-	        {core_.paths(), view_.document, view_.scan, view_.requirements, view_.documents, view_.boot_missing,
-	         play_findings_, open, build_findings_},
-	        *graph_, validation_cache_, *render_check_, *assets_);
+	const ProjectFindingsInput input{core_.paths(), view_.document, view_.scan, view_.requirements, view_.documents,
+	                                 view_.boot_missing, play_findings_, open, build_findings_};
+	// The graph, each file's own findings and the render check first: when none of them moved, no
+	// other input the rows are made of did, no reported finding waits on this validation and the
+	// rows are as it left them, they stand (nothing composed, copied or compared).
+	const bool moved = refresh_project_findings(input, *graph_, validation_cache_, *render_check_, *assets_);
+	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.diagnostics.size())) return;
+	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *render_check_);
+	++compositions_;
 	gate_size_ = findings.gate_end - findings.gate_begin;
 	gate_tail_ = findings.rows.size() - findings.gate_end;
 	// The findings kept after the composed rows, each as often as it was reported (two refusals of
@@ -64,7 +69,25 @@ void ProblemsService::compose(bool keep_reported) {
 		view_.diagnostics = std::move(findings.rows);
 		core_.touch(ViewConcern::Findings);
 	}
+	composed_.keep(input, view_.diagnostics.size());
 	if (graph_->generation() != graph_generation) core_.touch(ViewConcern::Graph);
+}
+
+bool ProblemsService::Composed::same(const ProjectFindingsInput &input, size_t rows_now) const {
+	return made && rows == rows_now && scan == input.scan.diagnostics &&
+	       requirements == input.requirements.diagnostics && boot_missing == input.boot_missing &&
+	       play == input.play && open == input.open_findings && build == input.build;
+}
+
+void ProblemsService::Composed::keep(const ProjectFindingsInput &input, size_t rows_now) {
+	made = true;
+	rows = rows_now;
+	scan = input.scan.diagnostics;
+	requirements = input.requirements.diagnostics;
+	boot_missing = input.boot_missing;
+	play = input.play;
+	open = input.open_findings;
+	build = input.build;
 }
 
 void ProblemsService::add_reported(const Diagnostic &d) {
@@ -89,6 +112,7 @@ void ProblemsService::clear() {
 	assets_->clear();
 	render_check_->clear();
 	validation_cache_ = ValidationCache();
+	composed_ = Composed();
 	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;

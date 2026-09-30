@@ -649,9 +649,9 @@ _Avoid_: preview (the one screen shown), validation (the document types' own che
 
 **Use check**:
 A finding about a project file that reads what other files make of it: a variable of the
-stylesheets the game reads that no menu uses, or that a menu uses as a colour it is not; an item id
-a table listed earlier defines too. The editor makes it from the asset graph after every file's own
-findings, which its document type makes from the file alone.
+stylesheets the game reads that no menu uses, or that a menu uses as a colour it is not. The editor
+makes it from the asset graph after every file's own findings, which its document type makes from
+the file alone.
 _Avoid_: cross-file validation (the use checks are one table, by the kind of file), validation (a
 file's own findings)
 

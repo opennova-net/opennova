@@ -55,7 +55,7 @@ std::vector<std::string> changed_variables(const std::map<std::string, std::stri
 // through the list is one of them: an APPEARANCE's, a FONT's, and a STRING's, an ITEM's or a
 // HEADER's text too, which no StyleVar edge reads.
 std::vector<std::string> variables_named(const MnuDocument &document) {
-	const std::string text = document.serialize().text;
+	const std::string &text = document.saved_serialization().text;
 	std::vector<std::string> names;
 	for (size_t at = text.find('%'); at != std::string::npos;) {
 		const size_t length = mns::variable_reference_at(text, at);
@@ -309,8 +309,9 @@ void MenuRenderCheck::clear() {
 	rendered_ = 0;
 }
 
-void MenuRenderCheck::update(const ValidationInput &input, const FileSource &files) {
+bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &files) {
 	rendered_ = 0;
+	bool moved = false; // a menu's notes may have changed
 	// The shell's %VAR% list, read again when a stylesheet's stamp moved: the variables that came,
 	// went or took another value, which the menus naming one render again.
 	const std::map<std::string, std::string> &vars = style_.vars(files);
@@ -357,6 +358,7 @@ void MenuRenderCheck::update(const ValidationInput &input, const FileSource &fil
 		const MnuDocument *menu = document.get();
 		// A menu that does not load or is blocked has its own findings (validate_menu_file).
 		if (!menu || menu->blocked()) {
+			moved = moved || !kept.findings.empty();
 			kept.document.reset();
 			kept.screens.clear();
 			kept.dependencies.clear();
@@ -374,11 +376,22 @@ void MenuRenderCheck::update(const ValidationInput &input, const FileSource &fil
 		kept.revision = menu->revision();
 		render_menu_(kept, *menu, files, vars);
 		++rendered_;
+		moved = true;
 	}
-	for (auto it = menus_.begin(); it != menus_.end();) it = it->second.seen ? std::next(it) : menus_.erase(it);
+	for (auto it = menus_.begin(); it != menus_.end();) {
+		if (it->second.seen) {
+			++it;
+			continue;
+		}
+		moved = moved || !it->second.findings.empty();
+		it = menus_.erase(it);
+	}
+	if (!moved)
+		return false;
 	diagnostics_.clear();
 	for (const auto &entry : menus_)
 		diagnostics_.insert(diagnostics_.end(), entry.second.findings.begin(), entry.second.findings.end());
+	return true;
 }
 
 void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,

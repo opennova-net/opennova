@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/asset_graph.h>
@@ -25,16 +26,29 @@ std::vector<const AssetEntry *> validation_files(const AssetScan &scan) {
 
 std::vector<Diagnostic> validate_project(
 		const ValidationInput &input, AssetGraph &graph, ValidationCache &cache) {
-	std::vector<Diagnostic> out;
+	refresh_project(input, graph, cache);
+	return project_rows(input, graph, cache);
+}
+
+bool refresh_project(const ValidationInput &input, AssetGraph &graph, ValidationCache &cache) {
+	const uint64_t generation = graph.generation();
 	// The graph first: the use checks read what the files define and who uses it.
 	graph.update(input.paths, input.project, input.scan, input.open);
 	cache.begin();
-	for (const AssetEntry *asset : validation_files(input.scan)) {
-		const std::vector<Diagnostic> &own = cache.file_findings(input, *asset);
-		out.insert(out.end(), own.begin(), own.end());
-	}
-	run_use_checks(graph, cache, out);
+	for (const AssetEntry *asset : validation_files(input.scan))
+		cache.file_findings(input, *asset);
 	cache.end();
+	const ValidationStats &stats = cache.stats();
+	return stats.files_validated > 0 || stats.files_dropped > 0 || graph.generation() != generation;
+}
+
+std::vector<Diagnostic> project_rows(
+		const ValidationInput &input, const AssetGraph &graph, const ValidationCache &cache) {
+	std::vector<Diagnostic> out;
+	for (const AssetEntry *asset : validation_files(input.scan))
+		if (const std::vector<Diagnostic> *own = cache.kept_findings(asset->relative_path))
+			out.insert(out.end(), own->begin(), own->end());
+	run_use_checks(graph, cache, out);
 	const std::vector<Diagnostic> &references = graph.diagnostics();
 	out.insert(out.end(), references.begin(), references.end());
 	return out;

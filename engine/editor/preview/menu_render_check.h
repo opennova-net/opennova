@@ -52,7 +52,8 @@ public:
 	// of its screens read moved, or when the shell's stylesheets moved and a variable the menu
 	// names (every %NAME% its saved text holds, as the game's expansion finds them) came, went or
 	// took another value: a stylesheet edit that changes no variable's value renders nothing.
-	void update(const ValidationInput &input, const FileSource &files);
+	// True when the notes may have moved: a menu rendered again, or one's notes went.
+	bool update(const ValidationInput &input, const FileSource &files);
 	void clear();
 	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
 	// The render of a screen row of the menu at `path`, null when there is none.

@@ -1091,9 +1091,15 @@ static int test_validation_cost() {
 			stats.files_reused == editable - 1);
 	TEST_EXPECT(session.document_for("items.def") == items); // open and unchanged: kept as it is
 	TEST_EXPECT(finding_on(v.diagnostics, menu) != nullptr);
+	// A rescan that finds nothing changed: the validation moves nothing the rows are made of, so
+	// they stand, composed none (no row copied or compared).
+	const size_t compositions = session.problems_compositions();
+	const uint64_t findings = v.revisions.of(ViewConcern::Findings);
 	session.handle(request::rescan());
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == editable);
+	TEST_EXPECT(session.problems_compositions() == compositions &&
+			v.revisions.of(ViewConcern::Findings) == findings);
 	TEST_EXPECT(finding_on(v.diagnostics, menu) != nullptr);
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
 	session.handle(request::rescan());

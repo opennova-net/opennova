@@ -58,4 +58,13 @@ struct ProjectFindings {
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                                          MenuRenderCheck &render_check, const FileSource &files);
 
+// compose_project_findings in two halves, for a caller that keeps the rows it made (the session):
+// the graph, each file's own findings and the render check brought to the project, true when a
+// row they give may have moved (graph/project_validation.h's refresh_project, or the render
+// check's notes); then the rows, from what the first half left.
+bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
+                              MenuRenderCheck &render_check, const FileSource &files);
+ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
+                                         const ValidationCache &cache, const MenuRenderCheck &render_check);
+
 } // namespace opennova::editor

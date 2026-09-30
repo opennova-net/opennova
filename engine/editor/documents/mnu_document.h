@@ -115,6 +115,10 @@ public:
 	// the game's reader, once per revision (a revision names one state, undo included).
 	// Null when it cannot be written (`issues` gets serialize()'s) or does not read back.
 	std::shared_ptr<const mnu::Document> saved_image(std::vector<SourceIssue> *issues = nullptr) const;
+	// What serialize() made of the saved image's state, kept with it: the text a Save writes and
+	// the issues that keep it from writing. The menu's validation, the render check's variables
+	// and the previews read one serialization per state.
+	const SerializeResult &saved_serialization() const;
 	// A screen row's position among the rows: the screen at that position of the saved
 	// image (screen names may repeat). SIZE_MAX for a row the document does not have.
 	size_t screen_position(NodeId row) const;
@@ -175,6 +179,7 @@ private:
 		uint64_t revision = 0;
 		std::shared_ptr<const mnu::Document> image;
 		std::vector<SourceIssue> issues;
+		SerializeResult serialized; // serialize()'s, which the image is read back from
 	};
 	mutable SavedImage saved_;
 	// The screens and windows (their identities) no by-name lookup returns, and why, once per
