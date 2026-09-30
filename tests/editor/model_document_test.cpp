@@ -11,6 +11,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -76,20 +77,9 @@ Edit op(EditOperation operation, NodeAddress address, size_t position = SIZE_MAX
 	return edit;
 }
 
-// The model validator over one open model, as a project's validation runs it over its models.
+// The model validator over one model, as a project's validation runs it over each file.
 std::vector<Diagnostic> validated(const std::shared_ptr<const ModelDocument> &document) {
-	static const ProjectDocument project;
-	const ProjectPaths paths = ProjectPaths::for_root(".");
-	AssetScan scan;
-	AssetEntry entry;
-	entry.logical_name = entry.relative_path = document->path();
-	entry.kind = AssetKind::Model;
-	scan.entries.push_back(entry);
-	scan.index();
-	const std::vector<std::shared_ptr<const DocumentBase>> open = {document};
-	ValidationCache cache;
-	const ValidationInput input{paths, project, scan, open, cache};
-	return validate_models(input, AssetGraph());
+	return document_type(DocumentTypeId::Model)->validate_file(*document);
 }
 
 int untouched_saves() {
@@ -270,7 +260,11 @@ int validation() {
 	}
 	TEST_EXPECT(editor_test::write_bytes(root + "/armory.3di", serialized(document)));
 	const AssetScan scan = scan_project_assets(paths, project);
-	const std::vector<Diagnostic> findings = validate_open_documents(paths, project, scan, {});
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const std::vector<Diagnostic> findings =
+			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto has = [&](const char *code, DiagnosticSeverity severity) {
 		for (const Diagnostic &d : findings)
 			if (d.code == code && d.severity == severity) return true;
@@ -452,7 +446,7 @@ int retail_models() {
 
 // S11h: a retail model loads in the game, so the validator finds no error in one. Every model
 // the game install serves (the base game's archives and each expansion's, each file once) is
-// opened from its bytes and validated as an open model of a project is (validate_models); every
+// opened from its bytes and validated as each model of a project is (validate_model_file); every
 // error is listed with its model, record, code and message before the leg fails. A file the
 // game's model loader refuses is no model it loads, and is counted apart: one whose chunk tag is
 // not 3DI3 (an install may carry GP-era GPM files among its models) [orig:

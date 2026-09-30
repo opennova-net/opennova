@@ -487,6 +487,18 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 	return true;
 }
 
+bool MissionKernel::load_powerup_table(const BootFileSource &files,
+		const std::string &name) {
+	world.tables.powerups = w::PowerupTable{};
+	std::vector<uint8_t> bytes;
+	if (!files.valid() || !files.read_file(name, bytes)) return false;
+	def::DefPowerupFile file = {};
+	if (def::def_parse_powerup_memory(bytes.data(), bytes.size(), &file) != 0) return false;
+	world.tables.powerups = w::build_powerup_table(file, world.tables.weapons);
+	def::def_free_powerup(&file);
+	return true;
+}
+
 bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	mission_start_pending = false;
 	have_baseline = false;
@@ -682,10 +694,21 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		if (ammo_ok_now && has_item_db) {
 			mission::resolve_minefields(world, *items_table(), assets());
 		}
+		// The powerup rows (powerup.def), after the weapon table its names
+		// resolve over [orig: Game_StartMission @0x5256CD].
+		step("powerup_table");
+		if (!load_powerup_table(files_))
+			io::logf(io::LogLevel::kWarn,
+					"mission kernel: Unable to load powerup.def - every Powerup row is destroyed at the bind");
 	}
 	if (has_item_db) {
 		step("ai_weapons");
 		mission::resolve_ai_weapons(world, *items_table(), {}, &assets());
+		// The powerup bind over pools 1 and 2: each Powerup row takes its
+		// powerup.def row by the item's `powerupdef` name, or is destroyed
+		// [orig: Game_StartMission @0x525DE7 -> the init walk @0x4432A0].
+		step("powerup_bind");
+		w::powerup_bind_entities(world, *items_table());
 	}
 	// The vehicle spawn-marker list is built from the mission as loaded, once
 	// the definitions are attached and ahead of the class inits, the

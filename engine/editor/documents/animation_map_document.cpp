@@ -294,70 +294,63 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 	}
 }
 
-std::vector<Diagnostic> validate_animation_maps(const ValidationInput &input, const AssetGraph &) {
+std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	for (const auto &asset : input.scan.entries) {
-		if (!is_animation_map_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
-			continue;
+	const auto *table = dynamic_cast<const AnimationMapDocument *>(&document);
+	if (!table) return findings;
+	// The lines the table leaves out, each on its line (Problems shows it) and on the row it
+	// was read into, wherever that row is now (source_address; gone: the file): input the
+	// game ignores is dropped on save (a warning, Rewrite drops it); a row the table cannot
+	// hold blocks the file (an error).
+	source_issue_findings(
+			*table, "animation_map.invalid_input", "animation_map.ignored_input", findings);
+	if (document.blocked()) return findings;
+	if (!has_reset(table->rows())) {
+		// On the first row's key, where a row takes the name (its Add anim_reset row fix
+		// adds one instead).
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "animation_map.no_reset",
+		                               "The table has no anim_reset row: the game cannot load it.", document.path(), "key");
+		if (!table->rows().empty()) {
+			const Node &first = *table->rows().front();
+			d.row_id = first.id;
+			d.record_kind = kRow;
+			d.record = row_of(first).key;
 		}
-		// The lines the table leaves out, each on its line (Problems shows it) and on the row it
-		// was read into, wherever that row is now (source_address; gone: the file): input the
-		// game ignores is dropped on save (a warning, Rewrite drops it); a row the table cannot
-		// hold blocks the file (an error).
-		source_issue_findings(
-				*document, "animation_map.invalid_input", "animation_map.ignored_input", findings);
-		if (document->blocked()) continue;
-		if (!has_reset(document->rows())) {
-			// On the first row's key, where a row takes the name (its Add anim_reset row fix
-			// adds one instead).
-			Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "animation_map.no_reset",
-			                               "The table has no anim_reset row: the game cannot load it.", document->path(), "key");
-			if (!document->rows().empty()) {
-				const Node &first = *document->rows().front();
-				d.row_id = first.id;
-				d.record_kind = kRow;
-				d.record = row_of(first).key;
-			}
+		findings.push_back(std::move(d));
+	}
+	// The first row naming each slot, by the slot's index.
+	std::unordered_map<int, size_t> first_of_slot;
+	for (size_t i = 0; i < table->rows().size(); ++i) {
+		const Node *node = table->rows()[i].get();
+		const AnimationMapRow &r = row_of(*node);
+		const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
+			Diagnostic d = make_diagnostic(severity, code, message, document.path(), "key");
+			d.row_id = node->id;
+			d.record_kind = kRow;
+			d.record = r.key;
 			findings.push_back(std::move(d));
-		}
-		// The first row naming each slot, by the slot's index.
-		std::unordered_map<int, size_t> first_of_slot;
-		for (size_t i = 0; i < document->rows().size(); ++i) {
-			const Node *node = document->rows()[i].get();
-			const AnimationMapRow &r = row_of(*node);
-			const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
-				Diagnostic d = make_diagnostic(severity, code, message, document->path(), "key");
-				d.row_id = node->id;
-				d.record_kind = kRow;
-				d.record = r.key;
-				findings.push_back(std::move(d));
-			};
-			const adm::AdmEntry e = entry_of(r);
-			const int slot = anim::adm_slot_index(r.key);
-			if (const char *problem = adm::adm_row_problem(e)) add(DiagnosticSeverity::Error, "animation_map.row", problem);
-			else if (slot < 0)
-				add(DiagnosticSeverity::Warning, "animation_map.key_unknown",
-				    "'" + r.key + "' names none of the engine's animation slots: the game skips the row.");
-			if (slot < 0) continue;
-			const auto first = first_of_slot.emplace(slot, i);
-			if (first.second) continue;
-			// A later row of a slot registers onto the same head: each clip token of a slot
-			// joins its ring ahead of the head, so the rows serve as one ring, last token first;
-			// slot 0's head is replaced by each reset token instead, so the last one loaded
-			// serves [orig: AnimMap_ParseConfigLine @ 0x40CB60, the slot lookup per row @0x40CB97;
-			// AnimMap_RegisterBoneNode @ 0x40C2D0, the ring insert @0x40C37F..0x40C385, slot 0's
-			// replace @0x40C38B..0x40C38F].
-			const std::string earlier = "row " + std::to_string(first.first->second + 1);
-			add(DiagnosticSeverity::Info, "animation_map.slot_repeated",
-			    slot == 0 ? "'" + r.key + "' names the reset slot as " + earlier +
-			                        " does: the game keeps only the last reset clip it loads."
-			              : "'" + r.key + "' names the slot " + earlier +
-			                        " names: the game joins their clips into one ring, served last to first.");
-		}
+		};
+		const adm::AdmEntry e = entry_of(r);
+		const int slot = anim::adm_slot_index(r.key);
+		if (const char *problem = adm::adm_row_problem(e)) add(DiagnosticSeverity::Error, "animation_map.row", problem);
+		else if (slot < 0)
+			add(DiagnosticSeverity::Warning, "animation_map.key_unknown",
+			    "'" + r.key + "' names none of the engine's animation slots: the game skips the row.");
+		if (slot < 0) continue;
+		const auto first = first_of_slot.emplace(slot, i);
+		if (first.second) continue;
+		// A later row of a slot registers onto the same head: each clip token of a slot
+		// joins its ring ahead of the head, so the rows serve as one ring, last token first;
+		// slot 0's head is replaced by each reset token instead, so the last one loaded
+		// serves [orig: AnimMap_ParseConfigLine @ 0x40CB60, the slot lookup per row @0x40CB97;
+		// AnimMap_RegisterBoneNode @ 0x40C2D0, the ring insert @0x40C37F..0x40C385, slot 0's
+		// replace @0x40C38B..0x40C38F].
+		const std::string earlier = "row " + std::to_string(first.first->second + 1);
+		add(DiagnosticSeverity::Info, "animation_map.slot_repeated",
+		    slot == 0 ? "'" + r.key + "' names the reset slot as " + earlier +
+		                        " does: the game keeps only the last reset clip it loads."
+		              : "'" + r.key + "' names the slot " + earlier +
+		                        " names: the game joins their clips into one ring, served last to first.");
 	}
 	return findings;
 }

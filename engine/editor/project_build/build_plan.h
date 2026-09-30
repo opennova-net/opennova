@@ -37,9 +37,9 @@ struct BuildPlan {
 };
 
 // `document_findings` is the document validation over this scan
-// (documents/document_types.h validate_open_documents) the caller already has: the
-// session's last validation, or the command line's one pass. The plan does not
-// validate again.
+// (graph/project_validation.h validate_project) the caller already has: the session's
+// last validation's gate, or the command line's one pass. The plan does not validate
+// again.
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings);
 

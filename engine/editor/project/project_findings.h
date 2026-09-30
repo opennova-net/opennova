@@ -37,23 +37,34 @@ struct ProjectFindingsInput {
 	const std::vector<Diagnostic> &build;
 };
 
-// `documents`: every document type's over the files and the asset graph's
-// (validate_open_documents), then the open documents' own: what a build gates on beside the
-// scan and the requirements. `rows`: every finding, the Problems rows the editor shows and
-// `opennova-project validate` prints, in order: the scan's, the requirements', the boot
-// report's, the last Play's, the documents', the menu render check's notes (never a build's gate) and the last
-// build's.
+// `rows`: every finding, the Problems rows the editor shows and `opennova-project validate`
+// prints, in order: the scan's, the requirements', the boot report's, the last Play's, the
+// documents' (each file's own, the use checks', the asset graph's: graph/project_validation.h)
+// and the open documents' own, the menu render check's notes and the last build's. The rows
+// from `gate_begin` to `gate_end` are the documents' and the open documents' own: what a build
+// gates on beside the scan and the requirements (the render check's notes never are). Each
+// finding is copied into the rows once; the session moves them into its view.
 struct ProjectFindings {
-	std::vector<Diagnostic> documents;
 	std::vector<Diagnostic> rows;
+	size_t gate_begin = 0;
+	size_t gate_end = 0;
 };
 
 // The project's findings, composed one way for the editor and the command line: the graph
-// updated and the files read through `cache` (the session keeps both from one validation to
-// the next; the command line makes them for its one call), and every menu screen compiled
-// headless by `render_check` over `files` (the project's files as the game looks them up,
-// the open documents standing in).
+// updated and each file's own findings kept in `cache` (the session keeps both from one
+// validation to the next; the command line makes them for its one call), and every menu screen
+// compiled headless by `render_check` over `files` (the project's files as the game looks them
+// up, the open documents standing in).
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
                                          MenuRenderCheck &render_check, const FileSource &files);
+
+// compose_project_findings in two halves, for a caller that keeps the rows it made (the session):
+// the graph, each file's own findings and the render check brought to the project, true when a
+// row they give may have moved (graph/project_validation.h's refresh_project, or the render
+// check's notes); then the rows, from what the first half left.
+bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
+                              MenuRenderCheck &render_check, const FileSource &files);
+ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
+                                         const ValidationCache &cache, const MenuRenderCheck &render_check);
 
 } // namespace opennova::editor

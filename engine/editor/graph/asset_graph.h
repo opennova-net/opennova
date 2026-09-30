@@ -333,10 +333,15 @@ std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std
 // no such file's bytes).
 bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_arg);
 
+// The kind a field's value references: the field's own reference, else, where a whole %NAME%
+// stands for the stylesheet variable's value (FieldUse::variable_through: a menu's text), the
+// variable (StyleVar); None for a value of such a field that is no whole %NAME%.
+ReferenceKind value_reference(const FieldUse &field, const Value &value);
 // The reference a field's value makes (graph/extractors.cpp), the field as it applies to its
 // record: the kind the graph resolves it in (a def's game-text kinds become string ids in
-// their table and section), the name and the scope. False when the value references nothing
-// (empty, NONE, NULL, a literal where a style variable could stand).
+// their table and section; a menu text's whole %NAME% the variable, value_reference), the name
+// and the scope. False when the value references nothing (empty, NONE, NULL, a literal where a
+// style variable could stand).
 bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &kind, std::string &name,
                       std::string &scope);
 

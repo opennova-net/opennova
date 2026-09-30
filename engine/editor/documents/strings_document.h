@@ -5,14 +5,11 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/model/document.h>
 #include <editor/project/project_document.h>
 #include <formats/rtxt/rtxt.h>
 
 namespace opennova::editor {
-
-class AssetGraph;
 
 // A string table (ADR 0046 S6b): the RTXT `.bin` files the game reads text from
 // (gametext.bin, gameerr.bin, ...). Rows are the table's sections in file order;
@@ -76,12 +73,12 @@ private:
 
 bool is_strings_kind(AssetKind kind);
 
-// The strings document type's validator (document_types): every string table in the
-// project, open documents standing in for their files. An empty key is an error; a
-// duplicate key inside one section is a warning (retail tables carry them, D-RTXT-5). A
-// section is checked by the reader's own rule (rtxt::File::section_index, the first section
-// of a name in any case): an empty name is an error, a name an earlier section has a
-// warning (a section lookup never reaches it).
-std::vector<Diagnostic> validate_strings(const ValidationInput &input, const AssetGraph &graph);
+// The strings document type's validator over one table (DocumentType::validate_file), an
+// open document standing in for its file. An empty key is an error; a duplicate key inside
+// one section is a warning (retail tables carry them, D-RTXT-5). A section is checked by the
+// reader's own rule (rtxt::File::section_index, the first section of a name in any case): an
+// empty name is an error, a name an earlier section has a warning (a section lookup never
+// reaches it).
+std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
 
 } // namespace opennova::editor

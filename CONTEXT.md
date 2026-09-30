@@ -679,6 +679,14 @@ mean become Problems rows on their records, never a build's gate and never a fin
 the asset graph already makes (a name the project lacks is the graph's).
 _Avoid_: preview (the one screen shown), validation (the document types' own checks)
 
+**Use check**:
+A finding about a project file that reads what other files make of it: a variable of the
+stylesheets the game reads that no menu uses, or that a menu uses as a colour it is not. The editor
+makes it from the asset graph after every file's own findings, which its document type makes from
+the file alone.
+_Avoid_: cross-file validation (the use checks are one table, by the kind of file), validation (a
+file's own findings)
+
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells
 a click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the

@@ -221,6 +221,10 @@ const ValidationStats &ProjectSession::validation_stats() const {
 	return impl_->problems.validation_stats();
 }
 
+size_t ProjectSession::problems_compositions() const {
+	return impl_->problems.compositions();
+}
+
 std::string ProjectSession::running_build_dir() const {
 	return impl_->play.running_build_dir();
 }

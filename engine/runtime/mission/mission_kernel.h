@@ -289,6 +289,12 @@ public:
 	// ammo.def -> world.tables.ammo + the weapon round_type resolve.
 	bool load_ammo_table(const BootFileSource &files,
 			const std::string &name = "ammo.def");
+	// powerup.def -> world.tables.powerups (the `weapon`/`ammo` names resolved
+	// over the loaded weapon table). False leaves the table empty and unloaded,
+	// retail's "Unable to load powerup.def" state [orig: Game_StartMission
+	// @0x5256CD -> PowerUpDef_LoadFromFile @0x443350].
+	bool load_powerup_table(const BootFileSource &files,
+			const std::string &name = "powerup.def");
 	// The infantry clip set (.adm -> .bad root-motion tracks): clear + register
 	// the default map through `adm_index` (null = the kernel's asset index) and
 	// re-point the AI. Returns the default map's clip count (0 = no default;

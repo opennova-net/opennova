@@ -1,10 +1,13 @@
 #include <editor/preview/menu_render_check.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <iterator>
 #include <variant>
 
+#include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
+#include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
 
 namespace opennova::editor {
@@ -20,6 +23,66 @@ bool same_stamps(const std::vector<menu::MenuDependency> &a, const std::vector<m
 	for (size_t i = 0; i < a.size(); ++i)
 		if (a[i].name != b[i].name || a[i].stamp != b[i].stamp) return false;
 	return true;
+}
+
+// The variables of two readings of the shell's list that one has and the other lacks, or that
+// hold another value (both keyed as the list keys them, upper case).
+std::vector<std::string> changed_variables(const std::map<std::string, std::string> &before,
+		const std::map<std::string, std::string> &after) {
+	std::vector<std::string> out;
+	auto was = before.begin();
+	auto now = after.begin();
+	while (was != before.end() || now != after.end()) {
+		if (now == after.end() || (was != before.end() && was->first < now->first)) {
+			out.push_back(was->first);
+			++was;
+		} else if (was == before.end() || now->first < was->first) {
+			out.push_back(now->first);
+			++now;
+		} else {
+			if (was->second != now->second)
+				out.push_back(now->first);
+			++was;
+			++now;
+		}
+	}
+	return out;
+}
+
+// The variables a menu names: every %NAME% the game's expansion finds in the text its Save would
+// write (mns::variable_reference_at, the scan the game runs over a menu's whole text before its
+// parse), upper case as the shell's list keys them. Every value the frame compiler resolves
+// through the list is one of them, and so is a %NAME% inside a longer text, which the game
+// expands too though no StyleVar edge reads it (a whole value is an edge).
+std::vector<std::string> variables_named(const MnuDocument &document) {
+	const std::string &text = document.saved_serialization().text;
+	std::vector<std::string> names;
+	for (size_t at = text.find('%'); at != std::string::npos;) {
+		const size_t length = mns::variable_reference_at(text, at);
+		if (length == 0) {
+			at = text.find('%', at + 1);
+			continue;
+		}
+		names.push_back(strutil::to_upper(text.substr(at + 1, length - 2)));
+		at = text.find('%', at + length);
+	}
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+	return names;
+}
+
+// A closed menu as the game would read it now, for its renders: null when it does not load or a
+// source error blocks it (its own findings say why, validate_menu_file).
+std::shared_ptr<const MnuDocument> read_menu(
+		const ValidationInput &input, const AssetEntry &asset) {
+	auto document = std::make_shared<MnuDocument>();
+	Diagnostic error;
+	if (!document->load(
+				(std::filesystem::path(input.paths.root) / asset.relative_path).generic_string(),
+				asset.relative_path, asset.kind, input.project.target_game, error) ||
+			document->blocked())
+		return nullptr;
+	return document;
 }
 
 } // namespace
@@ -241,45 +304,96 @@ void MenuRenderCheck::clear() {
 	menus_.clear();
 	style_.clear();
 	style_stamps_.clear();
+	vars_.clear();
 	diagnostics_.clear();
 	rendered_ = 0;
 }
 
-void MenuRenderCheck::update(const ValidationInput &input, const FileSource &files) {
+bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &files) {
 	rendered_ = 0;
+	bool moved = false; // a menu's notes may have changed
+	// The shell's %VAR% list, read again when a stylesheet's stamp moved: the variables that came,
+	// went or took another value, which the menus naming one render again.
 	const std::map<std::string, std::string> &vars = style_.vars(files);
 	std::vector<menu::MenuDependency> stamps;
 	style_.dependencies(stamps);
+	std::vector<std::string> changed;
 	if (!same_stamps(stamps, style_stamps_)) {
 		style_stamps_ = std::move(stamps);
-		++style_serial_;
+		changed = changed_variables(vars_, vars);
+		vars_ = vars;
 	}
+	const auto names_changed = [&changed](const std::vector<std::string> &names) {
+		for (const std::string &name : changed)
+			if (std::binary_search(names.begin(), names.end(), name))
+				return true;
+		return false;
+	};
 	for (auto &entry : menus_) entry.second.seen = false;
 	for (const AssetEntry &asset : input.scan.entries) {
-		if (!is_menu_kind(asset.kind)) continue;
-		Diagnostic error;
-		std::shared_ptr<const Document> document = input.document(asset, error);
-		const auto *menu = dynamic_cast<const MnuDocument *>(document.get());
-		// A menu that does not load or is blocked has its own findings (validate_menus).
-		if (!menu || menu->blocked()) continue;
+		if (!is_menu_kind(asset.kind))
+			continue;
 		Menu &kept = menus_[asset.relative_path];
 		kept.seen = true;
-		bool stale = !kept.document || kept.identity != menu->identity() || kept.revision != menu->revision() ||
-		             kept.style != style_serial_;
+		const auto open = input.open_document(asset);
+		std::shared_ptr<const MnuDocument> document;
+		if (open) {
+			// Open: the document stands in for its file, and the file is read again once it closes.
+			kept.read = false;
+			kept.closed.reset();
+			document = std::dynamic_pointer_cast<const MnuDocument>(open);
+		} else {
+			if (!kept.read || kept.size != asset.size_bytes ||
+					kept.modified != asset.modified_ticks || kept.kind != asset.kind ||
+					kept.game != input.project.target_game) {
+				kept.read = true;
+				kept.closed = read_menu(input, asset);
+				kept.size = asset.size_bytes;
+				kept.modified = asset.modified_ticks;
+				kept.kind = asset.kind;
+				kept.game = input.project.target_game;
+			}
+			document = kept.closed;
+		}
+		const MnuDocument *menu = document.get();
+		// A menu that does not load or is blocked has its own findings (validate_menu_file).
+		if (!menu || menu->blocked()) {
+			moved = moved || !kept.findings.empty();
+			kept.document.reset();
+			kept.screens.clear();
+			kept.dependencies.clear();
+			kept.variables.clear();
+			kept.findings.clear();
+			continue;
+		}
+		bool stale = !kept.document || kept.identity != menu->identity() ||
+				kept.load_generation != menu->load_generation() ||
+				kept.revision != menu->revision() || names_changed(kept.variables);
 		for (size_t i = 0; !stale && i < kept.dependencies.size(); ++i)
 			stale = files.stamp(kept.dependencies[i].name) != kept.dependencies[i].stamp;
 		if (!stale) continue;
 		kept.document = document;
 		kept.identity = menu->identity();
+		kept.load_generation = menu->load_generation();
 		kept.revision = menu->revision();
-		kept.style = style_serial_;
 		render_menu_(kept, *menu, files, vars);
 		++rendered_;
+		moved = true;
 	}
-	for (auto it = menus_.begin(); it != menus_.end();) it = it->second.seen ? std::next(it) : menus_.erase(it);
+	for (auto it = menus_.begin(); it != menus_.end();) {
+		if (it->second.seen) {
+			++it;
+			continue;
+		}
+		moved = moved || !it->second.findings.empty();
+		it = menus_.erase(it);
+	}
+	if (!moved)
+		return false;
 	diagnostics_.clear();
 	for (const auto &entry : menus_)
 		diagnostics_.insert(diagnostics_.end(), entry.second.findings.begin(), entry.second.findings.end());
+	return true;
 }
 
 void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,
@@ -287,6 +401,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 	menu.screens.clear();
 	menu.dependencies.clear();
 	menu.findings.clear();
+	menu.variables = variables_named(document);
 	for (const auto &row : document.rows()) {
 		Screen screen;
 		screen.row = row->id;
@@ -328,7 +443,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 
 const MnuDocument *MenuRenderCheck::document(const std::string &path) const {
 	const auto found = menus_.find(path);
-	return found == menus_.end() ? nullptr : dynamic_cast<const MnuDocument *>(found->second.document.get());
+	return found == menus_.end() ? nullptr : found->second.document.get();
 }
 
 const MenuScreenRender *MenuRenderCheck::render(const std::string &path, NodeId screen_row) const {

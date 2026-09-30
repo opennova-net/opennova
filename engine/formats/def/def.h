@@ -680,7 +680,6 @@ inline constexpr uint32_t DEF_ITEM_ATTRIB2_FARP = 0x00002000u;
 inline constexpr uint32_t DEF_ITEM_ATTRIB2_LANDMINE = 0x00004000u;
 
 typedef struct DefItemDef {
-    char powerup_def[64]; // powerup branch of the death/door union [orig: ItemDef_ParseProperty @0x49EB00]
     char graphic_enemy[16]; // [orig: ItemDef_ParseProperty @0x49EB00, graphicenemy -> the 16-byte name at +0x90]
     char text_id[32]; // [orig: ItemDef_ParseProperty @0x49EB00, textid -> +0x526]
     char display_name[128];
@@ -722,6 +721,17 @@ typedef struct DefItemDef {
     char move_function[16];
     char render_function[16];
     char disk_function[16];
+    /* 'powerupdef <name>': the powerup.def row the item binds at mission start
+       (world/powerup.h). Authoring it also RAISES the Powerup attrib bit: retail
+       ORs 0x2 in the same parse arm, so the shipped med/ammo packs, whose attrib
+       line is `notarget` alone, are Powerup items through this key.
+       +0x890 is the death/door union (deathTime, clipsize, doorType, openRate,
+       maxAngle; world/itemdef-re.md), so a name and those numerics overwrite
+       each other: the parser reports both as Unrepresentable and the writer
+       refuses both.
+       [orig: ItemDef_ParseProperty @0x49F698 -- the strcpy into itemDef+0x890
+       @0x49F6C4..0x49F6D0, then `or [edx+54h],2` @0x49F6D2] */
+    char powerup_def[32];
     /* 'input_function <class>': the input class row -- null / troop / tank. Its
        first callback is the key handler, its second the mounted first-person
        camera the carrier leg calls. [orig: ItemDef_ParseProperty @0x49F650 ->
@@ -1191,6 +1201,66 @@ typedef struct DefHudPosFile {
 } DefHudPosFile;
 
 /* ========================================================================= */
+/* Powerup Definitions (powerup.def)                                          */
+/* ========================================================================= */
+
+/* One `action "pickup"` / `action "respawn"` block of a powerup row: the
+   ActionDef keys the shared action-line parser accepts that the two powerup
+   handlers read. Other ActionDef keys (dupsound, ctrlreg, ctrlreginc) are
+   accepted and dropped. [orig: PowerUpDef_ParseProperty @0x442EE0 -- the
+   `action` open @0x443056..0x4430F4, in-action lines forwarded to
+   ActionDef_ParseScriptLine @0x4023C0 @0x443042, the closing `end`
+   @0x442FD0..0x443005] */
+typedef struct DefPowerupAction {
+    int present;                 /* the block was authored */
+    char function[128];          /* `function <name>` -> the handler (ActionDef+0) */
+    char anim[128];              /* ActionDef+58 */
+    char soundset[128];          /* ActionDef+8 */
+    char soundsetend[128];       /* ActionDef+12 */
+    char particle[128];          /* ActionDef+16 */
+    char particleuserpoint[128]; /* ActionDef+186 */
+    char texttoken[64];          /* ActionDef+20 */
+    int delaystart;              /* ActionDef+36 (ticks; `auto` -> -1) */
+    int delayend;                /* ActionDef+40 (`delay` aliases it) */
+    int action_value;            /* ActionDef+52 */
+} DefPowerupAction;
+
+/* One `ammo <class> <count>` row; the class name resolves against the weapon
+   table's ammo classes when the runtime table is built (retail resolves at
+   parse time through the weapon-table class lookup, an unknown class logging
+   "ammo class error") [orig: @0x443240..0x44327D]. */
+typedef struct DefPowerupAmmo {
+    char class_name[64];
+    int count; /* -1 = fill the class, else the amount added */
+} DefPowerupAmmo;
+
+/* One `powerup "<name>"` block (the 576-byte retail row). Every scalar
+   defaults to 0 (the parse block is zeroed after each `end`).
+   [orig: PowerUpDef_ParseProperty @0x442EE0; the row copy
+   PowerUpDef_RegisterNewEntry @0x442C00] */
+typedef struct DefPowerupDef {
+    char name[17];       /* strncpy(.., 16) into the 16-byte row head [orig: @0x442F3F] */
+    int respawn_time;    /* row+0x28, seconds (x62 ticks at pickup) [orig: @0x443103] */
+    int max_respawns;    /* row+0x23C [orig: @0x44312C] */
+    int hp;              /* row+0x2C: -1 raises to max, >0 adds [orig: @0x443155] */
+    int mana;            /* row+0x30: -1 refills ammo class 1, else adds [orig: @0x44317E] */
+    char weapon[64];     /* `weapon <name>`; resolved at table build [orig: @0x4431A7] */
+    int weapon_all;      /* `weapon all` -> row+0x34 = -1 [orig: @0x4431DA] */
+    int allammo;         /* row+0x38 [orig: @0x443220] */
+    DefPowerupAmmo *ammo;
+    size_t ammo_count;
+    DefPowerupAction pickup;  /* row+0x20 */
+    DefPowerupAction respawn; /* row+0x24 */
+    size_t open_line;
+    size_t end_line;
+} DefPowerupDef;
+
+typedef struct DefPowerupFile {
+    DefPowerupDef *entries;
+    size_t count;
+} DefPowerupFile;
+
+/* ========================================================================= */
 /* API                                                                       */
 /* ========================================================================= */
 
@@ -1215,6 +1285,12 @@ int def_parse_weapons(const char *path, DefWeaponsFile *out, DefParseReport *rep
    call; free with def_free_weapons as usual. Returns 0 on success, -1 on bad input. */
 int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report = nullptr);
 void def_free_weapons(DefWeaponsFile *f);
+
+int def_parse_powerup(const char *path, DefPowerupFile *out);
+/* Parse powerup.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by
+   the call; free with def_free_powerup as usual. Returns 0 on success, -1 on bad input. */
+int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out);
+void def_free_powerup(DefPowerupFile *f);
 
 int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report = nullptr);
 /* Parse items.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by the

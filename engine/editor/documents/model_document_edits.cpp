@@ -270,179 +270,170 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 	}
 }
 
-std::vector<Diagnostic> validate_models(const ValidationInput &input, const AssetGraph &) {
+std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	for (const auto &asset : input.scan.entries) {
-		if (!is_model_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
-			continue;
+	const auto *model = dynamic_cast<const ModelDocument *>(&document);
+	const ModelRow *row = model ? model->model_row() : nullptr;
+	if (!row) return findings;
+	const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message, ModelKind kind,
+	                     size_t collection, size_t index, const char *field) {
+		Diagnostic d = make_diagnostic(severity, code, message, document.path(), field);
+		d.row_id = row->id;
+		d.record_kind = node_kind(kind);
+		if (collection < row->collections.size() && index < row->collections[collection].size()) {
+			d.child_id = row->collections[collection][index];
+			d.record = model->record_path({row->id, node_kind(kind), d.child_id});
 		}
-		const auto *model = dynamic_cast<const ModelDocument *>(document.get());
-		const ModelRow *row = model ? model->model_row() : nullptr;
-		if (!row) continue;
-		const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message, ModelKind kind,
-		                     size_t collection, size_t index, const char *field) {
-			Diagnostic d = make_diagnostic(severity, code, message, document->path(), field);
-			d.row_id = row->id;
-			d.record_kind = node_kind(kind);
-			if (collection < row->collections.size() && index < row->collections[collection].size()) {
-				d.child_id = row->collections[collection][index];
-				d.record = document->record_path({row->id, node_kind(kind), d.child_id});
-			}
-			findings.push_back(std::move(d));
-		};
-		// A ninth `sitex` seat takes the control seat's slot (the one ctrlx and drvrx fill) and
-		// ends the seat scan, as the runtime's seat walk does (mission::extract_seats); the
-		// model still loads: a warning (threedi_user_point_is_sitex, THREEDI_SITEX_SEAT_LIMIT).
-		// The item-effect attach scan reads the first 16 points [orig:
-		// ItemDef_GetBoneMaskByName @ 0x49ea40].
-		int seats = 0;
-		std::map<std::string, size_t> names;
-		for (size_t i = 0; i < row->user_points.size(); ++i) {
-			const ThreediUserPoint &u = row->user_points[i];
-			if (threedi_user_point_is_sitex(u.name) && ++seats == THREEDI_SITEX_SEAT_LIMIT + 1)
-				add(DiagnosticSeverity::Warning, "model.seats",
-				    "More than " + std::to_string(THREEDI_SITEX_SEAT_LIMIT) +
-				            " sitex seats: the game takes the ninth for the control seat, and its seat scan reads no "
-				            "user point after it.",
-				    ModelKind::UserPoint, 3, i, "name");
-			if (!names.emplace(strutil::to_upper(u.name), i).second)
-				add(DiagnosticSeverity::Warning, "model.user_point_duplicate",
-				    std::string("Two user points are named '") + u.name + "'; a lookup by name finds the first.",
-				    ModelKind::UserPoint, 3, i, "name");
-		}
-		if (row->user_points.size() > THREEDI_USER_POINT_SCAN_LIMIT)
-			add(DiagnosticSeverity::Info, "model.user_points",
-			    std::to_string(row->user_points.size()) + " user points: the item-effect attach scan reads the first 16.",
-			    ModelKind::Model, SIZE_MAX, 0, "");
-		// The CTRL registers the records name by index: a generator's, a light's or a loaded
-		// track's above style 0x70, and a flipbook's with frames on the register clock. The load
-		// swaps each index for the global register its table entry names, with no check of the
-		// table's end [orig: ThreediGp_LoadFromFile @ 0x5B5C7A..0x5B5DA2 (materials),
-		// @ 0x5B5E08..0x5B5EF6 (part animations), @ 0x5B5F4D..0x5B5F62 (lights)], so an index
-		// past the end reads past the table: an error. A model with no table skips the material
-		// and part-animation swaps [orig: ThreediGp_LoadFromFile @ 0x5B5C49]: the index stays as
-		// written, and a style that reads a register reads the global one it numbers (a warning
-		// naming it; past the 96 global registers, an error), while the other styles above 0x70
-		// take it as their waveform's phase (no finding). The light swap runs with no table too
-		// and reads through the table it lacks: an error. `whose` names the reference in a
-		// finding with no field of its own to show it.
-		const auto register_finding = [&](int64_t index, bool reads_register, bool light, const char *whose,
-		                                  DiagnosticSeverity &severity, std::string &message) {
-			const std::string reference = std::string(whose) + "register " + std::to_string(index);
-			if (!row->registers.empty()) {
-				if (index < static_cast<int64_t>(row->registers.size())) return false;
-				severity = DiagnosticSeverity::Error;
-				message = reference + " is not one of the model's " + std::to_string(row->registers.size()) +
-				          ": the game reads past the end of its registers.";
-				message[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(message[0])));
-				return true;
-			}
-			if (light) {
-				severity = DiagnosticSeverity::Error;
-				message = "The model has no CTRL registers, and the game crashes loading a light that names one.";
-				return true;
-			}
-			if (!reads_register) return false;
-			const char *global = threedi_ctrl_register_name(static_cast<size_t>(index));
-			severity = global ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
-			message = "The model has no CTRL registers: the game reads " + reference +
-			          (global ? std::string(" as the global register ") + global + "."
-			                  : " as a global register, past the " + std::to_string(THREEDI_CTRL_REGISTER_COUNT) +
-			                            " it has.");
+		findings.push_back(std::move(d));
+	};
+	// A ninth `sitex` seat takes the control seat's slot (the one ctrlx and drvrx fill) and
+	// ends the seat scan, as the runtime's seat walk does (mission::extract_seats); the
+	// model still loads: a warning (threedi_user_point_is_sitex, THREEDI_SITEX_SEAT_LIMIT).
+	// The item-effect attach scan reads the first 16 points [orig:
+	// ItemDef_GetBoneMaskByName @ 0x49ea40].
+	int seats = 0;
+	std::map<std::string, size_t> names;
+	for (size_t i = 0; i < row->user_points.size(); ++i) {
+		const ThreediUserPoint &u = row->user_points[i];
+		if (threedi_user_point_is_sitex(u.name) && ++seats == THREEDI_SITEX_SEAT_LIMIT + 1)
+			add(DiagnosticSeverity::Warning, "model.seats",
+			    "More than " + std::to_string(THREEDI_SITEX_SEAT_LIMIT) +
+			            " sitex seats: the game takes the ninth for the control seat, and its seat scan reads no "
+			            "user point after it.",
+			    ModelKind::UserPoint, 3, i, "name");
+		if (!names.emplace(strutil::to_upper(u.name), i).second)
+			add(DiagnosticSeverity::Warning, "model.user_point_duplicate",
+			    std::string("Two user points are named '") + u.name + "'; a lookup by name finds the first.",
+			    ModelKind::UserPoint, 3, i, "name");
+	}
+	if (row->user_points.size() > THREEDI_USER_POINT_SCAN_LIMIT)
+		add(DiagnosticSeverity::Info, "model.user_points",
+		    std::to_string(row->user_points.size()) + " user points: the item-effect attach scan reads the first 16.",
+		    ModelKind::Model, SIZE_MAX, 0, "");
+	// The CTRL registers the records name by index: a generator's, a light's or a loaded
+	// track's above style 0x70, and a flipbook's with frames on the register clock. The load
+	// swaps each index for the global register its table entry names, with no check of the
+	// table's end [orig: ThreediGp_LoadFromFile @ 0x5B5C7A..0x5B5DA2 (materials),
+	// @ 0x5B5E08..0x5B5EF6 (part animations), @ 0x5B5F4D..0x5B5F62 (lights)], so an index
+	// past the end reads past the table: an error. A model with no table skips the material
+	// and part-animation swaps [orig: ThreediGp_LoadFromFile @ 0x5B5C49]: the index stays as
+	// written, and a style that reads a register reads the global one it numbers (a warning
+	// naming it; past the 96 global registers, an error), while the other styles above 0x70
+	// take it as their waveform's phase (no finding). The light swap runs with no table too
+	// and reads through the table it lacks: an error. `whose` names the reference in a
+	// finding with no field of its own to show it.
+	const auto register_finding = [&](int64_t index, bool reads_register, bool light, const char *whose,
+	                                  DiagnosticSeverity &severity, std::string &message) {
+		const std::string reference = std::string(whose) + "register " + std::to_string(index);
+		if (!row->registers.empty()) {
+			if (index < static_cast<int64_t>(row->registers.size())) return false;
+			severity = DiagnosticSeverity::Error;
+			message = reference + " is not one of the model's " + std::to_string(row->registers.size()) +
+			          ": the game reads past the end of its registers.";
+			message[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(message[0])));
 			return true;
+		}
+		if (light) {
+			severity = DiagnosticSeverity::Error;
+			message = "The model has no CTRL registers, and the game crashes loading a light that names one.";
+			return true;
+		}
+		if (!reads_register) return false;
+		const char *global = threedi_ctrl_register_name(static_cast<size_t>(index));
+		severity = global ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error;
+		message = "The model has no CTRL registers: the game reads " + reference +
+		          (global ? std::string(" as the global register ") + global + "."
+		                  : " as a global register, past the " + std::to_string(THREEDI_CTRL_REGISTER_COUNT) +
+		                            " it has.");
+		return true;
+	};
+	const auto check_register = [&](int64_t index, bool reads_register, ModelKind kind, size_t collection, size_t at,
+	                                const char *field, const char *whose) {
+		DiagnosticSeverity severity;
+		std::string message;
+		if (register_finding(index, reads_register, kind == ModelKind::Light, whose, severity, message))
+			add(severity, "model.register_missing", message, kind, collection, at, field);
+	};
+	// Which styles read the register they name is their consumer's rule
+	// (threedi_generator_reads_register); a flipbook names one only when it reads it
+	// (threedi_flipbook_reads_register).
+	for (size_t m = 0; m < row->materials.size(); ++m) {
+		const ThreediMaterial &mt = row->materials[m].material;
+		// A generator's index is its parameter byte (generator_param in threedi_schema.cpp).
+		const auto generator = [&](ThreediGeneratorConsumer consumer, uint8_t style, int32_t reg, const char *field,
+		                           const char *whose) {
+			if (threedi_generator_names_register(style))
+				check_register(static_cast<uint8_t>(reg), threedi_generator_reads_register(consumer, style),
+				               ModelKind::Material, 1, m, field, whose);
 		};
-		const auto check_register = [&](int64_t index, bool reads_register, ModelKind kind, size_t collection, size_t at,
-		                                const char *field, const char *whose) {
-			DiagnosticSeverity severity;
-			std::string message;
-			if (register_finding(index, reads_register, kind == ModelKind::Light, whose, severity, message))
-				add(severity, "model.register_missing", message, kind, collection, at, field);
-		};
-		// Which styles read the register they name is their consumer's rule
-		// (threedi_generator_reads_register); a flipbook names one only when it reads it
-		// (threedi_flipbook_reads_register).
-		for (size_t m = 0; m < row->materials.size(); ++m) {
-			const ThreediMaterial &mt = row->materials[m].material;
-			// A generator's index is its parameter byte (generator_param in threedi_schema.cpp).
-			const auto generator = [&](ThreediGeneratorConsumer consumer, uint8_t style, int32_t reg, const char *field,
-			                           const char *whose) {
-				if (threedi_generator_names_register(style))
-					check_register(static_cast<uint8_t>(reg), threedi_generator_reads_register(consumer, style),
-					               ModelKind::Material, 1, m, field, whose);
+		generator(THREEDI_GENERATOR_CONSUMER_ALPHA, mt.alpha_gen.style, mt.alpha_gen.reg, "alphagen.param", "");
+		generator(THREEDI_GENERATOR_CONSUMER_RGB, mt.rgb_gen.style, mt.rgb_gen.reg, "rgbgen.param", "");
+		// The second RGB generator has no field of its own: its finding names it.
+		generator(THREEDI_GENERATOR_CONSUMER_RGB, mt.rgb_gen2.style, mt.rgb_gen2.reg, "", "the second RGB generator's ");
+		generator(THREEDI_GENERATOR_CONSUMER_UV, mt.u_params.style, mt.u_params.reg, "ugen.param", "");
+		generator(THREEDI_GENERATOR_CONSUMER_UV, mt.v_params.style, mt.v_params.reg, "vgen.param", "");
+		// The flipbook's index is the word the time field holds.
+		if (threedi_flipbook_reads_register(mt.animation))
+			check_register(static_cast<uint16_t>(mt.animation.cycle_frame_time), true, ModelKind::Material, 1, m,
+			               "texanim.time", "");
+		uint32_t flags = 0;
+		if (!shader_flags(mt.shader_name, flags))
+			add(DiagnosticSeverity::Warning, "model.shader_unknown",
+			    std::string("The engine's shader table has no '") + mt.shader_name + "'.", ModelKind::Material, 1, m, "shader");
+		if (row->materials[m].source < 0 || !material_is_drawn(*row, row->materials[m].source))
+			add(DiagnosticSeverity::Info, "model.material_unused", "No strip draws with this material.",
+			    ModelKind::Material, 1, m, "shader");
+	}
+	for (size_t i = 0; i < row->lights.size(); ++i) {
+		const ThreediLight &l = row->lights[i];
+		if (threedi_generator_names_register(l.style))
+			check_register(l.phase, threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, l.style),
+			               ModelKind::Light, 2, i, "param", "");
+		if (l.subobj_index != 0 && (row->lods.empty() || l.subobj_index >= row->lods[0].lod.render_object_count))
+			add(DiagnosticSeverity::Error, "model.light_part", "This light names a part LOD 0 does not have.",
+			    ModelKind::Light, 2, i, "part");
+	}
+	for (size_t i = 0; i < row->registers.size(); ++i)
+		if (threedi_ctrl_register_ordinal(row->registers[i].name) == THREEDI_CTRL_REGISTER_NOT_FOUND)
+			add(DiagnosticSeverity::Warning, "model.register_unknown",
+			    std::string("'") + row->registers[i].name + "' is no CTRL register the engine knows: the game reads LOD_FRAC.",
+			    ModelKind::Register, 4, i, "name");
+	for (size_t l = 0; l < row->lods.size(); ++l) {
+		const ModelLod &lod = row->lods[l];
+		if (l > 0 && lod.lod.lod_threshold > row->lods[l - 1].lod.lod_threshold)
+			add(DiagnosticSeverity::Warning, "model.lod_order",
+			    "LOD " + std::to_string(l) + " takes over at more pixels than LOD " + std::to_string(l - 1) + ".",
+			    ModelKind::Lod, 0, l, "threshold");
+		for (size_t p = 0; p < lod.panm.size(); ++p) {
+			const ThreediPartAnimation &pa = lod.panm[p];
+			const auto on_row = [&](DiagnosticSeverity severity, const char *code, const std::string &message,
+			                        const std::string &field) {
+				Diagnostic d = make_diagnostic(severity, code, message, document.path(), field);
+				d.row_id = row->id;
+				d.record_kind = node_kind(ModelKind::PartAnimation);
+				d.child_id = lod.panm_ids[p];
+				d.record = model->record_path({row->id, d.record_kind, d.child_id});
+				findings.push_back(std::move(d));
 			};
-			generator(THREEDI_GENERATOR_CONSUMER_ALPHA, mt.alpha_gen.style, mt.alpha_gen.reg, "alphagen.param", "");
-			generator(THREEDI_GENERATOR_CONSUMER_RGB, mt.rgb_gen.style, mt.rgb_gen.reg, "rgbgen.param", "");
-			// The second RGB generator has no field of its own: its finding names it.
-			generator(THREEDI_GENERATOR_CONSUMER_RGB, mt.rgb_gen2.style, mt.rgb_gen2.reg, "", "the second RGB generator's ");
-			generator(THREEDI_GENERATOR_CONSUMER_UV, mt.u_params.style, mt.u_params.reg, "ugen.param", "");
-			generator(THREEDI_GENERATOR_CONSUMER_UV, mt.v_params.style, mt.v_params.reg, "vgen.param", "");
-			// The flipbook's index is the word the time field holds.
-			if (threedi_flipbook_reads_register(mt.animation))
-				check_register(static_cast<uint16_t>(mt.animation.cycle_frame_time), true, ModelKind::Material, 1, m,
-				               "texanim.time", "");
-			uint32_t flags = 0;
-			if (!shader_flags(mt.shader_name, flags))
-				add(DiagnosticSeverity::Warning, "model.shader_unknown",
-				    std::string("The engine's shader table has no '") + mt.shader_name + "'.", ModelKind::Material, 1, m, "shader");
-			if (row->materials[m].source < 0 || !material_is_drawn(*row, row->materials[m].source))
-				add(DiagnosticSeverity::Info, "model.material_unused", "No strip draws with this material.",
-				    ModelKind::Material, 1, m, "shader");
-		}
-		for (size_t i = 0; i < row->lights.size(); ++i) {
-			const ThreediLight &l = row->lights[i];
-			if (threedi_generator_names_register(l.style))
-				check_register(l.phase, threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, l.style),
-				               ModelKind::Light, 2, i, "param", "");
-			if (l.subobj_index != 0 && (row->lods.empty() || l.subobj_index >= row->lods[0].lod.render_object_count))
-				add(DiagnosticSeverity::Error, "model.light_part", "This light names a part LOD 0 does not have.",
-				    ModelKind::Light, 2, i, "part");
-		}
-		for (size_t i = 0; i < row->registers.size(); ++i)
-			if (threedi_ctrl_register_ordinal(row->registers[i].name) == THREEDI_CTRL_REGISTER_NOT_FOUND)
-				add(DiagnosticSeverity::Warning, "model.register_unknown",
-				    std::string("'") + row->registers[i].name + "' is no CTRL register the engine knows: the game reads LOD_FRAC.",
-				    ModelKind::Register, 4, i, "name");
-		for (size_t l = 0; l < row->lods.size(); ++l) {
-			const ModelLod &lod = row->lods[l];
-			if (l > 0 && lod.lod.lod_threshold > row->lods[l - 1].lod.lod_threshold)
-				add(DiagnosticSeverity::Warning, "model.lod_order",
-				    "LOD " + std::to_string(l) + " takes over at more pixels than LOD " + std::to_string(l - 1) + ".",
-				    ModelKind::Lod, 0, l, "threshold");
-			for (size_t p = 0; p < lod.panm.size(); ++p) {
-				const ThreediPartAnimation &pa = lod.panm[p];
-				const auto on_row = [&](DiagnosticSeverity severity, const char *code, const std::string &message,
-				                        const std::string &field) {
-					Diagnostic d = make_diagnostic(severity, code, message, document->path(), field);
-					d.row_id = row->id;
-					d.record_kind = node_kind(ModelKind::PartAnimation);
-					d.child_id = lod.panm_ids[p];
-					d.record = document->record_path({row->id, d.record_kind, d.child_id});
-					findings.push_back(std::move(d));
-				};
-				// The frame the pose turns the part through, by the pose's own rule
-				// (threedi_panm_frame_row); the pose fails on a row past the model's MTRX table,
-				// the one it is handed whole (threedi_panm_build_node_matrices).
-				const int frame = threedi_panm_frame_row(pa);
-				if (frame > 0 && static_cast<size_t>(frame) >= row->frames.size())
-					on_row(DiagnosticSeverity::Error, "model.frame_missing",
-					       "Rotation frame " + std::to_string(frame) + " is not one of the model's " +
-					               std::to_string(row->frames.size()) + ".",
-					       "matrix");
-				for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
-					const ThreediTransform &tr = *threedi_panm_tracks(pa)[t];
-					DiagnosticSeverity severity;
-					std::string message;
-					if (threedi_panm_track_loaded(pa, t) && threedi_generator_names_register(tr.control) &&
-					    register_finding(tr.control_param,
-					                     threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, tr.control),
-					                     false, "", severity, message))
-						on_row(severity, "model.register_missing", message,
-						       std::string(threedi_panm_track_label(t)) + ".param");
-				}
+			// The frame the pose turns the part through, by the pose's own rule
+			// (threedi_panm_frame_row); the pose fails on a row past the model's MTRX table,
+			// the one it is handed whole (threedi_panm_build_node_matrices).
+			const int frame = threedi_panm_frame_row(pa);
+			if (frame > 0 && static_cast<size_t>(frame) >= row->frames.size())
+				on_row(DiagnosticSeverity::Error, "model.frame_missing",
+				       "Rotation frame " + std::to_string(frame) + " is not one of the model's " +
+				               std::to_string(row->frames.size()) + ".",
+				       "matrix");
+			for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
+				const ThreediTransform &tr = *threedi_panm_tracks(pa)[t];
+				DiagnosticSeverity severity;
+				std::string message;
+				if (threedi_panm_track_loaded(pa, t) && threedi_generator_names_register(tr.control) &&
+				    register_finding(tr.control_param,
+				                     threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, tr.control),
+				                     false, "", severity, message))
+					on_row(severity, "model.register_missing", message,
+					       std::string(threedi_panm_track_label(t)) + ".param");
 			}
 		}
 	}

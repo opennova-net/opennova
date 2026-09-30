@@ -501,13 +501,15 @@ void init_ai_slot(AiEntity &ae, const bms::Entity &e) {
     s.f[13] = (e.perfectionist2 << 16) / 100;
     // [orig: slot+56 = (obliqueness<<8)/360]
     s.f[14] = (static_cast<int32_t>(e.obliqueness) << 8) / 360;
-    // [orig: slot+60 max / +64 min engagement (<<16, both fall back to max_attack_distance),
-    //  +68 = max_attack_distance<<16]
-    s.f[15] = (e.max_engagement_distance != 0 ? e.max_engagement_distance
-                                              : e.max_attack_distance) << 16;
+    // [orig: Entity_SpawnFromBMSRecord @0x40EF79..0x40EFC1 — slot+60 attack range =
+    //  max_attack_distance (rec+0x9C), falling back to max_engagement (rec+0x2C);
+    //  slot+64 = min_engagement (rec+0x28), falling back to max_engagement; slot+68
+    //  sight = max_engagement<<16]
+    s.f[15] = (e.max_attack_distance != 0 ? e.max_attack_distance
+                                          : e.max_engagement_distance) << 16;
     s.f[16] = (e.min_engagement_distance != 0 ? e.min_engagement_distance
-                                              : e.max_attack_distance) << 16;
-    s.f[17] = e.max_attack_distance << 16;
+                                              : e.max_engagement_distance) << 16;
+    s.f[17] = e.max_engagement_distance << 16;
     // [orig: slot+40/+44 = 100 - w_accuracy2/w_accuracy1, clamped >= 0; 0 -> 100]
     s.f[10] = (e.w_accuracy2 != 0) ? std::max(0, 100 - e.w_accuracy2) : 100;
     s.f[11] = (e.w_accuracy1 != 0) ? std::max(0, 100 - e.w_accuracy1) : 100;

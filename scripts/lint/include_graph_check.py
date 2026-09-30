@@ -126,12 +126,10 @@ EDITOR_RANK = {"model": 0, "documents": 1, "graph": 2, "session": 3, "ui": 4}
 EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h"}
 # (includer, included header): the upward includes the tree still makes.
 EDITOR_RANK_ALLOWED = {
-    # DocumentType::validate takes the project's graph; S13 D4's per-file
-    # validate_file(const Document &) takes none.
-    ("engine/editor/documents/document_types.h", "editor/graph/asset_graph.h"),
     # MnsDocument::style_value_use reads a variable's uses from the graph (S13
-    # V1; S13 V3 moves it under field_on) and validate_styles its bindings
-    # (S13 D4 moves the stylesheet's use checks into graph/use_checks).
+    # V1); S13 V3 moves it under field_on. (S13 D4 moved the stylesheet's use
+    # checks into graph/use_checks and gave DocumentType a per-file
+    # validate_file that takes no graph.)
     ("engine/editor/documents/mns_document.h", "editor/graph/asset_graph.h"),
 }
 

@@ -1409,12 +1409,12 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 				}
 			}
 		}
-		// Any planar contact above the threshold halves speed. [orig: @0x47A66E..0x47A683]
+		// Any planar contact above the threshold halves speed. [orig: @0x47B19A..0x47B1A9]
 		if (any_contact && speed > 17580)
 			m.speed >>= 1;
 	}
 
-	// ---- solve select [orig: the `!d_front && !d_rear` split @0x47A985].
+	// ---- solve select [orig: the `!d_front && !d_rear` split @0x47B32D..0x47B340].
 	int32_t up_z16 = static_cast<int32_t>(basis.up[2] * io::kFp16OneD);
 	const int32_t side_z16 = static_cast<int32_t>(basis.side[2] * io::kFp16OneD);
     // [orig: Entity_ProcessLightVehiclePhysics @ 0x479600]
@@ -1474,8 +1474,8 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		// Witness sites: [orig: @0x47AA13, @0x47AC84]
 		m.light_rear_contact_ticks = 0;
 		m.grounded = false;
-        world.vehicles.suspension_airborne_loop(veh, traits, 2, kSinkGrowthBike,
-                                         corner_adj);
+        world.vehicles.suspension_bike_airborne_loop(veh, traits, basis.q22.m[8] >> 6,
+                                                     corner_adj);
         if ((m.crashed && m.byte_2ef) || m.settle_2f0) {
             int32_t depth = -1;
             if (m.crashed || up_z16 < 0)
@@ -1561,7 +1561,7 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
     // Z select: crashed/no-up/parked ride the latch machine; the live leg
     // clamps slideDecay non-positive and adopts the fit Z — the mean of the
     // two lifted wheel corners [orig: `slideDecay = min(slideDecay, 0);
-    // Position.Z = out.z` @0x47AF52..0x47AF60; out.z = (c0.z + c1.z) * 0.5
+    // Position.Z = out.z` @0x47BC20..0x47BC3A; out.z = (c0.z + c1.z) * 0.5
     // via flt_7C3B94].
     if (m.crashed == 0 && m.settle_2f0 == 0 && up_z16 > 0) {
         if (m.slide_z > 0) m.slide_z = 0;
@@ -1571,10 +1571,10 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
         pz = io::bam_add(pz, crash_depth);
     }
     // Both-wheel landing absorbs half the fall [orig: `if (d0 && d1 &&
-    // slideDecay < 0) slideDecay -= slideDecay >> 1` @0x47B0F1..0x47B103].
+    // slideDecay < 0) slideDecay -= slideDecay >> 1` @0x47BD68..0x47BD78].
     if (d[0] != 0 && d[1] != 0 && m.slide_z < 0)
         m.slide_z -= m.slide_z >> 1;
-    // ---- the contact byte [orig: @0x47A4CC..0x47A52B]: up.z > 4096, the
+    // ---- the contact byte [orig: @0x47A8FB..0x47A94E]: up.z > 4096, the
     // lean bound |right.z| < 40960, REAR wheel contact, and a rear-contact
     // run longer than one tick [orig: the +1 @0x47B739-region, reset in the
     // both-wheels-off branch; `|entity[1].pad_040[8]| <= 1` kills the byte].
