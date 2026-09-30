@@ -139,6 +139,7 @@ int main() {
 	{
 		cs.breath_samples = 40;
 		cs.breathtime = 25;
+		cs.spawn_success_gate = true; // the folded round-over latch
 		const BreathBarFacts j = breath_bar_facts(joiner);
 		CHECK(j.samples == 40 && j.breath_time == 25 && j.spawn_success_gate);
 		ClientRuntime host_runtime("host-breath");

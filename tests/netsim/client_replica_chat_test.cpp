@@ -113,6 +113,20 @@ int main() {
 	host_owned->apply(s2c::GAME_RESET, {});
 	CHECK(!host_owned->state().round_reset_hold);
 
+	// THE ROUND-OVER LATCH (g_SpawnSuccessGate): a client's 0x25 raises it,
+	// the authority's does not; a 0x1D header raises it even when its body
+	// does not parse; only a mission start lowers it [orig:
+	// NapiNPClientMsg_GameReset @0x422849; NapiNPClientMsg_0x01D @0x430858;
+	// Game_StartMission @0x524a1f].
+	CHECK(view.state().spawn_success_gate); // the 0x25 above
+	CHECK(!host_owned->state().spawn_success_gate);
+	view.begin_mission();
+	CHECK(!view.state().spawn_success_gate);
+	view.apply(s2c::END_ROUND_HEADER, {});
+	CHECK(view.state().spawn_success_gate);
+	view.begin_mission();
+	CHECK(!view.state().spawn_success_gate);
+
 	// THE SENDER GATE: an active slot whose chat is muted (+50 bit 1), or a
 	// spectator slot while the spawn gate is down, drops the line; an unbound
 	// slot never gates [orig: Chat_DispatchToChannel @0x42b91e..0x42b943].
@@ -129,7 +143,7 @@ int main() {
 		std::vector<ClientChatLine> gated = g.drain_chat_lines();
 		CHECK(gated.size() == 1 && gated[0].text == "unbound");
 		g.state().roster[4].radio_mute_flags = 1; // the voice bit does not gate chat
-		g.state().end_round.header_known = true;  // the spawn gate up
+		g.state().spawn_success_gate = true;      // the spawn gate up
 		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 4, "voice-muted"));
 		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 5, "spectating"));
 		gated = g.drain_chat_lines();

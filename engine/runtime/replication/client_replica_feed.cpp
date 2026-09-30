@@ -132,7 +132,7 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 	// !g_SpawnSuccessGate].
 	const ClientRosterSlot &sender = state_.roster[rec.sender_slot];
 	if (sender.bound && ((sender.radio_mute_flags & 2u) != 0 ||
-			(sender.spectator && !state_.end_round.header_known)))
+			(sender.spectator && !state_.spawn_success_gate)))
 		return;
 	ClientChatLine line;
 	line.channel = rec.channel;

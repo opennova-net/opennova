@@ -969,6 +969,14 @@ struct ClientState {
 	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
 	// @0x49b9ad].
 	bool round_reset_hold = false;
+	// The round-over latch (g_SpawnSuccessGate): a client raises it on the
+	// 0x1D header ahead of its parse and on S2C 0x25; the authority's own
+	// round end raises it beside the 0x1D it broadcasts; only a mission start
+	// lowers it (ClientReplicaPipeline::begin_mission). The talk keys, the
+	// chat senders and the sender gate, the breath bar and the Esc chain
+	// read it. [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset
+	// @0x422849; Server_ProcessRoundEnd @0x5168e4; Game_StartMission @0x524a1f]
+	bool spawn_success_gate = false;
 	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
 	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),

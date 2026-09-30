@@ -268,6 +268,10 @@ public:
 	// A ring line the client raises itself (the CMAP go code) takes the next
 	// dispatch stamp, so it lands after every line already dispatched.
 	uint32_t claim_feed_order() { return next_feed_order_++; }
+	// A mission start lowers the round-over latch; a joiner's runtime lives
+	// across its round-cycle reloads, so each load calls this
+	// [orig: Game_StartMission @0x524a1f].
+	void begin_mission() { state_.spawn_success_gate = false; }
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns

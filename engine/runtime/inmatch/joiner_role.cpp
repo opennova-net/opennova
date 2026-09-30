@@ -95,6 +95,7 @@ bool JoinerRole::bring_up() {
 		reset_for_runtime_rebuild();
 	}
 	runtime->set_world_ready(true);
+	runtime->view().begin_mission();
 	reset_for_load(runtime->deployment_release_revision());
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
 	return rebuild;
@@ -733,15 +734,14 @@ void JoinerRole::pump() {
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
 	apply_weather_sample();
-	// A folded S2C 0x1D raises this client's round-over gate before the
-	// frame's entity update, which the gate then holds; a fresh runtime (a
-	// reset counter) latches nothing.
-	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
-	//  @0x430858; Game_ProcessMainFrame -- the is_in_session /
-	//  g_SpawnSuccessGate tests @0x526734..0x526742]
-	const uint32_t end_round_headers = rt.state().end_round.header_updates;
-	if (end_round_headers > end_round_headers_seen_) world.match.latch_round_over();
-	end_round_headers_seen_ = end_round_headers;
+	// The client's folded round-over latch (a 0x1D header or a 0x25) raises
+	// the world's gate before the frame's entity update, which the gate then
+	// holds; a mission start lowers both (ClientReplicaPipeline::begin_mission
+	// beside the load's fresh Match).
+	// [orig: g_SpawnSuccessGate — NapiNPClientMsg_0x01D @0x430858,
+	//  NapiNPClientMsg_GameReset @0x422849; Game_ProcessMainFrame -- the
+	//  is_in_session / g_SpawnSuccessGate tests @0x526734..0x526742]
+	if (rt.state().spawn_success_gate) world.match.latch_round_over();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
 	const bool preround_active = world.preround_delay_seconds != 0;

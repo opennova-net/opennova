@@ -1693,6 +1693,8 @@ public:
 	// C2S 0x0D send (ClientRuntime::queue_chat_message) and the crew key's
 	// denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
+	// The round-over latch every role's world holds (world::MatchOutcome::ended).
+	bool is_round_over() const;
 	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
 	void raise_chat_denied_sound();
 	// Substitute actor names into a canned template (engine: runtime/replication/client_replica_feed.cpp): the STRCND48 bonus re-compose when `extra` names the local

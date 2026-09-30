@@ -266,10 +266,15 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		apply_player_list(body);
 		break;
 	case s2c::GAME_RESET:
-		// A client raises the talk keys' reset hold until the next 0x0F; the
-		// authority's arm only counts [orig: NapiNPClientMsg_GameReset @0x422800
-		// — the is_authority test @0x422803, `dword_24C195C = 1` @0x42284e].
-		if (!authority_recipient_) state_.round_reset_hold = true;
+		// A client raises the talk keys' reset hold until the next 0x0F and
+		// the round-over latch; the authority's arm only counts
+		// [orig: NapiNPClientMsg_GameReset @0x422800 — the is_authority test
+		// @0x422803, `g_SpawnSuccessGate = 1` @0x422849, `dword_24C195C = 1`
+		// @0x42284e].
+		if (!authority_recipient_) {
+			state_.round_reset_hold = true;
+			state_.spawn_success_gate = true;
+		}
 		break;
 	case s2c::CLAN_ROSTER: // the NovaWorld clan registry (0x6A)
 		apply_clan_roster(body);

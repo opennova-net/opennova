@@ -550,7 +550,7 @@ hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::stri
 	// latch the folded 0x1D header raises [orig: @0x49A868 / @0x49A7A8;
 	// @0x49A931 / @0x49A6E1 / @0x49AA81 / @0x49ACA1 / @0x49ABD1].
 	const bool death_screen = view_.state().death_screen_active;
-	const bool spawn_gate = view_.state().end_round.header_known;
+	const bool spawn_gate = view_.state().spawn_success_gate;
 	if ((channel == 13 || channel == 11) ? death_screen : (death_screen && !spawn_gate))
 		return Result::Refused;
 	if (text.empty()) return Result::Refused; // [orig: `message && *message`]

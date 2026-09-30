@@ -1027,7 +1027,9 @@ func handle_page_key(forward: bool) -> bool:
 func handle_escape() -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	var in_session := sim != null and sim.is_mp_session()
-	var events := _toggles.escape(in_session, false)
+	# The round-over latch: out of a session it makes Esc a no-op (the
+	# engine's hud_toggles_escape carries the witness).
+	var events := _toggles.escape(in_session, sim != null and sim.is_round_over())
 	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
 		sim.request_hud_map_close()
 	_apply_toggle_events(events)

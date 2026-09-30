@@ -111,6 +111,10 @@ Ref<ScoreFeedback> Simulation::take_score_feedback() {
 	return out;
 }
 
+bool Simulation::is_round_over() const {
+	return kernel_ != nullptr && kernel_->world.match.outcome().ended;
+}
+
 opennova::hud::ChatEntryFacts Simulation::chat_entry_facts(uint32_t p_frame) const {
 	// The NovaWorld network type (hud::ChatEntryFacts::novaworld): the
 	// authority's own transport mode, or the network type the joiner's join

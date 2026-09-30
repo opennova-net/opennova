@@ -160,6 +160,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);
+	ClassDB::bind_method(D_METHOD("is_round_over"), &Simulation::is_round_over);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
