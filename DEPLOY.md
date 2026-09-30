@@ -168,6 +168,29 @@ them without credentials. Then:
 from the vault into a tmpfs, and drives the remote docker engine over
 `DOCKER_HOST=ssh://`. The host never needs anything but docker and sshd.
 
+### The web build (game.<domain>)
+
+The browser build of the game (ADR 0049) is a third image,
+`ghcr.io/<owner>/opennova-game`, published by `.github/workflows/game-web.yml`
+from `deploy/game/Dockerfile`: the wasm GDExtension, the Godot Web export and an
+nginx on `:8090` that sends the COOP/COEP headers the threaded build needs. The
+portal's nginx routes `game.<domain>` to it, `infra apply` creates the proxied
+`game` record, and the security group keeps `:8090` private. Make the
+`opennova-game` package public once, like the other two.
+
+It publishes on its own path filter, so `--tag` does not move it:
+
+```bash
+./deploy/run.sh app deploy --game-tag sha-abc1234   # pin the game image; default latest
+```
+
+To run it locally, from the repo root with the submodules checked out:
+
+```bash
+docker build -f deploy/game/Dockerfile -t opennova-game .
+docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
+```
+
 ## 6. Backups
 
 ```bash
