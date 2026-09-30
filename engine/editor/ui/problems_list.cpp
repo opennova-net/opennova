@@ -4,12 +4,14 @@
 #include <initializer_list>
 #include <utility>
 
+#include <base/io/json.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -38,13 +40,10 @@ std::string identity(const Diagnostic &d) {
 	return out;
 }
 
-// A fix's request as a press saw it, for its release to be on the same.
+// A fix's request as a press saw it, for its release to be on the same: its wire form, every
+// field its kind takes (S13 A4).
 std::string signature(const EditorRequest &request) {
-	std::string out = std::to_string(static_cast<int>(request.kind));
-	for (const std::string *part : {&request.path, &request.text}) out += '\x1f' + *part;
-	out += request.flag ? "\x1f+" : "\x1f-";
-	for (const std::string &name : request.names) out += '\x1f' + name;
-	return out;
+	return io::json_write(editor_request_to_json(request));
 }
 
 // The file a CreateMissing role makes: its requirement row's name.
@@ -256,7 +255,7 @@ ProblemsList::Proposal ProblemsList::propose(const SessionView &view,
 	std::vector<std::string> placeholders;
 	for (const EditorRequest &request : out.requests) {
 		if (request.kind == EditorRequestKind::CreateFile &&
-		    request.text == asset_kind_token(AssetKind::Texture))
+		    request.file_kind == asset_kind_token(AssetKind::Texture))
 			placeholders.push_back(request.path);
 		else
 			out.lines.push_back(describe(view, request));
@@ -280,12 +279,7 @@ bool ProblemsList::follow(const SessionView &view) {
 	if (shown_made_ == made_) return true;
 	Proposal now = propose(view, confirm_);
 	shown_made_ = made_;
-	const auto signatures = [](const Proposal &proposal) {
-		std::vector<std::string> out;
-		for (const EditorRequest &request : proposal.requests) out.push_back(signature(request));
-		return out;
-	};
-	if (now.lines != shown_.lines || signatures(now) != signatures(shown_)) {
+	if (now.lines != shown_.lines || now.requests != shown_.requests) {
 		shown_ = std::move(now);
 		++shown_version_;
 		shown_changed_ = true;
@@ -331,19 +325,19 @@ std::string ProblemsList::describe(const SessionView &view, const EditorRequest 
 	switch (request.kind) {
 	case EditorRequestKind::CreateMissing: {
 		std::vector<std::string> files;
-		for (const std::string &role : request.names) files.push_back(role_file(view, role));
+		for (const std::string &role : request.roles) files.push_back(role_file(view, role));
 		if (files.size() == 1)
 			return "Create " + files[0] +
 			       ". It starts as placeholder content, to replace with your own.";
 		return "Create " + counted(files.size(), "file") + ": " + joined(files, ", ") +
 		       ". They start as placeholder content, to replace with your own.";
 	}
-	case EditorRequestKind::PreviewRetailImport: {
-		const std::string needs = request.flag ? ", with the files they need" : "";
+	case EditorRequestKind::PreviewInstallImport: {
+		const std::string needs = request.with_dependencies ? ", with the files they need" : "";
 		if (request.names.size() == 1)
 			return "Import " + request.names[0] +
 			       " from the game data: the import dialog opens on it" +
-			       (request.flag ? ", with the files it needs." : ".");
+			       (request.with_dependencies ? ", with the files it needs." : ".");
 		return "Import " + counted(request.names.size(), "file") + " from the game data: " +
 		       joined(request.names, ", ") + ". The import dialog opens on them" + needs + ".";
 	}
@@ -356,8 +350,8 @@ std::string ProblemsList::describe(const SessionView &view, const EditorRequest 
 
 std::string ProblemsList::fix_all_label(const EditorRequest &request) {
 	switch (request.kind) {
-	case EditorRequestKind::CreateMissing: return "Create " + std::to_string(request.names.size());
-	case EditorRequestKind::PreviewRetailImport:
+	case EditorRequestKind::CreateMissing: return "Create " + std::to_string(request.roles.size());
+	case EditorRequestKind::PreviewInstallImport:
 		return "Import " + std::to_string(request.names.size()) + " from the game data...";
 	case EditorRequestKind::Reimport: return "Import " + basename_of(request.path) + " again";
 	case EditorRequestKind::Save: return "Rewrite " + basename_of(request.path);

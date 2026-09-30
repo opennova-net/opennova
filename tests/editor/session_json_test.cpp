@@ -27,6 +27,9 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_fields.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
@@ -74,13 +77,15 @@ const JsonValue *find_field(const JsonValue &record, const char *id) {
 } // namespace
 
 static int test_tokens() {
-	// Every kind to the enum's end has a token that reads back to it, and no two share one.
+	// Every kind to the enum's end has a token that reads back to it, and no two share one: its
+	// row's in the request table (S13 A4), which the wire reads.
 	for (int i = 0; i < static_cast<int>(EditorRequestKind::kCount); ++i) {
 		const auto kind = static_cast<EditorRequestKind>(i);
 		const std::string token = editor_request_kind_token(kind);
-		TEST_EXPECT(!token.empty());
+		TEST_EXPECT(!token.empty() && token == request_kind_row(kind).token && request_kind_row(kind).kind == kind);
 		EditorRequestKind back = EditorRequestKind::Rescan;
 		TEST_EXPECT(editor_request_kind_from_token(token, back) && back == kind);
+		TEST_EXPECT(request_kind_from_token(token, back) && back == kind);
 	}
 	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
 	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
@@ -134,6 +139,10 @@ static int test_tokens() {
 	TEST_EXPECT(!editor_request_kind_from_token("create_document", kind));
 	// Output's Clear (S11e).
 	TEST_EXPECT(editor_request_kind_from_token("clear_output", kind) && kind == EditorRequestKind::ClearOutput);
+	// The game install's import (S13 A4: preview_install_import, the retail token gone).
+	TEST_EXPECT(editor_request_kind_from_token("preview_install_import", kind) &&
+	            kind == EditorRequestKind::PreviewInstallImport);
+	TEST_EXPECT(!editor_request_kind_from_token("preview_retail_import", kind));
 	return 0;
 }
 
@@ -146,7 +155,7 @@ static int test_asset_kind_tokens() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Kinds"));
+	session.handle(request::new_project(dir.file("project"), "Kinds"));
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(!root.empty());
 	const std::pair<const char *, const char *> files[] = {
@@ -161,7 +170,7 @@ static int test_asset_kind_tokens() {
 	};
 	for (const auto &file : files)
 		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const JsonValue json = session_view_to_json(session.view());
 	for (const auto &file : files) {
 		const std::string name = std::filesystem::path(file.first).filename().string();
@@ -182,29 +191,31 @@ static int test_asset_kind_tokens() {
 }
 
 static int test_request_round_trip() {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, "menus/main.mnu");
-	request.edit.operation = EditOperation::Set;
-	request.edit.address = {7, 1, 9};
-	request.edit.field = "text";
-	request.edit.value = std::string("Hello");
-	request.edit.coalesce = true;
+	// An edit on one record: a batch of one (S13 A4: the single edit is edits of one).
+	Edit hello;
+	hello.address = {7, 1, 9};
+	hello.field = "text";
+	hello.value = std::string("Hello");
+	hello.coalesce = true;
+	const EditorRequest request = request::edit_record("menus/main.mnu", hello);
 	JsonValue parsed;
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(request)).c_str(), parsed));
 	EditorRequest back;
 	std::string error;
-	TEST_EXPECT(editor_request_from_json(parsed, back, error));
-	TEST_EXPECT(back.kind == EditorRequestKind::EditRecord && back.path == "menus/main.mnu");
-	TEST_EXPECT(back.edit.operation == EditOperation::Set && back.edit.address == request.edit.address);
-	TEST_EXPECT(back.edit.field == "text" && std::get<std::string>(back.edit.value) == "Hello" && back.edit.coalesce);
-	TEST_EXPECT(back.edit.position == SIZE_MAX && back.edit.parent == 0 && back.edit.gesture == 0 && back.edits.empty());
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == request);
+	TEST_EXPECT(back.kind == EditorRequestKind::EditRecord && back.path == "menus/main.mnu" && back.edits.size() == 1);
+	if (back.edits.size() != 1) return 1;
+	TEST_EXPECT(back.edits[0].operation == EditOperation::Set && back.edits[0].address == hello.address &&
+	            back.edits[0].field == "text" && std::get<std::string>(back.edits[0].value) == "Hello" &&
+	            back.edits[0].coalesce && back.edits[0].position == SIZE_MAX && back.edits[0].parent == 0 &&
+	            back.edits[0].gesture == 0);
 
 	// An owner, a gesture, a batch and a selection mode.
-	EditorRequest batch = make_request(EditorRequestKind::EditRecord, "menus/main.mnu");
-	batch.edit.operation = EditOperation::Move;
-	batch.edit.address = {7, 1, 9};
-	batch.edit.parent = 11;
-	batch.edit.position = 2;
-	Edit left, clear;
+	Edit move, left, clear;
+	move.operation = EditOperation::Move;
+	move.address = {7, 1, 9};
+	move.parent = 11;
+	move.position = 2;
 	left.address = {7, 1, 9};
 	left.field = "left";
 	left.value = int64_t(40);
@@ -213,119 +224,345 @@ static int test_request_round_trip() {
 	clear.address = {7, 1, 9};
 	clear.field = "right";
 	clear.gesture = 5;
-	batch.edits = {left, clear};
+	const EditorRequest batch = request::edit_record("menus/main.mnu", std::vector<Edit>{move, left, clear}, true);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(batch)).c_str(), parsed));
-	TEST_EXPECT(editor_request_from_json(parsed, back, error));
-	TEST_EXPECT(back.edit.operation == EditOperation::Move && back.edit.parent == 11 && back.edit.position == 2);
-	TEST_EXPECT(back.edits.size() == 2 && back.edits[0].field == "left" && std::get<int64_t>(back.edits[0].value) == 40 &&
-	            back.edits[0].gesture == 5 && back.edits[1].operation == EditOperation::Clear && back.edits[1].gesture == 5);
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, "menus/main.mnu");
-	select.edit.address = {7, 1, 9};
-	select.select_mode = SelectMode::Toggle;
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == batch && back.open_first);
+	TEST_EXPECT(back.edits.size() == 3 && back.edits[0].parent == 11 && back.edits[0].position == 2 &&
+	            back.edits[1].field == "left" && std::get<int64_t>(back.edits[1].value) == 40 && back.edits[1].gesture == 5 &&
+	            back.edits[2].operation == EditOperation::Clear && back.edits[2].gesture == 5);
+	const EditorRequest select = request::select_record("menus/main.mnu", {7, 1, 9}, SelectMode::Toggle);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(select)).c_str(), parsed));
-	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.select_mode == SelectMode::Toggle && back.edit.address == select.edit.address);
-	TEST_EXPECT(request_error("{\"kind\":\"paste\",\"edit\":{\"parent\":4,\"position\":1}}", back).empty());
-	TEST_EXPECT(back.kind == EditorRequestKind::Paste && back.edit.parent == 4 && back.edit.position == 1);
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.mode == SelectMode::Toggle && back.address == select.address);
+	// A Paste's place: its row, its owner and its index; none named, after the selection.
+	TEST_EXPECT(request_error("{\"kind\":\"paste\",\"paste_at\":{\"parent\":4,\"position\":1}}", back).empty());
+	TEST_EXPECT(back.kind == EditorRequestKind::Paste && back.paste_at.parent == 4 && back.paste_at.position == 1 &&
+	            back.paste_at.row == 0 && back.paste_at.named());
+	TEST_EXPECT(request_error("{\"kind\":\"paste\"}", back).empty() && !back.paste_at.named());
 	// A Go to (S12 D3): the document opened at a record by its locator, its field shown; the
 	// request by symbol it replaced is no token.
-	EditorRequest go_to = make_request(EditorRequestKind::OpenDocument, "gametext.bin", "1/string:0");
-	go_to.edit.field = "key";
+	const EditorRequest go_to = request::open_document("gametext.bin", "1/string:0", "key");
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(go_to)).c_str(), parsed));
 	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.kind == EditorRequestKind::OpenDocument &&
-	            back.path == "gametext.bin" && back.text == "1/string:0" && back.edit.field == "key");
+	            back.path == "gametext.bin" && back.locator == "1/string:0" && back.field == "key" && back == go_to);
 	EditorRequestKind gone = EditorRequestKind::Rescan;
 	TEST_EXPECT(!editor_request_kind_from_token("go_to_record", gone));
 
-	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
-	import.flag = true;
-	import.imports = {{"C:/data/localres.pff", "MAIN.MNU"}, {"C:/data/loose.txt", ""}};
 	ImportSource native; // a loose file copied as the game's own (S11f)
 	native.path = "C:/data/logo.png";
 	native.native = true;
-	import.imports.push_back(native);
-	import.paths = {"C:/data/localres.pff"};
+	ImportSource install; // a file of the game install (S13 A4: install, was retail)
+	install.path = "C:/games/JO";
+	install.entry = "main.mnu";
+	install.install = true;
+	const EditorRequest import = request::import_files(
+	        {{"C:/data/localres.pff", "MAIN.MNU"}, {"C:/data/loose.txt", ""}, native, install}, true);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(import)).c_str(), parsed));
-	TEST_EXPECT(editor_request_from_json(parsed, back, error));
-	TEST_EXPECT(back.kind == EditorRequestKind::ImportFiles && back.flag && back.paths == import.paths);
-	TEST_EXPECT(back.imports.size() == 3 && back.imports[0].entry == "MAIN.MNU" && back.imports[1].entry.empty());
-	TEST_EXPECT(!back.imports[0].native && !back.imports[1].native && back.imports[2].native && !back.imports[2].retail);
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == import);
+	TEST_EXPECT(back.kind == EditorRequestKind::ImportFiles && back.replace && back.imports.size() == 4 &&
+	            back.imports[0].entry == "MAIN.MNU" && back.imports[1].entry.empty());
+	TEST_EXPECT(!back.imports[0].native && !back.imports[1].native && back.imports[2].native && !back.imports[2].install &&
+	            back.imports[3].install);
+	const JsonValue *sources = parsed.get("imports");
+	TEST_EXPECT(sources && sources->array.size() == 4 && sources->array[3].get_bool("install", false) &&
+	            !sources->array[3].get("retail"));
 	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"native\":1}]}", back).find("native") !=
 	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"path\":\"x\",\"retail\":true}]}", back).find("retail") !=
+	            std::string::npos);
 
-	EditorRequest pick = make_request(EditorRequestKind::PickFile);
-	pick.purpose = PickPurpose::RuntimeExecutable;
+	const EditorRequest pick = request::pick_file(PickPurpose::RuntimeExecutable);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(pick)).c_str(), parsed));
 	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.purpose == PickPurpose::RuntimeExecutable);
+	// The game install's pick (S13 A4: game_install, was retail_directory).
+	TEST_EXPECT(std::string(pick_purpose_token(PickPurpose::GameInstall)) == "game_install");
+	TEST_EXPECT(request_error("{\"kind\":\"pick_directory\",\"purpose\":\"retail_directory\"}", back).find("retail_directory") !=
+	            std::string::npos);
 
 	// The request of every kind of fix (problem_fixes.h) reads back as it was written, and a
 	// fix's JSON carries it.
-	EditorRequest create = make_request(EditorRequestKind::CreateMissing);
-	create.names = {"main_menu", "gametext"};
-	EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
-	listed.names = {"MAIN.MNU"};
-	listed.flag = true; // with the files it needs (S11g)
-	EditorRequest again = make_request(EditorRequestKind::Reimport, "art/logo.png");
-	again.flag = true;
-	const EditorRequest fixes[] = {create, listed, make_request(EditorRequestKind::AssignRequirement, "menus/a.mnu", "main_menu"),
-	                               make_request(EditorRequestKind::CreateFile, "Arial99.fnt", "font"), again,
-	                               make_request(EditorRequestKind::Save, "defs/items.def")};
+	const EditorRequest create = request::create_missing({"main_menu", "gametext"});
+	const EditorRequest fixes[] = {create,
+	                               request::preview_install_import({"MAIN.MNU"}, true), // with the files it needs (S11g)
+	                               request::assign_requirement("main_menu", "menus/a.mnu"),
+	                               request::create_file("Arial99.fnt", "font"),
+	                               request::reimport("art/logo.png", true),
+	                               request::save("defs/items.def"),
+	                               request::show_in_files("strings/other.bin", true),
+	                               request::reload_document("defs/items.def"),
+	                               request::open_record("defs/items.def", {4, 2, 0}, "type")};
 	for (const EditorRequest &fix : fixes) {
 		TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(fix)).c_str(), parsed));
 		EditorRequest read;
-		TEST_EXPECT(editor_request_from_json(parsed, read, error));
-		TEST_EXPECT(read.kind == fix.kind && read.path == fix.path && read.text == fix.text && read.flag == fix.flag &&
-		            read.names == fix.names);
+		TEST_EXPECT(editor_request_from_json(parsed, read, error) && read == fix);
 	}
 	const JsonValue fix_json = problem_fix_to_json(ProblemFix{"Create main.mnu", "Creates the startup screen.", create, true});
 	TEST_EXPECT(fix_json.get_string("label", "") == "Create main.mnu" && fix_json.get_bool("bulk", false) &&
 	            fix_json.get_string("detail", "") == "Creates the startup screen." && fix_json.get("request") != nullptr);
-	if (const JsonValue *request = fix_json.get("request"))
-		TEST_EXPECT(editor_request_from_json(*request, back, error) && back.kind == EditorRequestKind::CreateMissing &&
-		            back.names == create.names);
-	TEST_EXPECT(request_error("{\"kind\":\"create_missing\",\"names\":\"main_menu\"}", back).find("names") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"create_missing\",\"names\":[3]}", back).find("names") != std::string::npos);
+	if (const JsonValue *fix_request = fix_json.get("request"))
+		TEST_EXPECT(editor_request_from_json(*fix_request, back, error) && back.kind == EditorRequestKind::CreateMissing &&
+		            back.roles == create.roles && fix_request->get("roles") && !fix_request->get("names"));
+	TEST_EXPECT(request_error("{\"kind\":\"create_missing\",\"roles\":\"main_menu\"}", back).find("roles") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"create_missing\",\"roles\":[3]}", back).find("roles") != std::string::npos);
 
-	EditorRequest resolve = make_request(EditorRequestKind::ResolveUnsaved);
-	resolve.unsaved_choice = UnsavedChoice::Discard;
+	const EditorRequest resolve = request::resolve_unsaved(UnsavedChoice::Discard);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(resolve)).c_str(), parsed));
-	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.unsaved_choice == UnsavedChoice::Discard);
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.choice == UnsavedChoice::Discard);
 	// The prompt's Save writes exactly the files it lists: "save" (no longer "save_all").
 	TEST_EXPECT(std::string(unsaved_choice_token(UnsavedChoice::Save)) == "save");
-	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back).empty() &&
-	            back.unsaved_choice == UnsavedChoice::Save);
-	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save_all\"}", back).find("save_all") !=
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"save\"}", back).empty() &&
+	            back.choice == UnsavedChoice::Save);
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"save_all\"}", back).find("save_all") !=
 	            std::string::npos);
+	// A Cancel is written too: a kind that must carry a field writes it at its default.
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(request::resolve_unsaved(UnsavedChoice::Cancel))).c_str(),
+	                  parsed) &&
+	            parsed.get_string("choice", "") == "cancel");
 
 	// Numbers: a whole number is an integer value, a fraction a real, a bool 0 / 1.
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"row\":3,\"field\":\"hp\",\"value\":40}}", back).empty());
-	TEST_EXPECT(std::get<int64_t>(back.edit.value) == 40 && back.edit.address.row == 3);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"row\":3,\"value\":2.5}}", back).empty());
-	TEST_EXPECT(std::get<double>(back.edit.value) == 2.5);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"row\":3,\"value\":true}}", back).empty());
-	TEST_EXPECT(std::get<int64_t>(back.edit.value) == 1);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"move\",\"row\":3,\"kind\":1,\"child\":4,\"position\":0}}", back).empty());
-	TEST_EXPECT(back.edit.operation == EditOperation::Move && back.edit.position == 0 && back.edit.address.child == 4);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":3,\"field\":\"hp\",\"value\":40}]}", back).empty());
+	TEST_EXPECT(back.edits.size() == 1 && std::get<int64_t>(back.edits[0].value) == 40 && back.edits[0].address.row == 3);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":3,\"value\":2.5}]}", back).empty());
+	TEST_EXPECT(back.edits.size() == 1 && std::get<double>(back.edits[0].value) == 2.5);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":3,\"value\":true}]}", back).empty());
+	TEST_EXPECT(back.edits.size() == 1 && std::get<int64_t>(back.edits[0].value) == 1);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"move\",\"row\":3,\"kind\":1,\"child\":4,"
+	                          "\"position\":0}]}",
+	                          back)
+	                    .empty());
+	TEST_EXPECT(back.edits.size() == 1 && back.edits[0].operation == EditOperation::Move && back.edits[0].position == 0 &&
+	            back.edits[0].address.child == 4);
 	TEST_EXPECT(request_error("{\"kind\":\"build\"}", back).empty() && back.kind == EditorRequestKind::Build);
 
-	// Refusals name what is wrong.
+	// Refusals name what is wrong: the fields S13 A4 retired name nothing, a field the kind does
+	// not take is refused naming what it takes, and one it must carry is refused left out.
 	TEST_EXPECT(request_error("[\"build\"]", back).find("object") != std::string::npos);
 	TEST_EXPECT(request_error("{\"path\":\"x\"}", back).find("kind") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":5}", back).find("kind") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"nope\"}", back).find("nope") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back).find("flagg") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flag\":\"yes\"}", back).find("flag") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"row\":-1}}", back).find("row") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"teleport\"}}", back).find("teleport") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"value\":[1]}}", back).find("value") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"rows\":1}}", back).find("rows") != std::string::npos);
+	for (const char *retired : {"text", "flag", "edit", "unsaved_choice"}) {
+		const std::string json = std::string("{\"kind\":\"save\",\"") + retired + "\":true}";
+		TEST_EXPECT(request_error(json.c_str(), back).find(std::string("Unknown request member \"") + retired) !=
+		            std::string::npos);
+	}
+	// A retired member's refusal names what the kind takes: where its field went.
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
+			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
+			"Unknown request member \"text\" (new_project takes dir, title).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
+			"Unknown request member \"flagg\" (build takes nothing).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes nothing).");
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
+	            "open_project takes no \"path\" (it takes dir).");
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) == "open_project needs \"dir\" (it takes dir).");
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\"}", back).find("needs \"new_name\"") !=
+	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"save\",\"path\":3}", back).find("path") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":-1}]}", back).find("row") != std::string::npos);
+	// An edit's refusal names it by its place in `edits`.
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":1},3]}", back) ==
+			"\"edits[1]\" must be an object.");
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"row\":1},{\"row\":-1}]}",
+						back) == "edits[1]: \"row\" must be a record identity.");
+	TEST_EXPECT(request_error("{\"kind\":\"revert_to_saved\",\"edits\":[{\"rows\":1}]}", back) ==
+			"Unknown edits[0] member \"rows\".");
+	// A new name sent as a whole number (an item id) is its digits; a fraction names nothing.
+	const char *numbered = "{\"kind\":\"rename_symbol\",\"path\":\"items.def\",\"locator\":\"L\","
+						   "\"field\":\"id\",\"new_name\":100302}";
+	TEST_EXPECT(request_error(numbered, back).empty() && back.new_name == "100302");
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\",\"new_name\":2.5}",
+						back) == "\"new_name\" must be a string or a whole number.");
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"teleport\"}]}", back).find("teleport") !=
+	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"value\":[1]}]}", back).find("value") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"rows\":1}]}", back).find("rows") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"pick_file\",\"purpose\":\"anything\"}", back).find("anything") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"import_files\",\"imports\":[{\"entry\":\"X\"}]}", back).find("path") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"later\"}", back).find("later") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"mode\":\"extend\"}", back).find("extend") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"gesture\":-2}}", back).find("gesture") != std::string::npos);
-	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"parent\":\"x\"}}", back).find("parent") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"later\"}", back).find("later") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"mode\":\"extend\"}", back).find("extend") !=
+	            std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"rows\":1}}", back).find("rows") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"paste\",\"paste_at\":{\"parent\":\"x\"}}", back).find("parent") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"gesture\":-2}]}", back).find("gesture") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"parent\":\"x\"}]}", back).find("parent") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":{\"row\":1}}", back).find("edits") != std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"fold\"}]}", back).find("fold") != std::string::npos);
+	return 0;
+}
+
+// A sample request of `kind`: every field its row takes set away from its default, each field
+// by its own sample (S13 A4). A field added to the struct without a sample here, or a kind
+// whose row takes it, fails test_request_table_samples.
+static EditorRequest table_sample(EditorRequestKind kind) {
+	using F = RequestFieldId;
+	EditorRequest out = request::of(kind);
+	const RequestParams &params = request_kind_row(kind).params;
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<F>(i);
+		if (!params.has(id)) continue;
+		switch (id) {
+		case F::Dir: out.dir = "C:/mods/Sample"; break;
+		case F::Title: out.title = "Sample"; break;
+		case F::Path: out.path = "menus/main.mnu"; break;
+		case F::Locator: out.locator = "0/window:1"; break;
+		case F::Field: out.field = "name"; break;
+		case F::NewName: out.new_name = "RENAMED"; break;
+		case F::Role: out.role = "main_menu"; break;
+		case F::FileKind: out.file_kind = "menu"; break;
+		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
+		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
+		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
+		case F::Imports: {
+			ImportSource install;
+			install.path = "C:/games/JO";
+			install.entry = "items.def";
+			install.install = true;
+			ImportSource native;
+			native.path = "C:/art/logo.png";
+			native.native = true;
+			out.imports = {{"C:/data/localres.pff", "MAIN.MNU"}, install, native};
+			break;
+		}
+		case F::Edits: {
+			Edit set, move, real, add;
+			set.address = {7, 1, 9};
+			set.field = "position.left";
+			set.value = int64_t(40);
+			set.gesture = 5;
+			set.coalesce = true;
+			move.operation = EditOperation::Move;
+			move.address = {7, 1, 9};
+			move.parent = 11;
+			move.position = 2;
+			real.address = {7, 1, 9};
+			real.field = "reach";
+			real.value = 2.5;
+			add.operation = EditOperation::Add;
+			add.address = {0, 1, 0};
+			add.parent = 3;
+			add.field = "name";
+			add.value = std::string("HELLO");
+			out.edits = {set, move, real, add};
+			break;
+		}
+		case F::Address: out.address = {7, 1, 9}; break;
+		case F::PasteAt: out.paste_at = PasteAt{3, 4, 1}; break;
+		case F::Mode: out.mode = SelectMode::Toggle; break;
+		case F::Choice: out.choice = UnsavedChoice::Discard; break;
+		case F::Settings:
+			out.settings.serial = 3;
+			out.settings.title = "Harbor";
+			out.settings.game_install = "C:/games/JO";
+			out.settings.play_in_install = true;
+			break;
+		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
+		case F::WithDependencies: out.with_dependencies = true; break;
+		case F::Replace: out.replace = true; break;
+		case F::Force: out.force = true; break;
+		case F::AskName: out.ask_name = true; break;
+		case F::OpenFirst: out.open_first = true; break;
+		case F::kCount: break;
+		}
+	}
+	return out;
+}
+
+// The request table on the wire (S13 A4). Every field has a row of its own with a token and a
+// doc, and some kind takes it. For every kind: the sample the table makes writes "kind" and
+// exactly the fields its row takes, each by its token, and reads back equal; the sample with a
+// field its row does not take added (as another kind's sample writes it) is refused naming the
+// field; and with a field its row must carry left out, refused naming it.
+static int test_request_table_samples() {
+	RequestFieldSet taken = 0;
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<RequestFieldId>(i);
+		const RequestField &row = request_field(id);
+		RequestFieldId back = RequestFieldId::kCount;
+		TEST_EXPECT(row.id == id && *row.token && *row.doc && request_field_from_token(row.token, back) && back == id);
+	}
+	for (size_t k = 0; k < kEditorRequestKindCount; ++k)
+		taken |= request_kind_row(static_cast<EditorRequestKind>(k)).params.takes;
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<RequestFieldId>(i);
+		if (!(taken & field_bit(id))) std::fprintf(stderr, "no request kind takes %s\n", request_field(id).token);
+		TEST_EXPECT((taken & field_bit(id)) != 0);
+	}
+	RequestFieldId none = RequestFieldId::Dir;
+	TEST_EXPECT(!request_field_from_token("kind", none) && !request_field_from_token("text", none) &&
+	            !request_field_from_token("flag", none) && !request_field_from_token("edit", none));
+
+	// Each field's value as a sample of a kind that takes it writes it.
+	std::vector<JsonValue> sample_values(kRequestFieldCount);
+	for (size_t k = 0; k < kEditorRequestKindCount; ++k) {
+		const JsonValue json = editor_request_to_json(table_sample(static_cast<EditorRequestKind>(k)));
+		for (const opennova::io::JsonMember &member : json.object) {
+			RequestFieldId id = RequestFieldId::Dir;
+			if (request_field_from_token(member.key, id)) sample_values[static_cast<size_t>(id)] = member.value;
+		}
+	}
+	size_t refused_outside = 0, refused_missing = 0;
+	for (size_t k = 0; k < kEditorRequestKindCount; ++k) {
+		const auto kind = static_cast<EditorRequestKind>(k);
+		const RequestKindRow &row = request_kind_row(kind);
+		const EditorRequest sample = table_sample(kind);
+		const JsonValue json = editor_request_to_json(sample);
+		// "kind" and exactly the fields the row takes.
+		TEST_EXPECT(json.get_string("kind", "") == row.token);
+		size_t members = 0;
+		for (const opennova::io::JsonMember &member : json.object) {
+			if (member.key == "kind") continue;
+			RequestFieldId id = RequestFieldId::Dir;
+			const bool known = request_field_from_token(member.key, id);
+			TEST_EXPECT(known && row.params.has(id));
+			++members;
+		}
+		size_t takes = 0;
+		for (size_t i = 0; i < kRequestFieldCount; ++i) {
+			const auto id = static_cast<RequestFieldId>(i);
+			if (!row.params.has(id)) continue;
+			++takes;
+			if (!json.get(request_field(id).token))
+				std::fprintf(stderr, "%s's sample writes no %s\n", row.token, request_field(id).token);
+			TEST_EXPECT(json.get(request_field(id).token) != nullptr);
+		}
+		TEST_EXPECT(members == takes);
+		// Read back, through the text, equal.
+		JsonValue parsed;
+		EditorRequest back;
+		std::string error;
+		const bool read =
+		        parse(opennova::io::json_write(json).c_str(), parsed) && editor_request_from_json(parsed, back, error);
+		if (!read || !(back == sample))
+			std::fprintf(stderr, "%s's sample does not read back: %s\n", row.token, error.c_str());
+		TEST_EXPECT(read && back == sample);
+		// A field the row does not take, refused naming it.
+		for (size_t i = 0; i < kRequestFieldCount; ++i) {
+			const auto id = static_cast<RequestFieldId>(i);
+			if (row.params.has(id)) continue;
+			JsonValue outside = json;
+			outside.set(request_field(id).token, sample_values[i]);
+			EditorRequest kept = back;
+			const bool read = editor_request_from_json(outside, kept, error);
+			TEST_EXPECT(!read && kept == back &&
+			            error.find(std::string("takes no \"") + request_field(id).token + "\"") != std::string::npos);
+			++refused_outside;
+		}
+		// A field the row must carry, left out: refused naming it.
+		for (size_t i = 0; i < kRequestFieldCount; ++i) {
+			const auto id = static_cast<RequestFieldId>(i);
+			if (!row.params.needs(id)) continue;
+			JsonValue missing = JsonValue::make_object();
+			for (const opennova::io::JsonMember &member : json.object)
+				if (member.key != request_field(id).token) missing.set(member.key, member.value);
+			TEST_EXPECT(!editor_request_from_json(missing, back, error) &&
+			            error.find(std::string("needs \"") + request_field(id).token + "\"") != std::string::npos);
+			++refused_missing;
+		}
+	}
+	TEST_EXPECT(refused_outside > kEditorRequestKindCount && refused_missing > 0);
+	std::printf("request table: %zu kinds, %zu fields, %zu refused outside their kind's set, %zu refused left out\n",
+	            kEditorRequestKindCount, kRequestFieldCount, refused_outside, refused_missing);
 	return 0;
 }
 
@@ -337,16 +574,17 @@ static int test_request_round_trip() {
 static int test_settings_json() {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
 	TEST_EXPECT(editor_request_kind_from_token("apply_project_settings", kind) && kind == EditorRequestKind::ApplyProjectSettings);
-	for (const char *gone : {"set_title", "set_feature", "set_runtime_executable", "set_retail_directory", "set_play_retail"})
+	for (const char *gone : {"set_title", "set_feature", "set_runtime_executable", "set_game_install", "set_play_retail"})
 		TEST_EXPECT(!editor_request_kind_from_token(gone, kind));
-	EditorRequest all = make_request(EditorRequestKind::ApplyProjectSettings);
-	all.settings.serial = 12;
-	all.settings.title = "Harbor";
-	all.settings.mission = true;
-	all.settings.multiplayer = false;
-	all.settings.retail_directory = "C:/games/Joint Operations";
-	all.settings.runtime_executable = "";
-	all.settings.play_retail = true;
+	ProjectSettingsChange every;
+	every.serial = 12;
+	every.title = "Harbor";
+	every.mission = true;
+	every.multiplayer = false;
+	every.game_install = "C:/games/Joint Operations";
+	every.runtime_executable = "";
+	every.play_in_install = true;
+	const EditorRequest all = request::apply_project_settings(every);
 	JsonValue parsed;
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(all)).c_str(), parsed));
 	EditorRequest back;
@@ -355,15 +593,24 @@ static int test_settings_json() {
 	const ProjectSettingsChange &read = back.settings;
 	TEST_EXPECT(read.serial == 12 && read.title == std::optional<std::string>("Harbor") && read.mission == std::optional<bool>(true) &&
 	            read.multiplayer == std::optional<bool>(false) &&
-	            read.retail_directory == std::optional<std::string>("C:/games/Joint Operations") &&
-	            read.runtime_executable == std::optional<std::string>("") && read.play_retail == std::optional<bool>(true));
+	            read.game_install == std::optional<std::string>("C:/games/Joint Operations") &&
+	            read.runtime_executable == std::optional<std::string>("") && read.play_in_install == std::optional<bool>(true));
+	const JsonValue *written = parsed.get("settings");
+	TEST_EXPECT(written && written->get("game_install") && written->get("play_in_install") &&
+	            !written->get("retail_directory") && !written->get("play_retail"));
 	// One setting named: the others are not set.
-	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_retail\":false}}", back).empty());
-	TEST_EXPECT(back.settings.play_retail == std::optional<bool>(false) && back.settings.serial == 0 && !back.settings.title &&
-	            !back.settings.mission && !back.settings.multiplayer && !back.settings.retail_directory &&
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"play_in_install\":false}}", back).empty());
+	TEST_EXPECT(back.settings.play_in_install == std::optional<bool>(false) && back.settings.serial == 0 && !back.settings.title &&
+	            !back.settings.mission && !back.settings.multiplayer && !back.settings.game_install &&
 	            !back.settings.runtime_executable);
-	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\"}", back).empty() && !back.settings.title &&
-	            !back.settings.play_retail);
+	// The settings must be named (an empty object sets nothing); the keys before S13 A4 name nothing.
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\"}", back).find("needs \"settings\"") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{}}", back).empty() && !back.settings.title &&
+	            !back.settings.play_in_install);
+	for (const char *retired : {"retail_directory", "play_retail"}) {
+		const std::string json = std::string("{\"kind\":\"apply_project_settings\",\"settings\":{\"") + retired + "\":true}}";
+		TEST_EXPECT(request_error(json.c_str(), back).find(retired) != std::string::npos);
+	}
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"titel\":\"X\"}}", back).find("titel") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"mission\":\"yes\"}}", back).find("mission") !=
@@ -384,7 +631,7 @@ static int test_settings_json() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	TEST_EXPECT(session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Settings")));
+	TEST_EXPECT(session.handle(request::new_project(dir.file("project"), "Settings")));
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":4,\"title\":\"Harbor\","
 	                          "\"runtime_executable\":\"C:/tools/opennova.exe\"}}",
 	                          back)
@@ -503,7 +750,7 @@ static int test_over_a_session() {
 	// New project through JSON: the checklist is unmet, every row listed.
 	const std::string root = dir.file("John Smith");
 	EditorRequest request;
-	TEST_EXPECT(request_error(("{\"kind\":\"new_project\",\"path\":\"" + root + "\",\"text\":\"John Smith\"}").c_str(), request).empty());
+	TEST_EXPECT(request_error(("{\"kind\":\"new_project\",\"dir\":\"" + root + "\",\"title\":\"John Smith\"}").c_str(), request).empty());
 	TEST_EXPECT(session.handle(request));
 	json = session_view_to_json(view);
 	const JsonValue *project = json.get("project");
@@ -553,7 +800,7 @@ static int test_over_a_session() {
 	// The fix's request, as the wire carries it, does what its label says.
 	std::string parse_error;
 	TEST_EXPECT(create_fix.get("request") && editor_request_from_json(*create_fix.get("request"), request, parse_error));
-	TEST_EXPECT(request.kind == EditorRequestKind::CreateMissing && request.names == std::vector<std::string>{"gameerr"});
+	TEST_EXPECT(request.kind == EditorRequestKind::CreateMissing && request.roles == std::vector<std::string>{"gameerr"});
 	TEST_EXPECT(session.handle(request) && session.outcome().done() && view.project.scan->find("gameerr.bin") != nullptr);
 	// A page, and the rows grouped by kind: one group, its title in plain words.
 	const JsonValue page = problems_to_json(view, answer_problems(errors_only, view), 1, 2, fix_cache);
@@ -582,7 +829,7 @@ static int test_over_a_session() {
 	for (const JsonValue &row : json.get("requirements")->get("rows")->array)
 		if (row.get_bool("required", false) && row.get_string("state", "") != "present")
 			roles += (roles.empty() ? "\"" : ",\"") + row.get_string("role", "") + "\"";
-	TEST_EXPECT(request_error(("{\"kind\":\"create_missing\",\"names\":[" + roles + "]}").c_str(), request).empty() &&
+	TEST_EXPECT(request_error(("{\"kind\":\"create_missing\",\"roles\":[" + roles + "]}").c_str(), request).empty() &&
 	            session.handle(request));
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	// Every file the scan lists, each with its kind and whether the editor opens it.
@@ -724,9 +971,9 @@ static int test_over_a_session() {
 			if (item.get_string("kind", "") == "reveal_record") out.push_back(item);
 		return out;
 	};
-	const std::string reveal = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"edit\":{\"row\":" +
+	const std::string reveal = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"address\":{\"row\":" +
 	                           std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
-	                           ",\"child\":" + std::to_string(title_address.child) + ",\"field\":\"string.value\"}}";
+	                           ",\"child\":" + std::to_string(title_address.child) + "},\"field\":\"string.value\"}";
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
 	std::vector<JsonValue> asked = reveals();
 	const JsonValue *asked_at = asked.size() == 1 ? asked[0].get("address") : nullptr;
@@ -744,7 +991,7 @@ static int test_over_a_session() {
 	asked = reveals();
 	TEST_EXPECT(asked.size() == 2 && asked[1].get_int("seq", 0) == asked[0].get_int("seq", 0) + 1 &&
 	            asked[1].get_string("field", "") == "string.value");
-	const std::string named = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"edit\":{\"row\":" +
+	const std::string named = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"address\":{\"row\":" +
 	                          std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
 	                          ",\"child\":" + std::to_string(title_address.child) + "}}";
 	TEST_EXPECT(request_error(named.c_str(), request).empty() && session.handle(request));
@@ -753,7 +1000,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(reveals().size() == 3);
 	// Files asked to show a file and ask its new name (a Problems row, a Rename... fix): a
 	// RevealFile event naming the file, its flag the rename, and the request writes back as read.
-	TEST_EXPECT(request_error("{\"kind\":\"show_in_files\",\"path\":\"main.mnu\",\"flag\":true}", request).empty() &&
+	TEST_EXPECT(request_error("{\"kind\":\"show_in_files\",\"path\":\"main.mnu\",\"ask_name\":true}", request).empty() &&
 	            session.handle(request));
 	const JsonValue shown = session_view_to_json(view);
 	const JsonValue *items = shown.get("events") ? shown.get("events")->get("items") : nullptr;
@@ -763,12 +1010,12 @@ static int test_over_a_session() {
 			file_event->get_bool("flag", false) && file_event->get("address") == nullptr &&
 			shown.get("reveal_file") == nullptr);
 	TEST_EXPECT(editor_request_to_json(request).get_string("kind", "") == "show_in_files" &&
-	            editor_request_to_json(request).get_bool("flag", false));
+	            editor_request_to_json(request).get_bool("ask_name", false));
 
 	// The same edit through JSON as through the typed request.
-	const std::string edit = "{\"kind\":\"edit_record\",\"edit\":{\"row\":" + std::to_string(title_address.row) +
+	const std::string edit = "{\"kind\":\"edit_record\",\"edits\":[{\"row\":" + std::to_string(title_address.row) +
 	                         ",\"kind\":" + std::to_string(title_address.kind) + ",\"child\":" +
-	                         std::to_string(title_address.child) + ",\"field\":\"string.value\",\"value\":\"John Smith's Game\"}}";
+	                         std::to_string(title_address.child) + ",\"field\":\"string.value\",\"value\":\"John Smith's Game\"}]}";
 	TEST_EXPECT(request_error(edit.c_str(), request).empty() && session.handle(request));
 	Value value;
 	TEST_EXPECT(document->get(title_address, "string.value", value) && std::get<std::string>(value) == "John Smith's Game");
@@ -787,7 +1034,7 @@ static int test_over_a_session() {
 	auto select_json = [&](const NodeAddress &address, const char *mode) {
 		const std::string path = std::string(mode) == "replace" ? std::string("main.mnu") : document->path();
 		return "{\"kind\":\"select_record\",\"path\":\"" + path + "\",\"mode\":\"" + mode +
-		       "\",\"edit\":{\"row\":" + std::to_string(address.row) + ",\"kind\":" + std::to_string(address.kind) +
+		       "\",\"address\":{\"row\":" + std::to_string(address.row) + ",\"kind\":" + std::to_string(address.kind) +
 		       ",\"child\":" + std::to_string(address.child) + "}}";
 	};
 	TEST_EXPECT(request_error(select_json(title_address, "replace").c_str(), request).empty() && session.handle(request));
@@ -797,9 +1044,9 @@ static int test_over_a_session() {
 	TEST_EXPECT(json.get("selected") && json.get("selected")->array.size() == 2 &&
 	            uint64_t(json.get("selection")->get_number("child", 0)) == exit_address.child);
 	TEST_EXPECT(json.get_int("clipboard_bytes", -1) == 0);
-	const std::string clear = "{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"clear\",\"row\":" +
+	const std::string clear = "{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"clear\",\"row\":" +
 	                          std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
-	                          ",\"child\":" + std::to_string(title_address.child) + ",\"field\":\"position.left\"}}";
+	                          ",\"child\":" + std::to_string(title_address.child) + ",\"field\":\"position.left\"}]}";
 	TEST_EXPECT(request_error(clear.c_str(), request).empty() && session.handle(request) && session.last_edit_ok());
 	record = record_to_json(*document, title_address, view);
 	left = find_field(record, "position.left");
@@ -823,9 +1070,9 @@ static int test_over_a_session() {
 	}
 	// Revert to saved through JSON (the Inspector's): the field as the file holds it, one
 	// step; again, nothing is left to revert and the request is refused.
-	const std::string revert = "{\"kind\":\"revert_to_saved\",\"edit\":{\"row\":" + std::to_string(title_address.row) +
+	const std::string revert = "{\"kind\":\"revert_to_saved\",\"edits\":[{\"row\":" + std::to_string(title_address.row) +
 	                           ",\"kind\":" + std::to_string(title_address.kind) + ",\"child\":" +
-	                           std::to_string(title_address.child) + ",\"field\":\"position.left\"}}";
+	                           std::to_string(title_address.child) + ",\"field\":\"position.left\"}]}";
 	TEST_EXPECT(request_error(revert.c_str(), request).empty() && session.handle(request) && session.last_edit_ok());
 	TEST_EXPECT(editor_request_to_json(request).get_string("kind", "") == "revert_to_saved");
 	record = record_to_json(*document, title_address, view);
@@ -842,7 +1089,7 @@ static int test_over_a_session() {
 	JsonValue outcome = action_outcome_to_json(session.outcome());
 	TEST_EXPECT(outcome.get_bool("done", false) && !outcome.get_bool("unsaved_prompt", true));
 	TEST_EXPECT(outcome.get("findings")->is_array() && outcome.get("findings")->array.empty());
-	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"text\":\"../x.mnu\"}", request).empty() &&
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"new_name\":\"../x.mnu\"}", request).empty() &&
 	            session.handle(request));
 	outcome = action_outcome_to_json(session.outcome());
 	TEST_EXPECT(!outcome.get_bool("done", true) && !outcome.get_bool("unsaved_prompt", true));
@@ -865,7 +1112,7 @@ static int test_over_a_session() {
 	            prompt->get_string("target", "") == document->path() && prompt->get_bool("can_discard", false));
 	TEST_EXPECT(prompt && prompt->get("files") && prompt->get("files")->array.size() == 1 &&
 	            prompt->get("files")->array.front().string == document->path());
-	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"cancel\"}", request).empty() &&
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"cancel\"}", request).empty() &&
 	            session.handle(request));
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_bool("done", false) && session.document_for() == document);
 	// Build packs the files on disk: no Discard; the prompt's "save" writes the file and builds.
@@ -874,7 +1121,7 @@ static int test_over_a_session() {
 	prompt = json.get("unsaved_prompt");
 	TEST_EXPECT(prompt && prompt->get_string("action", "") == "build" && !prompt->get_bool("can_discard", true) &&
 	            prompt->get("target") == nullptr);
-	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", request).empty() &&
+	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"save\"}", request).empty() &&
 	            session.handle(request));
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_bool("done", false) && !document->dirty() &&
 	            session.view().activity.operation.running());
@@ -1131,15 +1378,15 @@ static int test_import_plan_json() {
 	JsonValue parsed;
 	EditorRequest back;
 	std::string error;
-	EditorRequest plan = make_request(EditorRequestKind::PlanImport);
-	plan.flag = true;
-	plan.imports = {{"C:/mod/menus.pff", "a.mnu"}};
+	const EditorRequest plan = request::plan_import({{"C:/mod/menus.pff", "a.mnu"}}, true);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(plan)).c_str(), parsed));
-	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.kind == EditorRequestKind::PlanImport && back.flag &&
-	            back.imports == plan.imports);
-	TEST_EXPECT(request_error("{\"kind\":\"set_import_dependencies\"}", back).empty() &&
-	            back.kind == EditorRequestKind::SetImportDependencies && !back.flag);
-	TEST_EXPECT(request_error("{\"kind\":\"set_import_dependencies\",\"flag\":true}", back).empty() && back.flag);
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.kind == EditorRequestKind::PlanImport &&
+	            back.with_dependencies && back.imports == plan.imports);
+	TEST_EXPECT(request_error("{\"kind\":\"set_import_dependencies\"}", back).find("with_dependencies") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"set_import_dependencies\",\"with_dependencies\":false}", back).empty() &&
+	            back.kind == EditorRequestKind::SetImportDependencies && !back.with_dependencies);
+	TEST_EXPECT(request_error("{\"kind\":\"set_import_dependencies\",\"with_dependencies\":true}", back).empty() &&
+	            back.with_dependencies);
 
 	SessionView view;
 	view.project.import_dependencies = false;
@@ -1215,11 +1462,11 @@ static int test_import_plan_json() {
 	            need->get_string("name", "") == "arial99" && need->get("loader_arg") == nullptr);
 	const JsonValue *source = found.get("source");
 	TEST_EXPECT(source && source->get_string("path", "") == "C:/art/arial99.fnt" && source->get_bool("native", false) &&
-	            source->get("entry") == nullptr && source->get("retail") == nullptr);
+	            source->get("entry") == nullptr && source->get("install") == nullptr);
 	const JsonValue *rivals = found.get("rivals");
 	TEST_EXPECT(rivals && rivals->array.size() == 1 && rivals->array[0].get_string("found_in", "") == "the game install" &&
 	            rivals->array[0].get_bool("differs", false) && rivals->array[0].get("source") &&
-	            rivals->array[0].get("source")->get_bool("retail", false));
+	            rivals->array[0].get("source")->get_bool("install", false) && !rivals->array[0].get("source")->get("retail"));
 	TEST_EXPECT(!rows->array[2].get_bool("selected", true) &&
 	            rows->array[2].get_string("problem", "").find("16 characters") != std::string::npos);
 	const JsonValue *missing = import->get("not_found");
@@ -1248,6 +1495,22 @@ static int test_import_plan_json() {
 // MCP's transport caps a list at 200): a plan of 250 rows, 3 not found, with 250 files to
 // choose from and 250 chosen, shows 200 of each list and their counts; the next page the rest;
 // a row on a later page still carries the source an import takes.
+// The game install on the wire (S13 A4): the view's play block names it game_install and Play in
+// it in_install, the import block counts its files as install_files; the retail keys are gone.
+static int test_game_install_keys() {
+	SessionView view;
+	view.project.retail_directory = "C:/games/JO";
+	view.project.play_retail = true;
+	view.project.retail_files = {"items.def", "main.mnu"};
+	const JsonValue json = session_view_to_json(view);
+	const JsonValue *play = json.get("play");
+	const JsonValue *import = json.get("import");
+	TEST_EXPECT(play && play->get_bool("in_install", false) && play->get_string("game_install", "") == "C:/games/JO" &&
+	            !play->get("retail") && !play->get("retail_directory"));
+	TEST_EXPECT(import && import->get_int("install_files", 0) == 2 && !import->get("retail_files"));
+	return 0;
+}
+
 static int test_import_pages() {
 	SessionView view;
 	DialogsView::ImportPreview &preview = view.dialogs.import_preview;
@@ -1421,7 +1684,9 @@ int main() {
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();
 	failures += test_import_pages();
+	failures += test_game_install_keys();
 	failures += test_request_round_trip();
+	failures += test_request_table_samples();
 	failures += test_settings_json();
 	failures += test_problem_query_json();
 	failures += test_problem_groups_page();

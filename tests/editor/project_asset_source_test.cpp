@@ -19,6 +19,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
@@ -66,7 +67,7 @@ static int test_names_decode_and_rescan() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Assets"));
+	session.handle(request::new_project(dir.file("project"), "Assets"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.assets != nullptr);
@@ -88,7 +89,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(editor_test::write_bytes(root + "/notes/secret.txt", scr_encoded(plain, opennova::scr::SCR_KEY_JO_DFX2)));
 	TEST_EXPECT(assets.stamp("secret.txt") == 0);
 	const uint64_t before = assets.generation();
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(assets.generation() != before && assets.stamp("secret.txt") != 0);
 	TEST_EXPECT(assets.read("SECRET.TXT", read) && std::string(read.begin(), read.end()) == plain);
 
@@ -104,7 +105,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// A PNG with no .import record is a texture the build packs as it is.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", editor_test::gradient_png(4, 4)));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(assets.path_of("logo.pcx").find(".opennova/imported/") == 0);
 	TEST_EXPECT(assets.read("LOGO.PCX", read) && !read.empty());
 	// The import source is not: the build never packs it, so the game never finds it.
@@ -116,7 +117,7 @@ static int test_names_decode_and_rescan() {
 	// A changed file moves its stamp on the next rescan.
 	const uint64_t stamp = assets.stamp("secret.txt");
 	TEST_EXPECT(editor_test::write_text(root + "/notes/secret.txt", "a different, longer plain text file"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(assets.stamp("secret.txt") != stamp);
 	std::printf("test_names_decode_and_rescan passed\n");
 	return 0;
@@ -127,29 +128,29 @@ static int test_open_document_stands_in() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Open"));
+	session.handle(request::new_project(dir.file("project"), "Open"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const ProjectAssetSource &assets = *view.findings.assets;
 	const uint64_t on_disk = assets.stamp("gametext.bin");
 	TEST_EXPECT(on_disk != 0);
 
-	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	session.handle(request::open_document("gametext.bin"));
 	Document *strings = session.document_for("gametext.bin");
 	TEST_EXPECT(strings != nullptr);
 	const uint64_t opened = assets.stamp("gametext.bin");
 	TEST_EXPECT(opened != 0 && opened != on_disk);
 
 	// An edit, unsaved: the name reads the bytes Save would write, under a new stamp.
-	EditorRequest add = make_request(EditorRequestKind::EditRecord, strings->path());
-	add.edit.operation = EditOperation::Add;
-	add.edit.address = {0, strings->kind_from_name("section"), 0};
+	EditorRequest add = request::edit_record(strings->path(), Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address = {0, strings->kind_from_name("section"), 0};
 	session.handle(add);
 	TEST_EXPECT(session.last_edit_ok());
-	EditorRequest name = make_request(EditorRequestKind::EditRecord, strings->path());
-	name.edit.address = {strings->last_added(), strings->kind_from_name("section"), 0};
-	name.edit.field = "name";
-	name.edit.value = std::string("Unsaved");
+	EditorRequest name = request::edit_record(strings->path(), Edit());
+	name.edits[0].address = {strings->last_added(), strings->kind_from_name("section"), 0};
+	name.edits[0].field = "name";
+	name.edits[0].value = std::string("Unsaved");
 	session.handle(name);
 	TEST_EXPECT(session.last_edit_ok() && strings->dirty());
 	const uint64_t edited = assets.stamp("gametext.bin");
@@ -160,17 +161,17 @@ static int test_open_document_stands_in() {
 	TEST_EXPECT(file_bytes(session.view().project.root + "/" + strings->path(), disk) && !has_section(disk, "Unsaved"));
 
 	// Undone twice: the state (and so the stamp) it was opened in.
-	session.handle(make_request(EditorRequestKind::Undo, strings->path()));
-	session.handle(make_request(EditorRequestKind::Undo, strings->path()));
+	session.handle(request::undo(strings->path()));
+	session.handle(request::undo(strings->path()));
 	TEST_EXPECT(assets.stamp("gametext.bin") == opened);
 	TEST_EXPECT(assets.read("gametext.bin", bytes) && !has_section(bytes, "Unsaved"));
 
 	// Closed: the file again.
-	session.handle(make_request(EditorRequestKind::CloseDocument, strings->path()));
+	session.handle(request::close_document(strings->path()));
 	TEST_EXPECT(assets.stamp("gametext.bin") == on_disk);
 
 	// A closed project resolves nothing.
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(assets.stamp("gametext.bin") == 0 && assets.path_of("main.mnu").empty());
 	std::printf("test_open_document_stands_in passed\n");
 	return 0;

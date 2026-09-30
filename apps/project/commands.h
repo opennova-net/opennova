@@ -9,7 +9,7 @@
 //   opennova-project create-missing <dir> [--role <token>]
 //   opennova-project build <dir> [--out <dir>]
 //   opennova-project import <dir> <source> [--entry <name>]... [--replace]
-//   opennova-project import <dir> --retail <game install> --entry <name>... [--replace]
+//   opennova-project import <dir> --install <game install> --entry <name>... [--replace]
 //   opennova-project reimport <dir> [--force] [--source <path>]
 //
 // Every command that reads a project opens it the way the editor does: the engine's one

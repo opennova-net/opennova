@@ -49,6 +49,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
@@ -129,7 +130,7 @@ static int test_blank_project() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Graph"));
+	session.handle(request::new_project(dir.file("project"), "Graph"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.graph != nullptr);
@@ -176,7 +177,7 @@ static int test_blank_project() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::None, "x") == ReferenceStatus::NotAReference);
 	TEST_EXPECT(graph.stats().files_extracted > 0);
 	// Nothing changed: the next update reuses every extraction.
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_reused > 0);
 	return 0;
 }
@@ -190,25 +191,25 @@ static int test_menu_text_scope() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Scope"));
+	session.handle(request::new_project(dir.file("project"), "Scope"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	// menutxt.bin: TITLE_ID in its Menu section, STATS_ONLY in another; gametext.bin: a
 	// "menu" section with GAME_TITLE.
-	session.handle(make_request(EditorRequestKind::CreateFile, "menutxt.bin", "strings"));
+	session.handle(request::create_file("menutxt.bin", "strings"));
 	Document *menutxt = session.document_for("menutxt.bin");
 	TEST_EXPECT(menutxt);
 	const auto add_id = [&](Document &table, NodeId section, const char *key) {
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, table.path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {section, table.kind_from_name("string"), 0};
+		EditorRequest add = request::edit_record(table.path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {section, table.kind_from_name("string"), 0};
 		session.handle(add);
 		edit_window(session, table, {section, table.kind_from_name("string"), table.last_added()}, "key", std::string(key));
 	};
 	const auto add_section = [&](Document &table, const char *name) {
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, table.path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, table.kind_from_name("section"), 0};
+		EditorRequest add = request::edit_record(table.path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, table.kind_from_name("section"), 0};
 		session.handle(add);
 		const NodeId section = table.last_added();
 		edit_window(session, table, {section, table.kind_from_name("section"), 0}, "name", std::string(name));
@@ -220,12 +221,12 @@ static int test_menu_text_scope() {
 	TEST_EXPECT(menu_section != 0);
 	add_id(*menutxt, menu_section, "TITLE_ID");
 	add_id(*menutxt, add_section(*menutxt, "Stats"), "STATS_ONLY");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	session.handle(request::open_document("gametext.bin"));
 	Document *gametext = session.document_for("gametext.bin");
 	TEST_EXPECT(gametext);
 	add_id(*gametext, add_section(*gametext, "menu"), "GAME_TITLE");
 
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
 	NodeAddress main, title;
@@ -248,18 +249,23 @@ static int test_menu_text_scope() {
 	TEST_EXPECT(title_edge() && title_edge()->scope == "/menu");
 	TEST_EXPECT(missing_message("names no string table"));
 	// MAIN names menutxt.bin: TITLE reads its root's table.
-	EditorRequest write = make_request(EditorRequestKind::EditRecord, menu->path());
-	write.edit.operation = EditOperation::Write;
-	write.edit.address = main;
-	write.edit.field = "text_rsrc";
+	EditorRequest write = request::edit_record(menu->path(), Edit());
+	write.edits[0].operation = EditOperation::Write;
+	write.edits[0].address = main;
+	write.edits[0].field = "text_rsrc";
 	session.handle(write);
 	edit_window(session, *menu, main, "text_rsrc", std::string("menutxt.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "MENUTXT.BIN/menu");
 	TEST_EXPECT(
 			!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
-	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/menu") == ReferenceStatus::Present);
-	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/Menu").size() == 1);
-	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "GAMETEXT.BIN/menu").empty());
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "TITLE_ID",
+						"MENUTXT.BIN/menu") == ReferenceStatus::Present);
+	TEST_EXPECT(
+			view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/Menu")
+					.size() == 1);
+	TEST_EXPECT(view.findings.graph
+					->referrers_of(ReferenceKind::TextId, "TITLE_ID", "GAMETEXT.BIN/menu")
+					.empty());
 	// Its picker offers the ids of that table's "menu" section alone: not another section's, nor
 	// another table's.
 	const auto offered = [&](const char *key, ReferenceChoice &out) {
@@ -284,7 +290,7 @@ static int test_menu_text_scope() {
 			has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// TITLE's own TEXT_RSRC wins over its root's.
 	EditorRequest own = write;
-	own.edit.address = title;
+	own.edits[0].address = title;
 	session.handle(own);
 	edit_window(session, *menu, title, "text_rsrc", std::string("gametext.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "GAMETEXT.BIN/menu");
@@ -304,7 +310,7 @@ static int test_native_extractors() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Native"));
+	session.handle(request::new_project(dir.file("project"), "Native"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	// An environment naming sky textures and celestial models.
@@ -343,14 +349,14 @@ static int test_native_extractors() {
 	std::error_code ec;
 	const bool have_model = fs::is_regular_file(fixture, ec);
 	if (have_model) fs::copy_file(fixture, fs::path(root) / "armory.3di", ec);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	const GraphEdge *sky = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
 	TEST_EXPECT(sky && !sky->rewritable && sky->field == "sky_map1");
 	TEST_EXPECT(edge_to(graph, "day.env", ReferenceKind::Model, "sun.3di"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx") == ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a") == ReferenceStatus::Present); // without the extension
 	TEST_EXPECT(!graph.referrers_of_file("sky_a.pcx").empty());
@@ -377,7 +383,7 @@ static int test_native_extractors() {
 	TEST_EXPECT(!graph_reads_file(AssetKind::Mission, "test.mis") &&
 			graph_reads_file(AssetKind::Mission, "TEST.BMS"));
 	TEST_EXPECT(editor_test::write_text(root + "/test.mis", "; changed\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
 	TEST_EXPECT(graph.references_of("test.mis").empty() &&
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
@@ -388,7 +394,7 @@ static int test_native_extractors() {
 	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
 	TEST_EXPECT(editor_test::write_bytes(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const std::vector<Diagnostic> &diagnostics = session.view().findings.diagnostics;
 	const auto unreadable = [&diagnostics](const std::string &asset) {
 		size_t n = 0;
@@ -406,11 +412,11 @@ static int test_native_extractors() {
 	for (const Diagnostic &d : diagnostics)
 		model_error = model_error || (d.asset == "broken.3di" && d.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(model_error);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.bms") == 1);
 	fs::remove(fs::path(root) / "broken.bms");
 	fs::remove(fs::path(root) / "broken.3di");
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 	return 0;
 }
@@ -422,25 +428,25 @@ static int test_catalog_symbols() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
+	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
-	session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def")); // not a menu project's requirement
+	session.handle(request::create_file("ammo.def")); // not a menu project's requirement
 	Document *ammo = session.document_for("ammo.def");
 	TEST_EXPECT(ammo);
 	{
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, ammo->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, ammo->kind_from_name("ammo"), 0};
+		EditorRequest add = request::edit_record(ammo->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, ammo->kind_from_name("ammo"), 0};
 		session.handle(add);
 		edit_window(session, *ammo, {ammo->last_added(), ammo->kind_from_name("ammo"), 0}, "name", std::string("AMMO_GRAPH"));
 	}
-	session.handle(make_request(EditorRequestKind::OpenDocument, "weapon.def"));
+	session.handle(request::open_document("weapon.def"));
 	Document *weapon = session.document_for("weapon.def");
 	TEST_EXPECT(weapon);
 	{
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, weapon->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, weapon->kind_from_name("weapon"), 0};
+		EditorRequest add = request::edit_record(weapon->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, weapon->kind_from_name("weapon"), 0};
 		session.handle(add);
 		const NodeAddress row{weapon->last_added(), weapon->kind_from_name("weapon"), 0};
 		edit_window(session, *weapon, row, "weapon_name", std::string("WPN_GRAPH"));
@@ -469,13 +475,13 @@ static int test_catalog_symbols() {
 	TEST_EXPECT(!reference_target(field_use(*textid), std::string("NONE"), kind, name, scope));
 	// A string table's ids carry their table and section: a def's game-text field
 	// resolves in its witnessed section, a menu's id in its window's table.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	session.handle(request::open_document("gametext.bin"));
 	Document *strings = session.document_for("gametext.bin");
 	TEST_EXPECT(strings);
 	const auto add_id = [&](NodeId section, const char *key) {
-		EditorRequest add_string = make_request(EditorRequestKind::EditRecord, strings->path());
-		add_string.edit.operation = EditOperation::Add;
-		add_string.edit.address = {section, strings->kind_from_name("string"), 0};
+		EditorRequest add_string = request::edit_record(strings->path(), Edit());
+		add_string.edits[0].operation = EditOperation::Add;
+		add_string.edits[0].address = {section, strings->kind_from_name("string"), 0};
 		session.handle(add_string);
 		edit_window(session, *strings, {section, strings->kind_from_name("string"), strings->last_added()}, "key", std::string(key));
 	};
@@ -487,9 +493,9 @@ static int test_catalog_symbols() {
 	{
 		// A second section of the same name: the lookup reads the first, so its ids are
 		// defined but never read.
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, strings->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, strings->kind_from_name("section"), 0};
+		EditorRequest add = request::edit_record(strings->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, strings->kind_from_name("section"), 0};
 		session.handle(add);
 		const NodeId section = strings->last_added();
 		edit_window(session, *strings, {section, strings->kind_from_name("section"), 0}, "name", std::string("wepdes"));
@@ -566,7 +572,7 @@ static int test_catalog_symbols() {
 	TEST_EXPECT(has_missing(
 			view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
 	// The items' identities.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items && !items->rows().empty());
 	Value id;
@@ -581,12 +587,12 @@ static int test_rename() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
+	session.handle(request::new_project(dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
 	NodeAddress exit;
@@ -595,14 +601,13 @@ static int test_rename() {
 	const SessionView &view = session.view();
 	// The menu naming it has unsaved edits: the rename waits on the unsaved prompt, which
 	// lists the menu; cancelled, nothing moves.
-	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
+	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(session.outcome().unsaved_prompt && view.dialogs.unsaved_prompt.files == std::vector<std::string>({menu->path()}));
 	TEST_EXPECT(fs::exists(root + "/logo.tga") && !fs::exists(root + "/logo2.tga"));
-	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
-	cancel.unsaved_choice = UnsavedChoice::Cancel;
+	EditorRequest cancel = request::resolve_unsaved(UnsavedChoice::Cancel);
 	session.handle(cancel);
 	TEST_EXPECT(!view.dialogs.unsaved_prompt.open && menu->dirty());
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	TEST_EXPECT(!menu->dirty());
 	{
 		const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "logo2.tga");
@@ -613,7 +618,7 @@ static int test_rename() {
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "a_name_far_too_long.tga").ok());
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "nope.tga", "x.tga").ok());
 	}
-	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
+	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(!fs::exists(root + "/logo.tga") && fs::exists(root + "/logo2.tga"));
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
@@ -634,8 +639,8 @@ static int test_rename() {
 		TEST_EXPECT(opennova::env::save_env(out, config, error));
 		TEST_EXPECT(editor_test::write_text(root + "/day.env", out.str()));
 	}
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::RenameAsset, "logo2.tga", "logo3.tga"));
+	session.handle(request::rescan());
+	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
 	TEST_EXPECT(view.findings.diagnostics.back().code == "rename.site" || view.findings.diagnostics.back().code == "rename.refused");
 	TEST_EXPECT(fs::exists(root + "/logo2.tga") && !fs::exists(root + "/logo3.tga"));
 	// Through a style variable: the variable's value is the site. (A Rescan keeps an open
@@ -643,9 +648,9 @@ static int test_rename() {
 	TEST_EXPECT(session.document_for("main.mnu") == menu);
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	edit_window(session, *menu, menu_test::child_of(*menu, exit, "appearance"), "value", std::string("%DEF_FONTNAME_LG%"));
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	fs::remove(root + "/day.env");
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	std::string font_file;
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(), &font_file) == ReferenceStatus::Present);
 	// The variable stays in the menu: the site is its value in menu_style.mns, the one
@@ -663,7 +668,7 @@ static int test_rename() {
 	// The rename rewrites that value (the stylesheet saved CR LF) and moves the font; the
 	// menu still names the variable, which now resolves to the new file.
 	const std::string original_font = font_file;
-	session.handle(make_request(EditorRequestKind::RenameAsset, font_file, "zz.fnt"));
+	session.handle(request::rename_asset(font_file, "zz.fnt"));
 	TEST_EXPECT(session.outcome().done());
 	const std::string renamed_font = (fs::path(font_file).parent_path() / "zz.fnt").generic_string();
 	TEST_EXPECT(!fs::exists(root + "/" + font_file) && fs::exists(root + "/" + renamed_font));
@@ -685,7 +690,7 @@ static int test_rename() {
 		TEST_EXPECT(!(d.code == "reference.missing" && d.field == "font.name"));
 	font_file = renamed_font;
 	// A value without the extension is no site the rename rewrites: refused, the variable named.
-	session.handle(make_request(EditorRequestKind::OpenDocument, style_asset->relative_path));
+	session.handle(request::open_document(style_asset->relative_path));
 	Document *style = session.document_for(style_asset->relative_path);
 	NodeAddress large;
 	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "%def_fontname_lg%", large));
@@ -693,10 +698,10 @@ static int test_rename() {
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%") == ReferenceStatus::Present);
 	const RenamePlan through_style = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, font_file, "zz2.fnt");
 	TEST_EXPECT(!through_style.ok() && through_style.refusals.front().code == "rename.style");
-	session.handle(make_request(EditorRequestKind::Undo));
-	session.handle(make_request(EditorRequestKind::CloseDocument, style_asset->relative_path));
+	session.handle(request::undo());
+	session.handle(request::close_document(style_asset->relative_path));
 	// And back: the required font is the project's again.
-	session.handle(make_request(EditorRequestKind::RenameAsset, font_file, fs::path(original_font).filename().generic_string()));
+	session.handle(request::rename_asset(font_file, fs::path(original_font).filename().generic_string()));
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(fs::exists(root + "/" + original_font) && !fs::exists(root + "/" + font_file));
 	// Assign: a required name satisfied by renaming a file of the right kind.
@@ -706,10 +711,10 @@ static int test_rename() {
 		if (row.state == RequirementState::Present && row.expected_kind == AssetKind::Strings) { missing_role = row.role; missing_name = row.name; break; }
 	TEST_EXPECT(!missing_role.empty());
 	fs::remove(root + "/" + view.project.scan->find(missing_name)->relative_path);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(view.project.requirements->required_missing == 1);
 	{
-		EditorRequest assign = make_request(EditorRequestKind::AssignRequirement, "spare.pcx", missing_role);
+		EditorRequest assign = request::assign_requirement(missing_role, "spare.pcx");
 		session.handle(assign);
 		TEST_EXPECT(view.findings.diagnostics.back().code == "requirement.kind");
 		TEST_EXPECT(view.project.requirements->required_missing == 1);
@@ -722,16 +727,16 @@ static int test_rename() {
 	std::error_code ec;
 	fs::copy_file(root + "/" + some_table->relative_path, root + "/spare.bin", ec);
 	TEST_EXPECT(!ec);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	{
-		EditorRequest assign = make_request(EditorRequestKind::AssignRequirement, "spare.bin", missing_role);
+		EditorRequest assign = request::assign_requirement(missing_role, "spare.bin");
 		session.handle(assign);
 	}
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	TEST_EXPECT(
 			view.project.scan->find(missing_name) != nullptr && !fs::exists(root + "/spare.bin"));
 	// Assigning a requirement already met renames nothing: a refusal the outcome carries.
-	session.handle(make_request(EditorRequestKind::AssignRequirement, "spare.pcx", missing_role));
+	session.handle(request::assign_requirement(missing_role, "spare.pcx"));
 	TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
 	            session.outcome().findings.back().code == "requirement.assigned");
 	TEST_EXPECT(fs::exists(root + "/spare.pcx"));
@@ -746,28 +751,28 @@ static int test_rename_rewrites_planned_sites_only() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Sites"));
+	session.handle(request::new_project(dir.file("project"), "Sites"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/m16.adm", "adm"));
 	TEST_EXPECT(editor_test::write_text(root + "/m16.3di", "3di"));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "weapon.def"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("weapon.def"));
 	Document *weapon = session.document_for("weapon.def");
 	TEST_EXPECT(weapon);
 	if (!weapon) return 1;
 	const NodeKind kind = weapon->kind_from_name("weapon");
 	{
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, weapon->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, kind, 0};
+		EditorRequest add = request::edit_record(weapon->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, kind, 0};
 		session.handle(add);
 		const NodeAddress row{weapon->last_added(), kind, 0};
 		edit_window(session, *weapon, row, "weapon_name", std::string("WPN_M16"));
 		edit_window(session, *weapon, row, "animadm", std::string("m16"));
 		edit_window(session, *weapon, row, "gfx1", std::string("m16"));
 	}
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	TEST_EXPECT(!weapon->dirty());
 	const SessionView &view = session.view();
 	std::string file;
@@ -778,7 +783,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "m16.adm", "m16b.adm");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 1);
 	TEST_EXPECT(!plan.sites.empty() && plan.sites[0].field == "animadm" && plan.sites[0].after == "m16b");
-	session.handle(make_request(EditorRequestKind::RenameAsset, "m16.adm", "m16b.adm"));
+	session.handle(request::rename_asset("m16.adm", "m16b.adm"));
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(!fs::exists(root + "/m16.adm") && fs::exists(root + "/m16b.adm") && fs::exists(root + "/m16.3di"));
 	weapon = session.document_for("weapon.def"); // reloaded after the rewrite
@@ -800,7 +805,7 @@ static int test_rename_rewrites_planned_sites_only() {
 	if (at == std::string::npos) return 1;
 	text.replace(at, 4, "m16x");
 	TEST_EXPECT(editor_test::write_text(weapon_file, text));
-	session.handle(make_request(EditorRequestKind::RenameAsset, "m16b.adm", "m16c.adm"));
+	session.handle(request::rename_asset("m16b.adm", "m16c.adm"));
 	TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "rename.partial") > 0);
 	// The error names what the file still says (the site's own spelling), not the renamed file.
 	bool partial_error = false;
@@ -821,28 +826,28 @@ static int test_rename_by_locator() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locator"));
+	session.handle(request::new_project(dir.file("project"), "Locator"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
 	NodeAddress main;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "MAIN", main));
 	std::vector<NodeAddress> twins;
 	for (int i = 0; i < 2; ++i) {
-		EditorRequest add = make_request(EditorRequestKind::EditRecord, menu->path());
-		add.edit.operation = EditOperation::Add;
-		add.edit.address = {0, main.kind, 0};
-		add.edit.parent = main.child;
+		EditorRequest add = request::edit_record(menu->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {0, main.kind, 0};
+		add.edits[0].parent = main.child;
 		session.handle(add);
 		twins.push_back(menu->address_of(menu->last_added()));
 		edit_window(session, *menu, twins.back(), "name", std::string("TWIN"));
 		set_image(session, *menu, twins.back(), "logo.tga");
 	}
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	const SessionView &view = session.view();
 	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "logo2.tga");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 2);
@@ -852,7 +857,7 @@ static int test_rename_by_locator() {
 	                                         menu->locator(menu_test::child_of(*menu, twins[1], "appearance"))};
 	TEST_EXPECT(std::find(places.begin(), places.end(), plan.sites[0].locator) != places.end() &&
 	            std::find(places.begin(), places.end(), plan.sites[1].locator) != places.end());
-	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
+	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(session.outcome().done());
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	TEST_EXPECT(menu);
@@ -874,7 +879,7 @@ static int test_stylesheet_bindings() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
+	session.handle(request::new_project(dir.file("project"), "Styles"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = dir.file("project");
@@ -901,7 +906,7 @@ static int test_stylesheet_bindings() {
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\nBRAND_ONLY 1\r\n"));
 	// A stylesheet by another name is never read.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "STRAY_ONLY 1\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const GraphSymbol *text_fg = view.findings.graph->style_binding("DEF_TEXT_FG");
 	TEST_EXPECT(text_fg && fs::path(text_fg->file).filename() == "brand.mns" && text_fg->value == "FF102030");
 	TEST_EXPECT(view.findings.graph->resolve_style("%DEF_TEXT_FG%") == "FF102030");
@@ -930,14 +935,14 @@ static int test_stylesheet_bindings() {
 	// read whole, a 'G' stops the digits), and a value holds a %NAME% only where the
 	// game's expansion finds one (S12 B2).
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG +FF102030\r\nBRAND_ONLY 50% of %A B%\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 0 && count_code(view.findings.diagnostics, "style.nested_var") == 0);
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF10203G\r\nBRAND_ONLY x%DEF_TEXT_FG%\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.not_a_color") == 1 && count_code(view.findings.diagnostics, "style.nested_var") == 1);
 
 	// A menu naming the stray name: the finding says the game does not read that stylesheet.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
@@ -946,11 +951,11 @@ static int test_stylesheet_bindings() {
 	for (const Diagnostic &d : view.findings.diagnostics)
 		stray_message = stray_message || (d.code == "reference.missing" && d.message.find("does not read") != std::string::npos);
 	TEST_EXPECT(stray_message);
-	session.handle(make_request(EditorRequestKind::Undo));
+	session.handle(request::undo());
 
 	// A missing font named through a variable: reported once, where brand.mns names it.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME_LG nofont.fnt\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	size_t missing_fonts = 0;
 	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == "reference.missing" && d.message.find("nofont.fnt") != std::string::npos) {
@@ -962,7 +967,7 @@ static int test_stylesheet_bindings() {
 
 	// A line after the place the game stops reading defines nothing it reads.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "EARLY 1\r\nBAD%NAME x\r\nLATE_ONLY 2\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%EARLY%") == ReferenceStatus::Present);
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::StyleVar, "%LATE_ONLY%") == ReferenceStatus::Missing);
 	TEST_EXPECT(count_code(view.findings.diagnostics, "style.invalid_name_char") == 1);
@@ -977,7 +982,7 @@ static int test_stylesheet_bindings() {
 	style_text.replace(normal_font, 12, "Nowhere.fnt");
 	TEST_EXPECT(editor_test::write_text(style_file, style_text));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_FONTNAME\tArial16n.fnt\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const GraphSymbol *normal = view.findings.graph->style_binding("DEF_FONTNAME");
 	TEST_EXPECT(normal && fs::path(normal->file).filename() == "brand.mns" && normal->value == "Arial16n.fnt");
 	const auto nowhere_findings = [&view]() {
@@ -988,7 +993,7 @@ static int test_stylesheet_bindings() {
 	};
 	TEST_EXPECT(nowhere_findings() == 0);
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "// No fonts here.\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(nowhere_findings() == 1);
 	return 0;
 }
@@ -1030,7 +1035,7 @@ static int test_menu_names_and_targets() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Names"));
+	session.handle(request::new_project(dir.file("project"), "Names"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string go_body =
@@ -1059,8 +1064,8 @@ static int test_menu_names_and_targets() {
 	                       "FILE>icon.tga</SUBST></COLUMN>\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/graph.mnu", screen("HOME", home) + screen("AWAY", window("STATIC", "BOARD")) +
 	                                                              screen("AWAY", window("STATIC", "ELSEWHERE"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "graph.mnu"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("graph.mnu"));
 	const auto *menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu && !menu->blocked());
 	if (!menu) return 1;
@@ -1085,7 +1090,7 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(edge_of(graph, path, ReferenceKind::Menu, "graph.mnu") && edge_of(graph, path, ReferenceKind::Menu, "main.mnu"));
 	TEST_EXPECT(!edge_of(graph, path, ReferenceKind::Menu, "nofile.mnu")); // POP_SCREEN loads no FILE
 	TEST_EXPECT(editor_test::write_text(root + "/click.lwf", "lwf") && editor_test::write_text(root + "/credits.kda", "[TEXT]\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
 	if (!menu) return 1;
@@ -1254,14 +1259,14 @@ static int test_retail_menu_graph() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail"));
+	session.handle(request::new_project(dir.file("project"), "Retail"));
 	const std::string root = session.view().project.root;
 	for (const fs::path &menu : menus) fs::copy_file(menu, fs::path(root) / menu.filename(), ec);
 	// The shipped stylesheet, loose beside the menus or in the reference fixture set.
 	std::string style = retail::asset_file("menu_style.mns");
 	if (style.empty()) style = retail::reference_fixture("mns/menu_style.mns");
 	if (!style.empty()) fs::copy_file(style, fs::path(root) / "menu_style.mns", ec);
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const SessionView &view = session.view();
 	const AssetGraph &graph = *view.findings.graph;
 	std::map<std::string, size_t> edges, missing;
@@ -1316,7 +1321,7 @@ static int test_user_point_references() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Points"));
+	session.handle(request::new_project(dir.file("project"), "Points"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const fs::path fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
@@ -1331,7 +1336,7 @@ static int test_user_point_references() {
 	                                    "begin \"Lost Point\"\nid 100101\ntype building\ngraphic armory\n"
 	                                    "particlefx Effect_x Nowhere\nend\n"
 	                                    "begin \"No Graphic\"\nid 100102\ntype marker\nparticlefx Effect_x Anything\nend\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const AssetGraph &graph = *session.view().findings.graph;
 	TEST_EXPECT(graph.resolve(ReferenceKind::UserPoint, "armory", "ARMORY.3DI") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::UserPoint, "Nowhere", "ARMORY.3DI") == ReferenceStatus::Missing);
@@ -1342,15 +1347,15 @@ static int test_user_point_references() {
 	TEST_EXPECT(armory_users.size() == 1 && armory_users[0]->target == "ARMORY" && armory_users[0]->record == "Armory Item");
 	// Two points of one name among the first 16 (the lookup sets a bit for each [orig:
 	// ItemDef_GetBoneMaskByName @ 0x49ea40]): the slot naming them is one use of the model.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/armory.3di"));
+	session.handle(request::open_document("models/armory.3di"));
 	Document *model = session.document_for("models/armory.3di");
 	NodeAddress ground;
 	TEST_EXPECT(model && find_definition(AssetGraph(), *model, "Ground", ground));
 	if (!model || !ground.row) return 1;
-	EditorRequest rename = make_request(EditorRequestKind::EditRecord, model->path());
-	rename.edit.address = ground;
-	rename.edit.field = "name";
-	rename.edit.value = std::string("Armory");
+	EditorRequest rename = request::edit_record(model->path(), Edit());
+	rename.edits[0].address = ground;
+	rename.edits[0].field = "name";
+	rename.edits[0].value = std::string("Armory");
 	session.handle(rename);
 	TEST_EXPECT(graph.symbols_named(ReferenceKind::UserPoint, "ARMORY").size() == 2);
 	size_t slot_uses = 0;
@@ -1375,7 +1380,7 @@ static int test_symbol_locators() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locators"));
+	session.handle(request::new_project(dir.file("project"), "Locators"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::vector<const GraphSymbol *> exit = view.findings.graph->symbols_named(ReferenceKind::MenuWindow, "EXIT");
@@ -1398,7 +1403,7 @@ static int test_symbol_locators() {
 	const std::string style_path = style->relative_path; // the scan is read again below
 	const std::string style_file = view.project.root + "/" + style_path;
 	TEST_EXPECT(editor_test::write_text(style_file, read_text(style_file) + "\r\nTWICE 1\r\nTWICE 2\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const std::vector<const GraphSymbol *> twice = view.findings.graph->symbols_named(ReferenceKind::StyleVar, "twice");
 	TEST_EXPECT(twice.size() == 2 && twice[0]->inert && !twice[1]->inert && twice[1]->value == "2" &&
 	            twice[0]->inert_reason.find("defines it again below") != std::string::npos);
@@ -1406,7 +1411,7 @@ static int test_symbol_locators() {
 			(twice.size() == 2 ? twice[1] : nullptr));
 	// A query names a variable as the graph keys it; find_definition takes a menu's %NAME% too.
 	TEST_EXPECT(view.findings.graph->symbols_named(ReferenceKind::StyleVar, "%twice%").empty());
-	session.handle(make_request(EditorRequestKind::OpenDocument, style_path));
+	session.handle(request::open_document(style_path));
 	const Document *sheet_document = session.document_for(style_path);
 	NodeAddress by_name, by_variable;
 	Value read;
@@ -1433,7 +1438,7 @@ static int test_symbol_locators() {
 	// line of the stylesheet the editor opens at, its name shown; and the .fnt its value names,
 	// which the editor does not edit (Files shows it). A colour through a variable goes to the
 	// variable alone. The stylesheet's usages are the menus' uses of its variables.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress main;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "MAIN", main));
@@ -1572,7 +1577,7 @@ static int test_model_texture_references() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Textures"));
+	session.handle(request::new_project(dir.file("project"), "Textures"));
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
 	// A model minted from scene text, its texture rows of six types (an .mdt normal map and a
@@ -1592,7 +1597,7 @@ static int test_model_texture_references() {
 		std::error_code ec;
 		fs::remove_all(fs::path(root) / "textures", ec);
 		for (const char *file : files) editor_test::write_text(root + "/textures/" + file, "x");
-		session.handle(make_request(EditorRequestKind::Rescan));
+		session.handle(request::rescan());
 	};
 	const std::string model = "models/typed.3di";
 	const auto row_of = [&](const char *value) { return edge_to(*view.findings.graph, model, ReferenceKind::Texture, value); };
@@ -1651,7 +1656,7 @@ static int test_model_texture_references() {
 	// No other texture takes a file the scan cannot type: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.
-	session.handle(make_request(EditorRequestKind::OpenDocument, model));
+	session.handle(request::open_document(model));
 	const Document *document = session.document_for(model);
 	const GraphEdge *wall = row_of("wall.tga");
 	TEST_EXPECT(document && wall);
@@ -1672,8 +1677,10 @@ static int test_model_texture_references() {
 	textures({"puff.dds"});
 	const GraphEdge *puff =
 			edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->loader_arg == -1 && view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
-	            file == "textures/puff.dds" && !graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
+	TEST_EXPECT(puff && puff->loader_arg == -1 &&
+			view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
+			file == "textures/puff.dds" &&
+			!graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
 	textures({"puff_O.tga"});
 	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Present);
@@ -1694,7 +1701,7 @@ static int test_rename_keeps_loader_spelling() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Spelling"));
+	session.handle(request::new_project(dir.file("project"), "Spelling"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string root = view.project.root;
@@ -1707,11 +1714,11 @@ static int test_rename_keeps_loader_spelling() {
 	TEST_EXPECT(import_assets({{scene + "/relief.o3d", {}}}, paths, *view.project.document, false).imported ==
 	            std::vector<std::string>({"models/relief.3di"}));
 	TEST_EXPECT(editor_test::write_text(root + "/textures/bump.dds", "dds"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const RenamePlan plan = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/bump.dds", "stone.dds");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 4);
 	for (const RenameSite &site : plan.sites) TEST_EXPECT(site.before == "bump.tga" && site.after == "stone.tga");
-	session.handle(make_request(EditorRequestKind::RenameAsset, "textures/bump.dds", "stone.dds"));
+	session.handle(request::rename_asset("textures/bump.dds", "stone.dds"));
 	TEST_EXPECT(session.outcome().done() && view.project.scan->find("stone.dds") && !view.project.scan->find("bump.dds"));
 	size_t rows = 0;
 	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di")) {
@@ -1731,17 +1738,17 @@ static int test_rename_keeps_loader_spelling() {
 	// A menu's logo.tga the project serves from logo.dds: renamed where the new spelling is no
 	// file, the site keeps its .tga; where the project has that .tga (another file, which the
 	// menu loader would take first), the site takes the new name.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	if (!menu) return 1;
-	EditorRequest set = make_request(EditorRequestKind::EditRecord, menu->path());
-	set.edits = menu_test::image_edits(*menu, exit, "logo.tga");
+	EditorRequest set =
+			request::edit_record(menu->path(), menu_test::image_edits(*menu, exit, "logo.tga"));
 	session.handle(set);
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	TEST_EXPECT(editor_test::write_text(root + "/textures/logo.dds", "dds") && editor_test::write_text(root + "/textures/shine.tga", "tga"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const RenamePlan kept = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/logo.dds", "glow.dds");
 	TEST_EXPECT(kept.ok() && kept.sites.size() == 1 && kept.sites[0].after == "glow.tga");
 	const RenamePlan taken = plan_rename(paths, *view.project.scan, *view.findings.graph, "textures/logo.dds", "shine.dds");
@@ -2118,12 +2125,12 @@ static int test_incremental_equals_fresh() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Incremental"));
+	session.handle(request::new_project(dir.file("project"), "Incremental"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const ProjectDocument project = *session.view().project.document;
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	AssetScan scan = scan_project_assets(paths, project);
 	const AssetEntry *style = scan.find("menu_style.mns");
 	const AssetEntry *items = scan.find("items.def");

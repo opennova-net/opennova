@@ -45,15 +45,19 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 		if (pending_) close_prompt();
 		return false;
 	}
+	// What waits names its document (a Close, a Reload: the one with the edits), the project a
+	// switch opens (its dir), or the file it renames.
 	const RequestKindRow &row = request_kind_row(request.kind);
 	DialogsView::UnsavedPrompt prompt;
 	prompt.open = true;
 	prompt.action = request.kind;
-	prompt.target = row.guard == GuardScope::Document ? unsaved.front() : request.path;
+	prompt.target = row.guard == GuardScope::Document ? unsaved.front()
+	                : !request.dir.empty()            ? request.dir
+	                                                  : request.path;
 	prompt.files = std::move(unsaved);
 	prompt.can_discard = row.can_discard;
 	pending_ = request;
-	pending_->path = prompt.target;
+	if (row.guard == GuardScope::Document) pending_->path = prompt.target;
 	view_.dialogs.unsaved_prompt = std::move(prompt);
 	core_.outcome().unsaved_prompt = true;
 	core_.touch(ViewConcern::Dialogs);

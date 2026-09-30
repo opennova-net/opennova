@@ -1,5 +1,6 @@
 #include "table_cells.h"
 
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 
@@ -36,7 +37,7 @@ void text_cell(Workspace &workspace, const Document &document, NodeAddress addre
 		changed = ImGui::InputText(id.c_str(), text.data(), text.size());
 	}
 	if (changed) window_requests::set(workspace, document, address, field, std::string(text.data()));
-	if (ImGui::IsItemDeactivatedAfterEdit()) workspace.request(make_request(EditorRequestKind::EndEdit, document.path()));
+	if (ImGui::IsItemDeactivatedAfterEdit()) workspace.request(request::end_edit(document.path()));
 }
 
 } // namespace opennova::editor

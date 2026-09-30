@@ -4,7 +4,7 @@
 
 namespace opennova::editor {
 
-// A native file: loose, a named member of one PFF, or (retail) the effective file of
+// A native file: loose, a named member of one PFF, or (install) the effective file of
 // a mounted game install, resolved the way a stock launch resolves it (the archive
 // table's precedence; a loose file beside the archives is not what it reads, as it is
 // only under /d). Importing makes an editable
@@ -17,8 +17,8 @@ namespace opennova::editor {
 // (asset_import.h).
 struct ImportSource {
 	std::string path;
-	std::string entry;   // empty for a loose file; the logical name for a member or a retail file
-	bool retail = false; // `path` is the game install to mount
+	std::string entry;    // empty for a loose file; the logical name of a member or an install's
+	bool install = false; // `path` is the game install to mount
 	// A loose file copied as the game's own, as it is and with no import record (a PNG stays
 	// the texture a menu names): a file the import plan found beside the file that names it.
 	// A loose file picked from the disk is the author's source otherwise.
@@ -27,7 +27,7 @@ struct ImportSource {
 };
 
 inline bool operator==(const ImportSource &a, const ImportSource &b) {
-	return a.path == b.path && a.entry == b.entry && a.retail == b.retail && a.native == b.native;
+	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native;
 }
 inline bool operator!=(const ImportSource &a, const ImportSource &b) { return !(a == b); }
 

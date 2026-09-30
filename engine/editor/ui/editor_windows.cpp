@@ -5,8 +5,8 @@
 #include <memory>
 #include <utility>
 
-#include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_window.h>
@@ -20,59 +20,6 @@
 
 namespace opennova::editor {
 namespace {
-
-// The requests that act on the files as saved: the ones that write them (Save, Save All),
-// pack them (Build, Play) or answer the unsaved prompt, and the ones that ask whether a
-// document has unsaved edits (Close, Reload, a project switch, Quit, Import, Rename and
-// Assign and a rename everywhere, which the prompt guards; Rescan, which reads again the clean
-// documents whose files changed). Raised while a frame draws, they wait for the frame's other requests: the
-// menu bar draws before the windows, so a Ctrl+S pressed as the inspector sets a field
-// would otherwise save the document without it.
-bool acts_on_saved_files(EditorRequestKind kind) {
-	switch (kind) {
-	case EditorRequestKind::Save:
-	case EditorRequestKind::SaveAll:
-	case EditorRequestKind::Build:
-	case EditorRequestKind::Play:
-	case EditorRequestKind::ResolveUnsaved:
-	case EditorRequestKind::CloseDocument:
-	case EditorRequestKind::ReloadDocument:
-	case EditorRequestKind::NewProject:
-	case EditorRequestKind::OpenProject:
-	case EditorRequestKind::CloseProject:
-	case EditorRequestKind::Quit:
-	case EditorRequestKind::Rescan:
-	case EditorRequestKind::ImportFiles:
-	case EditorRequestKind::RenameAsset:
-	case EditorRequestKind::AssignRequirement:
-	case EditorRequestKind::RenameSymbol: return true;
-	default: return false;
-	}
-}
-
-// The requests whose empty path means the active document (the session's document_for).
-// Raised without a path, they name the one active when they were raised (request()), so a
-// Save that waits for the frame's other requests still saves it when a click in the same
-// frame makes another document active first.
-bool names_the_active_document(EditorRequestKind kind) {
-	switch (kind) {
-	case EditorRequestKind::OpenDocument:
-	case EditorRequestKind::ReloadDocument:
-	case EditorRequestKind::CloseDocument:
-	case EditorRequestKind::SelectRecord:
-	case EditorRequestKind::EditRecord:
-	case EditorRequestKind::RevertToSaved:
-	case EditorRequestKind::EndEdit:
-	case EditorRequestKind::Copy:
-	case EditorRequestKind::Cut:
-	case EditorRequestKind::Paste:
-	case EditorRequestKind::Duplicate:
-	case EditorRequestKind::Save:
-	case EditorRequestKind::Undo:
-	case EditorRequestKind::Redo: return true;
-	default: return false;
-	}
-}
 
 // A menu item chosen only while it can run: a disabled one is never chosen, however it is
 // activated.
@@ -88,30 +35,11 @@ bool enabled_button(const char *label, bool enabled) {
 	return pressed && enabled;
 }
 
-// What waits on the unsaved prompt, in the words of the menu that asked for it.
-std::string waiting_action(const DialogsView::UnsavedPrompt &prompt) {
-	const std::string file = basename_of(prompt.target);
-	switch (prompt.action) {
-	case EditorRequestKind::CloseDocument: return "Close " + file;
-	case EditorRequestKind::ReloadDocument: return "Reload " + file;
-	case EditorRequestKind::Build: return "Build";
-	case EditorRequestKind::Play: return "Play";
-	case EditorRequestKind::ImportFiles: return "Import";
-	case EditorRequestKind::RenameAsset:
-	case EditorRequestKind::AssignRequirement: return "Rename " + file;
-	case EditorRequestKind::RenameSymbol: return "Rename everywhere (defined in " + file + ")";
-	case EditorRequestKind::NewProject: return "Create a new project";
-	case EditorRequestKind::OpenProject: return "Open another project";
-	case EditorRequestKind::CloseProject: return "Close the project";
-	default: return "Quit";
-	}
-}
-
-// The session's unsaved-changes prompt: what waits, the files it lists and the answers that
-// fit it. One file (a Close or a Reload): Save / Don't save / Cancel; a project switch or
-// Quit: Save all / Discard / Cancel; Build and Play, which pack the files on disk, and an
-// import or a rename, which write over them: Save all and build (play, import, rename) /
-// Cancel.
+// The session's unsaved-changes prompt: what waits (its row's words, waiting_words), the files it
+// lists and the answers that fit it (its row's Save label, and Discard where its row offers it).
+// One file (a Close or a Reload): Save / Don't save / Cancel; a project switch or Quit: Save all /
+// Discard / Cancel; Build and Play, which pack the files on disk, and an import or a rename, which
+// write over them: Save all and build (play, import, rename) / Cancel.
 void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt &prompt) {
 	if (prompt.open) ImGui::OpenPopup("Unsaved changes");
 	if (!ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
@@ -120,22 +48,14 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 		ImGui::EndPopup();
 		return;
 	}
-	ImGui::TextUnformatted(waiting_action(prompt).c_str());
+	const RequestKindRow &row = request_kind_row(prompt.action);
+	ImGui::TextUnformatted(waiting_words(prompt.action, prompt.target).c_str());
 	ImGui::TextUnformatted(prompt.files.size() == 1 ? "This file has unsaved changes:" : "These files have unsaved changes:");
 	for (const std::string &file : prompt.files) ImGui::BulletText("%s", file.c_str());
-	const bool one_file = prompt.action == EditorRequestKind::CloseDocument || prompt.action == EditorRequestKind::ReloadDocument;
-	const bool renames = prompt.action == EditorRequestKind::RenameAsset || prompt.action == EditorRequestKind::AssignRequirement ||
-	                     prompt.action == EditorRequestKind::RenameSymbol;
-	const char *save = one_file                                           ? "Save"
-	                   : prompt.action == EditorRequestKind::Build       ? "Save all and build"
-	                   : prompt.action == EditorRequestKind::Play        ? "Save all and play"
-	                   : prompt.action == EditorRequestKind::ImportFiles ? "Save all and import"
-	                   : renames                                         ? "Save all and rename"
-	                                                                     : "Save all";
+	const bool one_file = row.guard == GuardScope::Document;
+	const char *save = row.save_label ? row.save_label : "Save all";
 	const auto answer = [&](UnsavedChoice choice) {
-		auto request = make_request(EditorRequestKind::ResolveUnsaved);
-		request.unsaved_choice = choice;
-		workspace.request(std::move(request));
+		workspace.request(request::resolve_unsaved(choice));
 		ImGui::CloseCurrentPopup();
 	};
 	// An answer the session would refuse while an operation runs (busy_refuses_answer) is
@@ -254,9 +174,16 @@ void EditorWindows::set_view(const SessionView *view) {
 	dispatched_ = this->view().events.next_seq() - 1;
 }
 
+// A request whose empty path names the active document (its row's names_active) names the one
+// active when it was raised, so a Save that waits for the frame's other requests still saves it
+// when a click in the same frame makes another document active first. One that acts on the files
+// as saved (its row's acts_on_saved), raised while a frame draws, waits for the frame's other
+// requests: the menu bar draws before the windows, so a Ctrl+S pressed as the inspector sets a
+// field would otherwise save the document without it.
 void EditorWindows::request(EditorRequest request) {
-	if (request.path.empty() && names_the_active_document(request.kind)) request.path = view().documents.active;
-	if (in_frame_ && acts_on_saved_files(request.kind)) deferred_.push_back(std::move(request));
+	const RequestKindRow &row = request_kind_row(request.kind);
+	if (request.path.empty() && row.names_active) request.path = view().documents.active;
+	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
 	else requests_.push_back(std::move(request));
 }
 
@@ -323,9 +250,9 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	if (path.empty()) return; // cancelled
 	switch (purpose) {
 	case PickPurpose::NewProjectLocation: new_project_.set_folder(path); break;
-	case PickPurpose::OpenProject: request(make_request(EditorRequestKind::OpenProject, path)); break;
+	case PickPurpose::OpenProject: request(request::open_project(path)); break;
 	case PickPurpose::RuntimeExecutable:
-	case PickPurpose::RetailDirectory: settings_.set_picked(purpose, path, view().project.root); break;
+	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
 	case PickPurpose::None: break;
 	}
@@ -333,11 +260,8 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 
 void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths) {
 	if (paths.empty() || purpose != PickPurpose::ImportFiles) return; // cancelled, or not a file list
-	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
-	preview.paths = paths;
-	preview.flag =
-			view().project.import_dependencies; // the editor's setting: with the files they need
-	request(std::move(preview));
+	// The editor's setting: with the files they need.
+	request(request::preview_import(paths, view().project.import_dependencies));
 }
 
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
@@ -363,57 +287,49 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	// A project switch and Quit, like every item that raises a request, are enabled while the
 	// busy gate takes their request (an operation that cannot be cancelled refuses them).
 	if (menu_item("New project...", nullptr, v.allows(EditorRequestKind::NewProject))) open_new_project_ = true;
-	if (menu_item("Open project...", nullptr, v.allows(EditorRequestKind::OpenProject))) {
-		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
-		pick.purpose = PickPurpose::OpenProject;
-		request(pick);
-	}
+	if (menu_item("Open project...", nullptr, v.allows(EditorRequestKind::OpenProject)))
+		request(request::pick_directory(PickPurpose::OpenProject));
 	if (ImGui::BeginMenu("Open recent", !v.project.recent_projects.empty())) {
 		for (const std::string &root : v.project.recent_projects) {
 			if (menu_item(root.c_str(), nullptr, v.allows(EditorRequestKind::OpenProject)))
-				request(make_request(EditorRequestKind::OpenProject, root));
+				request(request::open_project(root));
 		}
 		ImGui::EndMenu();
 	}
 	ImGui::Separator();
 	if (menu_item("Save", "Ctrl+S", !v.documents.active.empty() && v.allows(EditorRequestKind::Save)))
-		request(make_request(EditorRequestKind::Save));
+		request(request::save());
 	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.open.empty() && v.allows(EditorRequestKind::SaveAll)))
-		request(make_request(EditorRequestKind::SaveAll));
+		request(request::save_all());
 	if (menu_item("Close file", "Ctrl+W", !v.documents.active.empty() && v.allows(EditorRequestKind::CloseDocument)))
-		request(make_request(EditorRequestKind::CloseDocument));
+		request(request::close_document());
 	ImGui::Separator();
-	if (menu_item("Import files...", nullptr, v.project.open && v.allows(EditorRequestKind::PreviewImport))) {
-		EditorRequest pick = make_request(EditorRequestKind::PickFile);
-		pick.purpose = PickPurpose::ImportFiles;
-		request(pick);
-	}
-	if (menu_item("Import from the game data...", nullptr,
-	              v.project.open && !v.project.retail_directory.empty() && v.allows(EditorRequestKind::PreviewRetailImport))) {
-		EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
-		listed.flag = v.project.import_dependencies;
-		request(listed);
-	}
+	const bool imports = v.project.open && v.allows(EditorRequestKind::PreviewImport);
+	if (menu_item("Import files...", nullptr, imports)) request(request::pick_file(PickPurpose::ImportFiles));
+	const bool lists = v.project.open && !v.project.retail_directory.empty() &&
+	                   v.allows(EditorRequestKind::PreviewInstallImport);
+	if (menu_item("Import from the game data...", nullptr, lists))
+		request(request::preview_install_import({}, v.project.import_dependencies));
 	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		settings_.open(v);
 	if (menu_item("Show project folder", nullptr, v.project.open && v.allows(EditorRequestKind::RevealPath)))
-		request(make_request(EditorRequestKind::RevealPath, v.project.root));
+		request(request::reveal_path(v.project.root));
 	if (menu_item("Close project", nullptr, v.project.open && v.allows(EditorRequestKind::CloseProject)))
-		request(make_request(EditorRequestKind::CloseProject));
+		request(request::close_project());
 	ImGui::Separator();
-	if (menu_item("Quit", nullptr, v.allows(EditorRequestKind::Quit))) request(make_request(EditorRequestKind::Quit));
+	if (menu_item("Quit", nullptr, v.allows(EditorRequestKind::Quit))) request(request::quit());
 	ImGui::EndMenu();
 }
 
 void EditorWindows::draw_edit_menu(const SessionView &v, const Document *document) {
 	if (!ImGui::BeginMenu("Edit")) return;
 	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
-		request(make_request(EditorRequestKind::Undo));
+		request(request::undo());
 	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
-		request(make_request(EditorRequestKind::Redo));
+		request(request::redo());
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
@@ -424,24 +340,24 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const Document *documen
 void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
-		request(make_request(EditorRequestKind::Build));
+		request(request::build());
 	if (menu_item("Play", "F5", v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
-		request(make_request(EditorRequestKind::Play));
+		request(request::play());
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
-		request(make_request(EditorRequestKind::StopPlay));
+		request(request::stop_play());
 	ImGui::Separator();
 	// An editor setting, never refused (the busy gate takes it, as it takes the settings'
 	// Apply); the next Play reads it, so it waits while a game runs.
-	bool retail = v.project.play_retail;
+	bool in_install = v.project.play_retail;
 	const bool settable = v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::ApplyProjectSettings);
-	if (ImGui::MenuItem("Play in the game install", nullptr, &retail, settable) && settable) {
-		EditorRequest set = make_request(EditorRequestKind::ApplyProjectSettings);
-		set.settings.play_retail = retail;
-		request(set);
+	if (ImGui::MenuItem("Play in the game install", nullptr, &in_install, settable) && settable) {
+		ProjectSettingsChange change;
+		change.play_in_install = in_install;
+		request(request::apply_project_settings(change));
 	}
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
-		request(make_request(EditorRequestKind::RevealPath, v.activity.last_build->build_dir));
+		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();
 }
 
@@ -469,30 +385,30 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
 		if (io.KeyShift && !v.documents.open.empty() && v.allows(EditorRequestKind::SaveAll))
-			request(make_request(EditorRequestKind::SaveAll));
+			request(request::save_all());
 		else if (!io.KeyShift && !v.documents.active.empty() && v.allows(EditorRequestKind::Save))
-			request(make_request(EditorRequestKind::Save));
+			request(request::save());
 	}
 	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.documents.active.empty() &&
 	    v.allows(EditorRequestKind::CloseDocument))
-		request(make_request(EditorRequestKind::CloseDocument));
+		request(request::close_document());
 	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project.open && v.findings.graph) find_.open();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project.open && v.allows(EditorRequestKind::Build)) {
-		request(make_request(EditorRequestKind::Build));
+		request(request::build());
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
 		if (io.KeyShift && v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
-			request(make_request(EditorRequestKind::StopPlay));
+			request(request::stop_play());
 		} else if (!io.KeyShift && v.project.open && v.activity.play_state == PlayState::Stopped &&
 		           v.allows(EditorRequestKind::Play)) {
-			request(make_request(EditorRequestKind::Play));
+			request(request::play());
 		}
 	}
 	if (!io.WantTextInput && document) {
 		const EditorRequestKind z = io.KeyShift ? EditorRequestKind::Redo : EditorRequestKind::Undo;
-		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false) && v.allows(z)) request(make_request(z));
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false) && v.allows(z)) request(request::of(z));
 		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false) && v.allows(EditorRequestKind::Redo))
-			request(make_request(EditorRequestKind::Redo));
+			request(request::redo());
 	}
 }
 
@@ -586,10 +502,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		if (ImGui::BeginPopup("unsaved")) {
 			for (const Document *document : unsaved)
 				if (menu_item(document->path().c_str(), nullptr, v.allows(EditorRequestKind::OpenDocument)))
-					request(make_request(EditorRequestKind::OpenDocument, document->path()));
+					request(request::open_document(document->path()));
 			ImGui::Separator();
 			if (menu_item("Save all", nullptr, v.allows(EditorRequestKind::SaveAll)))
-				request(make_request(EditorRequestKind::SaveAll));
+				request(request::save_all());
 			ImGui::EndPopup();
 		}
 	}
@@ -609,17 +525,17 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ui_kit::tooltip(state_tip);
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
-				request(make_request(EditorRequestKind::CancelOperation));
+				request(request::cancel_operation());
 			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.activity.operation.kind).noun + ": nothing it made is kept.");
 		}
 	}
-	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(make_request(EditorRequestKind::Build));
+	if (enabled_button("Build", v.allows(EditorRequestKind::Build))) request(request::build());
 	ui_kit::tooltip("Build the project (Ctrl+B).");
 	if (enabled_button("Play", v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
-		request(make_request(EditorRequestKind::Play));
+		request(request::play());
 	ui_kit::tooltip("Build, then run the game on the build (F5).");
 	if (enabled_button("Stop", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
-		request(make_request(EditorRequestKind::StopPlay));
+		request(request::stop_play());
 	ui_kit::tooltip("Stop the game (Shift+F5).");
 	ImGui::PopID();
 }

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 
 namespace opennova::editor {
@@ -267,7 +268,7 @@ io::JsonValue record_batch_request(ProjectSession &session, const std::string &p
 	if (!request.is_object()) return refuse("The request is an object.");
 	Document *document = session.document_for(path);
 	if (!document && !path.empty() && session.project_open()) {
-		session.handle(make_request(EditorRequestKind::OpenDocument, path));
+		session.handle(request::open_document(path));
 		document = session.document_for(path);
 	}
 	if (!document) return refuse(path.empty() ? "No document is open." : "No document " + path + " could be opened.");
@@ -289,9 +290,7 @@ io::JsonValue record_batch_request(ProjectSession &session, const std::string &p
 		// An empty list replaced by nothing: nothing to do, done.
 		answer.set("outcome", action_outcome_to_json(ActionOutcome()));
 	} else {
-		EditorRequest edit = make_request(EditorRequestKind::EditRecord, document->path());
-		edit.edits = batch.edits;
-		session.handle(edit);
+		session.handle(request::edit_record(document->path(), batch.edits));
 		answer.set("outcome", action_outcome_to_json(session.outcome()));
 	}
 	JsonValue made = JsonValue::make_object(), added = JsonValue::make_array();

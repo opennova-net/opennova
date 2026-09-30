@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -21,18 +22,15 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// Create wait with it (the busy gate's answer, SessionView::allows).
 	const bool allowed = workspace.view().allows(EditorRequestKind::NewProject);
 	ImGui::BeginDisabled(!allowed);
-	if (ImGui::Button("Browse...##folder") && allowed) {
-		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
-		pick.purpose = PickPurpose::NewProjectLocation;
-		workspace.request(pick);
-	}
+	if (ImGui::Button("Browse...##folder") && allowed)
+		workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ImGui::EndDisabled();
 	ImGui::TextDisabled("The folder is created if it does not exist; it must not already hold a project.");
 	const bool ready = title_[0] != '\0' && folder_[0] != '\0' && allowed;
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;
 	ImGui::EndDisabled();
-	if (create) workspace.request(make_request(EditorRequestKind::NewProject, folder_, title_));
+	if (create) workspace.request(request::new_project(folder_, title_));
 	return create;
 }
 
@@ -50,11 +48,8 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 	ImGui::SeparatorText("Open project");
 	const bool opens = v.allows(EditorRequestKind::OpenProject);
 	ImGui::BeginDisabled(!opens);
-	if (ImGui::Button("Open a project folder...") && opens) {
-		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
-		pick.purpose = PickPurpose::OpenProject;
-		workspace.request(pick);
-	}
+	if (ImGui::Button("Open a project folder...") && opens)
+		workspace.request(request::pick_directory(PickPurpose::OpenProject));
 	ImGui::EndDisabled();
 	if (!v.project.recent_projects.empty()) {
 		ImGui::TextUnformatted("Recent");
@@ -71,12 +66,12 @@ void draw_welcome(Workspace &workspace, NewProjectForm &form) {
 				                             ImGuiSelectableFlags_AllowOverlap;
 				if (!opens) flags |= ImGuiSelectableFlags_Disabled;
 				if (ImGui::Selectable((shown + "###root").c_str(), false, flags) && opens)
-					workspace.request(make_request(EditorRequestKind::OpenProject, root));
+					workspace.request(request::open_project(root));
 				ui_kit::tooltip(shown != root ? "Open " + root : "Open it.");
 				ImGui::TableNextColumn();
 				const bool forgets = v.allows(EditorRequestKind::ForgetRecent);
 				ImGui::BeginDisabled(!forgets);
-				if (ImGui::SmallButton("Forget") && forgets) workspace.request(make_request(EditorRequestKind::ForgetRecent, root));
+				if (ImGui::SmallButton("Forget") && forgets) workspace.request(request::forget_recent(root));
 				ImGui::EndDisabled();
 				ui_kit::tooltip("Take it off this list; the project stays where it is.");
 				ImGui::PopID();

@@ -147,6 +147,11 @@ public:
 	void create_missing(const std::vector<std::string> &roles);
 	// The recent project `root` dropped from the preferences (ForgetRecent).
 	void forget_recent(const std::string &root);
+	// Output's Clear: the output lines emptied.
+	void clear_output();
+	// Quit: the running operation cancelled first (one that cannot be keeps the editor open,
+	// refused), then the view's quit_requested set, which the shell acts on.
+	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
 	// The game install the editor imports from and plays in: the open project's (its local.json),

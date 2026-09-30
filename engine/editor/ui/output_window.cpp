@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -30,7 +31,7 @@ void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const bool empty = v.activity.output.empty();
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Clear", !empty, empty ? "Nothing to clear." : "Empties the output."))
-		workspace_.request(make_request(EditorRequestKind::ClearOutput));
+		workspace_.request(request::clear_output());
 	if (ui_kit::tool(row, "Copy", !empty, empty ? "Nothing to copy." : "Copies every line to the clipboard.")) {
 		std::string all;
 		for (const std::string &line : v.activity.output) all += line + "\n";

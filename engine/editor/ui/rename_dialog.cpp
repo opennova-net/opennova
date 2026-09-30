@@ -2,6 +2,7 @@
 
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -25,11 +26,7 @@ std::string site_line(const RenameSite &site) {
 
 EditorRequest RenameDialog::preview(const std::string &path, const std::string &locator, const std::string &field,
                                     const std::string &name, bool ask) {
-	EditorRequest request = make_request(EditorRequestKind::PreviewRename, path, locator);
-	request.edit.field = field;
-	request.edit.value = name;
-	request.flag = ask;
-	return request;
+	return request::preview_rename(path, locator, field, name, ask);
 }
 
 void RenameDialog::draw(Workspace &workspace) {

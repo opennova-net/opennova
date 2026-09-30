@@ -8,6 +8,7 @@
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -59,7 +60,8 @@ MenuPreviewSnapshot menu_preview_snapshot(const SessionView &view, const MenuPre
 	snapshot.unreadable = model.unreadable();
 	snapshot.shown_revision = model.shown_revision();
 	for (const auto &open : view.documents.open)
-		if (open && open->path() == view.documents.previews.menu.path) snapshot.document = dynamic_cast<const MnuDocument *>(open.get());
+		if (open && open->path() == view.documents.previews.menu.path)
+			snapshot.document = dynamic_cast<const MnuDocument *>(open.get());
 	if (snapshot.document)
 		snapshot.screen = snapshot.document->row(view.documents.previews.menu.screen);
 	if (snapshot.status == MenuPreviewStatus::Ready) {
@@ -252,11 +254,9 @@ bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snaps
 		return false;
 	if (edits.empty()) return true;
 	const std::string path = document.path();
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
-	request.edits = std::move(edits);
-	session.handle(request);
+	session.handle(request::edit_record(path, std::move(edits)));
 	const bool ok = session.outcome().done();
-	session.handle(make_request(EditorRequestKind::EndEdit, path));
+	session.handle(request::end_edit(path));
 	return ok;
 }
 
@@ -274,9 +274,7 @@ bool menu_preview_arrange(ProjectSession &session, const MenuPreviewSnapshot &sn
 	if (!arrange_edits(document, shown, shown.front(), op, *snapshot.compiler, *snapshot.state, edits, nullptr))
 		return false;
 	if (edits.empty()) return true;
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, document.path());
-	request.edits = std::move(edits);
-	session.handle(request);
+	session.handle(request::edit_record(document.path(), std::move(edits)));
 	return session.outcome().done();
 }
 

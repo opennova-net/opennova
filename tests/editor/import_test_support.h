@@ -16,6 +16,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/pff/pff.h>
 
@@ -111,7 +112,7 @@ struct Project {
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
 	explicit Project(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Plan"));
+		session.handle(request::new_project(dir.file("project"), "Plan"));
 	}
 	const SessionView &view() const { return session.view(); }
 	std::string root() const { return session.view().project.root; }

@@ -41,6 +41,8 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/model/field_text.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include "../editor/editor_test_support.h"
 #include "../editor/menu_test_support.h"
@@ -64,13 +66,13 @@ namespace {
 
 void test_requests_round_trip() {
 	EditorWindows windows;
-	windows.request(make_request(EditorRequestKind::OpenProject, "C:/mods/A"));
-	EditorRequest set = make_request(EditorRequestKind::ApplyProjectSettings);
+	windows.request(request::open_project("C:/mods/A"));
+	EditorRequest set = request::of(EditorRequestKind::ApplyProjectSettings);
 	set.settings.mission = true;
 	windows.request(set);
 	CHECK(windows.pending_requests() == 2, "two queued");
 	EditorRequest out;
-	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::OpenProject && out.path == "C:/mods/A",
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::OpenProject && out.dir == "C:/mods/A",
 	      "oldest first");
 	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::ApplyProjectSettings &&
 	              out.settings.mission == std::optional<bool>(true),
@@ -82,16 +84,66 @@ void test_requests_round_trip() {
 	// open on its project), which its Apply sends (workspace_test.cpp); a folder for a new
 	// project fills the new-project form; a cancelled pick raises nothing.
 	windows.deliver_pick(PickPurpose::OpenProject, "C:/mods/B");
-	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::OpenProject && out.path == "C:/mods/B",
+	CHECK(windows.take_request(out) && out.kind == EditorRequestKind::OpenProject && out.dir == "C:/mods/B",
 	      "open pick");
 	windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/tools/opennova.exe");
-	windows.deliver_pick(PickPurpose::RetailDirectory, "C:/games/Joint Operations");
+	windows.deliver_pick(PickPurpose::GameInstall, "C:/games/Joint Operations");
 	CHECK(!windows.take_request(out), "the settings' picks fill its fields, they apply nothing by themselves");
 	windows.deliver_pick(PickPurpose::OpenProject, "");
 	CHECK(!windows.take_request(out), "a cancelled pick raises nothing");
 	windows.deliver_pick(PickPurpose::NewProjectLocation, "C:/mods/New");
 	CHECK(!windows.take_request(out) && std::string(windows.new_project_form().folder()) == "C:/mods/New",
 	      "a location pick fills the form, it does not open");
+}
+
+// The frame bracket reads the request table (S13 A4: acts_on_saved_files and
+// names_the_active_document were switches in editor_windows.cpp): raised inside a frame, a request
+// of a kind that acts on the files as saved waits for the frame's other requests (a Select raised
+// after it is taken first), any other goes in order; raised with no path, one whose empty path
+// names the active document carries the one active when it was raised. The lists are the ones the
+// switches held, every kind asked.
+void test_frame_bracket_follows_the_table() {
+	using K = EditorRequestKind;
+	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
+	                              K::Build, K::Play, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
+	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::Quit};
+	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
+	                               K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
+	                               K::Undo, K::Redo};
+	const auto listed = [](const std::vector<K> &kinds, K kind) {
+		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
+	};
+	SessionView v;
+	v.documents.active = "menus/main.mnu";
+	size_t deferred = 0, named = 0;
+	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
+		const auto kind = static_cast<K>(i);
+		const RequestKindRow &row = request_kind_row(kind);
+		CHECK(row.acts_on_saved == listed(saved, kind), row.token);
+		CHECK(row.names_active == listed(active, kind), row.token);
+		EditorWindows windows;
+		windows.set_view(&v);
+		windows.begin_frame();
+		windows.request(request::of(kind));
+		windows.request(request::select_record("menus/other.mnu", {1, 1, 0}));
+		windows.end_frame();
+		EditorRequest first, second;
+		CHECK(windows.take_request(first) && windows.take_request(second) && !windows.take_request(second), row.token);
+		const EditorRequest &raised = first.kind == kind ? first : second;
+		const bool waited = first.kind == K::SelectRecord && kind != K::SelectRecord;
+		CHECK(waited == row.acts_on_saved, row.token);
+		CHECK(raised.path == (row.names_active ? v.documents.active : std::string()), row.token);
+		deferred += waited ? 1 : 0;
+		named += raised.path.empty() ? 0 : 1;
+	}
+	CHECK(deferred == saved.size() && named == active.size(), "every kind asked");
+	// Outside a frame nothing waits: a Save raised then is taken first.
+	EditorWindows windows;
+	windows.set_view(&v);
+	windows.request(request::save());
+	windows.request(request::select_record("menus/other.mnu", {1, 1, 0}));
+	EditorRequest out;
+	CHECK(windows.take_request(out) && out.kind == K::Save && out.path == v.documents.active, "outside a frame, in order");
 }
 
 // --- S9h2: the menu view's tree and the inspector over the full menu schema ---------
@@ -329,8 +381,8 @@ void test_menu_window_ui() {
 		ui.button(false);
 		for (const EditorRequest &request : ui.drain()) {
 			if (request.kind != EditorRequestKind::SelectRecord) continue;
-			const NodeId id = request.edit.address.child;
-			CHECK(request.edit.address.kind == kWindow && request.select_mode == SelectMode::Replace, "a click selects a window");
+			const NodeId id = request.address.child;
+			CHECK(request.address.kind == kWindow && request.mode == SelectMode::Replace, "a click selects a window");
 			if (!rows.count(id)) order.push_back(id);
 			auto &extent = rows.emplace(id, std::make_pair(y, y)).first->second;
 			extent.second = y;
@@ -357,7 +409,7 @@ void test_menu_window_ui() {
 	ui.frames();
 	const std::vector<EditorRequest> toggled = ui.drain();
 	const EditorRequest *toggle = only(toggled, EditorRequestKind::SelectRecord);
-	CHECK(toggle && toggle->edit.address == named(*document, "TITLE") && toggle->select_mode == SelectMode::Toggle,
+	CHECK(toggle && toggle->address == named(*document, "TITLE") && toggle->mode == SelectMode::Toggle,
 	      "Ctrl+click toggles");
 
 	// Shift+click selects the rows from the last one clicked (TITLE) to BACK in the tree's
@@ -371,7 +423,7 @@ void test_menu_window_ui() {
 	std::vector<std::pair<std::string, SelectMode>> ranged;
 	for (const EditorRequest &request : ui.drain())
 		if (request.kind == EditorRequestKind::SelectRecord)
-			ranged.emplace_back(menu_test::window_of(*document, request.edit.address)->name, request.select_mode);
+			ranged.emplace_back(menu_test::window_of(*document, request.address)->name, request.mode);
 	CHECK(ranged == (std::vector<std::pair<std::string, SelectMode>>{{"PANEL", SelectMode::Replace},
 	                                                                 {"CHOICES", SelectMode::Add},
 	                                                                 {"TITLE", SelectMode::Add},
@@ -399,8 +451,8 @@ void test_menu_window_ui() {
 		ui.frames();
 		const std::vector<EditorRequest> fresh = ui.drain();
 		const EditorRequest *plain = only(fresh, EditorRequestKind::SelectRecord);
-		CHECK(plain && plain->path == extra->path() && plain->edit.address == named(*extra, "BACK") &&
-		              plain->select_mode == SelectMode::Replace,
+		CHECK(plain && plain->path == extra->path() && plain->address == named(*extra, "BACK") &&
+		              plain->mode == SelectMode::Replace,
 		      "another file: no range from a row of the first");
 		v.documents.open.pop_back();
 		v.documents.active = document->path();
@@ -427,16 +479,16 @@ void test_menu_window_ui() {
 	const NodeAddress main = named(*document, "MAIN"), back = named(*document, "BACK"), title = named(*document, "TITLE");
 	std::vector<EditorRequest> dropped = drag("BACK", middle("TITLE"));
 	CHECK(dropped.size() == 1 && dropped[0].kind == EditorRequestKind::EditRecord &&
-	              dropped[0].edit.operation == EditOperation::Move && dropped[0].edit.address == back &&
-	              dropped[0].edit.parent == title.child && dropped[0].edit.position == SIZE_MAX,
+	              edit_of(dropped[0]).operation == EditOperation::Move && edit_of(dropped[0]).address == back &&
+	              edit_of(dropped[0]).parent == title.child && edit_of(dropped[0]).position == SIZE_MAX,
 	      "dropped on a window's middle: inside it, at the end");
 	dropped = drag("BACK", bottom("TITLE"));
-	CHECK(dropped.size() == 1 && dropped[0].edit.operation == EditOperation::Move && dropped[0].edit.parent == main.child &&
-	              dropped[0].edit.position == 2,
+	CHECK(dropped.size() == 1 && edit_of(dropped[0]).operation == EditOperation::Move && edit_of(dropped[0]).parent == main.child &&
+	              edit_of(dropped[0]).position == 2,
 	      "dropped on a window's lower edge: after it");
 	dropped = drag("TITLE", top("PANEL"));
-	CHECK(dropped.size() == 1 && dropped[0].edit.operation == EditOperation::Move && dropped[0].edit.address == title &&
-	              dropped[0].edit.parent == main.child && dropped[0].edit.position == 1,
+	CHECK(dropped.size() == 1 && edit_of(dropped[0]).operation == EditOperation::Move && edit_of(dropped[0]).address == title &&
+	              edit_of(dropped[0]).parent == main.child && edit_of(dropped[0]).position == 1,
 	      "dropped on a window's upper edge: before it");
 	dropped = drag("MAIN", middle("CHOICES"));
 	CHECK(dropped.empty(), "a window never drops inside itself");
@@ -449,8 +501,8 @@ void test_menu_window_ui() {
 	ui.activate(item_id(menu_id, {"Indent"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *indent = only(requests, EditorRequestKind::EditRecord);
-	CHECK(indent && indent->edit.operation == EditOperation::Move && indent->edit.address == named(*document, "PANEL") &&
-	              indent->edit.parent == back.child,
+	CHECK(indent && edit_of(*indent).operation == EditOperation::Move && edit_of(*indent).address == named(*document, "PANEL") &&
+	              edit_of(*indent).parent == back.child,
 	      "Indent: into the window above");
 	ui.activate(item_id(menu_id, {"Duplicate"}));
 	requests = ui.drain();
@@ -460,24 +512,24 @@ void test_menu_window_ui() {
 	ui.activate(item_id(menu_id, {"Add window"}));
 	requests = ui.drain();
 	const EditorRequest *add = only(requests, EditorRequestKind::EditRecord);
-	CHECK(add && add->edit.operation == EditOperation::Add && add->edit.address.kind == kWindow &&
-	              add->edit.parent == named(*document, "PANEL").child && add->edit.field == "type" &&
-	              std::get<std::string>(add->edit.value) == "static",
+	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).address.kind == kWindow &&
+	              edit_of(*add).parent == named(*document, "PANEL").child && edit_of(*add).field == "type" &&
+	              std::get<std::string>(edit_of(*add).value) == "static",
 	      "Add window: a window of the picked type inside the selection, one edit");
 	select_in(v, named(*document, "CHOICES"));
 	ui.frames(2);
 	ui.activate(item_id(menu_id, {"Outdent"}));
 	requests = ui.drain();
 	const EditorRequest *outdent = only(requests, EditorRequestKind::EditRecord);
-	CHECK(outdent && outdent->edit.operation == EditOperation::Move && outdent->edit.parent == main.child &&
-	              outdent->edit.position == 2,
+	CHECK(outdent && edit_of(*outdent).operation == EditOperation::Move && edit_of(*outdent).parent == main.child &&
+	              edit_of(*outdent).position == 2,
 	      "Outdent: right after the window that held it");
 	ui.activate(item_id(menu_id, {"Duplicate screen"}));
 	requests = ui.drain();
 	const EditorRequest *copy_screen = only(requests, EditorRequestKind::EditRecord);
 	const NodeAddress screen_address{screen.id, kScreen, 0};
-	CHECK(copy_screen && copy_screen->edit.operation == EditOperation::Duplicate &&
-	              copy_screen->edit.address == screen_address && copy_screen->edit.position == 1,
+	CHECK(copy_screen && edit_of(*copy_screen).operation == EditOperation::Duplicate &&
+	              edit_of(*copy_screen).address == screen_address && edit_of(*copy_screen).position == 1,
 	      "Duplicate screen: right after it");
 
 	// Ctrl+C / X / V on the focused window: the session's clipboard requests.
@@ -523,8 +575,8 @@ void test_menu_window_ui() {
 	// Where a Paste goes is the window's to say: after the selected window among its siblings.
 	auto pasted_at = [&](const std::vector<EditorRequest> &raised, NodeId parent, size_t position) {
 		const EditorRequest *paste = only(raised, EditorRequestKind::Paste);
-		return paste && paste->path == document->path() && paste->edit.address.row == screen.id &&
-		       paste->edit.parent == parent && paste->edit.position == position;
+		return paste && paste->path == document->path() && paste->paste_at.row == screen.id &&
+		       paste->paste_at.parent == parent && paste->paste_at.position == position;
 	};
 	requests = chord(ImGuiKey_V);
 	CHECK(pasted_at(requests, main.child, 1), "Ctrl+V pastes after the selected window");
@@ -579,8 +631,8 @@ void test_inspector_ui() {
 	ui.activate(item_id(actions, {"Add"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *add = only(requests, EditorRequestKind::EditRecord);
-	CHECK(add && add->edit.operation == EditOperation::Add && add->edit.address.kind == menu_kind("action") &&
-	              add->edit.parent == back.child,
+	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).address.kind == menu_kind("action") &&
+	              edit_of(*add).parent == back.child,
 	      "a collection's Add goes into the record shown");
 
 	// A row of it selected: the leaf's form, and the rows beside it with their toolbar.
@@ -591,12 +643,12 @@ void test_inspector_ui() {
 	ui.activate(item_id(actions, {"Up"}));
 	requests = ui.drain();
 	const EditorRequest *up = only(requests, EditorRequestKind::EditRecord);
-	CHECK(up && up->edit.operation == EditOperation::Move && up->edit.address == second && up->edit.position == 0,
+	CHECK(up && edit_of(*up).operation == EditOperation::Move && edit_of(*up).address == second && edit_of(*up).position == 0,
 	      "Up moves the selected row");
 	ui.activate(item_id(actions, {"Duplicate"}));
 	requests = ui.drain();
 	const EditorRequest *duplicate = only(requests, EditorRequestKind::EditRecord);
-	CHECK(duplicate && duplicate->edit.operation == EditOperation::Duplicate && duplicate->edit.position == 2,
+	CHECK(duplicate && edit_of(*duplicate).operation == EditOperation::Duplicate && edit_of(*duplicate).position == 2,
 	      "Duplicate puts the copy after it");
 
 	// In place: the hotkey's Virtual key switch, and the second action's verb.
@@ -608,8 +660,8 @@ void test_inspector_ui() {
 	ui.activate(item_id(pushed(hotkeys, static_cast<int>(hotkey.child)), {"virtual", "##value"}));
 	requests = ui.drain();
 	const EditorRequest *virtual_key = only(requests, EditorRequestKind::EditRecord);
-	CHECK(virtual_key && virtual_key->edit.address == hotkey && virtual_key->edit.field == "virtual" &&
-	              std::get<int64_t>(virtual_key->edit.value) == 1,
+	CHECK(virtual_key && edit_of(*virtual_key).address == hotkey && edit_of(*virtual_key).field == "virtual" &&
+	              std::get<int64_t>(edit_of(*virtual_key).value) == 1,
 	      "a switch in a cell sets the row's field");
 	// The Virtual key heading, cut to its switch's narrow column, hovered: one tooltip, the
 	// field's words, at once and still once the header's own tooltip for the label it cut
@@ -645,8 +697,8 @@ void test_inspector_ui() {
 	ui.activate(item_id(pushed(ImHashStr("##Combo_00"), pop_screen), {"Go back"}));
 	requests = ui.drain();
 	const EditorRequest *verb = only(requests, EditorRequestKind::EditRecord);
-	CHECK(verb && verb->edit.address == second && verb->edit.field == "type" &&
-	              std::get<std::string>(verb->edit.value) == "POP_SCREEN",
+	CHECK(verb && edit_of(*verb).address == second && edit_of(*verb).field == "type" &&
+	              std::get<std::string>(edit_of(*verb).value) == "POP_SCREEN",
 	      "a choice picked by its readable name writes its token");
 
 	// TITLE's STRING switch, the first row of its block's form: the block left out.
@@ -656,7 +708,7 @@ void test_inspector_ui() {
 	ui.activate(item_id(inspector, {"string", "fields", "string", "##value"}));
 	requests = ui.drain();
 	const EditorRequest *block = only(requests, EditorRequestKind::EditRecord);
-	CHECK(block && block->edit.field == "string" && std::get<int64_t>(block->edit.value) == 0, "a block's switch");
+	CHECK(block && edit_of(*block).field == "string" && std::get<int64_t>(edit_of(*block).value) == 0, "a block's switch");
 
 	// S9k2: BACK and TITLE selected together (BACK the primary): the fields they share, the
 	// type marked mixed; a switch sets both in one batch.
@@ -718,7 +770,7 @@ void test_actions_after_edits() {
 	ImGui::GetIO().AddKeyEvent(ImGuiKey_S, true);
 	ui.frames();
 	requests = ui.drain();
-	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::EditRecord && requests[0].edit.field == "hidden" &&
+	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::EditRecord && edit_of(requests[0]).field == "hidden" &&
 	              requests[1].kind == EditorRequestKind::Save,
 	      "the frame's edit is raised before the frame's Save");
 	ui.key(ImGuiKey_S, false);
@@ -789,7 +841,7 @@ void test_actions_after_edits() {
 	ui.click(problems_lines().at(0, 2));
 	requests = ui.drain();
 	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::ShowInFiles &&
-	              requests[0].path == font_entry.relative_path && !requests[0].flag,
+	              requests[0].path == font_entry.relative_path && !requests[0].ask_name,
 	      "a font's row shows it in Files");
 	Diagnostic finding = make_diagnostic(DiagnosticSeverity::Error, "menu.test", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
@@ -942,7 +994,7 @@ void test_preview_canvas_smoke() {
 	ui.click(at(200.0f, 150.0f));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *picked = only(requests, EditorRequestKind::SelectRecord);
-	CHECK(picked && picked->edit.address == box && picked->select_mode == SelectMode::Replace, "a click selects BOX");
+	CHECK(picked && picked->address == box && picked->mode == SelectMode::Replace, "a click selects BOX");
 	CHECK(!only(requests, EditorRequestKind::EditRecord), "a click edits nothing");
 
 	// BOX selected: dragged by (40, 21), snapped: one gesture of Sets, then its end.
@@ -1213,7 +1265,7 @@ void test_preview_several_windows_ui() {
 	auto selections = [&](const std::vector<EditorRequest> &requests) {
 		std::vector<std::pair<NodeAddress, SelectMode>> out;
 		for (const EditorRequest &request : requests)
-			if (request.kind == EditorRequestKind::SelectRecord) out.emplace_back(request.edit.address, request.select_mode);
+			if (request.kind == EditorRequestKind::SelectRecord) out.emplace_back(request.address, request.mode);
 		return out;
 	};
 	// Where the batch sets one window's field (-1: it does not).
@@ -1291,7 +1343,7 @@ void test_preview_several_windows_ui() {
 	ui.frames();
 	requests = chord(ImGuiKey_V);
 	const EditorRequest *paste = only(requests, EditorRequestKind::Paste);
-	CHECK(paste && paste->edit.address.row == screen.id && paste->edit.parent == main.child && paste->edit.position == 2,
+	CHECK(paste && paste->paste_at.row == screen.id && paste->paste_at.parent == main.child && paste->paste_at.position == 2,
 	      "Ctrl+V pastes after the primary window (OTHER)");
 	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
 	// window's list row) the preview raises none of them, as the menu view does not.
@@ -1576,7 +1628,7 @@ void test_problems_window_ui() {
 	ui.frames(2);
 	ui.click(confirmation_button(false));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext", "main_menu"}),
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext", "main_menu"}),
 	      "Apply: one Create naming every role");
 	ui.frames(2);
 	CHECK(!confirmation(), "and the confirmation closes");
@@ -1598,7 +1650,7 @@ void test_problems_window_ui() {
 	ui.click(problems_lines().at(2, 2));
 	requests = ui.drain();
 	const EditorRequest *opened = one(requests, EditorRequestKind::OpenDocument);
-	CHECK(opened && opened->path == "defs/items.def" && opened->edit.address == (NodeAddress{4, 2, 0}) && opened->edit.field == "type",
+	CHECK(opened && opened->path == "defs/items.def" && opened->address == (NodeAddress{4, 2, 0}) && opened->field == "type",
 	      "a catalog finding opens its record at the field");
 	ui.click(problems_lines().at(2, 2));
 	ui.drain();
@@ -1606,7 +1658,7 @@ void test_problems_window_ui() {
 	// A required file's Fix creates it; its More lists every fix; a Use fix waits for Apply.
 	ui.click(problems_lines().fix(0));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}),
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext"}),
 	      "a required file's Fix creates it");
 	ui.click(problems_lines().more(0, "Create gametext.bin"));
 	text = logged_frame(ui);
@@ -1620,7 +1672,7 @@ void test_problems_window_ui() {
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::AssignRequirement) && requests[0].path == "strings/spare.bin" &&
-	              requests[0].text == "gametext",
+	              requests[0].role == "gametext",
 	      "Apply renames it");
 
 	// The summary's Fix alls: one Create for what factories make, one import list for what
@@ -1642,13 +1694,13 @@ void test_problems_window_ui() {
 	CHECK(confirmation() && ui.drain().empty(), "the summary's Create asks first");
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext", "main_menu"}),
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext", "main_menu"}),
 	      "one Create for every file a factory makes");
 	ui.frames(2);
-	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::PreviewRetailImport)), {"###fix"}));
+	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::PreviewInstallImport)), {"###fix"}));
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PreviewRetailImport) && requests[0].names == List({"cmap.mnu"}),
+	CHECK(one(requests, EditorRequestKind::PreviewInstallImport) && requests[0].names == List({"cmap.mnu"}),
 	      "one import list for what the game data has");
 
 	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
@@ -1666,7 +1718,7 @@ void test_problems_window_ui() {
 	ui.drain();
 	ui.click(problems_lines().fix(6));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"brand_style"}),
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"brand_style"}),
 	      "an optional file's Fix creates it");
 	CHECK(ui.windows.pending_requests() == 0, "nothing else");
 }
@@ -1731,7 +1783,7 @@ void test_problems_confirmation_follows() {
 	      "it says the new list, and that it changed");
 	ui.click(confirmation_button(false));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].names == List({"gametext"}), "then the new list alone");
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext"}), "then the new list alone");
 
 	// More's list follows its finding: main.mnu's again, gametext's gone before it.
 	replace_view(v, problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"),
@@ -1875,7 +1927,7 @@ void test_problems_many() {
 	};
 	const auto opened_row = [&](const std::vector<EditorRequest> &requests) -> NodeId {
 		const EditorRequest *open = one(requests, EditorRequestKind::OpenDocument);
-		return open ? open->edit.address.row : 0;
+		return open ? open->address.row : 0;
 	};
 	CHECK(rows_drawn() > 0 && rows_drawn() < 60, "a thousand findings: only the lines that show");
 	CHECK(window->fixes_asked() > 0 && window->fixes_asked() < 60, "and only their fixes asked");
@@ -1965,13 +2017,13 @@ void test_styles_window_ui() {
 	ui.activate(item_id(styles, {"Add variable"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *add = only(requests, EditorRequestKind::EditRecord);
-	CHECK(add && add->edit.operation == EditOperation::Add && add->edit.address.kind == node_kind(StyleKind::Variable) &&
-	              add->edit.position == 2,
+	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).address.kind == node_kind(StyleKind::Variable) &&
+	              edit_of(*add).position == 2,
 	      "Add variable goes after the selected line");
 	ui.activate(item_id(styles, {"Remove"}));
 	requests = ui.drain();
 	const EditorRequest *remove = only(requests, EditorRequestKind::EditRecord);
-	CHECK(remove && remove->edit.operation == EditOperation::Remove && remove->edit.address.row == fg.id,
+	CHECK(remove && edit_of(*remove).operation == EditOperation::Remove && edit_of(*remove).address.row == fg.id,
 	      "Remove takes the selected line");
 	const Node &directive = *document->rows()[3];
 	select_in(v, {directive.id, directive.kind, 0});
@@ -1995,13 +2047,13 @@ void test_styles_lines_listed() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
+	session.handle(request::new_project(dir.file("project"), "Styles"));
 	const SessionView &v = session.view();
 	CHECK(editor_test::write_text(v.project.root + "/menu_style.mns",
 	                              "// Header\r\nA_FG FFFFFFFF\r\n// Colours below\n\r\nB_FG FF000000\r\n// Footer\r\n"),
 	      "stylesheet fixture");
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("menu_style.mns"));
 	const auto *document = dynamic_cast<const MnsDocument *>(session.document_for("menu_style.mns"));
 	CHECK(document && document->rows().size() == 6,
 	      "the stylesheet's six lines: a header, a variable, a comment, a blank line, a variable, a footer");
@@ -2027,8 +2079,7 @@ void test_styles_lines_listed() {
 	// A line selected; a tool pressed, the requests it raised served.
 	const NodeKind variable = node_kind(StyleKind::Variable);
 	const auto select_line = [&](NodeId row) {
-		EditorRequest select = make_request(EditorRequestKind::SelectRecord, path);
-		select.edit.address = {row, variable, 0};
+		EditorRequest select = request::select_record(path, {row, variable, 0});
 		session.handle(select);
 		ui.frames(2);
 		ui.drain();
@@ -2041,12 +2092,12 @@ void test_styles_lines_listed() {
 		return requests;
 	};
 	const auto undo = [&]() {
-		session.handle(make_request(EditorRequestKind::Undo, path));
+		session.handle(request::undo(path));
 		ui.frames(2);
 	};
 	const auto moved_to = [](const std::vector<EditorRequest> &requests) {
 		const EditorRequest *move = only(requests, EditorRequestKind::EditRecord);
-		return move && move->edit.operation == EditOperation::Move ? move->edit.position : SIZE_MAX;
+		return move && edit_of(*move).operation == EditOperation::Move ? edit_of(*move).position : SIZE_MAX;
 	};
 	select_line(a);
 	CHECK(press("Up").empty() && text() == original, "the first listed line has no Up, the header above it");
@@ -2069,10 +2120,7 @@ void test_styles_lines_listed() {
 	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
 	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
-	EditorRequest open = make_request(EditorRequestKind::OpenDocument, location.path);
-	open.edit.address = location.record;
-	open.edit.field = location.field;
-	session.handle(open);
+	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);
 	ui.drain();
 	CHECK(v.documents.selection.row == comment, "the Problems row selects the comment");
@@ -2080,7 +2128,7 @@ void test_styles_lines_listed() {
 	CHECK(text() == original, "no row tool acts on a line the table does not list");
 	const std::vector<EditorRequest> added = press("Add variable");
 	const EditorRequest *add = only(added, EditorRequestKind::EditRecord);
-	CHECK(add && add->edit.operation == EditOperation::Add && add->edit.position == 6 && document->rows().size() == 7 &&
+	CHECK(add && edit_of(*add).operation == EditOperation::Add && edit_of(*add).position == 6 && document->rows().size() == 7 &&
 	              document->rows()[6]->kind == variable && text().rfind(original, 0) == 0,
 	      "Add variable: at the end of the file, after the footer");
 }
@@ -2096,17 +2144,16 @@ void test_go_to_ui() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
+	session.handle(request::new_project(dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(request::open_document("menu_style.mns"));
 	const Document *style = session.document_for("menu_style.mns");
 	NodeAddress large;
 	CHECK(style && find_definition(AssetGraph(), *style, "DEF_FONTNAME_LG", large),
 			"the stylesheet's large font");
 	if (!style || !large.row) return;
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, style->path());
-	select.edit.address = large;
+	EditorRequest select = request::select_record(style->path(), large);
 	session.handle(select);
 	const std::vector<const GraphEdge *> users = v.findings.graph->referrers_of(ReferenceKind::StyleVar, "DEF_FONTNAME_LG");
 	CHECK(!users.empty() && !users.front()->locator.empty(), "a menu names the large font");
@@ -2121,18 +2168,18 @@ void test_go_to_ui() {
 	ui.activate(item_id(pushed(inspector, 0), {"###use"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *use = one(requests, EditorRequestKind::OpenDocument);
-	CHECK(use && use->path == users.front()->source && use->text == users.front()->locator &&
-	              use->edit.field == users.front()->field,
+	CHECK(use && use->path == users.front()->source && use->locator == users.front()->locator &&
+	              use->field == users.front()->field,
 	      "a use opens its file at the record that makes it");
 
 	// MAIN's font: Go to offers the variable and the font file.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress main;
 	CHECK(menu && find_definition(AssetGraph(), *menu, "MAIN", main), "the menu's MAIN window");
 	if (!menu || !main.row) return;
-	select = make_request(EditorRequestKind::SelectRecord, menu->path());
-	select.edit.address = main;
+	select = request::select_record(menu->path(), {});
+	select.address = main;
 	session.handle(select);
 	ui.frames(3);
 	ui.drain();
@@ -2156,8 +2203,8 @@ void test_go_to_ui() {
 	ui.activate(popup_item(places, targets[0].label.c_str()));
 	requests = ui.drain();
 	const EditorRequest *variable = one(requests, EditorRequestKind::OpenDocument);
-	CHECK(variable && variable->path == style->path() && style->address_at(variable->text) == large &&
-	              variable->edit.field == "name",
+	CHECK(variable && variable->path == style->path() && style->address_at(variable->locator) == large &&
+	              variable->field == "name",
 	      "the variable: the stylesheet opened at it, its name shown");
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
 	ui.drain();
@@ -2177,7 +2224,7 @@ void test_numeric_go_to_ui() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Numbers"));
+	session.handle(request::new_project(dir.file("project"), "Numbers"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *items_asset = v.project.scan->find("items.def");
@@ -2188,8 +2235,8 @@ void test_numeric_go_to_ui() {
 	                              "begin \"Carrier\"\nid 100164\ntype vehicle\naddeweap ewep01 100166\nend\n"
 	                              "begin \"Gun\"\nid 100166\ntype vehicle\nend\n"),
 	      "an item naming another by id");
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, items_path));
+	session.handle(request::rescan());
+	session.handle(request::open_document(items_path));
 	const Document *items = session.document_for(items_path);
 	NodeAddress carrier, gun;
 	CHECK(items && find_definition(AssetGraph(), *items, "100164", carrier) &&
@@ -2202,8 +2249,7 @@ void test_numeric_go_to_ui() {
 			attachment = {carrier.row, collection.spec.kind, collection.ids.front()};
 	CHECK(attachment.child != 0, "the carrier's attachment");
 	if (!attachment.child) return;
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, items_path);
-	select.edit.address = attachment;
+	EditorRequest select = request::select_record(items_path, attachment);
 	session.handle(select);
 	std::string form, list;
 	for (const InspectorSection &section : plan_inspector(*items, attachment, carrier, "")) {
@@ -2221,7 +2267,7 @@ void test_numeric_go_to_ui() {
 	const ImGuiID inspector = Ui::window_id("Inspector");
 	const auto went_to_gun = [&](const std::vector<EditorRequest> &requests) {
 		const EditorRequest *go = one(requests, EditorRequestKind::OpenDocument);
-		return go && go->path == items_path && items->address_at(go->text) == gun && go->edit.field == "id";
+		return go && go->path == items_path && items->address_at(go->locator) == gun && go->field == "id";
 	};
 	ui.activate(item_id(inspector, {form.c_str(), "fields", "item_id", "Go to"}));
 	CHECK(went_to_gun(ui.drain()), "the form's Go to opens the table at the item the id names, its id shown");
@@ -2250,6 +2296,7 @@ struct Group {
 };
 void run_menu_tests() {
 	test_requests_round_trip();
+	test_frame_bracket_follows_the_table();
 	test_menu_tree_model();
 	test_menu_window_ui();
 	test_actions_after_edits();

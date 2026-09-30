@@ -1185,7 +1185,8 @@ static int test_selection() {
 	SessionView view;
 	view.documents.select(document.path(), fake.x, SelectMode::Replace);
 	view.documents.select(document.path(), fake.y, SelectMode::Add);
-	TEST_EXPECT(view.documents.selection == fake.y && view.documents.selected == std::vector<NodeAddress>({fake.x, fake.y}));
+	TEST_EXPECT(view.documents.selection == fake.y &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x, fake.y }));
 	view.documents.select(document.path(), fake.y, SelectMode::Toggle);
 	TEST_EXPECT(view.documents.selection == fake.x &&
 			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
@@ -1196,7 +1197,8 @@ static int test_selection() {
 	TEST_EXPECT(view.documents.selection == fake.b1 &&
 			view.documents.selected == std::vector<NodeAddress>({ fake.b1 }));
 	view.documents.select("other.txt", fake.x, SelectMode::Add);
-	TEST_EXPECT(view.documents.active == "other.txt" && view.documents.selected == std::vector<NodeAddress>({fake.x}));
+	TEST_EXPECT(view.documents.active == "other.txt" &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
 	view.documents.select(document.path(), NodeAddress(), SelectMode::Replace);
 	TEST_EXPECT(view.documents.selected.empty() && view.documents.selection == NodeAddress());
 

@@ -138,8 +138,8 @@ public:
 	// The wire seam (ADR 0046 d10, the editor MCP): the same requests and view as JSON
 	// text, marshalled by the portable session_json so the transport stays a pump.
 	// request_json answers {ok, served, error, outcome, status, revision (the view's any:
-	// view_revisions.h)}; the pickers are
-	// refused (they need a person), reveal_path and quit are served here. get_outcome_json
+	// view_revisions.h)}; the pickers are refused by their kind, before their fields are read
+	// (they need a person), reveal_path and quit are served here. get_outcome_json
 	// is what the last request came to (a typed seam call's included): {done,
 	// unsaved_prompt, operation, findings}.
 	String request_json(const String &p_json);
@@ -167,6 +167,8 @@ public:
 	// counts, groups when grouped, problems with their fixes}, or {error} for a query that
 	// does not parse.
 	String get_problems_json(const String &p_query = "{}");
+	// The request kinds request_json serves, by token: every row of the request table but those a
+	// person answers (the pickers).
 	PackedStringArray get_request_kinds() const;
 	// The asset graph (S7): what a file references, who names a file or a symbol (kind token +
 	// name, in the scope the symbol is defined in: "" any), who uses a file (who names it or

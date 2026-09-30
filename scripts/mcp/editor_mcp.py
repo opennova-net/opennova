@@ -8,10 +8,10 @@ so a `play start` here hands its `mcp_port` straight to `game_mcp.py --port`.
 
     python scripts/mcp/editor_mcp.py launch --headless --open "C:/mods/My Game" --pid-file build/editor.pid
     python scripts/mcp/editor_mcp.py state
-    python scripts/mcp/editor_mcp.py request new_project --path "C:/mods/My Game" --text "My Game"
-    python scripts/mcp/editor_mcp.py request create_missing --names main_menu,gametext
-    python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"retail_directory": "C:/Games/JO"}'
-    python scripts/mcp/editor_mcp.py request preview_import --paths "C:/art/main.mnu" --flag true  # with what it needs
+    python scripts/mcp/editor_mcp.py request new_project --dir "C:/mods/My Game" --title "My Game"
+    python scripts/mcp/editor_mcp.py request create_missing --roles main_menu,gametext
+    python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
+    python scripts/mcp/editor_mcp.py request preview_import --paths "C:/art/main.mnu" --with-dependencies true  # with what it needs
     python scripts/mcp/editor_mcp.py request import_files --imports '[{"path": "C:/art/main.mnu"},
         {"path": "C:/art/arial.fnt", "native": true}]'   # the rows kept (state's import rows' sources)
     python scripts/mcp/editor_mcp.py call editor_document '{"op": "open", "path": "main.mnu"}'
@@ -186,41 +186,46 @@ def parse_edits(text: str) -> list:
 
 
 def parse_imports(text: str) -> list:
-    """--imports: a JSON array of import sources ({path, entry?, retail?, native?}), as
+    """--imports: a JSON array of import sources ({path, entry?, install?, native?}), as
     editor_state's import rows carry them in `source`."""
     try:
         value = json.loads(text)
     except ValueError as error:
         raise GameMcpError(EXIT_USAGE, f"--imports is not JSON: {error}") from error
     if not isinstance(value, list) or not all(isinstance(source, dict) for source in value):
-        raise GameMcpError(EXIT_USAGE, "--imports must be a JSON array of {path, entry?, retail?, native?} objects")
+        raise GameMcpError(EXIT_USAGE, "--imports must be a JSON array of {path, entry?, install?, native?} objects")
     return value
+
+
+# The request's fields (engine/editor/session/request_fields.cpp), one flag each: the text fields,
+# the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
+# takes; the editor refuses the rest, naming what the kind takes.
+REQUEST_TEXTS = ("dir", "title", "path", "locator", "field", "new_name", "role", "file_kind", "mode", "choice",
+                 "purpose")
+REQUEST_LISTS = ("roles", "names")
+REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first")
 
 
 def cmd_request(args: argparse.Namespace) -> int:
     request: dict = {"kind": args.kind}
-    if args.path is not None:
-        request["path"] = args.path
-    if args.text is not None:
-        request["text"] = args.text
-    if args.flag is not None:
-        request["flag"] = args.flag == "true"
+    for field in REQUEST_TEXTS:
+        if getattr(args, field) is not None:
+            request[field] = getattr(args, field)
+    for field in REQUEST_LISTS:
+        if getattr(args, field):
+            request[field] = [name.strip() for name in getattr(args, field).split(",") if name.strip()]
+    for field in REQUEST_SWITCHES:
+        if getattr(args, field) is not None:
+            request[field] = getattr(args, field) == "true"
     if args.paths:
         request["paths"] = args.paths
-    if args.names:
-        request["names"] = [name.strip() for name in args.names.split(",") if name.strip()]
     if args.imports:
         request["imports"] = parse_imports(args.imports)
-    if args.edit:
-        request["edit"] = parse_json_arg(args.edit, None)
     if args.edits:
         request["edits"] = parse_edits(args.edits)
-    if args.mode:
-        request["mode"] = args.mode
-    if args.unsaved_choice:
-        request["unsaved_choice"] = args.unsaved_choice
-    if args.settings:
-        request["settings"] = parse_json_arg(args.settings, None)
+    for field in ("address", "paste_at", "settings"):
+        if getattr(args, field):
+            request[field] = parse_json_arg(getattr(args, field), None)
     payload = client_of(args).call("editor_request", request, timeout=args.timeout)
     emit_payload(payload, args)
     if payload.get("isError"):
@@ -237,7 +242,7 @@ def print_not_done(outcome: dict) -> None:
     """Why a request's outcome is not done: the unsaved-changes prompt it waits on, or its findings."""
     if outcome.get("unsaved_prompt"):
         print("not done: it waits on unsaved changes (`state` names the files); answer with "
-              "`request resolve_unsaved --unsaved-choice save|discard|cancel` (build and play take "
+              "`request resolve_unsaved --choice save|discard|cancel` (build and play take "
               "save or cancel)", file=sys.stderr)
     for finding in outcome.get("findings", []):
         print(f"not done: {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}",
@@ -732,30 +737,48 @@ def build_parser() -> argparse.ArgumentParser:
 
     request = commands.add_parser("request", help="raise one editor_request by kind")
     add_endpoint_options(request)
-    request.add_argument("kind", help="new_project, open_project, create_missing, build, play, save_all, quit, ...")
-    request.add_argument("--path", default=None)
-    request.add_argument("--text", default=None)
-    request.add_argument("--flag", choices=("true", "false"), default=None,
-                         help="the kind's flag: preview_import, preview_retail_import and plan_import plan with "
-                              "the files the chosen ones need; set_import_dependencies sets that setting; "
-                              "import_files replaces existing files; reimport forces")
+    request.add_argument("kind", help="new_project, open_project, create_missing, build, play, save_all, quit, ... "
+                                      "(editor_request's kind enum lists them)")
+    request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
+    request.add_argument("--title", default=None, help="a new project's title")
+    request.add_argument("--path", default=None, help="a file: a project file or open document ('' the active one)")
+    request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
+    request.add_argument("--field", default=None, help="a field of that record")
+    request.add_argument("--new-name", dest="new_name", default=None, help="the name a rename gives")
+    request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
+    request.add_argument("--file-kind", dest="file_kind", default=None,
+                         help="create_file: an asset kind token, for a name that cannot say its kind")
+    request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
+    request.add_argument("--names", default=None, help="comma-separated: preview_install_import's files")
     request.add_argument("--paths", action="append", default=None,
                          help="a file picked for preview_import (repeat for more)")
-    request.add_argument("--names", default=None,
-                         help="comma-separated: create_missing's requirement roles, preview_retail_import's files")
     request.add_argument("--imports", default=None,
                          help="plan_import's files chosen, import_files' rows kept: a JSON array of "
-                              "{path, entry?, retail?, native?} (editor_state's import rows carry each as source)")
-    request.add_argument("--edit", default=None, help="the edit as a JSON object (edit_record, select_record, paste)")
+                              "{path, entry?, install?, native?} (editor_state's import rows carry each as source)")
     request.add_argument("--edits", default=None,
-                         help="a batch of edits on one row as a JSON array (edit_record): one undo step")
+                         help="a batch of edits on one row as a JSON array (edit_record, revert_to_saved): one undo step")
+    request.add_argument("--address", default=None, help="a record's address as a JSON object {row, kind, child}")
+    request.add_argument("--paste-at", dest="paste_at", default=None,
+                         help="paste: where, as a JSON object {row, parent, position} (left out: after the selection)")
     request.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,
                          help="how select_record joins the selection")
-    request.add_argument("--unsaved-choice", choices=("save", "discard", "cancel"), default=None,
+    request.add_argument("--choice", choices=("save", "discard", "cancel"), default=None,
                          help="resolve_unsaved: save writes the files the prompt lists, then what waited runs")
+    request.add_argument("--purpose", default=None, help="the pickers' purpose (refused over MCP: pass paths)")
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
-                              "multiplayer, retail_directory, runtime_executable, play_retail; one left out stays)")
+                              "multiplayer, game_install, runtime_executable, play_in_install; one left out stays)")
+    switch = ("true", "false")
+    request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
+                         help="preview_import, plan_import, preview_install_import: with the files they need; "
+                              "set_import_dependencies: the setting")
+    request.add_argument("--replace", choices=switch, default=None,
+                         help="import_files: replace the project's files of the names")
+    request.add_argument("--force", choices=switch, default=None, help="reimport: import again even when unchanged")
+    request.add_argument("--ask-name", dest="ask_name", choices=switch, default=None,
+                         help="show_in_files, preview_rename: and ask the new name")
+    request.add_argument("--open-first", dest="open_first", choices=switch, default=None,
+                         help="edit_record: open the document first when it is not")
     request.add_argument("--json", action="store_true", help="print the raw result payload")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)

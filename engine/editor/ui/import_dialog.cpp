@@ -11,6 +11,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -45,9 +46,9 @@ std::string need_words(const ImportNeed &need) {
 std::string origin_words(const ImportPlanRow &row, bool short_place) {
 	std::string place = row.found_in;
 	const std::filesystem::path path(row.source.path);
-	if (short_place && !row.source.retail && row.source.entry.empty() && !path.parent_path().filename().empty())
+	if (short_place && !row.source.install && row.source.entry.empty() && !path.parent_path().filename().empty())
 		place = "the folder " + path.parent_path().filename().string();
-	else if (short_place && !row.source.retail && !row.source.entry.empty())
+	else if (short_place && !row.source.install && !row.source.entry.empty())
 		place = "the archive " + basename_of(row.source.path);
 	return row.made_from.empty() ? place : "made from " + row.made_from + ", " + place;
 }
@@ -131,8 +132,8 @@ void ImportDialog::draw(Workspace &workspace) {
 		                   "are now.");
 		ImGui::PopStyleColor();
 	}
-	const bool from_game = (!preview.roots.empty() && preview.roots.front().retail) ||
-	                       (!preview.choices.empty() && preview.choices.front().retail);
+	const bool from_game = (!preview.roots.empty() && preview.roots.front().install) ||
+	                       (!preview.choices.empty() && preview.choices.front().install);
 	ImGui::TextWrapped("%s", from_game ? "Copy files from the game data into the project." : "Copy files into the project.");
 	// The lists scroll; Replace existing files, Import and Cancel stay under them, on two lines
 	// in a narrow dialog.
@@ -168,18 +169,18 @@ void ImportDialog::draw(Workspace &workspace) {
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
-		EditorRequest request = make_request(EditorRequestKind::ImportFiles);
-		request.flag = replace_existing_;
+		std::vector<ImportSource> imports;
 		for (size_t i = 0; i < checked_.size(); ++i) {
 			const ImportSource &source = preview.plan->rows[i].source;
-			if (checked_[i] && std::find(request.imports.begin(), request.imports.end(), source) == request.imports.end())
-				request.imports.push_back(source);
+			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
+				imports.push_back(source);
 		}
+		EditorRequest request = request::import_files(std::move(imports), replace_existing_);
 		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
 	if (ui_kit::tool(actions, "Cancel", workspace.view().allows(EditorRequestKind::CancelImport), "Import nothing.")) {
-		workspace.request(make_request(EditorRequestKind::CancelImport));
+		workspace.request(request::cancel_import());
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::EndPopup();
@@ -204,8 +205,7 @@ void ImportDialog::take(const DialogsView::ImportPreview &preview) {
 // The files chosen, planned again: the chosen ones that are not in the list, then those
 // checked in it.
 void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview &preview) {
-	EditorRequest request = make_request(EditorRequestKind::PlanImport);
-	request.flag = preview.with_dependencies;
+	EditorRequest request = request::plan_import({}, preview.with_dependencies);
 	for (const ImportSource &root : preview.roots)
 		if (std::find(preview.choices.begin(), preview.choices.end(), root) == preview.choices.end())
 			request.imports.push_back(root);
@@ -218,7 +218,7 @@ void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview
 void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	const ImportSource &first = preview.choices.front();
 	const std::string from =
-	        first.retail ? std::string("the game data") : "the archive " + basename_of(first.path);
+	        first.install ? std::string("the game data") : "the archive " + basename_of(first.path);
 	ImGui::TextWrapped("Choose the files to import from %s:", from.c_str());
 	const float em = ImGui::GetFontSize();
 	ui_kit::WrapRow controls;
@@ -268,7 +268,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 		}
 		ui_kit::tooltip(shown != name ? name : std::string());
 		ImGui::TableNextColumn();
-		ui_kit::clipped_text(source.retail ? "game data" : basename_of(source.path), source.path);
+		ui_kit::clipped_text(source.install ? "game data" : basename_of(source.path), source.path);
 		ImGui::PopID();
 	}
 	ImGui::EndTable();
@@ -291,11 +291,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const std::string shown = ui_kit::fit(include, room);
 	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies);
 	ImGui::BeginDisabled(!plans);
-	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans) {
-		EditorRequest request = make_request(EditorRequestKind::SetImportDependencies);
-		request.flag = with;
-		workspace.request(std::move(request));
-	}
+	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans)
+		workspace.request(request::set_import_dependencies(with));
 	ImGui::EndDisabled();
 	ui_kit::tooltip((shown != include ? include + ".\n" : std::string()) +
 	                "Look for the files the chosen ones name (fonts, textures, models...) beside them and in the game "

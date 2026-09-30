@@ -2,129 +2,758 @@
 
 #include <cstddef>
 #include <iterator>
+#include <optional>
+#include <vector>
+
+#include <editor/project/project_files.h>
+#include <editor/session/document_set.h>
+#include <editor/session/import_controller.h>
+#include <editor/session/play_controller.h>
+#include <editor/session/problems_service.h>
+#include <editor/session/rename_controller.h>
+#include <editor/session/session_core.h>
+#include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
 
 namespace {
 
 using K = EditorRequestKind;
+using F = RequestFieldId;
 
 constexpr Holds kNone = HoldsNothing;
 constexpr Holds kFiles = HoldsFiles;
 constexpr Holds kDocuments = HoldsDocuments;
 constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
 
-// What each request reads and writes, what it asks of the busy gate, and what the unsaved-changes
-// prompt guards of it and whether the prompt offers Discard. What it reads and writes: the files
-// when it reads or writes them on disk (the import pass writes them too), the open documents when
-// it reads them or changes what they hold or which are open, everything when it switches or closes
-// the project, and the slot when it starts an operation. A running build reads the files and
-// writes only the slot, so an edit, an open, a selection or an import's preview goes on beside it,
-// and a save, a create, an import or a rename waits.
+// --- the handlers: what serves each session row, through the part it names -----------------------
+
+void serve_new_project(SessionCore &core, const EditorRequest &request) {
+	core.new_project(request.dir, request.title);
+}
+void serve_open_project(SessionCore &core, const EditorRequest &request) {
+	core.open_project(request.dir);
+}
+void serve_close_project(SessionCore &core, const EditorRequest &) {
+	core.close_project();
+}
+void serve_forget_recent(SessionCore &core, const EditorRequest &request) {
+	core.forget_recent(request.dir);
+}
+// Only what changed outside the editor is read again: an open document whose file holds what it
+// was read from keeps its records, its history and its selection.
+void serve_rescan(SessionCore &core, const EditorRequest &) {
+	if (!core.view().project.open)
+		return;
+	core.documents().reload_changed();
+	core.refresh();
+}
+void serve_apply_project_settings(SessionCore &core, const EditorRequest &request) {
+	core.apply_project_settings(request.settings);
+}
+void serve_preview_import(SessionCore &core, const EditorRequest &request) {
+	core.imports().preview_files(request);
+}
+void serve_plan_import(SessionCore &core, const EditorRequest &request) {
+	core.imports().plan(request);
+}
+void serve_set_import_dependencies(SessionCore &core, const EditorRequest &request) {
+	core.imports().set_dependencies(request.with_dependencies);
+}
+void serve_import_files(SessionCore &core, const EditorRequest &request) {
+	core.imports().import_files(request);
+}
+void serve_cancel_import(SessionCore &core, const EditorRequest &) {
+	core.imports().cancel();
+}
+void serve_create_missing(SessionCore &core, const EditorRequest &request) {
+	if (core.view().project.open)
+		core.create_missing(request.roles);
+}
+void serve_build(SessionCore &core, const EditorRequest &) {
+	if (core.view().project.open)
+		core.start_build(false);
+}
+void serve_play(SessionCore &core, const EditorRequest &) {
+	if (core.view().project.open)
+		core.start_build(true);
+}
+void serve_stop_play(SessionCore &core, const EditorRequest &) {
+	core.play().stop();
+}
+void serve_cancel_operation(SessionCore &core, const EditorRequest &) {
+	core.cancel_operation(true);
+}
+void serve_create_file(SessionCore &core, const EditorRequest &request) {
+	core.documents().create_file(request);
+}
+// OpenDocument and ReloadDocument.
+void serve_open_document(SessionCore &core, const EditorRequest &request) {
+	core.documents().open_document(request);
+}
+void serve_show_in_files(SessionCore &core, const EditorRequest &request) {
+	core.documents().show_in_files(request);
+}
+void serve_close_document(SessionCore &core, const EditorRequest &request) {
+	core.documents().close_document(request.path);
+}
+void serve_select_record(SessionCore &core, const EditorRequest &request) {
+	core.documents().select_record(request);
+}
+void serve_edit_record(SessionCore &core, const EditorRequest &request) {
+	core.documents().edit_record(request);
+}
+void serve_revert_to_saved(SessionCore &core, const EditorRequest &request) {
+	core.documents().revert_to_saved(request);
+}
+void serve_end_edit(SessionCore &core, const EditorRequest &request) {
+	core.documents().end_edit(request.path);
+}
+// Copy and Cut.
+void serve_copy(SessionCore &core, const EditorRequest &request) {
+	core.documents().copy(request);
+}
+void serve_paste(SessionCore &core, const EditorRequest &request) {
+	core.documents().paste(request);
+}
+void serve_duplicate(SessionCore &core, const EditorRequest &request) {
+	core.documents().duplicate(request);
+}
+void serve_save(SessionCore &core, const EditorRequest &request) {
+	core.documents().save(request.path);
+}
+void serve_save_all(SessionCore &core, const EditorRequest &) {
+	core.documents().save_all();
+}
+// Undo and Redo.
+void serve_undo_redo(SessionCore &core, const EditorRequest &request) {
+	core.documents().undo_redo(request);
+}
+// The prompt's answer runs what waited on it through its own row again (serve_request), never
+// through handle(): a request from outside is one entry and one outcome.
+void serve_resolve_unsaved(SessionCore &core, const EditorRequest &request) {
+	if (const std::optional<EditorRequest> waited = core.guard().resolve(request.choice))
+		serve_request(core, *waited);
+}
+void serve_rename_asset(SessionCore &core, const EditorRequest &request) {
+	core.renames().rename_asset(request.path, request.new_name);
+}
+void serve_assign_requirement(SessionCore &core, const EditorRequest &request) {
+	core.renames().assign_requirement(request.role, request.path);
+}
+void serve_preview_rename(SessionCore &core, const EditorRequest &request) {
+	core.renames().preview(request);
+}
+void serve_rename_symbol(SessionCore &core, const EditorRequest &request) {
+	core.renames().rename_symbol(request);
+}
+void serve_reimport(SessionCore &core, const EditorRequest &request) {
+	core.imports().reimport(request.path, request.force);
+}
+void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
+	core.imports().preview_install(request);
+}
+void serve_clear_output(SessionCore &core, const EditorRequest &) {
+	core.clear_output();
+}
+void serve_quit(SessionCore &core, const EditorRequest &) {
+	core.quit();
+}
+
+// --- the table ----------------------------------------------------------------------------------
+
+// A row built up column by column (as the asset kinds' rows are), so each row names only what it
+// sets: a session row's handler and doc always, a shell row's server.
+struct Request {
+	RequestKindRow row;
+	constexpr Request(K kind, const char *token, RequestHandler handler, const char *doc) : row() {
+		row.kind = kind;
+		row.token = token;
+		row.handler = handler;
+		row.doc = doc;
+	}
+	// A shell row: the shell serves it, the session never does (no handler).
+	constexpr Request served_by(ServedBy by) const {
+		Request out = *this;
+		out.row.served_by = by;
+		return out;
+	}
+	constexpr Request takes(RequestParams params) const {
+		Request out = *this;
+		out.row.params = params;
+		return out;
+	}
+	constexpr Request holds(Holds reads, Holds writes, OnBusy on_busy = OnBusy::Refuse) const {
+		Request out = *this;
+		out.row.reads = reads;
+		out.row.writes = writes;
+		out.row.on_busy = on_busy;
+		return out;
+	}
+	// What the unsaved-changes prompt guards of it, and its words: what waits ("Close %s", the %s
+	// the file the request names), the Save button.
+	constexpr Request guarded(GuardScope guard, const char *waiting, const char *save_label) const {
+		Request out = *this;
+		out.row.guard = guard;
+		out.row.waiting = waiting;
+		out.row.save_label = save_label;
+		return out;
+	}
+	constexpr Request can_discard() const {
+		Request out = *this;
+		out.row.can_discard = true;
+		return out;
+	}
+	constexpr Request acts_on_saved() const {
+		Request out = *this;
+		out.row.acts_on_saved = true;
+		return out;
+	}
+	constexpr Request names_active() const {
+		Request out = *this;
+		out.row.names_active = true;
+		return out;
+	}
+	constexpr Request ends_edit_groups() const {
+		Request out = *this;
+		out.row.ends_edit_groups = true;
+		return out;
+	}
+	constexpr Request validates() const {
+		Request out = *this;
+		out.row.validates = true;
+		return out;
+	}
+};
+
+// What each request reads and writes: the files when it reads or writes them on disk (the import
+// pass writes them too), the open documents when it reads them or changes what they hold or which
+// are open, everything when it switches or closes the project, and the slot when it starts an
+// operation. A running build reads the files and writes only the slot, so an edit, an open, a
+// selection or an import's preview goes on beside it, and a save, a create, an import or a rename
+// waits.
 constexpr RequestKindRow kRows[] = {
-	{K::NewProject, kNone, kHoldsAll, OnBusy::CancelRunning, GuardScope::AllDirty, true},
-	{K::OpenProject, kNone, kHoldsAll, OnBusy::CancelRunning, GuardScope::AllDirty, true},
-	{K::CloseProject, kNone, kHoldsAll, OnBusy::CancelRunning, GuardScope::AllDirty, true},
-	{K::ForgetRecent, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::Rescan, kFiles, kFilesAndDocuments, OnBusy::Refuse, GuardScope::None, false},
-	// The settings dialog waits on its result, so a settings change is never refused whole: each of
-	// its parts is weighed against the running operation inside, a refused part a failure its result
-	// carries back (SessionCore::apply_project_settings).
-	{K::ApplyProjectSettings, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	// An import's preview plans in place today. When S13 A3 makes the plan an operation
-	// (ImportPlan), these rows (and PreviewRetailImport's) start one: they must write the slot then,
-	// as Build and Play do, so none of them runs beside another operation.
-	{K::PreviewImport, kFiles, kNone, OnBusy::Supersede, GuardScope::None, false},
-	{K::PlanImport, kFiles, kNone, OnBusy::Supersede, GuardScope::None, false},
-	{K::SetImportDependencies, kFiles, kNone, OnBusy::Supersede, GuardScope::None, false},
-	{K::ImportFiles, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse,
-	 GuardScope::PlannedWrites, false},
-	{K::CancelImport, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::CreateMissing, kFiles, kFiles, OnBusy::Refuse, GuardScope::None, false},
+	Request(K::NewProject, "new_project", serve_new_project,
+			"A project made in dir (its title, else New Game), then opened; refused, the open "
+			"project kept, where dir holds a project already.")
+			.takes(request_params({ F::Dir }, { F::Title }))
+			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
+			.can_discard()
+			.acts_on_saved()
+			.row,
+	Request(K::OpenProject, "open_project", serve_open_project,
+			"The project in dir opened; one that does not open leaves the open project open.")
+			.takes(request_params({ F::Dir }))
+			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.guarded(GuardScope::AllDirty, "Open another project", "Save all")
+			.can_discard()
+			.acts_on_saved()
+			.row,
+	Request(K::CloseProject, "close_project", serve_close_project, "The open project closed.")
+			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.guarded(GuardScope::AllDirty, "Close the project", "Save all")
+			.can_discard()
+			.acts_on_saved()
+			.row,
+	Request(K::ForgetRecent, "forget_recent", serve_forget_recent,
+			"The recent project in dir dropped from the editor's list.")
+			.takes(request_params({ F::Dir }))
+			.row,
+	// It reads again the clean documents whose files changed.
+	Request(K::Rescan, "rescan", serve_rescan,
+			"The project's files read again: an open document whose file changed outside the "
+			"editor "
+			"is read again (one with unsaved edits keeps them, document.conflict; one that no "
+			"longer "
+			"reads stays open, document.stale), then the import pass, the scan and the "
+			"requirements.")
+			.holds(kFiles, kFilesAndDocuments)
+			.acts_on_saved()
+			.row,
+	// The settings dialog waits on its answer, so a settings change is never refused whole: each
+	// of its parts is weighed against the running operation inside, a refused part a failure the
+	// view's settings_result lists and its settings_applied event flags
+	// (SessionCore::apply_project_settings).
+	Request(K::ApplyProjectSettings, "apply_project_settings", serve_apply_project_settings,
+			"The settings set, each one left out as it is: the project's name and features "
+			"(project.opennova), the game install (the project's .opennova/local.json, and the "
+			"editor's, where a project naming none starts), the runtime and Play in the game "
+			"install (the editor's); its settings_applied view event carries the serial back, "
+			"flagged when a setting could not be written, and the view's settings_result lists "
+			"what could not be.")
+			.takes(request_params({ F::Settings }))
+			.row,
+	// An import's preview plans in place today, reading the graph. When S13 A3 makes the plan an
+	// operation (ImportPlan), these rows (and PreviewInstallImport's) start one: they must write
+	// the slot then, as Build and Play do, so none of them runs beside another operation.
+	Request(K::PreviewImport, "preview_import", serve_preview_import,
+			"The import dialog planned over the files on disk paths (a loose file chosen, an "
+			"archive's members listed to choose from), with the files they need, found beside them "
+			"or "
+			"in the game install, when with_dependencies.")
+			.takes(request_params({ F::Paths }, { F::WithDependencies }))
+			.holds(kFiles, kNone, OnBusy::Supersede)
+			.validates()
+			.row,
+	Request(K::PlanImport, "plan_import", serve_plan_import,
+			"The import dialog planned again over the files chosen, imports, with the files they "
+			"need "
+			"when with_dependencies (a preview opens when none is).")
+			.takes(request_params({ F::Imports }, { F::WithDependencies }))
+			.holds(kFiles, kNone, OnBusy::Supersede)
+			.validates()
+			.row,
+	Request(K::SetImportDependencies, "set_import_dependencies", serve_set_import_dependencies,
+			"The editor's setting of whether an import brings the files the chosen ones need "
+			"(with_dependencies), remembered; an open import dialog is planned again with it.")
+			.takes(request_params({ F::WithDependencies }))
+			.holds(kFiles, kNone, OnBusy::Supersede)
+			.validates()
+			.row,
+	Request(K::ImportFiles, "import_files", serve_import_files,
+			"The import dialog's rows kept, imports, copied into the project, every file checked "
+			"and "
+			"staged before any is published (replace: over the project's files of the names); with "
+			"a "
+			"preview open the files are planned again first, and nothing is written when that is "
+			"not "
+			"the plan shown (import.changed).")
+			.takes(request_params({ F::Imports }, { F::Replace }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
+			.acts_on_saved()
+			.validates()
+			.row,
+	Request(K::CancelImport, "cancel_import", serve_cancel_import, "The import dialog closed.").row,
+	Request(K::CreateMissing, "create_missing", serve_create_missing,
+			"The required files roles names made from scratch (none: nothing); a file there since "
+			"the last refresh is refused, never overwritten.")
+			.takes(request_params({}, { F::Roles }))
+			.holds(kFiles, kFiles)
+			.row,
 	// Before its operation starts, a Build (a Play's too) reads again the documents whose files
 	// changed and refreshes the project (SessionCore::start_build: the import pass, the scan): it
 	// writes the files and the documents, and the slot. A running build still serves it (its row's
 	// joined_by).
-	{K::Build, kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join,
-	 GuardScope::AllDirty, false},
-	{K::Play, kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join,
-	 GuardScope::AllDirty, false},
-	{K::StopPlay, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::CancelOperation, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::CreateFile, kFiles, kFilesAndDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::OpenDocument, kFiles, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::ShowInFiles, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::ReloadDocument, kFiles, kDocuments, OnBusy::Refuse, GuardScope::Document, true},
-	{K::CloseDocument, kNone, kDocuments, OnBusy::Refuse, GuardScope::Document, true},
-	{K::SelectRecord, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
+	Request(K::Build, "build", serve_build,
+			"The project packed into a build, an operation (the outcome names it); a build running "
+			"already serves it. Unsaved edits wait on the prompt first.")
+			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
+			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	Request(K::Play, "play", serve_play,
+			"A build, then the game run on it once it lands; a build running already serves it and "
+			"starts the game when it lands.")
+			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
+			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
+			.acts_on_saved()
+			.ends_edit_groups()
+			.row,
+	Request(K::StopPlay, "stop_play", serve_stop_play, "The running game stopped.").row,
+	Request(K::CancelOperation, "cancel_operation", serve_cancel_operation,
+			"The running operation stopped between two steps, its work discarded (a build's "
+			"staging "
+			"removed, a Play waiting on it dropped).")
+			.row,
+	Request(K::CreateFile, "create_file", serve_create_file,
+			"A blank file path made from its name's requirement factory, else its kind's free-form "
+			"one (file_kind where the name cannot say the kind); opened when the editor edits its "
+			"kind.")
+			.takes(request_params({ F::Path }, { F::FileKind }))
+			.holds(kFiles, kFilesAndDocuments)
+			.row,
+	Request(K::OpenDocument, "open_document", serve_open_document,
+			"The document at path opened, or made active, with the record at locator (a Go to) or "
+			"at address selected and its field shown (a RevealRecord view event).")
+			.takes(request_params({}, { F::Path, F::Locator, F::Field, F::Address }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	Request(K::ShowInFiles, "show_in_files", serve_show_in_files,
+			"Files selects the project file path and scrolls to it (a RevealFile view event), a "
+			"file the editor does not open included; ask_name: and asks its new name "
+			"(Rename...).")
+			.takes(request_params({ F::Path }, { F::AskName }))
+			.row,
+	Request(K::ReloadDocument, "reload_document", serve_open_document,
+			"The document at path read again from its file, its unsaved edits dropped (the prompt "
+			"asks first).")
+			.takes(request_params({}, { F::Path }))
+			.holds(kFiles, kDocuments)
+			.guarded(GuardScope::Document, "Reload %s", "Save")
+			.can_discard()
+			.acts_on_saved()
+			.names_active()
+			.row,
+	Request(K::CloseDocument, "close_document", serve_close_document,
+			"The document at path closed (the prompt asks about its unsaved edits first).")
+			.takes(request_params({}, { F::Path }))
+			.holds(kNone, kDocuments)
+			.guarded(GuardScope::Document, "Close %s", "Save")
+			.can_discard()
+			.acts_on_saved()
+			.names_active()
+			.row,
+	Request(K::SelectRecord, "select_record", serve_select_record,
+			"The record at address selected in the document at path, joining the selection as mode "
+			"says (the selection stays inside one row).")
+			.takes(request_params({ F::Address }, { F::Path, F::Mode }))
+			.names_active()
+			.row,
 	// A fix's edit opens its document first.
-	{K::EditRecord, kFiles, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::RevertToSaved, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::EndEdit, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::Copy, kDocuments, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::Cut, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::Paste, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::Duplicate, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::Save, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::SaveAll, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::Undo, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
-	{K::Redo, kNone, kDocuments, OnBusy::Refuse, GuardScope::None, false},
+	Request(K::EditRecord, "edit_record", serve_edit_record,
+			"The edits, a batch on one row, applied to the document at path as one undo step "
+			"(edits "
+			"sharing a nonzero gesture fold into one until end_edit); open_first: the document "
+			"opened "
+			"first when it is not (a fix's edit).")
+			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	Request(K::RevertToSaved, "revert_to_saved", serve_revert_to_saved,
+			"Each field the edits name (by address and field) of the document at path given back "
+			"the value and presence the saved file holds, one undo step; refused when none has "
+			"anything to go back to (the Inspector's Revert to saved).")
+			.takes(request_params({ F::Edits }, { F::Path }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	Request(K::EndEdit, "end_edit", serve_end_edit,
+			"The coalesced edit group, or the gesture, of the document at path ends.")
+			.takes(request_params({}, { F::Path }))
+			.names_active()
+			.row,
+	Request(K::Copy, "copy", serve_copy,
+			"The selected records of the document at path onto the session's clipboard, as the "
+			"document type's own payload.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kDocuments, kNone)
+			.names_active()
+			.row,
+	Request(K::Cut, "cut", serve_copy,
+			"The selected records of the document at path copied, then removed in one undo step.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	Request(K::Paste, "paste", serve_paste,
+			"The clipboard pasted into the document at path where paste_at says, else after the "
+			"selection, one undo step.")
+			.takes(request_params({}, { F::Path, F::PasteAt }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	Request(K::Duplicate, "duplicate", serve_duplicate,
+			"Each selected record of the document at path (those no other selected one holds) "
+			"copied "
+			"right after itself, one undo step; the copies become the selection.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	Request(K::Save, "save", serve_save,
+			"The document at path written, with no unsaved edits too when its file holds other "
+			"bytes "
+			"than it would write (a canonical rewrite); a file that is not open is read, rewritten "
+			"that way when it must be, and left closed.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.acts_on_saved()
+			.names_active()
+			.row,
+	Request(K::SaveAll, "save_all", serve_save_all,
+			"Every document with unsaved edits written, past a failure.")
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.acts_on_saved()
+			.row,
+	Request(K::Undo, "undo", serve_undo_redo, "The last step of the document at path undone.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
+	Request(K::Redo, "redo", serve_undo_redo,
+			"The last step undone in the document at path done again.")
+			.takes(request_params({}, { F::Path }))
+			.holds(kNone, kDocuments)
+			.names_active()
+			.row,
 	// Its Save is weighed as a Save All and its Discard as a write of the documents, inside; the
 	// request it answers meets the gate itself.
-	{K::ResolveUnsaved, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::RenameAsset, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse,
-	 GuardScope::PlannedWrites, false},
-	{K::AssignRequirement, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse,
-	 GuardScope::PlannedWrites, false},
-	{K::PreviewRename, kFiles, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::RenameSymbol, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse,
-	 GuardScope::PlannedWrites, false},
-	{K::Reimport, kFiles, kFiles, OnBusy::Refuse, GuardScope::None, false},
-	{K::PreviewRetailImport, kFiles, kNone, OnBusy::Supersede, GuardScope::None, false},
-	{K::ClearOutput, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::Quit, kNone, kHoldsAll, OnBusy::CancelRunning, GuardScope::AllDirty, true},
-	{K::PickDirectory, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::PickFile, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
-	{K::RevealPath, kNone, kNone, OnBusy::Refuse, GuardScope::None, false},
+	Request(K::ResolveUnsaved, "resolve_unsaved", serve_resolve_unsaved,
+			"The unsaved-changes prompt answered with choice: save writes the files it lists and "
+			"discard drops their edits, then what waited runs; cancel drops what waited.")
+			.takes(request_params({ F::Choice }))
+			.acts_on_saved()
+			.row,
+	Request(K::RenameAsset, "rename_asset", serve_rename_asset,
+			"The project file path renamed to new_name, every reference to it rewritten, or "
+			"refused "
+			"with the reasons; not undoable.")
+			.takes(request_params({ F::Path, F::NewName }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
+			.acts_on_saved()
+			.validates()
+			.row,
+	Request(K::AssignRequirement, "assign_requirement", serve_assign_requirement,
+			"The requirement role met by renaming the project file path, of the kind it expects, "
+			"to "
+			"the name the engine demands (as rename_asset renames).")
+			.takes(request_params({ F::Role, F::Path }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
+			.acts_on_saved()
+			.validates()
+			.row,
+	Request(K::PreviewRename, "preview_rename", serve_preview_rename,
+			"What a rename would do, planned into the view's rename_preview, nothing written: the "
+			"name the record at locator of path defines in field renamed everywhere to new_name, "
+			"or, "
+			"with no field, the file path renamed to new_name; ask_name: the Rename everywhere "
+			"dialog opens (an AskRename view event).")
+			.takes(request_params({ F::Path }, { F::Locator, F::Field, F::NewName, F::AskName }))
+			.holds(kFiles, kNone)
+			.validates()
+			.row,
+	Request(K::RenameSymbol, "rename_symbol", serve_rename_symbol,
+			"The name the record at locator of path defines in field renamed everywhere to "
+			"new_name, "
+			"every use that reaches it rewritten on disk, or refused with the reasons; not "
+			"undoable.")
+			.takes(request_params({ F::Path, F::Locator, F::Field, F::NewName }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.guarded(GuardScope::PlannedWrites, "Rename everywhere (defined in %s)",
+					"Save all and rename")
+			.acts_on_saved()
+			.validates()
+			.row,
+	Request(K::Reimport, "reimport", serve_reimport,
+			"A refresh whose import pass takes the source path (left out: every source) even when "
+			"it "
+			"is unchanged when force says so; the findings on it are the outcome.")
+			.takes(request_params({}, { F::Path, F::Force }))
+			.holds(kFiles, kFiles)
+			.row,
+	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
+			"The import dialog on the game install's files: the names alone, chosen, or with none "
+			"every file listed to choose from, with the files they need when with_dependencies "
+			"(their "
+			"sources carry install: true).")
+			.takes(request_params({}, { F::Names, F::WithDependencies }))
+			.holds(kFiles, kNone, OnBusy::Supersede)
+			.validates()
+			.row,
+	Request(K::ClearOutput, "clear_output", serve_clear_output,
+			"The output lines emptied, as Output's Clear does.")
+			.row,
+	Request(K::Quit, "quit", serve_quit,
+			"The editor quits once the prompt has asked about unsaved edits; the running operation "
+			"is cancelled first (one that cannot be keeps the editor open).")
+			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.guarded(GuardScope::AllDirty, "Quit", "Save all")
+			.can_discard()
+			.acts_on_saved()
+			.row,
+	Request(K::PickDirectory, "pick_directory", nullptr,
+			"A native folder dialog for purpose; its answer comes back as the request the purpose "
+			"makes (a person answers it: through the editor MCP, pass the path instead).")
+			.served_by(ServedBy::ShellNeedsPerson)
+			.takes(request_params({ F::Purpose }))
+			.row,
+	Request(K::PickFile, "pick_file", nullptr,
+			"A native file dialog for purpose, as pick_directory (import_files picks several).")
+			.served_by(ServedBy::ShellNeedsPerson)
+			.takes(request_params({ F::Purpose }))
+			.row,
+	Request(K::RevealPath, "reveal_path", nullptr,
+			"The file or folder path shown in the OS file manager.")
+			.served_by(ServedBy::Shell)
+			.takes(request_params({ F::Path }))
+			.row,
 };
 
-static_assert(std::size(kRows) == kEditorRequestKindCount, "every request kind has exactly one row");
+static_assert(
+		std::size(kRows) == kEditorRequestKindCount, "every request kind has exactly one row");
 
 constexpr bool rows_in_order() {
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i)
-		if (kRows[i].kind != static_cast<EditorRequestKind>(i)) return false;
+		if (kRows[i].kind != static_cast<EditorRequestKind>(i))
+			return false;
 	return true;
 }
 static_assert(rows_in_order(), "the request kind rows follow the enum's order");
+
+constexpr bool same_text(const char *a, const char *b) {
+	while (*a && *a == *b) {
+		++a;
+		++b;
+	}
+	return *a == *b;
+}
+
+// Every row has a token of its own and says what it does.
+constexpr bool rows_named() {
+	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
+		if (!kRows[i].token[0] || !kRows[i].doc || !kRows[i].doc[0])
+			return false;
+		for (size_t j = i + 1; j < kEditorRequestKindCount; ++j)
+			if (same_text(kRows[i].token, kRows[j].token))
+				return false;
+	}
+	return true;
+}
+static_assert(rows_named(), "each request kind has a token of its own and a doc");
+
+// The session serves a row by its handler; a shell row has none, and holds, guards, ends and
+// validates nothing of the session's.
+constexpr bool handlers_where_served() {
+	for (const RequestKindRow &row : kRows) {
+		const bool session = row.served_by == ServedBy::Session;
+		if (session != (row.handler != nullptr))
+			return false;
+		if (!session &&
+				(row.guard != GuardScope::None || row.acts_on_saved || row.names_active ||
+						row.ends_edit_groups || row.validates || row.reads != kNone ||
+						row.writes != kNone))
+			return false;
+	}
+	return true;
+}
+static_assert(handlers_where_served(), "a session row has a handler and a shell row has none");
 
 // The prompt offers Discard only for a request it guards whose plan writes nothing over the files:
 // an import's or a rename's Save writes the edits first, as Build's and Play's does.
 constexpr bool discard_only_where_nothing_is_written() {
 	for (const RequestKindRow &row : kRows)
-		if (row.can_discard && (row.guard == GuardScope::None || row.guard == GuardScope::PlannedWrites))
+		if (row.can_discard &&
+				(row.guard == GuardScope::None || row.guard == GuardScope::PlannedWrites))
 			return false;
 	return true;
 }
 static_assert(discard_only_where_nothing_is_written(),
 		"Discard is offered only where the files are not written over");
 
+// A request the prompt guards has its words (what waits, its Save), and a request it does not
+// guard has none.
+constexpr bool prompt_words_where_guarded() {
+	for (const RequestKindRow &row : kRows) {
+		const bool guarded = row.guard != GuardScope::None;
+		if (guarded != (row.waiting != nullptr && row.waiting[0] != 0) ||
+				guarded != (row.save_label != nullptr && row.save_label[0] != 0))
+			return false;
+	}
+	return true;
+}
+static_assert(prompt_words_where_guarded(), "the prompt's words are a guarded row's");
+
+// A request that must carry a field takes it; one whose empty path names the active document takes
+// a path and never needs one; one the prompt guards by its document names it by its path.
+constexpr bool params_hold() {
+	for (const RequestKindRow &row : kRows) {
+		if ((row.params.required & ~row.params.takes) != 0)
+			return false;
+		if (row.names_active &&
+				(!row.params.has(RequestFieldId::Path) || row.params.needs(RequestFieldId::Path)))
+			return false;
+		if (row.guard == GuardScope::Document && !row.params.has(RequestFieldId::Path))
+			return false;
+	}
+	return true;
+}
+static_assert(params_hold(), "each row's params hold its other columns");
+
+// --- the busy gate
+// --------------------------------------------------------------------------------
+
+// A Build or a Play onto the running build: the build serves it (a Play refused before it could,
+// as it would be before any build: no spawn here, or a game running). The outcome names the
+// operation joined.
+void join_operation(SessionCore &core, const EditorRequest &request) {
+	if (request.kind == EditorRequestKind::Play && core.play().refused())
+		return;
+	core.operations().running()->join(request);
+	core.outcome().operation = core.operations().status().id;
+	if (request.kind == EditorRequestKind::Play) {
+		core.view().activity.status = "Building, then playing...";
+		core.note("Play starts the game when the build lands.");
+	}
+}
+
+// The busy gate (gate_answer): the request's row and the running operation's weighed, the one
+// answer the windows disable by (busy_refuses). Refused: an operation.busy warning, the outcome not
+// done, nothing changed. Joined: the running operation serves it (a Build or a Play onto a build).
+// Superseded: the running operation is cancelled for it (a new import plan over a running one).
+// CancelRunning: the request goes on, and its own flow cancels the operation when it commits
+// (close_project, Quit), once its own checks pass: a NewProject that fails keeps the build. A
+// request that conflicts with nothing it reads or writes (an edit, an open, an import's preview
+// while a build packs) goes on. One the unsaved-changes prompt would hold, and which the gate does
+// not refuse, asks first and meets the gate once it goes ahead: a Close the prompt then drops
+// cancels nothing, and a Build with unsaved edits never joins a build that packs the files without
+// them. True when the request was refused or joined the running operation.
+bool gate_busy(SessionCore &core, const EditorRequest &request) {
+	const GateAnswer answer = gate_answer(request.kind, core.operations().status());
+	if (answer == GateAnswer::Proceed)
+		return false;
+	if (answer != GateAnswer::Refuse) {
+		std::vector<std::string> unsaved;
+		if (core.guard().files(request, unsaved) && !unsaved.empty())
+			return false;
+	}
+	switch (answer) {
+		case GateAnswer::CancelRunning:
+			return false;
+		case GateAnswer::Join:
+			join_operation(core, request);
+			return true;
+		case GateAnswer::Supersede:
+			if (core.cancel_operation(false))
+				return false;
+			break;
+		default:
+			break;
+	}
+	// The refusal names what the request named: the project a switch opens, else its file.
+	core.refuse_busy(request.dir.empty() ? request.path : request.dir);
+	return true;
+}
+
 } // namespace
 
 const RequestKindRow &request_kind_row(EditorRequestKind kind) {
 	const size_t index = static_cast<size_t>(kind);
-	return kRows[index < kEditorRequestKindCount ? index : static_cast<size_t>(EditorRequestKind::RevealPath)];
+	return kRows[index < kEditorRequestKindCount
+					? index
+					: static_cast<size_t>(EditorRequestKind::RevealPath)];
+}
+
+bool request_kind_from_token(const std::string &token, EditorRequestKind &out) {
+	for (const RequestKindRow &row : kRows) {
+		if (token == row.token) {
+			out = row.kind;
+			return true;
+		}
+	}
+	return false;
 }
 
 GateAnswer gate_answer(EditorRequestKind kind, const OperationStatus &running) {
-	if (!running.running()) return GateAnswer::Proceed;
+	if (!running.running())
+		return GateAnswer::Proceed;
 	const RequestKindRow &request = request_kind_row(kind);
 	const OperationKindRow &operation = operation_kind_row(running.kind);
-	if (request.on_busy == OnBusy::Join && operation.joined_by.has(kind)) return GateAnswer::Join;
+	if (request.on_busy == OnBusy::Join && operation.joined_by.has(kind))
+		return GateAnswer::Join;
 	// What would take the place of an operation that cannot be cancelled waits for it.
 	if (request.on_busy == OnBusy::Supersede && operation.superseded_by.has(kind))
 		return running.cancellable ? GateAnswer::Supersede : GateAnswer::Refuse;
-	if (!holds_conflict(request.reads, request.writes, running.reads, running.writes)) return GateAnswer::Proceed;
-	if (request.on_busy == OnBusy::CancelRunning && running.cancellable) return GateAnswer::CancelRunning;
+	if (!holds_conflict(request.reads, request.writes, running.reads, running.writes))
+		return GateAnswer::Proceed;
+	if (request.on_busy == OnBusy::CancelRunning && running.cancellable)
+		return GateAnswer::CancelRunning;
 	return GateAnswer::Refuse;
 }
 
@@ -132,15 +761,49 @@ bool busy_refuses(EditorRequestKind kind, const OperationStatus &running) {
 	return gate_answer(kind, running) == GateAnswer::Refuse;
 }
 
-bool busy_refuses_answer(EditorRequestKind waiting, UnsavedChoice choice, const OperationStatus &running) {
-	if (!running.running() || choice == UnsavedChoice::Cancel) return false;
+bool busy_refuses_answer(
+		EditorRequestKind waiting, UnsavedChoice choice, const OperationStatus &running) {
+	if (!running.running() || choice == UnsavedChoice::Cancel)
+		return false;
 	const GateAnswer answer = gate_answer(waiting, running);
-	if (answer == GateAnswer::Refuse) return true;
-	if (answer == GateAnswer::CancelRunning) return false; // it cancels the operation first
+	if (answer == GateAnswer::Refuse)
+		return true;
+	if (answer == GateAnswer::CancelRunning)
+		return false; // it cancels the operation first
 	const RequestKindRow &save_all = request_kind_row(EditorRequestKind::SaveAll);
 	return choice == UnsavedChoice::Save
-	               ? holds_conflict(save_all.reads, save_all.writes, running.reads, running.writes)
-	               : holds_conflict(HoldsNothing, HoldsDocuments, running.reads, running.writes);
+			? holds_conflict(save_all.reads, save_all.writes, running.reads, running.writes)
+			: holds_conflict(HoldsNothing, HoldsDocuments, running.reads, running.writes);
+}
+
+bool serve_request(SessionCore &core, const EditorRequest &request) {
+	const RequestKindRow &row = request_kind_row(request.kind);
+	if (!row.handler)
+		return false;
+	// Build and Play pack the files as saved: every edit group ends first, as EndEdit ends one, so
+	// a keystroke after them is a step of its own.
+	if (row.ends_edit_groups)
+		core.documents().end_edit_groups();
+	if (gate_busy(core, request))
+		return true;
+	// Its plan reads the graph: the validation an edit left due (a held pump's) runs first.
+	if (row.validates)
+		core.problems().validate_pending();
+	if (core.guard().holds(request))
+		return true;
+	row.handler(core, request);
+	return true;
+}
+
+std::string waiting_words(EditorRequestKind kind, const std::string &target) {
+	const RequestKindRow &row = request_kind_row(kind);
+	if (!row.waiting)
+		return std::string();
+	std::string words = row.waiting;
+	const size_t at = words.find("%s");
+	if (at != std::string::npos)
+		words.replace(at, 2, basename_of(target));
+	return words;
 }
 
 } // namespace opennova::editor

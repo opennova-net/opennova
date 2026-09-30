@@ -30,6 +30,7 @@
 #include <editor/preview/model_preview_state.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_o3d_read.h>
@@ -62,10 +63,10 @@ JsonValue json(const SessionView &view, const ModelPreviewModel &model) {
 }
 
 void set(ProjectSession &session, const std::string &path, const NodeAddress &address, const char *field, Value value) {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
-	request.edit.address = address;
-	request.edit.field = field;
-	request.edit.value = std::move(value);
+	EditorRequest request = request::edit_record(path, Edit());
+	request.edits[0].address = address;
+	request.edits[0].field = field;
+	request.edits[0].value = std::move(value);
 	session.handle(request);
 }
 
@@ -86,16 +87,16 @@ static int test_status_and_builds() {
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_project");
 	TEST_EXPECT(model_preview_to_json(model_preview_snapshot(view, model, false)).get_string("status", "") == "no_device");
 
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Model Preview Test"));
+	session.handle(request::new_project(dir.file("project"), "Model Preview Test"));
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	model.follow(view);
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_model");
 	TEST_EXPECT(json(view, model).get_string("message", "") ==
 	            "Open a model, a clip or an animation table to preview it.");
 
 	// The open model, as it would save.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/armory.3di"));
+	session.handle(request::open_document("models/armory.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
 	TEST_EXPECT(document && view.documents.previews.model.path == "models/armory.3di");
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild);
@@ -147,12 +148,12 @@ static int test_status_and_builds() {
 	model.built(files);
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Keep);
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(18, 0)));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild && model.builds() == 3);
 
 	// Saved and closed: nothing to show.
-	session.handle(make_request(EditorRequestKind::SaveAll));
-	session.handle(make_request(EditorRequestKind::CloseDocument, "models/armory.3di"));
+	session.handle(request::save_all());
+	session.handle(request::close_document("models/armory.3di"));
 	TEST_EXPECT(view.documents.previews.model.path.empty());
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Clear);
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_model" && !model.model());
@@ -211,11 +212,11 @@ static int test_overlays() {
 	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Overlay Test"));
+	session.handle(request::new_project(dir.file("project"), "Overlay Test"));
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/house.3di"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && model.follow(view) == ModelPreviewAction::Rebuild);
 
@@ -276,10 +277,9 @@ static int test_overlays() {
 }
 
 void apply(ProjectSession &session, const std::string &path, std::vector<Edit> edits) {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
-	request.edits = std::move(edits);
+	EditorRequest request = request::edit_record(path, std::move(edits));
 	session.handle(request);
-	session.handle(make_request(EditorRequestKind::EndEdit, path));
+	session.handle(request::end_edit(path));
 }
 
 // The marker of a kind and index, copied (the list is often a temporary).
@@ -300,11 +300,11 @@ static int test_handles() {
 	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Handle Test"));
+	session.handle(request::new_project(dir.file("project"), "Handle Test"));
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "models/house.3di"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && model.follow(view) == ModelPreviewAction::Rebuild);
 	model.seek(250);
@@ -348,8 +348,8 @@ static int test_handles() {
 	            near(point->direction.y, inv, 1e-3) && near(point->direction.z, inv, 1e-3));
 
 	// One drag, one undo step: undo takes the axis back, then the place.
-	session.handle(make_request(EditorRequestKind::Undo, document->path()));
-	session.handle(make_request(EditorRequestKind::Undo, document->path()));
+	session.handle(request::undo(document->path()));
+	session.handle(request::undo(document->path()));
 	model.follow(view);
 	point = find_overlay(model.overlays(), ModelOverlayKind::UserPoint, 0);
 	TEST_EXPECT(point && !near(point->at.x, to.x, 1e-3));
@@ -404,7 +404,7 @@ static int test_handles() {
 	model.follow(view);
 	std::optional<ModelOverlay> dragged = find_overlay(model.overlays(), ModelOverlayKind::UserPoint, 0);
 	TEST_EXPECT(dragged && !near(dragged->at.x, point->at.x, 1e-3));
-	session.handle(make_request(EditorRequestKind::Undo, document->path()));
+	session.handle(request::undo(document->path()));
 	model.follow(view);
 	dragged = find_overlay(model.overlays(), ModelOverlayKind::UserPoint, 0);
 	TEST_EXPECT(dragged && near(dragged->at.x, point->at.x, 1e-3) && near(dragged->at.y, point->at.y, 1e-3));
@@ -494,24 +494,24 @@ static int test_animation() {
 	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Animation Test"));
+	session.handle(request::new_project(dir.file("project"), "Animation Test"));
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
 	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
 	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
-	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	TEST_EXPECT(view.project.scan->find("skinned.3di") && view.project.scan->find("SKIN.adm") && view.project.scan->find("walk.bad"));
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 
 	// The table plays on the item's graphic.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
+	session.handle(request::open_document("anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
 	TEST_EXPECT(table && view.documents.previews.model.path == "anims/SKIN.adm");
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild);
@@ -525,8 +525,7 @@ static int test_animation() {
 	// The walk row selected: it plays from tick 0, the clock in game ticks.
 	NodeAddress walk;
 	TEST_EXPECT(find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, table->path());
-	select.edit.address = walk;
+	EditorRequest select = request::select_record(table->path(), walk);
 	session.handle(select);
 	model.follow(view);
 	TEST_EXPECT(model.clip_key() == "anim_walk_forward" && model.clip_variant() == 0 && model.clip_ticks() == 0);
@@ -541,7 +540,7 @@ static int test_animation() {
 	TEST_EXPECT(model.clip_loops() && model.clip_length_ticks() > events[1].tick);
 
 	// The clip plays on the table that names it, as the row that names it.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/walk.bad"));
+	session.handle(request::open_document("anims/walk.bad"));
 	TEST_EXPECT(view.documents.previews.model.path == "anims/walk.bad");
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::Ready && strutil_iequals(model.rig().table, "SKIN.adm"));
@@ -550,8 +549,8 @@ static int test_animation() {
 	Document *clip = session.document_for("anims/walk.bad");
 	TEST_EXPECT(clip && !clip->rows().empty());
 	const Node &clip_row = *clip->rows().front();
-	EditorRequest pick = make_request(EditorRequestKind::SelectRecord, clip->path());
-	pick.edit.address = {clip_row.id, node_kind(AnimationKind::Event), clip_row.collections[1][3]};
+	EditorRequest pick = request::select_record(clip->path(),
+			{ clip_row.id, node_kind(AnimationKind::Event), clip_row.collections[1][3] });
 	session.handle(pick);
 	model.advance(0.5);
 	model.follow(view);
@@ -561,8 +560,8 @@ static int test_animation() {
 
 	// No item pairs a table: no rig, until a model is chosen.
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
+	session.handle(request::rescan());
+	session.handle(request::open_document("anims/SKIN.adm"));
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::NoRig);
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_rig");
@@ -633,7 +632,7 @@ static int test_runtime_clips() {
 	ProjectSession session(platform, preferences);
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Runtime Clips"));
+	session.handle(request::new_project(dir.file("project"), "Runtime Clips"));
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
@@ -641,7 +640,7 @@ static int test_runtime_clips() {
 	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
 	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
 	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
-	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}}};
 	session.handle(import);
 	TEST_EXPECT(view.project.scan->find("SKIN.adm") && view.project.scan->find("STEP.adm") && view.project.scan->find("step.bad"));
@@ -650,12 +649,12 @@ static int test_runtime_clips() {
 	model.set_options(chosen);
 
 	// The walk row edited to "reset" "missing" "walk", not saved.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/SKIN.adm"));
+	session.handle(request::open_document("anims/SKIN.adm"));
 	Document *table = session.document_for("anims/SKIN.adm");
 	NodeAddress walk;
 	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
 	const NodeKind clip_kind = node_kind(AnimationMapKind::Clip);
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, table->path());
+	EditorRequest select = request::select_record(table->path(), {});
 	size_t at = 0;
 	for (const char *name : {"reset", "missing"}) {
 		Edit add;
@@ -668,14 +667,14 @@ static int test_runtime_clips() {
 			// keep the saved one, whose tokens are not the row's; walk selected plays nothing,
 			// and the preview says why.
 			TEST_EXPECT(!table->serialize().ok() && table->row(walk.row)->collections[0].size() == 2);
-			select.edit.address = {walk.row, clip_kind, table->row(walk.row)->collections[0][1]};
+			select.address = {walk.row, clip_kind, table->row(walk.row)->collections[0][1]};
 			session.handle(select);
 			model.follow(view);
 			TEST_EXPECT(model.status() == ModelPreviewStatus::Unserializable && !model.skeleton());
 			TEST_EXPECT(model.clip_key().empty() && model.clip_file().empty() && model.clip_events().empty());
 			TEST_EXPECT(json(view, model).get_string("status", "") == "unserializable");
 			// Nor does the empty token, which is the saved table's walk token by index.
-			select.edit.address = {walk.row, clip_kind, table->row(walk.row)->collections[0][0]};
+			select.address = {walk.row, clip_kind, table->row(walk.row)->collections[0][0]};
 			session.handle(select);
 			model.follow(view);
 			TEST_EXPECT(model.status() == ModelPreviewStatus::Unserializable && model.clip_key().empty());
@@ -684,7 +683,7 @@ static int test_runtime_clips() {
 	}
 	TEST_EXPECT(table->row(walk.row) && table->row(walk.row)->collections[0].size() == 3 && table->serialize().ok());
 	const std::vector<NodeId> tokens = table->row(walk.row)->collections[0];
-	select.edit.address = {walk.row, clip_kind, tokens[2]};
+	select.address = {walk.row, clip_kind, tokens[2]};
 	session.handle(select);
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::Ready && model.skeleton());
@@ -693,13 +692,13 @@ static int test_runtime_clips() {
 	const auto *served = model.skeleton() ? model.skeleton()->find_clip_variant(model.clip_key(), model.clip_variant())
 	                                      : nullptr;
 	TEST_EXPECT(served && served->source.file == "walk" && served->source.token == 2 && served->clip.frame_count == 4);
-	select.edit.address = {walk.row, clip_kind, tokens[1]};
+	select.address = {walk.row, clip_kind, tokens[1]};
 	session.handle(select);
 	model.follow(view);
 	TEST_EXPECT(model.clip_key().empty() && model.clip_file().empty() && model.clip_events().empty());
 
 	// The one-shot's events against the game's root motion over the same files.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "anims/step.bad"));
+	session.handle(request::open_document("anims/step.bad"));
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::Ready && strutil_iequals(model.rig().table, "STEP.adm"));
 	TEST_EXPECT(model.clip_key() == "anim_idle" && model.clip_variant() == 0 && !model.clip_loops());

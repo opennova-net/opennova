@@ -23,7 +23,31 @@ const DOCUMENT_OPS: Array[String] = [
 	"end_edit", "save", "save_all", "undo", "redo",
 ]
 
-## The edit shape editor_request takes (edit, and each of edits).
+## The request kinds editor_request serves, by their tokens in the request table
+## (engine/editor/session/request_kinds.cpp): every kind but the pickers, which need a person
+## (EditorApp.get_request_kinds, which editor_mcp_test holds this list to). S13 A5 generates the
+## catalog from the table.
+const REQUEST_KINDS: Array[String] = [
+	"new_project", "open_project", "close_project", "forget_recent", "rescan", "apply_project_settings",
+	"preview_import", "plan_import", "set_import_dependencies", "import_files", "cancel_import", "create_missing",
+	"build", "play", "stop_play", "cancel_operation", "create_file", "open_document", "show_in_files",
+	"reload_document", "close_document", "select_record", "edit_record", "revert_to_saved", "end_edit", "copy",
+	"cut", "paste", "duplicate", "save", "save_all", "undo", "redo", "resolve_unsaved", "rename_asset",
+	"assign_requirement", "preview_rename", "rename_symbol", "reimport", "preview_install_import",
+	"clear_output", "quit", "reveal_path",
+]
+
+## A record's address as editor_request takes it (address).
+const ADDRESS_SCHEMA := {
+	"type": "object",
+	"properties": {
+		"row": {"type": "integer", "minimum": 0},
+		"kind": {"type": "integer"},
+		"child": {"type": "integer", "minimum": 0},
+	},
+}
+
+## The edit shape editor_request takes (each of edits).
 const EDIT_SCHEMA := {
 	"type": "object",
 	"properties": {
@@ -121,9 +145,10 @@ static func definitions() -> Array[McpToolDef]:
 			+ "next_cursor, items; event_cursor / event_limit; the last 64 kept, next_cursor "
 			+ "continuing without one skipped or repeated): each item's seq and kind (reveal_record: "
 			+ "path, address and field, an open_document naming a record's field; reveal_file: path "
-			+ "and flag (Rename... asked), a show_in_files; ask_rename: path, field and tag (the "
-			+ "rename_preview's serial), a preview_rename with flag; settings_applied: tag (the "
-			+ "request's settings serial) and flag (a setting failed), an apply_project_settings; "
+			+ "and flag (Rename... asked: its ask_name), a show_in_files; ask_rename: path, field and "
+			+ "tag (the rename_preview's serial), a preview_rename with ask_name; settings_applied: "
+			+ "tag (the request's settings serial) and flag (a setting failed), an "
+			+ "apply_project_settings; "
 			+ "import_planned: flag (the files changed since the plan shown), an import plan made).",
 			{
 				"output_cursor": {"type": "integer", "minimum": 0, "default": 0},
@@ -136,111 +161,128 @@ static func definitions() -> Array[McpToolDef]:
 				"event_limit": {"type": "integer", "minimum": 0, "maximum": EVENTS_KEPT, "default": EVENTS_KEPT},
 			}, [], false),
 		McpToolDef.make("editor_request",
-			"Raise one typed editor request by kind, the same vocabulary the windows use: "
-			+ "new_project {path, text=title}, open_project {path}, close_project, "
-			+ "forget_recent {path}, rescan, apply_project_settings {settings:{serial?, title?, "
-			+ "mission?, multiplayer?, retail_directory? (the game install, kept absolute (a "
+			"Raise one typed editor request by kind, the same vocabulary the windows use. Each kind "
+			+ "takes its own fields, each field meaning one thing whatever the kind (the request "
+			+ "table, engine/editor/session/request_kinds.cpp): a field the kind does not take, or one "
+			+ "it must carry left out, is refused naming what it takes. new_project {dir, title?}, "
+			+ "open_project {dir}, close_project, forget_recent {dir}, rescan, apply_project_settings "
+			+ "{settings:{serial?, title?, mission?, multiplayer?, game_install? (kept absolute (a "
 			+ "relative path from the editor's working directory): the open project's, written to "
 			+ "its .opennova/local.json, which opennova-project reads too, and kept as the "
 			+ "editor's, where a project naming none starts), runtime_executable? ('' = the one "
-			+ "packaged beside the editor), play_retail?}} (each setting left out stays as it is; what "
-			+ "differs from the setting in effect is written, a settings_applied event carries the "
-			+ "serial back and editor_state's settings_result the settings that could not be "
-			+ "written), preview_import "
-			+ "{paths, flag} (the import dialog planned: a loose file picked is chosen, an archive's members "
-			+ "are listed to choose from; flag = with the files they need, found beside them or in "
-			+ "the game install), plan_import {imports, flag} (the files chosen, planned again), "
-			+ "set_import_dependencies {flag} (the editor's setting the dialog's 'Include the files "
-			+ "these need' writes; an open preview is planned again with it), import_files "
-			+ "{imports:[{path, entry, retail?, native? (a loose file copied as the game's own, with "
-			+ "no import record)}]: the rows kept, each row's source as editor_state's import rows "
-			+ "carry it, flag=replace} (with a preview open the files are planned again first: when "
-			+ "that is not the plan shown nothing is written, import.changed, and the preview holds "
+			+ "packaged beside the editor), play_in_install?}} (each setting left out stays as it is; "
+			+ "what differs from the setting in effect is written; a settings_applied event carries "
+			+ "the serial back, flagged when a setting could not be written, and editor_state's "
+			+ "settings_result lists those settings), preview_import "
+			+ "{paths, with_dependencies?} (the import dialog planned: a loose file picked is chosen, "
+			+ "an archive's members are listed to choose from; with_dependencies: with the files they "
+			+ "need, found beside them or in the game install), plan_import {imports, "
+			+ "with_dependencies?} (the files chosen, planned again), set_import_dependencies "
+			+ "{with_dependencies} (the editor's setting the dialog's 'Include the files these need' "
+			+ "writes; an open preview is planned again with it), import_files {imports:[{path, "
+			+ "entry?, install? (a file of the game install), native? (a loose file copied as the "
+			+ "game's own, with no import record)}]: the rows kept, each row's source as editor_state's "
+			+ "import rows carry it, replace?} (with a preview open the files are planned again first: "
+			+ "when that is not the plan shown nothing is written, import.changed, and the preview holds "
 			+ "the new plan; a row it does not have is refused; every file is checked and staged "
 			+ "under the project's cache before any is published, the whole selection or none of it "
 			+ "as far as the disk allows, a failure while publishing said file by file; an .o3d's "
 			+ "textures come only through its plan: a model naming one the import does not bring is "
-			+ "import.texture_not_imported), cancel_import, "
-			+ "create_missing {names=[the requirement roles whose files to make "
-			+ "from scratch; none makes nothing; a file there already is refused, never overwritten]}, "
-			+ "build, play, stop_play, cancel_operation (the running operation, a build, stopped between "
-			+ "two steps, its staging removed and a Play waiting on it dropped), create_file {path, "
-			+ "text=kind token} (made from the name's "
-			+ "requirement factory, else its kind's; a kind the editor does not edit, a font, is made "
-			+ "and not opened; a texture is the checkerboard the game draws for a missing texture, in "
-			+ "the format its name asks for: .tga or .mdt TGA, .pcx PCX, .dds DDS, another name "
-			+ "refused), open_document {path, text?, edit?} (text: a record's locator, as editor_graph "
-			+ "gives it, selected once open; edit.field: the field shown), show_in_files {path, flag} (Files selects the file and "
-			+ "scrolls to it, a file the editor does not open included; flag = and asks its new name, "
-			+ "Rename...), reload_document, "
-			+ "close_document, select_record {path, edit.row/"
-			+ "kind/child, mode=replace|add|toggle (the selection stays inside one row)}, "
-			+ "edit_record {path, edit:{operation (set, clear, write, add, duplicate, remove, move, "
-			+ "paste, set_file_value), row, kind, child, parent (an add's or paste's owner, a "
-			+ "move's destination), field, value, position (an index inside the owner's "
-			+ "collection), coalesce, gesture (edits sharing one fold into one undo step until "
-			+ "end_edit)}, or edits:[...] (a batch on one row, one undo step), flag = open the "
-			+ "document first when it is not (a fix's edit)}, revert_to_saved {path, edit:{row, "
-			+ "kind, child, field}, or edits:[...] (the same field of several records of one row): "
-			+ "the Inspector's Revert to saved, each given back the value and presence the saved "
-			+ "file holds, one undo step; refused when none has anything to go back to}, end_edit, "
-			+ "copy "
-			+ "and cut {path} (the selected records), paste {path, edit.parent/position, or "
-			+ "after the selection}, duplicate {path} (each selected record right after itself, one "
-			+ "step), save {path?} (the active document when no path; a file with no unsaved edits "
-			+ "is written when its bytes differ from what it would write; a file that is not open "
-			+ "is read, rewritten that way when it must be, and left closed; one that does not "
-			+ "serialize is refused with the reason), save_all (every file "
-			+ "with unsaved edits, past a failure), undo, redo, resolve_unsaved "
-			+ "{unsaved_choice=save|discard|cancel}, rename_asset {path, text=new name}, "
-			+ "assign_requirement {text=role, path}, reimport {path=one source or '', flag=force}, "
-			+ "preview_retail_import {names?, flag} (the import dialog on the game install's files: the "
-			+ "names alone, chosen, or every file listed to choose from; flag as for preview_import; "
-			+ "their sources carry retail: true), reveal_path {path}, clear_output (empties "
-			+ "the output lines, as Output's Clear does), quit. A "
-			+ "problem's fixes (editor_problems) are requests of these kinds. The pickers "
-			+ "are refused: pass paths directly. build and play return at once, their outcome naming "
-			+ "the build's operation; editor_state's operation shows it stepping (editor_build and "
-			+ "editor_play wait instead), and a build or a play while one packs joins it. While an "
-			+ "operation runs, a request that conflicts with what it reads or writes is refused with an "
-			+ "operation.busy warning (a save, an import, a rename, a create while a build packs; an "
-			+ "edit, an open or an import's preview goes on), and new_project, open_project, "
-			+ "close_project and quit cancel it as they commit, once their own checks pass (a switch "
-			+ "that fails keeps it; refused when it cannot be cancelled) and the unsaved-changes "
-			+ "prompt, when one holds them, is answered: a build or play with unsaved edits asks about "
-			+ "them rather than join. Closing or reloading a "
-			+ "file with unsaved edits, a project switch, quit, build and play, an import that "
-			+ "replaces a file with unsaved edits and a rename or assign that rewrites one (or "
-			+ "renames it) wait on the unsaved-changes prompt: editor_state's unsaved_prompt names "
-			+ "the action and the files, and resolve_unsaved save writes them, then the action runs "
-			+ "(build, play, import, rename and assign offer no discard); rescan reads again only "
-			+ "the open documents whose files changed outside the editor (one that no longer reads "
-			+ "stays open, document.stale; one with unsaved edits keeps them, document.conflict, "
-			+ "whose fix reloads it); a file made unsaved since the prompt opened renews it instead "
-			+ "(the answer waits again), and an answer with no prompt open is refused. ok says the "
-			+ "request parsed; outcome says what it came to: done "
-			+ "(false when it was refused, did not finish, or waits on the prompt), "
+			+ "import.texture_not_imported), cancel_import, create_missing {roles?: the requirement "
+			+ "roles whose files to make from scratch; none makes nothing; a file there already is "
+			+ "refused, never overwritten}, build, play, stop_play, cancel_operation (the running "
+			+ "operation, a build, stopped between two steps, its staging removed and a Play waiting "
+			+ "on it dropped), create_file {path, file_kind?} (made from the name's requirement "
+			+ "factory, else its kind's (file_kind: an asset kind token, for a name that cannot say "
+			+ "it); a kind the editor does not edit, a font, is made and not opened; a texture is the "
+			+ "checkerboard the game draws for a missing texture, in the format its name asks for: "
+			+ ".tga or .mdt TGA, .pcx PCX, .dds DDS, another name refused), open_document {path?, "
+			+ "locator?, address?, field?} (locator: a record's locator, as editor_graph gives it, or "
+			+ "address {row, kind, child}: selected once open; field: the field shown), show_in_files "
+			+ "{path, ask_name?} (Files selects the file and scrolls to it, a file the editor does not "
+			+ "open included; ask_name: and asks its new name, Rename...), reload_document {path?}, "
+			+ "close_document {path?}, select_record {path?, address:{row, kind, child}, "
+			+ "mode?=replace|add|toggle (the selection stays inside one row)}, edit_record {path?, "
+			+ "edits:[{operation (set, clear, write, add, duplicate, remove, move, paste, "
+			+ "set_file_value), row, kind, child, parent (an add's or paste's owner, a move's "
+			+ "destination), field, value, position (an index inside the owner's collection), "
+			+ "coalesce, gesture (edits sharing one fold into one undo step until end_edit)}] (a batch "
+			+ "on one row, one undo step; one edit is a batch of one), open_first? (the document "
+			+ "opened first when it is not: a fix's edit)}, revert_to_saved {path?, edits:[{row, kind, "
+			+ "child, field}]} (the same field of several records of one row: the Inspector's Revert "
+			+ "to saved, each given back the value and presence the saved file holds, one undo step; "
+			+ "refused when none has anything to go back to), end_edit {path?}, copy and cut {path?} "
+			+ "(the selected records), paste {path?, paste_at?:{row, parent, position}} (the "
+			+ "clipboard into the owner parent (0 = the row) at position; left out, after the "
+			+ "selection), duplicate {path?} (each selected record right after itself, one step), "
+			+ "save {path?} (a file with no unsaved edits is written when its bytes differ from what it "
+			+ "would write; a file that is not open is read, rewritten that way when it must be, and "
+			+ "left closed; one that does not serialize is refused with the reason), save_all (every "
+			+ "file with unsaved edits, past a failure), undo {path?}, redo {path?}, resolve_unsaved "
+			+ "{choice=save|discard|cancel}, rename_asset {path, new_name}, assign_requirement {role, "
+			+ "path}, preview_rename {path, locator?, field?, new_name?, ask_name?} (a name's rename "
+			+ "everywhere planned into editor_state's rename_preview, or with no field the file's), "
+			+ "rename_symbol {path, locator, field, new_name}, reimport {path? (one source; left out, "
+			+ "every source), force?}, preview_install_import {names?, with_dependencies?} (the import "
+			+ "dialog on the game install's files: the names alone, chosen, or every file listed to "
+			+ "choose from; their sources carry install: true), reveal_path {path}, clear_output "
+			+ "(empties the output lines, as Output's Clear does), quit; path? left out names the active "
+			+ "document. A problem's fixes (editor_problems) are requests of these kinds. The pickers "
+			+ "(pick_directory, pick_file {purpose}) are refused: pass paths directly. build and play "
+			+ "return at once, their outcome naming the build's operation; editor_state's operation "
+			+ "shows it stepping (editor_build and editor_play wait instead), and a build or a play "
+			+ "while one packs joins it. While an operation runs, a request that conflicts with what "
+			+ "it reads or writes is refused with an operation.busy warning (a save, an import, a "
+			+ "rename, a create while a build packs; an edit, an open or an import's preview goes on), "
+			+ "and new_project, open_project, close_project and quit cancel it as they commit, once "
+			+ "their own checks pass (a switch that fails keeps it; refused when it cannot be "
+			+ "cancelled) and the unsaved-changes prompt, when one holds them, is answered: a build or "
+			+ "play with unsaved edits asks about them rather than join. Closing or reloading a file "
+			+ "with unsaved edits, a project switch, quit, build and play, an import that replaces a "
+			+ "file with unsaved edits and a rename or assign that rewrites one (or renames it) wait on "
+			+ "the unsaved-changes prompt: editor_state's unsaved_prompt names the action and the "
+			+ "files, and resolve_unsaved save writes them, then the action runs (build, play, import, "
+			+ "rename and assign offer no discard); rescan reads again only the open documents whose "
+			+ "files changed outside the editor (one that no longer reads stays open, document.stale; "
+			+ "one with unsaved edits keeps them, document.conflict, whose fix reloads it); a file made "
+			+ "unsaved since the prompt opened renews it instead (the answer waits again), and an "
+			+ "answer with no prompt open is refused. ok says the request parsed; outcome says what it "
+			+ "came to: done (false when it was refused, did not finish, or waits on the prompt), "
 			+ "unsaved_prompt, operation (the one it started or joined, 0 for none) and the findings it "
 			+ "reported.",
 			{
-				"kind": {"type": "string"},
+				"kind": {"type": "string", "enum": REQUEST_KINDS},
+				"dir": {"type": "string"},
+				"title": {"type": "string"},
 				"path": {"type": "string"},
-				"text": {"type": "string"},
-				"flag": {"type": "boolean"},
-				"paths": {"type": "array", "items": {"type": "string"}},
+				"locator": {"type": "string"},
+				"field": {"type": "string"},
+				"new_name": {"type": ["string", "integer"]},
+				"role": {"type": "string"},
+				"file_kind": {"type": "string"},
+				"roles": {"type": "array", "items": {"type": "string"}},
 				"names": {"type": "array", "items": {"type": "string"}},
+				"paths": {"type": "array", "items": {"type": "string"}},
 				"imports": {
 					"type": "array",
 					"items": {
 						"type": "object",
-						"properties": {"path": {"type": "string"}, "entry": {"type": "string"}, "retail": {"type": "boolean"},
+						"properties": {"path": {"type": "string"}, "entry": {"type": "string"}, "install": {"type": "boolean"},
 								"native": {"type": "boolean"}},
 					},
 				},
-				"edit": EDIT_SCHEMA,
 				"edits": {"type": "array", "items": EDIT_SCHEMA},
+				"address": ADDRESS_SCHEMA,
+				"paste_at": {
+					"type": "object",
+					"properties": {
+						"row": {"type": "integer", "minimum": 0},
+						"parent": {"type": "integer", "minimum": 0},
+						"position": {"type": "integer", "minimum": 0},
+					},
+				},
 				"mode": {"type": "string", "enum": ["replace", "add", "toggle"]},
-				"unsaved_choice": {"type": "string", "enum": ["save", "discard", "cancel"]},
+				"choice": {"type": "string", "enum": ["save", "discard", "cancel"]},
 				"settings": {
 					"type": "object",
 					"properties": {
@@ -248,11 +290,18 @@ static func definitions() -> Array[McpToolDef]:
 						"title": {"type": "string"},
 						"mission": {"type": "boolean"},
 						"multiplayer": {"type": "boolean"},
-						"retail_directory": {"type": "string"},
+						"game_install": {"type": "string"},
 						"runtime_executable": {"type": "string"},
-						"play_retail": {"type": "boolean"},
+						"play_in_install": {"type": "boolean"},
 					},
 				},
+				"purpose": {"type": "string",
+						"enum": ["new_project_location", "open_project", "runtime_executable", "game_install", "import_files"]},
+				"with_dependencies": {"type": "boolean"},
+				"replace": {"type": "boolean"},
+				"force": {"type": "boolean"},
+				"ask_name": {"type": "boolean"},
+				"open_first": {"type": "boolean"},
 			}, ["kind"], true, BUILD_TIMEOUT_MS),
 		McpToolDef.make("editor_document",
 			"The documents. op=list {offset?, limit?}: the open documents and a page of the files "

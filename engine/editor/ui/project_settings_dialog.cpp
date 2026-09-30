@@ -6,6 +6,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <editor/project/project_document.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
@@ -59,9 +60,9 @@ void ProjectSettingsDialog::open(const SessionView &view) {
 	copy_into(fields_.title, view.project.document->title);
 	fields_.mission = view.project.document->features.mission;
 	fields_.multiplayer = view.project.document->features.multiplayer;
-	copy_into(fields_.retail, view.project.retail_directory);
+	copy_into(fields_.game_install, view.project.retail_directory);
 	copy_into(fields_.runtime, view.project.runtime_setting);
-	fields_.play_retail = view.project.play_retail;
+	fields_.play_in_install = view.project.play_retail;
 	root_ = view.project.root;
 	open_ = open_requested_ = true;
 	pick_ = PickPurpose::None;
@@ -80,7 +81,7 @@ void ProjectSettingsDialog::close() {
 void ProjectSettingsDialog::set_picked(PickPurpose purpose, const std::string &path, const std::string &project_root) {
 	if (!open_ || purpose != pick_ || project_root != root_) return;
 	pick_ = PickPurpose::None;
-	if (purpose == PickPurpose::RetailDirectory) copy_into(fields_.retail, path);
+	if (purpose == PickPurpose::GameInstall) copy_into(fields_.game_install, path);
 	else if (purpose == PickPurpose::RuntimeExecutable) copy_into(fields_.runtime, path);
 }
 
@@ -134,11 +135,10 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ImGui::Checkbox("Multiplayer", &fields_.multiplayer);
 
 	ImGui::SeparatorText("This computer");
-	if (path_field("Game install folder", fields_.retail, sizeof(fields_.retail), "Browse...##retail")) {
-		pick_ = PickPurpose::RetailDirectory;
-		EditorRequest pick = make_request(EditorRequestKind::PickDirectory);
-		pick.purpose = PickPurpose::RetailDirectory;
-		workspace.request(pick);
+	if (path_field("Game install folder", fields_.game_install, sizeof(fields_.game_install),
+	               "Browse...##install")) {
+		pick_ = PickPurpose::GameInstall;
+		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
 	ImGui::TextDisabled("Where the game is installed, kept with the project: its game data is imported from it.");
 	if (v.activity.source_run) {
@@ -150,14 +150,12 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	} else {
 		if (path_field("OpenNova runtime", fields_.runtime, sizeof(fields_.runtime), "Browse...##runtime")) {
 			pick_ = PickPurpose::RuntimeExecutable;
-			EditorRequest pick = make_request(EditorRequestKind::PickFile);
-			pick.purpose = PickPurpose::RuntimeExecutable;
-			workspace.request(pick);
+			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
 		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
 	}
-	ImGui::Checkbox("Play in the game install", &fields_.play_retail);
+	ImGui::Checkbox("Play in the game install", &fields_.play_in_install);
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
 
 	if (!error_.empty()) {
@@ -178,16 +176,16 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 // from the settings in effect (the runtime of a source run is not the dialog's to set).
 void ProjectSettingsDialog::apply(Workspace &workspace) {
 	const SessionView &v = workspace.view();
-	EditorRequest request = make_request(EditorRequestKind::ApplyProjectSettings);
+	EditorRequest request = request::of(EditorRequestKind::ApplyProjectSettings);
 	ProjectSettingsChange &settings = request.settings;
 	serial_ = std::max(serial_, seen_) + 1;
 	settings.serial = serial_;
 	settings.title = std::string(fields_.title);
 	settings.mission = fields_.mission;
 	settings.multiplayer = fields_.multiplayer;
-	settings.retail_directory = std::string(fields_.retail);
+	settings.game_install = std::string(fields_.game_install);
 	if (!v.activity.source_run) settings.runtime_executable = std::string(fields_.runtime);
-	settings.play_retail = fields_.play_retail;
+	settings.play_in_install = fields_.play_in_install;
 	waiting_ = true;
 	error_.clear();
 	workspace.request(std::move(request));

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <editor/graph/reference_queries.h>
+#include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include "editor_ui_test_support.h"
@@ -31,7 +32,7 @@ struct PickerProject {
 	NodeAddress item;
 
 	bool open() {
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Picker"));
+		session.handle(request::new_project(dir.file("project"), "Picker"));
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		const std::string repo = test_paths_repo_root(__FILE__);
@@ -43,12 +44,11 @@ struct PickerProject {
 		                             "hud_image gone.tga\nend\n"
 		                             "begin \"Other\"\nid 100301\ntype building\ngraphic gamma\nend\n"))
 			return false;
-		session.handle(make_request(EditorRequestKind::Rescan));
-		session.handle(make_request(EditorRequestKind::OpenDocument, "defs/items.def"));
+		session.handle(request::rescan());
+		session.handle(request::open_document("defs/items.def"));
 		items = session.document_for("defs/items.def");
 		if (!items || !find_definition(AssetGraph(), *items, "100300", item)) return false;
-		EditorRequest select = make_request(EditorRequestKind::SelectRecord, items->path());
-		select.edit.address = item;
+		EditorRequest select = request::select_record(items->path(), item);
 		session.handle(select);
 		return v.project.scan->find("gamma.3di") != nullptr;
 	}
@@ -73,8 +73,8 @@ std::string set_value(const std::vector<EditorRequest> &requests, const char *fi
 	std::string value;
 	int count = 0;
 	for (const EditorRequest &request : requests)
-		if (request.kind == EditorRequestKind::EditRecord && request.edit.field == field)
-			if (const auto *text = std::get_if<std::string>(&request.edit.value)) {
+		if (request.kind == EditorRequestKind::EditRecord && edit_of(request).field == field)
+			if (const auto *text = std::get_if<std::string>(&edit_of(request).value)) {
 				value = *text;
 				++count;
 			}
@@ -175,8 +175,7 @@ void test_filters_apart() {
 	// the first item's filter.
 	NodeAddress other;
 	CHECK(find_definition(AssetGraph(), *project.items, "100301", other), "the second item");
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, project.items->path());
-	select.edit.address = other;
+	EditorRequest select = request::select_record(project.items->path(), other);
 	project.session.handle(select);
 	ui.frames(3);
 	ui.drain();
@@ -184,7 +183,7 @@ void test_filters_apart() {
 	press(ui, ImGuiKey_Enter);
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(set_value(requests, "graphic") == "alpha.3di" && only(requests, EditorRequestKind::EditRecord) &&
-	              only(requests, EditorRequestKind::EditRecord)->edit.address == other,
+	              edit_of(*only(requests, EditorRequestKind::EditRecord)).address == other,
 	      "another record's picker lists every name");
 }
 
@@ -271,16 +270,16 @@ void test_list_kept() {
 	draw(false);
 	CHECK(GImGui->OpenPopupStack.Size == 1 && picker.lists_made() == 1,
 			"its list made as it opens");
-	project.session.handle(make_request(EditorRequestKind::ClearOutput));
+	project.session.handle(request::clear_output());
 	// Nothing to save: the status line alone.
-	project.session.handle(make_request(EditorRequestKind::SaveAll));
+	project.session.handle(request::save_all());
 	draw(false);
 	draw(false);
 	CHECK(picker.lists_made() == 1, "Output and the status line: the list kept");
-	EditorRequest set = make_request(EditorRequestKind::EditRecord, project.items->path());
-	set.edit.address = project.item;
-	set.edit.field = "hp";
-	set.edit.value = int64_t(33);
+	EditorRequest set = request::edit_record(project.items->path(), Edit());
+	set.edits[0].address = project.item;
+	set.edits[0].field = "hp";
+	set.edits[0].value = int64_t(33);
 	project.session.handle(set);
 	draw(false);
 	CHECK(picker.lists_made() == 2, "its document edited: the list made again");
@@ -288,15 +287,15 @@ void test_list_kept() {
 	// files, the project, the settings and the item table stand.
 	const ViewRevisions before = project.session.view().revisions;
 	const uint64_t revision = project.items->revision();
-	project.session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	project.session.handle(request::open_document("main.mnu"));
 	const Document *menu = project.session.document_for("main.mnu");
 	NodeAddress title;
 	CHECK(menu && find_definition(AssetGraph(), *menu, "TITLE", title),
 			"the start menu's TITLE window");
-	EditorRequest rename = make_request(EditorRequestKind::EditRecord, "main.mnu");
-	rename.edit.address = title;
-	rename.edit.field = "name";
-	rename.edit.value = std::string("HEADING");
+	EditorRequest rename = request::edit_record("main.mnu", Edit());
+	rename.edits[0].address = title;
+	rename.edits[0].field = "name";
+	rename.edits[0].value = std::string("HEADING");
 	project.session.handle(rename);
 	const ViewRevisions &after = project.session.view().revisions;
 	CHECK(after.of(ViewConcern::Graph) != before.of(ViewConcern::Graph), "the graph moved");
@@ -311,7 +310,7 @@ void test_list_kept() {
 	CHECK(editor_test::write_bytes(project.session.view().project.root + "/models/delta.3di",
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
 	      "another model");
-	project.session.handle(make_request(EditorRequestKind::Rescan));
+	project.session.handle(request::rescan());
 	draw(false);
 	draw(false);
 	CHECK(picker.lists_made() == 4, "a model the graph gains: the list made again");

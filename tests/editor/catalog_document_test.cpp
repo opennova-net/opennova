@@ -5,6 +5,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
@@ -132,41 +133,41 @@ static int session_gate() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
+	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
-    session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def"));
+    session.handle(request::create_file("ammo.def"));
     TEST_EXPECT(session.document_for("ammo.def"));
-    session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def"));
+    session.handle(request::create_file("ammo.def"));
     TEST_EXPECT(session.document_for("ammo.def")->rows().size() == 1);
-	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	session.handle(request::open_document("items.def"));
 	auto *document = session.document_for(); TEST_EXPECT(document);
 	const auto id = document->rows()[0]->id;
-	auto request = make_request(EditorRequestKind::EditRecord);
-	request.edit = field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string("missing"));
+	auto request = request::edit_record(std::string(),
+			field({ id, node_kind(DefRecordKind::Item), 0 }, "graphic", std::string("missing")));
 	session.handle(request);
 	// Play packs the files on disk: it waits on the prompt, which lists the edited catalog
 	// and offers no Discard; its Save writes the catalog, then Play builds.
-	session.handle(make_request(EditorRequestKind::Play));
+	session.handle(request::play());
 	const DialogsView::UnsavedPrompt &prompt = session.view().dialogs.unsaved_prompt;
 	TEST_EXPECT(platform.spawns == 0 && !session.view().activity.operation.running() && prompt.open && prompt.action == EditorRequestKind::Play);
 	TEST_EXPECT(prompt.files == std::vector<std::string>{document->path()} && !prompt.can_discard);
-	auto answer = make_request(EditorRequestKind::ResolveUnsaved); answer.unsaved_choice = UnsavedChoice::Save;
+	auto answer = request::of(EditorRequestKind::ResolveUnsaved); answer.choice = UnsavedChoice::Save;
 	session.handle(answer); session.run_operations();
 	TEST_EXPECT(!document->dirty() && !prompt.open); // semantic errors do not prevent saving
 	TEST_EXPECT(session.view().activity.has_build && !session.view().activity.last_build->ok && platform.spawns == 0); // the graphic is missing
-	request.edit = field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string(""));
+	request.edits = {field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string(""))};
 	session.handle(request);
-	session.handle(make_request(EditorRequestKind::CloseProject));
+	session.handle(request::close_project());
 	TEST_EXPECT(session.project_open() && prompt.open && prompt.can_discard);
-	answer.unsaved_choice = UnsavedChoice::Cancel;
+	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer); TEST_EXPECT(session.project_open() && !prompt.open);
-	session.handle(make_request(EditorRequestKind::CloseProject));
-	answer.unsaved_choice = UnsavedChoice::Save;
+	session.handle(request::close_project());
+	answer.choice = UnsavedChoice::Save;
 	session.handle(answer); TEST_EXPECT(!session.project_open());
-	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
-	session.handle(make_request(EditorRequestKind::Build)); session.run_operations();
+	session.handle(request::open_project(dir.file("project")));
+	session.handle(request::build()); session.run_operations();
 	TEST_EXPECT(session.view().activity.last_build->ok);
-	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	session.handle(request::open_document("items.def"));
 	document = session.document_for(); TEST_EXPECT(document && !document->dirty());
 	return 0;
 }
@@ -233,26 +234,24 @@ static int go_to_record() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
+	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
+	session.handle(request::open_document("items.def"));
 	auto *items = session.document_for("items.def"); TEST_EXPECT(items && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
 	const int id = std::get<DefItemDef>(row_at(*items, 0).data).id;
-	session.handle(make_request(EditorRequestKind::CloseDocument, items->path()));
+	session.handle(request::close_document(items->path()));
 	const GraphSymbol *item =
 			view.findings.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
 	TEST_EXPECT(item && item->field == "id" && !item->locator.empty());
 	if (!item) return 1;
-	EditorRequest open = make_request(EditorRequestKind::OpenDocument, item->file, item->locator);
-	open.edit.field = item->field;
-	session.handle(open);
+	session.handle(request::open_document(item->file, item->locator, item->field));
 	items = session.document_for("items.def");
 	TEST_EXPECT(items && view.documents.active == items->path());
 	TEST_EXPECT(items && view.documents.selection.row == items->rows()[0]->id && view.documents.selection.kind == node_kind(DefRecordKind::Item));
 	TEST_EXPECT(editor_test::revealed_field(view) == "id");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "weapon.def", "7"));
+	session.handle(request::open_document("weapon.def", "7"));
 	TEST_EXPECT(session.document_for("weapon.def") != nullptr && view.documents.selection.row == 0);
 	return 0;
 }

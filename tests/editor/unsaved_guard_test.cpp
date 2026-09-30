@@ -17,6 +17,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
@@ -39,17 +40,17 @@ struct Dirty {
 	ProjectSession session;
 	std::string extra;
 	explicit Dirty(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Guard"));
+		session.handle(request::new_project(dir.file("project"), "Guard"));
 		editor_test::create_missing_files(session);
-		session.handle(make_request(EditorRequestKind::CreateFile, "extra.mnu", asset_kind_token(AssetKind::Menu)));
+		session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 		Document *document = session.document_for("extra.mnu");
 		if (!document) return;
 		extra = document->path();
-		EditorRequest set = make_request(EditorRequestKind::EditRecord, extra);
-		set.edit.address = document->address_at("0/window:0");
-		set.edit.field = "position.left";
-		set.edit.value = int64_t(8);
-		session.handle(set);
+		Edit set;
+		set.address = document->address_at("0/window:0");
+		set.field = "position.left";
+		set.value = int64_t(8);
+		session.handle(request::edit_record(extra, set));
 	}
 	const SessionView &view() const { return session.view(); }
 	bool ready() { return !extra.empty() && session.documents_dirty() && session.document_for(extra)->dirty(); }
@@ -66,15 +67,16 @@ const RequirementRow *requirement_of(const SessionView &view, const std::string 
 // a project switch, Quit, Build and Play do by what they are; a Close or a Reload names it; an
 // import brings a file of its name, replacing it; a rename renames it, an assignment renames it to
 // a required file the project lacks, a rename everywhere renames the screen it defines. Any other
-// kind names it where it names a document.
+// kind that takes a path (its row's params) names it there.
 EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
-	EditorRequest request = make_request(kind, dirty.extra);
+	EditorRequest request = request::of(kind);
+	if (request_kind_row(kind).params.has(RequestFieldId::Path)) request.path = dirty.extra;
 	switch (kind) {
 	case EditorRequestKind::NewProject:
-		request.path = dirty.dir.file("elsewhere");
-		request.text = "Elsewhere";
+		request.dir = dirty.dir.file("elsewhere");
+		request.title = "Elsewhere";
 		break;
-	case EditorRequestKind::OpenProject: request.path = dirty.view().project.root; break;
+	case EditorRequestKind::OpenProject: request.dir = dirty.view().project.root; break;
 	case EditorRequestKind::ImportFiles: {
 		const std::string loose = dirty.dir.file("loose/extra.mnu");
 		const std::string saved = dirty.view().project.root + "/" + dirty.extra;
@@ -82,12 +84,11 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		fs::create_directories(fs::path(loose).parent_path(), ec);
 		fs::copy_file(saved, loose, fs::copy_options::overwrite_existing, ec);
 		std::vector<Diagnostic> diagnostics;
-		request.path.clear();
 		request.imports = list_import_sources({loose}, diagnostics);
-		request.flag = true; // replace the project's file of the name
+		request.replace = true; // replace the project's file of the name
 		break;
 	}
-	case EditorRequestKind::RenameAsset: request.text = "renamed.mnu"; break;
+	case EditorRequestKind::RenameAsset: request.new_name = "renamed.mnu"; break;
 	case EditorRequestKind::AssignRequirement: {
 		// main.mnu gone from the project: extra.mnu is a menu that can be it.
 		const RequirementRow *row = requirement_of(dirty.view(), "main.mnu");
@@ -95,16 +96,16 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		const std::string role = row->role;
 		std::error_code ec;
 		fs::remove(dirty.view().project.root + "/" + row->asset_path, ec);
-		dirty.session.handle(make_request(EditorRequestKind::Rescan));
-		request.text = role;
+		dirty.session.handle(request::rescan());
+		request.role = role;
 		break;
 	}
 	case EditorRequestKind::RenameSymbol: {
 		for (const GraphSymbol *symbol : dirty.view().findings.graph->symbols_of_kind(ReferenceKind::MenuScreen)) {
 			if (symbol->file != dirty.extra) continue;
-			request.text = symbol->locator;
-			request.edit.field = symbol->field;
-			request.edit.value = std::string("RENAMED");
+			request.locator = symbol->locator;
+			request.field = symbol->field;
+			request.new_name = "RENAMED";
 		}
 		break;
 	}
@@ -141,7 +142,9 @@ static int test_guard_column_is_the_prompt() {
 		TEST_EXPECT(prompt.action == kind);
 		TEST_EXPECT(prompt.files == std::vector<std::string>({dirty.extra}));
 		TEST_EXPECT(prompt.can_discard == row.can_discard);
-		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : request.path));
+		// What waits names its document, the project a switch opens, or the file it renames.
+		const std::string named = !request.dir.empty() ? request.dir : request.path;
+		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
 	TEST_EXPECT(prompted == 12 && went_ahead == kEditorRequestKindCount - 12);
 	return 0;
@@ -152,13 +155,13 @@ static int test_guard_column_is_the_prompt() {
 static int test_untouched_goes_ahead() {
 	Dirty dirty("opennova_editor_unsaved_guard_clean");
 	TEST_EXPECT(dirty.ready());
-	dirty.session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	dirty.session.handle(request::open_document("main.mnu"));
 	const std::string main = dirty.session.document_for("main.mnu")->path();
-	dirty.session.handle(make_request(EditorRequestKind::ReloadDocument, main));
+	dirty.session.handle(request::reload_document(main));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done());
-	dirty.session.handle(make_request(EditorRequestKind::CloseDocument, main));
+	dirty.session.handle(request::close_document(main));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
-	dirty.session.handle(make_request(EditorRequestKind::RenameAsset, "menu_style.mns", "renamed.mns"));
+	dirty.session.handle(request::rename_asset("menu_style.mns", "renamed.mns"));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open);
 	TEST_EXPECT(dirty.session.document_for(dirty.extra)->dirty());
 	return 0;

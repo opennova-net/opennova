@@ -103,9 +103,11 @@ func _tool_editor_document(args: Dictionary, _ctx: McpToolContext) -> Variant:
 		"open", "create", "close", "reload":
 			if path.is_empty() and op != "close" and op != "reload":
 				return McpToolResult.error("editor_document op=%s requires path." % op)
-			var request := {"kind": "create_file" if op == "create" else op + "_document", "path": path}
+			var request := {"kind": "create_file" if op == "create" else op + "_document"}
+			if not path.is_empty():
+				request["path"] = path
 			if op == "create" and args.has("kind"):
-				request["text"] = String(args["kind"])
+				request["file_kind"] = String(args["kind"])
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request))))
 			var failed := _outcome_error(answer, "editor_document op=%s" % op)
 			if failed != null:
@@ -199,8 +201,8 @@ func _tool_editor_document(args: Dictionary, _ctx: McpToolContext) -> Variant:
 			var record: Variant = _parsed(String(app.call("get_record_json", int(id))))
 			if not (record is Dictionary):
 				return McpToolResult.error("No record %d in the active document." % int(id))
-			var request := {"kind": "revert_to_saved", "edit": {"row": int(record["row"]), "kind": int(record["kind"]),
-					"child": int(record["child"]), "field": field}}
+			var request := {"kind": "revert_to_saved", "edits": [{"row": int(record["row"]), "kind": int(record["kind"]),
+					"child": int(record["child"]), "field": field}]}
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request))))
 			var failed := _outcome_error(answer, "editor_document op=revert")
 			if failed != null:
@@ -432,7 +434,7 @@ func _tool_editor_graph(args: Dictionary, _ctx: McpToolContext) -> Variant:
 						"editor_graph op=rename_symbol requires path, locator, field (a symbol as op=symbols lists it) and name.")
 			var dry_run := bool(args.get("dry_run", false))
 			var request := {"kind": "preview_rename" if dry_run else "rename_symbol", "path": path,
-					"text": String(args.get("locator", "")), "edit": {"field": field, "value": name}}
+					"locator": String(args.get("locator", "")), "field": field, "new_name": name}
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request))))
 			var failed := _outcome_error(answer, "editor_graph op=rename_symbol")
 			if failed != null:
@@ -446,12 +448,12 @@ func _tool_editor_graph(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				var name := String(args.get("name", ""))
 				if path.is_empty() or name.is_empty():
 					return McpToolResult.error("editor_graph op=rename requires path and name.")
-				request = {"kind": "rename_asset", "path": path, "text": name}
+				request = {"kind": "rename_asset", "path": path, "new_name": name}
 			else:
 				var role := String(args.get("role", ""))
 				if path.is_empty() or role.is_empty():
 					return McpToolResult.error("editor_graph op=assign requires role and path.")
-				request = {"kind": "assign_requirement", "path": path, "text": role}
+				request = {"kind": "assign_requirement", "path": path, "role": role}
 			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request))))
 			var failed := _outcome_error(answer, "editor_graph op=%s" % op)
 			if failed != null:
@@ -865,7 +867,7 @@ func _unsaved_prompt_error(what: String, action: String = "") -> McpToolResult:
 	var listed: Array = prompt.get("files", [])
 	var files := ", ".join(PackedStringArray(listed))
 	return McpToolResult.error("%s waits on unsaved changes (%s): editor_request resolve_unsaved with " % [what, files]
-			+ "unsaved_choice %s." % choices, prompt)
+			+ "choice %s." % choices, prompt)
 
 
 func _play_block() -> Dictionary:

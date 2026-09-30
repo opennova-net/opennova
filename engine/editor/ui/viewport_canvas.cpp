@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <editor/session/editor_request.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/ui_kit.h>
@@ -150,20 +151,15 @@ ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 
 void CanvasWindowRequests::select(
 		const std::string &path, const NodeAddress &record, CanvasJoin join) {
-	EditorRequest request = make_request(EditorRequestKind::SelectRecord, path);
-	request.edit.address = record;
-	request.select_mode = select_mode(join);
-	workspace_.request(std::move(request));
+	workspace_.request(request::select_record(path, record, select_mode(join)));
 }
 
 void CanvasWindowRequests::edits(const std::string &path, std::vector<Edit> batch) {
-	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
-	request.edits = std::move(batch);
-	workspace_.request(std::move(request));
+	workspace_.request(request::edit_record(path, std::move(batch)));
 }
 
 void CanvasWindowRequests::end_edit(const std::string &path) {
-	workspace_.request(make_request(EditorRequestKind::EndEdit, path));
+	workspace_.request(request::end_edit(path));
 }
 
 ViewportCanvas::ViewportCanvas(int design_width, int design_height) :

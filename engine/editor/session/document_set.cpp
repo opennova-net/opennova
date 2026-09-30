@@ -11,6 +11,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 
 namespace fs = std::filesystem;
@@ -180,8 +181,9 @@ void DocumentSet::forget_file_state(const std::string &path) {
 
 void DocumentSet::create_file(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	// A name alone cannot say what a new `.bin` is; the request's text may name the kind.
-	const AssetKind kind = request.text.empty() ? classify_asset(request.path, nullptr) : asset_kind_from_token(request.text);
+	// A name alone cannot say what a new `.bin` is; the request's file_kind may name the kind.
+	const AssetKind kind = request.file_kind.empty() ? classify_asset(request.path, nullptr)
+	                                                 : asset_kind_from_token(request.file_kind);
 	// A required name gets its requirement's blank (main.mnu, the STARTUP screen); any
 	// other name the kind's free-form one (blank_factory.h). A kind with neither cannot
 	// be made; one the editor does not edit (a font) is made and not opened.
@@ -222,7 +224,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		core_.note("Created " + relative);
 	}
 	if (is_editable_kind(kind)) {
-		open_document(make_request(EditorRequestKind::OpenDocument, request.path));
+		open_document(request::open_document(request.path));
 	} else {
 		view_.activity.status = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
 		core_.touch(ViewConcern::Output);
@@ -238,14 +240,14 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	// shows it again).
 	const auto select_named = [this, &request](const Document &document) {
 		const NodeAddress record =
-		        request.text.empty() ? request.edit.address : document.address_at(request.text);
+		        request.locator.empty() ? request.address : document.address_at(request.locator);
 		view_.documents.select_only(record);
-		if (!record.row || request.edit.field.empty()) return;
+		if (!record.row || request.field.empty()) return;
 		ViewEvent reveal;
 		reveal.kind = ViewEventKind::RevealRecord;
 		reveal.path = document.path();
 		reveal.address = record;
-		reveal.field = request.edit.field;
+		reveal.field = request.field;
 		view_.events.post(std::move(reveal));
 	};
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
@@ -253,7 +255,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		// a record (a Problems row, a Go to).
 		const Document &document = *document_for(path);
 		activate(document.path());
-		if (request.edit.address.row || !request.text.empty()) select_named(document);
+		if (request.address.row || !request.locator.empty()) select_named(document);
 		core_.touch(ViewConcern::Selection);
 		return;
 	}
@@ -296,7 +298,7 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	ViewEvent reveal;
 	reveal.kind = ViewEventKind::RevealFile;
 	reveal.path = asset->relative_path;
-	reveal.flag = request.flag;
+	reveal.flag = request.ask_name;
 	view_.events.post(std::move(reveal));
 	core_.touch(ViewConcern::Selection);
 }
@@ -322,23 +324,24 @@ void DocumentSet::select_record(const EditorRequest &request) {
 	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
 	if (path != view_.documents.active) {
 		activate(path);
-		view_.documents.select_only(request.edit.address);
+		view_.documents.select_only(request.address);
 	} else {
-		view_.documents.select(path, request.edit.address, request.select_mode);
+		view_.documents.select(path, request.address, request.mode);
 	}
 	core_.touch(ViewConcern::Selection);
 }
 
 void DocumentSet::edit_record(const EditorRequest &request) {
 	// A fix's edit opens its document first (a Problems row about a file not open).
-	if (!document_for(request.path) && request.flag && view_.project.open && !request.path.empty())
-		open_document(make_request(EditorRequestKind::OpenDocument, request.path));
+	if (!document_for(request.path) && request.open_first && view_.project.open &&
+	    !request.path.empty())
+		open_document(request::open_document(request.path));
 	auto *document = document_for(request.path);
 	if (!document) {
 		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before editing it.", request.path);
 		return;
 	}
-	apply_edits(*document, request.edits.empty() ? std::vector<Edit>{request.edit} : request.edits);
+	apply_edits(*document, request.edits);
 }
 
 void DocumentSet::revert_to_saved(const EditorRequest &request) {
@@ -348,7 +351,7 @@ void DocumentSet::revert_to_saved(const EditorRequest &request) {
 		return;
 	}
 	std::vector<Edit> batch;
-	for (const Edit &target : request.edits.empty() ? std::vector<Edit>{request.edit} : request.edits)
+	for (const Edit &target : request.edits)
 		for (Edit &edit : document->revert_edits(target.address, target.field)) batch.push_back(std::move(edit));
 	if (batch.empty()) {
 		last_edit_ok_ = false;
@@ -376,7 +379,7 @@ void DocumentSet::paste(const EditorRequest &request) {
 		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before pasting into it.", request.path);
 		return;
 	}
-	paste_records(*document, request.edit);
+	paste_records(*document, request.paste_at);
 }
 
 void DocumentSet::duplicate(const EditorRequest &request) {
@@ -620,14 +623,17 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 	if (apply_edits(document, removes)) view_.activity.status = "Cut " + std::to_string(records.size()) + " record(s).";
 }
 
-void DocumentSet::paste_records(Document &document, const Edit &target) {
+void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 	last_edit_ok_ = false;
 	if (view_.documents.clipboard.empty())
 		return core_.refuse_now("document.paste", "The clipboard is empty: copy records first.", document.path());
-	Edit edit = target;
+	Edit edit;
 	edit.operation = EditOperation::Paste;
+	edit.address.row = target.row;
+	edit.parent = target.parent;
+	edit.position = target.position;
 	edit.value = view_.documents.clipboard;
-	if (!edit.address.row && !edit.parent) {
+	if (!target.named()) {
 		// No target named: beside the selected record (the one position rule, position_after), or
 		// into the selected row, at its end.
 		if (document.path() != view_.documents.active || !view_.documents.selection.row)

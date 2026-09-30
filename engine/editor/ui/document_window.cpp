@@ -10,6 +10,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_outline.h>
 #include <editor/ui/document_toolbar.h>
@@ -68,7 +69,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		bool open = true;
 		const bool visible = ImGui::BeginTabItem(label.c_str(), &open, flags);
 		ui_kit::tooltip(path);
-		if (!open) workspace_.request(make_request(EditorRequestKind::CloseDocument, path));
+		if (!open) workspace_.request(request::close_document(path));
 		if (!visible) continue;
 		shown = path;
 		// Its view once it is the active document: the selection and the inspector are the
@@ -94,7 +95,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// A tab the user chose (a click, the tab list) shows another document: it becomes the
 		// active one, once.
 		raised_ = shown;
-		workspace_.request(make_request(EditorRequestKind::OpenDocument, shown));
+		workspace_.request(request::open_document(shown));
 	}
 }
 

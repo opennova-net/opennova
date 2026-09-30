@@ -29,6 +29,8 @@
 #include <editor/requirements/requirements.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
@@ -418,7 +420,7 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Choose the game runtime (opennova.exe)");
 			filters.push_back("*.exe ; Game runtime");
 			break;
-		case PickPurpose::RetailDirectory:
+		case PickPurpose::GameInstall:
 			picker_->set_title("Choose the game install folder");
 			break;
 		case PickPurpose::ImportFiles:
@@ -485,7 +487,7 @@ bool EditorApp::project_open_at(const std::string &p_dir) const {
 bool EditorApp::new_project(const String &p_dir, const String &p_title) {
 	ensure_session();
 	const std::string dir = opennova::to_std(p_dir);
-	session_->handle(opennova::editor::make_request(EditorRequestKind::NewProject, dir, opennova::to_std(p_title)));
+	session_->handle(opennova::editor::request::new_project(dir, opennova::to_std(p_title)));
 	// Made and opened: the request went through (a folder that holds a project already refuses
 	// it, the open project's own among them) and the project it made is the one open.
 	return session_->outcome().done() && project_open_at(dir);
@@ -494,26 +496,26 @@ bool EditorApp::new_project(const String &p_dir, const String &p_title) {
 bool EditorApp::open_project(const String &p_dir) {
 	ensure_session();
 	const std::string dir = opennova::to_std(p_dir);
-	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenProject, dir));
+	session_->handle(opennova::editor::request::open_project(dir));
 	return project_open_at(dir);
 }
 
 void EditorApp::close_project() {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::CloseProject));
+	session_->handle(opennova::editor::request::close_project());
 }
 
 int EditorApp::create_missing_files() {
 	ensure_session();
-	EditorRequest request = opennova::editor::make_request(EditorRequestKind::CreateMissing);
-	request.names = opennova::editor::unmet_required_roles(*session_->view().project.requirements);
-	session_->handle(request);
+	const auto roles =
+			opennova::editor::unmet_required_roles(*session_->view().project.requirements);
+	session_->handle(opennova::editor::request::create_missing(roles));
 	return get_required_missing();
 }
 
 void EditorApp::stop_play() {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::StopPlay));
+	session_->handle(opennova::editor::request::stop_play());
 }
 
 bool EditorApp::is_project_open() const {
@@ -623,22 +625,23 @@ int64_t identity_of(const NodeAddress &address) { return int64_t(address.child ?
 bool presence_edited(ProjectSession &session, int64_t id, const String &field, EditOperation operation) {
 	auto *document = session.document_for();
 	if (!document) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.operation = operation;
-	request.edit.address = document->address_of(uint64_t(id));
-	request.edit.field = opennova::to_std(field);
+	Edit edit;
+	edit.operation = operation;
+	edit.address = document->address_of(uint64_t(id));
+	edit.field = opennova::to_std(field);
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(edit));
 	return edited(session, *document, request);
 }
 } // namespace
 
 bool EditorApp::create_file(const String &p_path) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::CreateFile, opennova::to_std(p_path)));
+	session_->handle(opennova::editor::request::create_file(opennova::to_std(p_path)));
 	return session_->outcome().done();
 }
 bool EditorApp::open_document(const String &p_path) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenDocument, opennova::to_std(p_path)));
+	session_->handle(opennova::editor::request::open_document(opennova::to_std(p_path)));
 	return session_->document_for(opennova::to_std(p_path)) != nullptr;
 }
 int EditorApp::get_row_count() const {
@@ -659,30 +662,33 @@ int64_t EditorApp::add_record(const String &p_kind, int64_t p_parent, int64_t p_
 	if (!document || p_parent < 0) return 0;
 	const auto kind = document->kind_from_name(opennova::to_std(p_kind));
 	if (kind < 0) return 0;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.operation = EditOperation::Add;
-	request.edit.address = {0, kind, 0};
-	request.edit.parent = uint64_t(p_parent);
-	request.edit.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {0, kind, 0};
+	add.parent = uint64_t(p_parent);
+	add.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(add));
 	return edited(*session_, *document, request) ? int64_t(document->last_added()) : 0;
 }
 bool EditorApp::remove_record(int64_t p_id) {
 	ensure_session();
 	auto *document = session_->document_for();
 	if (!document) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.operation = EditOperation::Remove;
-	request.edit.address = document->address_of(uint64_t(p_id));
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = document->address_of(uint64_t(p_id));
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(remove));
 	return edited(*session_, *document, request);
 }
 bool EditorApp::set_field(int64_t p_id, const String &p_field, const Variant &p_value) {
 	ensure_session();
 	auto *document = session_->document_for();
 	if (!document) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.address = document->address_of(uint64_t(p_id));
-	request.edit.field = opennova::to_std(p_field);
-	if (!to_value(p_value, request.edit.value)) return false;
+	Edit set;
+	set.address = document->address_of(uint64_t(p_id));
+	set.field = opennova::to_std(p_field);
+	if (!to_value(p_value, set.value)) return false;
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(set));
 	return edited(*session_, *document, request);
 }
 bool EditorApp::clear_field(int64_t p_id, const String &p_field) {
@@ -704,11 +710,11 @@ Variant EditorApp::get_field(int64_t p_id, const String &p_field) const {
 }
 bool EditorApp::save_documents() {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::SaveAll));
+	session_->handle(opennova::editor::request::save_all());
 	return !session_->documents_dirty();
 }
-void EditorApp::undo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Undo)); }
-void EditorApp::redo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Redo)); }
+void EditorApp::undo() { ensure_session(); session_->handle(opennova::editor::request::undo()); }
+void EditorApp::redo() { ensure_session(); session_->handle(opennova::editor::request::redo()); }
 bool EditorApp::is_document_dirty() const {
 	const auto *document = session_ ? session_->document_for() : nullptr;
 	return document && document->dirty();
@@ -749,9 +755,8 @@ bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view()
 void EditorApp::resolve_unsaved(int p_choice) {
 	if (p_choice < 0 || p_choice > 2) return;
 	ensure_session();
-	auto request = opennova::editor::make_request(EditorRequestKind::ResolveUnsaved);
-	request.unsaved_choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
-	session_->handle(request);
+	const auto choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
+	session_->handle(opennova::editor::request::resolve_unsaved(choice));
 }
 int EditorApp::get_play_mcp_port() const {
 	return session_ ? session_->view().activity.play_mcp_port : 0;
@@ -760,25 +765,27 @@ bool EditorApp::duplicate_record(int64_t p_id) {
 	ensure_session();
 	auto *document = session_->document_for();
 	if (!document) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.operation = EditOperation::Duplicate;
-	request.edit.address = document->address_of(uint64_t(p_id));
+	Edit duplicate;
+	duplicate.operation = EditOperation::Duplicate;
+	duplicate.address = document->address_of(uint64_t(p_id));
 	// The copy goes right after the record, in its owner's collection or among the rows.
 	Document::Placement at;
-	if (document->placement(request.edit.address, at)) request.edit.position = at.index + 1;
-	for (size_t i = 0; !request.edit.address.child && i < document->rows().size(); ++i)
-		if (document->rows()[i]->id == request.edit.address.row) request.edit.position = i + 1;
+	if (document->placement(duplicate.address, at)) duplicate.position = at.index + 1;
+	for (size_t i = 0; !duplicate.address.child && i < document->rows().size(); ++i)
+		if (document->rows()[i]->id == duplicate.address.row) duplicate.position = i + 1;
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(duplicate));
 	return edited(*session_, *document, request);
 }
 bool EditorApp::move_record(int64_t p_id, int p_position, int64_t p_parent) {
 	ensure_session();
 	auto *document = session_->document_for();
 	if (!document || p_position < 0 || p_parent < 0) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::EditRecord);
-	request.edit.operation = EditOperation::Move;
-	request.edit.address = document->address_of(uint64_t(p_id));
-	request.edit.position = size_t(p_position);
-	request.edit.parent = uint64_t(p_parent);
+	Edit move;
+	move.operation = EditOperation::Move;
+	move.address = document->address_of(uint64_t(p_id));
+	move.position = size_t(p_position);
+	move.parent = uint64_t(p_parent);
+	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(move));
 	return edited(*session_, *document, request);
 }
 bool EditorApp::select_record(int64_t p_id, const String &p_mode) {
@@ -788,10 +795,7 @@ bool EditorApp::select_record(int64_t p_id, const String &p_mode) {
 	if (!document || !opennova::editor::select_mode_from_token(opennova::to_std(p_mode), mode)) return false;
 	const NodeAddress address = document->address_of(uint64_t(p_id));
 	if (!address.row) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::SelectRecord, document->path());
-	request.edit.address = address;
-	request.select_mode = mode;
-	session_->handle(request);
+	session_->handle(opennova::editor::request::select_record(document->path(), address, mode));
 	return true;
 }
 PackedInt64Array EditorApp::get_selected_records() const {
@@ -803,26 +807,26 @@ PackedInt64Array EditorApp::get_selected_records() const {
 bool EditorApp::copy_records() {
 	ensure_session();
 	auto *document = session_->document_for();
-	return document && edited(*session_, *document, opennova::editor::make_request(EditorRequestKind::Copy));
+	return document && edited(*session_, *document, opennova::editor::request::copy());
 }
 bool EditorApp::cut_records() {
 	ensure_session();
 	auto *document = session_->document_for();
-	return document && edited(*session_, *document, opennova::editor::make_request(EditorRequestKind::Cut));
+	return document && edited(*session_, *document, opennova::editor::request::cut());
 }
 bool EditorApp::paste_records(int64_t p_parent, int p_position) {
 	ensure_session();
 	auto *document = session_->document_for();
 	if (!document || p_parent < 0) return false;
-	auto request = opennova::editor::make_request(EditorRequestKind::Paste);
-	request.edit.parent = uint64_t(p_parent);
-	request.edit.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
-	return edited(*session_, *document, request);
+	opennova::editor::PasteAt at;
+	at.parent = uint64_t(p_parent);
+	at.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
+	return edited(*session_, *document, opennova::editor::request::paste(std::string(), at));
 }
 void EditorApp::end_edit() {
 	ensure_session();
 	if (auto *document = session_->document_for())
-		session_->handle(opennova::editor::make_request(EditorRequestKind::EndEdit, document->path()));
+		session_->handle(opennova::editor::request::end_edit(document->path()));
 }
 
 // --- the wire seam ---------------------------------------------------------------
@@ -883,14 +887,23 @@ String EditorApp::request_json(const String &p_json) {
 	opennova::io::JsonValue json, answer = opennova::io::JsonValue::make_object();
 	std::string error;
 	EditorRequest request;
-	bool ok = opennova::io::json_parse(opennova::to_std(p_json), json, error) &&
-			opennova::editor::editor_request_from_json(json, request, error);
-	bool served = false;
-	if (ok && (request.kind == EditorRequestKind::PickDirectory || request.kind == EditorRequestKind::PickFile)) {
+	bool ok = opennova::io::json_parse(opennova::to_std(p_json), json, error);
+	// A kind the shell serves with a person to answer it (the pickers) never comes through here:
+	// refused by its kind, before its fields are read, naming the fields that carry what it picks.
+	const opennova::io::JsonValue *token = ok ? json.get("kind") : nullptr;
+	EditorRequestKind kind = EditorRequestKind::Rescan;
+	if (token && token->is_string() &&
+			opennova::editor::request_kind_from_token(token->string, kind) &&
+			opennova::editor::request_kind_row(kind).served_by ==
+					opennova::editor::ServedBy::ShellNeedsPerson) {
 		ok = false;
-		error = "The pickers need a person: pass the path with new_project, open_project, apply_project_settings "
-				"or preview_import instead.";
+		error = "The pickers need a person: pass what they pick instead, a project's folder as the "
+				"dir of new_project or open_project, the game install or the runtime as "
+				"settings.game_install or settings.runtime_executable of apply_project_settings, "
+				"files to import as the paths of preview_import.";
 	}
+	ok = ok && opennova::editor::editor_request_from_json(json, request, error);
+	bool served = false;
 	if (ok) {
 		served = session_->handle(request);
 		if (!served) serve(request);
@@ -977,9 +990,14 @@ String EditorApp::get_problems_json(const String &p_query) {
 	return opennova::to_gd(session_->problems_json(opennova::to_std(p_query)));
 }
 
+// The kinds request_json serves: every row of the request table but those a person answers.
 PackedStringArray EditorApp::get_request_kinds() const {
 	PackedStringArray kinds;
-	for (const std::string &token : opennova::editor::editor_request_kind_tokens()) kinds.push_back(opennova::to_gd(token));
+	for (size_t i = 0; i < opennova::editor::kEditorRequestKindCount; ++i) {
+		const auto &row = opennova::editor::request_kind_row(static_cast<EditorRequestKind>(i));
+		if (row.served_by != opennova::editor::ServedBy::ShellNeedsPerson)
+			kinds.push_back(opennova::to_gd(row.token));
+	}
 	return kinds;
 }
 
@@ -1267,7 +1285,7 @@ bool EditorApp::menu_preview_arrange(const PackedInt64Array &p_ids, const String
 
 void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
-		ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Quit));
+		ensure_session(); session_->handle(opennova::editor::request::quit());
 	}
 }
 
