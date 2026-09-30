@@ -1488,6 +1488,15 @@ static int test_selection_repair() {
 	Selection selection;
 	selection.select(document.path(), line(0), marquee, SelectMode::Replace);
 	TEST_EXPECT(selection.records.size() == kSelected && selection.primary == line(0));
+	// Every line asked of the selection's index (the outline asks it per line it draws): the
+	// selected ones held, the others not, a toggle and an add answered at once.
+	size_t held = 0;
+	for (size_t i = 0; i < kRows; ++i) held += selection.holds(line(i)) == (i % 10 == 0) ? 1 : 0;
+	TEST_EXPECT(held == kRows);
+	selection.select(document.path(), NodeAddress(), {line(10), line(11)}, SelectMode::Toggle);
+	TEST_EXPECT(!selection.holds(line(10)) && selection.holds(line(11)) && selection.primary == line(0));
+	selection.select(document.path(), line(0), marquee, SelectMode::Replace);
+	TEST_EXPECT(selection.holds(line(10)) && !selection.holds(line(11)));
 	const auto repaired = [&](const std::vector<Edit> &edits) -> size_t {
 		const uint64_t load = document.load_generation(), revision = document.revision();
 		Diagnostic refused;

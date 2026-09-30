@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <tuple>
 #include <variant>
 
 #include <editor/model/document.h>
@@ -14,6 +15,11 @@ std::atomic<uint64_t> g_next_serial{ 0 };
 
 bool among(const std::vector<NodeId> &sorted, NodeId id) {
 	return std::binary_search(sorted.begin(), sorted.end(), id);
+}
+
+// The order holds() searches the records in.
+bool before(const NodeAddress &a, const NodeAddress &b) {
+	return std::tie(a.row, a.child, a.kind) < std::tie(b.row, b.child, b.kind);
 }
 
 } // namespace
@@ -29,11 +35,13 @@ bool has_record(const Document &document, const NodeAddress &address) {
 }
 
 void Selection::changed() {
+	sorted_ = records;
+	std::sort(sorted_.begin(), sorted_.end(), before);
 	serial = ++g_next_serial;
 }
 
 bool Selection::holds(const NodeAddress &address) const {
-	return std::find(records.begin(), records.end(), address) != records.end();
+	return std::binary_search(sorted_.begin(), sorted_.end(), address, before);
 }
 
 void Selection::select_only(const std::string &path, const NodeAddress &address) {
@@ -75,9 +83,13 @@ void Selection::select(const std::string &path, const NodeAddress &named_primary
 		else
 			records.push_back(address);
 	}
-	if (named_primary.row && holds(named_primary))
+	// The index is the records' before the toggle until changed() makes it again.
+	const auto selected = [&](const NodeAddress &address) {
+		return std::find(records.begin(), records.end(), address) != records.end();
+	};
+	if (named_primary.row && selected(named_primary))
 		primary = named_primary;
-	else if (!holds(primary))
+	else if (!selected(primary))
 		primary = records.empty() ? NodeAddress() : records.back();
 	changed();
 }

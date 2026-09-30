@@ -27,12 +27,15 @@ bool has_record(const Document &document, const NodeAddress &address);
 struct Selection {
 	std::string document; // the path of the document the records are in ("" = none)
 	NodeAddress primary; // one of `records`; empty when none is selected
-	std::vector<NodeAddress> records; // each selected record once, in the order selected
+	// Each selected record once, in the order selected; changed through the methods below, which
+	// keep holds()'s index of it.
+	std::vector<NodeAddress> records;
 	uint64_t serial = 0;
 
 	bool empty() const { return records.empty(); }
 	// Whether `address` is selected: every list and tree of records marks a row selected by it, so
-	// a row is marked exactly when Copy, Cut, Duplicate and Remove take it.
+	// a row is marked exactly when Copy, Cut, Duplicate and Remove take it. A binary search of the
+	// records in address order (the outline asks it for every line it draws).
 	bool holds(const NodeAddress &address) const;
 	// `address` alone in `document` (nothing selected for an empty address).
 	void select_only(const std::string &document, const NodeAddress &address);
@@ -63,7 +66,9 @@ struct Selection {
 	size_t repair(const Document &document, const ChangeSet *changes, const NodeAddress &owner);
 
 private:
-	void changed(); // a serial no selection had
+	// The records in address order again, and a serial no selection had.
+	void changed();
+	std::vector<NodeAddress> sorted_; // `records` in address order: holds()'s index
 };
 
 } // namespace opennova::editor
