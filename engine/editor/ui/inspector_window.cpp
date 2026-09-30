@@ -242,9 +242,14 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
-// text. A text one is picked too (the picker's names are texts).
-bool is_reference(const FieldUse &field) { return field.reference != ReferenceKind::None; }
-bool picks_reference(const FieldUse &field) { return is_reference(field) && field.schema->type == FieldType::Text; }
+// text, and a text whose whole %NAME% names the stylesheet variable (value_reference). A text
+// reference of the field's own is picked too (the picker's names are texts).
+bool is_reference(const FieldUse &field, const Value &value) {
+	return value_reference(field, value) != ReferenceKind::None;
+}
+bool picks_reference(const FieldUse &field) {
+	return field.reference != ReferenceKind::None && field.schema->type == FieldType::Text;
+}
 
 // The width a reference's tools take beside its value: Pick (a text's), the widest word and
 // Go to.
@@ -494,8 +499,8 @@ void field_row(Workspace &workspace, ReferencePicker &picker, const Document &do
 	// words' room.
 	const bool renames = present && renames_name(document, targets, field, value);
 	const float rename_width = renames ? ui_kit::button_width("Rename...") + ImGui::GetStyle().ItemSpacing.x : 0.0f;
-	const float tools = (is_reference(field) ? reference_tools_width(field) : 0.0f) + rename_width;
-	const bool beside = (is_reference(field) || renames) && !schema.multiline &&
+	const float tools = (is_reference(field, value) ? reference_tools_width(field) : 0.0f) + rename_width;
+	const bool beside = (is_reference(field, value) || renames) && !schema.multiline &&
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
@@ -503,7 +508,8 @@ void field_row(Workspace &workspace, ReferencePicker &picker, const Document &do
 	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(workspace, document, targets, field);
 	ImGui::EndDisabled();
-	if (is_reference(field) && present) reference_tools(workspace, picker, document, targets, field, value, false, beside);
+	if (is_reference(field, value) && present)
+		reference_tools(workspace, picker, document, targets, field, value, false, beside);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -609,7 +615,7 @@ void field_cell(Workspace &workspace, ReferencePicker &picker, const Document &d
 	}
 	const ImGuiStyle &style = ImGui::GetStyle();
 	float reserve = 0.0f;
-	if (is_reference(field))
+	if (is_reference(field, value))
 		reserve += (picks_reference(field) ? ui_kit::button_width("...") + style.ItemSpacing.x : 0.0f) +
 		           ImGui::GetFrameHeight() * 0.5f + style.ItemSpacing.x;
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
@@ -618,7 +624,8 @@ void field_cell(Workspace &workspace, ReferencePicker &picker, const Document &d
 	value_control(workspace, document, {address}, field, value, true);
 	if (present) drop_target(workspace, document, {address}, field);
 	ImGui::EndDisabled();
-	if (is_reference(field) && present) reference_tools(workspace, picker, document, {address}, field, value, true, true);
+	if (is_reference(field, value) && present)
+		reference_tools(workspace, picker, document, {address}, field, value, true, true);
 	if (ignored) {
 		ImGui::SameLine();
 		ImGui::TextColored(kIgnored, "!");

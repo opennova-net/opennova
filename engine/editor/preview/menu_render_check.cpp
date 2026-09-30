@@ -52,8 +52,8 @@ std::vector<std::string> changed_variables(const std::map<std::string, std::stri
 // The variables a menu names: every %NAME% the game's expansion finds in the text its Save would
 // write (mns::variable_reference_at, the scan the game runs over a menu's whole text before its
 // parse), upper case as the shell's list keys them. Every value the frame compiler resolves
-// through the list is one of them: an APPEARANCE's, a FONT's, and a STRING's, an ITEM's or a
-// HEADER's text too, which no StyleVar edge reads.
+// through the list is one of them, and so is a %NAME% inside a longer text, which the game
+// expands too though no StyleVar edge reads it (a whole value is an edge).
 std::vector<std::string> variables_named(const MnuDocument &document) {
 	const std::string &text = document.saved_serialization().text;
 	std::vector<std::string> names;

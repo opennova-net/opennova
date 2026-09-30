@@ -25,6 +25,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/graph/project_validation.h>
 #include <editor/graph/use_checks.h>
 #include <editor/import/import_plan.h>
@@ -435,14 +436,23 @@ static int test_style_name_as_reference() {
 	return 0;
 }
 
-// What a use of a variable is, by the field that names it (S13 D4's review): a label's text that
-// is one %NAME% (a STRING of no id type) is a use of the variable, whose value the game shows
-// there, so the variable is no style.unused; a colour's variable a string id's STRING names too is
-// no style.mixed_use (a string id is none of a colour, a font and an image).
+// What a use of a variable is, by the field that names it (S13 D4's reviews): the game expands a
+// menu's whole text before its parse, so any text that is one %NAME% is a use of the variable (a
+// label's STRING, an ACTION's URL, a window's NAME), and none of those is style.unused; a colour's
+// variable a string id's STRING names too is no style.mixed_use (a string id is none of a colour,
+// a font and an image). A text's %NAME% no stylesheet defines is the graph's finding on its field,
+// which the field's reference status reads as the variable's.
 static int test_style_uses_by_what_names_them() {
 	Project project;
+	const auto button = [](const std::string &name, const std::string &body) {
+		return "<WINDOW TYPE=\"BUTTON\" NAME=\"" + name +
+				"\">\r\n<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>20</BOTTOM>"
+				"</POSITION>\r\n" +
+				body + "</WINDOW>\r\n";
+	};
 	TEST_EXPECT(project.make({
-			{ "menus/menu_style.mns", "LABEL_TEXT Hello\r\nFG FF00FF00\r\n" },
+			{ "menus/menu_style.mns",
+					"LABEL_TEXT Hello\r\nFG FF00FF00\r\nHOME_URL http://x/\r\nPANEL PANEL_A\r\n" },
 			{ "menus/main.mnu",
 					"<SCREEN>\r\n<NAME>MAIN</NAME>\r\n" +
 							window("A", "<STRING>%LABEL_TEXT%</STRING>\r\n") +
@@ -450,25 +460,61 @@ static int test_style_uses_by_what_names_them() {
 									"<APPEARANCE STATE=\"DEFAULT\" "
 									"TYPE=\"COLOR\">%FG%</APPEARANCE>\r\n") +
 							window("C", "<STRING TYPE=\"ID\">%FG%</STRING>\r\n") +
+							window("D", "<STRING>%NOPE%</STRING>\r\n") +
+							button("WEB", "<ACTION TYPE=\"URL\">%HOME_URL%</ACTION>\r\n") +
+							window("%PANEL%", "") +
+							button("OPEN",
+									"<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">%PANEL%</ACTION>\r\n") +
 							"</SCREEN>\r\n" },
 	}));
 	AssetGraph graph;
 	ValidationCache cache;
 	const std::vector<std::shared_ptr<const Document>> open;
-	size_t style_rows = 0;
-	for (const Diagnostic &d :
-			validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
+	const std::vector<Diagnostic> rows =
+			validate_project({ project.paths, project.document, project.scan, open }, graph, cache);
+	size_t style_rows = 0, nope = 0;
+	for (const Diagnostic &d : rows) {
 		if (d.code == "style.unused" || d.code == "style.mixed_use" ||
 				d.code == "style.not_a_color") {
 			std::printf("  %s %s: %s\n", d.code.c_str(), d.record.c_str(), d.message.c_str());
 			++style_rows;
 		}
-	TEST_EXPECT(style_rows == 0);
-	// The label's text is the variable's edge through the shown text.
-	const std::vector<const GraphEdge *> uses =
-			graph.referrers_of(ReferenceKind::StyleVar, "LABEL_TEXT");
-	TEST_EXPECT(uses.size() == 1 && uses[0]->through == ReferenceKind::MenuText &&
-			uses[0]->field == "string.value");
+		if (d.code == "reference.missing" && d.record == "MAIN/D") {
+			++nope;
+			TEST_EXPECT(d.field == "string.value" && d.reference == ReferenceKind::StyleVar &&
+					d.severity == DiagnosticSeverity::Warning &&
+					d.message.find("%NOPE%") != std::string::npos);
+		}
+	}
+	TEST_EXPECT(style_rows == 0 && nope == 1);
+	// Each text is the variable's edge through the text.
+	const auto through_text = [&graph](const char *name, const char *field) {
+		for (const GraphEdge *edge : graph.referrers_of(ReferenceKind::StyleVar, name))
+			if (edge->through == ReferenceKind::MenuText && edge->field == field)
+				return true;
+		return false;
+	};
+	TEST_EXPECT(through_text("LABEL_TEXT", "string.value") && through_text("HOME_URL", "target") &&
+			through_text("PANEL", "name"));
+	// D's STRING references the variable it names: missing, as the Problems row says.
+	std::shared_ptr<Document> menu = project.open("menus/main.mnu");
+	NodeAddress d;
+	TEST_EXPECT(menu && find_definition(graph, *menu, "D", d));
+	if (!menu)
+		return 1;
+	bool checked = false;
+	for (const FieldSchema &schema : menu->fields(d.kind)) {
+		if (schema.id != "string.value")
+			continue;
+		const FieldUse use = menu->field_on(d, schema);
+		Value value;
+		TEST_EXPECT(menu->get(d, schema.id, value));
+		TEST_EXPECT(use.variable_through == ReferenceKind::MenuText &&
+				value_reference(use, value) == ReferenceKind::StyleVar &&
+				reference_status(graph, use, value) == ReferenceStatus::Missing);
+		checked = true;
+	}
+	TEST_EXPECT(checked);
 	return 0;
 }
 

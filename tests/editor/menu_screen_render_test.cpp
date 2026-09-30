@@ -479,13 +479,70 @@ static int test_retail_install_leg() {
 	return totals.failures == 0 ? 0 : 1;
 }
 
+// A composition the render check alone moves (S13 D4's second review): a font a menu reads is
+// replaced on disk, a file no graph extractor reads and no document type opens, so only the
+// check's dependency stamp moves. The menu renders again, its note goes, and the Problems rows
+// are composed again (Findings moves) though no file's own findings and nothing of the graph did.
+static int test_notes_alone_recompose() {
+	editor_test::TempProjectDir dir("opennova_menu_render_notes");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Notes"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const MenuRenderCheck &check = *view.render_check;
+	const std::string root = view.project_root;
+	std::string font;
+	for (const AssetEntry &asset : view.scan.entries)
+		if (asset.kind == AssetKind::Font) {
+			font = asset.relative_path;
+			break;
+		}
+	TEST_EXPECT(!font.empty());
+	if (font.empty())
+		return 1;
+	const std::vector<uint8_t> readable = test_io::read_file(root + "/" + font);
+	TEST_EXPECT(!readable.empty());
+	const std::string broken =
+			(std::filesystem::path(root + "/" + font).parent_path() / "broken.fnt")
+					.generic_string();
+	TEST_EXPECT(editor_test::write_text(broken, "not a font"));
+	TEST_EXPECT(editor_test::write_text(root + "/menus/letters.mnu",
+			"<SCREEN>\r\n<NAME>LETTERS</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
+			"</POSITION>\r\n<FONT><NAME>broken.fnt</NAME></FONT>\r\n<STRING>Hello</STRING>\r\n"
+			"</WINDOW>\r\n</SCREEN>\r\n"));
+	session.handle(request::rescan());
+	const auto unreadable = [&view] {
+		size_t found = 0;
+		for (const Diagnostic &d : view.diagnostics)
+			found += d.code == "menu.render.font_unreadable" && d.asset == "menus/letters.mnu" ? 1
+																							   : 0;
+		return found;
+	};
+	TEST_EXPECT(unreadable() == 1);
+	const size_t compositions = session.problems_compositions();
+	const uint64_t findings = view.revisions.of(ViewConcern::Findings);
+	const uint64_t graph = view.graph->generation();
+	TEST_EXPECT(editor_test::write_bytes(broken, readable));
+	session.handle(request::rescan());
+	TEST_EXPECT(
+			session.validation_stats().files_validated == 0 && view.graph->generation() == graph);
+	TEST_EXPECT(check.rendered() == 1 && unreadable() == 0);
+	TEST_EXPECT(session.problems_compositions() == compositions + 1 &&
+			view.revisions.of(ViewConcern::Findings) != findings);
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	const std::pair<const char *, int (*)()> cases[] = {
-	        {"blank_startup", test_blank_startup},
-	        {"render_again_only_when_moved", test_render_again_only_when_moved},
-	        {"retail_assets_leg", test_retail_assets_leg},
-	        {"retail_install_leg", test_retail_install_leg},
+		{ "blank_startup", test_blank_startup },
+		{ "render_again_only_when_moved", test_render_again_only_when_moved },
+		{ "notes_alone_recompose", test_notes_alone_recompose },
+		{ "retail_assets_leg", test_retail_assets_leg },
+		{ "retail_install_leg", test_retail_install_leg },
 	};
 	for (const auto &entry : cases) {
 		std::fflush(stdout);

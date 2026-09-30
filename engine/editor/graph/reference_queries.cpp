@@ -138,6 +138,7 @@ bool missing_finding(const AssetGraph &graph, const Document &document, const No
 	edge.value = name;
 	edge.scope = scope;
 	edge.loader_arg = field.loader_arg;
+	if (field.reference == ReferenceKind::None) edge.through = field.variable_through; // a text's %NAME%
 	if (kind != ReferenceKind::StyleVar && graph_names::is_style_reference(name) && !graph.style_binding(name)) {
 		edge.kind = ReferenceKind::StyleVar;
 		edge.scope.clear();

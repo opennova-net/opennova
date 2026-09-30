@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -422,9 +423,52 @@ static int test_changes_since_save() {
 	return 0;
 }
 
+// What a variable's value is used as (MnsDocument::style_value_use, the Styles view's cell): a
+// colour use gives the value its swatch; a use as a string id or as a menu's text is none of a
+// colour, a font and an image, so a value that reads as hex there ("ADD", "FACE") is no colour
+// (S13 D4's second review); a value no menu uses that the game reads whole as hex still is.
+static int test_style_value_use() {
+	editor_test::TempProjectDir dir("opennova_styles_value_use");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Uses"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const AssetEntry *style = view.scan.find("menu_style.mns");
+	TEST_EXPECT(style != nullptr);
+	if (!style) return 1;
+	const std::string path = style->relative_path;
+	const std::string sheet = dir.file("project") + "/" + path;
+	std::string text, message;
+	TEST_EXPECT(read_file_text(sheet, text, message));
+	TEST_EXPECT(editor_test::write_text(sheet, text + "ID_ONLY ADD\r\nTEXT_ONLY FACE\r\nPAINT FF102030\r\nSPARE 30\r\n"));
+	const std::string window = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n";
+	TEST_EXPECT(editor_test::write_text(
+	        (std::filesystem::path(sheet).parent_path() / "uses.mnu").generic_string(),
+	        "<SCREEN>\r\n<NAME>USES</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"A\">\r\n" + window +
+	                "<STRING TYPE=\"ID\">%ID_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"B\">\r\n" +
+	                window + "<STRING>%TEXT_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"C\">\r\n" +
+	                window + "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%PAINT%</APPEARANCE>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	session.handle(request::rescan());
+	session.handle(request::open_document(path));
+	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(path));
+	TEST_EXPECT(styles != nullptr && view.graph != nullptr);
+	if (!styles || !view.graph) return 1;
+	const auto colour = [&](const char *name) {
+		NodeAddress line;
+		if (!find_definition(*view.graph, *styles, name, line)) return -1;
+		return styles->style_value_use(line, view.graph.get(), view.graph->generation()).colour ? 1 : 0;
+	};
+	TEST_EXPECT(colour("ID_ONLY") == 0 && colour("TEXT_ONLY") == 0);
+	TEST_EXPECT(colour("PAINT") == 1 && colour("SPARE") == 1);
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
+	failures += test_style_value_use();
 	failures += test_byte_identity();
 	failures += test_edits();
 	failures += test_refusals();

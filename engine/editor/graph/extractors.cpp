@@ -104,20 +104,6 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 			symbol.line = facts.line;
 			out.symbols.push_back(std::move(symbol));
 		}
-		// A text shown as written that is one %NAME% stands for the variable's value: a use of the
-		// variable alone (FieldUse::variable_through), which Rename rewrites with it.
-		if (field.reference == ReferenceKind::None) {
-			const std::string text = value_name(value);
-			if (field.variable_through == ReferenceKind::None || !is_style_reference(text)) continue;
-			place();
-			GraphEdge var = edge_of(document.path(), record, schema.id, ReferenceKind::StyleVar, text, std::string(),
-			                        !field.read_only);
-			var.locator = locator;
-			var.address = address;
-			var.through = field.variable_through;
-			out.edges.push_back(std::move(var));
-			continue;
-		}
 		ReferenceKind kind;
 		std::string name, scope;
 		if (!reference_target(field, value, kind, name, scope)) continue;
@@ -126,10 +112,14 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		edge.locator = locator;
 		edge.address = address;
 		edge.loader_arg = field.loader_arg;
+		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
+		// (FieldUse::variable_through), which Rename rewrites with it.
+		if (field.reference == ReferenceKind::None) edge.through = field.variable_through;
 		out.edges.push_back(std::move(edge));
 		// A menu's font or texture through a style variable is two references: the
 		// variable, and the file it names once resolved.
-		if (field.reference != ReferenceKind::StyleVar && is_style_reference(name)) {
+		if (field.reference != ReferenceKind::None && field.reference != ReferenceKind::StyleVar &&
+		    is_style_reference(name)) {
 			GraphEdge var = edge_of(document.path(), record, schema.id, ReferenceKind::StyleVar, name, std::string(),
 			                        !field.read_only);
 			var.locator = locator;
@@ -247,13 +237,21 @@ NativeExtractor native_extractor(AssetKind kind) {
 
 } // namespace
 
+ReferenceKind value_reference(const FieldUse &field, const Value &value) {
+	if (field.reference != ReferenceKind::None) return field.reference;
+	return field.variable_through != ReferenceKind::None && is_style_reference(value_name(value)) ? ReferenceKind::StyleVar
+	                                                                                                : ReferenceKind::None;
+}
+
 bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &kind, std::string &name,
                       std::string &scope) {
-	kind = field.reference;
+	kind = value_reference(field, value);
 	scope.clear();
 	name.clear();
 	if (kind == ReferenceKind::None) return false;
 	name = value_name(value);
+	// A text's whole %NAME% names the variable, which has no scope (the field's is what it defines).
+	if (field.reference == ReferenceKind::None) return true;
 	if (name.empty()) return false;
 	const std::string normalized = graph_names::key(name);
 	if (normalized == "NONE" || normalized == "NULL") return false;

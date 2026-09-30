@@ -21,8 +21,9 @@ struct FieldUse {
 	ReferenceKind reference = ReferenceKind::None;
 	ReferenceKind defines = ReferenceKind::None;
 	// What a value that is one %NAME% stands for where the field makes no reference of its own: a
-	// menu's text shown as written (ReferenceKind::MenuText), which the stylesheet variable's value
-	// replaces as it is; the graph reads it as a StyleVar edge through that kind. None: a %NAME%
+	// menu's text as the game reads it (ReferenceKind::MenuText: any text of a menu, the game
+	// expanding its whole text first), which the stylesheet variable's value replaces as it is;
+	// the graph reads it as a StyleVar edge through that kind (value_reference). None: a %NAME%
 	// there is text like any other.
 	ReferenceKind variable_through = ReferenceKind::None;
 	// The namespace the name it references or defines lives in ("" = any).

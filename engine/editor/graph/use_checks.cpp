@@ -72,7 +72,7 @@ void check_style_uses(
 			if (!is_binding)
 				continue;
 			// The uses of the variable, by what its value must be there (a string id, a screen's
-			// or a window's NAME and a shown text are none of a colour, a font and an image).
+			// or a window's NAME and any other text are none of a colour, a font and an image).
 			bool color = false, font = false, image = false;
 			const std::vector<const GraphEdge *> uses =
 					graph.referrers_of(ReferenceKind::StyleVar, name);
@@ -82,11 +82,11 @@ void check_style_uses(
 				font = font || use == StyleVariableUse::Font;
 				image = image || use == StyleVariableUse::Image;
 			}
-			// Every field value a menu names a variable by whole is an edge: a colour, a font, an
-			// image, a string id, a screen's or a window's NAME, and a text shown as written (a
-			// STRING's, an ITEM's or a HEADER's: FieldUse::variable_through), so none means no
-			// menu uses it. A %NAME% inside a longer text is no edge: the frame compiler reads a
-			// whole value alone.
+			// Every field value of a menu that is one whole %NAME% is an edge: a colour, a font, an
+			// image, a string id, a screen's or a window's name, and any other text the game reads
+			// (a NAME, a shown text, an ACTION's target: FieldUse::variable_through), so none
+			// means no menu uses it. A %NAME% inside a longer text is no edge: the frame compiler
+			// reads a whole value alone.
 			if (uses.empty())
 				add(DiagnosticSeverity::Info, "style.unused",
 						"No menu of the project names %" + name + "%.");

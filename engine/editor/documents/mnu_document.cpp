@@ -107,20 +107,6 @@ FieldColor colour_of(ReferenceKind reference) {
 	return reference == ReferenceKind::StyleVar ? FieldColor::HexArgb : FieldColor::None;
 }
 
-// A text the game shows as written takes a whole %NAME% as the stylesheet variable's value: a
-// STRING's or a TOGGLE_STRING's value, an ITEM's or a HEADER's text, each where its TYPE makes it
-// no string id, image or colour (mnu::schema_reference answers None) [orig:
-// NapiXML_ExpandVariablesInText @ 0x63a000; the frame compiler's resolve_text_value].
-bool shows_text(SchemaShape shape, const std::string &field) {
-	switch (shape) {
-	case SchemaShape::Window:
-	case SchemaShape::Part: return field == "string.value" || field == "toggle_string.value";
-	case SchemaShape::Item:
-	case SchemaShape::Header: return field == "text";
-	default: return false;
-	}
-}
-
 const std::vector<FieldChoice> &yes_no() {
 	static const std::vector<FieldChoice> choices = {{"no", 0}, {"yes", 1}};
 	return choices;
@@ -736,8 +722,6 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	if (schema && schema->reference == mnu::SchemaReference::Dynamic) {
 		out.reference = reference_of(mnu::schema_reference(at.record, field.id));
 		out.color = colour_of(out.reference);
-		if (out.reference == ReferenceKind::None && shows_text(at.record.shape, field.id))
-			out.variable_through = ReferenceKind::MenuText;
 	}
 	// A string id resolves in the "menu" section of the table the window reads: its own
 	// TEXT_RSRC, else the one it falls back to (the runtime's rule, menu_screen_inputs.h).
@@ -760,6 +744,12 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	if (at.record.shape == SchemaShape::Part) out.defines = ReferenceKind::None;
 	if (out.defines == ReferenceKind::MenuWindow)
 		out.scope = menu_window_scope(Document::path(), screen_of(*row(address.row)).screen.name);
+	// Any text that makes no reference of its own (a NAME, a shown text, an ACTION's target,
+	// an extra element's text) takes a whole %NAME% as the stylesheet variable's value: the game
+	// expands the menu's whole text before its parse [orig: NapiXML_ExpandVariablesInText @
+	// 0x63a000; ADR 0005].
+	if (out.reference == ReferenceKind::None && field.type == FieldType::Text)
+		out.variable_through = ReferenceKind::MenuText;
 }
 
 void MnuDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
@@ -956,8 +946,7 @@ std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<Source
 		saved_ = SavedImage();
 		saved_.made = true;
 		saved_.revision = revision();
-		saved_.serialized = serialize();
-		const SerializeResult &result = saved_.serialized;
+		const SerializeResult &result = saved_serialization();
 		if (result.ok()) {
 			auto image = std::make_shared<mnu::Document>();
 			std::string error;
@@ -974,8 +963,12 @@ std::shared_ptr<const mnu::Document> MnuDocument::saved_image(std::vector<Source
 }
 
 const SerializeResult &MnuDocument::saved_serialization() const {
-	saved_image();
-	return saved_.serialized;
+	if (!serialized_.made || serialized_.revision != revision()) {
+		serialized_.made = true;
+		serialized_.revision = revision();
+		serialized_.result = serialize();
+	}
+	return serialized_.result;
 }
 
 size_t MnuDocument::screen_position(NodeId row_id) const {

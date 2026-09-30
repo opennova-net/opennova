@@ -42,7 +42,8 @@ struct StyleRow : Node {
 // the document decides it). The menus use the definition the game reads, the last of its name
 // in the shell's stylesheets (the graph's binding), each use reading its value as a colour, a
 // font or an image. The value is a colour, with a swatch, when a use reads it as one, or when
-// none reads it as a font or an image and the game's wcstoul reads it whole; else it is picked
+// no use reads it as anything (a font, an image, a string id, a name or a shown text) and the
+// game's wcstoul reads it whole; else it is picked
 // from the project's files of the kind a use loads, or its own value names (field_on's
 // reference). A line that stays where it is (frozen) is neither.
 struct StyleValueUse {

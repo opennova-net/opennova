@@ -224,7 +224,7 @@ const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const
 	if (!row || row->kind != kVariable) return out;
 	// The uses of the definition the game reads, by what its value must be there.
 	out.winner = winning_row(row->name()) == row->id;
-	bool colour = false, font = false, image = false;
+	bool colour = false, font = false, image = false, other = false;
 	if (out.winner && read_by_game() && graph) {
 		const GraphSymbol *binding = graph->style_binding(row->name());
 		out.bound = binding && binding->file == path();
@@ -235,6 +235,7 @@ const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const
 			colour = colour || use == StyleVariableUse::Colour;
 			font = font || use == StyleVariableUse::Font;
 			image = image || use == StyleVariableUse::Image;
+			other = other || use == StyleVariableUse::Other;
 		}
 	const NodeAddress address{row->id, row->kind, 0};
 	FieldUse value;
@@ -243,7 +244,9 @@ const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const
 	Value text;
 	const std::string shown = get(address, "value", text) ? std::get<std::string>(text) : "";
 	const bool fixed = frozen(*row);
-	out.colour = !fixed && (colour || (!font && !image && mnu::color_reads_whole(shown)));
+	// The guess from the value alone only where no use says what it is: a string id's, a name's
+	// or a shown text's value is none of a colour, a font and an image, hex digits or not.
+	out.colour = !fixed && (colour || (!font && !image && !other && mnu::color_reads_whole(shown)));
 	out.file = value;
 	if (font || value.reference == ReferenceKind::Font) out.file.reference = ReferenceKind::Font;
 	else if (image || value.reference == ReferenceKind::MenuTexture)

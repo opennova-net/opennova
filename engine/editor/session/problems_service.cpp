@@ -47,7 +47,9 @@ void ProblemsService::compose(bool keep_reported) {
 	                                 view_.boot_missing, play_findings_, open, build_findings_};
 	// The graph, each file's own findings and the render check first: when none of them moved, no
 	// other input the rows are made of did, no reported finding waits on this validation and the
-	// rows are as it left them, they stand (nothing composed, copied or compared).
+	// rows are as it left them, they stand. No row is composed, copied or compared then; the small
+	// inputs are compared with their copies (Composed::same), and the open documents' own findings
+	// are made again for it.
 	const bool moved = refresh_project_findings(input, *graph_, validation_cache_, *render_check_, *assets_);
 	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.diagnostics.size())) return;
 	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *render_check_);

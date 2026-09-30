@@ -264,8 +264,9 @@ constexpr ReferenceKindRow kRows[] = {
 	        .tolerated(clip_missing)
 	        .message_reads_files()
 	        .row,
-	// Never a reference of its own: a menu's text shown as written, which a whole %NAME% of the
-	// stylesheets stands in for (a StyleVar edge's through: FieldUse::variable_through).
+	// Never a reference of its own: a menu's text as the game reads it (a NAME, a shown text, an
+	// ACTION's target), which a whole %NAME% of the stylesheets stands in for (a StyleVar edge's
+	// through: FieldUse::variable_through).
 	Row(ReferenceKind::MenuText, "menu_text", "the text", "text").row,
 	// An item's particle slot naming no user point attaches its effect to none.
 	Row(ReferenceKind::UserPoint, "user_point", "the user point", "user point")
