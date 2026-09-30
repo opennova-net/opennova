@@ -22,14 +22,15 @@
 #include <editor/project/project_state.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/run/launch_plan.h>
+#include <editor/run/play_lease.h>
+#include <editor/session/build_operation.h>
+#include <editor/session/request_kinds.h>
 
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
 namespace {
-
-constexpr size_t kOutputLinesMax = 2000;
 
 bool same_finding(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.code == b.code && a.message == b.message && a.asset == b.asset &&
@@ -96,7 +97,7 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 	// Build and Play pack the files as saved: every edit group ends first, as EndEdit ends
 	// one, so a keystroke after them is a step of its own.
 	if (request.kind == EditorRequestKind::Build || request.kind == EditorRequestKind::Play) end_edit_groups();
-	if (guard_unsaved(request) || handle_document(request)) return true;
+	if (gate_busy(request) || guard_unsaved(request) || handle_document(request)) return true;
 	switch (request.kind) {
 	case EditorRequestKind::NewProject: new_project(request.path, request.text); return true;
 	case EditorRequestKind::OpenProject: open_project(request.path); return true;
@@ -172,6 +173,7 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 		if (view_.project_open) start_build(true);
 		return true;
 	case EditorRequestKind::StopPlay: stop_play(); return true;
+	case EditorRequestKind::CancelOperation: cancel_operation(true); return true;
 	case EditorRequestKind::RenameAsset: rename_asset(request.path, request.text); return true;
 	case EditorRequestKind::AssignRequirement: assign_requirement(request.text, request.path); return true;
 	case EditorRequestKind::PreviewRename: preview_rename(request); return true;
@@ -195,13 +197,11 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 void ProjectSession::poll() {
 	validation_held_ = false;
 	validate_pending();
-	if (build_) {
-		build_->step();
-		view_.build_done = build_->steps_done();
-		view_.build_total = build_->steps_total();
-		view_.build_step = build_->last_step();
+	// The running operation's steps, within the poll's budget: its progress moves Operation alone.
+	if (operations_.running() && !operations_.done()) {
+		operations_.poll(poll_budget_, steady_clock_ms);
+		view_.operation = operations_.status();
 		touch(ViewConcern::Operation);
-		if (build_->done()) absorb_build();
 	}
 	const PlayState before = play_.state();
 	const PlayState now = play_.poll();
@@ -217,10 +217,110 @@ void ProjectSession::poll() {
 		touch(ViewConcern::Run);
 		validate_pending();
 	}
+	// Last, the operation found done finishes: the view learns what it came to (a build lands,
+	// and the game a Play waits on starts on it).
+	if (operations_.done()) finish_operation();
 }
 
-void ProjectSession::finish_build() {
-	while (build_) poll();
+void ProjectSession::run_operations() {
+	while (operations_.running()) {
+		operations_.run_to_end();
+		poll();
+	}
+}
+
+// --- the busy gate and the operation slot -----------------------------------------------
+
+// The busy gate (request_kinds.h): while an operation runs that holds what a request needs, the
+// request's row says what happens. Refused: an operation.busy warning, the outcome not done,
+// nothing changed. Joined: the running operation serves it (a Build or a Play onto a build).
+// Superseded: the running operation is cancelled for it. CancelRunning: the running operation
+// is cancelled and the request goes on (a project switch, Quit: a Play waiting on a build goes
+// with it). A request that needs nothing it holds (an edit while a build packs) goes on. One the
+// unsaved-changes prompt would hold, and which the row does not refuse, asks first and meets the
+// gate once it goes ahead: a Close the prompt then drops cancels nothing, and a Build with
+// unsaved edits never joins a build that packs the files without them.
+bool ProjectSession::gate_busy(const EditorRequest &request) {
+	if (!busy_for(request.kind)) return false;
+	const OnBusy on_busy = request_kind_row(request.kind).on_busy;
+	if (on_busy != OnBusy::Refuse) {
+		std::vector<std::string> unsaved;
+		if (unsaved_files(request, unsaved) && !unsaved.empty()) return false;
+	}
+	switch (on_busy) {
+	case OnBusy::CancelRunning:
+		cancel_operation(false);
+		return false;
+	case OnBusy::Join:
+		if (join_operation(request)) return true;
+		break;
+	case OnBusy::Supersede:
+		if (operations_.running()->superseded_by(request)) {
+			cancel_operation(false);
+			return false;
+		}
+		break;
+	case OnBusy::Refuse: break;
+	}
+	refuse_busy(request.path);
+	return true;
+}
+
+bool ProjectSession::busy_for(EditorRequestKind kind) const {
+	const SessionOperation *running = operations_.running();
+	return running && holds_any(request_kind_row(kind).needs, running->holds());
+}
+
+void ProjectSession::refuse_busy(const std::string &asset) {
+	const SessionOperation *running = operations_.running();
+	const std::string noun = running ? operation_kind_row(running->kind()).noun : "the operation";
+	refuse_now("operation.busy", "Wait for " + noun + " to finish, or cancel it, first.", asset);
+}
+
+// A Build or a Play onto the running build: the build serves it (a Play refused before it could,
+// as it would be before any build: no spawn here, or a game running). The outcome names the
+// operation joined.
+bool ProjectSession::join_operation(const EditorRequest &request) {
+	if (request.kind == EditorRequestKind::Play && play_refused()) return true;
+	if (!operations_.running()->join(request)) return false;
+	outcome_.operation = view_.operation.id;
+	if (request.kind == EditorRequestKind::Play) {
+		view_.status = "Building, then playing...";
+		note("Play starts the game when the build lands.");
+	}
+	return true;
+}
+
+// The running operation stopped between two steps, its work discarded (a build's staging
+// directory removed, the Play waiting on it dropped); `asked` is CancelOperation's, which says
+// so when nothing runs.
+void ProjectSession::cancel_operation(bool asked) {
+	const SessionOperation *running = operations_.running();
+	if (!running) {
+		if (asked) refuse_now("operation.none", "Nothing is running to cancel.");
+		return;
+	}
+	const std::string noun = operation_kind_row(running->kind()).noun;
+	if (!operations_.cancel()) {
+		if (asked) refuse_now("operation.not_cancellable", "This cannot be cancelled now: wait for " + noun + " to finish.");
+		return;
+	}
+	const std::string line = "Cancelled " + noun + ".";
+	if (asked) view_.status = line;
+	note(line);
+	show_operation();
+}
+
+void ProjectSession::finish_operation() {
+	operations_.finish(*this);
+	show_operation();
+}
+
+// The slot as the view shows it: the running operation (none) and what the last one came to.
+void ProjectSession::show_operation() {
+	view_.operation = operations_.status();
+	view_.last_operation = operations_.last();
+	touch(ViewConcern::Operation);
 }
 
 bool ProjectSession::new_project(const std::string &dir, const std::string &title) {
@@ -284,9 +384,9 @@ void ProjectSession::close_project() {
 	document_findings_.clear();
 	validation_due_ = false;
 	if (!view_.project_open) return;
-	if (build_) {
-		finish_build();
-	}
+	// Its operation goes with it (a project switch and Quit cancelled it at the gate already): a
+	// build is cancelled, and a Play waiting on it.
+	cancel_operation(false);
 	const std::string title = view_.document.title;
 	// What belongs to the project goes with it: its documents, their selections, a prompt
 	// waiting on them (an answer to it afterwards is refused: nothing waits), and the boot
@@ -316,8 +416,7 @@ void ProjectSession::close_project() {
 	view_.diagnostics.clear();
 	view_.has_build = false;
 	view_.last_build = BuildReport();
-	// The build finished above: its findings are this project's and go with it.
-	build_gate_.clear();
+	// The last build's findings are this project's and go with it.
 	build_findings_.clear();
 	paths_ = ProjectPaths();
 	local_ = LocalSettings();
@@ -373,6 +472,16 @@ void ProjectSession::apply_project_settings(const ProjectSettingsChange &change)
 	if (change.multiplayer && *change.multiplayer != project.features.multiplayer) {
 		project.features.multiplayer = *change.multiplayer;
 		project_changed = features_changed = true;
+	}
+	// The requirements follow the features: their change reads the files again (the import pass,
+	// the scan), which an operation holding them (a build packing them) must not see change.
+	if (features_changed && busy_for(EditorRequestKind::Rescan)) {
+		failures.push_back(make_diagnostic(DiagnosticSeverity::Warning, "operation.busy",
+		                                   "Wait for the build to finish, or cancel it, before changing the "
+		                                   "project's features."));
+		project.features = view_.document.features;
+		features_changed = false;
+		project_changed = project.title != view_.document.title;
 	}
 	if (project_changed && !view_.project_open) {
 		failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.none",
@@ -448,7 +557,6 @@ void ProjectSession::apply_project_settings(const ProjectSettingsChange &change)
 // are now, so a file that has appeared since is refused (create_missing.exists), never
 // overwritten.
 void ProjectSession::create_missing(const std::vector<std::string> &roles) {
-	if (build_) return refuse_now("create_missing.build_running", "Wait for the build to finish before creating files.");
 	if (roles.empty()) {
 		view_.status = "Nothing to create.";
 		touch(ViewConcern::Output);
@@ -473,22 +581,29 @@ void ProjectSession::create_missing(const std::vector<std::string> &roles) {
 	touch(ViewConcern::Output);
 }
 
-// Unsaved edits never reach here: Build and Play wait on the unsaved prompt first
-// (guard_unsaved), whose Save writes them.
-void ProjectSession::start_build(bool then_play) {
-	if (then_play && !platform_.can_spawn()) {
+// Play refused before any build: where nothing can be spawned, and while a game runs (a second
+// one would fight it for its files). True when refused, said why.
+bool ProjectSession::play_refused() {
+	if (!platform_.can_spawn()) {
 		report(make_diagnostic(DiagnosticSeverity::Error, "play.unsupported",
 		                       "Play is Windows-only for now: the editor cannot start the game on this system. "
 		                       "Build works here."));
-		return;
+		return true;
 	}
-	if (then_play && play_.state() != PlayState::Stopped) {
+	if (play_.state() != PlayState::Stopped) {
 		report(make_diagnostic(DiagnosticSeverity::Error, "play.already_running",
 		                       "The game is already running; stop it before starting it again."));
-		return;
+		return true;
 	}
-	play_after_build_ = play_after_build_ || then_play;
-	if (build_) return; // the running build serves this request too
+	return false;
+}
+
+// The build as an operation (BuildOperation): planned here from the Problems rows as they are,
+// then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
+// edits never reach here: Build and Play wait on the unsaved prompt first (guard_unsaved), whose
+// Save writes them. A build running already served the request at the busy gate (it joined).
+void ProjectSession::start_build(bool then_play) {
+	if (then_play && play_refused()) return;
 	build_findings_.clear(); // the last build's rows go: this one reports anew
 	reload_changed_documents();
 	refresh();
@@ -496,27 +611,28 @@ void ProjectSession::start_build(bool then_play) {
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
 	const BuildPlan plan = plan_build(paths_, view_.scan, view_.requirements, document_findings_);
-	build_gate_ = view_.diagnostics;
-	std::vector<std::string> protected_dirs;
+	// No directory a game runs from is pruned: this editor's game's, and every one whose lease
+	// names a process that still runs (a game left running across an editor restart); a lease
+	// whose game is gone is deleted (run/play_lease.h).
+	const std::string output_root = paths_.build_dir + "/play";
+	std::vector<std::string> protected_dirs =
+	        live_leased_dirs(output_root, platform_, play_.state() != PlayState::Stopped ? play_.pid() : -1);
 	if (!play_.running_build_dir().empty()) protected_dirs.push_back(play_.running_build_dir());
 	// The build lands under the cache, which keeps itself out of the modder's repository;
 	// a cache that cannot be made fails the build's own first step, which says why.
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
-	build_ = std::make_unique<BuildRun>(plan, paths_.build_dir + "/play", protected_dirs);
-	view_.build_running = true;
-	view_.build_done = 0;
-	view_.build_total = build_->steps_total();
-	view_.build_step.clear();
-	view_.status = "Building...";
+	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
+	        plan, output_root, std::move(protected_dirs), view_.diagnostics, then_play));
+	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
+	outcome_.operation = id;
+	view_.status = then_play ? "Building, then playing..." : "Building...";
 	note("Build started.");
-	touch(ViewConcern::Operation);
+	show_operation();
 }
 
-void ProjectSession::absorb_build() {
-	const BuildReport result = build_->report();
-	build_.reset();
-	view_.build_running = false;
+OperationOutcome ProjectSession::absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate,
+                                              bool then_play) {
 	view_.has_build = true;
 	view_.last_build = result;
 	// A blocked build's report repeats the findings that blocked it, which were Problems rows
@@ -525,12 +641,10 @@ void ProjectSession::absorb_build() {
 	// them until the next build starts or the project closes.
 	std::vector<Diagnostic> own;
 	for (const Diagnostic &d : result.diagnostics)
-		if (std::none_of(build_gate_.begin(), build_gate_.end(),
-		                 [&d](const Diagnostic &gated) { return same_finding(gated, d); }))
+		if (std::none_of(gate.begin(), gate.end(), [&d](const Diagnostic &gated) { return same_finding(gated, d); }))
 			own.push_back(d);
-	build_gate_.clear();
 	for (const Diagnostic &d : own) report(d);
-	build_findings_ = std::move(own);
+	build_findings_ = own;
 	if (result.ok) {
 		if (result.reused_existing) {
 			note("Build unchanged: " + shown_path(result.build_dir, paths_.root));
@@ -545,10 +659,12 @@ void ProjectSession::absorb_build() {
 		note("Build failed.");
 		view_.status = "Build failed; see Problems.";
 	}
-	const bool play = play_after_build_;
-	play_after_build_ = false;
-	if (result.ok && play) start_play();
+	if (result.ok && then_play) start_play();
 	touch(ViewConcern::Operation);
+	OperationOutcome outcome;
+	outcome.end = result.ok ? OperationEnd::Done : OperationEnd::Failed;
+	outcome.findings = std::move(own);
+	return outcome;
 }
 
 // The game install the editor imports from and plays in: the open project's (its
@@ -618,6 +734,12 @@ void ProjectSession::start_play() {
 		touch(ViewConcern::Output);
 		return;
 	}
+	// The game's lease on the directory it runs from: a build leaves it alone while the game
+	// runs, this editor's and one started after the editor restarts (run/play_lease.h).
+	std::string lease_error;
+	if (!write_play_lease({plan.build_dir, play_.pid(), plan.executable}, lease_error))
+		note("The game's lease could not be written (" + lease_error +
+		     "): a build after the editor restarts may remove its files while it runs.");
 	view_.play_state = play_.state();
 	view_.play_pid = play_.pid();
 	view_.play_mcp_port = plan.mcp_port;
@@ -639,12 +761,7 @@ void ProjectSession::stop_play() {
 }
 
 void ProjectSession::note(std::string line) {
-	view_.output.push_back(std::move(line));
-	if (view_.output.size() > kOutputLinesMax) {
-		view_.output.erase(view_.output.begin(),
-		                   view_.output.begin() +
-		                           static_cast<std::ptrdiff_t>(view_.output.size() - kOutputLinesMax));
-	}
+	view_.output.append(std::move(line));
 	touch(ViewConcern::Output);
 }
 
@@ -728,6 +845,7 @@ void ProjectSession::absorb_boot_report(const std::string &line) {
 // its code and a Problems row (play.crashed) that stays, like the boot report, until Play
 // starts again or the project closes (a game of a project closed since reports nothing).
 void ProjectSession::absorb_play_exit() {
+	remove_play_lease(play_.plan().build_dir); // the game is gone: its directory is a build like any
 	view_.play_exited_on_its_own = play_.exited_on_its_own();
 	view_.play_exit_code = play_.exit_code();
 	std::string line = view_.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
@@ -909,7 +1027,6 @@ void ProjectSession::forget_file_state(const std::string &path) {
 // writes them.
 void ProjectSession::rename_asset(const std::string &file, const std::string &new_name) {
 	if (!view_.project_open) return;
-	if (build_) return refuse_now("rename.build_running", "Wait for the build to finish before renaming a file.", file);
 	// The plan reads the graph: an edit a held pump made first reaches it (and the
 	// Problems rows), so a reference it added is planned or refused like any other.
 	validate_pending();
@@ -1049,7 +1166,6 @@ void ProjectSession::preview_rename(const EditorRequest &request) {
 // (guard_unsaved), whose Save writes them.
 void ProjectSession::rename_symbol(const EditorRequest &request) {
 	if (!view_.project_open) return;
-	if (build_) return refuse_now("rename.build_running", "Wait for the build to finish before renaming.", request.path);
 	const SymbolRenamePlan plan = plan_symbol(request);
 	if (!plan.ok()) {
 		for (const Diagnostic &d : plan.refusals) report(d);
@@ -1097,7 +1213,6 @@ void ProjectSession::rename_symbol(const EditorRequest &request) {
 // changed importer, a wanted rebuild).
 void ProjectSession::reimport(const std::string &source, bool force) {
 	if (!view_.project_open) return;
-	if (build_) return refuse_now("import.build_running", "Wait for the build to finish before importing again.", source);
 	const ImportRunResult imported = refresh(force, source);
 	// The pass's findings are Problems rows already (they ride the scan); the ones on the
 	// sources asked for are also this request's outcome.
@@ -1199,7 +1314,6 @@ void ProjectSession::set_import_dependencies(bool flag) {
 // prompt first (guard_unsaved), whose Save writes them; the rescan after it reads again
 // the open documents whose files it replaced.
 void ProjectSession::import_files(const EditorRequest &request) {
-	if (build_) return refuse_now("import.build_running", "Wait for the build to finish before importing.");
 	if (!view_.project_open) return;
 	SessionView::ImportPreview &preview = view_.import_preview;
 	if (preview.open) {
@@ -1304,12 +1418,8 @@ void ProjectSession::assign_requirement(const std::string &role, const std::stri
 // which also writes one with none whose file holds other bytes than it would write, and
 // refuses one that does not serialize), past a failure: an Output line per file written, the
 // refresh, then one finding per file that could not be, the status counting both. False when
-// one could not be, or a build packs.
+// one could not be. (A save while a build packs never reaches here: the busy gate refused it.)
 bool ProjectSession::save_documents(const std::vector<std::string> &paths, bool rewrite) {
-	if (build_) {
-		refuse_now("document.build_running", "Wait for the build to finish before saving.");
-		return false;
-	}
 	std::vector<Document *> writes;
 	for (const std::string &path : paths)
 		for (const auto &document : documents_)
@@ -1351,13 +1461,10 @@ bool ProjectSession::save_documents(const std::vector<std::string> &paths, bool 
 // write other bytes than the file holds (the canonical rewrite: the lines the game ignores
 // dropped, the line ends fixed, a table regrouped), and left closed; the refresh then reads
 // the file as written, so the findings the rewrite fixed leave Problems. One that does not
-// serialize is refused with the reason (document.unserializable), the file untouched.
+// serialize is refused with the reason (document.unserializable), the file untouched. Of two
+// files of one name, the one project_file picks: the path named, else the first of the name.
 void ProjectSession::rewrite_file(const std::string &path) {
-	if (build_) return refuse_now("document.build_running", "Wait for the build to finish before saving.", path);
-	const AssetEntry *asset = nullptr;
-	for (const AssetEntry &entry : view_.scan.entries)
-		if (entry.relative_path == path || normalized_logical_name(entry.logical_name) == normalized_logical_name(path))
-			asset = &entry;
+	const AssetEntry *asset = project_file(path);
 	if (!asset) return report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", path));
 	const std::string relative = asset->relative_path;
 	Diagnostic error;
@@ -1433,10 +1540,6 @@ bool ProjectSession::handle_document(const EditorRequest &request) {
 	switch (request.kind) {
 	case EditorRequestKind::CreateFile: {
 		if (!view_.project_open) return true;
-		if (build_) {
-			refuse_now("document.build_running", "Wait for the build to finish before creating a file.", request.path);
-			return true;
-		}
 		// A name alone cannot say what a new `.bin` is; the request's text may name the kind.
 		const AssetKind kind = request.text.empty() ? classify_asset(request.path, nullptr) : asset_kind_from_token(request.text);
 		// A required name gets its requirement's blank (main.mnu, the STARTUP screen); any
@@ -1966,6 +2069,17 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 		return;
 	}
 	if (choice == UnsavedChoice::Save) {
+		// Its Save writes the files an operation may hold (a build packing them): refused as a
+		// Save All is, the prompt kept, unless what waits cancels that operation anyway (a project
+		// switch, Quit), which then cancels it first.
+		if (busy_for(EditorRequestKind::SaveAll)) {
+			if (request_kind_row(pending_request_->kind).on_busy != OnBusy::CancelRunning) {
+				refuse_busy(std::string());
+				outcome_.unsaved_prompt = true;
+				return;
+			}
+			cancel_operation(false);
+		}
 		end_edit_groups();
 		if (!save_documents(view_.unsaved_prompt.files, false)) {
 			outcome_.unsaved_prompt = true;

@@ -92,6 +92,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/pcx/pcx_io.cpp
     # pff — the archive format
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff_stream_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/pff_writer.cpp
     # playersav — weapon.sav player profile
     ${CMAKE_CURRENT_SOURCE_DIR}/playersav/weapon_sav.cpp

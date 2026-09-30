@@ -610,6 +610,18 @@ per-archive input hash.
 _Avoid_: pack (a step inside a build), export (a build copied to a chosen directory),
 stage (the retired retail-staging vocabulary)
 
+**Operation**:
+A long job of the editor's session (a build; opening a project, a refresh, an import's plan and
+its write, a rename's rewrite to follow), run one at a time a step at a time, each step within
+the frame's budget, so the editor keeps drawing while it runs. Its progress shows while it runs;
+nothing it makes reaches the view until it finishes, and a Cancel stops it between two steps, its
+work discarded. It holds what must not change under it (a build, the project's files), and a request
+that needs what it holds meets the busy gate, its request kind's row saying what happens: it is
+refused (a save while a build packs), joins the operation (a Build or a Play onto a build), takes
+its place (a new import plan over a running one) or cancels it first (a project switch, Quit). A
+request that needs nothing it holds (an edit) goes on.
+_Avoid_: task, job, background work (nothing runs on another thread)
+
 **Play**:
 Build, then launch the game runtime (`opennova.exe -- --resource-dir <build>
 --mcp-port <n>`) as the editor's one managed child through a `PlaySession`; Stop ends

@@ -616,6 +616,13 @@ target_link_libraries(pff_unit_test PRIVATE opennova_formats)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# The resumable PFF writer (S13 A1): byte for byte the pre-stream writer's archives at write
+# budgets of 1, 7 and the whole, through the single-call forms too.
+add_executable(pff_stream_writer_test pff/pff_stream_writer_test.cpp)
+target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
+target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
+
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
@@ -3612,6 +3619,14 @@ add_executable(editor_session_test editor/editor_session_test.cpp)
 target_link_libraries(editor_session_test PRIVATE opennova_editor)
 target_include_directories(editor_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session COMMAND editor_session_test)
+
+# The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
+# cancelled between two steps, finished once; the busy gate's four answers over a real build
+# (refused, joined, superseded as the table says, cancelled first); edits during a build.
+add_executable(editor_session_operation_test editor/editor_session_operation_test.cpp)
+target_link_libraries(editor_session_operation_test PRIVATE opennova_editor)
+target_include_directories(editor_session_operation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session_operation COMMAND editor_session_operation_test)
 
 # The session's wire form (the editor MCP): request tokens both ways, the view, a
 # document and a record as JSON over a real session.

@@ -322,17 +322,23 @@ func _tool_editor_problems(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	return answer
 
 
-func _tool_editor_build(_args: Dictionary, _ctx: McpToolContext) -> Variant:
+## The build raised as the windows raise it, then frames awaited until its operation ends: the
+## editor keeps drawing and answering editor_state (its operation block) the while. A build
+## running already is joined, not started again.
+func _tool_editor_build(_args: Dictionary, ctx: McpToolContext) -> Variant:
 	if not bool(app.call("is_project_open")):
 		return McpToolResult.error("No project is open: editor_request new_project or open_project first.")
-	var ok := bool(app.call("build"))
-	if not ok:
-		var waiting := _unsaved_prompt_error("editor_build", "build")
-		if waiting != null:
-			return waiting
+	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify({"kind": "build"}))))
+	var failed := _outcome_error(answer, "editor_build")
+	if failed != null:
+		return failed
+	var ended := await _operation_end(int(answer.get("outcome", {}).get("operation", 0)), ctx)
 	var build: Dictionary = _view(0, 0).get("build", {})
-	build["ok"] = ok
-	if not ok:
+	build["operation"] = ended
+	build["ok"] = String(ended.get("end", "")) == "done" and bool(build.get("ok", false))
+	if String(ended.get("end", "")) == "cancelled" or ended.is_empty():
+		return McpToolResult.error("The build was cancelled before it landed.", build)
+	if not bool(build["ok"]):
 		return McpToolResult.error("The build failed; its diagnostics and editor_problems say why.", build)
 	return build
 
@@ -345,10 +351,14 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 				return McpToolResult.error("No project is open: editor_request new_project or open_project first.")
 			if String(app.call("get_play_state")) != "stopped":
 				return McpToolResult.error("The game is already running; editor_play op=stop first.")
-			if not bool(app.call("play")):
-				var waiting := _unsaved_prompt_error("editor_play op=start", "play")
-				if waiting != null:
-					return waiting
+			# Play builds first: its build's operation is awaited as editor_build awaits it, and the
+			# game starts on the poll the build lands.
+			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify({"kind": "play"}))))
+			var failed := _outcome_error(answer, "editor_play op=start")
+			if failed != null:
+				return failed
+			await _operation_end(int(answer.get("outcome", {}).get("operation", 0)), ctx)
+			if String(app.call("get_play_state")) != "running":
 				return McpToolResult.error("Play did not start; the build or the launch refused (editor_problems, "
 						+ "editor_state's output).", _view(0, 0).get("build", {}))
 			return _play_block()
@@ -855,6 +865,23 @@ func _play_block() -> Dictionary:
 	var play: Dictionary = _view(0, 0).get("play", {})
 	play["ok"] = true
 	return play
+
+
+## Frames until the operation `id` ends, the main thread never held: what it came to (the view's
+## last_operation: id, kind, end, findings), or {} when the call is cancelled or another
+## operation's outcome stands in its place.
+func _operation_end(id: int, ctx: McpToolContext) -> Dictionary:
+	while not ctx.cancelled:
+		var state: Variant = _parsed(String(app.call("get_operation_json")))
+		if state is Dictionary:
+			var running: Dictionary = (state as Dictionary).get("operation", {})
+			if id == 0 or not bool(running.get("running", false)) or int(running.get("id", 0)) != id:
+				var last: Variant = (state as Dictionary).get("last_operation")
+				if last is Dictionary and int((last as Dictionary).get("id", 0)) == id:
+					return last
+				return {}
+		await ctx.frames(1)
+	return {}
 
 
 ## The findings of the request the tool just made, for a refusal's details.

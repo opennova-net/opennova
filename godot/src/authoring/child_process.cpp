@@ -69,6 +69,16 @@ bool has_exited(HANDLE handle) {
 	return WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
 }
 
+// A path's file name, lower-cased (ASCII), whichever separator it uses.
+std::wstring file_name_of(const std::wstring &path) {
+	const size_t slash = path.find_last_of(L"\\/");
+	std::wstring name = slash == std::wstring::npos ? path : path.substr(slash + 1);
+	for (wchar_t &c : name) {
+		if (c >= L'A' && c <= L'Z') c = wchar_t(c - L'A' + L'a');
+	}
+	return name;
+}
+
 // The child's top-level windows get WM_CLOSE: the game's orderly quit path.
 BOOL CALLBACK close_window_of_process(HWND window, LPARAM param) {
 	DWORD owner = 0;
@@ -219,6 +229,32 @@ void ChildProcessPlatform::release(int64_t pid) {
 	children_.erase(it);
 #else
 	(void)pid;
+#endif
+}
+
+bool ChildProcessPlatform::process_alive(int64_t pid, const std::string &executable) {
+#ifdef _WIN32
+	if (pid <= 0 || executable.empty()) {
+		return false;
+	}
+	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+	if (handle == nullptr) {
+		return false;
+	}
+	bool alive = !has_exited(handle);
+	if (alive) {
+		// The pid may have been recycled: the process must run the lease's executable.
+		wchar_t image[MAX_PATH * 4];
+		DWORD length = static_cast<DWORD>(sizeof(image) / sizeof(image[0]));
+		alive = QueryFullProcessImageNameW(handle, 0, image, &length) != 0 &&
+				file_name_of(std::wstring(image, length)) == file_name_of(native_path(executable));
+	}
+	CloseHandle(handle);
+	return alive;
+#else
+	(void)pid;
+	(void)executable;
+	return false;
 #endif
 }
 

@@ -34,6 +34,7 @@
 #include <editor/preview/model_preview_state.h>
 #include <editor/project/project_document.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/files_window.h>
@@ -163,7 +164,8 @@ SessionView seeded_view() {
 	lacking.role = missing.role;
 	lacking.target = missing.name;
 	v.diagnostics.push_back(lacking);
-	v.output = {"Opened My Game", "Build started."};
+	v.output.append("Opened My Game");
+	v.output.append("Build started.");
 	v.recent_projects = {"C:/mods/My Game", "C:/mods/Other"};
 	v.status = "Opened My Game.";
 	return v;
@@ -800,10 +802,10 @@ std::vector<std::pair<float, float>> hover_spans(Ui &ui, const std::vector<ImGui
 
 // The menu bar's right end: what the session last said (cut to the room left), the unsaved
 // files (a click lists them: one made the active document, Save all), the error and warning
-// counts (a click shows Problems), the build or the game, and Build / Play / Stop, each
-// enabled when it can run; a narrow window leaves parts out from the left, what was said
-// first, and at every width the right end starts after the menus and Stop ends inside the
-// bar.
+// counts (a click shows Problems), the running operation with its Cancel or the game, and Build
+// / Play / Stop, each enabled when the busy gate would not refuse it (a Build while one packs
+// joins it); a narrow window leaves parts out from the left, what was said first, and at every
+// width the right end starts after the menus and Stop ends inside the bar.
 void test_menu_bar_status() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_status_test");
 	const auto a = menu_at(dir, "a.mnu", "menus/a.mnu");
@@ -814,10 +816,14 @@ void test_menu_bar_status() {
 	for (int i = 0; i < 7; ++i) v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "catalog.x", "An error."));
 	for (int i = 0; i < 5; ++i) v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.y", "A warning."));
 	v.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Info, "catalog.z", "A note."));
-	v.build_running = true;
-	v.build_done = 3;
-	v.build_total = 12;
-	v.build_step = "Packing menus";
+	v.operation.id = 7;
+	v.operation.kind = OperationKind::Build;
+	v.operation.done = 3 * 1024 * 1024;
+	v.operation.total = 12 * 1024 * 1024;
+	v.operation.unit = OperationUnit::Bytes;
+	v.operation.label = "Packing localres.pff";
+	v.operation.cancellable = true;
+	v.operation.holds = HoldsFiles;
 	v.status = "menus/a.mnu has no changes to save.";
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -826,8 +832,8 @@ void test_menu_bar_status() {
 	ui.drain();
 	std::string text = logged_frame(ui);
 	CHECK(in_order(text, {"File", "Edit", "Build", "Windows", "menus/a.mnu has no changes to save.", "2 unsaved", "7", "5",
-	                      "Building 3/12", "Build", "Play", "Stop"}),
-	      "after the menus: what was said, 2 unsaved, 7 errors, 5 warnings, the build's progress, the buttons");
+	                      "Building 25%", "Cancel", "Build", "Play", "Stop"}),
+	      "after the menus: what was said, 2 unsaved, 7 errors, 5 warnings, the build's progress and its Cancel, the buttons");
 	// A long line is cut to the room it has, whole in its tooltip.
 	v.status = "Opened A Project With A Very Long Name (C:/Users/someone/Documents/OpenNova projects/A Project With A "
 	           "Very Long Name That Goes On)";
@@ -845,17 +851,30 @@ void test_menu_bar_status() {
 	ui.activate(popup_item(unsaved, c->path().c_str()));
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == c->path(), "one of them made the active document");
+	// The gate's refusals are disabled: no Save all while the build holds the files (an edit goes
+	// on).
+	CHECK(busy_refuses(EditorRequestKind::SaveAll, v.operation) && !busy_refuses(EditorRequestKind::EditRecord, v.operation),
+	      "Save All refused while the build holds the files; an edit is not");
 	ui.activate(item_id(bar, {"status", "##unsaved"}));
 	ui.activate(popup_item(unsaved, "Save all"));
-	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::SaveAll) != nullptr, "Save all");
+	CHECK(ui.drain().empty(), "no Save all while the build packs");
 	ui.activate(item_id(bar, {"status", "##problems"}));
 	ui.frames(3);
 	CHECK(GImGui->NavWindow == ImGui::FindWindowByName("Problems"), "a click on the counts shows Problems");
 	ui.activate(item_id(bar, {"status", "Build"}));
-	CHECK(ui.drain().empty(), "no Build while one packs");
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::Build) != nullptr, "a Build while one packs: the session joins it");
+	ui.activate(item_id(bar, {"status", "Cancel"}));
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::CancelOperation) != nullptr, "Cancel: the running operation");
 
-	v.build_running = false;
+	v.operation = OperationStatus();
+	v.revisions.touch(ViewConcern::Operation);
+	ui.frames(2);
+	ui.activate(item_id(bar, {"status", "##unsaved"}));
+	ui.activate(popup_item(unsaved, "Save all"));
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::SaveAll) != nullptr, "Save all, once the build is done");
 	v.play_state = PlayState::Running;
 	v.play_pid = 4242;
 	v.revisions.touch(ViewConcern::Operation);
@@ -1587,14 +1606,15 @@ void test_files_tree_kept() {
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	ui.frames(3);
 	CHECK(window->rebuilds() == made, "Output and the status line: the tree kept");
+	session.set_poll_budget({0, 64 * 1024}); // one step per poll
 	session.handle(make_request(EditorRequestKind::Build)); // its refresh reads the files again
 	ui.frames(2);
 	const size_t building = window->rebuilds();
 	size_t steps = 0;
-	while (session.build_running() && steps < 100) {
+	while (session.view().operation.running() && steps < 100) {
 		session.poll();
 		ui.frames(1);
-		if (!session.build_running()) break;
+		if (!session.view().operation.running()) break;
 		++steps;
 		CHECK(window->rebuilds() == building, "a build's step: the tree kept");
 	}

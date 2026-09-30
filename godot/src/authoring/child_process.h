@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include <editor/run/process_platform.h>
@@ -33,6 +34,9 @@ public:
 	bool kill(int64_t pid) override;
 	bool exit_code(int64_t pid, uint32_t &out) override;
 	void release(int64_t pid) override;
+	// A game this platform no longer holds (a Play lease's, across an editor restart): opened by
+	// its pid, alive while it has not exited and its image's file name is the lease's executable's.
+	bool process_alive(int64_t pid, const std::string &executable) override;
 	int64_t now_ms() override;
 	void sleep_ms(int64_t ms) override;
 

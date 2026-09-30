@@ -1,10 +1,12 @@
 #include <editor/ui/editor_windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <utility>
 
+#include <editor/session/request_kinds.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/output_window.h>
@@ -169,6 +171,38 @@ bool enabled_button(const char *label, bool enabled) {
 	return pressed && enabled;
 }
 
+// False while the running operation holds what a request of `kind` needs and its row refuses it
+// (request_kinds.h, the session's busy gate): the menus and the bar disable it then.
+bool allowed(const SessionView &v, EditorRequestKind kind) {
+	return !busy_refuses(kind, v.operation);
+}
+
+// A number of bytes as the bar's tooltip says it: "512 bytes", "3.4 KB", "12.0 MB".
+std::string size_text(uint64_t bytes) {
+	char text[32];
+	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu bytes", static_cast<unsigned long long>(bytes));
+	else if (bytes < (uint64_t(1) << 20)) std::snprintf(text, sizeof(text), "%.1f KB", double(bytes) / 1024.0);
+	else std::snprintf(text, sizeof(text), "%.1f MB", double(bytes) / double(uint64_t(1) << 20));
+	return text;
+}
+
+// The running operation on the bar ("Building 45%", "Refreshing 3/12") and in its tooltip (what
+// it works on, how far it is).
+std::string operation_text(const OperationStatus &operation) {
+	const std::string verb = operation_kind_row(operation.kind).verb;
+	if (operation.total == 0) return verb;
+	if (operation.unit == OperationUnit::Bytes)
+		return verb + " " + std::to_string(std::min<uint64_t>(operation.done * 100 / operation.total, 100)) + "%";
+	return verb + " " + std::to_string(operation.done) + "/" + std::to_string(operation.total);
+}
+
+std::string operation_tip(const OperationStatus &operation) {
+	std::string tip = operation.label;
+	if (operation.total > 0 && operation.unit == OperationUnit::Bytes)
+		tip += (tip.empty() ? "" : "\n") + size_text(operation.done) + " of " + size_text(operation.total);
+	return tip;
+}
+
 } // namespace
 
 EditorWindows::EditorWindows() {
@@ -256,9 +290,17 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::OpenProject: request(make_request(EditorRequestKind::OpenProject, path)); break;
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::RetailDirectory: settings_.set_picked(purpose, path, view().project_root); break;
-	case PickPurpose::ImportFiles: break; // the multi-file result goes directly to the session
+	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
 	case PickPurpose::None: break;
 	}
+}
+
+void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths) {
+	if (paths.empty() || purpose != PickPurpose::ImportFiles) return; // cancelled, or not a file list
+	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
+	preview.paths = paths;
+	preview.flag = view().import_dependencies; // the editor's setting: with the files they need
+	request(std::move(preview));
 }
 
 void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
@@ -294,16 +336,20 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 		ImGui::EndMenu();
 	}
 	ImGui::Separator();
-	if (menu_item("Save", "Ctrl+S", !v.active_document.empty())) request(make_request(EditorRequestKind::Save));
-	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.empty())) request(make_request(EditorRequestKind::SaveAll));
-	if (menu_item("Close file", "Ctrl+W", !v.active_document.empty())) request(make_request(EditorRequestKind::CloseDocument));
+	if (menu_item("Save", "Ctrl+S", !v.active_document.empty() && allowed(v, EditorRequestKind::Save)))
+		request(make_request(EditorRequestKind::Save));
+	if (menu_item("Save All", "Ctrl+Shift+S", !v.documents.empty() && allowed(v, EditorRequestKind::SaveAll)))
+		request(make_request(EditorRequestKind::SaveAll));
+	if (menu_item("Close file", "Ctrl+W", !v.active_document.empty() && allowed(v, EditorRequestKind::CloseDocument)))
+		request(make_request(EditorRequestKind::CloseDocument));
 	ImGui::Separator();
-	if (menu_item("Import files...", nullptr, v.project_open)) {
+	if (menu_item("Import files...", nullptr, v.project_open && allowed(v, EditorRequestKind::PreviewImport))) {
 		EditorRequest pick = make_request(EditorRequestKind::PickFile);
 		pick.purpose = PickPurpose::ImportFiles;
 		request(pick);
 	}
-	if (menu_item("Import from the game data...", nullptr, v.project_open && !v.retail_directory.empty())) {
+	if (menu_item("Import from the game data...", nullptr,
+	              v.project_open && !v.retail_directory.empty() && allowed(v, EditorRequestKind::PreviewRetailImport))) {
 		EditorRequest listed = make_request(EditorRequestKind::PreviewRetailImport);
 		listed.flag = v.import_dependencies;
 		request(listed);
@@ -332,13 +378,14 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const Document *documen
 
 void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
-	if (menu_item("Build", "Ctrl+B", v.project_open && !v.build_running)) request(make_request(EditorRequestKind::Build));
-	if (menu_item("Play", "F5", v.project_open && v.play_state == PlayState::Stopped))
+	if (menu_item("Build", "Ctrl+B", v.project_open && allowed(v, EditorRequestKind::Build)))
+		request(make_request(EditorRequestKind::Build));
+	if (menu_item("Play", "F5", v.project_open && v.play_state == PlayState::Stopped && allowed(v, EditorRequestKind::Play)))
 		request(make_request(EditorRequestKind::Play));
 	if (menu_item("Stop", "Shift+F5", v.play_state == PlayState::Running)) request(make_request(EditorRequestKind::StopPlay));
 	ImGui::Separator();
 	bool retail = v.play_retail;
-	const bool stopped = !v.build_running && v.play_state == PlayState::Stopped;
+	const bool stopped = !v.operation.running() && v.play_state == PlayState::Stopped;
 	if (ImGui::MenuItem("Play in the game install", nullptr, &retail, stopped) && stopped) {
 		EditorRequest set = make_request(EditorRequestKind::ApplyProjectSettings);
 		set.settings.play_retail = retail;
@@ -373,19 +420,23 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 	if (v.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();
 	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) {
-		if (io.KeyShift && !v.documents.empty()) request(make_request(EditorRequestKind::SaveAll));
-		else if (!io.KeyShift && !v.active_document.empty()) request(make_request(EditorRequestKind::Save));
+		if (io.KeyShift && !v.documents.empty() && allowed(v, EditorRequestKind::SaveAll))
+			request(make_request(EditorRequestKind::SaveAll));
+		else if (!io.KeyShift && !v.active_document.empty() && allowed(v, EditorRequestKind::Save))
+			request(make_request(EditorRequestKind::Save));
 	}
-	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.active_document.empty())
+	if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_W, false) && !v.active_document.empty() &&
+	    allowed(v, EditorRequestKind::CloseDocument))
 		request(make_request(EditorRequestKind::CloseDocument));
 	if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F, false) && v.project_open && v.graph) find_.open();
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && !v.build_running) {
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_B, false) && v.project_open && allowed(v, EditorRequestKind::Build)) {
 		request(make_request(EditorRequestKind::Build));
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
 		if (io.KeyShift && v.play_state == PlayState::Running) {
 			request(make_request(EditorRequestKind::StopPlay));
-		} else if (!io.KeyShift && v.project_open && v.play_state == PlayState::Stopped) {
+		} else if (!io.KeyShift && v.project_open && v.play_state == PlayState::Stopped &&
+		           allowed(v, EditorRequestKind::Play)) {
 			request(make_request(EditorRequestKind::Play));
 		}
 	}
@@ -398,9 +449,11 @@ void EditorWindows::shortcuts(const SessionView &v, const Document *document) {
 
 // The bar's right end, right-aligned: what the session last said (cut to the room left),
 // the files with unsaved changes (a click lists them: a click on one makes it the active
-// document; Save all), the errors and warnings (a click shows Problems), the build or the
-// game ("Building 3/12", "Built", "Game running"), then Build, Play and Stop. A bar too
-// narrow for all of it leaves parts out from the left rather than run over the menus.
+// document; Save all), the errors and warnings (a click shows Problems), the running
+// operation with its Cancel ("Building 45%"), else the game or the last build ("Game
+// running", "Built"), then Build, Play and Stop, each disabled while the busy gate would
+// refuse it. A bar too narrow for all of it leaves parts out from the left rather than run
+// over the menus.
 void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	const SessionView &v = view();
 	if (!v.project_open) return;
@@ -415,9 +468,10 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	}
 	const std::string unsaved_text = std::to_string(unsaved.size()) + " unsaved";
 	std::string state, state_tip;
-	if (v.build_running) {
-		state = "Building " + std::to_string(v.build_done) + "/" + std::to_string(v.build_total);
-		state_tip = v.build_step.empty() ? "Preparing..." : v.build_step;
+	const bool cancel = v.operation.running() && v.operation.cancellable;
+	if (v.operation.running()) {
+		state = operation_text(v.operation);
+		state_tip = operation_tip(v.operation);
 	} else if (v.play_state == PlayState::Running) {
 		state = v.play_retail ? "Game install running" : "Game running";
 		state_tip = "Process " + std::to_string(v.play_pid) + ". Stop ends it.";
@@ -436,6 +490,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (!unsaved.empty()) widths[0] = ui_kit::unsaved_dot_width() + gap + ui_kit::text_width(unsaved_text.c_str());
 	widths[1] = ui_kit::severity_count_width(errors) + gap + ui_kit::severity_count_width(warnings);
 	if (!state.empty()) widths[2] = ui_kit::text_width(state.c_str());
+	if (cancel) widths[2] += gap + ui_kit::button_width("Cancel");
 	widths[3] = ui_kit::button_width("Build") + gap + ui_kit::button_width("Play") + gap + ui_kit::button_width("Stop");
 	const float left = ImGui::GetCursorPosX();
 	const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
@@ -481,7 +536,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 			for (const Document *document : unsaved)
 				if (ImGui::MenuItem(document->path().c_str())) request(make_request(EditorRequestKind::OpenDocument, document->path()));
 			ImGui::Separator();
-			if (ImGui::MenuItem("Save all")) request(make_request(EditorRequestKind::SaveAll));
+			if (menu_item("Save all", nullptr, allowed(v, EditorRequestKind::SaveAll)))
+				request(make_request(EditorRequestKind::SaveAll));
 			ImGui::EndPopup();
 		}
 	}
@@ -499,10 +555,15 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first <= 2 && !state.empty()) {
 		ImGui::TextUnformatted(state.c_str());
 		ui_kit::tooltip(state_tip);
+		if (cancel) {
+			if (ImGui::Button("Cancel")) request(make_request(EditorRequestKind::CancelOperation));
+			ui_kit::tooltip(std::string("Stops ") + operation_kind_row(v.operation.kind).noun + ": nothing it made is kept.");
+		}
 	}
-	if (enabled_button("Build", !v.build_running)) request(make_request(EditorRequestKind::Build));
+	if (enabled_button("Build", allowed(v, EditorRequestKind::Build))) request(make_request(EditorRequestKind::Build));
 	ui_kit::tooltip("Build the project (Ctrl+B).");
-	if (enabled_button("Play", v.play_state == PlayState::Stopped)) request(make_request(EditorRequestKind::Play));
+	if (enabled_button("Play", v.play_state == PlayState::Stopped && allowed(v, EditorRequestKind::Play)))
+		request(make_request(EditorRequestKind::Play));
 	ui_kit::tooltip("Build, then run the game on the build (F5).");
 	if (enabled_button("Stop", v.play_state == PlayState::Running)) request(make_request(EditorRequestKind::StopPlay));
 	ui_kit::tooltip("Stop the game (Shift+F5).");

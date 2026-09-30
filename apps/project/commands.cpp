@@ -10,7 +10,7 @@
 #include <editor/blank/create_missing.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project_build/build_plan.h>
-#include <editor/project_build/build_session.h>
+#include <editor/project_build/build_run.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_findings.h>

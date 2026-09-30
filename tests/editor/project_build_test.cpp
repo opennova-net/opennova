@@ -1,7 +1,10 @@
 // Pins the build (ADR 0046 d8): the routing into the three boot-table archives and the
 // loose set, the validation gate, the content-addressed immutable build directory the
 // engine's own VFS re-mounts, the incremental reuse of unchanged archives, and what a
-// failure leaves behind.
+// failure leaves behind; and (S13 A1) the build stepped by bytes: every step bounded by its
+// budget, a cancel between two steps leaving nothing, and archives byte-identical to the
+// single-call writer's however small the steps.
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -14,9 +17,10 @@
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
+#include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <editor/project_build/build_plan.h>
-#include <editor/project_build/build_session.h>
+#include <editor/project_build/build_run.h>
 #include <editor/requirements/requirements.h>
 
 #include "common/test_expect.h"
@@ -213,8 +217,137 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	return 0;
 }
 
+// A file of `size` bytes that is no text the game reads: a loose music bank's bytes.
+static bool write_filler(const std::string &path, size_t size) {
+	std::vector<uint8_t> bytes(size);
+	for (size_t i = 0; i < size; ++i) bytes[i] = uint8_t((i * 2654435761u) >> 24);
+	std::string error;
+	fs::create_directories(fs::path(path).parent_path());
+	return write_file_atomic(path, bytes.data(), bytes.size(), error);
+}
+
+// The staging directories under an output root (`<id>.tmp`).
+static size_t staging_dirs(const std::string &output_root) {
+	size_t count = 0;
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(output_root, ec)) {
+		const std::string name = entry.path().filename().string();
+		if (entry.is_directory(ec) && name.size() > 4 && name.compare(name.size() - 4, 4, kBuildStagingSuffix) == 0) ++count;
+	}
+	return count;
+}
+
+// S13 A1: a build steps by bytes. One 5 MB file under a 64 KB budget takes at least 80 steps
+// (hashed, then copied, a chunk a step), no step moves more than its budget, and the progress
+// only goes up, to the total.
+static int test_steps_are_bounded() {
+	Project p("opennova_editor_build_steps_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(write_filler(p.root + "/music/big.sbf", 5 * 1024 * 1024));
+	const BuildPlan plan = p.plan();
+	TEST_EXPECT(plan.ok);
+	constexpr uint64_t budget = 64 * 1024;
+	BuildRun run(plan, p.output_root());
+	TEST_EXPECT(run.bytes_total() >= 2 * uint64_t(5 * 1024 * 1024) && run.bytes_done() == 0);
+	size_t steps = 0;
+	uint64_t largest = 0, done = 0;
+	bool upward = true;
+	while (!run.step(budget)) {
+		++steps;
+		upward = upward && run.bytes_done() >= done && run.bytes_done() <= run.bytes_total();
+		largest = std::max(largest, run.bytes_done() - done);
+		done = run.bytes_done();
+		TEST_EXPECT(steps < 100000);
+		if (steps >= 100000) break;
+	}
+	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	TEST_EXPECT(run.report().ok && !run.cancelled());
+	TEST_EXPECT(steps >= 80);
+	TEST_EXPECT(upward && largest <= budget);
+	TEST_EXPECT(run.bytes_done() == run.bytes_total());
+	TEST_EXPECT(run.items_done() == run.items_total() && run.item_name(0) == "language.pff");
+	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == 5u * 1024u * 1024u);
+	return 0;
+}
+
+// S13 A1: a cancel between two steps, mid-archive, removes the staging directory (and the
+// archive's temp file inside it), publishes nothing and leaves the last good build as it was.
+static int test_cancel_publishes_nothing() {
+	Project p("opennova_editor_build_cancel_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const BuildReport first = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(first.ok);
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "a change"));
+	BuildRun run(p.plan(), p.output_root());
+	size_t steps = 0;
+	// Mid-archive: the hash pass in large steps (half the total), then 16 bytes a step until the
+	// language archive's writer is open and 32 bytes of it are written.
+	const uint64_t hashed = run.bytes_total() / 2;
+	while (steps < 100000 && (run.label() != "Packing language.pff" || run.bytes_done() < hashed + 32)) {
+		if (run.step(run.bytes_done() < hashed ? uint64_t(1) << 20 : 16)) break;
+		++steps;
+	}
+	TEST_EXPECT(!run.done() && run.label() == "Packing language.pff" && staging_dirs(p.output_root()) == 1);
+	run.cancel();
+	TEST_EXPECT(run.done() && run.cancelled() && !run.report().ok && run.report().diagnostics.empty());
+	TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0);
+	TEST_EXPECT(last_good_build_dir(p.output_root()) == first.build_dir && fs::is_directory(first.build_dir));
+	TEST_EXPECT(run.step(16) && run.cancelled()); // a cancelled run stays done
+	size_t builds = 0;
+	for (const fs::directory_entry &entry : fs::directory_iterator(p.output_root()))
+		builds += entry.is_directory() ? 1 : 0;
+	TEST_EXPECT(builds == 1);
+	// A run dropped unfinished cancels itself.
+	{
+		BuildRun dropped(p.plan(), p.output_root());
+		while (!dropped.done() && staging_dirs(p.output_root()) == 0) dropped.step(uint64_t(1) << 20);
+		TEST_EXPECT(!dropped.done() && staging_dirs(p.output_root()) == 1);
+	}
+	TEST_EXPECT(staging_dirs(p.output_root()) == 0 && last_good_build_dir(p.output_root()) == first.build_dir);
+	return 0;
+}
+
+// S13 A1: the stepped build's archives are byte for byte what the single-call writer makes of the
+// same entries (pff_write_archive over each file's bytes, in the plan's order), at steps of 7
+// bytes and of a whole build alike: the stream writer resumes across steps without a seam.
+static int test_archives_match_the_single_call_writer() {
+	for (const uint64_t budget : {uint64_t(7), uint64_t(1) << 30}) {
+		Project p(budget == 7 ? "opennova_editor_build_bytes7_test" : "opennova_editor_build_bytes_test");
+		TEST_EXPECT(p.create());
+		TEST_EXPECT(p.fill());
+		const BuildPlan plan = p.plan();
+		BuildRun run(plan, p.output_root());
+		for (size_t steps = 0; !run.step(budget) && steps < 10000000; ++steps) {}
+		TEST_EXPECT(run.report().ok);
+		for (const BuildArchive &archive : plan.archives) {
+			std::vector<std::vector<uint8_t>> payloads(archive.entries.size());
+			std::vector<opennova::pff::PffWriteEntry> entries;
+			std::string error;
+			for (size_t i = 0; i < archive.entries.size(); ++i)
+				TEST_EXPECT(read_file_bytes(archive.entries[i].source_path, payloads[i], error));
+			for (size_t i = 0; i < archive.entries.size(); ++i)
+				entries.push_back({archive.entries[i].logical_name.c_str(), payloads[i].empty() ? nullptr : payloads[i].data(),
+				                   uint32_t(payloads[i].size()), 0, 0, 0});
+			const std::string single = p.dir.file(archive.file_name.c_str());
+			TEST_EXPECT(opennova::pff::pff_write_archive(single.c_str(), opennova::pff::PFF_FORMAT_PFF3,
+			                                             entries.empty() ? nullptr : entries.data(),
+			                                             uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK);
+			std::vector<uint8_t> built, expected;
+			TEST_EXPECT(read_file_bytes((fs::path(run.report().build_dir) / archive.file_name).generic_string(), built, error));
+			TEST_EXPECT(read_file_bytes(single, expected, error));
+			TEST_EXPECT(!built.empty() && built == expected);
+		}
+	}
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_steps_are_bounded();
+	failures += test_cancel_publishes_nothing();
+	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();
 	failures += test_empty_project_is_blocked();
 	failures += test_filled_project_builds_and_mounts();

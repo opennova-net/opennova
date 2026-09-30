@@ -138,7 +138,7 @@ int pff_write_archive(const char *path, PffFormat format,
    read_entry must fill `out` with exactly `size` bytes for the entry at `index` (the ORIGINAL
    array index, not the sorted write position) and return 0 on success, non-zero on failure. Same
    header/payload/directory layout, name validation, sort, and atomic temp-rename as
-   pff_write_archive (which is a thin wrapper over this). */
+   pff_write_archive: both run PffStreamWriter (pff_stream_writer.h) to the end in one call. */
 typedef int (*PffReadEntryFn)(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
 
 typedef struct PffWriteStreamEntry {

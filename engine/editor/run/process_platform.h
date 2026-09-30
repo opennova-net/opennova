@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <editor/run/launch_plan.h>
 
@@ -35,6 +36,14 @@ public:
 	}
 	// Forget the child (release the handle spawn kept).
 	virtual void release(int64_t pid) = 0;
+	// Whether a process this platform did not spawn (or spawned before the editor restarted) still
+	// runs `executable` as `pid`: a Play lease's game (run/play_lease.h). The image's file name is
+	// compared, so a recycled pid running something else is not it. False where it cannot tell.
+	virtual bool process_alive(int64_t pid, const std::string &executable) {
+		(void)pid;
+		(void)executable;
+		return false;
+	}
 	virtual int64_t now_ms() = 0;
 	// Yield between two observations of a blocking wait (PlaySession::wait); the
 	// per-frame poll never calls it.

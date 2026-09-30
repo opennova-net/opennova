@@ -16,6 +16,8 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/project_build/build_run.h>
+#include <editor/run/play_lease.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_json.h>
@@ -37,6 +39,7 @@ struct FakePlatform : ProcessPlatform {
 	bool spawn_fails = false;
 	bool spawn_supported = true;
 	std::vector<int64_t> running;
+	std::vector<int64_t> alive_elsewhere; // the games process_alive finds (one an earlier editor started)
 	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
 	LaunchPlan last_plan;
 	int spawns = 0;
@@ -51,6 +54,10 @@ struct FakePlatform : ProcessPlatform {
 	}
 	bool is_running(int64_t pid) override {
 		for (int64_t p : running) if (p == pid) return true;
+		return false;
+	}
+	bool process_alive(int64_t pid, const std::string &) override {
+		for (int64_t p : alive_elsewhere) if (p == pid) return true;
 		return false;
 	}
 	bool terminate(int64_t pid) override { exit_child(pid); return true; }
@@ -140,7 +147,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(!session.handle(pick));
 	TEST_EXPECT(session.handle(make_request(EditorRequestKind::Quit)));
 	TEST_EXPECT(session.handle(make_request(EditorRequestKind::Build))); // no project: nothing happens
-	TEST_EXPECT(!session.build_running());
+	TEST_EXPECT(!session.view().operation.running());
 
 	// New project: open, listed as recent, the checklist all unmet.
 	const std::string root = dir.file("My Game");
@@ -158,7 +165,7 @@ static int test_lifecycle() {
 	// A build on the unmet project is refused, and Play with it.
 	const uint64_t before = v.revisions.any();
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.revisions.any() > before);
 	TEST_EXPECT(v.has_build && !v.last_build.ok);
 	TEST_EXPECT(v.play_state == PlayState::Stopped && platform.spawns == 0);
@@ -170,17 +177,29 @@ static int test_lifecycle() {
 	TEST_EXPECT(!v.scan.entries.empty());
 	TEST_EXPECT(output_has(v, "Created menus/main.mnu"));
 
-	// Build steps once per poll; the view shows progress until it lands.
+	// Build is an operation stepped by bytes, one 64 KiB step per poll at this budget; the view
+	// shows its progress, which never goes back, until it lands and says what it came to.
+	session.set_poll_budget({0, 64 * 1024});
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(session.build_running() && v.build_running);
+	TEST_EXPECT(v.operation.running() && v.operation.kind == OperationKind::Build && v.operation.cancellable);
+	TEST_EXPECT(session.outcome().done() && session.outcome().operation == v.operation.id);
+	const uint64_t build_id = v.operation.id;
 	size_t polls = 0;
-	while (session.build_running()) {
+	uint64_t done = 0;
+	while (v.operation.running()) {
 		session.poll();
 		++polls;
-		TEST_EXPECT(polls < 100);
+		TEST_EXPECT(polls < 200);
+		if (!v.operation.running()) break;
+		TEST_EXPECT(v.operation.done >= done && v.operation.done <= v.operation.total &&
+		            v.operation.unit == OperationUnit::Bytes && !v.operation.label.empty());
+		done = v.operation.done;
 	}
-	TEST_EXPECT(polls > 2); // prepare, three archives, the loose file, publish
-	TEST_EXPECT(v.has_build && v.last_build.ok && !v.build_running);
+	TEST_EXPECT(polls > 2); // the gate, the hash, the staging, the archives, the loose file, the publish
+	TEST_EXPECT(v.has_build && v.last_build.ok && !v.operation.running());
+	TEST_EXPECT(v.last_operation.id == build_id && v.last_operation.kind == OperationKind::Build &&
+	            v.last_operation.end == OperationEnd::Done);
+	session.set_poll_budget(kDefaultPollBudget);
 	TEST_EXPECT(fs::is_regular_file(fs::path(v.last_build.build_dir) / "localres.pff"));
 	// S11e: Output names the project by its name and its files (the build too) from its
 	// folder: no line holds the folder itself. Clear empties it.
@@ -197,7 +216,7 @@ static int test_lifecycle() {
 
 	// Play: no runtime set and none beside a fake editor -> a plain problem, no spawn.
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0);
 	TEST_EXPECT(v.diagnostics.back().code == "play.runtime_missing");
 
@@ -211,7 +230,7 @@ static int test_lifecycle() {
 	session.set_launcher(launcher);
 	TEST_EXPECT(v.runtime_executable == runtime);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1);
 	TEST_EXPECT(v.play_state == PlayState::Running && v.play_pid == 500);
 	TEST_EXPECT(platform.last_plan.working_dir == v.last_build.build_dir);
@@ -223,7 +242,7 @@ static int test_lifecycle() {
 
 	// A second Play while running is refused; the game's log is tailed line by line.
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1);
 	TEST_EXPECT(v.diagnostics.back().code == "play.already_running");
 	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\nhalf"));
@@ -278,7 +297,7 @@ static int test_lifecycle() {
 	// stays until the next Play (a validation keeps it).
 	TEST_EXPECT(has_code(v.diagnostics, "play.boot_missing"));
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running && v.play_exit_code == -1);
 	TEST_EXPECT(v.boot_missing.empty() && !has_code(v.diagnostics, "play.boot_missing"));
 	platform.codes[501] = 0xC0000005u;
@@ -295,7 +314,7 @@ static int test_lifecycle() {
 	// Stop: terminate, then the deadline kill if ignored (the fake exits on terminate). The
 	// crash row goes with the new Play; a stopped game reports no code.
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running && !has_code(v.diagnostics, "play.crashed"));
 	platform.codes[502] = 1;
 	session.handle(make_request(EditorRequestKind::StopPlay));
@@ -474,7 +493,7 @@ static int test_retail_play() {
 	retail.play_retail = true;
 	editor_test::apply_settings(session, retail);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0 && session.view().diagnostics.back().code == "play.retail_missing");
 
 	const std::string install = dir.file("retail install");
@@ -482,7 +501,7 @@ static int test_retail_play() {
 	TEST_EXPECT(editor_test::write_text(install + "/binkw32.dll", "ordinary Bink"));
 	editor_test::set_retail_directory(session, install);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0);
 	TEST_EXPECT(session.view().diagnostics.back().message.find("game.cfg") != std::string::npos);
 	const std::string built = session.view().last_build.build_dir;
@@ -503,7 +522,7 @@ static int test_retail_play() {
 	launcher.mcp_port = 8999;
 	session.set_launcher(launcher);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1 && session.view().play_state == PlayState::Running);
 	TEST_EXPECT(platform.last_plan.executable == built + "/Jointops.exe");
 	TEST_EXPECT(platform.last_plan.working_dir == built && session.running_build_dir() == built);
@@ -518,7 +537,7 @@ static int test_retail_play() {
 		TEST_EXPECT(reopened.view().play_retail && reopened.view().retail_directory == install);
 	}
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1); // Build stays a build with the retail checkbox checked
 	session.handle(make_request(EditorRequestKind::StopPlay));
 	session.poll();
@@ -529,7 +548,7 @@ static int test_retail_play() {
 	fs::remove(fs::path(install) / "binkw32_.dll");
 	TEST_EXPECT(editor_test::write_text(built + "/game.cfg", "project video settings"));
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2);
 	TEST_EXPECT(read_file_text(built + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
 	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "project video settings");
@@ -537,7 +556,7 @@ static int test_retail_play() {
 	session.poll();
 	fs::remove(fs::path(install) / "Jointops.exe");
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && session.view().play_state == PlayState::Stopped);
 
 	// A copy failure is also reported before any child starts.
@@ -545,13 +564,13 @@ static int test_retail_play() {
 	fs::remove(fs::path(built) / "binkw32.dll");
 	fs::create_directory(fs::path(built) / "binkw32.dll");
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && session.view().diagnostics.back().code == "play.retail_copy");
 
 	retail.play_retail = false;
 	editor_test::apply_settings(session, retail);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.executable == launcher.executable);
 	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
 	TEST_EXPECT(read_file_bytes(built + "/localres.pff", archive_after, io_error) && archive_after == archive_before);
@@ -747,10 +766,11 @@ static int test_outcomes_and_refusals() {
 }
 
 // A request that cannot run now says so (ADR 0046 S9f): a rename, a reimport, a Create,
-// a Save, a create-missing or an import (S11b) while a build packs the project's files,
-// and an edit, an undo or a redo on a file that is not open, each leave a warning and an
-// outcome that is not done, and change nothing. A blocked build lists each blocker once.
-// Play where the platform has no spawn says it is Windows-only before building.
+// a Save, a create-missing or an import (S11b) while a build packs the project's files (S13
+// A1: the busy gate's operation.busy), and an edit, an undo or a redo on a file that is not
+// open, each leave a warning and an outcome that is not done, and change nothing. A blocked
+// build lists each blocker once. Play where the platform has no spawn says it is Windows-only
+// before building.
 static int test_requests_that_cannot_run() {
 	editor_test::TempProjectDir dir("opennova_editor_session_cannot_run");
 	FakePlatform platform;
@@ -764,7 +784,7 @@ static int test_requests_that_cannot_run() {
 	const size_t missing = count_code(v.diagnostics, "requirement.missing");
 	TEST_EXPECT(missing > 0);
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok);
 	TEST_EXPECT(count_code(v.last_build.diagnostics, "requirement.missing") == missing);
 	TEST_EXPECT(count_code(v.diagnostics, "requirement.missing") == missing);
@@ -777,7 +797,7 @@ static int test_requests_that_cannot_run() {
 
 	// While a build packs: refused with a warning, nothing moved or written.
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(session.build_running());
+	TEST_EXPECT(session.view().operation.running());
 	struct Case { EditorRequest request; const char *code; };
 	EditorRequest create = make_request(EditorRequestKind::CreateFile, "extra.mnu", "menu");
 	EditorRequest reimport = make_request(EditorRequestKind::Reimport);
@@ -788,12 +808,12 @@ static int test_requests_that_cannot_run() {
 	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
 	import.imports = {{dir.file("loose.txt"), {}}};
 	const Case during_build[] = {
-		{make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"), "rename.build_running"},
-		{reimport, "import.build_running"},
-		{create, "document.build_running"},
-		{make_request(EditorRequestKind::SaveAll), "document.build_running"},
-		{brand, "create_missing.build_running"},
-		{import, "import.build_running"},
+		{make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"), "operation.busy"},
+		{reimport, "operation.busy"},
+		{create, "operation.busy"},
+		{make_request(EditorRequestKind::SaveAll), "operation.busy"},
+		{brand, "operation.busy"},
+		{import, "operation.busy"},
 	};
 	for (const Case &c : during_build) {
 		session.handle(c.request);
@@ -805,7 +825,7 @@ static int test_requests_that_cannot_run() {
 	TEST_EXPECT(fs::exists(root + "/logo.tga") && !fs::exists(root + "/logo2.tga"));
 	TEST_EXPECT(!fs::exists(root + "/menus/extra.mnu") && !session.document_for("extra.mnu"));
 	TEST_EXPECT(!fs::exists(root + "/menus/brand.mns") && !fs::exists(root + "/loose.txt"));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.last_build.ok);
 	// Once it is done the same requests run.
 	session.handle(make_request(EditorRequestKind::RenameAsset, "logo.tga", "logo2.tga"));
@@ -829,7 +849,7 @@ static int test_requests_that_cannot_run() {
 	platform.spawn_supported = false;
 	const size_t spawns = platform.spawns;
 	session.handle(make_request(EditorRequestKind::Play));
-	TEST_EXPECT(!session.build_running() && platform.spawns == spawns);
+	TEST_EXPECT(!session.view().operation.running() && platform.spawns == spawns);
 	TEST_EXPECT(!session.outcome().done() && v.diagnostics.back().code == "play.unsupported");
 	TEST_EXPECT(v.diagnostics.back().message.find("Windows-only") != std::string::npos);
 	return 0;
@@ -1060,19 +1080,19 @@ static int test_validation_cost() {
 	session.hold_validation();
 	set("type", int64_t(0));
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(!session.build_running() && v.unsaved_prompt.open && v.unsaved_prompt.action == EditorRequestKind::Build);
+	TEST_EXPECT(!session.view().operation.running() && v.unsaved_prompt.open && v.unsaved_prompt.action == EditorRequestKind::Build);
 	session.poll();
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type") && v.unsaved_prompt.open);
 	EditorRequest save_and_build = make_request(EditorRequestKind::ResolveUnsaved);
 	save_and_build.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save_and_build);
-	TEST_EXPECT(!items->dirty() && !v.unsaved_prompt.open && session.build_running());
-	session.finish_build();
+	TEST_EXPECT(!items->dirty() && !v.unsaved_prompt.open && session.view().operation.running());
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok && has_code(v.last_build.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
 	session.handle(make_request(EditorRequestKind::Save));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && v.last_build.ok);
 
 	// A closed file changed on disk (another size) is read again at the next refresh,
@@ -1127,14 +1147,14 @@ static int test_validation_cost() {
 	}
 	TEST_EXPECT(!held->matches_file() && !has_code(v.diagnostics, "catalog.item_type"));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok && has_code(v.last_build.diagnostics, "catalog.item_type"));
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type"));
 	held = session.document_for("items.def"); // read again: a new document
 	TEST_EXPECT(held != nullptr && !held->dirty() && held->matches_file());
 	TEST_EXPECT(editor_test::write_bytes(items_file, items_bytes));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && v.last_build.ok && !has_code(v.diagnostics, "catalog.item_type"));
 	// An open document whose file no longer loads stays open as it was, and why is an error
 	// (document.stale) that blocks the build; once the file reads again it is gone.
@@ -1143,13 +1163,13 @@ static int test_validation_cost() {
 	TEST_EXPECT(kept != nullptr);
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok && finding_on(v.last_build.diagnostics, menu) != nullptr);
 	TEST_EXPECT(session.document_for(menu) == kept && has_code(v.last_build.diagnostics, "document.stale"));
 	TEST_EXPECT(finding_on(v.diagnostics, menu) != nullptr && finding_on(v.diagnostics, menu)->code == "document.stale");
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && v.last_build.ok && session.document_for(menu) == kept && !has_code(v.diagnostics, "document.stale"));
 
 	// A request that reads the graph inside a held pump sees the burst's edits first: a
@@ -1386,11 +1406,11 @@ static int test_unsaved_prompt() {
 	session.handle(make_request(EditorRequestKind::Play));
 	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Play && prompt.files == both && !prompt.can_discard);
 	answer(UnsavedChoice::Cancel);
-	TEST_EXPECT(!prompt.open && !session.build_running() && project.platform.spawns == 0);
+	TEST_EXPECT(!prompt.open && !session.view().operation.running() && project.platform.spawns == 0);
 
 	session.handle(make_request(EditorRequestKind::Build));
 	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Build && prompt.files == both && !prompt.can_discard);
-	TEST_EXPECT(!session.build_running() && !session.outcome().done());
+	TEST_EXPECT(!session.view().operation.running() && !session.outcome().done());
 	answer(UnsavedChoice::Discard);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "unsaved.discard"));
 	TEST_EXPECT(prompt.open && project.items->dirty() && project.strings->dirty());
@@ -1398,12 +1418,12 @@ static int test_unsaved_prompt() {
 	TEST_EXPECT(project.block_items(true));
 	answer(UnsavedChoice::Save);
 	TEST_EXPECT(!session.outcome().done() && session.outcome().unsaved_prompt && has_code(session.outcome().findings, "document.write"));
-	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Build && !session.build_running());
+	TEST_EXPECT(prompt.open && prompt.action == EditorRequestKind::Build && !session.view().operation.running());
 	TEST_EXPECT(project.items->dirty() && !project.strings->dirty());
 	TEST_EXPECT(project.block_items(false));
 	answer(UnsavedChoice::Save);
-	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && session.build_running());
-	session.finish_build();
+	TEST_EXPECT(session.outcome().done() && !prompt.open && !project.items->dirty() && session.view().operation.running());
+	session.run_operations();
 	TEST_EXPECT(v.has_build);
 	return 0;
 }
@@ -1474,7 +1494,7 @@ static int test_prompt_renews() {
 	TEST_EXPECT(project.strings->dirty());
 	answer(UnsavedChoice::Save);
 	TEST_EXPECT(!session.outcome().done() && session.outcome().unsaved_prompt && prompt.open && prompt.files == both);
-	TEST_EXPECT(project.items->dirty() && project.strings->dirty() && !session.build_running());
+	TEST_EXPECT(project.items->dirty() && project.strings->dirty() && !session.view().operation.running());
 	answer(UnsavedChoice::Cancel);
 	undo_strings(EditorRequestKind::Redo);
 	TEST_EXPECT(!project.strings->dirty());
@@ -1508,8 +1528,8 @@ static int test_prompt_belongs_to_its_project() {
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	TEST_EXPECT(!project.items->dirty() && v.unsaved_prompt.open);
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(!v.unsaved_prompt.open && session.build_running());
-	session.finish_build();
+	TEST_EXPECT(!v.unsaved_prompt.open && session.view().operation.running());
+	session.run_operations();
 
 	project.set_hp(25);
 	session.handle(make_request(EditorRequestKind::Build));
@@ -1525,7 +1545,7 @@ static int test_prompt_belongs_to_its_project() {
 	save.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "unsaved.none"));
-	TEST_EXPECT(!session.build_running() && !v.has_build);
+	TEST_EXPECT(!session.view().operation.running() && !v.has_build);
 	return 0;
 }
 
@@ -1599,7 +1619,7 @@ static int test_boot_findings() {
 	launcher.executable = runtime;
 	session.set_launcher(launcher);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
 	const std::string log = platform.last_plan.log_file;
 	const int64_t first_game = v.play_pid;
@@ -1627,7 +1647,7 @@ static int test_boot_findings() {
 	session.handle(make_request(EditorRequestKind::Rescan)); // reads the clean table again: `items` is gone
 	TEST_EXPECT(count_code(v.diagnostics, "play.boot_missing") == 2);
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.last_build.ok && count_code(v.diagnostics, "play.boot_missing") == 2);
 	// The project closes, its game still running: the rows go, and a later line of the game's
 	// log is ignored with no project open, in another project, and in this one opened again.
@@ -1652,7 +1672,7 @@ static int test_boot_findings() {
 	session.poll();
 	TEST_EXPECT(v.play_state == PlayState::Stopped);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
 	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file,
 	                                    boot_line("menutxt.bin", "- optional")));
@@ -1661,7 +1681,7 @@ static int test_boot_findings() {
 	session.handle(make_request(EditorRequestKind::StopPlay));
 	session.poll();
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.boot_missing.empty() && !has_code(v.diagnostics, "play.boot_missing"));
 	return 0;
 }
@@ -1684,7 +1704,7 @@ static int test_optional_rows() {
 		if (d.code == "requirement.optional_missing")
 			TEST_EXPECT(d.severity == DiagnosticSeverity::Info && !d.role.empty() && !d.target.empty() && d.asset.empty());
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.last_build.ok && !has_code(v.last_build.diagnostics, "requirement.optional_missing"));
 	EditorRequest brand = make_request(EditorRequestKind::CreateMissing);
 	brand.names = {"brand_style"};
@@ -1797,11 +1817,11 @@ static int test_import_fix_plans_dependencies() {
 
 	// A build packing: refused with a warning, the preview kept, nothing written.
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(session.build_running());
+	TEST_EXPECT(session.view().operation.running());
 	session.handle(import);
-	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "import.build_running") && shown.open);
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "operation.busy") && shown.open);
 	TEST_EXPECT(!v.scan.find("main.mnu") && !fs::exists(root + "/menus/main.mnu"));
-	session.finish_build();
+	session.run_operations();
 	// A file with unsaved edits the import does not write over holds nothing: the import goes
 	// ahead, and the edits stay.
 	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
@@ -2223,7 +2243,7 @@ static int test_build_findings_stay() {
 	const size_t missing = count_code(v.diagnostics, "requirement.missing");
 	TEST_EXPECT(missing > 0);
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok && count_code(v.diagnostics, "build.blocked") == 1);
 	TEST_EXPECT(count_code(v.diagnostics, "requirement.missing") == missing);
 	session.handle(make_request(EditorRequestKind::Rescan));
@@ -2231,7 +2251,7 @@ static int test_build_findings_stay() {
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(count_code(v.diagnostics, "build.blocked") == 1 && !has_code(v.diagnostics, "requirement.missing"));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && v.last_build.ok && !has_code(v.diagnostics, "build.blocked"));
 
 	// The build's own findings are those its report adds to the rows it was gated on, not to
@@ -2258,10 +2278,10 @@ static int test_build_findings_stay() {
 	session.handle(make_request(EditorRequestKind::Save, items->path()));
 	TEST_EXPECT(!items->dirty() && count_code(v.diagnostics, "catalog.item_type") == 1);
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(session.build_running());
+	TEST_EXPECT(session.view().operation.running());
 	set_type(4);
 	TEST_EXPECT(!has_code(v.diagnostics, "catalog.item_type"));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.has_build && !v.last_build.ok && has_code(v.last_build.diagnostics, "catalog.item_type"));
 	TEST_EXPECT(count_code(v.diagnostics, "build.blocked") == 1 && !has_code(v.diagnostics, "catalog.item_type"));
 	set_type(0);
@@ -2269,13 +2289,14 @@ static int test_build_findings_stay() {
 	session.handle(make_request(EditorRequestKind::Undo, items->path()));
 	session.handle(make_request(EditorRequestKind::Undo, items->path()));
 
-	// A build still packing when another project opens finishes first, and its findings stay
-	// with its project: the new one has no build and none of its rows.
+	// A build still packing when another project opens is cancelled (S13 A1: a project switch
+	// cancels the running operation), and nothing of it reaches the new project: no build, none
+	// of its rows.
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("other"), "Other"));
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(session.build_running());
+	TEST_EXPECT(session.view().operation.running());
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("third"), "Third"));
-	TEST_EXPECT(v.project_open && v.document.title == "Third" && !session.build_running() && !v.has_build);
+	TEST_EXPECT(v.project_open && v.document.title == "Third" && !session.view().operation.running() && !v.has_build);
 	TEST_EXPECT(!has_code(v.diagnostics, "build.blocked"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	TEST_EXPECT(!has_code(v.diagnostics, "build.blocked"));
@@ -2314,14 +2335,15 @@ static int test_view_revisions() {
 	const ValidationStats &stats = session.validation_stats();
 
 	// The build: each step moves Operation alone and validates nothing; the last lands it.
+	session.set_poll_budget({0, 64 * 1024});
 	session.handle(make_request(EditorRequestKind::Build));
 	size_t steps = 0;
-	while (session.build_running()) {
+	while (session.view().operation.running()) {
 		const ViewRevisions before = v.revisions;
 		const size_t passes = stats.passes;
 		session.poll();
 		TEST_EXPECT(stats.passes == passes);
-		if (!session.build_running()) break;
+		if (!session.view().operation.running()) break;
 		++steps;
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Operation}));
 	}
@@ -2335,7 +2357,7 @@ static int test_view_revisions() {
 	launcher.executable = runtime;
 	session.set_launcher(launcher);
 	session.handle(make_request(EditorRequestKind::Play));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
 	{
 		ViewRevisions before = v.revisions;
@@ -2472,8 +2494,233 @@ static int test_import_guard_past_the_cap() {
 	return 0;
 }
 
+// The staging directories under a build's output root (`<id>.tmp`).
+static size_t staging_dirs(const std::string &output_root) {
+	size_t count = 0;
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(output_root, ec)) {
+		const std::string name = entry.path().filename().string();
+		if (entry.is_directory(ec) && name.size() > 4 && name.compare(name.size() - 4, 4, kBuildStagingSuffix) == 0) ++count;
+	}
+	return count;
+}
+
+// S13 A1: Play, then Close before its build lands. The project's close cancels the build between
+// two steps (a project switch cancels the running operation): the staging directory goes, nothing
+// is published, and the Play that waited on it starts nothing, then or on any later poll (the
+// play-after-close bug: the waiting Play outlived the project it was asked in).
+static int test_play_then_close() {
+	editor_test::TempProjectDir dir("opennova_editor_session_play_close");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Play close"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher(launcher);
+	const std::string output_root = v.project_root + "/.opennova/build/play";
+
+	// The hash pass in 1 MiB steps, then 64 bytes a poll until an archive packs.
+	session.set_poll_budget({0, uint64_t(1) << 20});
+	session.handle(make_request(EditorRequestKind::Play));
+	TEST_EXPECT(session.outcome().done() && v.operation.running() && session.outcome().operation == v.operation.id);
+	const uint64_t id = v.operation.id;
+	for (size_t polls = 0; polls < 10000 && v.operation.running() && v.operation.done < v.operation.total / 2; ++polls)
+		session.poll();
+	session.set_poll_budget({0, 64});
+	for (size_t polls = 0; polls < 10000 && v.operation.label.rfind("Packing", 0) != 0; ++polls) session.poll();
+	TEST_EXPECT(v.operation.running() && v.operation.label.rfind("Packing", 0) == 0);
+	TEST_EXPECT(staging_dirs(output_root) == 1 && platform.spawns == 0);
+
+	session.handle(make_request(EditorRequestKind::CloseProject));
+	TEST_EXPECT(!v.project_open && !v.operation.running());
+	TEST_EXPECT(v.last_operation.id == id && v.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(staging_dirs(output_root) == 0 && last_good_build_dir(output_root).empty());
+	TEST_EXPECT(output_has(v, "Cancelled the build."));
+	for (int i = 0; i < 5; ++i) session.poll();
+	TEST_EXPECT(platform.spawns == 0 && v.play_state == PlayState::Stopped && !v.has_build);
+
+	// CancelOperation stops a build the same way; with nothing running it is refused.
+	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
+	session.handle(make_request(EditorRequestKind::Build));
+	TEST_EXPECT(v.operation.running());
+	session.poll();
+	session.handle(make_request(EditorRequestKind::CancelOperation));
+	TEST_EXPECT(session.outcome().done() && !v.operation.running() && v.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(staging_dirs(output_root) == 0 && v.status == "Cancelled the build.");
+	session.handle(make_request(EditorRequestKind::CancelOperation));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "operation.none"));
+	return 0;
+}
+
+// S13 A1: a game left running across an editor restart keeps its build. Play writes the game's
+// lease beside the build directory (<build-id>.lease, the directory itself immutable); an editor
+// started later protects every directory whose lease names a process that still runs when it
+// builds, and deletes a lease whose process is gone, after which that directory is pruned like
+// any other. A file that only looks like a lease is never touched.
+static int test_play_leases() {
+	editor_test::TempProjectDir dir("opennova_editor_session_leases");
+	const std::string project = dir.file("project");
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	std::string played, output_root;
+	{
+		FakePlatform platform;
+		ProjectSession session(platform, dir.file("settings.json"));
+		session.handle(make_request(EditorRequestKind::NewProject, project, "Leases"));
+		editor_test::create_missing_files(session);
+		session.set_launcher(launcher);
+		session.handle(make_request(EditorRequestKind::Play));
+		session.run_operations();
+		const SessionView &v = session.view();
+		TEST_EXPECT(v.play_state == PlayState::Running && v.play_pid == 500);
+		played = v.last_build.build_dir;
+		output_root = fs::path(played).parent_path().generic_string();
+		const std::string lease = played + kPlayLeaseSuffix;
+		std::string text, error;
+		opennova::io::JsonValue record;
+		TEST_EXPECT(read_file_text(lease, text, error) && opennova::io::json_parse(text, record, error));
+		TEST_EXPECT(record.get_int("pid", -1) == 500 && record.get_string("executable", "") == platform.last_plan.executable &&
+		            record.get_string("build_id", "") == fs::path(played).filename().string());
+		// The editor quits; the game runs on (its handle released, never the process).
+	}
+	TEST_EXPECT(editor_test::write_text(output_root + "/0123456789abcdef.lease", "not a lease record"));
+
+	FakePlatform platform;
+	platform.alive_elsewhere = {500};
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::OpenProject, project));
+	const SessionView &v = session.view();
+	TEST_EXPECT(v.project_open && v.play_state == PlayState::Stopped);
+	const auto rebuild = [&](const char *text) {
+		editor_test::write_text(v.project_root + "/defs/items.def",
+		                        std::string("begin \"Marker\"\nid 100001\ntype marker\nhp ") + text + "\nend\n");
+		session.handle(make_request(EditorRequestKind::Build));
+		session.run_operations();
+		return v.last_build.ok ? v.last_build.build_dir : std::string();
+	};
+	// The game still runs: its directory survives the build's prune, its lease kept.
+	const std::string second = rebuild("20");
+	TEST_EXPECT(!second.empty() && second != played);
+	TEST_EXPECT(fs::is_directory(played) && fs::exists(played + kPlayLeaseSuffix));
+	// The game is gone: the next build deletes its lease and prunes its directory.
+	platform.alive_elsewhere.clear();
+	const std::string third = rebuild("30");
+	TEST_EXPECT(!third.empty() && !fs::exists(played) && !fs::exists(played + kPlayLeaseSuffix));
+	TEST_EXPECT(!fs::exists(second));
+	TEST_EXPECT(fs::is_regular_file(output_root + "/0123456789abcdef.lease"));
+	return 0;
+}
+
+// S13 A1: the Output lines keep an absolute index (OutputLog), so a client paging with the last
+// page's next_cursor neither skips nor repeats a line while the log drops its oldest past 2,000.
+// 2,100 lines of the game's log, read in pages as they come: every one once, in order; a cursor
+// below the oldest line held starts at it.
+static int test_output_cursor() {
+	editor_test::TempProjectDir dir("opennova_editor_session_output");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Output"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher(launcher);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.run_operations();
+	TEST_EXPECT(v.play_state == PlayState::Running);
+
+	uint64_t cursor = v.output.next_index();
+	std::vector<std::string> seen;
+	const auto read_pages = [&] {
+		for (;;) {
+			SessionJsonOptions options;
+			options.output_cursor = cursor;
+			options.output_limit = 200;
+			const opennova::io::JsonValue json = session_view_to_json(v, options);
+			const opennova::io::JsonValue *output = json.get("output");
+			if (!output || !output->get("lines")) return;
+			const auto &lines = output->get("lines")->array;
+			for (const opennova::io::JsonValue &line : lines) seen.push_back(line.string);
+			cursor = uint64_t(output->get_number("next_cursor", 0.0));
+			if (lines.empty()) return;
+		}
+	};
+	std::string log;
+	const auto game_says = [&](int from, int to) {
+		for (int i = from; i < to; ++i) log += "line " + std::to_string(i) + "\r\n";
+		const bool written = editor_test::write_text(platform.last_plan.log_file, log);
+		session.poll();
+		return written;
+	};
+	TEST_EXPECT(game_says(0, 1500));
+	read_pages();
+	TEST_EXPECT(game_says(1500, 2100));
+	TEST_EXPECT(v.output.size() == OutputLog::kMaxLines && v.output.first_index() > 0);
+	read_pages();
+	TEST_EXPECT(seen.size() == 2100);
+	bool in_order = seen.size() == 2100;
+	for (size_t i = 0; in_order && i < seen.size(); ++i) in_order = seen[i] == "game: line " + std::to_string(i);
+	TEST_EXPECT(in_order);
+	// A cursor the log dropped past starts at the oldest line held.
+	SessionJsonOptions from_zero;
+	from_zero.output_cursor = 0;
+	from_zero.output_limit = 1;
+	const opennova::io::JsonValue json = session_view_to_json(v, from_zero);
+	TEST_EXPECT(json.get("output")->get_number("first", 0.0) == double(v.output.first_index()) &&
+	            json.get("output")->get_number("cursor", 0.0) == double(v.output.first_index()) &&
+	            json.get("output")->get_number("next", 0.0) == double(v.output.next_index()) &&
+	            json.get("output")->get("lines")->array.front().string == v.output[0]);
+	// Clear empties it; the indices go on, so a held cursor still reads what comes next.
+	const uint64_t next = v.output.next_index();
+	session.handle(make_request(EditorRequestKind::ClearOutput));
+	TEST_EXPECT(v.output.empty() && v.output.first_index() == next && v.output.next_index() == next);
+	return 0;
+}
+
+// S13 A1: of two files of one logical name, a Save of the name rewrites the one every other
+// request picks (project_file: the path named, else the first of the name, as Files shows it),
+// never another; a Save naming the other's path rewrites that one.
+static int test_save_picks_like_the_rest() {
+	editor_test::TempProjectDir dir("opennova_editor_session_duplicate_save");
+	FakePlatform platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Duplicates"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	const std::string ignored = "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n";
+	TEST_EXPECT(editor_test::write_text(v.project_root + "/defs/items.def", ignored));
+	TEST_EXPECT(editor_test::write_text(v.project_root + "/extra/items.def", ignored));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(has_code(v.diagnostics, "asset.name.duplicate"));
+	session.handle(make_request(EditorRequestKind::ShowInFiles, "items.def"));
+	const std::string picked = v.reveal_file;
+	const std::string other = picked == "defs/items.def" ? "extra/items.def" : "defs/items.def";
+	TEST_EXPECT(picked == "defs/items.def" || picked == "extra/items.def");
+	session.handle(make_request(EditorRequestKind::Save, "items.def"));
+	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + picked));
+	std::string text, error;
+	TEST_EXPECT(read_file_text(v.project_root + "/" + picked, text, error) && text.find("subtype") == std::string::npos);
+	TEST_EXPECT(read_file_text(v.project_root + "/" + other, text, error) && text == ignored);
+	session.handle(make_request(EditorRequestKind::Save, other));
+	TEST_EXPECT(session.outcome().done() && read_file_text(v.project_root + "/" + other, text, error) &&
+	            text.find("subtype") == std::string::npos);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_play_then_close();
+	failures += test_play_leases();
+	failures += test_output_cursor();
+	failures += test_save_picks_like_the_rest();
 	failures += test_view_revisions();
 	failures += test_import_guard_past_the_cap();
 	failures += test_build_findings_stay();

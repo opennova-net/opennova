@@ -74,14 +74,16 @@ const JsonValue *find_field(const JsonValue &record, const char *id) {
 } // namespace
 
 static int test_tokens() {
-	for (int i = 0; i <= static_cast<int>(EditorRequestKind::RevealPath); ++i) {
+	// Every kind to the enum's end has a token that reads back to it, and no two share one.
+	for (int i = 0; i < static_cast<int>(EditorRequestKind::kCount); ++i) {
 		const auto kind = static_cast<EditorRequestKind>(i);
 		const std::string token = editor_request_kind_token(kind);
 		TEST_EXPECT(!token.empty());
 		EditorRequestKind back = EditorRequestKind::Rescan;
 		TEST_EXPECT(editor_request_kind_from_token(token, back) && back == kind);
 	}
-	TEST_EXPECT(editor_request_kind_tokens().size() == static_cast<size_t>(EditorRequestKind::RevealPath) + 1);
+	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
+	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
 	TEST_EXPECT(editor_request_kind_tokens().front() == "new_project");
 	for (int i = 0; i <= static_cast<int>(EditOperation::SetFileValue); ++i) {
 		const auto operation = static_cast<EditOperation>(i);
@@ -647,8 +649,11 @@ static int test_over_a_session() {
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
 	TEST_EXPECT(view.selection == title_address && session_view_to_json(view).get_string("reveal_field", "") == "string.value");
 	TEST_EXPECT(view.reveal_serial == serial + 1);
+	TEST_EXPECT(session_view_to_json(view).get_number("reveal_serial", -1.0) == double(serial + 1));
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
 	TEST_EXPECT(view.reveal_field == "string.value" && view.reveal_serial == serial + 2);
+	// The same field asked again: the JSON's serial moves with it, so a client sees the second ask.
+	TEST_EXPECT(session_view_to_json(view).get_number("reveal_serial", -1.0) == double(serial + 2));
 	const std::string named = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"edit\":{\"row\":" +
 	                          std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
 	                          ",\"child\":" + std::to_string(title_address.child) + "}}";
@@ -779,24 +784,46 @@ static int test_over_a_session() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", request).empty() &&
 	            session.handle(request));
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_bool("done", false) && !document->dirty() &&
-	            session.build_running());
-	session.finish_build();
+	            session.view().operation.running());
+	// The build runs as an operation: the answer names it, and the view's operation block shows
+	// it stepping (its kind, its progress in bytes, what it holds) until it lands.
+	const double operation = action_outcome_to_json(session.outcome()).get_number("operation", 0.0);
+	TEST_EXPECT(operation > 0.0 && operation == double(view.operation.id));
+	json = session_view_to_json(view);
+	const JsonValue *running = json.get("operation");
+	TEST_EXPECT(running && running->get_bool("running", false) && running->get_number("id", 0.0) == operation &&
+	            running->get_string("kind", "") == "build" && running->get_string("unit", "") == "bytes" &&
+	            running->get_bool("cancellable", false) && running->get_number("total", 0.0) > 0.0 &&
+	            running->get("holds") && running->get("holds")->array.size() == 1 &&
+	            running->get("holds")->array.front().string == "files");
+	TEST_EXPECT(json.get("build") && json.get("build")->get("running") == nullptr);
+	session.run_operations();
+	json = session_view_to_json(view);
+	TEST_EXPECT(!json.get("operation")->get_bool("running", true) && json.get("operation")->get("id") == nullptr);
+	const JsonValue *last = json.get("last_operation");
+	TEST_EXPECT(last && last->get_number("id", 0.0) == operation && last->get_string("kind", "") == "build" &&
+	            last->get_string("end", "") == "done" && last->get("findings") && last->get("findings")->array.empty());
+	TEST_EXPECT(json.get("build")->get_bool("has_build", false) && json.get("build")->get_bool("ok", false));
 	TEST_EXPECT(!session_view_to_json(view).get("unsaved_prompt")->get_bool("open", true));
 	TEST_EXPECT(request_error("{\"kind\":\"undo\"}", request).empty() && session.handle(request) && document->dirty());
 
-	// Output paging: a cursor past the lines yields none, a window yields that window.
+	// Output paging by absolute index: the lines held from `first` to `next`, a window yields that
+	// window, a cursor past the lines none (it waits at `next` for lines to come).
 	json = session_view_to_json(view);
-	const size_t total = size_t(json.get("output")->get_number("total", 0));
-	TEST_EXPECT(total == view.output.size() && total > 0);
+	const uint64_t first = uint64_t(json.get("output")->get_number("first", -1.0));
+	const uint64_t next = uint64_t(json.get("output")->get_number("next", 0.0));
+	TEST_EXPECT(first == view.output.first_index() && next == view.output.next_index() && next - first == view.output.size() &&
+	            view.output.size() > 1);
 	SessionJsonOptions options;
-	options.output_cursor = 1;
+	options.output_cursor = first + 1;
 	options.output_limit = 1;
 	json = session_view_to_json(view, options);
-	TEST_EXPECT(json.get("output")->get("lines")->array.size() == 1 && json.get("output")->get_int("next_cursor", 0) == 2);
+	TEST_EXPECT(json.get("output")->get("lines")->array.size() == 1 &&
+	            uint64_t(json.get("output")->get_number("next_cursor", 0.0)) == first + 2);
 	TEST_EXPECT(json.get("output")->get("lines")->array.front().string == view.output[1]);
-	options.output_cursor = total + 5;
+	options.output_cursor = next + 5;
 	json = session_view_to_json(view, options);
-	TEST_EXPECT(json.get("output")->get("lines")->array.empty() && size_t(json.get("output")->get_number("cursor", 0)) == total);
+	TEST_EXPECT(json.get("output")->get("lines")->array.empty() && uint64_t(json.get("output")->get_number("cursor", 0.0)) == next);
 
 	// The written text is strict JSON that reads back.
 	JsonValue reread;

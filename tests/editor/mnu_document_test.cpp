@@ -278,12 +278,12 @@ int validation() {
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds, blocked by the missing texture.
 	session.handle(make_request(EditorRequestKind::Build));
-	TEST_EXPECT(view.unsaved_prompt.open && !view.unsaved_prompt.can_discard && !session.build_running() &&
+	TEST_EXPECT(view.unsaved_prompt.open && !view.unsaved_prompt.can_discard && !session.view().operation.running() &&
 	            view.unsaved_prompt.files == std::vector<std::string>{document->path()});
 	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
 	save.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save);
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(!document->dirty() && !view.unsaved_prompt.open && view.has_build && !view.last_build.ok);
 	// A new menu by name and kind.
 	session.handle(make_request(EditorRequestKind::CreateFile, "extra.mnu", asset_kind_token(AssetKind::Menu)));

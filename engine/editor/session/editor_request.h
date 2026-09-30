@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -37,9 +38,14 @@ enum class EditorRequestKind {
 	CancelImport,
 	CreateMissing,        // names = the roles of the required files to create from scratch (none: nothing);
 	                      // a file there since the last refresh is refused, never overwritten
-	Build,                // packs the files on disk: asks to save unsaved edits first
-	Play,                 // build, then run the game on the build
+	Build,                // packs the files on disk: asks to save unsaved edits first; returns once the
+	                      // build operation starts (ActionOutcome::operation), a build running already
+	                      // serving it
+	Play,                 // build, then run the game on the build; a build running already serves it and
+	                      // starts the game when it lands
 	StopPlay,
+	CancelOperation,      // the running operation (the view's operation) stops between two steps, its
+	                      // work discarded
 	CreateFile,           // path = the file to create blank, from the name's requirement factory, else its
 	                      // kind's free-form one; opened when the editor edits its kind (a font, a .coo,
 	                      // character attributes are made and listed, not opened); text = its kind token
@@ -96,7 +102,10 @@ enum class EditorRequestKind {
 	PickDirectory,        // purpose says what the picked directory is for
 	PickFile,             // purpose = RuntimeExecutable; ImportFiles picks multiple files
 	RevealPath,           // path: show it in the OS file manager
+	kCount,
 };
+
+inline constexpr size_t kEditorRequestKindCount = static_cast<size_t>(EditorRequestKind::kCount);
 
 enum class PickPurpose { None, NewProjectLocation, OpenProject, RuntimeExecutable, RetailDirectory, ImportFiles };
 
@@ -149,10 +158,12 @@ struct EditorRequest {
 // serving that one (a rename's close and reload) add to the same outcome.
 struct ActionOutcome {
 	bool refused = false;        // refused or did not finish: an error was reported, or the
-	                             // request could not run now (a build is packing, the
-	                             // document is not open; a warning says which)
+	                             // request could not run now (an operation holds what it
+	                             // needs, the document is not open; a warning says which)
 	bool unsaved_prompt = false; // waits on resolve_unsaved (save, discard or cancel): the
 	                             // view's unsaved_prompt says what waits and on which files
+	uint64_t operation = 0;      // the operation it started or joined (the view's operation
+	                             // while it runs, its last_operation once it ends); 0 for none
 	std::vector<Diagnostic> findings;
 	bool done() const { return !refused && !unsaved_prompt; }
 };

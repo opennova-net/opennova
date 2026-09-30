@@ -305,7 +305,7 @@ static int test_menu_references() {
 	// A saved menu with a missing texture is blocked by the build (an error).
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(!view.last_build.ok);
 	return 0;
 }

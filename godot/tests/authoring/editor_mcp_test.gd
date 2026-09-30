@@ -11,7 +11,9 @@ extends GutTest
 ## batch by label in one undo step, a list replaced, the findings, and their refusals.
 ## S11b: editor_problems asks the Problems query (severities, a page, only the fixable,
 ## grouped by kind), and a problem's fix is a request passed back as it is. S11g: an import
-## planned with the files it needs, its rows passed back to import_files.
+## planned with the files it needs, its rows passed back to import_files. S13 A1: a build is
+## the editor's operation, read mid-way through editor_state while it steps frame by frame,
+## and editor_build joins it and waits for it to land.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
@@ -78,6 +80,47 @@ func _call(name: String, args := {}) -> Dictionary:
 				text += String(block["text"]) + "\n"
 		return {"_error": text}
 	return result.get("structuredContent", {})
+
+
+## A build raised through editor_request returns at once with its operation, which steps a
+## small budget a frame: editor_state reads it mid-way (running, its id, bytes done short of the
+## total, cancellable, holding the files), editor_build joins it and returns once it lands, and
+## the state then shows what it came to. The main thread is never held: the state answers while
+## the build runs.
+func test_build_is_an_operation_the_state_reads_mid_way() -> void:
+	if _client == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova build operation %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var made := await _call("editor_request", {"kind": "new_project", "path": dir, "text": "Operation"})
+	assert_true(bool(made.get("ok", false)), str(made))
+	assert_true(bool((await _create_missing()).get("ok", false)))
+	_app.call("set_poll_budget", 0, 8192) # a step of 8 KiB a frame
+	var raised := await _call("editor_request", {"kind": "build"})
+	var outcome: Dictionary = raised.get("outcome", {})
+	assert_true(bool(outcome.get("done", false)), str(raised))
+	var id := int(outcome.get("operation", 0))
+	assert_gt(id, 0, str(raised))
+	var state := await _call("editor_state", {"output_limit": 0, "import_limit": 0, "files_limit": 0})
+	var operation: Dictionary = state.get("operation", {})
+	assert_true(bool(operation.get("running", false)), str(operation))
+	assert_eq(int(operation.get("id", 0)), id)
+	assert_eq(String(operation.get("kind", "")), "build")
+	assert_eq(String(operation.get("unit", "")), "bytes")
+	assert_lt(int(operation.get("done", 0)), int(operation.get("total", 0)), str(operation))
+	assert_true(bool(operation.get("cancellable", false)))
+	assert_eq(operation.get("holds", []), ["files"])
+	var saved := await _call("editor_request", {"kind": "save_all"})
+	assert_false(bool(saved.get("outcome", {}).get("done", true)), "a save waits for the build: " + str(saved))
+	var built := await _call("editor_build")
+	assert_true(bool(built.get("ok", false)), str(built))
+	assert_eq(int(built.get("operation", {}).get("id", 0)), id, "editor_build joined the build that ran")
+	assert_eq(String(built.get("operation", {}).get("end", "")), "done")
+	state = await _call("editor_state", {"output_limit": 0, "import_limit": 0, "files_limit": 0})
+	assert_false(bool(state.get("operation", {}).get("running", true)))
+	assert_eq(int(state.get("last_operation", {}).get("id", 0)), id)
+	assert_eq(String(state.get("last_operation", {}).get("end", "")), "done")
+	_app.call("set_poll_budget", 10, 1048576)
 
 
 ## Every missing required file created, as the editor's Create all asks: create_missing

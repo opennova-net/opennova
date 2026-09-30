@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include <editor/session/editor_request.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/session_operation.h>
 #include <editor/session/session_view.h>
 
 namespace opennova::editor {
@@ -59,7 +61,9 @@ io::JsonValue value_to_json(const Value &value);
 bool value_from_json(const io::JsonValue &json, Value &out);
 
 struct SessionJsonOptions {
-	size_t output_cursor = 0; // the first output line to include (lines before it are counted)
+	// The first output line to include, by its absolute index (OutputLog): a cursor kept from the
+	// last page's next_cursor neither skips nor repeats a line.
+	uint64_t output_cursor = 0;
 	size_t output_limit = 200;
 	// The page of the import block's lists (its choices, roots, rows and not_found): each
 	// from `import_offset`, `import_limit` entries at most; their counts say how many there are.
@@ -73,15 +77,24 @@ struct SessionJsonOptions {
 // waiting request's kind token as `action`, its `target`, the `files` it lists and
 // `can_discard`), project (its `files`: every file the scan lists, with its kind and whether
 // the editor opens it), requirements (rows included), documents (their paths, kinds,
-// dirtiness), the selection (the primary, every selected record, and `reveal_field` while a
-// request asked for one of its fields), the clipboard's size, the build and play blocks,
+// dirtiness), the selection (the primary, every selected record, and `reveal_field` with its
+// `reveal_serial` while a request asked for one of its fields), the clipboard's size, the
+// operation (operation_status_to_json) and the last one's outcome (`last_operation`), the build
+// and play blocks,
 // the import state (the dialog: its `choices` and `roots` as a request's imports take them,
 // the plan's importable `rows` with their source, destination, needed_by, found_in,
 // selected, problem and rivals, the `not_found` rows, each of the four lists a page from
 // `offset` with its count, then `not_followed`, `truncated` and the plan's findings; the
 // editor's `import_dependencies` setting; the project's imported sources), the problem
-// counts, the recent projects and a page of the output lines.
+// counts, the recent projects and a page of the output lines by absolute index ({first, next,
+// cursor, next_cursor, lines}).
 io::JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions &options = {});
+// The operation that runs: {running}, and while one does its id, kind token, label, done, total,
+// unit token (bytes, files, steps), cancellable and holds (tokens: files, documents, project).
+io::JsonValue operation_status_to_json(const OperationStatus &status);
+// What an operation came to: {id, kind, end (done, failed, cancelled), findings}; null before the
+// first ends.
+io::JsonValue operation_outcome_to_json(const OperationOutcome &outcome);
 // A finding: severity, code, message, and as it has them asset, field, record, line, the
 // record's identities, and what it is about (role, target, reference as a kind token, scope).
 io::JsonValue diagnostic_to_json(const Diagnostic &diagnostic);
@@ -103,8 +116,9 @@ bool problem_query_from_json(const io::JsonValue &json, ProblemQuery &query, siz
 // its first row among the shown), count, errors, warnings, infos}.
 io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer, size_t offset, size_t limit,
                                ProblemFixCache &fixes);
-// What one request came to: {done, unsaved_prompt, findings}; `done` is false when it
-// was refused or failed (an error among the findings) or waits on the unsaved prompt.
+// What one request came to: {done, unsaved_prompt, operation, findings}; `done` is false when
+// it was refused or failed (an error among the findings) or waits on the unsaved prompt;
+// `operation` names the operation it started or joined (0: none).
 io::JsonValue action_outcome_to_json(const ActionOutcome &outcome);
 // A document: its lifecycle state (with file_state_changed: its file-wide state differs from
 // the saved baseline's), the source issues and, with rows, every row with its collections

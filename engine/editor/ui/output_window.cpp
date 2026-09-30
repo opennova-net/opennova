@@ -41,7 +41,7 @@ void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::PopStyleColor();
 	}
 	if (empty) {
-		lines_seen_ = 0;
+		lines_seen_ = v.output.next_index();
 		ui_kit::empty_state("Nothing yet.", "What the editor does and what the running game says show here.");
 		return;
 	}
@@ -52,11 +52,12 @@ void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		while (clipper.Step()) {
 			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) output_line(v.output[static_cast<size_t>(i)]);
 		}
-		// Follow the newest line unless the user scrolled up to read.
-		if (v.output.size() != lines_seen_ && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
+		// Follow the newest line unless the user scrolled up to read (by its absolute index: at the
+		// log's cap the count stands while the lines move on).
+		if (v.output.next_index() != lines_seen_ && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
 			ImGui::SetScrollHereY(1.0f);
 		}
-		lines_seen_ = v.output.size();
+		lines_seen_ = v.output.next_index();
 	}
 	ImGui::EndChild();
 }

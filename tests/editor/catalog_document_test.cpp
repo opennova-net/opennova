@@ -152,10 +152,10 @@ static int session_gate() {
 	// and offers no Discard; its Save writes the catalog, then Play builds.
 	session.handle(make_request(EditorRequestKind::Play));
 	const SessionView::UnsavedPrompt &prompt = session.view().unsaved_prompt;
-	TEST_EXPECT(platform.spawns == 0 && !session.build_running() && prompt.open && prompt.action == EditorRequestKind::Play);
+	TEST_EXPECT(platform.spawns == 0 && !session.view().operation.running() && prompt.open && prompt.action == EditorRequestKind::Play);
 	TEST_EXPECT(prompt.files == std::vector<std::string>{document->path()} && !prompt.can_discard);
 	auto answer = make_request(EditorRequestKind::ResolveUnsaved); answer.unsaved_choice = UnsavedChoice::Save;
-	session.handle(answer); session.finish_build();
+	session.handle(answer); session.run_operations();
 	TEST_EXPECT(!document->dirty() && !prompt.open); // semantic errors do not prevent saving
 	TEST_EXPECT(session.view().has_build && !session.view().last_build.ok && platform.spawns == 0); // the graphic is missing
 	request.edit = field({id, node_kind(DefRecordKind::Item), 0}, "graphic", std::string(""));
@@ -168,7 +168,7 @@ static int session_gate() {
 	answer.unsaved_choice = UnsavedChoice::Save;
 	session.handle(answer); TEST_EXPECT(!session.project_open());
 	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
-	session.handle(make_request(EditorRequestKind::Build)); session.finish_build();
+	session.handle(make_request(EditorRequestKind::Build)); session.run_operations();
 	TEST_EXPECT(session.view().last_build.ok);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
 	document = session.document_for(); TEST_EXPECT(document && !document->dirty());
