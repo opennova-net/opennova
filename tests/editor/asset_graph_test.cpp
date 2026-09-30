@@ -2065,12 +2065,23 @@ static int test_generation() {
 	graph.update(paths, doc, scan, {});
 	const uint64_t changed = graph.generation();
 	TEST_EXPECT(changed != grown && changed != assembled && changed != fresh);
+	// A file the graph does not read (a mission's .mis, S13 PR0): its row counts, so one added
+	// assembles again, while what it holds is read by nothing, so a change to it keeps the graph.
+	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; one\n"));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	const uint64_t with_mis = graph.generation();
+	TEST_EXPECT(with_mis != changed && graph.stats().files_extracted == 0);
+	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; two, a longer line\n"));
+	scan = scan_project_assets(paths, doc);
+	graph.update(paths, doc, scan, {});
+	TEST_EXPECT(graph.generation() == with_mis && graph.stats().files_extracted == 0);
 	// The item ids in the order the file defines them (by name, 100300 would lead).
 	const std::vector<const GraphSymbol *> ids = graph.symbols_of_kind(ReferenceKind::Item);
 	TEST_EXPECT(ids.size() == 2 && ids[0]->name == "100301" && ids[1]->name == "100300");
 	TEST_EXPECT(graph.symbols_of_kind(ReferenceKind::Weapon).empty());
 	// Two graphs, a copy and a cleared graph: each a generation of its own, never one seen before.
-	std::set<uint64_t> seen = {fresh, assembled, grown, changed};
+	std::set<uint64_t> seen = {fresh, assembled, grown, changed, with_mis};
 	AssetGraph another;
 	TEST_EXPECT(seen.insert(another.generation()).second);
 	const AssetGraph copy = graph;

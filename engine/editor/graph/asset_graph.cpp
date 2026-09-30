@@ -116,6 +116,8 @@ void AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &projec
 				!same_extracted(cached->second.content, entry.content);
 	};
 	for (const AssetEntry &asset : scan.entries) {
+		// A file the graph does not read (a mission's .mis) holds no extraction; its row still
+		// counts (same_files), so one added or gone assembles again.
 		if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
 		const Document *document = nullptr;
 		for (const auto &candidate : open)
