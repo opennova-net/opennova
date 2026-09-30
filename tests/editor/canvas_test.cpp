@@ -928,9 +928,11 @@ int test_model_canvas() {
 	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Canvas Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(
 			dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));
 	const auto *document =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));

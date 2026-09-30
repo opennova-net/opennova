@@ -23,14 +23,17 @@ struct ValidationStats;
 // create, scan and evaluate, create-missing, build, play. Portable: the embedder hands it
 // the process seam and the store its preferences live in and drains its view; a test drives
 // it the same way. Requests come in typed (EditorRequest), the view goes out (SessionView).
-// A long job is an operation (session_operation.h, S13 A1): one at a time, stepped within
-// each poll's budget so the window that hosts the session keeps drawing while a project
-// packs; a request that conflicts with what it reads or writes is refused, joins it,
-// supersedes it or cancels it as it commits, as its row says (request_kinds.h), in
-// handle(). An edit (a Set, an Add, an Undo) leaves the project's validation due rather than
-// running it: a request from outside returns validated, and a pump that holds validation
-// (hold_validation) validates once, at its poll, however many edits its requests made; Save,
-// Build, Rescan and the other project requests validate at once.
+// A long job is an operation (session_operation.h, S13 A1, A3): opening a project, a Rescan or
+// a Reimport, an import's plan and its write, a rename's commit, a build; one at a time, stepped
+// within each poll's budget so the window that hosts the session keeps drawing, and the request
+// that starts one returns at once, its outcome naming it (an embedder that waits polls, or runs
+// it to its end: run_operations). A request that conflicts with what an operation reads or
+// writes is refused, joins it, supersedes it or cancels it as it commits, as its row says
+// (request_kinds.h), in handle(). An edit (a Set, an Add, an Undo) leaves the project's
+// validation due rather than running it: a request from outside returns validated, and a pump
+// that holds validation (hold_validation) leaves it to its poll, which steps it a file at a time
+// within its budget however many edits its requests made (the first validation of a large project
+// spreads over polls).
 //
 // A facade (S13 A2): the session is its parts (session_core.h, document_set.h,
 // problems_service.h, play_controller.h, import_controller.h, rename_controller.h,
@@ -86,15 +89,16 @@ public:
 	// rename's close and reload, the unsaved prompt's answer) never enter it.
 	uint64_t handle_entries() const;
 
-	// Once per frame: the validation the frame's edits left due, the running operation's steps
-	// within the poll's budget, the child's state and the game's log tail, then the operation
-	// that is done finished (a build lands, and the Play waiting on it starts).
+	// Once per frame: the validation left due, stepped a file at a time within the poll's budget,
+	// the running operation's steps within it, the child's state and the game's log tail, then the
+	// operation that is done finished (a project opens, a build lands, and the Play waiting on it
+	// starts).
 	void poll();
-	// How much a poll steps the running operation (kDefaultPollBudget; a test's ms 0 is one
-	// step per poll).
+	// How much a poll steps the validation and the running operation (kDefaultPollBudget; a test's
+	// ms 0 is one step of each per poll).
 	void set_poll_budget(const PollBudget &budget);
-	// The running operation, and those its finish starts, run to their end and finished (a
-	// test, a command line).
+	// The running operation, and those its finish starts, run to their end and finished, then the
+	// validation they left due run to its end (a test, a command line).
 	void run_operations();
 	// `operation` started in the slot as a request starts one: its id, 0 while another runs (a
 	// test's, for an operation no request starts yet: one that cannot be cancelled, one that
@@ -114,6 +118,9 @@ public:
 	// How many times the Problems rows were composed: a validation that finds nothing they are
 	// made of moved composes none (for the tests).
 	size_t problems_compositions() const;
+	// How many project files the last scan read: every one by a refresh (an Open, a Rescan), those
+	// a Save, a create or a rename's commit touched by its update (for the tests).
+	size_t files_scanned() const;
 	// The directory the running game uses ("" when none): the build never prunes it.
 	std::string running_build_dir() const;
 

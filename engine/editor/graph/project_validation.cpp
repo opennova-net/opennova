@@ -31,15 +31,51 @@ std::vector<Diagnostic> validate_project(
 }
 
 bool refresh_project(const ValidationInput &input, AssetGraph &graph, ValidationCache &cache) {
-	const uint64_t generation = graph.generation();
-	// The graph first: the use checks read what the files define and who uses it.
-	graph.update(input.paths, input.project, input.scan, input.open);
-	cache.begin();
-	for (const AssetEntry *asset : validation_files(input.scan))
-		cache.file_findings(input, *asset);
-	cache.end();
-	const ValidationStats &stats = cache.stats();
-	return stats.files_validated > 0 || stats.files_dropped > 0 || graph.generation() != generation;
+	ProjectValidation validation(graph, cache);
+	while (!validation.step(input, UINT64_MAX)) {
+	}
+	return validation.moved();
+}
+
+ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache) :
+		graph_(graph), cache_(cache), generation_(graph.generation()) {}
+
+bool ProjectValidation::graph_moved() const {
+	return phase_ != Phase::Graph && graph_.generation() != generation_;
+}
+
+bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
+	uint64_t spent = 0;
+	do {
+		switch (phase_) {
+		case Phase::Graph:
+			// The graph first: the use checks read what the files define and who uses it. The
+			// update is one step, whatever it reads.
+			generation_ = graph_.generation();
+			graph_.update(input.paths, input.project, input.scan, input.open);
+			cache_.begin();
+			files_ = validation_files(input.scan);
+			phase_ = Phase::Files;
+			return false;
+		case Phase::Files: {
+			if (next_ == files_.size()) {
+				cache_.end();
+				const ValidationStats &stats = cache_.stats();
+				moved_ = stats.files_validated > 0 || stats.files_dropped > 0 || graph_.generation() != generation_;
+				phase_ = Phase::Done;
+				return true;
+			}
+			const AssetEntry &asset = *files_[next_++];
+			current_ = asset.relative_path;
+			const size_t loaded = cache_.stats().files_loaded;
+			cache_.file_findings(input, asset);
+			spent += kValidationFileCost + (cache_.stats().files_loaded != loaded ? asset.size_bytes : 0);
+			break;
+		}
+		case Phase::Done: return true;
+		}
+	} while (spent < budget);
+	return false;
 }
 
 std::vector<Diagnostic> project_rows(

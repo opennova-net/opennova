@@ -134,6 +134,7 @@ static int session_gate() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
     session.handle(request::create_file("ammo.def"));
     TEST_EXPECT(session.document_for("ammo.def"));
@@ -165,6 +166,7 @@ static int session_gate() {
 	answer.choice = UnsavedChoice::Save;
 	session.handle(answer); TEST_EXPECT(!session.project_open());
 	session.handle(request::open_project(dir.file("project")));
+	session.run_operations();
 	session.handle(request::build()); session.run_operations();
 	TEST_EXPECT(session.view().activity.last_build->ok);
 	session.handle(request::open_document("items.def"));
@@ -235,6 +237,7 @@ static int go_to_record() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	session.handle(request::open_document("items.def"));

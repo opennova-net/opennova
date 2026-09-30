@@ -190,6 +190,7 @@ int validation_and_session() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Strings"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.project.requirements->required_missing == 0);

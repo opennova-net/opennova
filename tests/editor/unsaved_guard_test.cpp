@@ -41,6 +41,7 @@ struct Dirty {
 	std::string extra;
 	explicit Dirty(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Guard"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 		Document *document = session.document_for("extra.mnu");
@@ -97,6 +98,7 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		std::error_code ec;
 		fs::remove(dirty.view().project.root + "/" + row->asset_path, ec);
 		dirty.session.handle(request::rescan());
+		dirty.session.run_operations();
 		request.role = role;
 		break;
 	}
@@ -162,6 +164,7 @@ static int test_untouched_goes_ahead() {
 	dirty.session.handle(request::close_document(main));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
 	dirty.session.handle(request::rename_asset("menu_style.mns", "renamed.mns"));
+	dirty.session.run_operations();
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open);
 	TEST_EXPECT(dirty.session.document_for(dirty.extra)->dirty());
 	return 0;

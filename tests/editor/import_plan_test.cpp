@@ -80,6 +80,7 @@ static int test_plan_folder() {
 	const std::string root = project.root();
 	TEST_EXPECT(editor_test::write_text(root + "/fonts/have.fnt", "fnt"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
 	                                                                    window("STATIC", "KEEP", font("have")))));
@@ -463,6 +464,7 @@ static int test_plan_material_sources() {
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 3);
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	size_t resolved = 0;
 	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di"))
@@ -489,6 +491,7 @@ static int test_plan_stylesheets() {
 	TEST_EXPECT(editor_test::write_text(root + "/menus/menu_style.mns", "FONT_X old.fnt\r\nVAR_Y gone.fnt\r\n") &&
 	            editor_test::write_text(root + "/menus/brand.mns", "FONT_X brand.fnt\r\n"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/menu_style.mns", "FONT_X base.fnt\r\n"));
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "X", font("%FONT_X%")) +
@@ -574,6 +577,7 @@ static int test_plan_native_png() {
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 2);
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	const AssetEntry *png = view.project.scan->find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));

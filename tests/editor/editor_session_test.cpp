@@ -123,6 +123,7 @@ static int test_lifecycle() {
 	// New project: open, listed as recent, the checklist all unmet.
 	const std::string root = dir.file("My Game");
 	TEST_EXPECT(session.handle(request::new_project(root, "My Game")));
+	session.run_operations();
 	TEST_EXPECT(session.project_open());
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project.document->title == "My Game");
@@ -287,6 +288,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(crashed && crashed->severity == DiagnosticSeverity::Error && crashed->asset.empty() &&
 	            crashed->message.find("3221225477 (0xC0000005)") != std::string::npos);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.crashed") == 1);
 
 	// Stop: terminate, then the deadline kill if ignored (the fake exits on terminate). The
@@ -325,6 +327,7 @@ static int test_lifecycle() {
 		ProjectSession again(other, again_preferences);
 		TEST_EXPECT(again.view().project.recent_projects.size() == 1);
 		TEST_EXPECT(again.handle(request::open_project(root)));
+		again.run_operations();
 		TEST_EXPECT(again.view().project.document->title == "Renamed");
 		TEST_EXPECT(again.view().project.requirements->required_missing > 0); // the mission rows
 		again.handle(request::forget_recent(root));
@@ -337,6 +340,7 @@ static int test_lifecycle() {
 		ProjectSession again(other, again_preferences);
 		TEST_EXPECT(!again.handle(request::open_project(dir.file("nowhere"))) ||
 		            !again.project_open());
+		again.run_operations();
 	}
 	return 0;
 }
@@ -347,6 +351,7 @@ static int test_import() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Imports"));
+	session.run_operations();
 	const std::string loose = dir.file("loose.txt");
 	const std::string packed = dir.file("source.pff");
 	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
@@ -360,6 +365,7 @@ static int test_import() {
 	EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
 	preview.paths = {loose, packed};
 	session.handle(preview);
+	session.run_operations();
 	// The loose file chosen and planned; the archive's members listed to choose from.
 	const DialogsView::ImportPreview &shown = session.view().dialogs.import_preview;
 	TEST_EXPECT(shown.open && shown.roots.size() == 1 && shown.roots[0].path == loose && shown.choices.size() == 2);
@@ -367,14 +373,17 @@ static int test_import() {
 	session.handle(request::cancel_import());
 	TEST_EXPECT(!shown.open && shown.roots.empty() && shown.choices.empty() && shown.plan->rows.empty());
 	session.handle(preview);
+	session.run_operations();
 	// A member chosen from the list: planned with the loose file, the list kept.
 	EditorRequest choose = request::of(EditorRequestKind::PlanImport);
 	choose.imports = {{loose, {}}, {packed, "note.txt"}};
 	session.handle(choose);
+	session.run_operations();
 	TEST_EXPECT(shown.open && shown.choices.size() == 2 && shown.roots.size() == 2 && shown.plan->rows.size() == 2);
 	EditorRequest importing = request::of(EditorRequestKind::ImportFiles);
 	importing.imports = choose.imports;
 	session.handle(importing);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && !shown.open);
 	TEST_EXPECT(session.view().project.scan->find("loose.txt") &&
 			session.view().project.scan->find("note.txt"));
@@ -389,10 +398,12 @@ static int test_import() {
 	TEST_EXPECT(editor_test::write_text(dir.file("project/custom/NOTE.TXT"), "authored"));
 	importing.imports = {{packed, "note.txt"}};
 	session.handle(importing);
+	session.run_operations();
 	TEST_EXPECT(session.view().findings.diagnostics.back().code == "import.exists");
 	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "authored");
 	importing.replace = true;
 	session.handle(importing);
+	session.run_operations();
 	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "packed");
 	TEST_EXPECT(!fs::exists(dir.file("project/note.txt")));
 
@@ -404,6 +415,7 @@ static int test_import() {
 	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	importing.imports = {{items, {}}};
 	session.handle(importing);
+	session.run_operations();
 	session.handle(request::open_document("items.def"));
 	TEST_EXPECT(session.view().documents.open.size() == 1);
 	const Document *held = session.document_for("items.def");
@@ -417,6 +429,7 @@ static int test_import() {
 	TEST_EXPECT(session.documents_dirty());
 	TEST_EXPECT(editor_test::write_text(items, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
 	session.handle(importing);
+	session.run_operations();
 	const DialogsView::UnsavedPrompt &prompt = session.view().dialogs.unsaved_prompt;
 	TEST_EXPECT(session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::ImportFiles);
 	TEST_EXPECT(prompt.files == std::vector<std::string>({"defs/items.def"}) && !prompt.can_discard);
@@ -432,11 +445,13 @@ static int test_import() {
 		EditorRequest alone = request::of(EditorRequestKind::ImportFiles);
 		alone.imports = {{other, {}}};
 		session.handle(alone);
+		session.run_operations();
 		TEST_EXPECT(session.outcome().done() && !prompt.open && session.view().project.scan->find("other.txt"));
 		TEST_EXPECT(session.document_for("items.def") == held && held->dirty());
 	}
 	session.handle(request::undo());
 	session.handle(importing);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	const auto &reimported = static_cast<const CatalogRow &>(
 	        *records_of(*session.view().documents.open[0])->rows()[0]);
@@ -468,6 +483,7 @@ static int test_import() {
 	TEST_EXPECT(editor_test::write_text(dir.file("bad.pff"), "not an archive"));
 	preview.paths = {dir.file("bad.pff"), dir.file("missing.txt")};
 	session.handle(preview);
+	session.run_operations();
 	TEST_EXPECT(!session.view().dialogs.import_preview.open);
 	return 0;
 }
@@ -480,6 +496,7 @@ static int test_retail_play() {
 	TEST_EXPECT(
 			!session.view().project.play_retail && session.view().project.retail_directory.empty());
 	session.handle(request::new_project(dir.file("project"), "Retail test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	ProjectSettingsChange retail;
 	retail.play_in_install = true;
@@ -592,14 +609,17 @@ static int test_import_dependencies_setting() {
 		const SessionView &v = session.view();
 		TEST_EXPECT(v.project.import_dependencies);
 		session.handle(request::new_project(dir.file("project"), "Setting"));
+		session.run_operations();
 		EditorRequest preview = request::of(EditorRequestKind::PreviewImport);
 		preview.paths = {art + "/a.mnu"};
 		preview.with_dependencies = v.project.import_dependencies;
 		session.handle(preview);
+		session.run_operations();
 		TEST_EXPECT(v.dialogs.import_preview.open && v.dialogs.import_preview.with_dependencies && v.dialogs.import_preview.plan->rows.size() == 2);
 		const uint64_t before = v.events.next_seq() - 1;
 		EditorRequest off = request::of(EditorRequestKind::SetImportDependencies);
 		session.handle(off);
+		session.run_operations();
 		TEST_EXPECT(session.outcome().done() && !v.project.import_dependencies &&
 				!v.dialogs.import_preview.with_dependencies);
 		// Planned again: one ImportPlanned event, the dialog's cue to take the new plan's checks.
@@ -617,6 +637,7 @@ static int test_import_dependencies_setting() {
 	EditorRequest on = request::of(EditorRequestKind::SetImportDependencies);
 	on.with_dependencies = true;
 	later.handle(on);
+	later.run_operations();
 	TEST_EXPECT(
 			later.view().project.import_dependencies && !later.view().dialogs.import_preview.open);
 	Preferences stored;
@@ -636,6 +657,7 @@ static int test_outcomes_and_refusals() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Outcomes"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(session.outcome().done() && session.outcome().findings.empty());
 	const SessionView &v = session.view();
@@ -645,10 +667,12 @@ static int test_outcomes_and_refusals() {
 	// refuses, and the finding outlives the refresh that follows.
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_text(root + "/logo2.tga", "late"));
-	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
-	TEST_EXPECT(!session.outcome().done() && !session.outcome().unsaved_prompt);
-	TEST_EXPECT(has_code(session.outcome().findings, "rename.exists"));
+	// The request is done (its commit started), and what the commit came to is its operation's.
+	const ActionOutcome renamed = editor_test::handle_to_end(session, request::rename_asset("logo.tga", "logo2.tga"));
+	TEST_EXPECT(!renamed.done() && !renamed.unsaved_prompt);
+	TEST_EXPECT(has_code(renamed.findings, "rename.exists"));
 	TEST_EXPECT(has_code(v.findings.diagnostics, "rename.exists"));
 	TEST_EXPECT(fs::exists(root + "/logo.tga"));
 	std::string text, error;
@@ -659,6 +683,7 @@ static int test_outcomes_and_refusals() {
 	// rename once passed and the scan then held asset.name.too_long against the build.
 	TEST_EXPECT(editor_test::write_text(root + "/notes/readme.docx", "notes"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(
 			request::rename_asset("notes/readme.docx", "readme_notes.docx"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "rename.name"));
@@ -667,9 +692,11 @@ static int test_outcomes_and_refusals() {
 	// The name the rename refuses is the one the scan refuses.
 	TEST_EXPECT(editor_test::write_text(root + "/notes/readme_notes.docx", "notes"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.too_long"));
 	fs::remove_all(root + "/notes");
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "asset.name.too_long"));
 
 	// A table open with unsaved changes: the rename waits on the unsaved prompt (its edits
@@ -688,6 +715,7 @@ static int test_outcomes_and_refusals() {
 	session.handle(add);
 	TEST_EXPECT(table->dirty());
 	session.handle(request::rename_asset("gametext.bin", "gametxt2.bin"));
+	session.run_operations();
 	TEST_EXPECT(!session.outcome().done() && session.outcome().unsaved_prompt && session.outcome().findings.empty());
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::RenameAsset &&
 	            v.dialogs.unsaved_prompt.files == std::vector<std::string>({table->path()}) && !v.dialogs.unsaved_prompt.can_discard);
@@ -752,6 +780,7 @@ static int test_outcomes_and_refusals() {
 	if (main_menu) {
 		fs::remove(root + "/" + main_menu->relative_path);
 		session.handle(request::rescan());
+		session.run_operations();
 		session.handle(request::create_file("main.mnu"));
 		TEST_EXPECT(session.outcome().done());
 		const Document *startup = session.document_for("main.mnu");
@@ -773,6 +802,7 @@ static int test_requests_that_cannot_run() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Cannot run"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 
@@ -791,6 +821,7 @@ static int test_requests_that_cannot_run() {
 	TEST_EXPECT(v.project.requirements->required_missing == 0);
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
+	session.run_operations();
 
 	// While a build packs: refused with a warning, nothing moved or written.
 	session.handle(request::build());
@@ -825,6 +856,7 @@ static int test_requests_that_cannot_run() {
 	TEST_EXPECT(v.activity.last_build->ok);
 	// Once it is done the same requests run.
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/logo2.tga"));
 
 	// An edit, an undo or a redo on a file that is not open.
@@ -861,11 +893,13 @@ static int test_rename_keeps_the_active_document() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Rename active"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
+	session.run_operations();
 
 	// The startup menu names logo.tga, saved.
 	session.handle(request::open_document("main.mnu"));
@@ -894,10 +928,12 @@ static int test_rename_keeps_the_active_document() {
 
 	// The rename reloads main.mnu: the catalog stays active with its selection.
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
 	// An open file that is not active, renamed: the catalog still is.
 	session.handle(request::rename_asset("extra.mnu", "extra2.mnu"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
 	const Document *renamed = session.document_for("extra2.mnu");
@@ -907,6 +943,7 @@ static int test_rename_keeps_the_active_document() {
 	if (!renamed) return 1;
 	session.handle(request::open_document(renamed->path()));
 	session.handle(request::rename_asset("extra2.mnu", "extra3.mnu"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	const Document *moved = session.document_for("extra3.mnu");
 	TEST_EXPECT(moved && v.documents.active == moved->path() && v.documents.selection.row && v.documents.selection == first_row(moved));
@@ -920,6 +957,7 @@ static int test_rename_keeps_the_active_document() {
 	session.handle(select_exit);
 	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == exit);
 	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	const Document *reread = session.document_for("main.mnu");
 	TEST_EXPECT(reread && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(reread) &&
@@ -936,6 +974,7 @@ static int test_preview_target() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Preview"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
@@ -1006,6 +1045,7 @@ static int test_validation_cost() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Validation"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const ValidationStats &stats = session.validation_stats();
@@ -1128,6 +1168,7 @@ static int test_validation_cost() {
 	// A UTF-16 byte-order mark and half a code unit: a menu that cannot be decoded.
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 1 &&
 			stats.files_reused == editable - 1);
 	TEST_EXPECT(session.document_for("items.def") == items); // open and unchanged: kept as it is
@@ -1137,6 +1178,7 @@ static int test_validation_cost() {
 	const size_t compositions = session.problems_compositions();
 	const uint64_t findings = v.revisions.of(ViewConcern::Findings);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == editable);
 	TEST_EXPECT(session.problems_compositions() == compositions &&
@@ -1144,6 +1186,7 @@ static int test_validation_cost() {
 	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) != nullptr);
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 0 &&
 			stats.files_reused == editable - 1);
 	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) == nullptr);
@@ -1154,6 +1197,7 @@ static int test_validation_cost() {
 	const fs::path weapon_path = fs::path(root) / weapons->relative_path;
 	fs::last_write_time(weapon_path, fs::last_write_time(weapon_path) + std::chrono::hours(1));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 &&
 			stats.files_reused == editable - 1);
 
@@ -1209,6 +1253,7 @@ static int test_validation_cost() {
 	// prompt, which lists the menu.
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(menu));
 	Document *menu_document = session.document_for(menu);
 	NodeAddress exit;
@@ -1220,6 +1265,7 @@ static int test_validation_cost() {
 			menu_document->path(), menu_test::image_edits(*menu_document, exit, "logo.tga"));
 	session.handle(image);
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
+	session.run_operations();
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.files == std::vector<std::string>({menu}));
 	TEST_EXPECT(fs::exists(root + "/logo.tga") && !fs::exists(root + "/logo2.tga"));
 	session.poll();
@@ -1250,6 +1296,7 @@ struct SaveProject {
 	explicit SaveProject(const char *name) : dir(name), session(platform, preferences) {}
 	bool open() {
 		session.handle(request::new_project(dir.file("project"), "Saves"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		root = v.project.root;
@@ -1262,6 +1309,7 @@ struct SaveProject {
 		                             "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"))
 			return false;
 		session.handle(request::rescan());
+		session.run_operations();
 		session.handle(request::open_document(items_path));
 		session.handle(request::open_document(strings_path));
 		session.handle(request::open_document(items_path));
@@ -1360,6 +1408,7 @@ static int test_rewrite_closed_file() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Rewrite"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *entry = v.project.scan->find("items.def");
@@ -1369,6 +1418,7 @@ static int test_rewrite_closed_file() {
 	const std::string file = v.project.root + "/" + items;
 	TEST_EXPECT(editor_test::write_text(file, "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input") &&
 			!session.document_for(items));
 	session.handle(request::save(items));
@@ -1393,6 +1443,7 @@ static int test_rewrite_closed_file() {
 	const std::string crash = v.project.root + "/menus/crash.mnu";
 	TEST_EXPECT(editor_test::write_text(crash, crash_text));
 	session.handle(request::rescan());
+	session.run_operations();
 	ProblemFix rewrite;
 	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !find_fix(v, "menu.ignored_input", "Rewrite crash.mnu", rewrite));
 	session.handle(request::save("menus/crash.mnu"));
@@ -1580,6 +1631,7 @@ static int test_prompt_belongs_to_its_project() {
 	Diagnostic error;
 	TEST_EXPECT(::opennova::editor::create_project(other, "Other", kDefaultTargetGame, created, error));
 	session.handle(request::open_project(other));
+	session.run_operations();
 	TEST_EXPECT(v.project.open && v.project.root == other && !v.dialogs.unsaved_prompt.open);
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
 	session.handle(save);
@@ -1649,6 +1701,7 @@ static int test_boot_findings() {
 	const SessionView &v = session.view();
 	const std::string first = dir.file("first");
 	session.handle(request::new_project(first, "First"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string runtime = dir.file("runtime/opennova.exe");
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
@@ -1684,7 +1737,8 @@ static int test_boot_findings() {
 	TEST_EXPECT(items->dirty() && count_code(v.findings.diagnostics, "play.boot_missing") == 2);
 	session.handle(request::undo(items->path()));
 	TEST_EXPECT(!items->dirty() && count_code(v.findings.diagnostics, "play.boot_missing") == 2);
-	session.handle(request::rescan()); // reads the clean table again: `items` is gone
+	session.handle(request::rescan());
+	session.run_operations(); // reads the clean table again: `items` is gone
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 2);
 	session.handle(request::build());
 	session.run_operations();
@@ -1699,12 +1753,14 @@ static int test_boot_findings() {
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.empty());
 	session.handle(request::new_project(dir.file("second"), "Second"));
+	session.run_operations();
 	lines += boot_line("vmacros.bin", "- late");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.empty() &&
 			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	session.handle(request::open_project(first));
+	session.run_operations();
 	lines += boot_line("gameerr.bin", "- late");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
@@ -1738,6 +1794,7 @@ static int test_optional_rows() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Optional"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project.requirements->required_missing == 0 &&
@@ -1770,6 +1827,7 @@ static int test_create_missing_roles() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Roles"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	const int total = v.project.requirements->required_total;
@@ -1835,6 +1893,7 @@ static int test_import_fix_plans_dependencies() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Import fix"));
+	session.run_operations();
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
@@ -1843,6 +1902,7 @@ static int test_import_fix_plans_dependencies() {
 	TEST_EXPECT(fix.request.kind == EditorRequestKind::PreviewInstallImport && fix.request.names == std::vector<std::string>({"main.mnu"}) &&
 	            fix.request.with_dependencies && fix.detail.find("with the files it needs") != std::string::npos);
 	session.handle(fix.request);
+	session.run_operations();
 	const DialogsView::ImportPreview &shown = v.dialogs.import_preview;
 	TEST_EXPECT(session.outcome().done() && shown.open && shown.with_dependencies && shown.roots.size() == 1);
 	TEST_EXPECT(shown.plan->rows.size() == 3 && shown.plan->rows[0].name == "main.mnu" &&
@@ -1863,6 +1923,7 @@ static int test_import_fix_plans_dependencies() {
 	session.handle(request::build());
 	TEST_EXPECT(session.view().activity.operation.running());
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "operation.busy") && shown.open);
 	TEST_EXPECT(!v.project.scan->find("main.mnu") && !fs::exists(root + "/menus/main.mnu"));
 	session.run_operations();
@@ -1870,6 +1931,7 @@ static int test_import_fix_plans_dependencies() {
 	// ahead, and the edits stay.
 	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("items.def"));
 	const Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr);
@@ -1881,6 +1943,7 @@ static int test_import_fix_plans_dependencies() {
 	session.handle(edit);
 	TEST_EXPECT(session.documents_dirty());
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && !shown.open && !v.dialogs.unsaved_prompt.open);
 	TEST_EXPECT(session.document_for("items.def") == items && items->dirty());
 	for (const char *name : {"main.mnu", "retail.fnt", "retail.tga"}) TEST_EXPECT(v.project.scan->find(name));
@@ -1911,17 +1974,21 @@ static int test_fixes_apply() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Fixes"));
+	session.run_operations();
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	TEST_EXPECT(editor_test::write_bytes(root + "/strings/spare.bin", table));
 	session.handle(request::rescan());
+	session.run_operations();
 	ProblemFix fix;
 	TEST_EXPECT(find_fix(v, "requirement.missing", "Create main.mnu", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("main.mnu") && !finding_about(v.findings.diagnostics, "requirement.missing", "main.mnu"));
 	TEST_EXPECT(find_fix(v, "requirement.missing", "Import gametext.bin from the game data...", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open &&
 			v.dialogs.import_preview.roots.size() == 1);
 	TEST_EXPECT(v.dialogs.import_preview.choices.empty() &&
@@ -1932,11 +1999,13 @@ static int test_fixes_apply() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = v.dialogs.import_preview.roots;
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && !v.dialogs.import_preview.open);
 	TEST_EXPECT(v.project.scan->find("gametext.bin") && !finding_about(v.findings.diagnostics, "requirement.missing", "gametext.bin"));
 	TEST_EXPECT(find_fix(v, "requirement.missing", "Use spare.bin as keyhelp.bin", fix));
 	TEST_EXPECT(fix.detail == "Renames spare.bin to keyhelp.bin; nothing refers to it. It cannot be undone with Undo.");
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("keyhelp.bin") && !v.project.scan->find("spare.bin"));
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin"));
 	// The rest made; then the item table with a line the game ignores, closed: Rewrite drops it.
@@ -1948,8 +2017,10 @@ static int test_fixes_apply() {
 	const std::string items_file = root + "/" + items->relative_path;
 	TEST_EXPECT(editor_test::write_text(items_file, "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(find_fix(v, "catalog.ignored_input", "Rewrite items.def", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	std::string text, io_error;
 	TEST_EXPECT(
 			session.outcome().done() && !has_code(v.findings.diagnostics, "catalog.ignored_input"));
@@ -1968,6 +2039,7 @@ static int test_fixes_apply() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "reference.missing"));
 	TEST_EXPECT(find_fix(v, "reference.missing", "Create Custom.fnt", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("Custom.fnt") && v.project.scan->find("Custom.fnt")->relative_path == "fonts/Custom.fnt");
 	TEST_EXPECT(!session.document_for("Custom.fnt") && v.documents.active == menu->path());
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "reference.missing"));
@@ -1982,9 +2054,11 @@ static int test_fixes_apply() {
 	session.handle(request::save_all()); // an import waits for the edits to be saved
 	TEST_EXPECT(find_fix(v, "reference.missing", "Import splash.png from the game data...", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open && v.dialogs.import_preview.roots.size() == 1);
 	import.imports = v.dialogs.import_preview.roots;
 	session.handle(import);
+	session.run_operations();
 	const AssetEntry *copied = v.project.scan->find("splash.png");
 	TEST_EXPECT(session.outcome().done() && copied && copied->kind == AssetKind::Texture);
 	TEST_EXPECT(copied && !fs::exists(root + "/" + copied->relative_path + kImportSidecarSuffix));
@@ -1999,6 +2073,7 @@ static int test_fixes_apply() {
 	EditorRequest loose = request::of(EditorRequestKind::ImportFiles);
 	loose.imports = {{authored, {}}};
 	session.handle(loose);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.imports->size() == 1 && (*v.project.imports)[0].outputs.size() == 1);
 	if (v.project.imports->size() != 1 || (*v.project.imports)[0].outputs.size() != 1) return 1;
 	const std::string source = root + "/" + (*v.project.imports)[0].source;
@@ -2008,10 +2083,12 @@ static int test_fixes_apply() {
 	TEST_EXPECT(editor_test::write_text(source, "no longer a png"));
 	fs::remove(output);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "import.output_missing") && !fs::exists(output));
 	TEST_EXPECT(editor_test::write_bytes(source, good));
 	TEST_EXPECT(find_fix(v, "import.output_missing", "Import badge.png again", fix));
 	session.handle(fix.request);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && fs::is_regular_file(output) && !has_code(v.findings.diagnostics, "import.output_missing"));
 	return 0;
 }
@@ -2051,6 +2128,7 @@ static int test_project_settings() {
 	            v.project.settings_result.failures[0].code == "project.none" && v.project.retail_directory == install);
 	TEST_EXPECT(!session.outcome().done());
 	session.handle(request::new_project(dir.file("project"), "Armory"));
+	session.run_operations();
 	const std::string root = v.project.root;
 	ProjectDocument on_disk;
 	Diagnostic error;
@@ -2184,11 +2262,13 @@ static int test_menu_first_screen() {
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection == title);
 	std::string text, io_error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	menu = session.document_for(menu_path);
 	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(menu));
 	return 0;
@@ -2228,6 +2308,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->can_undo() && !items->dirty());
 	TEST_EXPECT(session.document_for(project.strings_path) == project.strings);
@@ -2245,14 +2326,17 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(read_file_bytes(project.root + "/" + menu_path, menu_bytes, error));
 	TEST_EXPECT(editor_test::write_bytes(project.root + "/" + menu_path, {0xFF, 0xFE, 0x41}));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == reread);
 	const Diagnostic *stale = finding_in(v.findings.diagnostics, "document.stale", menu_path);
 	TEST_EXPECT(stale && stale->severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(output_has(v, "Kept " + menu_path));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.stale") == 1 && session.document_for(menu_path) == reread);
 	TEST_EXPECT(editor_test::write_bytes(project.root + "/" + menu_path, menu_bytes));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.document_for(menu_path) == reread && !has_code(v.findings.diagnostics, "document.stale"));
 
 	// Unsaved edits over a file that changed: kept, with a warning and its Reload fix.
@@ -2262,6 +2346,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(editor_test::write_text(project.root + "/" + project.items_path,
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 50\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->dirty());
 	const Diagnostic *conflict =
 			finding_in(v.findings.diagnostics, "document.conflict", project.items_path);
@@ -2302,6 +2387,7 @@ static int test_build_findings_stay() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Build rows"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const size_t missing = count_code(v.findings.diagnostics, "requirement.missing");
 	TEST_EXPECT(missing > 0);
@@ -2311,6 +2397,7 @@ static int test_build_findings_stay() {
 			count_code(v.findings.diagnostics, "build.blocked") == 1);
 	TEST_EXPECT(count_code(v.findings.diagnostics, "requirement.missing") == missing);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && count_code(v.findings.diagnostics, "requirement.missing") == missing);
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && !has_code(v.findings.diagnostics, "requirement.missing"));
@@ -2328,6 +2415,7 @@ static int test_build_findings_stay() {
 	const std::string items_path = items_entry->relative_path;
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/" + items_path, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(items_path));
 	const Document *items = session.document_for(items_path);
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
@@ -2358,12 +2446,15 @@ static int test_build_findings_stay() {
 	// cancels the running operation), and nothing of it reaches the new project: no build, none
 	// of its rows.
 	session.handle(request::new_project(dir.file("other"), "Other"));
+	session.run_operations();
 	session.handle(request::build());
 	TEST_EXPECT(session.view().activity.operation.running());
 	session.handle(request::new_project(dir.file("third"), "Third"));
+	session.run_operations();
 	TEST_EXPECT(v.project.open && v.project.document->title == "Third" && !session.view().activity.operation.running() && !v.activity.has_build);
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "build.blocked"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "build.blocked"));
 	return 0;
 }
@@ -2399,6 +2490,7 @@ static int test_view_revisions() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Revisions"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const ValidationStats &stats = session.validation_stats();
@@ -2469,13 +2561,15 @@ static int test_view_revisions() {
 			"begin \"Crate\"\nid 100300\ntype building\nhp 10\ngraphic crate\nend\n";
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/defs/items.def", crate_def));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(finding_about(v.findings.diagnostics, "reference.missing", "crate") != nullptr);
 
-	// A Rescan that finds the files as they were: Files alone.
+	// A Rescan that finds the files as they were: Files, and the Operation it ran as (S13 A3).
 	{
 		const ViewRevisions before = v.revisions;
 		session.handle(request::rescan());
-		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Files}));
+		session.run_operations();
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Files, ViewConcern::Operation}));
 	}
 
 	// Opening a document: which are open, and which is active, both move.
@@ -2582,10 +2676,12 @@ static int test_import_guard_past_the_cap() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Cap"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("items.def"));
 	const Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
@@ -2618,6 +2714,7 @@ static int test_import_guard_past_the_cap() {
 	import.replace = true;
 	for (const std::string &name : names) import.imports.push_back({archive, name});
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.action == EditorRequestKind::ImportFiles &&
 	            v.dialogs.unsaved_prompt.files == std::vector<std::string>({items->path()}));
 	std::string text, error;
@@ -2647,6 +2744,7 @@ static int test_play_then_close() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Play close"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string runtime = dir.file("runtime/opennova.exe");
@@ -2683,6 +2781,7 @@ static int test_play_then_close() {
 
 	// CancelOperation stops a build the same way; with nothing running it is refused.
 	session.handle(request::open_project(dir.file("project")));
+	session.run_operations();
 	session.handle(request::build());
 	TEST_EXPECT(v.activity.operation.running());
 	session.poll();
@@ -2719,6 +2818,7 @@ static int test_play_leases() {
 		MemoryPreferencesStore preferences;
 		ProjectSession session(platform, preferences);
 		session.handle(request::new_project(project, "Leases"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		session.set_launcher_source(editor_test::fixed_launcher(launcher));
 		session.handle(request::play());
@@ -2761,6 +2861,7 @@ static int test_play_leases() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::open_project(project));
+	session.run_operations();
 	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project.open && v.activity.play_state == PlayState::Stopped);
@@ -2817,6 +2918,7 @@ static int test_output_cursor() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Output"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string runtime = dir.file("runtime/opennova.exe");
@@ -2880,12 +2982,14 @@ static int test_save_picks_like_the_rest() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Duplicates"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string ignored = "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n";
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/defs/items.def", ignored));
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/extra/items.def", ignored));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.duplicate"));
 	const uint64_t before = v.events.next_seq() - 1;
 	session.handle(request::show_in_files("items.def"));
@@ -2918,6 +3022,7 @@ static int test_handle_entered_once() {
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(request::new_project(dir.file("project"), "Entries"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("menu_style.mns"));
 	session.handle(request::open_document("main.mnu"));
@@ -2934,6 +3039,7 @@ static int test_handle_entered_once() {
 			variable = symbol;
 	TEST_EXPECT(variable);
 	session.handle(request::rename_symbol(variable->file, variable->locator, variable->field, "ENTRIES_RENAMED"));
+	session.run_operations();
 	TEST_EXPECT(session.handle_entries() == before + 1 && session.outcome().done());
 	TEST_EXPECT(session.document_for("main.mnu")->serialize().text.find("%ENTRIES_RENAMED%") != std::string::npos);
 	before = session.handle_entries();
@@ -2943,6 +3049,7 @@ static int test_handle_entered_once() {
 	session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	TEST_EXPECT(session.handle_entries() == before + 1 && session.document_for("extra.mnu"));
 	session.handle(request::rename_asset(session.document_for("extra.mnu")->path(), "renamed.mnu"));
+	session.run_operations();
 	TEST_EXPECT(session.handle_entries() == before + 2 && session.outcome().done());
 	TEST_EXPECT(!session.document_for("extra.mnu") && session.document_for("renamed.mnu") &&
 	            v.documents.active == session.document_for("renamed.mnu")->path());
@@ -2991,6 +3098,7 @@ static int test_handle_entered_once() {
 	import.imports = list_import_sources({loose}, diagnostics);
 	before = session.handle_entries();
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(session.handle_entries() == before + 1 && session.outcome().done() && v.project.scan->find("notes.txt"));
 	return 0;
 }
@@ -3005,6 +3113,7 @@ static int test_mcp_port_allocated_at_spawn() {
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(request::new_project(dir.file("project"), "Ports"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string runtime = dir.file("runtime/opennova.exe");
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
@@ -3036,6 +3145,7 @@ static int test_mcp_port_allocated_at_spawn() {
 	// A Play whose build is cancelled asks for no port.
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/notes.txt", "a new file: the next build packs again"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::play());
 	TEST_EXPECT(v.activity.operation.running());
 	session.handle(request::cancel_operation());
@@ -3060,6 +3170,7 @@ static int test_play_launches_one_answer() {
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(request::new_project(dir.file("project"), "Launcher"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string first = dir.file("runtime/first.exe"), second = dir.file("runtime/second.exe");
 	TEST_EXPECT(editor_test::write_text(first, "MZ") && editor_test::write_text(second, "MZ"));
@@ -3103,6 +3214,7 @@ static int test_reentry_keeps_the_outer_outcome() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Reentry"));
+	session.run_operations();
 	platform.session = &session;
 	const uint64_t before = session.handle_entries();
 	session.handle(request::play());
@@ -3128,6 +3240,7 @@ static int test_view_events() {
 	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	session.handle(request::new_project(dir.file("project"), "Events"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	// The events the last requests posted: every one after `seen`, which moves past them.
 	uint64_t seen = v.events.next_seq() - 1;
@@ -3221,6 +3334,7 @@ static int test_view_events() {
 	TEST_EXPECT(editor_test::write_text(loose, "notes"));
 	std::vector<Diagnostic> diagnostics;
 	session.handle(request::plan_import(list_import_sources({ loose }, diagnostics), false));
+	session.run_operations();
 	events = posted();
 	TEST_EXPECT(events.size() == 1 && events[0].kind == ViewEventKind::ImportPlanned &&
 			!events[0].flag && v.dialogs.import_preview.open);
@@ -3286,6 +3400,7 @@ static int test_rows_validate_first() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Validates"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");

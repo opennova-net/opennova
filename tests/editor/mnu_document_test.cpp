@@ -127,6 +127,7 @@ int structure_and_save() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "John Smith"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
@@ -230,6 +231,7 @@ int validation() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Menus"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
@@ -310,6 +312,7 @@ int windows_at_depth() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Depth"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
@@ -690,6 +693,7 @@ int copy_and_paste() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Clip"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
@@ -764,6 +768,7 @@ int duplicate_selection() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Dup"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
@@ -1226,6 +1231,7 @@ int parse_notes() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Notes"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string window = "<WINDOW type=\"button\" name=\"B\" SCREENX=\"1\"><POSITION><LEFT>0</LEFT></POSITION>";
 	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/ignored.mnu"),
@@ -1243,6 +1249,7 @@ int parse_notes() {
 	                                    "name=\"A\"><POSITION><LEFT>0</LEFT></POSITION></WINDOW>" +
 	                                            window + "</WINDOW></WINDOW></SCREEN>"));
 	session.handle(request::rescan());
+	session.run_operations();
 	const SessionView &view = session.view();
 	auto finding = [&](const char *asset, const char *code) -> const Diagnostic * {
 		for (const Diagnostic &d : view.findings.diagnostics)
@@ -1307,6 +1314,7 @@ int blank_menu_edits() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Edits"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	session.handle(request::open_document("main.mnu"));
@@ -1357,6 +1365,7 @@ int blank_menu_edits() {
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
 	const std::string menu_path = view.project.root + "/" + document->path();
 	session.handle(request::rename_asset("mytext.bin", "newtext.bin"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	mnu::Document reparsed;
 	std::string message;
@@ -1379,6 +1388,7 @@ int name_is_its_own_edit() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Names"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string place = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT>"
@@ -1397,6 +1407,7 @@ int name_is_its_own_edit() {
 	                                            "</SCREEN>\r\n<SCREEN>\r\n<NAME>AWAY</NAME>\r\n" +
 	                                            window("BUTTON", "BACK", back) + "</SCREEN>\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("flow.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
 	TEST_EXPECT(menu && menu->rows().size() == 2);
@@ -1434,6 +1445,7 @@ int name_is_its_own_edit() {
 	TEST_EXPECT(text_of(*menu, home, "name") == "HOME" && !menu->can_undo());
 	// Rename everywhere: the window and the ACTION reaching it, on disk.
 	session.handle(request::rename_symbol(menu->path(), menu->locator(title), "name", "HEADLINE"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
 	NodeAddress headline, go_again;
@@ -1894,6 +1906,7 @@ int changes_since_save() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Changes"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
@@ -1955,6 +1968,7 @@ int colours_and_flags() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Colours"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));

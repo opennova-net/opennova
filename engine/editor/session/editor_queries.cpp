@@ -822,9 +822,11 @@ constexpr EditorQueryRow kRows[] = {
 			.pages("lines")
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
-			"The operation that runs (running, and while one does its id, kind, label, done and "
-			"total in its unit, cancellable, and what it reads and writes), what the last one "
-			"came to (last_operation: id, kind, end, findings) and the last build.")
+			"The operation that runs (running, and while one does its id, kind (open, refresh, "
+			"build, import_plan, import_apply, rename_apply), label, done and total in its unit, "
+			"cancellable, and what it reads and writes), what the last one came to "
+			"(last_operation: id, kind, end, findings), the validation the polls step "
+			"(validation: running, done and total files) and the last build.")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
 	Query(K::Events, "events", answer_events, kCursorParams,

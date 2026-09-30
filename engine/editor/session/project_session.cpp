@@ -173,14 +173,17 @@ uint64_t ProjectSession::handle_entries() const {
 
 // --- the poll and the operation slot -------------------------------------------------------------
 
+// The poll's order (S13 A3): the validation left due, a file at a time within the budget; the
+// running operation's steps within it; the child's state and the game's log tail; last, the
+// operation found done finishes: the view learns what it came to (a project opens, a build lands
+// and the game a Play waits on starts on it), and what it read leaves the validation due, which
+// the next poll steps.
 void ProjectSession::poll() {
 	Impl &session = *impl_;
 	session.problems.release();
-	session.problems.validate_pending();
+	session.problems.step_validation(session.core.poll_budget(), steady_clock_ms);
 	session.core.step_operation();
 	session.play.poll();
-	// Last, the operation found done finishes: the view learns what it came to (a build lands,
-	// and the game a Play waits on starts on it).
 	if (session.core.operations().done()) session.core.finish_operation();
 }
 
@@ -193,6 +196,7 @@ void ProjectSession::run_operations() {
 		impl_->core.operations().run_to_end();
 		poll();
 	}
+	impl_->problems.validate_pending();
 }
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
@@ -223,6 +227,10 @@ const ValidationStats &ProjectSession::validation_stats() const {
 
 size_t ProjectSession::problems_compositions() const {
 	return impl_->problems.compositions();
+}
+
+size_t ProjectSession::files_scanned() const {
+	return impl_->core.files_scanned();
 }
 
 std::string ProjectSession::running_build_dir() const {

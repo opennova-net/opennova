@@ -105,6 +105,7 @@ struct OpenMenu {
 
 	explicit OpenMenu(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Names"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		session.handle(request::open_document("main.mnu"));
 		menu = session.document_for("main.mnu");
@@ -196,6 +197,7 @@ static int test_asset_kind_tokens() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Kinds"));
+	session.run_operations();
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(!root.empty());
 	const std::pair<const char *, const char *> files[] = {
@@ -211,6 +213,7 @@ static int test_asset_kind_tokens() {
 	for (const auto &file : files)
 		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
 	session.handle(request::rescan());
+	session.run_operations();
 	JsonValue args = JsonValue::make_object();
 	args.set("limit", JsonValue::make_number(200.0));
 	std::string error;
@@ -824,6 +827,7 @@ static int test_settings_json() {
 				: JsonValue::make_null();
 	};
 	TEST_EXPECT(session.handle(request::new_project(dir.file("project"), "Settings")));
+	session.run_operations();
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":4,\"title\":\"Harbor\","
 	                          "\"runtime_executable\":\"C:/tools/opennova.exe\"}}",
 	                          back)
@@ -921,6 +925,16 @@ static int test_over_a_session() {
 	EditorRequest request;
 	TEST_EXPECT(request_error(("{\"kind\":\"new_project\",\"dir\":\"" + root + "\",\"title\":\"John Smith\"}").c_str(), request).empty());
 	TEST_EXPECT(session.handle(request));
+	// Opening it is an operation (S13 A3): the view holds nothing of the project until it ends, and
+	// the operation section says what runs.
+	const JsonValue opening = section(ViewSection::Operation);
+	TEST_EXPECT(!section(ViewSection::Project).get_bool("open", true) &&
+	            opening.get("operation")->get_bool("running", false) &&
+	            opening.get("operation")->get_string("kind", "") == "open" &&
+	            opening.get("operation")->get_string("unit", "") == "files" &&
+	            opening.get("operation")->get_bool("cancellable", false) &&
+	            !opening.get("validation")->get_bool("running", true));
+	session.run_operations();
 	const JsonValue project = section(ViewSection::Project);
 	TEST_EXPECT(project.get_bool("open", false) && project.get_string("title", "") == "John Smith");
 	TEST_EXPECT(project.get_string("target_game", "") == "jo" && project.get("features")->get_bool("menu", false));

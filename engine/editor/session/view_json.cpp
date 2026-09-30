@@ -339,8 +339,11 @@ constexpr ViewSectionRow kSections[] = {
 			"The selection in the active document: its primary record and every selected one "
 			"({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
-			"The operation that runs (a build: done and total in its unit, cancellable, what it "
-			"reads and writes), what the last one came to and the last build." },
+			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply or "
+			"rename_apply; done and total in its unit, what it works on, cancellable, what it reads "
+			"and writes), what the last one came to, the validation the polls step (running, the "
+			"files done of total: the problems are the last composed until it ends) and the last "
+			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
 			"the files it reported missing at boot, and what Play runs (the game install, in it or "
@@ -544,6 +547,11 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("operation", operation_status_to_json(activity.operation));
 	out.set("last_operation", operation_outcome_to_json(activity.last_operation));
+	JsonValue validation = JsonValue::make_object();
+	validation.set("running", boolean(activity.validation.running));
+	validation.set("done", json_number(double(activity.validation.done)));
+	validation.set("total", json_number(double(activity.validation.total)));
+	out.set("validation", std::move(validation));
 	JsonValue build = JsonValue::make_object();
 	build.set("has_build", boolean(activity.has_build));
 	if (activity.has_build) {

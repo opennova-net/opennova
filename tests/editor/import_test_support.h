@@ -113,6 +113,7 @@ struct Project {
 	ProjectSession session;
 	explicit Project(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Plan"));
+		session.run_operations();
 	}
 	const SessionView &view() const { return session.view(); }
 	std::string root() const { return session.view().project.root; }

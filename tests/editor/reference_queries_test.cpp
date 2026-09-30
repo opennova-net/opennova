@@ -63,6 +63,7 @@ static int test_menu_references() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Menus"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	const Document *document = session.document_for("main.mnu");
@@ -195,6 +196,7 @@ static int test_go_to_targets() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "GoTo"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string go = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
@@ -209,6 +211,7 @@ static int test_go_to_targets() {
 	        root + "/other.mnu",
 	        screen("OTHER", window("BUTTON", "JUMP", "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">AWAY</ACTION>\r\n"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("flow.mnu"));
 	Document *menu = session.document_for("flow.mnu");
 	TEST_EXPECT(menu && menu->rows().size() == 2);
@@ -289,6 +292,7 @@ static int test_find_definition() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Find"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
@@ -303,6 +307,7 @@ static int test_find_definition() {
 			style_file, text + "\r\nDEF_TEXT_FG FF00FF00\r\nTWICE 1\r\nTWICE 2\r\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(style_path));
 	Document *sheet = session.document_for(style_path);
 	TEST_EXPECT(sheet != nullptr);

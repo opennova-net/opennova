@@ -52,6 +52,7 @@ struct Project {
 	ProjectSession session;
 	explicit Project(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Rename"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 	}
 	const SessionView &view() const { return session.view(); }
@@ -69,7 +70,8 @@ struct Project {
 		buffer << in.rdbuf();
 		return buffer.str();
 	}
-	void rescan() { session.handle(request::rescan()); }
+	void rescan() { session.handle(request::rescan());
+	session.run_operations(); }
 	// The definition of a name of `kind` in `file` (by its path).
 	const GraphSymbol *defined(ReferenceKind kind, const std::string &name, const std::string &file) const {
 		for (const GraphSymbol *symbol : graph().symbols_named(kind, name))
@@ -86,10 +88,9 @@ struct Project {
 		session.handle(request(EditorRequestKind::PreviewRename, symbol, name));
 		return view().dialogs.rename_preview;
 	}
-	// The rename committed: whether it went through.
+	// The rename committed (its operation run to its end): whether it went through.
 	bool rename(const GraphSymbol &symbol, const std::string &name) {
-		session.handle(request(EditorRequestKind::RenameSymbol, symbol, name));
-		return session.outcome().done();
+		return editor_test::handle_to_end(session, request(EditorRequestKind::RenameSymbol, symbol, name)).done();
 	}
 };
 
@@ -305,8 +306,7 @@ static int test_string_key() {
 			!project.view().dialogs.unsaved_prompt.can_discard &&
 			project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{ table_path });
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
-	project.session.handle(save);
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, save).done());
 	const AssetGraph &graph = project.graph();
 	const GraphEdge *label = edge_to(graph, weapons, ReferenceKind::TextId, "WEP_RENAMED");
 	TEST_EXPECT(label && graph.resolve(*label) == ReferenceStatus::Present);
@@ -460,8 +460,7 @@ static int test_saved_use_behind_an_edit() {
 	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
 	            project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{items});
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
-	project.session.handle(save);
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, save).done());
 	TEST_EXPECT(project.read(items).find("GUN_A") == std::string::npos && project.read(items).find("GUN_C") != std::string::npos);
 	TEST_EXPECT(project.defined(ReferenceKind::Weapon, "GUN_B", weapons) && project.graph().missing().empty());
 	return 0;
@@ -549,8 +548,7 @@ static int test_item_id_sent_as_a_number() {
 	EditorRequest rename;
 	std::string error;
 	TEST_EXPECT(editor_request_from_json(json, rename, error) && rename.new_name == "100302");
-	project.session.handle(rename);
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, rename).done());
 	TEST_EXPECT(project.defined(ReferenceKind::Item, "100302", items) &&
 			project.read(items).find("100302") != std::string::npos &&
 			project.read(items).find("100300") == std::string::npos);

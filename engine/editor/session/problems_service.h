@@ -12,6 +12,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
+#include <editor/session/session_operation.h>
 
 namespace opennova::editor {
 
@@ -32,9 +33,18 @@ struct SessionView;
 // the composed rows alone: one the composition makes too is shown once, and a finding reported
 // twice is two rows. It keeps the Problems query and the fixes the query seam's problems row
 // asks for (answer, fixes), each until what it reads moves.
+//
+// A validation is stepped (S13 A3): the graph's update, then each file's own findings, a file at a
+// time (graph/project_validation.h's ProjectValidation), then the render check and the rows. The
+// poll steps the one left due within its budget (step_validation), so the first validation of a
+// large project spreads over frames while the editor draws; what cannot wait (a request from
+// outside returning validated, a flow that reads the graph, the build's gate) runs it to its end.
+// What it reads is held as it was when it started (the scan, the project, the open documents and
+// their states), and it starts again when that moved; a gesture's edits hold it until they end.
 class ProblemsService {
 public:
 	explicit ProblemsService(SessionCore &core);
+	~ProblemsService();
 	ProblemsService(const ProblemsService &) = delete;
 	ProblemsService &operator=(const ProblemsService &) = delete;
 
@@ -47,16 +57,26 @@ public:
 		validation_due_ = true;
 		for (Reported &reported : reported_) reported.kept = false; // a change after them
 	}
+	// The validation left due, or the one under way, run to its end and the rows composed.
 	void validate_pending() {
-		if (validation_due_) validate_pending_now();
+		if (validating()) validate_pending_now();
 	}
+	// The poll's validation step (S13 A3): the validation left due, or the one under way, stepped
+	// within `budget` (at least one step, none while a gesture's edits wait for it to end), its rows
+	// composed on the step that ends it.
+	void step_validation(const PollBudget &budget, const OperationClock &clock);
+	// True while a validation is due or under way: the Problems rows are the last composed.
+	bool validating() const { return validation_due_ || pass_ != nullptr; }
+	// The view's validation status (ActivityView::validation) as it stands: running while one is
+	// due or under way, the files asked of those it asks; Operation moves when it changed.
+	void show_validation();
 	// A pump holds validation until its poll (hold), which releases it (release).
 	void hold() { validation_held_ = true; }
 	void release() { validation_held_ = false; }
 	bool held() const { return validation_held_; }
 
 	// A finding a request or a poll reported: a Problems row now, and after the composed rows until
-	// the validation for a change made after it.
+	// the validation for a change made after it (one due or under way when it was reported keeps it).
 	void add_reported(const Diagnostic &d);
 
 	// The project's files as the scan lists them, the open documents standing in (set_open).
@@ -72,7 +92,7 @@ public:
 	// The last Play's own (a nonzero exit), rows until Play starts again or the project closes.
 	void set_play_findings(std::vector<Diagnostic> findings) { play_findings_ = std::move(findings); }
 	// What the open project held goes (close_project): the graph emptied under a new generation, the
-	// render check, the cache and the last validation's findings; nothing left due.
+	// render check, the cache and the last validation's findings; nothing left due or under way.
 	void clear();
 
 	const AssetGraph &graph() const { return *graph_; }
@@ -100,6 +120,9 @@ private:
 		Diagnostic finding;
 		bool kept = false;
 	};
+	// The validation under way (problems_service.cpp): what it reads, held as it started, and its
+	// cursor over the graph and the cache.
+	struct Pass;
 
 	// What the last composition read beside the graph, the files' own findings and the render
 	// check (whose refresh says whether they moved): the rows stand while these do and the rows
@@ -114,7 +137,15 @@ private:
 	};
 
 	void validate_pending_now();
+	// The validation under way (started when due or none is, and again when what it reads moved)
+	// run to its end, then the rows.
 	void compose(bool keep_reported);
+	// One step of it within `bytes`; true when it is done.
+	bool step_pass(uint64_t bytes);
+	// Whether what the pass under way reads is the view's still.
+	bool pass_current() const;
+	// The rows, from the pass that ended (its files' findings moved or not) and the render check.
+	void compose_rows(bool keep_reported);
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -136,6 +167,7 @@ private:
 	std::vector<Diagnostic> play_findings_; // the last Play's own (a nonzero exit), that project's too
 	std::vector<Reported> reported_;        // reported since the last validation
 	bool validation_due_ = false;           // an edit since the last validation
+	std::unique_ptr<Pass> pass_;            // the validation under way, stepped by the polls
 	bool validation_held_ = false;          // a pump holds validation until its poll
 	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands

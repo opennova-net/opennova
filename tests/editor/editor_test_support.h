@@ -2,8 +2,8 @@
 // Shared plumbing for the editor core tests: a throwaway project directory under the
 // system temp directory (std::filesystem::temp_directory_path, so no env read of our
 // own) that is wiped on construction and destruction, a file writer, every missing
-// required file of a session's project created, the project settings applied, and an operation
-// that holds the documents.
+// required file of a session's project created, the project settings applied, a request and the
+// operation it starts run to their end, and an operation that holds the documents.
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -53,6 +53,24 @@ inline std::vector<opennova::editor::ViewEvent> events_after(
 	for (const opennova::editor::ViewEvent &event : view.events.held())
 		if (event.seq > after && event.kind == kind) out.push_back(event);
 	return out;
+}
+
+// A request handled and what it came to with the operation it started (or joined) run to its end
+// (S13 A3: an Open, a Rescan, a Reimport, an import's plan and its write, a rename's commit, a
+// build): the request's outcome with the operation's findings after its own, done only when the
+// request was and the operation ended done (a rename's commit, an import's write or a Reimport's
+// pass may still refuse or fail once the request that started it is done).
+inline opennova::editor::ActionOutcome handle_to_end(opennova::editor::ProjectSession &session,
+		const opennova::editor::EditorRequest &request) {
+	session.handle(request);
+	opennova::editor::ActionOutcome outcome = session.outcome();
+	session.run_operations();
+	const opennova::editor::OperationOutcome &ended = session.view().activity.last_operation;
+	if (outcome.operation != 0 && ended.id == outcome.operation) {
+		outcome.findings.insert(outcome.findings.end(), ended.findings.begin(), ended.findings.end());
+		if (ended.end != opennova::editor::OperationEnd::Done) outcome.refused = true;
+	}
+	return outcome;
 }
 
 // Create all missing, as the editor asks for it: the roles of every Required row the

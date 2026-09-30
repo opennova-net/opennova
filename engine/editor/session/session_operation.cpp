@@ -14,16 +14,21 @@ constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
 
 // What each operation reads and writes (every one writes the slot: one runs at a time), and the
 // requests it serves or gives way to while it runs. A build reads the project's files and writes
-// only its own output, so what reads the files (an import's preview, a rename's plan, an open)
-// goes on beside it and what writes them waits.
+// only its own output, so what reads the files and starts no operation (a rename's plan, an open)
+// goes on beside it and what writes them waits. Opening a project holds everything: a request that
+// reads or writes anything of it waits, and a project switch or Quit cancels it. A refresh, an
+// import's write and a rename's commit read and write the files and the open documents (the import
+// pass writes the imported outputs, a finish reads documents again): an edit waits. An import's plan
+// reads the files: an edit goes on, a save waits, and a new plan (or the dialog's Cancel) takes its
+// place.
 constexpr OperationKindRow kOperationKindRows[] = {
 	{OperationKind::Open, "open", kHoldsAll, kHoldsAll | HoldsSlot, {}, {}, "Opening", "opening the project"},
 	{OperationKind::Refresh, "refresh", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {}, "Refreshing",
 	 "the refresh"},
 	{OperationKind::Build, "build", HoldsFiles, HoldsSlot, {K::Build, K::Play}, {}, "Building", "the build"},
 	{OperationKind::ImportPlan, "import_plan", HoldsFiles, HoldsSlot, {},
-	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewInstallImport}, "Planning the import",
-	 "the import's plan"},
+	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewInstallImport, K::CancelImport},
+	 "Planning the import", "the import's plan"},
 	{OperationKind::ImportApply, "import_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Importing", "the import"},
 	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},

@@ -5,9 +5,11 @@
 
 #include <editor/graph/rename_transaction.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/session_operation.h>
 
 namespace opennova::editor {
 
+class RenameOperation;
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;
@@ -17,7 +19,9 @@ struct SessionView;
 // kind to the name the engine demands, and a defined name renamed everywhere, previewed (every
 // site before and after, the refusals) and committed. The open documents a commit rewrites are
 // read again, and the one the modder was in stays active, through DocumentSet. The unsaved guard
-// asks it which documents with unsaved edits a rename would rewrite or leave behind.
+// asks it which documents with unsaved edits a rename would rewrite or leave behind. A rename is
+// planned in its request and committed as an operation (S13 A3, RenameOperation: a file at a time,
+// then the one step that writes), whose finish reads again what it touched (absorb_rename).
 class RenameController {
 public:
 	explicit RenameController(SessionCore &core);
@@ -30,6 +34,10 @@ public:
 	// reported): a name's rename everywhere, or a file's (no field).
 	void preview(const EditorRequest &request);
 	void rename_symbol(const EditorRequest &request);
+	// A rename committed (RenameOperation's finish): the files it touched read again (the scan
+	// updated, or an import source's refresh taken), the open documents it rewrote read again, the
+	// one the modder was in active again, its findings and what it did said.
+	OperationOutcome absorb_rename(RenameOperation &operation);
 
 	// The documents with unsaved edits a RenameAsset, an AssignRequirement or a RenameSymbol would
 	// rewrite or leave behind (the unsaved guard's).

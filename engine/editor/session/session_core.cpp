@@ -6,17 +6,20 @@
 #include <optional>
 #include <utility>
 
+#include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_files.h>
-#include <editor/project/project_state.h>
+#include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_controller.h>
+#include <editor/session/open_operation.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/refresh_operation.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace fs = std::filesystem;
@@ -147,6 +150,7 @@ bool SessionCore::cancel_operation(bool asked) {
 
 void SessionCore::finish_operation() {
 	operations_.finish(*this);
+	problems().show_validation(); // a finish that read the files leaves their validation due
 	show_operation();
 }
 
@@ -184,9 +188,9 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title) 
 	return open_project(dir);
 }
 
-// The project in `dir` opened, read before the open one closes: one that does not open leaves the
-// open project open, its operation running; one that does closes it (close_project: refused,
-// nothing opened, when its operation cannot be cancelled).
+// The project in `dir` read before the open one closes: one that does not open leaves the open
+// project open, its operation running; one that does closes it (close_project: refused, nothing
+// opened, when its operation cannot be cancelled), and the Open reads its files as an operation.
 bool SessionCore::open_project(const std::string &dir) {
 	if (dir.empty()) return false;
 	ProjectDocument doc;
@@ -200,31 +204,51 @@ bool SessionCore::open_project(const std::string &dir) {
 		return false;
 	}
 	if (!close_project()) return false;
-	paths_ = ProjectPaths::for_root(dir);
+	const ProjectPaths paths = ProjectPaths::for_root(dir);
 	// The project's game install is its own (local.json); one that names none starts from the
 	// install last chosen in the editor. A local.json of another schema is set aside, a warning:
 	// the project opens as one with none.
+	LocalSettings local;
 	Diagnostic local_finding;
-	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_finding) ||
+	if (!open_local_settings(paths, preferences_.values().game_install, local, local_finding) ||
 			!local_finding.code.empty())
 		report(local_finding);
+	const std::string title = doc.title;
+	const uint64_t id = start_operation(std::make_unique<OpenOperation>(paths, std::move(local), std::move(doc)));
+	if (id == 0) {
+		refuse_busy(dir); // the close cancelled what ran: nothing does
+		return false;
+	}
+	outcome_.operation = id;
+	view_.activity.status = "Opening " + title + "...";
+	touch(ViewConcern::Output);
+	return true;
+}
+
+// The project an Open read made the open one, as the Open read it: its paths, its local settings
+// and its document, the recent projects and the runtime, the game install's names, then its files
+// (absorb_refresh). Output names the project; the menu bar's tooltip on what was said names its
+// folder.
+OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
+	paths_ = open.paths();
+	local_ = open.local();
 	view_.project.open = true;
 	view_.project.root = paths_.root;
-	view_.project.document = std::make_shared<const ProjectDocument>(doc);
+	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
-	imports().refresh_install_files();
-	refresh();
-	// Output names the project; the menu bar's tooltip on what was said names its folder.
-	note("Opened " + doc.title + ".");
-	view_.activity.status = "Opened " + doc.title + ".";
+	imports().set_install_files(std::move(open.install_files()));
+	absorb_refresh(open.refresh());
+	const std::string &title = view_.project.document->title;
+	note("Opened " + title + ".");
+	view_.activity.status = "Opened " + title + ".";
 	touch(ViewConcern::Project);
 	touch(ViewConcern::Operation); // no build yet
 	touch(ViewConcern::Output);
-	return true;
+	return OperationOutcome();
 }
 
 bool SessionCore::close_project() {
@@ -271,23 +295,52 @@ bool SessionCore::close_project() {
 	return true;
 }
 
-// Re-read the project's files and re-evaluate the checklist through the engine's one
-// refresh (project/project_state.h: import, scan, requirements), the same the command
-// line runs; the project findings replace the last action's.
-ImportRunResult SessionCore::refresh(bool force_import, const std::string &only) {
-	ProjectState state = refresh_project_state(paths_, *view_.project.document, force_import, only);
-	view_.project.imports =
-			std::make_shared<const std::vector<ImportedSource>>(state.imports.sources);
-	for (const ImportedSource &source : state.imports.sources)
+bool SessionCore::start_refresh(bool reimport, bool force, const std::string &only) {
+	const uint64_t id =
+			start_operation(std::make_unique<RefreshOperation>(paths_, *view_.project.document, reimport, force, only));
+	if (id == 0) {
+		refuse_busy(std::string());
+		return false;
+	}
+	outcome_.operation = id;
+	return true;
+}
+
+// The project's files as a refresh read them through the engine's one refresh
+// (project/project_refresh.h: import, scan, requirements), the same the command line runs; the
+// validation the Problems rows follow is left due.
+ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
+	ImportRunResult imports = std::move(refresh.imports());
+	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>(imports.sources);
+	for (const ImportedSource &source : imports.sources)
 		if (source.reimported) note("Imported " + source.source + " (" + std::to_string(source.outputs.size()) + " file" +
 		                            (source.outputs.size() == 1 ? "" : "s") + ")");
-	view_.project.scan = std::make_shared<const AssetScan>(std::move(state.scan));
+	files_scanned_ = refresh.files_scanned();
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(refresh.scan()));
 	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
-	view_.project.requirements =
-			std::make_shared<const RequirementReport>(std::move(state.requirements));
+	view_.project.requirements = std::make_shared<const RequirementReport>(std::move(refresh.requirements()));
 	touch(ViewConcern::Files);
-	problems().validate_documents();
-	return std::move(state.imports);
+	problems().validate_later();
+	return imports;
+}
+
+void SessionCore::refresh_now() {
+	ProjectRefresh refresh(paths_, *view_.project.document);
+	while (!refresh.step(kWholeWalkStep)) {
+	}
+	absorb_refresh(refresh);
+	problems().validate_pending();
+}
+
+void SessionCore::update_files(const std::vector<std::string> &paths) {
+	AssetScan scan = *view_.project.scan;
+	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
+	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	view_.project.requirements = std::make_shared<const RequirementReport>(
+			evaluate_requirements(*view_.project.document, *view_.project.scan));
+	touch(ViewConcern::Files);
+	problems().validate_later();
 }
 
 // The settings a request names that differ from those in effect, written: the project's
@@ -338,7 +391,13 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		Diagnostic error;
 		if (save_project_document(paths_.project_file, project, error)) {
 			view_.project.document = std::make_shared<const ProjectDocument>(project);
-			if (features_changed) refresh(); // the requirements follow the features
+			if (features_changed) {
+				// The requirements follow the features, over the files as the scan lists them.
+				view_.project.requirements = std::make_shared<const RequirementReport>(
+						evaluate_requirements(project, *view_.project.scan));
+				touch(ViewConcern::Files);
+				problems().validate_later();
+			}
 		} else {
 			failures.push_back(error);
 			project_changed = false;
@@ -410,21 +469,29 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 
 // The required files `roles` names, made from their factories. The checklist the request
 // was raised from may be older than the tree: it is evaluated again over the files as they
-// are now, so a file that has appeared since is refused (create_missing.exists), never
-// overwritten.
+// are now (a scan, the import pass's findings kept), so a file that has appeared since is
+// refused (create_missing.exists), never overwritten; that scan, the files made read into it
+// (AssetScan::update), is then the view's.
 void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	if (roles.empty()) {
 		view_.activity.status = "Nothing to create.";
 		touch(ViewConcern::Output);
 		return;
 	}
-	const RequirementReport now = evaluate_requirements(*view_.project.document, scan_project_assets(paths_, *view_.project.document));
-	const CreateMissingResult result = create_missing_requirements(paths_, *view_.project.document, now, roles);
+	const ProjectDocument &doc = *view_.project.document;
+	AssetScan now = scan_project_assets(paths_, doc);
+	now.set_import_findings(view_.project.scan->import_findings());
+	const CreateMissingResult result = create_missing_requirements(paths_, doc, evaluate_requirements(doc, now), roles);
 	for (const std::string &path : result.created) note("Created " + path);
 	for (const std::string &name : result.unavailable) {
 		note("The editor cannot create " + name + " yet: no writer exists for this kind of file.");
 	}
-	refresh();
+	now.update(paths_, doc, result.created);
+	view_.project.scan = std::make_shared<const AssetScan>(std::move(now));
+	problems().set_scan(paths_.root, *view_.project.scan, doc.target_game);
+	view_.project.requirements = std::make_shared<const RequirementReport>(evaluate_requirements(doc, *view_.project.scan));
+	touch(ViewConcern::Files);
+	problems().validate_later();
 	for (const Diagnostic &d : result.diagnostics) report(d);
 	if (result.created.empty() && result.unavailable.empty() && result.diagnostics.empty()) {
 		view_.activity.status = "Nothing to create.";
@@ -501,7 +568,7 @@ void SessionCore::start_build(bool then_play) {
 	if (then_play && play().refused()) return;
 	problems().clear_build_findings(); // the last build's rows go: this one reports anew
 	documents().reload_changed();
-	refresh();
+	refresh_now();
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.

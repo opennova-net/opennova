@@ -108,6 +108,7 @@ static int test_blank_startup() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Render Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.render_check);
@@ -191,6 +192,7 @@ static int test_render_again_only_when_moved() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Again"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck &check = *view.findings.render_check;
@@ -204,6 +206,7 @@ static int test_render_again_only_when_moved() {
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(check.rendered() == 0 && session.document_for("main.mnu") == menu);
 	// A validation where nothing a menu reads moved (the project's features refresh the
 	// scan): nothing renders.
@@ -239,12 +242,14 @@ static int test_render_again_only_when_moved() {
 			"<STRING>%SEMIOPAQUE_BLACK%</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
 	size_t passes = stats.passes;
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 2 &&
 			check.document("menus/trim.mnu") != nullptr &&
 			check.document("menus/label.mnu") != nullptr);
 	TEST_EXPECT(!unused("SEMIOPAQUE_BLACK"));
 	passes = stats.passes;
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 0);
 	// A stylesheet edit that changes no variable's value (its comment) renders nothing; a
 	// variable changed renders again the menus naming it, and those alone.
@@ -490,6 +495,7 @@ static int test_notes_alone_recompose() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Notes"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck &check = *view.findings.render_check;
@@ -515,6 +521,7 @@ static int test_notes_alone_recompose() {
 			"</POSITION>\r\n<FONT><NAME>broken.fnt</NAME></FONT>\r\n<STRING>Hello</STRING>\r\n"
 			"</WINDOW>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	const auto unreadable = [&view] {
 		size_t found = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
@@ -528,6 +535,7 @@ static int test_notes_alone_recompose() {
 	const uint64_t graph = view.findings.graph->generation();
 	TEST_EXPECT(editor_test::write_bytes(broken, readable));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(
 			session.validation_stats().files_validated == 0 && view.findings.graph->generation() == graph);
 	TEST_EXPECT(check.rendered() == 1 && unreadable() == 0);

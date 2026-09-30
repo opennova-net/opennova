@@ -431,6 +431,7 @@ static int test_validate_matches_the_editor() {
 	opennova::editor::MemoryPreferencesStore preferences;
 	opennova::editor::ProjectSession session(platform, preferences);
 	session.handle(opennova::editor::request::open_project(root));
+	session.run_operations();
 	std::vector<std::string> shown;
 	bool render_note = false;
 	for (const opennova::editor::Diagnostic &d : session.view().findings.diagnostics) {
@@ -477,6 +478,7 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(root));
+		session.run_operations();
 		TEST_EXPECT(session.project_open() && session.view().project.retail_directory.empty());
 		opennova::editor::EditorRequest apply =
 		        opennova::editor::request::of(opennova::editor::EditorRequestKind::ApplyProjectSettings);
@@ -504,6 +506,7 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(other));
+		session.run_operations();
 		TEST_EXPECT(session.project_open() && session.view().project.retail_directory == install);
 	}
 	TEST_EXPECT(run_capture(capture, {"status", other}, text) == 0 && has("game install: " + install + "\n"));
@@ -534,6 +537,7 @@ static int test_older_local_settings() {
 	opennova::editor::MemoryPreferencesStore preferences;
 	opennova::editor::ProjectSession session(platform, preferences);
 	session.handle(opennova::editor::request::open_project(root));
+	session.run_operations();
 	size_t warnings = 0;
 	for (const opennova::editor::Diagnostic &d : session.outcome().findings)
 		warnings += d.code == "local_settings.schema_version.unsupported" &&

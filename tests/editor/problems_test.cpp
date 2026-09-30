@@ -252,6 +252,7 @@ static int test_fixes() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Fixes"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	blank.logical_name = "spare.bin";
@@ -261,6 +262,7 @@ static int test_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/art/splash.tga", "tga") && editor_test::write_text(root + "/art/splash.pcx", "pcx"));
 	TEST_EXPECT(editor_test::write_text(root + "/foo.bin", "raw bytes")); // a .bin that is no string table
 	session.handle(request::rescan());
+	session.run_operations();
 
 	// A required file with a factory, and no game data: Create it (placeholder content, with
 	// the others in a Fix all), or Use a string table of the project as it (never in bulk),
@@ -668,6 +670,7 @@ static int test_placeholders() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Placeholders"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	// armory.3di names armry.tga on a diffuse row (type 0); c.mnu an image, fx.ptl a graphic.
@@ -684,6 +687,7 @@ static int test_placeholders() {
 	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n"
 	                                                      "\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code == "reference.missing" && d.reference == kind && d.target == target) return &d;
@@ -837,6 +841,7 @@ static int test_locations_and_fixes() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Places"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
@@ -884,6 +889,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/art/twin.tga", "tga") && editor_test::write_text(root + "/other/twin.tga", "tga"));
 	TEST_EXPECT(editor_test::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
 	session.handle(request::rescan());
+	session.run_operations();
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code == code && d.asset == asset) return &d;
@@ -992,6 +998,7 @@ static int test_locations_and_fixes() {
 			plan_rename(paths, *v.project.scan, *v.findings.graph, twin, "twin2.tga");
 	TEST_EXPECT(second_plan.ok() && second_plan.path == twin && second_plan.sites.empty());
 	session.handle(request::rename_asset(twin, "twin2.tga"));
+	session.run_operations();
 	const std::string moved = (fs::path(twin).parent_path() / "twin2.tga").generic_string();
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/" + moved) && !fs::exists(root + "/" + twin));
 	TEST_EXPECT(fs::exists(root + "/art/twin.tga") &&
@@ -1044,6 +1051,7 @@ static int test_locations_and_fixes() {
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
 	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
 	session.handle(request::rescan());
+	session.run_operations();
 	bool any = false;
 	v.findings.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
 		any = any ||

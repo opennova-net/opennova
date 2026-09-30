@@ -2,34 +2,21 @@
 
 #include <algorithm>
 #include <cstring>
-#include <filesystem>
 #include <numeric>
-#include <system_error>
+#include <set>
+#include <utility>
 
-#include <base/io/file_time.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
-#include <editor/assets/asset_type_registry.h>
-#include <editor/import/import_run.h>
-#include <editor/import/sidecar.h>
+#include <editor/assets/project_scan.h>
+#include <editor/import/importer.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
-
-namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
 namespace {
-
-bool same_path(const fs::path &a, const fs::path &b) {
-	std::error_code ec;
-	const fs::path ca = fs::weakly_canonical(a, ec);
-	if (ec) return false;
-	const fs::path cb = fs::weakly_canonical(b, ec);
-	if (ec) return false;
-	return ca == cb;
-}
 
 // The entries' order: by key, then by path.
 bool entry_before(const AssetEntry &a, const AssetEntry &b) {
@@ -56,6 +43,47 @@ void stale_index(size_t entries, size_t indexed) {
 			"AssetScan: %zu entries, %zu indexed: its entries changed after index(), which a scan "
 			"made by hand calls again; looked through linearly",
 			entries, indexed);
+}
+
+// The findings of the names, over the indexed entries in their order: the archive's name rules
+// bind only a file the build packs (check_file_name's rule: a loose kind, a video, a music bank, a
+// config, is copied beside the archives under any name); two files of one name; a kind the game
+// does not use.
+void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnostic> &out) {
+	for (size_t i = 0; i < entries.size(); ++i) {
+		const AssetEntry &asset = entries[i];
+		const bool packed = archive_name_limit_binds(asset.kind);
+		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
+			out.push_back(make_diagnostic(
+			        DiagnosticSeverity::Error, "asset.name.too_long",
+			        "The file name " + asset.logical_name + " is longer than " +
+			                std::to_string(pff::PFF_NAME_SIZE) +
+			                " characters; the game cannot store it in an archive.",
+			        asset.relative_path));
+		} else if (packed && asset.key.empty()) {
+			out.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
+			                              "The file name is blank once normalized.", asset.relative_path));
+		}
+		if (i > 0 && entries[i - 1].key == asset.key) {
+			out.push_back(make_diagnostic(
+			        DiagnosticSeverity::Error, "asset.name.duplicate",
+			        "Two files share the name " + asset.logical_name + " (" + entries[i - 1].relative_path + " and " +
+			                asset.relative_path + "); the game resolves names without folders, so only one can exist.",
+			        asset.relative_path));
+		}
+		if (asset.kind == AssetKind::Unknown) {
+			out.push_back(make_diagnostic(DiagnosticSeverity::Warning, "asset.kind.unknown",
+			                              "The game does not use files of this type.", asset.relative_path));
+		}
+	}
+}
+
+// A finding the scan lists already: the import pass's record of a sidecar that does not parse is
+// the walk's too, one finding.
+bool listed(const std::vector<Diagnostic> &rows, const Diagnostic &d) {
+	return std::any_of(rows.begin(), rows.end(), [&d](const Diagnostic &row) {
+		return row.severity == d.severity && row.code == d.code && row.asset == d.asset && row.message == d.message;
+	});
 }
 
 } // namespace
@@ -112,150 +140,65 @@ void AssetScan::index() {
 	});
 }
 
+void AssetScan::set_visits(std::map<std::string, Visit> visits) {
+	visits_ = std::move(visits);
+	compose();
+}
+
+size_t AssetScan::update(const ProjectPaths &paths, const ProjectDocument &doc, const std::vector<std::string> &changed) {
+	// An import record is no file of its own: its outputs are its source's, and a PNG is a source
+	// only while its record is there, so the two are visited together.
+	const std::string suffix = kImportSidecarSuffix;
+	std::set<std::string> again;
+	for (const std::string &path : changed) {
+		if (path.empty()) continue;
+		again.insert(path);
+		if (strutil::ends_with_icase(path, suffix))
+			again.insert(path.substr(0, path.size() - suffix.size()));
+		else if (importer_for(basename_of(path)))
+			again.insert(path + suffix);
+	}
+	// Each dropped first under the path asked and visited again under the path the walk lists it by
+	// (a rename that changes only the case asks for both).
+	for (const std::string &path : again) visits_.erase(path);
+	std::set<std::string> read;
+	for (const std::string &path : again) {
+		std::string key;
+		Visit visit;
+		if (!scan_project_file(paths, doc, path, key, visit)) continue;
+		visits_[key] = std::move(visit);
+		read.insert(key); // two paths of one file (its case changed) read it once
+	}
+	compose();
+	return read.size();
+}
+
+void AssetScan::set_import_findings(std::vector<Diagnostic> findings) {
+	import_findings_ = std::move(findings);
+	compose();
+}
+
+// One order however the visits were made: the entries by key then path, the walk's findings by the
+// files' paths, the names' in the entries' order, then the import pass's that neither made (a
+// record both read, a sidecar that does not parse left as the author wrote it, is one finding).
+void AssetScan::compose() {
+	entries.clear();
+	diagnostics.clear();
+	for (const auto &[path, visit] : visits_) {
+		entries.insert(entries.end(), visit.entries.begin(), visit.entries.end());
+		diagnostics.insert(diagnostics.end(), visit.findings.begin(), visit.findings.end());
+	}
+	index();
+	name_findings(entries, diagnostics);
+	for (const Diagnostic &d : import_findings_)
+		if (!listed(diagnostics, d)) diagnostics.push_back(d);
+}
+
 AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &doc) {
-	AssetScan scan;
-	const fs::path root(paths.root);
-	const fs::path export_dir(paths.export_dir(doc));
-	const std::string sidecar_suffix = kImportSidecarSuffix;
-
-	std::error_code ec;
-	fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
-	if (ec) {
-		scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.root.unreadable",
-		                                           "Cannot read the project directory " + paths.root +
-		                                                   ": " + ec.message()));
-		return scan;
+	ProjectScan scan(paths, doc);
+	while (!scan.step(kWholeWalkStep)) {
 	}
-	const fs::recursive_directory_iterator end;
-	for (; it != end; it.increment(ec)) {
-		if (ec) break;
-		const fs::directory_entry &entry = *it;
-		const fs::path &path = entry.path();
-		if (entry.is_directory(ec)) {
-			if (is_dot_directory(path) || same_path(path, export_dir)) it.disable_recursion_pending();
-			continue;
-		}
-		if (!entry.is_regular_file(ec)) continue;
-		const std::string filename = path.filename().string();
-		if (path.parent_path() == root && filename == kProjectFileName) continue;
-		if (strutil::ends_with_icase(filename, sidecar_suffix)) {
-			// An import record: its outputs are project files that live under the cache.
-			std::string sidecar_relative = fs::relative(path, root, ec).generic_string();
-			if (ec) sidecar_relative = filename;
-			const std::string source_relative = sidecar_relative.substr(0, sidecar_relative.size() - sidecar_suffix.size());
-			// A record whose source is gone lists nothing: its outputs would otherwise
-			// outlive the source and still pack.
-			if (!fs::is_regular_file(root / source_relative, ec)) {
-				scan.diagnostics.push_back(make_diagnostic(
-				        DiagnosticSeverity::Warning, "import.orphan_record",
-				        "The import record names " + source_relative + ", which is not in the project: delete the record.",
-				        sidecar_relative));
-				continue;
-			}
-			ImportSidecar sidecar;
-			Diagnostic error;
-			if (!load_import_sidecar(path.generic_string(), sidecar, error)) {
-				if (!error.code.empty()) {
-					error.asset = sidecar_relative;
-					scan.diagnostics.push_back(error);
-				}
-				continue;
-			}
-			const std::string output_dir = import_output_dir(paths, source_relative);
-			for (const std::string &output : sidecar.outputs) {
-				const fs::path output_path = root / output_dir / output;
-				if (!fs::is_regular_file(output_path, ec)) {
-					// Only the import pass makes outputs: one missing after it ran means the
-					// last import did not finish (its finding says why).
-					scan.diagnostics.push_back(make_diagnostic(
-					        DiagnosticSeverity::Warning, "import.output_missing",
-					        output + " (imported from " + source_relative + ") has not been made: the game will not see it.",
-					        source_relative));
-					continue;
-				}
-				AssetEntry produced;
-				produced.logical_name = output;
-				produced.relative_path = (fs::path(output_dir) / output).generic_string();
-				produced.imported_from = source_relative;
-				const auto produced_size = fs::file_size(output_path, ec);
-				if (!ec) produced.size_bytes = static_cast<uint64_t>(produced_size);
-				produced.modified_ticks = io::file_modified_ticks(output_path);
-				std::vector<uint8_t> bytes;
-				std::string io_error;
-				produced.kind = asset_classification_needs_bytes(output) && read_file_bytes(output_path.string(), bytes, io_error)
-				                        ? classify_asset(output, &bytes)
-				                        : classify_asset(output, nullptr);
-				scan.entries.push_back(std::move(produced));
-			}
-			continue;
-		}
-
-		AssetEntry asset;
-		asset.logical_name = filename;
-		asset.relative_path = fs::relative(path, root, ec).generic_string();
-		if (ec) asset.relative_path = filename;
-		const auto size = fs::file_size(path, ec);
-		if (!ec) asset.size_bytes = static_cast<uint64_t>(size);
-		asset.modified_ticks = io::file_modified_ticks(path);
-		if (asset_classification_needs_bytes(filename)) {
-			std::vector<uint8_t> bytes;
-			std::string io_error;
-			if (read_file_bytes(path.string(), bytes, io_error)) {
-				asset.kind = classify_asset(filename, &bytes);
-			} else {
-				asset.kind = classify_asset(filename, nullptr);
-				scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning,
-				                                           "asset.unreadable", io_error,
-				                                           asset.relative_path));
-			}
-		} else {
-			asset.kind = classify_asset(filename, nullptr);
-		}
-		// A PNG is an import source only when its `.import` record says so; one
-		// without is a texture the game loads as it is (retail's menu loader
-		// decodes .png [orig: CTextureManager_LoadOrFindTexture @ 0x654980 ->
-		// load_png_from_file @ 0x6654d0]).
-		if (asset.kind == AssetKind::ImageSource &&
-		    !fs::is_regular_file(fs::path(path.generic_string() + sidecar_suffix), ec))
-			asset.kind = AssetKind::Texture;
-		scan.entries.push_back(std::move(asset));
-	}
-
-	scan.index();
-
-	for (size_t i = 0; i < scan.entries.size(); ++i) {
-		const AssetEntry &asset = scan.entries[i];
-		// The archive's name rules bind only a file the build packs (check_file_name's rule): a
-		// loose kind (a video, a music bank, a config) is copied beside the archives under any
-		// name.
-		const bool packed = archive_name_limit_binds(asset.kind);
-		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
-			scan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.too_long",
-			        "The file name " + asset.logical_name + " is longer than " +
-			                std::to_string(pff::PFF_NAME_SIZE) +
-			                " characters; the game cannot store it in an archive.",
-			        asset.relative_path));
-		} else if (packed && asset.key.empty()) {
-			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
-			                                           "The file name is blank once normalized.",
-			                                           asset.relative_path));
-		}
-		if (i > 0 && scan.entries[i - 1].key == asset.key) {
-			scan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.duplicate",
-			        "Two files share the name " + asset.logical_name + " (" +
-			                scan.entries[i - 1].relative_path + " and " + asset.relative_path +
-			                "); the game resolves names without folders, so only one can exist.",
-			        asset.relative_path));
-		}
-		if (asset.kind == AssetKind::Unknown) {
-			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "asset.kind.unknown",
-			                                           "The game does not use files of this type.",
-			                                           asset.relative_path));
-		}
-	}
-	return scan;
+	return scan.take();
 }
 
 } // namespace opennova::editor

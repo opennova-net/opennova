@@ -18,15 +18,14 @@ namespace opennova::editor {
 class SessionCore;
 
 // The long jobs the session runs one at a time, a step at a time, so the window that hosts it
-// keeps drawing (ADR 0046 S13 A1). Build has a body; the other kinds are rows already, so the
-// slices that move them onto the slot add bodies, not shapes.
+// keeps drawing (ADR 0046 S13 A1; every kind with its body since S13 A3).
 enum class OperationKind : uint8_t {
-	Open,        // a project opened: the install's names, the import pass, the scan, the requirements
-	Refresh,     // the files read again: a Rescan, a Reimport, the refresh after an import
-	Build,       // the project packed into an immutable build directory (project_build/build_run.h)
-	ImportPlan,  // an import's plan: the scan, the graph, the install
-	ImportApply, // an import written
-	RenameApply, // a rename's files rewritten
+	Open,        // a project opened: the install's names, the import pass, the scan, the requirements (OpenOperation)
+	Refresh,     // the files read again: a Rescan, a Reimport (RefreshOperation)
+	Build,       // the project packed into an immutable build directory (BuildOperation, project_build/build_run.h)
+	ImportPlan,  // an import's plan: the scan, the graph, the install, the plan (ImportPlanOperation)
+	ImportApply, // an import planned again, written, and the files read again (ImportOperation)
+	RenameApply, // a rename's files rewritten a file at a time, then written (RenameOperation)
 	kCount,
 };
 

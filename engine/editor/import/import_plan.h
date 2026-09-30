@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -162,10 +163,13 @@ inline constexpr size_t kImportPlanFileCap = 1000;
 
 // The plan of importing `sources` into the project (its files `scan`, resolved by `graph`),
 // with the files they need when `with_dependencies`, looked for in the game install at
-// `retail_directory` too ("" for none), `file_cap` files at most.
+// `retail_directory` too ("" for none), `file_cap` files at most. `install_mounted`: the game
+// install at `retail_directory` opened already (ImportOrigin::Kind::GameInstall), which a caller
+// stepping the plan mounts in a step of its own (S13 A3); null, the plan mounts it when it needs it.
 ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
-                       const std::string &retail_directory, size_t file_cap = kImportPlanFileCap);
+                       const std::string &retail_directory, size_t file_cap = kImportPlanFileCap,
+                       std::shared_ptr<const ImportOrigin> install_mounted = nullptr);
 
 // Whether two plans come to the same import (an import checks the plan it shows against the
 // one it makes again before it writes): the same rows in the same order, each the same file

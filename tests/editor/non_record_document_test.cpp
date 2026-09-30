@@ -71,6 +71,7 @@ static int test_non_record_type() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Blobs"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");

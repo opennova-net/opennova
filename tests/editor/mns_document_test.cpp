@@ -295,6 +295,7 @@ static int test_validation() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Styles"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const auto unused = [&view]() {
@@ -332,6 +333,7 @@ static int test_validation() {
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A x\\ y\nB 2\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	bool line_ending = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code == "style.line_ending") {
@@ -377,6 +379,7 @@ static int test_validation() {
 	// and its finding is gone.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/note.mns", "N 1\nM 2\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	const AssetEntry *note = view.project.scan->find("note.mns");
 	TEST_EXPECT(note != nullptr);
 	if (!note) return 1;
@@ -435,6 +438,7 @@ static int test_style_value_use() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Uses"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
@@ -453,6 +457,7 @@ static int test_style_value_use() {
 	                window + "<STRING>%TEXT_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"C\">\r\n" +
 	                window + "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%PAINT%</APPEARANCE>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(path));
 	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(path));
 	const std::shared_ptr<const AssetGraph> &graph = view.findings.graph;

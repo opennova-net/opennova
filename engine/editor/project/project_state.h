@@ -9,13 +9,11 @@
 
 namespace opennova::editor {
 
-// The project as the engine will see it, read the one way the editor and the command
-// line share (ADR 0046 d4 CLI parity, d8 "import changed sources"): the import pass
-// first, so the scan lists what the importers made; the scan; then the requirements
-// over that scan. `force` and `only` are the import pass's (import_run.h): a Reimport
-// is this refresh with the sources it names forced. The pass's findings ride in the
-// scan's diagnostics, so whatever reads the scan (the Problems rows, `validate`, the
-// build's gate) sees them.
+// The project as the engine will see it, read to its end by the refresh the editor steps
+// (project_refresh.h): the import pass first, so the scan lists what the importers made; the
+// scan, carrying the pass's findings; then the requirements over that scan. `force` and `only` are
+// the import pass's (import_run.h). The command line's (opennova-project), until it reads the
+// project through the session (S13 A7), which leaves this with no caller.
 struct ProjectState {
 	ImportRunResult imports;
 	AssetScan scan;

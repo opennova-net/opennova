@@ -8,6 +8,8 @@
 #include <editor/import/import_run.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
+#include <editor/session/import_operation.h>
+#include <editor/session/import_plan_operation.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 
@@ -62,23 +64,13 @@ void ImportController::cancel() {
 	core_.touch(ViewConcern::Dialogs);
 }
 
-// The refresh with the import pass forced over one source (or all): every stale source
-// imports too, as on any refresh; `force` imports the named one even when unchanged (a
-// changed importer, a wanted rebuild).
+// The refresh with the import pass forced over one source (or all), as an operation
+// (RefreshOperation): every stale source imports too, as on any refresh; `force` imports the named
+// one even when unchanged (a changed importer, a wanted rebuild). The pass's findings on the
+// sources asked for are what the operation came to.
 void ImportController::reimport(const std::string &source, bool force) {
 	if (!view_.project.open) return;
-	const ImportRunResult imported = core_.refresh(force, source);
-	// The pass's findings are Problems rows already (they ride the scan); the ones on the
-	// sources asked for are also this request's outcome.
-	std::vector<std::string> asked;
-	for (const ImportedSource &ran : imported.sources)
-		if (import_source_named(source, ran.source)) {
-			asked.push_back(ran.source);
-			asked.push_back(ran.sidecar);
-		}
-	for (const Diagnostic &d : imported.diagnostics)
-		if (std::find(asked.begin(), asked.end(), d.asset) != asked.end()) core_.record_outcome(d);
-	view_.activity.status = std::to_string(imported.reimported) + " source" + (imported.reimported == 1 ? "" : "s") + " imported.";
+	if (core_.start_refresh(true, force, source)) view_.activity.status = "Importing again...";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -95,29 +87,39 @@ void ImportController::preview(std::vector<ImportSource> choices, std::vector<Im
 			preview.roots.push_back(std::move(root));
 	preview.with_dependencies = with_dependencies;
 	preview.open = !preview.choices.empty() || !preview.roots.empty();
-	plan_preview();
+	if (preview.open) start_plan();
+	else show_plan(std::make_shared<const ImportPlan>(), nullptr);
 }
 
-// The open preview's plan, made from its roots as the files are now: the project read again
-// (the view's scan may be older than a change made outside the editor; a scan writes
-// nothing, unlike a refresh, which runs the import pass), resolved by a copy of the asset
-// graph brought up to it (its cache reads again only the files that changed); its findings
-// are the dialog's to show. Every request that plans it validates first (its row's
-// `validates`), so an edit a held pump made reaches the graph it copies. Each plan made posts
-// an ImportPlanned event, on which the dialog takes the plan's checks again. `shown`: the plan
-// an Import was shown, planned again before it writes; the preview says it changed (`changed`,
-// the event's flag) when the new plan is not that one.
-void ImportController::plan_preview(const ImportPlan *shown) {
+// The open preview's plan, made from its roots as the files are now, as an operation
+// (ImportPlanOperation: the project read again, a copy of the asset graph brought up to it, the
+// game install mounted, the plan); its findings are the dialog's to show. Every request that plans
+// it validates first (its row's `validates`), so an edit a held pump made reaches the graph it
+// copies. The dialog shows its files at once, and no plan until the operation's is made.
+void ImportController::start_plan() {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
-	if (preview.open) {
-		const AssetScan scan = scan_project_assets(paths_, *view_.project.document);
-		AssetGraph graph = core_.problems().graph();
-		graph.update(paths_, *view_.project.document, scan, view_.documents.open);
-		preview.plan = std::make_shared<const ImportPlan>(plan_import(preview.roots, preview.with_dependencies,
-				paths_, *view_.project.document, scan, graph, core_.game_install()));
-	} else {
-		preview.plan = std::make_shared<const ImportPlan>();
-	}
+	preview.plan = std::make_shared<const ImportPlan>();
+	preview.changed = false;
+	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(paths_, *view_.project.document,
+			core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies, core_.game_install()));
+	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Planning the import...";
+	core_.touch(ViewConcern::Dialogs);
+	core_.touch(ViewConcern::Output);
+}
+
+OperationOutcome ImportController::absorb_plan(ImportPlanOperation &operation) {
+	show_plan(std::make_shared<const ImportPlan>(std::move(operation.plan())), nullptr);
+	return OperationOutcome();
+}
+
+// A plan made for the dialog. Each posts an ImportPlanned event, on which the dialog takes the
+// plan's checks again. `shown`: the plan an Import was shown, planned again before it writes; the
+// preview says it changed (`changed`, the event's flag) when the new plan is not that one.
+void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const ImportPlan *shown) {
+	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	preview.plan = std::move(plan);
 	preview.changed = shown && !same_import(*shown, *preview.plan);
 	ViewEvent planned;
 	planned.kind = ViewEventKind::ImportPlanned;
@@ -157,70 +159,102 @@ void ImportController::set_dependencies(bool with_dependencies) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	if (preview.open && preview.with_dependencies != with_dependencies) {
 		preview.with_dependencies = with_dependencies;
-		plan_preview();
+		start_plan();
 	}
 	core_.touch(ViewConcern::Preferences);
 	core_.touch(ViewConcern::Output);
 }
 
 // The rows kept, written the whole selection or none of it as far as the disk allows
-// (import_assets), then one refresh. With a preview open the files are planned again first:
-// when that is not the import the preview showed (a dependency new or gone, a file found in
-// another place, a file that no longer reads), nothing is written and the dialog shows the
-// new plan with a line saying so; a row the plan does not have is refused. An import that
-// would write over a file with unsaved edits never reaches here: it waits on the unsaved
-// prompt first (UnsavedGuard), whose Save writes them; the rescan after it reads again
+// (import_assets), then one refresh, as an operation (ImportOperation). With a preview open the
+// files are planned again first: when that is not the import the preview showed (a dependency new
+// or gone, a file found in another place, a file that no longer reads), nothing is written and
+// the dialog shows the new plan with a line saying so; a row the plan does not have is refused.
+// An import that would write over a file with unsaved edits never reaches here: it waits on the
+// unsaved prompt first (UnsavedGuard), whose Save writes them; the refresh after it reads again
 // the open documents whose files it replaced.
 void ImportController::import_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	std::unique_ptr<ImportPlanOperation> replan;
+	std::shared_ptr<const ImportPlan> shown;
 	if (preview.open) {
-		const std::shared_ptr<const ImportPlan> shown = preview.plan;
-		plan_preview(shown.get());
-		if (preview.changed) {
-			view_.activity.status = "The files changed since the preview: nothing was imported.";
-			core_.touch(ViewConcern::Dialogs);
-			core_.touch(ViewConcern::Output);
-			return core_.refuse_now("import.changed",
-			                        "The files changed since the preview: nothing was imported. Check the import again.");
-		}
-		for (const ImportSource &import : request.imports) {
-			const bool planned = std::any_of(preview.plan->rows.begin(), preview.plan->rows.end(), [&import](const ImportPlanRow &row) {
-				return row.state != ImportPlanRow::State::NotFound && row.source == import;
-			});
-			if (!planned)
-				return core_.report(make_diagnostic(DiagnosticSeverity::Error, "import.not_planned",
-				                                    import.name() + " is not in the import preview: plan it first.", import.name()));
-		}
-	}
-	view_.dialogs.import_preview = DialogsView::ImportPreview();
-	if (request.imports.empty()) {
+		shown = preview.plan;
+		replan = std::make_unique<ImportPlanOperation>(paths_, *view_.project.document, core_.problems().graph(),
+				view_.documents.open, preview.roots, preview.with_dependencies, core_.game_install());
+	} else if (request.imports.empty()) {
 		view_.activity.status = "Nothing to import.";
-		core_.touch(ViewConcern::Dialogs);
 		core_.touch(ViewConcern::Output);
 		return;
 	}
-	const ImportResult imported = import_assets(request.imports, paths_, *view_.project.document, request.replace);
-	if (!imported.imported.empty()) {
+	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, *view_.project.document,
+			request.imports, request.replace, std::move(replan), std::move(shown)));
+	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Importing...";
+	core_.touch(ViewConcern::Output);
+}
+
+OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
+	OperationOutcome outcome;
+	const auto refused = [&](const Diagnostic &d) {
+		core_.report(d);
+		outcome.end = OperationEnd::Failed;
+		outcome.findings.push_back(d);
+		return outcome;
+	};
+	if (operation.replanned()) {
+		show_plan(operation.new_plan(), operation.shown().get());
+		if (operation.changed()) {
+			view_.activity.status = "The files changed since the preview: nothing was imported.";
+			core_.touch(ViewConcern::Dialogs);
+			core_.touch(ViewConcern::Output);
+			return refused(make_diagnostic(DiagnosticSeverity::Warning, "import.changed",
+			                               "The files changed since the preview: nothing was imported. Check the import again."));
+		}
+		if (!operation.refusals().empty()) return refused(operation.refusals().front());
+	}
+	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	if (operation.imports().empty()) {
+		view_.activity.status = "Nothing to import.";
+		core_.touch(ViewConcern::Dialogs);
+		core_.touch(ViewConcern::Output);
+		return outcome;
+	}
+	const ImportResult &imported = operation.result();
+	if (operation.refreshed()) {
 		// A Rescan: the open documents whose files it replaced read again, then the refresh.
 		core_.documents().reload_changed();
-		core_.refresh();
+		core_.absorb_refresh(operation.refresh());
 	}
 	for (const auto &path : imported.imported) core_.note("Imported " + path);
 	for (const auto &path : imported.not_imported) core_.note("Not imported " + path);
-	for (const auto &d : imported.diagnostics) core_.report(d);
+	// What the import reported is what it came to: an error failed it (refused before anything was
+	// written, or stopped part way, its not_imported files said).
+	for (const auto &d : imported.diagnostics) {
+		core_.report(d);
+		outcome.findings.push_back(d);
+		if (d.severity == DiagnosticSeverity::Error) outcome.end = OperationEnd::Failed;
+	}
 	const size_t done = imported.imported.size();
+	if (!imported.not_imported.empty()) outcome.end = OperationEnd::Failed;
 	view_.activity.status = !imported.not_imported.empty()
 	                       ? std::to_string(done) + " of " + std::to_string(done + imported.not_imported.size()) +
 	                                 " files imported: the import stopped at " + imported.not_imported.front() + "."
 	                       : std::to_string(done) + " file(s) imported.";
 	core_.touch(ViewConcern::Dialogs); // the preview closed
 	core_.touch(ViewConcern::Output);
+	return outcome;
 }
 
 void ImportController::refresh_install_files() {
 	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.game_install(), *view_.project.document)
 	                                        : std::vector<std::string>();
+	core_.touch(ViewConcern::Files);
+}
+
+void ImportController::set_install_files(std::vector<std::string> names) {
+	view_.project.retail_files = std::move(names);
 	core_.touch(ViewConcern::Files);
 }
 

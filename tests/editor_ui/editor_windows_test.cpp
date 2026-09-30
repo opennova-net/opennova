@@ -2048,11 +2048,13 @@ void test_styles_lines_listed() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Styles"));
+	session.run_operations();
 	const SessionView &v = session.view();
 	CHECK(editor_test::write_text(v.project.root + "/menu_style.mns",
 	                              "// Header\r\nA_FG FFFFFFFF\r\n// Colours below\n\r\nB_FG FF000000\r\n// Footer\r\n"),
 	      "stylesheet fixture");
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("menu_style.mns"));
 	const auto *document = dynamic_cast<const MnsDocument *>(session.document_for("menu_style.mns"));
 	CHECK(document && document->rows().size() == 6,
@@ -2145,6 +2147,7 @@ void test_go_to_ui() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "GoTo"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	session.handle(request::open_document("menu_style.mns"));
@@ -2225,6 +2228,7 @@ void test_numeric_go_to_ui() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Numbers"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *items_asset = v.project.scan->find("items.def");
@@ -2236,6 +2240,7 @@ void test_numeric_go_to_ui() {
 	                              "begin \"Gun\"\nid 100166\ntype vehicle\nend\n"),
 	      "an item naming another by id");
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(items_path));
 	const Document *items = session.document_for(items_path);
 	NodeAddress carrier, gun;
