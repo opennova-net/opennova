@@ -41,18 +41,35 @@ ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache) 
 		graph_(graph), cache_(cache), generation_(graph.generation()) {}
 
 bool ProjectValidation::graph_moved() const {
-	return phase_ != Phase::Graph && graph_.generation() != generation_;
+	return (phase_ == Phase::Files || phase_ == Phase::Done) && graph_.generation() != generation_;
 }
 
 bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 	uint64_t spent = 0;
 	do {
 		switch (phase_) {
-		case Phase::Graph:
-			// The graph first: the use checks read what the files define and who uses it. The
-			// update is one step, whatever it reads.
+		case Phase::Start:
 			generation_ = graph_.generation();
-			graph_.update(input.paths, input.project, input.scan, input.open);
+			to_read_ = graph_.files_to_read(input.scan, input.open);
+			phase_ = Phase::Read;
+			break;
+		case Phase::Read: {
+			// The graph first (the use checks read what the files define and who uses it): the files
+			// its update would read, read ahead a file at a time.
+			if (read_next_ == to_read_.size()) {
+				phase_ = Phase::Graph;
+				break;
+			}
+			const AssetEntry &asset = *to_read_[read_next_++];
+			current_ = asset.relative_path;
+			readings_[asset.relative_path] = AssetGraph::read_file(input.paths, input.project, asset);
+			spent += kValidationFileCost + asset.size_bytes;
+			break;
+		}
+		case Phase::Graph:
+			// The update, a step of its own: it takes the readings and resolves what they reach.
+			graph_.update(input.paths, input.project, input.scan, input.open, &readings_);
+			readings_.clear();
 			cache_.begin();
 			files_ = validation_files(input.scan);
 			phase_ = Phase::Files;

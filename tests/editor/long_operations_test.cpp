@@ -404,8 +404,9 @@ static int test_scan_update() {
 
 // The validation a file at a time (ProjectValidation): over the four fixture projects, stepped at a
 // budget of one byte (a file a step), it makes the rows refresh_project and project_rows make in one
-// call, member for member, and the same stats; at one byte a step for the graph's update and one
-// for each file the document types open, and the last one ends it.
+// call, member for member, and the same stats; at one byte a step for each file the graph reads
+// (read ahead, the update taking them), one for the update, one for each file the document
+// types open, and the last one ends it.
 static int test_validation_steps() {
 	editor_test::TempProjectDir dir("opennova_long_ops_validation");
 	for (const Fixture &fixture : kFixtures) {
@@ -422,8 +423,12 @@ static int test_validation_steps() {
 		ProjectValidation validation(stepped_graph, stepped_cache);
 		size_t steps = 1;
 		while (!validation.step(input, 1)) ++steps;
-		TEST_EXPECT(validation.moved() && validation.files_done() == validation_files(scan).size());
-		TEST_EXPECT(steps == validation_files(scan).size() + 2); // the graph, each file, the end
+		// Each file the graph reads read ahead, the update, each file's own findings, the end.
+		TEST_EXPECT(validation.moved() && validation.files_done() == validation.files_total() &&
+		            validation.files_total() == whole_graph.stats().files_extracted + validation_files(scan).size());
+		TEST_EXPECT(steps == validation.files_total() + 2);
+		// The readings taken count as the update read them.
+		TEST_EXPECT(stepped_graph.stats().files_extracted == whole_graph.stats().files_extracted);
 		std::vector<std::string> a, b;
 		for (const Diagnostic &d : project_rows(input, whole_graph, whole_cache)) a.push_back(row_of(d));
 		for (const Diagnostic &d : project_rows(input, stepped_graph, stepped_cache)) b.push_back(row_of(d));
@@ -833,8 +838,19 @@ static int test_retail_open() {
 		AssetGraph graph;
 		ValidationCache cache;
 		auto part = clock::now();
+		size_t read = 0;
+		for (const AssetEntry &asset : v.project.scan->entries) {
+			if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
+			Extracted content;
+			Diagnostic failure;
+			extract_from_asset(paths, *v.project.document, asset, content, failure);
+			++read;
+		}
+		const double read_ms = ms_since(part);
+		part = clock::now();
 		graph.update(paths, *v.project.document, *v.project.scan, open);
 		const double graph_ms = ms_since(part);
+		std::printf("retail: the graph's files read alone: %zu in %.0f ms\n", read, read_ms);
 		part = clock::now();
 		cache.begin();
 		double longest_file = 0;
