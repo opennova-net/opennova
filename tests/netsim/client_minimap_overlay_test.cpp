@@ -56,6 +56,18 @@ void tick(ns::ClientReplicaPipeline &view) {
 	view.age_minimap_overlays(1);
 }
 
+// A role over a kernel and a replica runtime whose tick only advances the
+// logic clock: the session's own frame is all that runs.
+struct RadarProbeRole final : opennova::inmatch::Role {
+	opennova::inmatch::ClientRuntime *runtime = nullptr;
+	opennova::inmatch::RoleKind probe_kind = opennova::inmatch::RoleKind::Joiner;
+	opennova::inmatch::RoleKind kind() const override { return probe_kind; }
+	void run_tick(const opennova::inmatch::TickInput &) override { ++kernel()->world.logic_tick; }
+	bool reset_to_baseline(opennova::inmatch::SessionError &) override { return true; }
+	void close() override {}
+	opennova::inmatch::ClientRuntime *client_runtime() override { return runtime; }
+};
+
 const ns::ClientMinimapOverlaySlot *find_slot(
 		const ns::ClientMinimapState &map, uint16_t handle,
 		bool live_only = true) {
@@ -416,6 +428,102 @@ int main() {
 		CHECK(aged != nullptr &&
 						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 160,
 				"the map site's update spends the held ticks at once");
+	}
+
+	// The session's frame runs the radar step after its tick drain, with no
+	// HUD frame at all: a multiplayer session under the in-game menu (the
+	// HUD presenter idle) keeps aging the banks. The HUD's own gates ride in
+	// from the embedder; the spawn-success early-out is read live; a paused
+	// single-player frame runs the pass with nothing to age.
+	// [orig: Render_ProcessMainSceneFrame @0x5cad04 -> HUD_RenderAllOverlays
+	//  -> Radar_UpdateContacts @0x5a817d -> MapOverlay_UpdateTimers @0x59a9ce;
+	//  the menu pause only outside a session, UI_OptionsScreenInit @0x554dcf]
+	{
+		opennova::mission::MissionKernel kernel;
+		opennova::world::World &w = kernel.world;
+		w.registry.configure_pool(0, 4);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.health = 100;
+		const opennova::world::EntityHandle self = w.registry.spawn(0, seed);
+		w.ai.attach(self);
+		w.cached.local_player = self;
+		opennova::replication::LoopbackChannel channel;
+		opennova::inmatch::ClientRuntime runtime(channel);
+		auto &e = runtime.state().upsert(0x2051);
+		e.cls = opennova::EntityClass::Vehicle;
+		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2051, 10, 0x0A, 0));
+		RadarProbeRole role;
+		role.runtime = &runtime;
+		role.bind(kernel);
+		opennova::inmatch::Session session(role);
+		CHECK(session.begin_load().applied() && session.complete_load().applied(),
+				"the probe session loads");
+		opennova::inmatch::FrameInput frame;
+		frame.delta_seconds = opennova::world::TickAccumulator::kTickDt * 3.0;
+		const opennova::inmatch::FrameOutcome out = session.advance(frame);
+		const auto *aged = find_slot(runtime.state().minimap, 0x2051);
+		CHECK(out.ticks_run() == 3 && aged != nullptr &&
+						aged->remaining_ticks ==
+								ns::kMinimapOverlayLifetimeTicks - static_cast<int32_t>(w.logic_tick),
+				"the session's frame ages the banks by the ticks it drained");
+		const int32_t after_first = aged != nullptr ? aged->remaining_ticks : 0;
+		// The HUD's hud_detail-3 early-out (no pass gate) holds the banks.
+		session.set_hud_radar_gates(0u);
+		session.advance(frame);
+		aged = find_slot(runtime.state().minimap, 0x2051);
+		CHECK(aged != nullptr && aged->remaining_ticks == after_first,
+				"a HUD pass gated off holds the banks");
+		// The spawn-success gate, read live off the runtime, holds them too.
+		session.set_hud_radar_gates(opennova::inmatch::Session::kHudRadarGatesDefault);
+		runtime.state().spawn_success_gate = true;
+		session.advance(frame);
+		aged = find_slot(runtime.state().minimap, 0x2051);
+		CHECK(aged != nullptr && aged->remaining_ticks == after_first,
+				"the spawn-success early-out holds the banks");
+		// The next open pass spends the held ticks at once.
+		runtime.state().spawn_success_gate = false;
+		session.advance(frame);
+		aged = find_slot(runtime.state().minimap, 0x2051);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks ==
+								ns::kMinimapOverlayLifetimeTicks - static_cast<int32_t>(w.logic_tick),
+				"the reopened pass catches the banks up");
+	}
+	{
+		// A paused single-player session: the frame's pass still runs, no
+		// tick ran, nothing ages.
+		opennova::mission::MissionKernel kernel;
+		opennova::world::World &w = kernel.world;
+		w.registry.configure_pool(0, 4);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.health = 100;
+		const opennova::world::EntityHandle self = w.registry.spawn(0, seed);
+		w.ai.attach(self);
+		w.cached.local_player = self;
+		opennova::replication::LoopbackChannel channel;
+		opennova::inmatch::ClientRuntime runtime(channel);
+		auto &e = runtime.state().upsert(0x2052);
+		e.cls = opennova::EntityClass::Vehicle;
+		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2052, 10, 0x0A, 0));
+		RadarProbeRole role;
+		role.runtime = &runtime;
+		role.probe_kind = opennova::inmatch::RoleKind::SinglePlayer;
+		role.bind(kernel);
+		opennova::inmatch::Session session(role);
+		CHECK(session.begin_load().applied() && session.complete_load().applied(),
+				"the SP probe session loads");
+		opennova::inmatch::FrameInput frame;
+		frame.delta_seconds = opennova::world::TickAccumulator::kTickDt * 2.0;
+		session.advance(frame);
+		const auto *aged = find_slot(runtime.state().minimap, 0x2052);
+		const int32_t held = aged != nullptr ? aged->remaining_ticks : 0;
+		CHECK(session.pause().applied(), "the SP session pauses");
+		const opennova::inmatch::FrameOutcome paused = session.advance(frame);
+		aged = find_slot(runtime.state().minimap, 0x2052);
+		CHECK(paused.ticks_run() == 0 && aged != nullptr && aged->remaining_ticks == held,
+				"a paused frame ages nothing");
 	}
 
 	const auto before = view.state().minimap.revision;

@@ -624,6 +624,31 @@ bool test_action_codes() {
   return true;
 }
 
+// The records' revision moves on every write and never on a read, so the
+// HUDLS key-label cache rebuilds only on a binding change.
+bool test_binding_revision() {
+  BindingSet set;
+  uint32_t r = set.revision();
+  set.record(0);
+  set.control_text(0, Device::Keyboard);
+  CHECK(set.revision() == r, "reads leave the revision");
+  CHECK(set.assign_key(0, 0x41, false, false, false, false), "a key assigns");
+  CHECK(set.revision() != r, "an assigned key moves it");
+  r = set.revision();
+  set.assign_mouse(0, 1);
+  CHECK(set.revision() != r, "a mouse mask moves it");
+  r = set.revision();
+  set.clear(0, Device::Keyboard);
+  CHECK(set.revision() != r, "a clear moves it");
+  r = set.revision();
+  set.set_record(0, BindingRecord{});
+  CHECK(set.revision() != r, "a persistence load moves it");
+  r = set.revision();
+  set.restore_defaults();
+  CHECK(set.revision() != r, "the defaults move it");
+  return true;
+}
+
 int main() {
   int failed = 0;
 
@@ -655,6 +680,7 @@ int main() {
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
   RUN_TEST(test_action_codes);
+  RUN_TEST(test_binding_revision);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

@@ -1681,13 +1681,19 @@ void HudOverlay::set_minimap_grid_origin(const Vector2 &p_mission_position,
 	queue_redraw();
 }
 
-const opennova::hud::HudDrawList &HudOverlay::server_status_page_draw_list_(
-		const Vector2 &p_surface) {
+void HudOverlay::server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const {
 	// The wall clock and the window's focus the page's throttle reads
 	// (hud_server_status.h server_status_page_due).
-	const uint32_t now_ms = static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec());
-	Window *window = get_window();
-	const bool window_active = window == nullptr || window->has_focus();
+	r_now_ms = static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec());
+	const Window *window = get_window();
+	r_window_active = window == nullptr || window->has_focus();
+}
+
+const opennova::hud::HudDrawList &HudOverlay::server_status_page_draw_list_(
+		const Vector2 &p_surface) {
+	uint32_t now_ms = 0;
+	bool window_active = true;
+	server_status_clock_(now_ms, window_active);
 	compiler_.compile_server_status_page(state_, server_status_page_, now_ms, window_active,
 			p_surface.x, p_surface.y);
 	return compiler_.server_status_page_list();

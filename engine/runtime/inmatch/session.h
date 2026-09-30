@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/hud/hud_minimap.h> // HudMinimapRadar
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/tick_accumulator.h>
@@ -284,6 +285,32 @@ public:
 		return {frames_last_second_, accumulator_.cpu_percent()};
 	}
 
+	// THE FRAME'S RADAR STEP. Retail's HUD pass runs on every rendered
+	// frame, the in-game menu's included (the menu only stops the
+	// single-player ticks), and its radar update ages the local player's
+	// contacts and the retained minimap banks (the 0x6B designations, the
+	// transient slots, the linked markers' lapse) by the ticks since its last
+	// run. The session runs that step after each frame's tick drain, paused
+	// or not, so the aging never waits on the embedder's HUD
+	// (inmatch::step_hud_radar carries the legs). The embedder hands over the
+	// HUD pass's own gates whenever its HUD compiles
+	// (hud::HudFrameCompiler::radar_frame_gates: the hud_detail-3 early-out
+	// and the corner map's update site; the pass runs until told otherwise);
+	// the spawn-success early-out is read live off the role's replica
+	// runtime, and the in-game menu pause is the Paused state.
+	// [orig: Render_ProcessMainSceneFrame @0x5cad04 -> HUD_RenderAllOverlays
+	//  @0x5a8070 (skipped only under a cine fade or the CMAP screen,
+	//  @0x5ca17d..0x5ca190) -> Radar_UpdateContacts @0x5a817d ->
+	//  MapOverlay_UpdateTimers @0x59a9ce; the menu pause dword_A87050 is
+	//  raised only outside a session, UI_OptionsScreenInit @0x554dcf..0x554dd8]
+	void set_hud_radar_gates(uint32_t gates) { hud_radar_gates_ = gates; }
+	uint32_t hud_radar_gates() const { return hud_radar_gates_; }
+	// The last frame's radar snapshot, the HUD's bit-10 legs' input.
+	const hud::HudMinimapRadar &hud_radar() const { return hud_radar_; }
+	// The gate bits' default (hud::HudFrameCompiler::kRadarGatePass): the pass
+	// runs, the corner map's site does not.
+	static constexpr uint32_t kHudRadarGatesDefault = 1u;
+
 	TransitionResult configure_role(Role &role);
 	TransitionResult begin_connect();
 	TransitionResult begin_load();
@@ -312,6 +339,7 @@ private:
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
+	void step_hud_radar_frame();
 	static int64_t now_us();
 
 	Role *role_ = nullptr;
@@ -334,6 +362,10 @@ private:
 	CameraSample latest_camera_;
 	SessionError last_error_;
 	FramePerf last_perf_;
+	// The HUD pass's gates as the embedder last handed them, and the radar
+	// step's last snapshot.
+	uint32_t hud_radar_gates_ = kHudRadarGatesDefault;
+	hud::HudMinimapRadar hud_radar_;
 };
 
 } // namespace opennova::inmatch

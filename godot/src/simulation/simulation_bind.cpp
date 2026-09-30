@@ -210,8 +210,9 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_waypoint_hud_view"), &Simulation::get_waypoint_hud_view);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_snapshot"),
 	                     &Simulation::get_hud_minimap_snapshot);
-	ClassDB::bind_method(D_METHOD("step_hud_radar", "gates"),
-	                     &Simulation::step_hud_radar);
+	ClassDB::bind_method(D_METHOD("set_hud_radar_gates", "gates"),
+	                     &Simulation::set_hud_radar_gates);
+	ClassDB::bind_method(D_METHOD("get_hud_radar"), &Simulation::get_hud_radar);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_footprints"),
 	                     &Simulation::get_hud_minimap_footprints);
 	ClassDB::bind_method(D_METHOD("get_hud_map_grid_origin"),

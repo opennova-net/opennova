@@ -92,6 +92,16 @@ struct EntityHandle {
     bool operator!=(const EntityHandle &o) const { return packed != o.packed; }
 };
 
+// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
+// pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
+// outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
+// base and capacity tests return -1; its callers store the low byte, e.g.
+// Server_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
+// waypoint share's owner @0x514897]
+constexpr uint8_t pool0_index_byte(EntityHandle h) {
+    return h.valid() && h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
+}
+
 // Spawn-origin provenance word: (kind << 24) | (record index & 0xFFFFFF);
 // kSpawnOriginNone = none.
 inline constexpr uint32_t kSpawnOriginNone = 0xFFFFFFFFu;
@@ -501,6 +511,16 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
+    // A user waypoint's exact 16.16 x / y (entity+4 / +8): the dwords
+    // Waypoint_CreateForPlayer stores from its arguments, compares in its
+    // duplicate wipe and the share writes back out. `position` mirrors them
+    // as floats, which drop the low bits past 256 units. Zero on every other
+    // entity (world/user_waypoints.h).
+    // [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d (the stores),
+    //  @0x4dfdba / @0x4dfdc6 (the wipe's compares);
+    //  NetPacket_WriteTypeNameAndPosition @0x42b1bc / @0x42b1cd (the share)]
+    int32_t waypoint_x_q16 = 0;
+    int32_t waypoint_y_q16 = 0;
     // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
     // copied as two dwords for an AIData def and never rewritten; the 0x0D
     // record's AI trailer streams it. The port's .aip resolver reads its own

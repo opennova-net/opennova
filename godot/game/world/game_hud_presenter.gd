@@ -76,6 +76,9 @@ var _warned_no_player := false
 # The HUD clock's tick the tip countdown last advanced to (-1 = not yet this
 # mission): each frame advances the countdown by the main frames since.
 var _tip_ticks_seen := -1
+# The binding revision the HUDLS key labels were last formatted at (-1 = not
+# yet for this HUD): the labels rebuild only on a binding change or a new HUD.
+var _slot_bar_key_labels_revision := -1
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
@@ -210,6 +213,7 @@ func teardown() -> void:
 	_endround_banner = ""
 	_toggles.reset_mission()
 	_tip_ticks_seen = -1
+	_slot_bar_key_labels_revision = -1
 	_chat.reset()
 	_scoreboard.reset()
 	_vehicle_panel.reset()
@@ -297,6 +301,24 @@ func set_crosshair_spread_enabled(enabled: bool) -> void:
 # PlayerViewEffects post stack mount as behind-parent children of the overlay,
 # exactly the child-control stack the ported shell HUD carried.
 # [orig: HUD_RenderAllOverlays @0x5a8070]
+func _apply_slot_bar_key_labels() -> void:
+	var model: ControlsModel = ControlsBindings.model()
+	var revision := model.get_binding_revision()
+	if revision == _slot_bar_key_labels_revision:
+		return
+	_slot_bar_key_labels_revision = revision
+	var key_labels := PackedStringArray()
+	for category in SLOT_BAR_CATEGORY_COUNT:
+		key_labels.append(model.display_text_for_action_code(
+				SLOT_BAR_KEY_RECORD_BASE + category))
+	_game_hud.set_slot_bar_key_labels(key_labels)
+
+
+## The binding revision the HUDLS key labels were last formatted at (tests).
+func get_slot_bar_key_labels_revision() -> int:
+	return _slot_bar_key_labels_revision
+
+
 ## Build the overlay if the mission has none yet (update() does it on the first
 ## frame with a local player; the GUT files build it over a staged root).
 func ensure_game_hud() -> void:
@@ -308,6 +330,7 @@ func ensure_game_hud() -> void:
 	_game_hud.set_no_hud(LaunchFlags.no_hud())
 	# The F1 help pages rebuild from the live bindings at every mission start.
 	ControlsBindings.model().build_help_screen()
+	_slot_bar_key_labels_revision = -1
 	_map_legend_labels = PackedStringArray()
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mount: Node = _ui_parent if _ui_parent != null else self
@@ -556,12 +579,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 			ControlsBindings.model())
 	# The HUDLS key labels by weapon category: the live binding of the row the
 	# start-up re-lay puts at record 200 + category (engine controls
-	# action_for_code carries the witness).
-	var key_labels := PackedStringArray()
-	for category in SLOT_BAR_CATEGORY_COUNT:
-		key_labels.append(ControlsBindings.model().display_text_for_action_code(
-				SLOT_BAR_KEY_RECORD_BASE + category))
-	_game_hud.set_slot_bar_key_labels(key_labels)
+	# action_for_code carries the witness), formatted again only when a
+	# binding changed or the HUD was rebuilt.
+	_apply_slot_bar_key_labels()
 	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
 	# from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).
@@ -575,13 +595,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
 	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
 	_game_hud.set_player_context(lv)
-	# The radar-contact legs (spinmap content-mask bit 10): the engine steps the
-	# contact table once per HUD frame behind the overlay pass's gates, ages the
-	# retained map banks by the ticks that update consumed, and hands the
-	# overlay its snapshot — ahead of the marker snapshot below, as retail's
-	# pass updates the radar before it draws the map (inmatch/role_feeds.h
-	# step_hud_radar carries the witness).
-	_game_hud.set_minimap_radar(sim.step_hud_radar(_game_hud.get_radar_frame_gates()))
+	# The radar-contact legs (spinmap content-mask bit 10): the session steps
+	# the contact table once per frame behind the overlay pass's gates and ages
+	# the retained map banks by the ticks that update consumed, whether or not
+	# this presenter ticks (the in-game menu, inmatch/session.h carries the
+	# witness); the overlay draws the frame's snapshot ahead of the marker
+	# snapshot below, and the session gets this HUD's pass gates back.
+	_game_hud.set_minimap_radar(sim.get_hud_radar())
+	sim.set_hud_radar_gates(_game_hud.get_radar_frame_gates())
 	var player_pos: Vector3 = sim.get_local_player_position()
 	_game_hud.set_minimap_state(Vector2(player_pos.x, -player_pos.z),
 			player_pos.y, sim.get_local_player_heading_bam(),

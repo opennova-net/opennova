@@ -103,6 +103,16 @@ void test_throttle() {
 	// An inactive window waits 10 s.
 	CHECK(!server_status_page_due(&last, 50200 + 9999, false));
 	CHECK(server_status_page_due(&last, 50200 + 10000, false));
+	// The peek answers the same without moving the stamp.
+	uint32_t peek = 0;
+	CHECK(server_status_page_due_at(peek, 50000, true));
+	CHECK(!server_status_page_due_at(peek, 50000, false));
+	peek = 50000;
+	CHECK(!server_status_page_due_at(peek, 50199, true));
+	CHECK(server_status_page_due_at(peek, 50200, true));
+	CHECK(server_status_page_due_at(peek, 50200, true) && peek == 50000);
+	CHECK(!server_status_page_due_at(peek, 50000 + 9999, false));
+	CHECK(server_status_page_due_at(peek, 50000 + 10000, false));
 }
 
 void test_grid_cells_and_codes() {

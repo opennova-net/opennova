@@ -358,8 +358,10 @@ public:
 	// The non-bank map legs' feed (Simulation::get_hud_minimap_overlays);
 	// null clears it.
 	void set_minimap_overlays(const Ref<HudMapOverlays> &p_overlays);
-	// The per-frame radar-contact snapshot (Simulation.step_hud_radar), and
-	// the HUD-pass gates that step rides (HudFrameCompiler::radar_frame_gates).
+	// The per-frame radar-contact snapshot (Simulation.get_hud_radar), and
+	// the HUD-pass gates the session's radar step rides
+	// (HudFrameCompiler::radar_frame_gates, handed over by
+	// Simulation.set_hud_radar_gates).
 	void set_minimap_radar(const PackedInt32Array &p_feed);
 	int get_radar_frame_gates() const;
 
@@ -537,6 +539,7 @@ private:
 	void ensure_map_materials_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
 	const opennova::hud::HudDrawList &server_status_page_draw_list_(const Vector2 &p_surface);
+	void server_status_clock_(uint32_t &r_now_ms, bool &r_window_active) const;
 	// One index range per flat kind of a draw list.
 	struct FlatRange {
 		size_t quads_begin = 0, quads_end = 0;

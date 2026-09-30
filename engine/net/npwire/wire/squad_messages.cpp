@@ -1,49 +1,18 @@
 #include <net/npwire/squad_messages.h>
 
+#include <base/io/byte_reader.h>
 #include <base/io/le.h>
 
 namespace opennova {
 
 namespace {
 
-// The retail handlers' cursor: `p + n <= end ? read : 0`, the cursor advancing
-// only on a read; a string runs to its NUL (strlen) with the cursor clamped to
-// the body end [orig: e.g. NapiNPClientMsg_0x033 @0x425fb0..0x425fe8].
-struct LenientCursor {
-	const uint8_t *p;
-	const uint8_t *end;
-
-	uint8_t u8() {
-		if (p + 1 > end) return 0;
-		return *p++;
-	}
-	uint16_t u16() {
-		if (p + 2 > end) return 0;
-		const uint16_t v = io::read_u16_le(p);
-		p += 2;
-		return v;
-	}
-	int32_t i32() {
-		if (p + 4 > end) return 0;
-		const int32_t v = static_cast<int32_t>(io::read_u32_le(p));
-		p += 4;
-		return v;
-	}
-	// A skipped dword: advances only when four bytes remain.
-	void skip32() {
-		if (p + 4 <= end) p += 4;
-	}
-	std::string cstr() {
-		const uint8_t *s = p;
-		while (s < end && *s != 0) ++s;
-		std::string out(reinterpret_cast<const char *>(p), static_cast<size_t>(s - p));
-		p = s < end ? s + 1 : end;
-		return out;
-	}
-};
-
-LenientCursor cursor(const uint8_t *body, size_t len) {
-	return LenientCursor{body, body != nullptr ? body + len : body};
+// The retail handlers' cursor is the format-parser contract: `p + n <= end ?
+// read : 0`, the cursor advancing only on a read; a string runs to its NUL
+// (strlen) with the cursor clamped to the body end
+// [orig: e.g. NapiNPClientMsg_0x033 @0x425fb0..0x425fe8].
+io::ByteReader reader(const uint8_t *body, size_t len) {
+	return io::ByteReader(body, body != nullptr ? len : 0);
 }
 
 void put_cstr(std::vector<uint8_t> &out, const std::string &s) {
@@ -67,13 +36,13 @@ std::vector<uint8_t> encode_waypoint_share(const WaypointShare &share) {
 
 WaypointShare decode_waypoint_share(const uint8_t *body, size_t len) {
 	// [orig: NapiNPServerMsg_HandleChatOrWhisper @0x51489c..0x51490f]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	WaypointShare out;
-	out.target = c.u8();
-	out.name = c.cstr();
-	out.x = c.i32();
-	out.y = c.i32();
-	out.z = c.i32();
+	out.target = c.read_u8();
+	out.name = c.read_cstr();
+	out.x = c.read_i32();
+	out.y = c.read_i32();
+	out.z = c.read_i32();
 	return out;
 }
 
@@ -91,13 +60,13 @@ std::vector<uint8_t> encode_waypoint_create(const WaypointCreate &create) {
 WaypointCreate decode_waypoint_create(const uint8_t *body, size_t len) {
 	// [orig: NapiNPClientMsg_0x033 @0x425fa0 — the name, x, y, the third dword
 	//  skipped, the owner byte]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	WaypointCreate out;
-	out.name = c.cstr();
-	out.x = c.i32();
-	out.y = c.i32();
-	c.skip32();
-	out.owner_index = c.u8();
+	out.name = c.read_cstr();
+	out.x = c.read_i32();
+	out.y = c.read_i32();
+	c.skip_if_available(4);
+	out.owner_index = c.read_u8();
 	return out;
 }
 
@@ -110,8 +79,8 @@ std::vector<uint8_t> encode_entity_handle16(uint16_t handle) {
 
 uint16_t decode_entity_handle16(const uint8_t *body, size_t len) {
 	// [orig: NapiNPServerMsg_0x04F @0x514a88; NapiNPClientMsg_0x07C @0x426020]
-	LenientCursor c = cursor(body, len);
-	return c.u16();
+	io::ByteReader c = reader(body, len);
+	return c.read_u16();
 }
 
 std::vector<uint8_t> encode_squad_join_request(uint8_t leader) {
@@ -119,20 +88,22 @@ std::vector<uint8_t> encode_squad_join_request(uint8_t leader) {
 }
 
 uint8_t decode_squad_join_request(const uint8_t *body, size_t len) {
-	LenientCursor c = cursor(body, len); // [orig: @0x5109c4..0x5109d4]
-	return c.u8();
+	io::ByteReader c = reader(body, len); // [orig: @0x5109c4..0x5109d4]
+	return c.read_u8();
 }
 
 std::vector<uint8_t> encode_squad_join(const SquadJoin &join) {
-	return {join.leader, join.member}; // [orig: NetPacket_WritePlayerChainLink @0x5106d0]
+	// [orig: NetPacket_WritePlayerChainLink @0x5106d0 — the link byte
+	//  @0x510797, the member slot @0x5107A4]
+	return {join.leader, join.member};
 }
 
 SquadJoin decode_squad_join(const uint8_t *body, size_t len) {
 	// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600..0x42563a]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	SquadJoin out;
-	out.leader = c.u8();
-	out.member = c.u8();
+	out.leader = c.read_u8();
+	out.member = c.read_u8();
 	return out;
 }
 
@@ -149,12 +120,12 @@ std::vector<uint8_t> encode_squad_order_request(const SquadOrderRequest &order) 
 
 SquadOrderRequest decode_squad_order_request(const uint8_t *body, size_t len) {
 	// [orig: NapiNPServerMsg_HandleChatBroadcast @0x510b1b..0x510b62]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	SquadOrderRequest out;
-	out.kind = c.u8();
-	const uint8_t count = c.u8();
-	out.text = c.cstr();
-	for (uint8_t i = 0; i < count; ++i) out.targets.push_back(c.u8());
+	out.kind = c.read_u8();
+	const uint8_t count = c.read_u8();
+	out.text = c.read_cstr();
+	for (uint8_t i = 0; i < count; ++i) out.targets.push_back(c.read_u8());
 	return out;
 }
 
@@ -169,10 +140,10 @@ std::vector<uint8_t> encode_squad_order(const SquadOrder &order) {
 
 SquadOrder decode_squad_order(const uint8_t *body, size_t len) {
 	// [orig: NapiNPClientMsg_0x072 @0x425710]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	SquadOrder out;
-	out.kind = c.u8();
-	out.text = c.cstr();
+	out.kind = c.read_u8();
+	out.text = c.read_cstr();
 	return out;
 }
 
@@ -187,11 +158,11 @@ std::vector<uint8_t> encode_fireteam_assign(const FireteamAssign &assign) {
 
 FireteamAssign decode_fireteam_assign(const uint8_t *body, size_t len) {
 	// [orig: NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c3c..0x510c6c]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	FireteamAssign out;
-	out.fireteam = c.u8();
-	const uint8_t count = c.u8();
-	for (uint8_t i = 0; i < count; ++i) out.members.push_back(c.u8());
+	out.fireteam = c.read_u8();
+	const uint8_t count = c.read_u8();
+	for (uint8_t i = 0; i < count; ++i) out.members.push_back(c.read_u8());
 	return out;
 }
 
@@ -200,10 +171,10 @@ std::vector<uint8_t> encode_fireteam_set(const FireteamSet &set) {
 }
 
 FireteamSet decode_fireteam_set(const uint8_t *body, size_t len) {
-	LenientCursor c = cursor(body, len); // [orig: NapiNPClientMsg_0x073 @0x425770]
+	io::ByteReader c = reader(body, len); // [orig: NapiNPClientMsg_0x073 @0x425770]
 	FireteamSet out;
-	out.member = c.u8();
-	out.fireteam = c.u8();
+	out.member = c.read_u8();
+	out.fireteam = c.read_u8();
 	return out;
 }
 
@@ -212,10 +183,10 @@ std::vector<uint8_t> encode_squad_recruit(const SquadRecruit &recruit) {
 }
 
 SquadRecruit decode_squad_recruit(const uint8_t *body, size_t len) {
-	LenientCursor c = cursor(body, len); // [orig: @0x510d20..0x510d74]
+	io::ByteReader c = reader(body, len); // [orig: @0x510d20..0x510d74]
 	SquadRecruit out;
-	out.recruiter = c.u8();
-	out.target = c.u8();
+	out.recruiter = c.read_u8();
+	out.target = c.read_u8();
 	return out;
 }
 
@@ -224,8 +195,8 @@ std::vector<uint8_t> encode_squad_recruited(uint8_t recruiter) {
 }
 
 uint8_t decode_squad_recruited(const uint8_t *body, size_t len) {
-	LenientCursor c = cursor(body, len); // [orig: NapiNPClientMsg_PlayerRecruited @0x4258b0]
-	return c.u8();
+	io::ByteReader c = reader(body, len); // [orig: NapiNPClientMsg_PlayerRecruited @0x4258b0]
+	return c.read_u8();
 }
 
 std::vector<uint8_t> encode_go_code(const GoCode &code) {
@@ -234,10 +205,10 @@ std::vector<uint8_t> encode_go_code(const GoCode &code) {
 
 GoCode decode_go_code(const uint8_t *body, size_t len) {
 	// [orig: @0x510dc0..0x510e1d; NapiNPClientMsg_0x078 @0x425970]
-	LenientCursor c = cursor(body, len);
+	io::ByteReader c = reader(body, len);
 	GoCode out;
-	out.leader = c.u8();
-	out.code = c.u8();
+	out.leader = c.read_u8();
+	out.code = c.read_u8();
 	return out;
 }
 
@@ -246,8 +217,8 @@ std::vector<uint8_t> encode_punt_vote(uint8_t target) {
 }
 
 uint8_t decode_punt_vote(const uint8_t *body, size_t len) {
-	LenientCursor c = cursor(body, len); // [orig: NapiNPServerMsg_VoteKick @0x518f38]
-	return c.u8();
+	io::ByteReader c = reader(body, len); // [orig: NapiNPServerMsg_VoteKick @0x518f38]
+	return c.read_u8();
 }
 
 } // namespace opennova

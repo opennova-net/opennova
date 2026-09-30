@@ -38,6 +38,8 @@ bool Simulation::fill_server_status_page(opennova::hud::ServerStatusPageState &r
 	return true;
 }
 
+bool Simulation::has_server_status_page() const { return host_ctx() != nullptr; }
+
 Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	// The panel describes the vehicle the local player rides — the attached
 	// gun child re-roots to its parent vehicle, and every mount qualifies

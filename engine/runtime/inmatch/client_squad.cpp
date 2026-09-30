@@ -173,20 +173,21 @@ void ClientRuntime::apply_squad_event(world::World &world,
 					{hud::SquadFeedLine::Kind::Join, event.name, 0, event.feed_order});
 		if ((event.mute & 1u) == 0u)
 			play_interface(world, entity_sound(world, event.entity_slot, kSoundRecruitAccept));
-		// Every placed waypoint goes to the new member: one C2S 0x17 per live
-		// table entry, the member's own slot the target.
+		// Every placed waypoint goes to the new member: one C2S 0x17 per
+		// non-null table entry, the member's own slot the target, the row's
+		// name and its exact x / y / z dwords (a wiped row's zeros).
 		// [orig: Server_BroadcastChatToAllPlayers @0x549200 (a misnomer: the
 		//  push) — NetPacket_SendChatMessage(joiner+0x154, entry) per non-null
-		//  entry]
+		//  entry @0x549210..0x54921f]
 		for (const world::UserWaypointTable::Entry &entry : world.user_waypoints.entries) {
-			const world::Entity *wp = world.registry.get(entry.handle);
-			if (wp == nullptr) continue;
+			if (!entry.handle.valid()) continue;
+			const world::UserWaypointRow row = world::user_waypoint_row(world, entry.handle);
 			WaypointShare share;
 			share.target = event.slot;
-			share.name = wp->display_name;
-			share.x = world::to_fixed(wp->position.x);
-			share.y = world::to_fixed(wp->position.y);
-			share.z = world::to_fixed(wp->position.z);
+			share.name = row.name;
+			share.x = row.x;
+			share.y = row.y;
+			share.z = row.z;
 			queue_squad_message(c2s::WAYPOINT_SHARE, encode_waypoint_share(share));
 		}
 		break;

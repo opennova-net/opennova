@@ -87,12 +87,6 @@ constexpr uint8_t kRadioRequestSeconds = 30;
 // The designation ray's reach, whole units [orig: `push 3E80000h` @0x514678].
 constexpr int32_t kDesignationRayUnits = 1000;
 
-// Pool_GetIndexFromPtr(0, entity): the raw pool-0 index, -1 (0xFF as the
-// byte) for an entity outside pool 0 [orig: @0x5143bb..0x5143c5].
-uint8_t pool0_index_byte(world::EntityHandle h) {
-	return h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
-}
-
 // The rule distance between the sender and a recipient: the x87 length of the
 // Q16 deltas (2-D for type 1, 3-D for types 2..5 and 7), saturated at
 // flt_7C19E0 and truncated. [orig: @0x51457f..0x514603]
@@ -231,7 +225,7 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 
 	TrackedPlayerVoice call;
 	call.event = static_cast<uint8_t>(request.value & 0xFF); // the low byte @0x5143b0
-	call.player_index = pool0_index_byte(entity->handle);    // @0x5143c5
+	call.player_index = world::pool0_index_byte(entity->handle); // @0x5143bb..0x5143c5
 	// The call's RAD_ key, flags 6 (no body prefix): the A&S active-zone
 	// context reads the host process's client-side zone overlay.
 	// [orig: RadioCall_FindRuleByKey(movsx call, entity) @0x5143c0..0x5143cd]

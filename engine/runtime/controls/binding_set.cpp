@@ -111,6 +111,7 @@ BindingSet::BindingSet() {
 }
 
 void BindingSet::restore_defaults() {
+  ++revision_;
   std::size_t n = 0;
   const ActionDef *cat = catalog(&n);
   records_.assign(n, BindingRecord{});
@@ -150,6 +151,7 @@ bool BindingSet::assign_key(int index, int vk, bool ctrl_held, bool shift_held,
   // [orig: @ 0x55bb4f..0x55bb51; Input_QueueKeyEvent @ 0x760c10].
   const uint16_t mod =
       (ctrl_held && !shift_held && !extended && !repeat) ? 17 : 0;
+  ++revision_;
   uint16_t scan = static_cast<uint16_t>(vk & 0xFF);
   if (vk == kKeypadEnterScan) {
     scan = kKeypadEnterScan;
@@ -199,6 +201,7 @@ void BindingSet::assign_mouse(int index, uint16_t mask) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return;
   }
+  ++revision_;
   records_[static_cast<std::size_t>(index)].mouse_mask = mask;
 }
 
@@ -206,6 +209,7 @@ void BindingSet::clear(int index, Device device) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return;
   }
+  ++revision_;
   BindingRecord &r = records_[static_cast<std::size_t>(index)];
   switch (device) {
     case Device::Keyboard:
@@ -430,6 +434,7 @@ bool BindingSet::set_record(int index, const BindingRecord &rec) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return false;
   }
+  ++revision_;
   records_[static_cast<std::size_t>(index)] = rec;
   return true;
 }

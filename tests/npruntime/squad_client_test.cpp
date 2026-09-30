@@ -17,6 +17,7 @@
 #include <net/npwire/squad_messages.h>
 #include <runtime/hud/squad_feed.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/world/user_waypoints.h>
 #include <runtime/world/world.h>
 
@@ -40,13 +41,19 @@ int failures = 0;
 
 // A world with the local player at pool-0 slot 0 and a teammate at slot 1,
 // pool 4 open for waypoints; roster slots 0 (local, "Lead") and 1 ("Mate").
+// The loopback form is the listen host's own client, whose squad sends reach
+// `wire` (the host side reads them back).
 struct Client {
-	inmatch::ClientRuntime runtime{"SquadClient"};
+	replication::LoopbackChannel wire;
+	inmatch::ClientRuntime runtime;
 	w::World world;
 	w::EntityHandle local;
 	w::EntityHandle mate;
 
-	Client() {
+	Client() : runtime("SquadClient") { setup(); }
+	explicit Client(bool /*loopback*/) : runtime(wire) { setup(); }
+
+	void setup() {
 		world.registry.configure_pool(0, 4);
 		world.registry.configure_pool(4, 32);
 		world.tables.user_waypoint_type_index = 7; // a def: the sweeps' `+0x1C` test
@@ -223,6 +230,96 @@ void test_placed_waypoint_table() {
 	CHECK(removed.size() == 15 && removed[0] == first && c.world.user_waypoints.count == 0);
 }
 
+// The duplicate wipe compares the row's x / y dwords exactly: past 256 units
+// a float round trip drops the low bits, and a re-placed or re-shared point
+// must still wipe its old row. The table is not told of the wipe: its entry
+// keeps naming the row, which the allocator re-takes as the first free one.
+// [orig: Waypoint_CreateForPlayer @0x4dfdba / @0x4dfdc6 (the compares),
+//  memset @0x4dfde6, Pool_AllocEntry(4, 1) @0x4dfdf4]
+void test_waypoint_wipe_is_exact() {
+	Client c;
+	const int32_t x = (300 << 16) + 1;
+	const int32_t y = -((700 << 16) + 3);
+	const w::EntityHandle first = w::place_user_waypoint(c.world, x, y, "RALLY");
+	CHECK(first.valid() && c.pool4_rows() == 1);
+	CHECK(c.world.registry.get(first)->waypoint_x_q16 == x &&
+			c.world.registry.get(first)->waypoint_y_q16 == y);
+	CHECK(w::user_waypoint_row(c.world, first).x == x &&
+			w::user_waypoint_row(c.world, first).y == y);
+	const w::EntityHandle second = w::place_user_waypoint(c.world, x, y, "rally");
+	CHECK(c.pool4_rows() == 1);
+	CHECK(second == first);
+	CHECK(c.world.user_waypoints.count == 2 && c.world.user_waypoints.entries[0].handle == first &&
+			c.world.user_waypoints.entries[1].handle == first);
+	// One low bit apart is another point: no wipe.
+	w::place_user_waypoint(c.world, x + 1, y, "RALLY");
+	CHECK(c.pool4_rows() == 2);
+	// A received share at a far point replaces its own row the same way.
+	WaypointCreate create;
+	create.name = "FAR";
+	create.x = (900 << 16) + 5;
+	create.y = (1000 << 16) + 7;
+	create.owner_index = static_cast<uint8_t>(c.mate.slot());
+	for (int i = 0; i < 2; ++i) {
+		c.runtime.view().apply(s2c::WAYPOINT_CREATE, encode_waypoint_create(create));
+		c.runtime.apply_received_effects(c.world);
+	}
+	CHECK(c.pool4_rows() == 3);
+}
+
+// A table entry whose row was wiped reads as retail's stale pointer: a
+// zeroed row until the allocator re-takes it. The squad-join push sends one
+// C2S 0x17 per non-null entry with the row's exact dwords, the wiped one
+// empty at the origin.
+// [orig: Server_BroadcastChatToAllPlayers @0x549200 ->
+//  NetPacket_WriteTypeNameAndPosition @0x42b160]
+void test_member_join_pushes_each_entry() {
+	Client c(true);
+	// A foreign row takes slot 0, the local placement slot 1; the foreign row
+	// goes, so the local re-placement wipes slot 1 and lands in slot 0.
+	WaypointCreate create;
+	create.name = "THEIRS";
+	create.x = 1 << 16;
+	create.y = 1 << 16;
+	create.owner_index = static_cast<uint8_t>(c.mate.slot());
+	c.runtime.view().apply(s2c::WAYPOINT_CREATE, encode_waypoint_create(create));
+	c.runtime.apply_received_effects(c.world);
+	c.runtime.drain_squad_lines();
+	const int32_t x = (400 << 16) + 9;
+	const int32_t y = (260 << 16) + 1;
+	CHECK(c.runtime.place_user_waypoint(c.world, x, y, "HOLD"));
+	const w::EntityHandle placed = c.world.user_waypoints.entries[0].handle;
+	CHECK(placed.slot() == 1);
+	c.runtime.view().apply(s2c::DESTROY_ENTITY,
+			encode_entity_handle16(w::EntityHandle::make(w::kUserWaypointPool, 0).packed));
+	c.runtime.apply_received_effects(c.world);
+	CHECK(c.runtime.place_user_waypoint(c.world, x, y, "HOLD"));
+	CHECK(c.world.user_waypoints.count == 2 &&
+			c.world.user_waypoints.entries[1].handle.slot() == 0);
+	const w::UserWaypointRow stale = w::user_waypoint_row(c.world, placed);
+	CHECK(stale.x == 0 && stale.y == 0 && stale.z == 0 && stale.name.empty());
+	c.wire.clear();
+	// Mate joins the local player's squad: the push.
+	SquadJoin join;
+	join.leader = 0;
+	join.member = 1;
+	c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+	c.runtime.apply_received_effects(c.world);
+	std::vector<WaypointShare> shares;
+	replication::Datagram d;
+	while (c.wire.host_recv(d)) {
+		if (d.tag == c2s::WAYPOINT_SHARE)
+			shares.push_back(decode_waypoint_share(d.body.data(), d.body.size()));
+	}
+	CHECK(shares.size() == 2);
+	if (shares.size() == 2) {
+		CHECK(shares[0].target == 1 && shares[0].name.empty() && shares[0].x == 0 &&
+				shares[0].y == 0 && shares[0].z == 0);
+		CHECK(shares[1].target == 1 && shares[1].name == "HOLD" && shares[1].x == x &&
+				shares[1].y == y);
+	}
+}
+
 void test_feed_lines() {
 	const hud::GameTextLookup text = [](const char *section, const char *key,
 											  const char *fallback) -> std::string {
@@ -260,6 +357,8 @@ int main() {
 	test_orders_fireteam_go_code_and_destroy();
 	test_local_slot_is_the_latched_slot();
 	test_placed_waypoint_table();
+	test_waypoint_wipe_is_exact();
+	test_member_join_pushes_each_entry();
 	test_feed_lines();
 	if (failures == 0) std::printf("squad_client: all checks passed\n");
 	return failures == 0 ? 0 : 1;

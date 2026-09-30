@@ -95,6 +95,9 @@ public:
 	// record), " *" appended when the row's flags carry 0x200. The HUDLS key
 	// label reads record 200 + category.
 	String display_text_for_action_code(int p_code) const;
+	// The live records' revision (engine BindingSet::revision): it moves on
+	// every binding write, so a label cache rebuilds only on a change.
+	int get_binding_revision() const { return static_cast<int>(bindings_.revision()); }
 
 	// The capture button->mask translation (0 = unmappable). The witnessed
 	// mask values are the engine's kMouse* constants (controls/binding_set.h

@@ -1,7 +1,9 @@
 #include <runtime/inmatch/session.h>
 
 #include <base/io/perf_clock.h>
+#include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/mission/mission_kernel.h>
 
 #include <utility>
@@ -305,12 +307,31 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	return out;
 }
 
+void Session::step_hud_radar_frame() {
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
+			"the default gates run the pass");
+	ClientRuntime *runtime = role_->client_runtime();
+	// The pass's spawn-success early-out [orig: g_SpawnSuccessGate
+	// @0x5a8084], live; the hud_detail-3 early-out and the map site are the
+	// embedder's HUD's.
+	const bool spawn_gate = runtime != nullptr && runtime->state().spawn_success_gate;
+	const bool pass_runs =
+			(hud_radar_gates_ & hud::HudFrameCompiler::kRadarGatePass) != 0u && !spawn_gate;
+	const bool map_site = (hud_radar_gates_ & hud::HudFrameCompiler::kRadarGateMapSite) != 0u;
+	step_hud_radar(*role_->kernel(), runtime, pass_runs, map_site, state_ == State::Paused,
+			hud_radar_);
+}
+
 FrameOutcome Session::advance(const FrameInput &input) {
 	FrameOutcome out;
 	out.state = state_;
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
+		// The paused frame still runs its HUD pass: no tick ran, so nothing
+		// ages, and the menu pause holds the lock tone.
+		if (state_ == State::Paused) step_hud_radar_frame();
 		return out;
 	}
 	latch_input(input);
@@ -356,6 +377,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
+	// The frame's HUD pass follows the drain [orig: Game_MainLoop's
+	// Game_ProcessMainFrame drain, then the render's HUD_RenderAllOverlays].
+	if (!out.terminal()) step_hud_radar_frame();
 	return out;
 }
 
@@ -455,6 +479,8 @@ TransitionResult Session::close() {
 	start_rebase_frames_ = 0;
 	rebase_clock_ = false;
 	last_error_ = {};
+	hud_radar_gates_ = kHudRadarGatesDefault;
+	hud_radar_ = {};
 	state_ = State::Unloaded;
 	return {TransitionCode::Applied, from, state_, {}};
 }

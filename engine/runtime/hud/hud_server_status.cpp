@@ -79,14 +79,19 @@ const char *quit_dialog_text_key(bool in_session, bool authority) {
 	return authority ? "STROVER_QUITSERVER" : "STROVER_QUITCLIENT";
 }
 
-bool server_status_page_due(uint32_t *last_ms, uint32_t now_ms, bool window_active) {
+bool server_status_page_due_at(uint32_t last_ms, uint32_t now_ms, bool window_active) {
 	// [orig: @0x50a305..0x50a315 — a zero stamp seeds GetTickCount - 1000;
-	//  @0x50a31a..0x50a334 the 200 ms / inactive 10 s gates; @0x50a35d the
-	//  store; the skipped frame's dword_24D1E00 = 1 @0x50a338 has no reader]
-	if (*last_ms == 0) *last_ms = now_ms - 1000u;
-	const uint32_t since = now_ms - *last_ms;
+	//  @0x50a31a..0x50a334 the 200 ms / inactive 10 s gates]
+	const uint32_t since = now_ms - (last_ms == 0 ? now_ms - 1000u : last_ms);
 	if (since < kServerStatusRedrawMs) return false;
-	if (!window_active && since < kServerStatusInactiveRedrawMs) return false;
+	return window_active || since >= kServerStatusInactiveRedrawMs;
+}
+
+bool server_status_page_due(uint32_t *last_ms, uint32_t now_ms, bool window_active) {
+	// [orig: the seed @0x50a305..0x50a315 and the store @0x50a35d; the skipped
+	//  frame's dword_24D1E00 = 1 @0x50a338 has no reader]
+	if (*last_ms == 0) *last_ms = now_ms - 1000u;
+	if (!server_status_page_due_at(*last_ms, now_ms, window_active)) return false;
 	*last_ms = now_ms;
 	return true;
 }

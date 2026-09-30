@@ -6,18 +6,6 @@
 
 namespace opennova::inmatch {
 
-namespace {
-
-// A connection's player-slot row is in use once its player was added: the
-// slot's active byte (+4) [orig: Server_PlayerAdd @0x51CBC0; the same test
-// server_squad.cpp's slot_connection reads].
-bool slot_active(const NapiNPConnection &c) {
-	return c.phase >= ConnectionPhase::PlayerAdded && c.phase < ConnectionPhase::Goodbye &&
-			!c.reply.player_slot_reserved;
-}
-
-} // namespace
-
 void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServerCtx &ctx,
 		const world::World *world) {
 	page.mp_session_peer = ctx.is_mp_session_peer != 0;
@@ -30,7 +18,8 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 	page.slot_limit = capacity;
 	page.slots.assign(static_cast<size_t>(capacity), hud::ServerStatusSlot{});
 	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (!slot_active(c) || c.reply.player_slot >= capacity) continue;
+		// The slot's active byte (+4) [orig: Server_PlayerAdd @0x51CBC0].
+		if (!player_slot_active(c) || c.reply.player_slot >= capacity) continue;
 		hud::ServerStatusSlot &slot = page.slots[c.reply.player_slot];
 		slot.active = true;
 		// +5: the host's own slot, the loopback connection

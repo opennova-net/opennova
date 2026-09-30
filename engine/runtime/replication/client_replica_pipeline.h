@@ -96,10 +96,10 @@ public:
 	// slots do not age; the transient bank clears on expiry while the special
 	// bank floors its lifetime at zero keeping the handle; live links re-arm
 	// their slot's lifetime and handle and clear it when they lapse. Retail
-	// runs it from the HUD's radar update with that update's elapsed tick
-	// count, so the embedder calls it from its HUD frame (inmatch
-	// step_hud_radar) [orig: MapOverlay_UpdateTimers @0x5BFCE0, called by
-	// Radar_UpdateContacts @0x59a9ce].
+	// runs it from the HUD pass's radar update with that update's elapsed
+	// tick count, so the session's frame calls it (inmatch step_hud_radar
+	// from Session's radar step) [orig: MapOverlay_UpdateTimers @0x5BFCE0,
+	// called by Radar_UpdateContacts @0x59a9ce].
 	void age_minimap_overlays(uint32_t elapsed);
 	// Once per client tick: regular (non-special) markers refresh pose and
 	// known from the decoded entity, mirroring retail's draw-time pool read.

@@ -1914,6 +1914,13 @@ int check_squad_and_waypoint_legs() {
 	const WaypointCreate create_out = decode_waypoint_create(wire.data(), wire.size());
 	EXPECT(create_out.name == "WP" && create_out.x == 5 && create_out.y == 6 &&
 			create_out.owner_index == 3);
+	// A body cut inside the skipped z dword skips nothing: the owner byte is
+	// the next one [orig: `if (cursor + 4 <= end) cursor += 4` @0x425feb].
+	{
+		std::vector<uint8_t> cut = {'W', 0, 5, 0, 0, 0, 6, 0, 0, 0, 9};
+		const WaypointCreate short_out = decode_waypoint_create(cut.data(), cut.size());
+		EXPECT(short_out.x == 5 && short_out.y == 6 && short_out.owner_index == 9);
+	}
 	cover('S', 0x33);
 	wire = encode_entity_handle16(0x4003);
 	EXPECT(decode_entity_handle16(wire.data(), wire.size()) == 0x4003);

@@ -1614,8 +1614,9 @@ public:
 	// map legs' feed (inmatch/minimap_overlays.h); LOCAL-entity policy tails.
 	PackedInt32Array get_hud_minimap_snapshot() const;
 	Ref<HudMapOverlays> get_hud_minimap_overlays(const Ref<RtxtStringFile> &p_gametext) const;
-	// One HUD frame of the radar legs and the bank aging (inmatch::step_hud_radar).
-	PackedInt32Array step_hud_radar(int p_gates);
+	// The session's radar step (the bank aging too): the HUD's pass gates in, the snapshot out.
+	void set_hud_radar_gates(int p_gates);
+	PackedInt32Array get_hud_radar() const;
 	// Static footprint polygons for footprint-class markers (buildings/zones
 	// with marker models): {version=1, count} then per row {handle,
 	// fill_argb, fill_value_count, xy_q16..., edge_value_count, xy_q16...}.
@@ -1674,6 +1675,7 @@ public:
 	// board (inmatch::scoreboard_feed), the status page (inmatch::fill_server_status_page).
 	bool fill_scoreboard(opennova::hud::HudScoreboardState &r_state) const;
 	bool fill_server_status_page(opennova::hud::ServerStatusPageState &r_page) const;
+	bool has_server_status_page() const; // its source exists (an authority's host), no gather
 	// The mounted-vehicle panel (hud/hud_vehicle_panel.h, world/vehicle_panel_feed.h):
 	// {shown, item_id} — the panel's root vehicle (the attached gun child
 	// re-roots to its parent), whose items.def sid the shell joins to its
@@ -1685,11 +1687,9 @@ public:
 	// false (rows cleared) when the local player rides nothing.
 	bool fill_vehicle_panel(const opennova::def::DefVehicleHudBlock &p_block,
 			opennova::hud::HudVehiclePanelState &r_state) const;
-	// The AAS zone status panel feed (world/lfp_feed.h), NOT ClassDB-bound:
-	// one HudLfpZone per spawn-zone list entry joined with the client
-	// runtime's zone-timer entry and the zone's transient minimap slot flags.
-	bool fill_lfp_zones(int p_local_team,
-			std::vector<opennova::hud::HudLfpZone> &r_zones);
+	// NOT ClassDB-bound: the AAS zone panel feed (world/lfp_feed.h), one HudLfpZone per
+	// spawn-zone entry joined with its zone-timer entry and transient minimap slot flags.
+	bool fill_lfp_zones(int p_local_team, std::vector<opennova::hud::HudLfpZone> &r_zones);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
 	String get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const; // RULELIST (inmatch::command_map_rules_text); "" = keep

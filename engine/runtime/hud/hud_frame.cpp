@@ -723,8 +723,9 @@ bool HudFrameCompiler::corner_spinmap_visible(const HudFrameState &state) const 
 }
 
 uint32_t HudFrameCompiler::radar_frame_gates(const HudFrameState &state) const {
-	// [orig: g_SpawnSuccessGate @0x5a8084; g_HUDDetailLevel == 3 @0x5a80c4]
-	if (state.spawn_success_gate || state.hud_detail_level >= 3) return 0u;
+	// [orig: g_HUDDetailLevel == 3 @0x5a80c4; the spawn-success early-out
+	//  @0x5a8084 is the session's own read (inmatch/session.h)]
+	if (state.hud_detail_level >= 3) return 0u;
 	// The corner map's own update site needs mask bits 9, 6 and 10
 	// [orig: @0x5a78ff / @0x5a7906 / @0x5a790a].
 	const bool map_site = corner_spinmap_visible(state) &&

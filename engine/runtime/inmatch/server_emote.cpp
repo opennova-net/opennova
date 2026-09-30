@@ -19,12 +19,6 @@ constexpr int32_t kEmoteRangePerAxisFixed = 0x640000;
 // The re-armed cooldown, whole seconds [orig: `mov dword ptr [ebp+178h], 2` @0x501f53].
 constexpr int32_t kEmoteCooldownSeconds = 2;
 
-// Pool_GetIndexFromPtr(0, entity): the raw pool-0 index, -1 (0xFF as the
-// byte) for an entity outside pool 0 [orig: @0x501e87].
-uint8_t pool0_index_byte(world::EntityHandle h) {
-	return h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
-}
-
 } // namespace
 
 std::vector<ProtocolMessage> Server_HandleEmoteRequest(NapiNPConnection &sender,
@@ -42,7 +36,7 @@ std::vector<ProtocolMessage> Server_HandleEmoteRequest(NapiNPConnection &sender,
 
 	EmoteBroadcast broadcast;
 	broadcast.emote = static_cast<uint8_t>(request.value & 0xFF); // the low byte @0x501e7a
-	broadcast.player_index = pool0_index_byte(entity->handle);    // @0x501e87..0x501e92
+	broadcast.player_index = world::pool0_index_byte(entity->handle);    // @0x501e87..0x501e92
 	const std::vector<uint8_t> body = encode_emote_broadcast(broadcast);
 	const int32_t sx = world::to_fixed(entity->position.x);
 	const int32_t sy = world::to_fixed(entity->position.y);

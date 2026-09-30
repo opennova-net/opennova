@@ -47,15 +47,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Pool-0 index byte for the S2C 0x1E kill-feed actor fields (§5.26: u8 pool-0 index,
-// 0xFF = none).
-uint8_t pool0_index_byte(uint16_t handle) {
-	const world::EntityHandle h{handle};
-	if (!h.valid() || h.pool() != 0) return 0xFF;
-	const int slot = h.slot();
-	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
-}
-
 uint8_t death_family_variant(world::World &world, uint8_t base) {
 	return static_cast<uint8_t>(
 			base + ((3u * uint32_t(world.next_prng16())) >> 16));
@@ -97,7 +88,7 @@ PlayerDeathFeed classify_player_death(
 		const world::Entity *killer_entity,
 		uint32_t underwater_breath_samples) {
 	PlayerDeathFeed out;
-	const uint8_t victim_index = pool0_index_byte(death.victim_handle);
+	const uint8_t victim_index = world::pool0_index_byte(world::EntityHandle{death.victim_handle});
 	const uint32_t cause =
 			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
 	auto clear_cause = [victim_entity](uint32_t bit) {
@@ -125,7 +116,7 @@ PlayerDeathFeed classify_player_death(
 		return out;
 	}
 
-	const uint8_t killer_index = pool0_index_byte(death.killer_handle);
+	const uint8_t killer_index = world::pool0_index_byte(world::EntityHandle{death.killer_handle});
 	// The see-all exemption: a same-team kill routes to the team-kill arm only
 	// when NEITHER side's AI record carries the targets-any-team flag
 	// (aiSlot[4] & 0x200); either flag set falls through to the enemy-kill
@@ -172,7 +163,7 @@ PlayerDeathFeed classify_player_death(
 	}
 	out.attacker = killer_index;
 	out.victim = victim_index;
-	out.aux = pool0_index_byte(killer_entity->primary_occupant.packed);
+	out.aux = world::pool0_index_byte(killer_entity->primary_occupant);
 	return out;
 }
 
@@ -349,17 +340,17 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 		switch (event.kind) {
 		case world::MatchGameplayEventKind::FlagPickup:
 			feed_type = 0x14;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagSave:
 			feed_type = 0x15;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagCapture:
 			feed_type = 0x13;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagReturn:
@@ -2148,7 +2139,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (const auto *start =
 						std::get_if<world::ZoneCaptureEvents::TimedStart>(&event)) {
 				send_all(0x1E, event_body(start->team == 1 ? 41 : 42,
-				                            pool0_index_byte(start->capturer.packed),
+				                            world::pool0_index_byte(start->capturer),
 				                            0xFF));
 				continue;
 			}
@@ -2157,13 +2148,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (completion->announce)
 					send_all(0x1E, event_body(
 							completion->new_team == 1 ? 43 : 44,
-							pool0_index_byte(completion->capturer.packed), 0xFF));
+							world::pool0_index_byte(completion->capturer), 0xFF));
 				continue;
 			}
 			const auto *flip =
 					std::get_if<world::ZoneCaptureEvents::Flip>(&event);
 			if (flip == nullptr || !flip->announce) continue;
-			const uint8_t capturer_idx = pool0_index_byte(flip->capturer.packed);
+			const uint8_t capturer_idx = world::pool0_index_byte(flip->capturer);
 			if (!flip->numbered) {
 				// An unnumbered instant flip announces as a completion does.
 				// [orig: GameEvent_FlagCapture @0x50F936..0x50F94B, the send

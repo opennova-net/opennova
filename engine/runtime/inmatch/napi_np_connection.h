@@ -766,6 +766,19 @@ inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }
 
+// The player slot's active byte (+4): its player was added. Server_PlayerAdd
+// is its one setter, and only the row memsets clear it (the slot table's
+// allocation and the disconnect's), which the port's connection erase stands
+// for; no phase past PlayerAdded clears it (ConnectionPhase::Goodbye is never
+// stored). The pre-add table claim (player_slot_reserved) is not an added
+// player. [orig: Server_PlayerAdd `mov byte ptr [ebp+4], 1` @0x51cd14 /
+// @0x51cefe; Server_HandlePlayerDisconnect tests it @0x51b5dc and memsets the
+// row @0x51b87d; the readers PlayerState_GetByIndex @0x500850 and
+// Server_DrawStatusScreen's roster walk @0x50a44d]
+inline bool player_slot_active(const NapiNPConnection &conn) {
+	return conn.phase >= ConnectionPhase::PlayerAdded && !conn.reply.player_slot_reserved;
+}
+
 // NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It
 // includes the listen host and does not inspect entity health; this runtime's
 // completed initial-state burst is the shared representation of that active

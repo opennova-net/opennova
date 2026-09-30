@@ -19,17 +19,12 @@ namespace {
 // 0x3EC-byte `vote_tallies` memset @0x511496].
 constexpr size_t kVoteTallyRows = 251;
 
-// The slot's active byte (+4): its player was added.
-bool slot_active(const NapiNPConnection &c) {
-	return c.phase >= ConnectionPhase::PlayerAdded && !c.reply.player_slot_reserved;
-}
-
 // PlayerState_GetByIndex + the slot's active byte (+4): the connection
 // holding player slot `index` once its player was added.
 // [orig: PlayerState_GetByIndex @0x500850]
 NapiNPConnection *slot_connection(NapiNPServerCtx &ctx, uint8_t index) {
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (slot_active(c) && c.reply.player_slot == index) return &c;
+		if (player_slot_active(c) && c.reply.player_slot == index) return &c;
 	}
 	return nullptr;
 }
@@ -42,7 +37,7 @@ NapiNPConnection *slot_connection(NapiNPServerCtx &ctx, uint8_t index) {
 //  `+0x20 == 6`, !+0x178E3; Server_ProcessRoundEnd — the 6 -> 7 store
 //  @0x51685e]
 bool slot_state_6(const NapiNPServerCtx &ctx, const NapiNPConnection &c) {
-	if (!slot_active(c) || !is_in_match(c)) return false;
+	if (!player_slot_active(c) || !is_in_match(c)) return false;
 	return ctx.world == nullptr || !ctx.world->match.outcome().ended;
 }
 
@@ -98,9 +93,7 @@ void relay_waypoint_share(NapiNPServerCtx &ctx, NapiNPConnection &sender,
 	create.x = share.x;
 	create.y = share.y;
 	create.z = share.z;
-	create.owner_index = sender.link.owned_entity.pool() == 0
-			? static_cast<uint8_t>(sender.link.owned_entity.slot())
-			: uint8_t{0xFF};
+	create.owner_index = world::pool0_index_byte(sender.link.owned_entity);
 	const std::vector<uint8_t> out = encode_waypoint_create(create);
 	if (share.target == 0xFFu) {
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
@@ -232,7 +225,7 @@ void Server_ProcessVoteKickResults(NapiNPServerCtx &ctx) {
 		// Server_SendValidatedChatToPlayer(target, "", 40, "VOTEDOFF") — the
 		// authority, the slot active, not local, no disconnect latched.
 		// [orig: @0x5114f8; Server_SendValidatedChatToPlayer @0x50a210]
-		if (victim == nullptr || victim->type == NapiNPConnection::kTypeClientSide) continue;
+		if (victim == nullptr) continue;
 		DisconnectEvent event;
 		event.ds = 1;
 		event.dc = 2;

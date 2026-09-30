@@ -92,8 +92,8 @@ void HudOverlay::set_server_status_page(bool p_shown, bool p_score_list_open,
 		const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
 	// Only an authority draws the page (hud_server_status.h: the render gate
 	// reads the authority bit beside the view word); the fill is its source.
-	opennova::hud::ServerStatusPageState page;
-	const bool shown = p_shown && p_sim.is_valid() && p_sim->fill_server_status_page(page);
+	const bool shown = p_shown && p_sim.is_valid() && p_sim->has_server_status_page();
+	const bool opened = shown && !server_status_shown_;
 	if (shown != server_status_shown_) {
 		server_status_shown_ = shown;
 		// The scene frame is not drawn while the page stands in for it: the
@@ -105,6 +105,17 @@ void HudOverlay::set_server_status_page(bool p_shown, bool p_score_list_open,
 		}
 	}
 	if (!shown) return;
+	// The page draws only at its throttle and the frames between present the
+	// last one, so its facts are gathered for the draw that is due (and when
+	// the page opens), not every frame.
+	// [orig: Server_DrawStatusScreen @0x50a31a..0x50a334 — the 200 ms /
+	//  inactive 10 s gates ahead of every read of the page]
+	uint32_t now_ms = 0;
+	bool window_active = true;
+	server_status_clock_(now_ms, window_active);
+	if (!opened && !compiler_.server_status_page_due_now(now_ms, window_active)) return;
+	opennova::hud::ServerStatusPageState page;
+	p_sim->fill_server_status_page(page);
 	server_status_page_ = std::move(page);
 	server_status_page_.score_list_open = p_score_list_open;
 	server_status_page_.text = opennova::hud::server_status_text(

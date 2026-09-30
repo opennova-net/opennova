@@ -372,7 +372,9 @@ struct EntityLightingFeed {
 // logic tick (world::radar_hud_frame; `pass_runs` / `map_site` the overlay's
 // gate bits, `menu_paused` the in-game menu pause), then the retained map
 // banks' MapOverlay_UpdateTimers with the tick count the update aged by —
-// the banks age only when the HUD's radar update runs, as in retail.
+// the banks age only when the HUD pass's radar update runs, as in retail.
+// The session runs it once per frame (Session's radar step), whatever the
+// embedder's HUD does.
 // [orig: HUD_RenderAllOverlays @0x5a817d / HUD_DrawMapOverlay @0x5a791c ->
 //  Radar_UpdateContacts @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
 void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,

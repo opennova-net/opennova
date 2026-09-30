@@ -206,9 +206,15 @@ class BindingSet {
   bool set_record(int index, const BindingRecord &rec);  // persistence load
   int index_of_token(const std::string &token) const;
 
+  // Moves on every record write (defaults, assign, clear, a persistence
+  // load), so a reader that formats labels from the records (the HUDLS key
+  // labels) rebuilds them only when a binding changed.
+  uint32_t revision() const { return revision_; }
+
  private:
   std::vector<BindingRecord> records_;  // catalog order
   bool keyboard_captured_ = false;
+  uint32_t revision_ = 0;
 };
 
 }  // namespace opennova::controls

@@ -372,6 +372,8 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::display_text_for_token);
 	ClassDB::bind_method(D_METHOD("display_text_for_action_code", "code"),
 			&ControlsModel::display_text_for_action_code);
+	ClassDB::bind_method(D_METHOD("get_binding_revision"),
+			&ControlsModel::get_binding_revision);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);

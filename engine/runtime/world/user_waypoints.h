@@ -25,20 +25,23 @@ class World;
 // The items.def type id Waypoint_CreateForPlayer resolves.
 // [orig: ItemList_FindIndexByTypeId(6089) @0x4dfcf0]
 inline constexpr int32_t kUserWaypointTypeId = 6089;
-// The pool the waypoints live in [orig: Pool_AllocEntry(4, 1) @0x4dfe1b].
+// The pool the waypoints live in [orig: Pool_AllocEntry(4, 1) @0x4dfdf4].
 inline constexpr int kUserWaypointPool = 4;
 // The pool-4 name buffer (entity+244 up to the +288 dword).
 inline constexpr size_t kUserWaypointNameMax = 43;
 
 // Creates one waypoint for `owner` at (x, y): every pool-4 row with a def,
-// the same owner, the same x and y and the same name (case-insensitive) is
-// wiped first (a plain memset — no destroy callback), then a new row is
-// allocated with the def's ordinal, the terrain height at (x, y), the name
-// ("Unknown" when null) and the owner. `received_line` gets the SYSTEM-ring
-// line "Waypoint \"%s\" received from %s." when the owner is not the local
-// player (empty otherwise). Returns the new row (invalid when pool 4 is full).
+// the same owner, the same x and y dwords and the same name
+// (case-insensitive) is wiped first (a plain memset — no destroy callback,
+// and the placed-waypoint table is not touched), then a new row is allocated
+// at the first free slot with the def's ordinal, x and y exactly as given,
+// the terrain height at (x, y), the name ("Unknown" when null) and the owner.
+// `received_line` gets the SYSTEM-ring line "Waypoint \"%s\" received from
+// %s." when the owner is not the local player (empty otherwise). Returns the
+// new row (invalid when pool 4 is full).
 // [orig: Waypoint_CreateForPlayer @0x4dfcb0 — the dedupe walk
-//  @0x4dfd9a..0x4dfe12, Pool_AllocEntry @0x4dfe1b, the line @0x4dfe45..0x4dfe6a
+//  @0x4dfd96..0x4dfdee, Pool_AllocEntry(4, 1) @0x4dfdf4 (the first row whose
+//  +0x1C is zero, Pool_AllocEntry @0x442230), the line @0x4dfe13..0x4dfe43
 //  (Chat_AddMessageChannel2(msg, -1, 930))]
 EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, const char *name,
 		EntityHandle owner, std::string &received_line);
@@ -46,6 +49,24 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 // Entity_Destroy on one pool row, whatever it holds (an empty row is left
 // alone) [orig: j_Entity_Destroy @0x4dbcb0].
 void destroy_pool_row(World &world, EntityHandle handle);
+
+// One placed-waypoint table entry read the way retail reads its stored row
+// pointer: whatever the row now holds, with no liveness test. A wiped or
+// destroyed row reads zeroed (0, 0, 0, ""), and a row the allocator re-took
+// reads its new occupant. The table itself never learns of a wipe, so the
+// entry keeps its slot, counts toward the 16 and still sends its C2S 0x4F.
+// [orig: Server_BroadcastChatToAllPlayers @0x549200 (entity +4 / +8 / +12 /
+//  +244 through NetPacket_WriteTypeNameAndPosition @0x42b160),
+//  CMapWindow_HandleEvent @0x549dd7 / @0x549ba0 (entity +4); the only
+//  table writers are the append, the delete compaction and the clear;
+//  Entity_Destroy's memset @0x43ea70]
+struct UserWaypointRow {
+	int32_t x = 0; // +4, 16.16
+	int32_t y = 0; // +8, 16.16
+	int32_t z = 0; // +12, 16.16
+	std::string name; // +244
+};
+UserWaypointRow user_waypoint_row(const World &world, EntityHandle handle);
 
 // The CMAP screen's placed-waypoint table.
 struct UserWaypointTable {

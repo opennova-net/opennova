@@ -1201,13 +1201,13 @@ public:
 	// dword_2723D58 (@0x59dd95) have none here.
 	void reset_overlay_buffers();
 
-	// The HUD-pass gates the radar legs ride, as bits for the embedder's
-	// per-frame radar step (world::radar_hud_frame): bit 0 the overlay pass
-	// runs past its spawn-success and hud_detail-3 early-outs, bit 1 the
-	// corner spinmap also draws with mask bits 9, 6 and 10, so its own update
-	// site runs [orig: HUD_RenderAllOverlays @0x5a8084 / @0x5a80c4; the
-	// spinmap gates @0x5a8635 / @0x5a86e8; HUD_DrawMapOverlay
-	// @0x5a78ff..0x5a790f].
+	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
+	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
+	// bit 0 the overlay pass runs past its hud_detail-3 early-out (the
+	// spawn-success early-out the session reads live), bit 1 the corner
+	// spinmap also draws with mask bits 9, 6 and 10, so its own update site
+	// runs [orig: HUD_RenderAllOverlays @0x5a80c4; the spinmap gates
+	// @0x5a8635 / @0x5a86e8; HUD_DrawMapOverlay @0x5a78ff..0x5a790f].
 	static constexpr uint32_t kRadarGatePass = 1u;
 	static constexpr uint32_t kRadarGateMapSite = 2u;
 	uint32_t radar_frame_gates(const HudFrameState &state) const;
@@ -1259,6 +1259,10 @@ public:
 	bool compile_server_status_page(const HudFrameState &state, const ServerStatusPageState &page,
 			uint32_t now_ms, bool window_active, float surface_w, float surface_h);
 	const HudDrawList &server_status_page_list() const { return status_page_list_; }
+	// Whether compile_server_status_page would draw now (the stamp untouched).
+	bool server_status_page_due_now(uint32_t now_ms, bool window_active) const {
+		return server_status_page_due_at(status_last_draw_ms_, now_ms, window_active);
+	}
 	// The CMAP MAP / ORDERS_MAP window [orig: CMapWindow_HandleEvent event 1
 	// @0x5497f0 -> HUD_BuildMapOverlayView mode 4 @0x5a7e10].
 	const MapWindowDraw &compile_command_map(const HudFrameState &state,

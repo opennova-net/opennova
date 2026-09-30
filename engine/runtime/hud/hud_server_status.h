@@ -135,6 +135,10 @@ const char *quit_dialog_text_key(bool in_session, bool authority);
 inline constexpr uint32_t kServerStatusRedrawMs = 200;
 inline constexpr uint32_t kServerStatusInactiveRedrawMs = 10000;
 bool server_status_page_due(uint32_t *last_ms, uint32_t now_ms, bool window_active);
+// The same test without the stamp: whether a draw would be due now (a zero
+// stamp reads as seeded one second back). The embedder gathers the page's
+// facts only when it is, since the frames between two draws present nothing.
+bool server_status_page_due_at(uint32_t last_ms, uint32_t now_ms, bool window_active);
 
 // The roster grid: ceil(capacity / 30) columns, doubled under three; rows
 // enough for the capacity; columns 1010 / columns apart from x 7; rows 540 /

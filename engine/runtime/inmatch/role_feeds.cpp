@@ -573,16 +573,19 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 	out.in_session = view.joiner ? (runtime != nullptr && runtime->in_session())
 			: w.rules.mp_session;
 	out.hud_team = out.player_team;
-	// The CMAP's placed-waypoint table's entities.
+	// The CMAP's placed-waypoint table: every non-null entry, read through
+	// its row whatever the row now holds (world::user_waypoint_row)
+	// [orig: CMapWindow_HandleEvent `if (entry)` @0x549dc8 / @0x549b7a, the
+	//  entity +4 read @0x549dd7 / @0x549ba0].
 	for (int i = 0; i < world::UserWaypointTable::kCapacity; ++i) {
-		const world::Entity *wp =
-				w.registry.get(w.user_waypoints.entries[static_cast<size_t>(i)].handle);
-		if (wp == nullptr) continue;
+		const world::EntityHandle handle = w.user_waypoints.entries[static_cast<size_t>(i)].handle;
+		if (!handle.valid()) continue;
+		const world::UserWaypointRow row = world::user_waypoint_row(w, handle);
 		hud::DeathMapFacts::UserWaypoint &fact = out.user_waypoints[static_cast<size_t>(i)];
 		fact.live = true;
-		fact.x = io::float_to_fp16_16_sat(wp->position.x);
-		fact.y = io::float_to_fp16_16_sat(wp->position.y);
-		fact.name = wp->display_name;
+		fact.x = row.x;
+		fact.y = row.y;
+		fact.name = row.name;
 	}
 	// The zone walk is the minimap banks' (banked_spawn_zones) [orig:
 	// MapOverlay_DrawView @0x5a5a4d..0x5a5d2c].
@@ -713,10 +716,8 @@ bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry 
 	out = menu::CommandMapLocations{};
 	if (view.kernel == nullptr) return false;
 	const world::World &w = view.kernel->world;
-	for (const world::UserWaypointTable::Entry &entry : w.user_waypoints.entries) {
-		const world::Entity *wp = w.registry.get(entry.handle);
-		out.user_waypoints.push_back(wp != nullptr ? wp->display_name : std::string());
-	}
+	for (const world::UserWaypointTable::Entry &entry : w.user_waypoints.entries)
+		out.user_waypoints.push_back(world::user_waypoint_row(w, entry.handle).name);
 	std::vector<world::EntityHandle> banked;
 	banked_spawn_zones(view, banked);
 	for (const world::EntityHandle handle : banked)

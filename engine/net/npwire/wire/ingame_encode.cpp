@@ -1194,8 +1194,6 @@ std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign
 	return out;
 }
 
-// [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the link byte @0x510797, the member
-//  slot @0x5107A4]
 // [orig: NetPacket_SerializeEntityEventToBuffer @0x5055A0]
 std::vector<uint8_t> encode_explosion_effect(const ExplosionEffectRecord &event) {
     std::vector<uint8_t> out;
