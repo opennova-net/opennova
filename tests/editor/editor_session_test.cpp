@@ -32,6 +32,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/view_json.h>
 #include <editor/project/project_files.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pff/pff.h>
@@ -211,7 +212,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(platform.last_plan.working_dir == v.activity.last_build->build_dir);
 	TEST_EXPECT(platform.last_plan.args[0] == "--headless");
 	TEST_EXPECT(platform.last_plan.mcp_port == 8999);
-	TEST_EXPECT(v.activity.play_mcp_port == 8999 && session_view_to_json(v).get("play")->get_int("mcp_port", 0) == 8999);
+	TEST_EXPECT(v.activity.play_mcp_port == 8999 && view_section_to_json(v, ViewSection::Run).get_int("mcp_port", 0) == 8999);
 	TEST_EXPECT(session.running_build_dir() == v.activity.last_build->build_dir);
 	TEST_EXPECT(output_has(v, "Running: "));
 
@@ -250,8 +251,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.activity.missing_at_boot("main.mnu"));
 	{
 		bool marked = false;
-		const opennova::io::JsonValue json = session_view_to_json(v);
-		for (const opennova::io::JsonValue &row : json.get("requirements")->get("rows")->array)
+		const opennova::io::JsonValue json = view_section_to_json(v, ViewSection::Requirements);
+		for (const opennova::io::JsonValue &row : json.get("rows")->array)
 			if (row.get_string("name", "") == "main.mnu") marked = row.get_bool("boot_missing", false);
 		TEST_EXPECT(marked);
 	}
@@ -262,8 +263,8 @@ static int test_lifecycle() {
 	platform.exit_child(500);
 	session.poll();
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && v.activity.play_exited_on_its_own && v.activity.play_exit_code == 0);
-	TEST_EXPECT(v.activity.play_mcp_port == 0 && session_view_to_json(v).get("play")->get_int("mcp_port", -1) == 0);
-	TEST_EXPECT(session_view_to_json(v).get("play")->get_int("exit_code", -1) == 0);
+	TEST_EXPECT(v.activity.play_mcp_port == 0 && view_section_to_json(v, ViewSection::Run).get_int("mcp_port", -1) == 0);
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Run).get_int("exit_code", -1) == 0);
 	TEST_EXPECT(
 			output_has(v, "The game exited.") && !has_code(v.findings.diagnostics, "play.crashed"));
 	TEST_EXPECT(session.running_build_dir().empty());
@@ -2539,14 +2540,21 @@ static int test_view_revisions() {
 		TEST_EXPECT(moved_since(v, before) ==
 				Concerns({ViewConcern::Findings, ViewConcern::Output}));
 	}
-	const opennova::io::JsonValue json = session_view_to_json(v);
-	TEST_EXPECT(json.get_number("revision", -1.0) == double(v.revisions.any()));
+	// One clock on the wire (S13 A5): the state query's view_revision is the view's clock, `any`,
+	// and its revisions each concern's stamp, the clock value at which it last moved.
+	std::string error;
+	const opennova::io::JsonValue json =
+			session.query("state", opennova::io::JsonValue::make_null(), error);
+	TEST_EXPECT(error.empty() &&
+			json.get_number("view_revision", -1.0) == double(v.revisions.any()) &&
+			json.get("revision") == nullptr);
 	const opennova::io::JsonValue *revisions = json.get("revisions");
 	TEST_EXPECT(revisions != nullptr);
 	if (revisions)
 		for (const ViewConcernRow &row : kViewConcernRows) {
-			const double counter = double(v.revisions.of(row.concern));
-			TEST_EXPECT(revisions->get_number(row.token, -1.0) == counter);
+			const double stamp = double(v.revisions.stamp(row.concern));
+			TEST_EXPECT(revisions->get_number(row.token, -1.0) == stamp &&
+					stamp <= double(v.revisions.any()));
 		}
 
 	// Closed (saved first, so nothing waits on the prompt): every concern moves, and the graph
@@ -2824,12 +2832,9 @@ static int test_output_cursor() {
 	std::vector<std::string> seen;
 	const auto read_pages = [&] {
 		for (;;) {
-			SessionJsonOptions options;
-			options.output_cursor = cursor;
-			options.output_limit = 200;
-			const opennova::io::JsonValue json = session_view_to_json(v, options);
-			const opennova::io::JsonValue *output = json.get("output");
-			if (!output || !output->get("lines")) return;
+			const opennova::io::JsonValue page = output_page_to_json(v.activity.output, cursor, 200);
+			const opennova::io::JsonValue *output = &page;
+			if (!output->get("lines")) return;
 			const auto &lines = output->get("lines")->array;
 			for (const opennova::io::JsonValue &line : lines) seen.push_back(line.string);
 			cursor = uint64_t(output->get_number("next_cursor", 0.0));
@@ -2854,16 +2859,11 @@ static int test_output_cursor() {
 	for (size_t i = 0; in_order && i < seen.size(); ++i) in_order = seen[i] == "game: line " + std::to_string(i);
 	TEST_EXPECT(in_order);
 	// A cursor the log dropped past starts at the oldest line held.
-	SessionJsonOptions from_zero;
-	from_zero.output_cursor = 0;
-	from_zero.output_limit = 1;
-	const opennova::io::JsonValue json = session_view_to_json(v, from_zero);
-	TEST_EXPECT(json.get("output")->get_number("first", 0.0) ==
-					double(v.activity.output.first_index()) &&
-			json.get("output")->get_number("cursor", 0.0) ==
-					double(v.activity.output.first_index()) &&
-			json.get("output")->get_number("next", 0.0) == double(v.activity.output.next_index()) &&
-			json.get("output")->get("lines")->array.front().string == v.activity.output[0]);
+	const opennova::io::JsonValue from_zero = output_page_to_json(v.activity.output, 0, 1);
+	TEST_EXPECT(from_zero.get_number("first", 0.0) == double(v.activity.output.first_index()) &&
+			from_zero.get_number("cursor", 0.0) == double(v.activity.output.first_index()) &&
+			from_zero.get_number("next", 0.0) == double(v.activity.output.next_index()) &&
+			from_zero.get("lines")->array.front().string == v.activity.output[0]);
 	// Clear empties it; the indices go on, so a held cursor still reads what comes next.
 	const uint64_t next = v.activity.output.next_index();
 	session.handle(request::clear_output());

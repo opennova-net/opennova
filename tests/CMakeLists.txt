@@ -3820,13 +3820,15 @@ target_link_libraries(editor_menu_arrange_test PRIVATE opennova_editor)
 target_include_directories(editor_menu_arrange_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_menu_arrange COMMAND editor_menu_arrange_test)
 
-# The editor MCP's menu tools (S9m): a menu's tree with the render check's rects, a batch
-# by record identity and label (a window added and filled in, one undo step), a list
-# replaced, and one menu's Problems rows by source, over a real session through JSON.
-add_executable(editor_menu_tools_test editor/menu_tools_test.cpp)
-target_link_libraries(editor_menu_tools_test PRIVATE opennova_editor)
-target_include_directories(editor_menu_tools_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_menu_tools COMMAND editor_menu_tools_test)
+# The query seam (S13 A5): every list a query serves paged in C++ (the pages make the list,
+# count the whole, an offset or a limit out of range refused naming the query), the state by
+# section and since a revision, the catalog from the tables, the menu reads editor_menu served
+# (its tree, its findings, the render check's render) and its batch as edit_record's wire form
+# (records by identity or label, a list replaced, one undo step), over a real session.
+add_executable(editor_query_test editor/editor_query_test.cpp)
+target_link_libraries(editor_query_test PRIVATE opennova_editor)
+target_include_directories(editor_query_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_query COMMAND editor_query_test)
 
 # The render check (S9j2): every menu screen compiled headless, its notes as Problems rows
 # on their records (never a build's gate, never the graph's findings twice), rendered

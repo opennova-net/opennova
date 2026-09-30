@@ -29,7 +29,7 @@ struct FindingsView {
 	// DocumentTypeId, run with every validation: their findings are Problems rows (never a
 	// build's gate). The menu type's is the render check, every menu screen of the project
 	// compiled headless as the game draws it (S9j2; preview/menu_render_check.h's
-	// menu_render_check), whose render of a screen answers the MCP's editor_menu_preview render.
+	// menu_render_check), whose render of a screen answers the menu_render query.
 	std::shared_ptr<const ProjectChecks> project_checks;
 };
 

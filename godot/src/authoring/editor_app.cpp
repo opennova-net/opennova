@@ -14,24 +14,14 @@
 #include <string>
 #include <vector>
 
-#include <editor/documents/mnu_document.h>
-#include <editor/graph/asset_graph.h>
-#include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_preview_state.h>
-#include <editor/preview/menu_render_check.h>
-#include <editor/preview/menu_report.h>
-#include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_json.h>
-#include <editor/project_build/build_run.h>
-#include <editor/requirements/requirements.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/request_kinds.h>
-#include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 
@@ -43,7 +33,6 @@ using opennova::editor::EditorRequestKind;
 using opennova::editor::PickPurpose;
 using opennova::editor::PlayLauncher;
 using opennova::editor::ProjectSession;
-using opennova::editor::SessionView;
 
 namespace godot {
 
@@ -59,59 +48,10 @@ constexpr const char *kMcpServicePath = "res://editor/mcp/editor_mcp_service.gd"
 } // namespace
 
 void EditorApp::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create_file", "path"), &EditorApp::create_file);
-	ClassDB::bind_method(D_METHOD("open_document", "path"), &EditorApp::open_document);
-	ClassDB::bind_method(D_METHOD("get_row_count"), &EditorApp::get_row_count);
-	ClassDB::bind_method(D_METHOD("get_row_id", "index"), &EditorApp::get_row_id);
-	ClassDB::bind_method(D_METHOD("get_row_name", "index"), &EditorApp::get_row_name);
-	ClassDB::bind_method(D_METHOD("add_record", "kind", "parent", "position"), &EditorApp::add_record, DEFVAL(0), DEFVAL(-1));
-	ClassDB::bind_method(D_METHOD("remove_record", "id"), &EditorApp::remove_record);
-	ClassDB::bind_method(D_METHOD("set_field", "id", "field", "value"), &EditorApp::set_field);
-	ClassDB::bind_method(D_METHOD("clear_field", "id", "field"), &EditorApp::clear_field);
-	ClassDB::bind_method(D_METHOD("write_field", "id", "field"), &EditorApp::write_field);
-	ClassDB::bind_method(D_METHOD("get_field", "id", "field"), &EditorApp::get_field);
-	ClassDB::bind_method(D_METHOD("save_documents"), &EditorApp::save_documents);
-	ClassDB::bind_method(D_METHOD("undo"), &EditorApp::undo);
-	ClassDB::bind_method(D_METHOD("redo"), &EditorApp::redo);
-	ClassDB::bind_method(D_METHOD("is_document_dirty"), &EditorApp::is_document_dirty);
-	ClassDB::bind_method(D_METHOD("get_child_records", "id", "kind"), &EditorApp::get_child_records, DEFVAL(String()));
-	ClassDB::bind_method(D_METHOD("get_record_owner", "id"), &EditorApp::get_record_owner);
-	ClassDB::bind_method(D_METHOD("get_record_name", "id"), &EditorApp::get_record_name);
-	ClassDB::bind_method(D_METHOD("find_record", "symbol", "scope"), &EditorApp::find_record, DEFVAL(String()));
-	ClassDB::bind_method(D_METHOD("has_unsaved_prompt"), &EditorApp::has_unsaved_prompt);
-	ClassDB::bind_method(D_METHOD("resolve_unsaved", "choice"), &EditorApp::resolve_unsaved);
-	ClassDB::bind_method(D_METHOD("get_play_mcp_port"), &EditorApp::get_play_mcp_port);
-	ClassDB::bind_method(D_METHOD("duplicate_record", "id"), &EditorApp::duplicate_record);
-	ClassDB::bind_method(D_METHOD("move_record", "id", "position", "parent"), &EditorApp::move_record, DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("select_record", "id", "mode"), &EditorApp::select_record, DEFVAL("replace"));
-	ClassDB::bind_method(D_METHOD("get_selected_records"), &EditorApp::get_selected_records);
-	ClassDB::bind_method(D_METHOD("copy_records"), &EditorApp::copy_records);
-	ClassDB::bind_method(D_METHOD("cut_records"), &EditorApp::cut_records);
-	ClassDB::bind_method(D_METHOD("paste_records", "parent", "position"), &EditorApp::paste_records, DEFVAL(0), DEFVAL(-1));
-	ClassDB::bind_method(D_METHOD("end_edit"), &EditorApp::end_edit);
 	ClassDB::bind_method(D_METHOD("request_json", "json"), &EditorApp::request_json);
-	ClassDB::bind_method(D_METHOD("get_outcome_json"), &EditorApp::get_outcome_json);
-	ClassDB::bind_method(D_METHOD("get_operation_json"), &EditorApp::get_operation_json);
-	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset",
-								 "import_limit", "event_cursor", "event_limit"),
-			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200), DEFVAL(0),
-			DEFVAL(64));
-	ClassDB::bind_method(D_METHOD("get_document_json", "path", "with_rows"), &EditorApp::get_document_json);
-	ClassDB::bind_method(D_METHOD("get_record_json", "id"), &EditorApp::get_record_json);
-	ClassDB::bind_method(D_METHOD("get_reference_choices_json", "id", "field"), &EditorApp::get_reference_choices_json);
-	ClassDB::bind_method(D_METHOD("get_reference_targets_json", "id", "field"), &EditorApp::get_reference_targets_json);
-	ClassDB::bind_method(D_METHOD("search_document_json", "path", "text", "match_case"), &EditorApp::search_document_json,
-	                     DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("get_problems_json", "query"), &EditorApp::get_problems_json, DEFVAL("{}"));
-	ClassDB::bind_method(D_METHOD("get_request_kinds"), &EditorApp::get_request_kinds);
-	ClassDB::bind_method(D_METHOD("get_references_json", "path"), &EditorApp::get_references_json);
-	ClassDB::bind_method(D_METHOD("get_referrers_json", "path"), &EditorApp::get_referrers_json);
-	ClassDB::bind_method(D_METHOD("get_symbol_referrers_json", "kind", "name", "scope"), &EditorApp::get_symbol_referrers_json,
-	                     DEFVAL(String()));
-	ClassDB::bind_method(D_METHOD("get_usages_json", "path"), &EditorApp::get_usages_json);
-	ClassDB::bind_method(D_METHOD("get_missing_references_json"), &EditorApp::get_missing_references_json);
-	ClassDB::bind_method(D_METHOD("get_symbols_json", "kind"), &EditorApp::get_symbols_json);
-	ClassDB::bind_method(D_METHOD("search_project_json", "text"), &EditorApp::search_project_json);
+	ClassDB::bind_method(D_METHOD("query_json", "name", "args"), &EditorApp::query_json, DEFVAL("{}"));
+	ClassDB::bind_method(D_METHOD("pump"), &EditorApp::pump);
+	ClassDB::bind_method(D_METHOD("set_poll_budget", "ms", "step_bytes"), &EditorApp::set_poll_budget);
 	ClassDB::bind_method(D_METHOD("get_menu_preview_json"), &EditorApp::get_menu_preview_json);
 	ClassDB::bind_method(D_METHOD("menu_preview_hit_json", "x", "y"), &EditorApp::menu_preview_hit_json);
 	ClassDB::bind_method(D_METHOD("set_menu_preview_options", "options"), &EditorApp::set_menu_preview_options);
@@ -125,10 +65,6 @@ void EditorApp::_bind_methods() {
 			DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("get_model_preview_camera"), &EditorApp::get_model_preview_camera);
 	ClassDB::bind_method(D_METHOD("get_model_preview_model"), &EditorApp::get_model_preview_model);
-	ClassDB::bind_method(D_METHOD("get_menu_render_json", "path", "screen"), &EditorApp::get_menu_render_json);
-	ClassDB::bind_method(D_METHOD("get_menu_tree_json", "path"), &EditorApp::get_menu_tree_json);
-	ClassDB::bind_method(D_METHOD("get_menu_findings_json", "path"), &EditorApp::get_menu_findings_json);
-	ClassDB::bind_method(D_METHOD("edit_menu_json", "path", "json"), &EditorApp::edit_menu_json);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 
@@ -139,25 +75,6 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_play_engine_args"), &EditorApp::get_play_engine_args);
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "play_engine_args"), "set_play_engine_args",
 			"get_play_engine_args");
-	ClassDB::bind_method(D_METHOD("new_project", "dir", "title"), &EditorApp::new_project);
-	ClassDB::bind_method(D_METHOD("open_project", "dir"), &EditorApp::open_project);
-	ClassDB::bind_method(D_METHOD("close_project"), &EditorApp::close_project);
-	ClassDB::bind_method(D_METHOD("create_missing_files"), &EditorApp::create_missing_files);
-	ClassDB::bind_method(D_METHOD("stop_play"), &EditorApp::stop_play);
-	ClassDB::bind_method(D_METHOD("pump"), &EditorApp::pump);
-	ClassDB::bind_method(D_METHOD("set_poll_budget", "ms", "step_bytes"), &EditorApp::set_poll_budget);
-	ClassDB::bind_method(D_METHOD("is_project_open"), &EditorApp::is_project_open);
-	ClassDB::bind_method(D_METHOD("get_project_title"), &EditorApp::get_project_title);
-	ClassDB::bind_method(D_METHOD("get_project_root"), &EditorApp::get_project_root);
-	ClassDB::bind_method(D_METHOD("get_required_missing"), &EditorApp::get_required_missing);
-	ClassDB::bind_method(D_METHOD("get_required_total"), &EditorApp::get_required_total);
-	ClassDB::bind_method(D_METHOD("get_last_build_dir"), &EditorApp::get_last_build_dir);
-	ClassDB::bind_method(D_METHOD("is_last_build_ok"), &EditorApp::is_last_build_ok);
-	ClassDB::bind_method(D_METHOD("get_play_state"), &EditorApp::get_play_state);
-	ClassDB::bind_method(D_METHOD("did_game_exit_on_its_own"), &EditorApp::did_game_exit_on_its_own);
-	ClassDB::bind_method(D_METHOD("get_problem_count"), &EditorApp::get_problem_count);
-	ClassDB::bind_method(D_METHOD("get_output_lines"), &EditorApp::get_output_lines);
-	ClassDB::bind_method(D_METHOD("get_recent_projects"), &EditorApp::get_recent_projects);
 	ClassDB::bind_method(D_METHOD("get_loaded_variant"), &EditorApp::get_loaded_variant);
 	ClassDB::bind_method(D_METHOD("is_source_run"), &EditorApp::is_source_run);
 	ClassDB::bind_method(D_METHOD("_on_dir_selected", "dir"), &EditorApp::_on_dir_selected);
@@ -248,7 +165,8 @@ void EditorApp::_ready() {
 		}
 	}
 	for (int i = 0; i + 1 < args.size(); ++i) {
-		if (args[i] == kProjectFlag) open_project(args[i + 1]);
+		if (args[i] == kProjectFlag)
+			session_->handle(opennova::editor::request::open_project(opennova::to_std(args[i + 1])));
 	}
 	// The editor's own endpoint: the same flag the game reads (docs/mcp.md).
 	const int mcp_port = LaunchFlags::mcp_port();
@@ -474,361 +392,6 @@ int EditorApp::allocate_mcp_port() {
 	probe->stop();
 	return port;
 }
-
-// --- the typed seam --------------------------------------------------------------
-
-// Whether the project at `dir` is the one open now: a switch that failed or was refused leaves
-// the project that was open before it open (or none).
-bool EditorApp::project_open_at(const std::string &p_dir) const {
-	return session_->project_open() &&
-			session_->view().project.root == opennova::editor::ProjectPaths::for_root(p_dir).root;
-}
-
-bool EditorApp::new_project(const String &p_dir, const String &p_title) {
-	ensure_session();
-	const std::string dir = opennova::to_std(p_dir);
-	session_->handle(opennova::editor::request::new_project(dir, opennova::to_std(p_title)));
-	// Made and opened: the request went through (a folder that holds a project already refuses
-	// it, the open project's own among them) and the project it made is the one open.
-	return session_->outcome().done() && project_open_at(dir);
-}
-
-bool EditorApp::open_project(const String &p_dir) {
-	ensure_session();
-	const std::string dir = opennova::to_std(p_dir);
-	session_->handle(opennova::editor::request::open_project(dir));
-	return project_open_at(dir);
-}
-
-void EditorApp::close_project() {
-	ensure_session();
-	session_->handle(opennova::editor::request::close_project());
-}
-
-int EditorApp::create_missing_files() {
-	ensure_session();
-	const auto roles =
-			opennova::editor::unmet_required_roles(*session_->view().project.requirements);
-	session_->handle(opennova::editor::request::create_missing(roles));
-	return get_required_missing();
-}
-
-void EditorApp::stop_play() {
-	ensure_session();
-	session_->handle(opennova::editor::request::stop_play());
-}
-
-bool EditorApp::is_project_open() const {
-	return session_ && session_->project_open();
-}
-
-String EditorApp::get_project_title() const {
-	return session_ ? opennova::to_gd(session_->view().project.document->title) : String();
-}
-
-String EditorApp::get_project_root() const {
-	return session_ ? opennova::to_gd(session_->view().project.root) : String();
-}
-
-int EditorApp::get_required_missing() const {
-	if (!session_) {
-		return 0;
-	}
-	const SessionView &v = session_->view();
-	return v.project.requirements->required_missing + v.project.requirements->required_wrong_kind;
-}
-
-int EditorApp::get_required_total() const {
-	return session_ ? session_->view().project.requirements->required_total : 0;
-}
-
-String EditorApp::get_last_build_dir() const {
-	return session_ ? opennova::to_gd(session_->view().activity.last_build->build_dir) : String();
-}
-
-bool EditorApp::is_last_build_ok() const {
-	return session_ && session_->view().activity.has_build &&
-			session_->view().activity.last_build->ok;
-}
-
-String EditorApp::get_play_state() const {
-	return session_ ? String(opennova::editor::play_state_label(session_->view().activity.play_state)) : String("stopped");
-}
-
-bool EditorApp::did_game_exit_on_its_own() const {
-	return session_ && session_->view().activity.play_exited_on_its_own;
-}
-
-int EditorApp::get_problem_count() const {
-	return session_ ? static_cast<int>(session_->view().findings.diagnostics.size()) : 0;
-}
-
-PackedStringArray EditorApp::get_output_lines() const {
-	PackedStringArray lines;
-	if (session_) {
-		for (const std::string &line : session_->view().activity.output) {
-			lines.push_back(opennova::to_gd(line));
-		}
-	}
-	return lines;
-}
-
-PackedStringArray EditorApp::get_recent_projects() const {
-	PackedStringArray roots;
-	if (session_) {
-		for (const std::string &root : session_->view().project.recent_projects) {
-			roots.push_back(opennova::to_gd(root));
-		}
-	}
-	return roots;
-}
-
-
-namespace {
-using opennova::editor::Document;
-using opennova::editor::Edit;
-using opennova::editor::EditOperation;
-using opennova::editor::NodeAddress;
-using opennova::editor::Value;
-
-bool to_value(const Variant &variant, Value &out) {
-	switch (variant.get_type()) {
-	case Variant::INT: out = int64_t(variant); return true;
-	case Variant::FLOAT: out = double(variant); return true;
-	case Variant::STRING: out = opennova::to_std(String(variant)); return true;
-	case Variant::BOOL: out = int64_t(bool(variant) ? 1 : 0); return true;
-	default: return false;
-	}
-}
-
-Variant to_variant(const Value &value) {
-	if (const auto *number = std::get_if<int64_t>(&value)) return Variant(*number);
-	if (const auto *real = std::get_if<double>(&value)) return Variant(*real);
-	return Variant(opennova::to_gd(std::get<std::string>(value)));
-}
-
-// True when the request on the active document went through (a Move that leaves a
-// record where it is included: nothing was wrong, nothing changed); false for one the session
-// refused before its edit ran (an operation holding the documents), whose edit flag is the last
-// edit's.
-bool edited(ProjectSession &session, Document &document, EditorRequest request) {
-	request.path = document.path();
-	session.handle(request);
-	return session.outcome().done() && session.last_edit_ok();
-}
-
-// A record's identity as the seam names it: the nested record's, else the row's.
-int64_t identity_of(const NodeAddress &address) { return int64_t(address.child ? address.child : address.row); }
-
-// An optional field of a record of the active document left out (Clear) or written again
-// (Write).
-bool presence_edited(ProjectSession &session, int64_t id, const String &field, EditOperation operation) {
-	auto *document = session.document_for();
-	if (!document) return false;
-	Edit edit;
-	edit.operation = operation;
-	edit.address = document->address_of(uint64_t(id));
-	edit.field = opennova::to_std(field);
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(edit));
-	return edited(session, *document, request);
-}
-} // namespace
-
-bool EditorApp::create_file(const String &p_path) {
-	ensure_session();
-	session_->handle(opennova::editor::request::create_file(opennova::to_std(p_path)));
-	return session_->outcome().done();
-}
-bool EditorApp::open_document(const String &p_path) {
-	ensure_session();
-	session_->handle(opennova::editor::request::open_document(opennova::to_std(p_path)));
-	return session_->document_base_for(opennova::to_std(p_path)) != nullptr;
-}
-int EditorApp::get_row_count() const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	return document ? int(document->rows().size()) : 0;
-}
-int64_t EditorApp::get_row_id(int p_index) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	return document && p_index >= 0 && size_t(p_index) < document->rows().size() ? int64_t(document->rows()[p_index]->id) : 0;
-}
-String EditorApp::get_row_name(int p_index) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	return document && p_index >= 0 && size_t(p_index) < document->rows().size() ? opennova::to_gd(document->rows()[p_index]->name()) : String();
-}
-int64_t EditorApp::add_record(const String &p_kind, int64_t p_parent, int64_t p_position) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document || p_parent < 0) return 0;
-	const auto kind = document->kind_from_name(opennova::to_std(p_kind));
-	if (kind < 0) return 0;
-	Edit add;
-	add.operation = EditOperation::Add;
-	add.address = {0, kind, 0};
-	add.parent = uint64_t(p_parent);
-	add.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(add));
-	return edited(*session_, *document, request) ? int64_t(document->last_added()) : 0;
-}
-bool EditorApp::remove_record(int64_t p_id) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document) return false;
-	Edit remove;
-	remove.operation = EditOperation::Remove;
-	remove.address = document->address_of(uint64_t(p_id));
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(remove));
-	return edited(*session_, *document, request);
-}
-bool EditorApp::set_field(int64_t p_id, const String &p_field, const Variant &p_value) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document) return false;
-	Edit set;
-	set.address = document->address_of(uint64_t(p_id));
-	set.field = opennova::to_std(p_field);
-	if (!to_value(p_value, set.value)) return false;
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(set));
-	return edited(*session_, *document, request);
-}
-bool EditorApp::clear_field(int64_t p_id, const String &p_field) {
-	ensure_session();
-	return presence_edited(*session_, p_id, p_field, EditOperation::Clear);
-}
-bool EditorApp::write_field(int64_t p_id, const String &p_field) {
-	ensure_session();
-	return presence_edited(*session_, p_id, p_field, EditOperation::Write);
-}
-Variant EditorApp::get_field(int64_t p_id, const String &p_field) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return Variant();
-	const NodeAddress address = document->address_of(uint64_t(p_id));
-	const std::string field = opennova::to_std(p_field);
-	Value value;
-	if (!document->get(address, field, value) || !document->present(address, field)) return Variant();
-	return to_variant(value);
-}
-bool EditorApp::save_documents() {
-	ensure_session();
-	session_->handle(opennova::editor::request::save_all());
-	return !session_->documents_dirty();
-}
-void EditorApp::undo() { ensure_session(); session_->handle(opennova::editor::request::undo()); }
-void EditorApp::redo() { ensure_session(); session_->handle(opennova::editor::request::redo()); }
-bool EditorApp::is_document_dirty() const {
-	const auto *document = session_ ? session_->document_base_for() : nullptr;
-	return document && document->dirty();
-}
-PackedInt64Array EditorApp::get_child_records(int64_t p_id, const String &p_kind) const {
-	PackedInt64Array children;
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return children;
-	const std::string kind = opennova::to_std(p_kind);
-	for (const Document::Collection &collection : document->collections_of(document->address_of(uint64_t(p_id)))) {
-		if (!kind.empty() && kind != document->kind_token(collection.spec.kind)) continue;
-		for (const opennova::editor::NodeId id : collection.ids) children.push_back(int64_t(id));
-	}
-	return children;
-}
-int64_t EditorApp::get_record_owner(int64_t p_id) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	Document::Placement at;
-	if (!document || !document->placement(document->address_of(uint64_t(p_id)), at)) return 0;
-	return identity_of(at.owner);
-}
-String EditorApp::get_record_name(int64_t p_id) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return String();
-	return opennova::to_gd(document->record_name(document->address_of(uint64_t(p_id))));
-}
-int64_t EditorApp::find_record(const String &p_symbol, const String &p_scope) const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	NodeAddress address;
-	if (!document || !graph ||
-	    !opennova::editor::find_definition(*graph, *document, opennova::to_std(p_symbol), address,
-	                                       opennova::to_std(p_scope)))
-		return 0;
-	return identity_of(address);
-}
-bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view().dialogs.unsaved_prompt.open; }
-void EditorApp::resolve_unsaved(int p_choice) {
-	if (p_choice < 0 || p_choice > 2) return;
-	ensure_session();
-	const auto choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
-	session_->handle(opennova::editor::request::resolve_unsaved(choice));
-}
-int EditorApp::get_play_mcp_port() const {
-	return session_ ? session_->view().activity.play_mcp_port : 0;
-}
-bool EditorApp::duplicate_record(int64_t p_id) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document) return false;
-	Edit duplicate;
-	duplicate.operation = EditOperation::Duplicate;
-	duplicate.address = document->address_of(uint64_t(p_id));
-	// The copy goes right after the record, in its owner's collection or among the rows.
-	Document::Placement at;
-	if (document->placement(duplicate.address, at)) duplicate.position = at.index + 1;
-	for (size_t i = 0; !duplicate.address.child && i < document->rows().size(); ++i)
-		if (document->rows()[i]->id == duplicate.address.row) duplicate.position = i + 1;
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(duplicate));
-	return edited(*session_, *document, request);
-}
-bool EditorApp::move_record(int64_t p_id, int p_position, int64_t p_parent) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document || p_position < 0 || p_parent < 0) return false;
-	Edit move;
-	move.operation = EditOperation::Move;
-	move.address = document->address_of(uint64_t(p_id));
-	move.position = size_t(p_position);
-	move.parent = uint64_t(p_parent);
-	const EditorRequest request = opennova::editor::request::edit_record({}, std::move(move));
-	return edited(*session_, *document, request);
-}
-bool EditorApp::select_record(int64_t p_id, const String &p_mode) {
-	ensure_session();
-	auto *document = session_->document_for();
-	opennova::editor::SelectMode mode;
-	if (!document || !opennova::editor::select_mode_from_token(opennova::to_std(p_mode), mode)) return false;
-	const NodeAddress address = document->address_of(uint64_t(p_id));
-	if (!address.row) return false;
-	session_->handle(opennova::editor::request::select_record(document->path(), address, mode));
-	return true;
-}
-PackedInt64Array EditorApp::get_selected_records() const {
-	PackedInt64Array ids;
-	if (session_)
-		for (const NodeAddress &address : session_->view().documents.selected) ids.push_back(identity_of(address));
-	return ids;
-}
-bool EditorApp::copy_records() {
-	ensure_session();
-	auto *document = session_->document_for();
-	return document && edited(*session_, *document, opennova::editor::request::copy());
-}
-bool EditorApp::cut_records() {
-	ensure_session();
-	auto *document = session_->document_for();
-	return document && edited(*session_, *document, opennova::editor::request::cut());
-}
-bool EditorApp::paste_records(int64_t p_parent, int p_position) {
-	ensure_session();
-	auto *document = session_->document_for();
-	if (!document || p_parent < 0) return false;
-	opennova::editor::PasteAt at;
-	at.parent = uint64_t(p_parent);
-	at.position = p_position < 0 ? SIZE_MAX : size_t(p_position);
-	return edited(*session_, *document, opennova::editor::request::paste(std::string(), at));
-}
-void EditorApp::end_edit() {
-	ensure_session();
-	if (auto *document = session_->document_base_for())
-		session_->handle(opennova::editor::request::end_edit(document->path()));
-}
-
 // --- the wire seam ---------------------------------------------------------------
 
 namespace {
@@ -884,177 +447,36 @@ bool to_json(const Variant &p_value, opennova::io::JsonValue &r_out) {
 
 String EditorApp::request_json(const String &p_json) {
 	ensure_session();
-	opennova::io::JsonValue json, answer = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue json;
 	std::string error;
-	EditorRequest request;
-	bool ok = opennova::io::json_parse(opennova::to_std(p_json), json, error);
-	// A kind the shell serves with a person to answer it (the pickers) never comes through here:
-	// refused by its kind, before its fields are read, naming the fields that carry what it picks.
-	const opennova::io::JsonValue *token = ok ? json.get("kind") : nullptr;
-	EditorRequestKind kind = EditorRequestKind::Rescan;
-	if (token && token->is_string() &&
-			opennova::editor::request_kind_from_token(token->string, kind) &&
-			opennova::editor::request_kind_row(kind).served_by ==
-					opennova::editor::ServedBy::ShellNeedsPerson) {
-		ok = false;
-		error = "The pickers need a person: pass what they pick instead, a project's folder as the "
-				"dir of new_project or open_project, the game install or the runtime as "
-				"settings.game_install or settings.runtime_executable of apply_project_settings, "
-				"files to import as the paths of preview_import.";
+	opennova::editor::EditorRequest shell;
+	if (!opennova::io::json_parse(opennova::to_std(p_json), json, error)) {
+		opennova::io::JsonValue answer = session_->handle_json(opennova::io::JsonValue::make_null());
+		answer.set("error", opennova::io::JsonValue::make_string("The request is not JSON: " + error));
+		return json_text(answer);
 	}
-	ok = ok && opennova::editor::editor_request_from_json(json, request, error);
-	bool served = false;
-	if (ok) {
-		served = session_->handle(request);
-		if (!served) serve(request);
-	}
-	answer.set("ok", opennova::io::JsonValue::make_bool(ok));
-	answer.set("served", opennova::io::JsonValue::make_bool(served));
-	if (!error.empty()) answer.set("error", opennova::io::JsonValue::make_string(error));
-	// What the request came to (`ok` only says it parsed): the session's outcome, or a
-	// plain done for a kind the shell served.
-	if (ok) {
-		answer.set("outcome", opennova::editor::action_outcome_to_json(
-				served ? session_->outcome() : opennova::editor::ActionOutcome()));
-	}
-	answer.set("status", opennova::io::JsonValue::make_string(session_->view().activity.status));
-	const double revision = double(session_->view().revisions.any());
-	answer.set("revision", opennova::io::JsonValue::make_number(revision));
+	const opennova::io::JsonValue answer = session_->handle_json(json, &shell);
+	// A row the shell serves (reveal_path): the session left it to the shell.
+	if (answer.get_bool("ok", false) && !answer.get_bool("served", true)) serve(shell);
 	return json_text(answer);
 }
 
-String EditorApp::get_outcome_json() const {
-	return json_text(opennova::editor::action_outcome_to_json(session_ ? session_->outcome() : opennova::editor::ActionOutcome()));
-}
-
-String EditorApp::get_operation_json() const {
-	opennova::io::JsonValue answer = opennova::io::JsonValue::make_object();
-	const SessionView empty;
-	const SessionView &view = session_ ? session_->view() : empty;
-	answer.set("operation", opennova::editor::operation_status_to_json(view.activity.operation));
-	answer.set("last_operation",
-			opennova::editor::operation_outcome_to_json(view.activity.last_operation));
-	return json_text(answer);
-}
-
-String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset,
-		int p_import_limit, int p_event_cursor, int p_event_limit) const {
-	if (!session_) return String("{}");
-	opennova::editor::SessionJsonOptions options;
-	options.output_cursor = size_t(std::max(p_output_cursor, 0));
-	options.output_limit = size_t(std::max(p_output_limit, 0));
-	options.import_offset = size_t(std::max(p_import_offset, 0));
-	options.import_limit = size_t(std::max(p_import_limit, 0));
-	options.event_cursor = uint64_t(std::max(p_event_cursor, 0));
-	options.event_limit = size_t(std::max(p_event_limit, 0));
-	return json_text(opennova::editor::session_view_to_json(session_->view(), options));
-}
-
-String EditorApp::get_document_json(const String &p_path, bool p_with_rows) const {
-	const std::string path = opennova::to_std(p_path);
-	const auto *document = session_ ? session_->document_base_for(path) : nullptr;
-	if (!document) return String("null");
-	return json_text(opennova::editor::document_to_json(*document, p_with_rows));
-}
-
-String EditorApp::get_record_json(int64_t p_id) const {
-	const Document *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return String("null");
-	return json_text(opennova::editor::record_to_json(*document, document->address_of(uint64_t(p_id)), session_->view()));
-}
-
-String EditorApp::get_reference_choices_json(int64_t p_id, const String &p_field) const {
-	const Document *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return String("null");
-	return json_text(opennova::editor::reference_choices_to_json(*document, document->address_of(uint64_t(p_id)),
-			opennova::to_std(p_field), session_->view()));
-}
-
-String EditorApp::get_reference_targets_json(int64_t p_id, const String &p_field) const {
-	const Document *document = session_ ? session_->document_for() : nullptr;
-	if (!document) return String("null");
-	return json_text(opennova::editor::reference_targets_to_json(*document, document->address_of(uint64_t(p_id)),
-			opennova::to_std(p_field), session_->view()));
-}
-
-String EditorApp::search_document_json(const String &p_path, const String &p_text, bool p_match_case) const {
-	const Document *document = session_ ? session_->document_for(opennova::to_std(p_path)) : nullptr;
-	if (!document) return String("null");
-	opennova::editor::SearchOptions options;
-	options.match_case = p_match_case;
-	return json_text(opennova::editor::document_hits_to_json(
-			opennova::editor::find_in_document(*document, opennova::to_std(p_text), options)));
-}
-
-String EditorApp::get_problems_json(const String &p_query) {
+String EditorApp::query_json(const String &p_name, const String &p_args) {
 	ensure_session();
-	return opennova::to_gd(session_->problems_json(opennova::to_std(p_query)));
-}
-
-// The kinds request_json serves: every row of the request table but those a person answers.
-PackedStringArray EditorApp::get_request_kinds() const {
-	PackedStringArray kinds;
-	for (size_t i = 0; i < opennova::editor::kEditorRequestKindCount; ++i) {
-		const auto &row = opennova::editor::request_kind_row(static_cast<EditorRequestKind>(i));
-		if (row.served_by != opennova::editor::ServedBy::ShellNeedsPerson)
-			kinds.push_back(opennova::to_gd(row.token));
+	opennova::io::JsonValue args, answer;
+	std::string error;
+	if (!opennova::io::json_parse(opennova::to_std(p_args), args, error)) {
+		error = "The query's args are not JSON: " + error;
+	} else {
+		answer = session_->query(opennova::to_std(p_name), args, error);
 	}
-	return kinds;
+	if (!error.empty()) {
+		answer = opennova::io::JsonValue::make_object();
+		answer.set("error", opennova::io::JsonValue::make_string(error));
+	}
+	return json_text(answer);
 }
 
-String EditorApp::get_references_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	if (!graph) return String("[]");
-	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->references_of(opennova::to_std(p_path))));
-}
-
-String EditorApp::get_referrers_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	if (!graph) return String("[]");
-	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->referrers_of_file(opennova::to_std(p_path))));
-}
-
-String EditorApp::get_symbol_referrers_json(const String &p_kind, const String &p_name, const String &p_scope) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	opennova::editor::ReferenceKind kind;
-	if (!graph || !opennova::editor::reference_kind_from_token(opennova::to_std(p_kind), kind)) return String("[]");
-	return json_text(opennova::editor::graph_edges_to_json(
-	        *graph, graph->referrers_of(kind, opennova::to_std(p_name), opennova::to_std(p_scope))));
-}
-
-String EditorApp::get_usages_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	if (!graph) return String("[]");
-	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->usages_of(opennova::to_std(p_path))));
-}
-
-String EditorApp::get_missing_references_json() const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	if (!graph) return String("[]");
-	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->missing()));
-}
-
-String EditorApp::search_project_json(const String &p_text) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	if (!graph) return json_text(opennova::editor::graph_search_to_json({}));
-	return json_text(opennova::editor::graph_search_to_json(graph->search(opennova::to_std(p_text))));
-}
-
-String EditorApp::get_symbols_json(const String &p_kind) const {
-	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
-	opennova::editor::ReferenceKind kind;
-	const bool filtered = !p_kind.is_empty();
-	if (!graph || (filtered && !opennova::editor::reference_kind_from_token(opennova::to_std(p_kind), kind))) return String("[]");
-	opennova::io::JsonValue out = opennova::io::JsonValue::make_array();
-	if (filtered)
-		for (const opennova::editor::GraphSymbol *symbol : graph->symbols_of_kind(kind))
-			out.push(opennova::editor::graph_symbol_to_json(*symbol));
-	else
-		graph->for_each_symbol([&out](const opennova::editor::GraphSymbol &symbol) {
-			out.push(opennova::editor::graph_symbol_to_json(symbol));
-		});
-	return json_text(out);
-}
 String EditorApp::get_menu_preview_json() {
 	ensure_session();
 #if OPENNOVA_EDITOR_UI
@@ -1080,61 +502,6 @@ String EditorApp::menu_preview_hit_json(double p_x, double p_y) {
 	opennova::editor::MenuPreviewModel none;
 	return json_text(opennova::editor::menu_preview_hit_to_json(
 			opennova::editor::menu_preview_snapshot(session_->view(), none, nullptr, nullptr), float(p_x), float(p_y)));
-}
-
-String EditorApp::get_menu_render_json(const String &p_path, int64_t p_screen) const {
-	opennova::editor::MenuPreviewSnapshot none;
-	none.status = opennova::editor::MenuPreviewStatus::NoScreen;
-	const opennova::editor::MenuRenderCheck *render_check = session_
-			? opennova::editor::menu_render_check(session_->view().findings.project_checks.get())
-			: nullptr;
-	if (render_check == nullptr) {
-		none.status = opennova::editor::MenuPreviewStatus::NoProject;
-		return json_text(opennova::editor::menu_preview_to_json(none));
-	}
-	const opennova::editor::SessionView &view = session_->view();
-	const std::string path = opennova::to_std(p_path);
-	const opennova::editor::MenuRenderCheck &check = *render_check;
-	// The open document when the menu is open (its current state), else the file as the
-	// check read it.
-	const opennova::editor::MnuDocument *document = check.document(path);
-	for (const auto &open : view.documents.open) {
-		if (open && open->path() == path) {
-			document = dynamic_cast<const opennova::editor::MnuDocument *>(open.get());
-		}
-	}
-	const opennova::editor::NodeId row = opennova::editor::NodeId(p_screen);
-	const opennova::editor::Node *screen = document != nullptr ? document->row(row) : nullptr;
-	const opennova::editor::MenuScreenRender *render = check.render(path, row);
-	if (document == nullptr || screen == nullptr || render == nullptr) {
-		none.document = document;
-		return json_text(opennova::editor::menu_preview_to_json(none));
-	}
-	return json_text(opennova::editor::menu_preview_to_json(
-			opennova::editor::render_snapshot(*render, *document, *screen)));
-}
-
-String EditorApp::get_menu_tree_json(const String &p_path) const {
-	if (!session_) return String("null");
-	return json_text(opennova::editor::menu_tree_to_json(session_->view(), opennova::to_std(p_path)));
-}
-
-String EditorApp::get_menu_findings_json(const String &p_path) const {
-	if (!session_) return String("null");
-	return json_text(opennova::editor::menu_findings_to_json(session_->view(), opennova::to_std(p_path)));
-}
-
-String EditorApp::edit_menu_json(const String &p_path, const String &p_json) {
-	ensure_session();
-	opennova::io::JsonValue json;
-	std::string error;
-	if (!opennova::io::json_parse(opennova::to_std(p_json), json, error)) {
-		opennova::io::JsonValue answer = opennova::io::JsonValue::make_object();
-		answer.set("ok", opennova::io::JsonValue::make_bool(false));
-		answer.set("error", opennova::io::JsonValue::make_string("The edits are not JSON: " + error));
-		return json_text(answer);
-	}
-	return json_text(opennova::editor::menu_edit_request(*session_, opennova::to_std(p_path), json));
 }
 
 bool EditorApp::set_menu_preview_options(const Dictionary &p_options) {
@@ -1286,11 +653,9 @@ bool EditorApp::menu_preview_arrange(const PackedInt64Array &p_ids, const String
 	return false;
 #endif
 }
-
 void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());
 	}
 }
-
 } // namespace godot

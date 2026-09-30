@@ -1,5 +1,6 @@
 #include <editor/preview/menu_report.h>
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <variant>
@@ -7,11 +8,10 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/project/project_files.h>
-#include <editor/session/project_session.h>
-#include <editor/session/record_batch.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
@@ -37,10 +37,12 @@ bool names_menu(const DocumentBase &document, const std::string &path) {
 	       normalized_logical_name(basename_of(document.path())) == normalized_logical_name(path);
 }
 
-// The menu's project-relative path: an open document's, else the scan's entry for it.
+// The menu's project-relative path: an open document's, else the scan's entry for it. A pathless
+// read is of the active document, as a pathless request's edits are (S13 A5): none when it is no
+// menu, never the previewed menu instead (the identities a read gives are those a pathless edit
+// names).
 std::string menu_path(const SessionView &view, const std::string &path) {
-	std::string wanted = path;
-	if (wanted.empty()) wanted = !view.documents.previews.menu.path.empty() ? view.documents.previews.menu.path : view.documents.active;
+	const std::string wanted = path.empty() ? view.documents.active : path;
 	if (wanted.empty()) return std::string();
 	for (const auto &open : view.documents.open)
 		if (open && is_menu_kind(open->kind()) && names_menu(*open, wanted)) return open->path();
@@ -211,18 +213,49 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 	return out;
 }
 
-io::JsonValue menu_edit_request(ProjectSession &session, const std::string &path, const io::JsonValue &request) {
-	const std::string relative = menu_path(session.view(), path);
-	if (relative.empty()) {
-		JsonValue answer = JsonValue::make_object();
-		answer.set("ok", JsonValue::make_bool(false));
-		answer.set("error", json_string(path.empty() ? "No menu is previewed or open: name one with path (a project-relative path "
-		                                       "or a logical name)."
-		                                     : "No menu '" + path + "' in the project (a project-relative path or a "
-		                                                            "logical name)."));
-		return answer;
+io::JsonValue menu_render_to_json(
+		const SessionView &view, const std::string &path, NodeId row, const JsonPage &page) {
+	MenuPreviewSnapshot none;
+	none.status = MenuPreviewStatus::NoScreen;
+	JsonValue out;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	if (!render_check) {
+		none.status = MenuPreviewStatus::NoProject;
+		out = menu_preview_to_json(none);
+	} else {
+		const std::string relative = menu_path(view, path);
+		if (relative.empty()) return JsonValue::make_null();
+		const MenuRenderCheck &check = *render_check;
+		// The open document when the menu is open (its current state), else the file as the check
+		// read it.
+		const MnuDocument *document = check.document(relative);
+		if (const MnuDocument *open = open_menu(view, relative)) document = open;
+		const Node *screen = document ? document->row(row) : nullptr;
+		const MenuScreenRender *render = check.render(relative, row);
+		if (!document || !screen || !render) {
+			none.document = document;
+			out = menu_preview_to_json(none);
+		} else {
+			out = menu_preview_to_json(render_snapshot(*render, *document, *screen));
+		}
 	}
-	return record_batch_request(session, relative, request);
+	// A page of the widgets and, by the same page, of the notes.
+	const auto page_of = [&out, &page](const char *key) {
+		JsonValue *list = out.get(key);
+		if (!list || !list->is_array()) return size_t(0);
+		const size_t total = list->array.size();
+		std::vector<JsonValue> kept(list->array.begin() + std::ptrdiff_t(page.first(total)),
+				list->array.begin() + std::ptrdiff_t(page.last(total)));
+		list->array = std::move(kept);
+		return total;
+	};
+	const size_t widgets = page_of("widgets");
+	const size_t notes = page_of("notes");
+	// `count` the widgets'; the page runs on while either list has entries past it.
+	set_page(out, page, widgets, notes);
+	out.set("widget_count", json_number(double(widgets)));
+	out.set("note_count", json_number(double(notes)));
+	return out;
 }
 
 } // namespace opennova::editor

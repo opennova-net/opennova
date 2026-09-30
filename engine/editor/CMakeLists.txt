@@ -77,11 +77,12 @@ add_library(opennova_editor STATIC
     # screen, the render check over every menu (the menu type's project check: the compiler
     # notes as findings), and the texture header probe it measures with; what a drag of a
     # window's handles writes, and what arranging several windows (align, distribute, drawing
-    # order) writes; a menu's tree and its findings as the editor MCP's editor_menu reads them;
-    # the model preview's portable half: its camera and the level the game draws, what it shows
-    # and when to build it again, and its JSON (the device is the shell's ObjectModel); the
-    # canvas's one gesture machine, and what a press on the menu's or the model's picture
-    # takes, what its drag writes and what is drawn over the picture
+    # order) writes; a menu's tree, its findings and a screen as the render check compiled it,
+    # as the menu_tree, menu_findings and menu_render queries read them; the model preview's
+    # portable half: its camera and the level the game draws, what it shows and when to build
+    # it again, and its JSON (the device is the shell's ObjectModel); the canvas's one gesture
+    # machine, and what a press on the menu's or the model's picture takes, what its drag
+    # writes and what is drawn over the picture
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -120,11 +121,13 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), and what Problems
-    # shows of its findings and offers to do about them
+    # imports, renames, the unsaved guard, the preferences over their store), what Problems
+    # shows of its findings and offers to do about them, the request and query tables (S13 A4,
+    # A5) and their wire forms (session_json, view_json)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
@@ -141,6 +144,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
     # the documents, the findings, the activity, the dialogs), the events a request posts, and
     # the findings by file and record

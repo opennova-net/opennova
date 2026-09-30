@@ -3,20 +3,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <deque>
 #include <limits>
+#include <memory>
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
-#include <editor/graph/rename_transaction.h>
-#include <editor/import/import_plan.h>
-#include <editor/import/import_run.h>
-#include <editor/project_build/build_run.h>
-#include <editor/requirements/requirements.h>
-#include <editor/run/play_session.h>
+#include <editor/project/project_files.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 
@@ -150,16 +147,9 @@ const char *reference_status_token(ReferenceStatus status) {
 	return "not_a_reference";
 }
 
-const char *requirement_state_token(RequirementState state) {
-	switch (state) {
-	case RequirementState::Present: return "present";
-	case RequirementState::Missing: return "missing";
-	case RequirementState::WrongKind: return "wrong_kind";
-	}
-	return "missing";
-}
-
 JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
+
+} // namespace
 
 JsonValue address_to_json(const NodeAddress &address) {
 	JsonValue out = JsonValue::make_object();
@@ -168,6 +158,8 @@ JsonValue address_to_json(const NodeAddress &address) {
 	out.set("child", json_number(double(address.child)));
 	return out;
 }
+
+namespace {
 
 // A whole, non-negative JSON number as an identity; false for anything else.
 bool read_id(const JsonValue &json, uint64_t &out) {
@@ -268,84 +260,6 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	return out;
 }
 
-// One edit of a request's `edits`, `what` naming it in a refusal ("edits[2]").
-bool edit_from_json(const JsonValue &json, const std::string &what, Edit &out, std::string &error) {
-	if (!json.is_object()) {
-		error = "\"" + what + "\" must be an object.";
-		return false;
-	}
-	if (!members_known(json,
-				{ "operation", "row", "kind", "child", "parent", "field", "value", "position",
-						"coalesce", "gesture", "payload" },
-				what.c_str(), error))
-		return false;
-	// A member's refusal names the edit it is in.
-	const auto refuse = [&error, &what](const std::string &why) {
-		error = what + ": " + why;
-		return false;
-	};
-	Edit edit;
-	std::string operation;
-	if (!read_string(json, "operation", operation, error))
-		return refuse(error);
-	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation))
-		return refuse("unknown edit operation \"" + operation + "\".");
-	// An Apply's change is made in C++ by its document type (Edit::payload), which JSON names by
-	// its token alone: no request carries one yet (S13 D6).
-	if (edit.operation == EditOperation::Apply)
-		return refuse("an apply edit carries a change its document type makes in C++; the "
-		              "editor's JSON cannot send one.");
-	if (json.get("payload"))
-		return refuse("\"payload\" names a change a document type makes in C++; the editor's "
-		              "JSON cannot carry one.");
-	for (const char *key : {"row", "child", "parent"}) {
-		if (const JsonValue *member = json.get(key)) {
-			uint64_t id = 0;
-			if (!read_id(*member, id))
-				return refuse(std::string("\"") + key + "\" must be a record identity.");
-			(key[0] == 'r' ? edit.address.row : key[0] == 'c' ? edit.address.child : edit.parent) = id;
-		}
-	}
-	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, edit.address.kind))
-		return refuse("\"kind\" must be a whole number.");
-	if (!read_string(json, "field", edit.field, error))
-		return refuse(error);
-	if (const JsonValue *value = json.get("value")) {
-		if (!value_from_json(*value, edit.value))
-			return refuse("\"value\" must be a number, a string or a bool.");
-	}
-	if (const JsonValue *position = json.get("position")) {
-		uint64_t index = 0;
-		if (!read_id(*position, index))
-			return refuse("\"position\" must be a whole number.");
-		edit.position = static_cast<size_t>(index);
-	}
-	if (!read_bool(json, "coalesce", edit.coalesce, error))
-		return refuse(error);
-	if (const JsonValue *gesture = json.get("gesture")) {
-		if (!read_id(*gesture, edit.gesture))
-			return refuse("\"gesture\" must be a whole number.");
-	}
-	out = edit;
-	return true;
-}
-
-JsonValue edit_to_json(const Edit &edit) {
-	JsonValue out = JsonValue::make_object();
-	out.set("operation", json_string(edit_operation_token(edit.operation)));
-	out.set("row", json_number(double(edit.address.row)));
-	out.set("kind", json_number(double(edit.address.kind)));
-	out.set("child", json_number(double(edit.address.child)));
-	if (edit.parent) out.set("parent", json_number(double(edit.parent)));
-	if (!edit.field.empty()) out.set("field", json_string(edit.field));
-	out.set("value", value_to_json(edit.value));
-	if (edit.position != SIZE_MAX) out.set("position", json_number(double(edit.position)));
-	if (edit.coalesce) out.set("coalesce", boolean(true));
-	if (edit.gesture) out.set("gesture", json_number(double(edit.gesture)));
-	if (edit.payload) out.set("payload", json_string(edit.payload->token()));
-	return out;
-}
-
 // A record's own collections (none for one that holds nothing), each record with the
 // collections it holds in turn.
 JsonValue collections_to_json(const Document &document, const NodeAddress &owner) {
@@ -377,6 +291,8 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 
 // An import source as a request's `imports` takes it: {path, entry, install, native}, the
 // defaults left out, so the view's sources pass back as they are.
+} // namespace
+
 JsonValue import_source_to_json(const ImportSource &source) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(source.path));
@@ -385,6 +301,8 @@ JsonValue import_source_to_json(const ImportSource &source) {
 	if (source.native) out.set("native", boolean(true));
 	return out;
 }
+
+namespace {
 
 // Whether the document holds the record `address` names, of the kind it says.
 bool holds_record(const Document &document, const NodeAddress &address) {
@@ -404,6 +322,24 @@ bool field_of(const Document &document, const NodeAddress &address, const std::s
 			return true;
 		}
 	return false;
+}
+
+// What a kind's edits are (S13 A5): revert_to_saved's the fields to give back, every other's
+// changes.
+RecordBatchForm batch_form(EditorRequestKind kind) {
+	return kind == EditorRequestKind::RevertToSaved ? RecordBatchForm::Fields
+													: RecordBatchForm::Edits;
+}
+
+// A blank record document of the type that opens `path` (its kinds' tokens, no records): what a
+// request's edits name their kinds in when no document it acts on is open (a fix's edit, whose
+// document opens first). The path's kind is the scan's by its name (classify_asset: a menu's too,
+// which the runtime's classifier types). Null for a path no document type opens, or one whose
+// documents hold no records (S13 D6).
+std::unique_ptr<Document> blank_names(const std::string &path) {
+	if (path.empty()) return nullptr;
+	const DocumentType *type = document_type_for(classify_asset(basename_of(path), nullptr));
+	return type && type->make ? records_of(type->make()) : nullptr;
 }
 
 // --- a request's fields (request_fields.h): each read and written by its row's JSON type ---------
@@ -538,10 +474,12 @@ bool import_source_from_json(const JsonValue &json, ImportSource &out, std::stri
 	return true;
 }
 
-// A request's field `id` from its wire form into `request`; false with `error` for a value of
-// another type, an unknown token or a malformed object.
+// A request's field `id` from its wire form into `request` (its edits named in `names`, their
+// records not looked for when `unresolved`, RequestNames', their labels into `labels`); false with
+// `error` for a value of another type, an unknown token or a malformed object.
 bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &request,
-                     std::string &error) {
+		const Document *names, bool unresolved, std::vector<std::string> &labels,
+		std::string &error) {
 	using F = RequestFieldId;
 	const char *token = request_field(id).token;
 	const std::string shown = json.is_string() ? json.string : std::string("?");
@@ -572,18 +510,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Edits: {
-		if (!json.is_array()) {
-			error = "\"edits\" must be an array of edits.";
+		RecordBatch batch;
+		if (!record_batch_from_json(
+					json, names, batch_form(request.kind), batch, error, !unresolved))
 			return false;
-		}
-		std::vector<Edit> edits;
-		for (size_t i = 0; i < json.array.size(); ++i) {
-			Edit edit;
-			if (!edit_from_json(json.array[i], "edits[" + std::to_string(i) + "]", edit, error))
-				return false;
-			edits.push_back(std::move(edit));
-		}
-		request.edits = std::move(edits);
+		request.edits = std::move(batch.edits);
+		labels = std::move(batch.made_labels);
 		return true;
 	}
 	case F::Address: return address_from_json(json, request.address, error);
@@ -612,9 +544,10 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	return false;
 }
 
-// A request's field `id` as it goes on the wire into `out`; false when it holds its default, which
-// the writer leaves out unless the kind must carry the field.
-bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &out) {
+// A request's field `id` as it goes on the wire into `out` (its edits named in `names`); false when
+// it holds its default, which the writer leaves out unless the kind must carry the field.
+bool field_to_json(
+		RequestFieldId id, const EditorRequest &request, const Document *names, JsonValue &out) {
 	using F = RequestFieldId;
 	switch (id) {
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
@@ -633,8 +566,7 @@ bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &o
 		for (const ImportSource &source : request.imports) out.push(import_source_to_json(source));
 		return !request.imports.empty();
 	case F::Edits:
-		out = JsonValue::make_array();
-		for (const Edit &edit : request.edits) out.push(edit_to_json(edit));
+		out = record_batch_to_json(request.edits, names, batch_form(request.kind));
 		return !request.edits.empty();
 	case F::Address:
 		out = address_to_json(request.address);
@@ -721,6 +653,14 @@ std::vector<std::string> editor_request_kind_tokens() {
 	return tokens;
 }
 
+void set_page(JsonValue &out, const JsonPage &page, size_t total, size_t beside) {
+	out.set("count", json_number(double(total)));
+	const size_t span = total > beside ? total : beside;
+	const size_t first = page.first(span), last = page.last(span);
+	out.set("offset", json_number(double(first)));
+	out.set("next_offset", last < span ? json_number(double(last)) : JsonValue::make_null());
+}
+
 JsonValue value_to_json(const Value &value) {
 	if (const auto *number = std::get_if<int64_t>(&value)) return json_number(double(*number));
 	if (const auto *real = std::get_if<double>(&value)) return json_number(*real);
@@ -741,7 +681,8 @@ bool value_from_json(const JsonValue &json, Value &out) {
 	}
 }
 
-bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::string &error) {
+bool editor_request_from_json(
+		const JsonValue &json, EditorRequest &out, std::string &error, RequestNames *names) {
 	if (!json.is_object()) { error = "A request is a JSON object."; return false; }
 	const JsonValue *kind = json.get("kind");
 	if (!kind || !kind->is_string()) { error = "\"kind\" names the request (a string)."; return false; }
@@ -750,9 +691,17 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		error = "Unknown request kind \"" + kind->string + "\".";
 		return false;
 	}
-	// Each member a field the kind's row takes (request_kinds.cpp), each field it must carry there.
+	// Each member a field the kind's row takes (request_kinds.cpp), each field it must carry there;
+	// its edits named in the document it acts on, else in a blank of the type its path opens.
 	const RequestParams &params = request_kind_row(request.kind).params;
 	RequestFieldSet carried = 0;
+	std::unique_ptr<Document> blank;
+	const Document *document = names ? names->document : nullptr;
+	if (!document && params.has(RequestFieldId::Edits)) {
+		blank = blank_names(json.get_string("path", ""));
+		document = blank.get();
+	}
+	std::vector<std::string> labels;
 	for (const io::JsonMember &member : json.object) {
 		if (member.key == "kind") continue;
 		RequestFieldId id = RequestFieldId::Dir;
@@ -766,7 +715,9 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 					fields_taken(params) + ").";
 			return false;
 		}
-		if (!field_from_json(id, member.value, request, error)) return false;
+		if (!field_from_json(id, member.value, request, document, names && names->unresolved,
+					labels, error))
+			return false;
 		carried |= field_bit(id);
 	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
@@ -778,19 +729,25 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		}
 	}
 	out = std::move(request);
+	if (names) names->made_labels = std::move(labels);
 	return true;
 }
 
-JsonValue editor_request_to_json(const EditorRequest &request) {
+JsonValue editor_request_to_json(const EditorRequest &request, const Document *names) {
 	JsonValue out = JsonValue::make_object();
 	out.set("kind", json_string(editor_request_kind_token(request.kind)));
 	// The fields its row takes: each it must carry, and any other it carries (not its default).
 	const RequestParams &params = request_kind_row(request.kind).params;
+	std::unique_ptr<Document> blank;
+	if (!names && !request.edits.empty()) {
+		blank = blank_names(request.path);
+		names = blank.get();
+	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
 		if (!params.has(id)) continue;
 		JsonValue value;
-		if (field_to_json(id, request, value) || params.needs(id))
+		if (field_to_json(id, request, names, value) || params.needs(id))
 			out.set(request_field(id).token, std::move(value));
 	}
 	return out;
@@ -833,56 +790,8 @@ JsonValue problem_fix_to_json(const ProblemFix &fix) {
 	return out;
 }
 
-bool problem_query_from_json(const JsonValue &json, ProblemQuery &query, size_t &offset, size_t &limit,
-                             std::string &error) {
-	if (!json.is_object()) { error = "A Problems query is a JSON object."; return false; }
-	if (!members_known(json, {"severities", "text", "scope", "fixable", "group", "offset", "limit"}, "query", error))
-		return false;
-	ProblemQuery parsed;
-	if (const JsonValue *severities = json.get("severities")) {
-		if (!severities->is_array()) { error = "\"severities\" must be an array of error, warning and info."; return false; }
-		parsed.errors = parsed.warnings = parsed.infos = false;
-		for (const JsonValue &token : severities->array) {
-			DiagnosticSeverity severity = DiagnosticSeverity::Error;
-			if (!token.is_string() || !diagnostic_severity_from_token(token.string, severity)) {
-				error = "\"severities\" takes error, warning and info.";
-				return false;
-			}
-			switch (severity) {
-			case DiagnosticSeverity::Error: parsed.errors = true; break;
-			case DiagnosticSeverity::Warning: parsed.warnings = true; break;
-			case DiagnosticSeverity::Info: parsed.infos = true; break;
-			}
-		}
-	}
-	if (!read_string(json, "text", parsed.text, error) || !read_bool(json, "fixable", parsed.fixable, error)) return false;
-	std::string scope, group;
-	if (!read_string(json, "scope", scope, error) || !read_string(json, "group", group, error)) return false;
-	if (!scope.empty() && !problem_scope_from_token(scope, parsed.scope)) {
-		error = "Unknown scope \"" + scope + "\".";
-		return false;
-	}
-	if (!group.empty() && !problem_grouping_from_token(group, parsed.grouping)) {
-		error = "Unknown grouping \"" + group + "\".";
-		return false;
-	}
-	uint64_t first = 0, count = UINT64_MAX;
-	if (const JsonValue *member = json.get("offset"); member && !read_id(*member, first)) {
-		error = "\"offset\" must be a whole number.";
-		return false;
-	}
-	if (const JsonValue *member = json.get("limit"); member && !read_id(*member, count)) {
-		error = "\"limit\" must be a whole number.";
-		return false;
-	}
-	query = parsed;
-	offset = static_cast<size_t>(first);
-	limit = count == UINT64_MAX ? SIZE_MAX : static_cast<size_t>(count);
-	return true;
-}
-
-JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer, size_t offset, size_t limit,
-                           ProblemFixCache &fixes) {
+JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
+		const JsonPage &page, ProblemFixCache &fixes) {
 	JsonValue out = JsonValue::make_object();
 	out.set("total", json_number(double(answer.total())));
 	out.set("shown", json_number(double(answer.rows.size())));
@@ -891,8 +800,9 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	counts.set("warnings", json_number(double(answer.warnings)));
 	counts.set("infos", json_number(double(answer.infos)));
 	out.set("counts", std::move(counts));
-	const size_t first = std::min(offset, answer.rows.size());
-	const size_t last = first + std::min(limit, answer.rows.size() - first);
+	const size_t first = page.first(answer.rows.size());
+	const size_t last = page.last(answer.rows.size());
+	set_page(out, page, answer.rows.size());
 	// Grouped, the rows run group after group: the group of each shown row and where each
 	// group starts. Only the page's groups are written (a project can have a group per file).
 	std::vector<size_t> group_of;
@@ -938,383 +848,13 @@ JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
 	out.set("unsaved_prompt", boolean(outcome.unsaved_prompt));
 	out.set("operation", json_number(double(outcome.operation)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
+	JsonValue added = JsonValue::make_array();
+	for (const NodeId id : outcome.added) added.push(json_number(double(id)));
+	out.set("added", std::move(added));
 	return out;
 }
 
-JsonValue operation_status_to_json(const OperationStatus &status) {
-	JsonValue out = JsonValue::make_object();
-	out.set("running", boolean(status.running()));
-	if (!status.running()) return out;
-	out.set("id", json_number(double(status.id)));
-	out.set("kind", json_string(operation_kind_row(status.kind).token));
-	out.set("label", json_string(status.label));
-	out.set("done", json_number(double(status.done)));
-	out.set("total", json_number(double(status.total)));
-	out.set("unit", json_string(operation_unit_token(status.unit)));
-	out.set("cancellable", boolean(status.cancellable));
-	// What it reads and writes: a request that writes either, or reads what it writes, waits.
-	JsonValue reads = JsonValue::make_array();
-	for (const char *token : holds_tokens(status.reads)) reads.push(json_string(token));
-	out.set("reads", std::move(reads));
-	JsonValue writes = JsonValue::make_array();
-	for (const char *token : holds_tokens(status.writes)) writes.push(json_string(token));
-	out.set("writes", std::move(writes));
-	return out;
-}
-
-JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
-	if (outcome.id == 0) return JsonValue::make_null();
-	JsonValue out = JsonValue::make_object();
-	out.set("id", json_number(double(outcome.id)));
-	out.set("kind", json_string(operation_kind_row(outcome.kind).token));
-	out.set("end", json_string(operation_end_token(outcome.end)));
-	out.set("findings", diagnostics_to_json(outcome.findings));
-	return out;
-}
-
-JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions &options) {
-	JsonValue out = JsonValue::make_object();
-	out.set("revision", json_number(double(view.revisions.any())));
-	JsonValue revisions = JsonValue::make_object();
-	for (size_t i = 0; i < kViewConcernCount; ++i) {
-		const ViewConcern concern = static_cast<ViewConcern>(i);
-		revisions.set(view_concern_token(concern), json_number(double(view.revisions.of(concern))));
-	}
-	out.set("revisions", std::move(revisions));
-	out.set("status", json_string(view.activity.status));
-	// What waits on the unsaved-changes prompt, and the files its Save writes.
-	JsonValue prompt = JsonValue::make_object();
-	prompt.set("open", boolean(view.dialogs.unsaved_prompt.open));
-	if (view.dialogs.unsaved_prompt.open) {
-		prompt.set("action",
-				json_string(editor_request_kind_token(view.dialogs.unsaved_prompt.action)));
-		if (!view.dialogs.unsaved_prompt.target.empty())
-			prompt.set("target", json_string(view.dialogs.unsaved_prompt.target));
-		JsonValue files = JsonValue::make_array();
-		for (const std::string &file : view.dialogs.unsaved_prompt.files)
-			files.push(json_string(file));
-		prompt.set("files", std::move(files));
-		prompt.set("can_discard", boolean(view.dialogs.unsaved_prompt.can_discard));
-	}
-	out.set("unsaved_prompt", std::move(prompt));
-	// What the last preview_rename planned: every site, before and after, and the refusals.
-	if (view.dialogs.rename_preview.serial) {
-		const DialogsView::RenamePreview &rename = view.dialogs.rename_preview;
-		JsonValue preview = JsonValue::make_object();
-		preview.set("serial", json_number(double(rename.serial)));
-		preview.set("symbol", boolean(rename.symbol));
-		if (rename.symbol) preview.set("kind", json_string(reference_row(rename.kind).token));
-		preview.set("path", json_string(rename.path));
-		if (!rename.locator.empty()) preview.set("locator", json_string(rename.locator));
-		if (!rename.field.empty()) preview.set("field", json_string(rename.field));
-		preview.set("old_name", json_string(rename.old_name));
-		preview.set("new_name", json_string(rename.new_name));
-		JsonValue sites = JsonValue::make_array();
-		for (const RenameSite &site : *rename.sites) {
-			JsonValue entry = JsonValue::make_object();
-			entry.set("file", json_string(site.file));
-			if (!site.record.empty()) entry.set("record", json_string(site.record));
-			if (!site.locator.empty()) entry.set("locator", json_string(site.locator));
-			entry.set("field", json_string(site.field));
-			entry.set("before", json_string(site.before));
-			entry.set("after", json_string(site.after));
-			sites.push(std::move(entry));
-		}
-		preview.set("sites", std::move(sites));
-		preview.set("refusals", diagnostics_to_json(rename.refusals));
-		preview.set("ok", boolean(rename.refusals.empty()));
-		out.set("rename_preview", std::move(preview));
-	}
-	// What the last apply_project_settings could not write (its settings_applied event says it
-	// came).
-	JsonValue settings_result = JsonValue::make_object();
-	settings_result.set("failures", diagnostics_to_json(view.project.settings_result.failures));
-	out.set("settings_result", std::move(settings_result));
-	out.set("quit_requested", boolean(view.dialogs.quit_requested));
-
-	JsonValue project = JsonValue::make_object();
-	project.set("open", boolean(view.project.open));
-	if (view.project.open) {
-		project.set("root", json_string(view.project.root));
-		project.set("title", json_string(view.project.document->title));
-		project.set("id", json_string(view.project.document->project_id));
-		project.set("target_game", json_string(view.project.document->target_game));
-		JsonValue features = JsonValue::make_object();
-		features.set("menu", boolean(view.project.document->features.menu));
-		features.set("mission", boolean(view.project.document->features.mission));
-		features.set("multiplayer", boolean(view.project.document->features.multiplayer));
-		project.set("features", std::move(features));
-		project.set("assets", json_number(double(view.project.scan->entries.size())));
-		// Every file the scan lists, as Files lists them, each with its kind and whether the
-		// editor opens it, so a client need not guess at kinds.
-		JsonValue files = JsonValue::make_array();
-		for (const AssetEntry &entry : view.project.scan->entries) {
-			JsonValue file = JsonValue::make_object();
-			file.set("path", json_string(entry.relative_path));
-			file.set("name", json_string(entry.logical_name));
-			file.set("kind", json_string(asset_kind_token(entry.kind)));
-			file.set("editable", boolean(is_editable_kind(entry.kind)));
-			files.push(std::move(file));
-		}
-		project.set("files", std::move(files));
-	}
-	out.set("project", std::move(project));
-
-	JsonValue requirements = JsonValue::make_object();
-	requirements.set("total", json_number(double(view.project.requirements->required_total)));
-	requirements.set("missing", json_number(double(view.project.requirements->required_missing)));
-	requirements.set(
-			"wrong_kind", json_number(double(view.project.requirements->required_wrong_kind)));
-	JsonValue rows = JsonValue::make_array();
-	for (const RequirementRow &row : view.project.requirements->rows) {
-		JsonValue entry = JsonValue::make_object();
-		entry.set("role", json_string(row.role));
-		entry.set("name", json_string(row.name));
-		entry.set("phase", json_string(requirement_phase_label(row.phase)));
-		entry.set("severity", json_number(double(row.severity)));
-		entry.set("required", boolean(row.required));
-		entry.set("state", json_string(requirement_state_token(row.state)));
-		entry.set("expected_kind", json_string(asset_kind_token(row.expected_kind)));
-		if (!row.asset_path.empty()) entry.set("asset", json_string(row.asset_path));
-		if (row.found_kind != AssetKind::Unknown) entry.set("found_kind", json_string(asset_kind_token(row.found_kind)));
-		if (view.activity.missing_at_boot(row.name)) entry.set("boot_missing", boolean(true));
-		rows.push(std::move(entry));
-	}
-	requirements.set("rows", std::move(rows));
-	out.set("requirements", std::move(requirements));
-
-	JsonValue documents = JsonValue::make_array();
-	for (const auto &document : view.documents.open) {
-		if (document) documents.push(document_to_json(*document, false));
-	}
-	out.set("documents", std::move(documents));
-	out.set("active_document", json_string(view.documents.active));
-	out.set("selection", address_to_json(view.documents.selection));
-	JsonValue selected = JsonValue::make_array();
-	for (const NodeAddress &address : view.documents.selected)
-		selected.push(address_to_json(address));
-	out.set("selected", std::move(selected));
-	out.set("clipboard_bytes", json_number(double(view.documents.clipboard.size())));
-
-	// The operation that runs (a build stepping) and what the last one came to; the build block
-	// is the last build's.
-	out.set("operation", operation_status_to_json(view.activity.operation));
-	out.set("last_operation", operation_outcome_to_json(view.activity.last_operation));
-	JsonValue build = JsonValue::make_object();
-	build.set("has_build", boolean(view.activity.has_build));
-	if (view.activity.has_build) {
-		build.set("ok", boolean(view.activity.last_build->ok));
-		build.set("id", json_string(view.activity.last_build->build_id));
-		build.set("dir", json_string(view.activity.last_build->build_dir));
-		build.set("reused_existing", boolean(view.activity.last_build->reused_existing));
-		build.set("archives_written",
-				json_number(double(view.activity.last_build->archives_written.size())));
-		build.set("archives_reused",
-				json_number(double(view.activity.last_build->archives_reused.size())));
-		build.set("loose_written",
-				json_number(double(view.activity.last_build->loose_written.size())));
-		build.set("diagnostics", diagnostics_to_json(view.activity.last_build->diagnostics));
-	}
-	out.set("build", std::move(build));
-
-	JsonValue play = JsonValue::make_object();
-	play.set("state", json_string(play_state_label(view.activity.play_state)));
-	play.set("pid", json_number(double(view.activity.play_pid)));
-	play.set("mcp_port", json_number(double(view.activity.play_mcp_port)));
-	play.set("command_line", json_string(view.activity.play_command_line));
-	play.set("exited_on_its_own", boolean(view.activity.play_exited_on_its_own));
-	play.set("exit_code", view.activity.play_exit_code >= 0 ? json_number(double(view.activity.play_exit_code)) : JsonValue::make_null());
-	play.set("in_install", boolean(view.project.play_retail));
-	play.set("game_install", json_string(view.project.retail_directory));
-	play.set("source_run", boolean(view.activity.source_run));
-	play.set("runtime_executable", json_string(view.activity.runtime_executable));
-	play.set("runtime_setting", json_string(view.project.runtime_setting));
-	JsonValue boot_missing = JsonValue::make_array();
-	for (const std::string &name : view.activity.boot_missing) boot_missing.push(json_string(name));
-	play.set("boot_missing", std::move(boot_missing));
-	out.set("play", std::move(play));
-
-	// The import dialog: what it lists to choose from, the files chosen, and their plan, each
-	// list a page (options.import_offset / import_limit) with its count.
-	const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
-	JsonValue import = JsonValue::make_object();
-	import.set("open", boolean(preview.open));
-	import.set("import_dependencies", boolean(view.project.import_dependencies));
-	import.set("with_dependencies", boolean(preview.with_dependencies));
-	if (preview.changed) import.set("changed", boolean(true));
-	import.set("offset", json_number(double(options.import_offset)));
-	const auto on_page = [&options](size_t index) {
-		return index >= options.import_offset && index - options.import_offset < options.import_limit;
-	};
-	const auto sources_to_json = [&on_page](const std::vector<ImportSource> &sources) {
-		JsonValue out = JsonValue::make_array();
-		for (size_t i = 0; i < sources.size(); ++i)
-			if (on_page(i)) out.push(import_source_to_json(sources[i]));
-		return out;
-	};
-	import.set("choice_count", json_number(double(preview.choices.size())));
-	import.set("choices", sources_to_json(preview.choices));
-	import.set("root_count", json_number(double(preview.roots.size())));
-	import.set("roots", sources_to_json(preview.roots));
-	JsonValue planned = JsonValue::make_array();
-	JsonValue not_found = JsonValue::make_array();
-	size_t row_count = 0, not_found_count = 0;
-	const ImportPlan &plan = *preview.plan;
-	for (const ImportPlanRow &row : plan.rows) {
-		const bool found = row.state != ImportPlanRow::State::NotFound;
-		if (!on_page(found ? row_count++ : not_found_count++)) continue;
-		JsonValue entry = JsonValue::make_object();
-		entry.set("state", json_string(row.state == ImportPlanRow::State::Selected ? "selected" : found ? "found" : "not_found"));
-		entry.set("name", json_string(row.name));
-		entry.set("kind", json_string(asset_kind_token(row.kind)));
-		if (!row.needed_by.file.empty()) {
-			JsonValue need = JsonValue::make_object();
-			need.set("file", json_string(row.needed_by.file));
-			need.set("record", json_string(row.needed_by.record));
-			need.set("field", json_string(row.needed_by.field));
-			need.set("reference", json_string(reference_row(row.needed_by.reference).token));
-			need.set("name", json_string(row.needed_by.name));
-			if (row.needed_by.loader_arg >= 0) need.set("loader_arg", json_number(double(row.needed_by.loader_arg)));
-			entry.set("needed_by", std::move(need));
-		}
-		if (found) {
-			entry.set("source", import_source_to_json(row.source));
-			entry.set("destination", json_string(row.destination));
-			if (!row.made_from.empty()) entry.set("made_from", json_string(row.made_from));
-			entry.set("found_in", json_string(row.found_in));
-			entry.set("selected", boolean(row.selected));
-			if (!row.problem.empty()) entry.set("problem", json_string(row.problem));
-			JsonValue rivals = JsonValue::make_array();
-			for (const ImportRival &rival : row.rivals) {
-				JsonValue other = JsonValue::make_object();
-				other.set("name", json_string(rival.name));
-				other.set("found_in", json_string(rival.found_in));
-				other.set("differs", boolean(rival.differs));
-				other.set("source", import_source_to_json(rival.source));
-				rivals.push(std::move(other));
-			}
-			if (!row.rivals.empty()) entry.set("rivals", std::move(rivals));
-		}
-		(found ? planned : not_found).push(std::move(entry));
-	}
-	import.set("row_count", json_number(double(row_count)));
-	import.set("rows", std::move(planned));
-	import.set("not_found_count", json_number(double(not_found_count)));
-	import.set("not_found", std::move(not_found));
-	JsonValue not_followed = JsonValue::make_array();
-	for (const ImportNotFollowed &kind : plan.not_followed) {
-		JsonValue entry = JsonValue::make_object();
-		if (kind.reference != ReferenceKind::None) entry.set("reference", json_string(reference_row(kind.reference).token));
-		else entry.set("kind", json_string(asset_kind_token(kind.kind)));
-		entry.set("count", json_number(double(kind.count)));
-		entry.set("first", json_string(kind.first));
-		not_followed.push(std::move(entry));
-	}
-	import.set("not_followed", std::move(not_followed));
-	import.set("truncated", boolean(plan.truncated));
-	import.set("diagnostics", diagnostics_to_json(plan.diagnostics));
-	// The importable sources in the project and what their importers made.
-	JsonValue imported = JsonValue::make_array();
-	for (const ImportedSource &source : *view.project.imports) {
-		JsonValue entry = JsonValue::make_object();
-		entry.set("source", json_string(source.source));
-		entry.set("sidecar", json_string(source.sidecar));
-		entry.set("importer", json_string(source.importer));
-		entry.set("ok", boolean(source.ok));
-		entry.set("reimported", boolean(source.reimported));
-		JsonValue outputs = JsonValue::make_array();
-		for (const std::string &output : source.outputs) outputs.push(json_string(output));
-		entry.set("outputs", std::move(outputs));
-		imported.push(std::move(entry));
-	}
-	import.set("imported", std::move(imported));
-	import.set("install_files", json_number(double(view.project.retail_files.size())));
-	out.set("import", std::move(import));
-
-	size_t errors = 0, warnings = 0, infos = 0;
-	for (const Diagnostic &d : view.findings.diagnostics) {
-		if (d.severity == DiagnosticSeverity::Error) ++errors;
-		else if (d.severity == DiagnosticSeverity::Warning) ++warnings;
-		else ++infos;
-	}
-	JsonValue problems = JsonValue::make_object();
-	problems.set("count", json_number(double(view.findings.diagnostics.size())));
-	problems.set("errors", json_number(double(errors)));
-	problems.set("warnings", json_number(double(warnings)));
-	problems.set("infos", json_number(double(infos)));
-	out.set("problems", std::move(problems));
-
-	JsonValue recent = JsonValue::make_array();
-	for (const std::string &root : view.project.recent_projects) recent.push(json_string(root));
-	out.set("recent_projects", std::move(recent));
-
-	JsonValue graph = JsonValue::make_object();
-	if (view.findings.graph) {
-		const GraphStats &stats = view.findings.graph->stats();
-		graph.set("edges", json_number(double(view.findings.graph->edge_count())));
-		graph.set("symbols", json_number(double(view.findings.graph->symbol_count())));
-		graph.set("missing", json_number(double(view.findings.graph->missing_count())));
-		graph.set("files_extracted", json_number(double(stats.files_extracted)));
-		graph.set("files_reused", json_number(double(stats.files_reused)));
-		graph.set("files_failed", json_number(double(stats.files_failed)));
-		graph.set("files_patched", json_number(double(stats.files_patched)));
-		graph.set("edges_resolved", json_number(double(stats.edges_resolved)));
-		graph.set("findings_made", json_number(double(stats.findings_made)));
-	}
-	out.set("graph", std::move(graph));
-
-	// A page of the output lines by absolute index (OutputLog): `first` is the oldest line held,
-	// `next` one past the newest; a cursor below `first` missed the lines dropped since, one past
-	// `next` waits for lines to come.
-	JsonValue output = JsonValue::make_object();
-	const uint64_t first = view.activity.output.first_index();
-	const uint64_t next = view.activity.output.next_index();
-	const uint64_t cursor = std::min<uint64_t>(std::max<uint64_t>(options.output_cursor, first), next);
-	const uint64_t last = std::min<uint64_t>(cursor + options.output_limit, next);
-	output.set("first", json_number(double(first)));
-	output.set("next", json_number(double(next)));
-	output.set("cursor", json_number(double(cursor)));
-	output.set("next_cursor", json_number(double(last)));
-	JsonValue lines = JsonValue::make_array();
-	for (uint64_t i = cursor; i < last; ++i) lines.push(json_string(view.activity.output.at(i)));
-	output.set("lines", std::move(lines));
-	out.set("output", std::move(output));
-
-	// A page of the events by seq (ViewEvents), as the output's: `first` is the oldest held, `next`
-	// one past the newest; a client reading from its last `next_cursor` neither skips nor repeats
-	// one, and a cursor below `first` missed the ones dropped since.
-	JsonValue events = JsonValue::make_object();
-	const std::deque<ViewEvent> &held = view.events.held();
-	const uint64_t first_event = view.events.first_seq();
-	const uint64_t next_event = view.events.next_seq();
-	const uint64_t event_cursor =
-			std::min<uint64_t>(std::max<uint64_t>(options.event_cursor, first_event), next_event);
-	const uint64_t last_event = std::min<uint64_t>(event_cursor + options.event_limit, next_event);
-	events.set("first", json_number(double(first_event)));
-	events.set("next", json_number(double(next_event)));
-	events.set("cursor", json_number(double(event_cursor)));
-	events.set("next_cursor", json_number(double(last_event)));
-	JsonValue items = JsonValue::make_array();
-	for (uint64_t seq = event_cursor; seq < last_event; ++seq)
-		items.push(view_event_to_json(held[size_t(seq - first_event)]));
-	events.set("items", std::move(items));
-	out.set("events", std::move(events));
-	return out;
-}
-
-JsonValue view_event_to_json(const ViewEvent &event) {
-	JsonValue out = JsonValue::make_object();
-	out.set("seq", json_number(double(event.seq)));
-	out.set("kind", json_string(view_event_kind_token(event.kind)));
-	if (!event.path.empty()) out.set("path", json_string(event.path));
-	if (event.address.row) out.set("address", address_to_json(event.address));
-	if (!event.field.empty()) out.set("field", json_string(event.field));
-	if (event.flag) out.set("flag", boolean(true));
-	if (event.tag) out.set("tag", json_number(double(event.tag)));
-	return out;
-}
-
-JsonValue document_to_json(const DocumentBase &base, bool with_rows) {
+JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 	// The record document's rows and records where it is one; the lifecycle alone for another kind.
 	const Document *records = records_of(base);
 	JsonValue out = JsonValue::make_object();
@@ -1353,9 +893,12 @@ JsonValue document_to_json(const DocumentBase &base, bool with_rows) {
 		kinds.push(std::move(entry));
 	}
 	out.set("top_kinds", std::move(kinds));
-	if (!with_rows) return out;
+	if (!page) return out;
 	JsonValue rows = JsonValue::make_array();
-	for (const auto &row : document.rows()) {
+	const size_t total = document.rows().size();
+	set_page(out, *page, total);
+	for (size_t i = page->first(total); i < page->last(total); ++i) {
+		const auto &row = document.rows()[i];
 		if (!row) continue;
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id", json_number(double(row->id)));
@@ -1521,8 +1064,8 @@ JsonValue graph_symbol_to_json(const GraphSymbol &symbol) {
 	return out;
 }
 
-JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address, const std::string &id,
-                                    const SessionView &view) {
+JsonValue reference_choices_to_json(const Document &document, const NodeAddress &address,
+		const std::string &id, const SessionView &view, const JsonPage &page) {
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
@@ -1530,7 +1073,8 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 			? reference_choices(*view.findings.graph, field)
 			: std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
-	for (const ReferenceChoice &choice : choices) {
+	for (size_t i = page.first(choices.size()); i < page.last(choices.size()); ++i) {
+		const ReferenceChoice &choice = choices[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("name", json_string(choice.name));
 		entry.set("kind", json_string(reference_row(choice.kind).token));
@@ -1547,13 +1091,13 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	out.set("field", json_string(field.schema->id));
 	out.set("reference", json_string(reference_row(field.reference).token));
 	if (!field.scope.empty()) out.set("scope", json_string(field.scope));
-	out.set("count", json_number(double(choices.size())));
+	set_page(out, page, choices.size());
 	out.set("choices", std::move(list));
 	return out;
 }
 
-JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address, const std::string &id,
-                                    const SessionView &view) {
+JsonValue reference_targets_to_json(const Document &document, const NodeAddress &address,
+		const std::string &id, const SessionView &view, const JsonPage &page) {
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
@@ -1561,7 +1105,8 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 			? reference_targets(*view.findings.graph, *view.project.scan, field, value)
 			: std::vector<ReferenceTarget>();
 	JsonValue list = JsonValue::make_array();
-	for (const ReferenceTarget &target : targets) {
+	for (size_t i = page.first(targets.size()); i < page.last(targets.size()); ++i) {
+		const ReferenceTarget &target = targets[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("label", json_string(target.label));
 		entry.set("file", json_string(target.file));
@@ -1574,14 +1119,15 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	out.set("field", json_string(field.schema->id));
 	out.set("reference", json_string(reference_row(field.reference).token));
 	out.set("value", value_to_json(value));
-	out.set("count", json_number(double(targets.size())));
+	set_page(out, page, targets.size());
 	out.set("targets", std::move(list));
 	return out;
 }
 
-JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits) {
+JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits, const JsonPage &page) {
 	JsonValue list = JsonValue::make_array();
-	for (const DocumentHit &hit : hits) {
+	for (size_t i = page.first(hits.size()); i < page.last(hits.size()); ++i) {
+		const DocumentHit &hit = hits[i];
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id",
 		          json_number(double(hit.address.child ? hit.address.child : hit.address.row)));
@@ -1595,14 +1141,15 @@ JsonValue document_hits_to_json(const std::vector<DocumentHit> &hits) {
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("count", json_number(double(hits.size())));
+	set_page(out, page, hits.size());
 	out.set("hits", std::move(list));
 	return out;
 }
 
-JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits) {
+JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits, const JsonPage &page) {
 	JsonValue list = JsonValue::make_array();
-	for (const GraphSearchHit &hit : hits) {
+	for (size_t i = page.first(hits.size()); i < page.last(hits.size()); ++i) {
+		const GraphSearchHit &hit = hits[i];
 		JsonValue entry = hit.symbol ? graph_symbol_to_json(*hit.symbol) : JsonValue::make_object();
 		if (!hit.symbol) {
 			entry.set("kind", json_string("file"));
@@ -1613,7 +1160,7 @@ JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits) {
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();
-	out.set("count", json_number(double(hits.size())));
+	set_page(out, page, hits.size());
 	out.set("hits", std::move(list));
 	return out;
 }
