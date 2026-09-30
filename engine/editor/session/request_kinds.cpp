@@ -9,63 +9,68 @@ namespace {
 
 using K = EditorRequestKind;
 
+constexpr Holds kNone = HoldsNothing;
+constexpr Holds kFiles = HoldsFiles;
+constexpr Holds kDocuments = HoldsDocuments;
 constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
 
-// A request needs the files when it writes them or runs the import pass (a build reads them as
-// they were when it started), the open documents when it changes what they hold or which are open
-// (an import or a rename reads them again), everything when it switches or closes the project;
-// reading alone needs nothing. A build holds the files alone, so an edit, an undo, a selection or
-// a copy goes on while it packs.
+// What each request reads and writes: the files when it reads or writes them on disk (the import
+// pass writes them too), the open documents when it reads them or changes what they hold or which
+// are open, everything when it switches or closes the project, and the slot when it starts an
+// operation. A build reads the files and writes only the slot, so an edit, an open, a selection or
+// an import's preview goes on beside it, and a save, a create, an import or a rename waits.
 constexpr RequestKindRow kRows[] = {
-	{K::NewProject, kHoldsAll, OnBusy::CancelRunning},
-	{K::OpenProject, kHoldsAll, OnBusy::CancelRunning},
-	{K::CloseProject, kHoldsAll, OnBusy::CancelRunning},
-	{K::ForgetRecent, HoldsNothing, OnBusy::Refuse},
-	{K::Rescan, kFilesAndDocuments, OnBusy::Refuse},
-	// The settings dialog waits on its result, so a settings change is never refused whole: what a
-	// build must not see (a features change, which reads the files again) is refused inside it, a
-	// failure its result carries back (ProjectSession::apply_project_settings).
-	{K::ApplyProjectSettings, HoldsProject, OnBusy::Refuse},
-	{K::PreviewImport, HoldsFiles, OnBusy::Supersede},
-	{K::PlanImport, HoldsFiles, OnBusy::Supersede},
-	{K::SetImportDependencies, HoldsFiles, OnBusy::Supersede},
-	{K::ImportFiles, kFilesAndDocuments, OnBusy::Refuse},
-	{K::CancelImport, HoldsNothing, OnBusy::Refuse},
-	{K::CreateMissing, HoldsFiles, OnBusy::Refuse},
-	{K::Build, HoldsFiles, OnBusy::Join},
-	{K::Play, HoldsFiles, OnBusy::Join},
-	{K::StopPlay, HoldsNothing, OnBusy::Refuse},
-	{K::CancelOperation, HoldsNothing, OnBusy::Refuse},
-	{K::CreateFile, kFilesAndDocuments, OnBusy::Refuse},
-	{K::OpenDocument, HoldsDocuments, OnBusy::Refuse},
-	{K::ShowInFiles, HoldsNothing, OnBusy::Refuse},
-	{K::ReloadDocument, HoldsDocuments, OnBusy::Refuse},
-	{K::CloseDocument, HoldsDocuments, OnBusy::Refuse},
-	{K::SelectRecord, HoldsNothing, OnBusy::Refuse},
-	{K::EditRecord, HoldsDocuments, OnBusy::Refuse},
-	{K::RevertToSaved, HoldsDocuments, OnBusy::Refuse},
-	{K::EndEdit, HoldsNothing, OnBusy::Refuse},
-	{K::Copy, HoldsNothing, OnBusy::Refuse},
-	{K::Cut, HoldsDocuments, OnBusy::Refuse},
-	{K::Paste, HoldsDocuments, OnBusy::Refuse},
-	{K::Duplicate, HoldsDocuments, OnBusy::Refuse},
-	{K::Save, kFilesAndDocuments, OnBusy::Refuse},
-	{K::SaveAll, kFilesAndDocuments, OnBusy::Refuse},
-	{K::Undo, HoldsDocuments, OnBusy::Refuse},
-	{K::Redo, HoldsDocuments, OnBusy::Refuse},
-	// Its Save is gated as a SaveAll's, and the request it answers goes through the gate itself.
-	{K::ResolveUnsaved, HoldsNothing, OnBusy::Refuse},
-	{K::RenameAsset, kFilesAndDocuments, OnBusy::Refuse},
-	{K::AssignRequirement, kFilesAndDocuments, OnBusy::Refuse},
-	{K::PreviewRename, HoldsNothing, OnBusy::Refuse},
-	{K::RenameSymbol, kFilesAndDocuments, OnBusy::Refuse},
-	{K::Reimport, HoldsFiles, OnBusy::Refuse},
-	{K::PreviewRetailImport, HoldsFiles, OnBusy::Supersede},
-	{K::ClearOutput, HoldsNothing, OnBusy::Refuse},
-	{K::Quit, kHoldsAll, OnBusy::CancelRunning},
-	{K::PickDirectory, HoldsNothing, OnBusy::Refuse},
-	{K::PickFile, HoldsNothing, OnBusy::Refuse},
-	{K::RevealPath, HoldsNothing, OnBusy::Refuse},
+	{K::NewProject, kNone, kHoldsAll, OnBusy::CancelRunning},
+	{K::OpenProject, kNone, kHoldsAll, OnBusy::CancelRunning},
+	{K::CloseProject, kNone, kHoldsAll, OnBusy::CancelRunning},
+	{K::ForgetRecent, kNone, kNone, OnBusy::Refuse},
+	{K::Rescan, kFiles, kFilesAndDocuments, OnBusy::Refuse},
+	// The settings dialog waits on its result, so a settings change is never refused whole: each of
+	// its parts is weighed against the running operation inside, a refused part a failure its result
+	// carries back (ProjectSession::apply_project_settings).
+	{K::ApplyProjectSettings, kNone, kNone, OnBusy::Refuse},
+	{K::PreviewImport, kFiles, kNone, OnBusy::Supersede},
+	{K::PlanImport, kFiles, kNone, OnBusy::Supersede},
+	{K::SetImportDependencies, kFiles, kNone, OnBusy::Supersede},
+	{K::ImportFiles, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::CancelImport, kNone, kNone, OnBusy::Refuse},
+	{K::CreateMissing, kFiles, kFiles, OnBusy::Refuse},
+	{K::Build, kFiles, HoldsSlot, OnBusy::Join},
+	{K::Play, kFiles, HoldsSlot, OnBusy::Join},
+	{K::StopPlay, kNone, kNone, OnBusy::Refuse},
+	{K::CancelOperation, kNone, kNone, OnBusy::Refuse},
+	{K::CreateFile, kFiles, kFilesAndDocuments, OnBusy::Refuse},
+	{K::OpenDocument, kFiles, kDocuments, OnBusy::Refuse},
+	{K::ShowInFiles, kNone, kNone, OnBusy::Refuse},
+	{K::ReloadDocument, kFiles, kDocuments, OnBusy::Refuse},
+	{K::CloseDocument, kNone, kDocuments, OnBusy::Refuse},
+	{K::SelectRecord, kNone, kNone, OnBusy::Refuse},
+	// A fix's edit opens its document first.
+	{K::EditRecord, kFiles, kDocuments, OnBusy::Refuse},
+	{K::RevertToSaved, kNone, kDocuments, OnBusy::Refuse},
+	{K::EndEdit, kNone, kNone, OnBusy::Refuse},
+	{K::Copy, kDocuments, kNone, OnBusy::Refuse},
+	{K::Cut, kNone, kDocuments, OnBusy::Refuse},
+	{K::Paste, kNone, kDocuments, OnBusy::Refuse},
+	{K::Duplicate, kNone, kDocuments, OnBusy::Refuse},
+	{K::Save, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::SaveAll, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::Undo, kNone, kDocuments, OnBusy::Refuse},
+	{K::Redo, kNone, kDocuments, OnBusy::Refuse},
+	// Its Save is weighed as a Save All and its Discard as a write of the documents, inside; the
+	// request it answers meets the gate itself.
+	{K::ResolveUnsaved, kNone, kNone, OnBusy::Refuse},
+	{K::RenameAsset, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::AssignRequirement, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::PreviewRename, kFiles, kNone, OnBusy::Refuse},
+	{K::RenameSymbol, kFilesAndDocuments, kFilesAndDocuments, OnBusy::Refuse},
+	{K::Reimport, kFiles, kFiles, OnBusy::Refuse},
+	{K::PreviewRetailImport, kFiles, kNone, OnBusy::Supersede},
+	{K::ClearOutput, kNone, kNone, OnBusy::Refuse},
+	{K::Quit, kNone, kHoldsAll, OnBusy::CancelRunning},
+	{K::PickDirectory, kNone, kNone, OnBusy::Refuse},
+	{K::PickFile, kNone, kNone, OnBusy::Refuse},
+	{K::RevealPath, kNone, kNone, OnBusy::Refuse},
 };
 
 static_assert(std::size(kRows) == kEditorRequestKindCount, "every request kind has exactly one row");
@@ -84,10 +89,21 @@ const RequestKindRow &request_kind_row(EditorRequestKind kind) {
 	return kRows[index < kEditorRequestKindCount ? index : static_cast<size_t>(EditorRequestKind::RevealPath)];
 }
 
+GateAnswer gate_answer(EditorRequestKind kind, const OperationStatus &running) {
+	if (!running.running()) return GateAnswer::Proceed;
+	const RequestKindRow &request = request_kind_row(kind);
+	const OperationKindRow &operation = operation_kind_row(running.kind);
+	if (request.on_busy == OnBusy::Join && operation.joined_by.has(kind)) return GateAnswer::Join;
+	// What would take the place of an operation that cannot be cancelled waits for it.
+	if (request.on_busy == OnBusy::Supersede && operation.superseded_by.has(kind))
+		return running.cancellable ? GateAnswer::Supersede : GateAnswer::Refuse;
+	if (!holds_conflict(request.reads, request.writes, running.reads, running.writes)) return GateAnswer::Proceed;
+	if (request.on_busy == OnBusy::CancelRunning && running.cancellable) return GateAnswer::CancelRunning;
+	return GateAnswer::Refuse;
+}
+
 bool busy_refuses(EditorRequestKind kind, const OperationStatus &running) {
-	if (!running.running()) return false;
-	const RequestKindRow &row = request_kind_row(kind);
-	return holds_any(row.needs, running.holds) && row.on_busy == OnBusy::Refuse;
+	return gate_answer(kind, running) == GateAnswer::Refuse;
 }
 
 } // namespace opennova::editor

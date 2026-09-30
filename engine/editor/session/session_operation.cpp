@@ -8,14 +8,34 @@ namespace opennova::editor {
 
 namespace {
 
+using K = EditorRequestKind;
+
+constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
+
+// What each operation reads and writes (every one writes the slot: one runs at a time), and the
+// requests it serves or gives way to while it runs. A build reads the project's files and writes
+// only its own output, so what reads the files (an import's preview, a rename's plan, an open)
+// goes on beside it and what writes them waits.
 constexpr OperationKindRow kOperationKindRows[] = {
-	{OperationKind::Open, "open", kHoldsAll, "Opening", "opening the project"},
-	{OperationKind::Refresh, "refresh", HoldsFiles | HoldsDocuments, "Refreshing", "the refresh"},
-	{OperationKind::Build, "build", HoldsFiles, "Building", "the build"},
-	{OperationKind::ImportPlan, "import_plan", HoldsFiles, "Planning the import", "the import's plan"},
-	{OperationKind::ImportApply, "import_apply", HoldsFiles | HoldsDocuments, "Importing", "the import"},
-	{OperationKind::RenameApply, "rename_apply", HoldsFiles | HoldsDocuments, "Renaming", "the rename"},
+	{OperationKind::Open, "open", kHoldsAll, kHoldsAll | HoldsSlot, {}, {}, "Opening", "opening the project"},
+	{OperationKind::Refresh, "refresh", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {}, "Refreshing",
+	 "the refresh"},
+	{OperationKind::Build, "build", HoldsFiles, HoldsSlot, {K::Build, K::Play}, {}, "Building", "the build"},
+	{OperationKind::ImportPlan, "import_plan", HoldsFiles, HoldsSlot, {},
+	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewRetailImport}, "Planning the import",
+	 "the import's plan"},
+	{OperationKind::ImportApply, "import_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
+	 "Importing", "the import"},
+	{OperationKind::RenameApply, "rename_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
+	 "Renaming", "the rename"},
 };
+
+constexpr bool every_operation_writes_the_slot() {
+	for (const OperationKindRow &row : kOperationKindRows)
+		if (!holds_any(row.writes, HoldsSlot)) return false;
+	return true;
+}
+static_assert(every_operation_writes_the_slot(), "one operation runs at a time: each writes the slot");
 
 static_assert(std::size(kOperationKindRows) == kOperationKindCount, "every operation kind has exactly one row");
 
@@ -41,6 +61,7 @@ std::vector<const char *> holds_tokens(Holds holds) {
 	if (holds_any(holds, HoldsFiles)) tokens.push_back("files");
 	if (holds_any(holds, HoldsDocuments)) tokens.push_back("documents");
 	if (holds_any(holds, HoldsProject)) tokens.push_back("project");
+	if (holds_any(holds, HoldsSlot)) tokens.push_back("slot");
 	return tokens;
 }
 
@@ -123,7 +144,8 @@ OperationStatus OperationSlot::status() const {
 	status.total = progress.total;
 	status.unit = progress.unit;
 	status.cancellable = operation_->cancellable();
-	status.holds = operation_->holds();
+	status.reads = operation_->reads();
+	status.writes = operation_->writes();
 	return status;
 }
 

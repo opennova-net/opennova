@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,13 +33,15 @@ enum class OperationKind : uint8_t {
 
 inline constexpr size_t kOperationKindCount = static_cast<size_t>(OperationKind::kCount);
 
-// What an operation holds while it runs, which a request that needs it must not change under it
-// (request_kinds.h, the session's busy gate). Bit flags.
+// The session's resources an operation and a request read or write (request_kinds.h, the
+// session's busy gate): a request conflicts with the running operation when it writes what the
+// operation reads or writes, or reads what the operation writes. Bit flags.
 enum Holds : uint8_t {
 	HoldsNothing = 0,
 	HoldsFiles = 1 << 0,     // the project's files on disk: a build reads them, a save or an import writes them
-	HoldsDocuments = 1 << 1, // the open documents: an import, a rename or a refresh reads them again
+	HoldsDocuments = 1 << 1, // the open documents: an edit writes them, an import or a rename reads them again
 	HoldsProject = 1 << 2,   // which project is open, and its settings
+	HoldsSlot = 1 << 3,      // the one operation slot: every operation writes it, as does a request that starts one
 };
 
 constexpr Holds operator|(Holds a, Holds b) {
@@ -49,19 +52,42 @@ inline constexpr Holds kHoldsAll = HoldsFiles | HoldsDocuments | HoldsProject;
 constexpr bool holds_any(Holds a, Holds b) {
 	return (static_cast<uint8_t>(a) & static_cast<uint8_t>(b)) != 0;
 }
+// True when what reads `reads` and writes `writes` conflicts with what reads `held_reads` and
+// writes `held_writes`: it writes what the other reads or writes, or reads what the other writes.
+constexpr bool holds_conflict(Holds reads, Holds writes, Holds held_reads, Holds held_writes) {
+	return holds_any(writes, held_reads | held_writes) || holds_any(reads, held_writes);
+}
 
-// Each kind's row: its wire token, what it holds, and its words (the menu bar's "Building", a
-// sentence's "the build").
+// A set of request kinds, one bit each.
+struct RequestKindSet {
+	uint64_t bits = 0;
+	constexpr RequestKindSet() = default;
+	constexpr RequestKindSet(std::initializer_list<EditorRequestKind> kinds) {
+		for (const EditorRequestKind kind : kinds) bits |= uint64_t(1) << static_cast<unsigned>(kind);
+	}
+	constexpr bool has(EditorRequestKind kind) const {
+		return ((bits >> static_cast<unsigned>(kind)) & 1u) != 0;
+	}
+};
+static_assert(kEditorRequestKindCount <= 64, "a RequestKindSet holds every request kind");
+
+// Each kind's row: its wire token, what it reads and writes, the request kinds it serves as they
+// are while it runs (joined_by: a Build and a Play onto a build) and those that take its place,
+// cancelling it (superseded_by: a new import plan over a running one), and its words (the menu
+// bar's "Building", a sentence's "the build").
 struct OperationKindRow {
 	OperationKind kind;
 	const char *token;
-	Holds holds;
+	Holds reads;
+	Holds writes;
+	RequestKindSet joined_by;
+	RequestKindSet superseded_by;
 	const char *verb;
 	const char *noun;
 };
 
 const OperationKindRow &operation_kind_row(OperationKind kind);
-// A holds set's flags by their tokens ("files", "documents", "project"), in bit order.
+// A holds set's flags by their tokens ("files", "documents", "project", "slot"), in bit order.
 std::vector<const char *> holds_tokens(Holds holds);
 
 // How much one step of an operation may do: the bytes it reads, hashes, writes or copies.
@@ -105,7 +131,8 @@ struct OperationOutcome {
 	std::vector<Diagnostic> findings;
 };
 
-// The operation that runs, as the view shows it (id 0: none).
+// The operation that runs, as the view shows it (id 0: none), with what the busy gate weighs a
+// request against (request_kinds.h): what it reads and writes, and whether it can be cancelled.
 struct OperationStatus {
 	uint64_t id = 0;
 	OperationKind kind = OperationKind::Build;
@@ -114,7 +141,8 @@ struct OperationStatus {
 	uint64_t total = 0;
 	OperationUnit unit = OperationUnit::Steps;
 	bool cancellable = false;
-	Holds holds = HoldsNothing;
+	Holds reads = HoldsNothing;
+	Holds writes = HoldsNothing;
 	bool running() const { return id != 0; }
 };
 
@@ -126,7 +154,8 @@ public:
 	virtual ~SessionOperation() = default;
 
 	virtual OperationKind kind() const = 0;
-	virtual Holds holds() const { return operation_kind_row(kind()).holds; }
+	virtual Holds reads() const { return operation_kind_row(kind()).reads; }
+	virtual Holds writes() const { return operation_kind_row(kind()).writes; }
 	// One step within `budget`; true once the operation's work is done (finish() then absorbs it).
 	virtual bool step(const StepBudget &budget) = 0;
 	virtual OperationProgress progress() const = 0;
@@ -134,18 +163,9 @@ public:
 	// Stops between two steps and discards the work (a build's staging directory goes): the
 	// operation never finishes.
 	virtual void cancel() = 0;
-	// A request whose row joins a running operation (OnBusy::Join): true when this one serves it
-	// too (a build takes a Build, and a Play, which starts the game when it lands).
-	virtual bool join(const EditorRequest &request) {
-		(void)request;
-		return false;
-	}
-	// A request whose row supersedes a running operation (OnBusy::Supersede): true when it
-	// replaces this one, which is cancelled for it (a new import plan replaces a running one).
-	virtual bool superseded_by(const EditorRequest &request) const {
-		(void)request;
-		return false;
-	}
+	// A request its row's joined_by names, served by this operation as it is: what it adds (a
+	// Play onto a build starts the game when the build lands).
+	virtual void join(const EditorRequest &request) { (void)request; }
 	// The work absorbed into the session: what the operation came to (how it ended and its
 	// findings; the slot names it).
 	virtual OperationOutcome finish(SessionCore &core) = 0;

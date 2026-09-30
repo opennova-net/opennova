@@ -39,7 +39,9 @@ struct FakePlatform : ProcessPlatform {
 	bool spawn_fails = false;
 	bool spawn_supported = true;
 	std::vector<int64_t> running;
-	std::vector<int64_t> alive_elsewhere; // the games process_alive finds (one an earlier editor started)
+	// How process_liveness answers for a game this platform does not hold (one an earlier editor
+	// started), by pid: Dead for any it does not list.
+	std::map<int64_t, ProcessLiveness> elsewhere;
 	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
 	LaunchPlan last_plan;
 	int spawns = 0;
@@ -56,9 +58,9 @@ struct FakePlatform : ProcessPlatform {
 		for (int64_t p : running) if (p == pid) return true;
 		return false;
 	}
-	bool process_alive(int64_t pid, const std::string &) override {
-		for (int64_t p : alive_elsewhere) if (p == pid) return true;
-		return false;
+	ProcessLiveness process_liveness(int64_t pid, const std::string &) override {
+		const auto found = elsewhere.find(pid);
+		return found == elsewhere.end() ? ProcessLiveness::Dead : found->second;
 	}
 	bool terminate(int64_t pid) override { exit_child(pid); return true; }
 	bool kill(int64_t pid) override { exit_child(pid); return true; }
@@ -2633,10 +2635,12 @@ static int test_play_then_close() {
 }
 
 // S13 A1: a game left running across an editor restart keeps its build. Play writes the game's
-// lease beside the build directory (<build-id>.lease, the directory itself immutable); an editor
-// started later protects every directory whose lease names a process that still runs when it
-// builds, and deletes a lease whose process is gone, after which that directory is pruned like
-// any other. A file that only looks like a lease is never touched.
+// lease beside the build directory (<build-id>.<pid>.lease, the directory itself immutable) and
+// removes it when the game stops, its own and no other: two games may run from one build. A
+// build asks when it publishes which directories a lease protects: one whose process runs
+// (Alive) or cannot be told (Unknown: a game the platform may not question) is kept, and a lease
+// whose process is gone (Dead) is deleted, after which its directory is pruned like any other. A
+// file that only looks like a lease is never touched.
 static int test_play_leases() {
 	editor_test::TempProjectDir dir("opennova_editor_session_leases");
 	const std::string project = dir.file("project");
@@ -2644,7 +2648,10 @@ static int test_play_leases() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	std::string played, output_root;
+	const auto lease_of = [](const std::string &build_dir, int64_t pid) {
+		return build_dir + "." + std::to_string(pid) + kPlayLeaseSuffix;
+	};
+	std::string played, output_root, executable;
 	{
 		FakePlatform platform;
 		ProjectSession session(platform, dir.file("settings.json"));
@@ -2657,20 +2664,33 @@ static int test_play_leases() {
 		TEST_EXPECT(v.play_state == PlayState::Running && v.play_pid == 500);
 		played = v.last_build.build_dir;
 		output_root = fs::path(played).parent_path().generic_string();
-		const std::string lease = played + kPlayLeaseSuffix;
+		executable = platform.last_plan.executable;
 		std::string text, error;
 		opennova::io::JsonValue record;
-		TEST_EXPECT(read_file_text(lease, text, error) && opennova::io::json_parse(text, record, error));
-		TEST_EXPECT(record.get_int("pid", -1) == 500 && record.get_string("executable", "") == platform.last_plan.executable &&
+		TEST_EXPECT(read_file_text(lease_of(played, 500), text, error) && opennova::io::json_parse(text, record, error));
+		TEST_EXPECT(record.get_int("pid", -1) == 500 && record.get_string("executable", "") == executable &&
 		            record.get_string("build_id", "") == fs::path(played).filename().string());
 		// The editor quits; the game runs on (its handle released, never the process).
 	}
-	TEST_EXPECT(editor_test::write_text(output_root + "/0123456789abcdef.lease", "not a lease record"));
+	// A second game runs from the same build (another editor's), and files that only look like
+	// leases lie beside them: an older name, a lease's name over a record that is not one, a
+	// record naming another pid than its name.
+	std::string error;
+	TEST_EXPECT(write_play_lease({played, 600, executable}, error));
+	const std::string build_id = fs::path(played).filename().string();
+	const std::vector<std::string> decoys = {output_root + "/" + build_id + kPlayLeaseSuffix,
+	                                         output_root + "/" + build_id + ".77" + kPlayLeaseSuffix,
+	                                         output_root + "/" + build_id + ".78" + kPlayLeaseSuffix};
+	TEST_EXPECT(editor_test::write_text(decoys[0], "{\"schema_version\":1,\"build_id\":\"" + build_id + "\",\"pid\":78}"));
+	TEST_EXPECT(editor_test::write_text(decoys[1], "not a lease record"));
+	TEST_EXPECT(editor_test::write_text(decoys[2], "{\"schema_version\":1,\"build_id\":\"" + build_id + "\",\"pid\":79}"));
 
 	FakePlatform platform;
-	platform.alive_elsewhere = {500};
+	platform.next_pid = 900;
+	platform.elsewhere = {{500, ProcessLiveness::Alive}, {600, ProcessLiveness::Unknown}};
 	ProjectSession session(platform, dir.file("settings.json"));
 	session.handle(make_request(EditorRequestKind::OpenProject, project));
+	session.set_launcher(launcher);
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project_open && v.play_state == PlayState::Stopped);
 	const auto rebuild = [&](const char *text) {
@@ -2680,16 +2700,36 @@ static int test_play_leases() {
 		session.run_operations();
 		return v.last_build.ok ? v.last_build.build_dir : std::string();
 	};
-	// The game still runs: its directory survives the build's prune, its lease kept.
+	// Both games may still run: their directory survives the build's prune, both leases kept.
 	const std::string second = rebuild("20");
 	TEST_EXPECT(!second.empty() && second != played);
-	TEST_EXPECT(fs::is_directory(played) && fs::exists(played + kPlayLeaseSuffix));
-	// The game is gone: the next build deletes its lease and prunes its directory.
-	platform.alive_elsewhere.clear();
+	TEST_EXPECT(fs::is_directory(played) && fs::exists(lease_of(played, 500)) && fs::exists(lease_of(played, 600)));
+
+	// This editor's game runs from the new build beside another game's lease on it: stopped, its
+	// own lease goes and the other stays.
+	TEST_EXPECT(write_play_lease({second, 901, executable}, error));
+	session.handle(make_request(EditorRequestKind::Play));
+	session.run_operations();
+	TEST_EXPECT(v.play_state == PlayState::Running && v.play_pid == 900 && v.last_build.build_dir == second);
+	TEST_EXPECT(fs::exists(lease_of(second, 900)) && fs::exists(lease_of(second, 901)));
+	session.handle(make_request(EditorRequestKind::StopPlay));
+	session.poll();
+	TEST_EXPECT(v.play_state == PlayState::Stopped);
+	TEST_EXPECT(!fs::exists(lease_of(second, 900)) && fs::exists(lease_of(second, 901)));
+	TEST_EXPECT(fs::exists(lease_of(played, 500)) && fs::exists(lease_of(played, 600)));
+
+	// The first game is gone, the second cannot be told: its lease alone keeps the directory. The
+	// game on the second build is gone too: its lease is deleted and the build pruned.
+	platform.elsewhere = {{600, ProcessLiveness::Unknown}};
 	const std::string third = rebuild("30");
-	TEST_EXPECT(!third.empty() && !fs::exists(played) && !fs::exists(played + kPlayLeaseSuffix));
-	TEST_EXPECT(!fs::exists(second));
-	TEST_EXPECT(fs::is_regular_file(output_root + "/0123456789abcdef.lease"));
+	TEST_EXPECT(!third.empty() && fs::is_directory(played));
+	TEST_EXPECT(!fs::exists(lease_of(played, 500)) && fs::exists(lease_of(played, 600)));
+	TEST_EXPECT(!fs::exists(second) && !fs::exists(lease_of(second, 901)));
+	// And once it is gone as well, the next build deletes its lease and prunes its directory.
+	platform.elsewhere.clear();
+	const std::string fourth = rebuild("40");
+	TEST_EXPECT(!fourth.empty() && !fs::exists(played) && !fs::exists(lease_of(played, 600)) && !fs::exists(third));
+	for (const std::string &decoy : decoys) TEST_EXPECT(fs::is_regular_file(decoy));
 	return 0;
 }
 

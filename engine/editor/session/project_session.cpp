@@ -186,6 +186,12 @@ bool ProjectSession::dispatch(const EditorRequest &request) {
 	case EditorRequestKind::PickFile:
 	case EditorRequestKind::RevealPath: return false;
 	case EditorRequestKind::Quit:
+		// The running operation goes first (a build's staging directory with it); one that cannot
+		// be cancelled keeps the editor open.
+		if (!cancel_operation(false)) {
+			refuse_busy(std::string());
+			return true;
+		}
 		view_.quit_requested = true;
 		touch(ViewConcern::Project);
 		return true;
@@ -229,86 +235,92 @@ void ProjectSession::run_operations() {
 	}
 }
 
+uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
+	const uint64_t id = operations_.start(std::move(operation));
+	if (id != 0) show_operation();
+	return id;
+}
+
 // --- the busy gate and the operation slot -----------------------------------------------
 
-// The busy gate (request_kinds.h): while an operation runs that holds what a request needs, the
-// request's row says what happens. Refused: an operation.busy warning, the outcome not done,
-// nothing changed. Joined: the running operation serves it (a Build or a Play onto a build).
-// Superseded: the running operation is cancelled for it. CancelRunning: the running operation
-// is cancelled and the request goes on (a project switch, Quit: a Play waiting on a build goes
-// with it). A request that needs nothing it holds (an edit while a build packs) goes on. One the
-// unsaved-changes prompt would hold, and which the row does not refuse, asks first and meets the
-// gate once it goes ahead: a Close the prompt then drops cancels nothing, and a Build with
-// unsaved edits never joins a build that packs the files without them.
+// The busy gate (request_kinds.h): the request's row and the running operation's weighed by
+// gate_answer, the one answer the windows disable by (busy_refuses). Refused: an operation.busy
+// warning, the outcome not done, nothing changed. Joined: the running operation serves it (a
+// Build or a Play onto a build). Superseded: the running operation is cancelled for it (a new
+// import plan over a running one). CancelRunning: the request goes on, and its own flow cancels
+// the operation when it commits (close_project, Quit), once its own checks pass: a NewProject
+// that fails keeps the build. A request that conflicts with nothing it reads or writes (an edit,
+// an open, an import's preview while a build packs) goes on. One the unsaved-changes prompt
+// would hold, and which the gate does not refuse, asks first and meets the gate once it goes
+// ahead: a Close the prompt then drops cancels nothing, and a Build with unsaved edits never
+// joins a build that packs the files without them.
 bool ProjectSession::gate_busy(const EditorRequest &request) {
-	if (!busy_for(request.kind)) return false;
-	const OnBusy on_busy = request_kind_row(request.kind).on_busy;
-	if (on_busy != OnBusy::Refuse) {
+	const GateAnswer answer = gate_answer(request.kind, operations_.status());
+	if (answer == GateAnswer::Proceed) return false;
+	if (answer != GateAnswer::Refuse) {
 		std::vector<std::string> unsaved;
 		if (unsaved_files(request, unsaved) && !unsaved.empty()) return false;
 	}
-	switch (on_busy) {
-	case OnBusy::CancelRunning:
-		cancel_operation(false);
-		return false;
-	case OnBusy::Join:
-		if (join_operation(request)) return true;
+	switch (answer) {
+	case GateAnswer::CancelRunning: return false;
+	case GateAnswer::Join: join_operation(request); return true;
+	case GateAnswer::Supersede:
+		if (cancel_operation(false)) return false;
 		break;
-	case OnBusy::Supersede:
-		if (operations_.running()->superseded_by(request)) {
-			cancel_operation(false);
-			return false;
-		}
-		break;
-	case OnBusy::Refuse: break;
+	default: break;
 	}
 	refuse_busy(request.path);
 	return true;
 }
 
-bool ProjectSession::busy_for(EditorRequestKind kind) const {
+bool ProjectSession::busy_for(Holds reads, Holds writes) const {
+	const OperationStatus running = operations_.status();
+	return running.running() && holds_conflict(reads, writes, running.reads, running.writes);
+}
+
+std::string ProjectSession::busy_message(const std::string &until) const {
 	const SessionOperation *running = operations_.running();
-	return running && holds_any(request_kind_row(kind).needs, running->holds());
+	const std::string noun = running ? operation_kind_row(running->kind()).noun : "the operation";
+	return "Wait for " + noun + " to finish" + (running && running->cancellable() ? ", or cancel it, " : " ") + until +
+	       ".";
 }
 
 void ProjectSession::refuse_busy(const std::string &asset) {
-	const SessionOperation *running = operations_.running();
-	const std::string noun = running ? operation_kind_row(running->kind()).noun : "the operation";
-	refuse_now("operation.busy", "Wait for " + noun + " to finish, or cancel it, first.", asset);
+	refuse_now("operation.busy", busy_message("first"), asset);
 }
 
 // A Build or a Play onto the running build: the build serves it (a Play refused before it could,
 // as it would be before any build: no spawn here, or a game running). The outcome names the
 // operation joined.
-bool ProjectSession::join_operation(const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && play_refused()) return true;
-	if (!operations_.running()->join(request)) return false;
-	outcome_.operation = view_.operation.id;
+void ProjectSession::join_operation(const EditorRequest &request) {
+	if (request.kind == EditorRequestKind::Play && play_refused()) return;
+	operations_.running()->join(request);
+	outcome_.operation = operations_.status().id;
 	if (request.kind == EditorRequestKind::Play) {
 		view_.status = "Building, then playing...";
 		note("Play starts the game when the build lands.");
 	}
-	return true;
 }
 
 // The running operation stopped between two steps, its work discarded (a build's staging
 // directory removed, the Play waiting on it dropped); `asked` is CancelOperation's, which says
-// so when nothing runs.
-void ProjectSession::cancel_operation(bool asked) {
+// so when nothing runs or the operation cannot be cancelled. True when none runs now.
+bool ProjectSession::cancel_operation(bool asked) {
 	const SessionOperation *running = operations_.running();
 	if (!running) {
 		if (asked) refuse_now("operation.none", "Nothing is running to cancel.");
-		return;
+		return true;
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
 	if (!operations_.cancel()) {
 		if (asked) refuse_now("operation.not_cancellable", "This cannot be cancelled now: wait for " + noun + " to finish.");
-		return;
+		return false;
 	}
 	const std::string line = "Cancelled " + noun + ".";
 	if (asked) view_.status = line;
 	note(line);
 	show_operation();
+	return true;
 }
 
 void ProjectSession::finish_operation() {
@@ -323,9 +335,10 @@ void ProjectSession::show_operation() {
 	touch(ViewConcern::Operation);
 }
 
+// The project made in `dir`, then opened (open_project closes the open one, its operation with
+// it): one that cannot be made leaves the open project open, its operation running.
 bool ProjectSession::new_project(const std::string &dir, const std::string &title) {
 	if (dir.empty()) return false;
-	if (view_.project_open) close_project();
 	ProjectDocument doc;
 	Diagnostic error;
 	if (!create_project(dir, title.empty() ? std::string("New Game") : title, kDefaultTargetGame, doc, error)) {
@@ -338,9 +351,11 @@ bool ProjectSession::new_project(const std::string &dir, const std::string &titl
 	return open_project(dir);
 }
 
+// The project in `dir` opened, read before the open one closes: one that does not open leaves the
+// open project open, its operation running; one that does closes it (close_project: refused,
+// nothing opened, when its operation cannot be cancelled).
 bool ProjectSession::open_project(const std::string &dir) {
 	if (dir.empty()) return false;
-	if (view_.project_open) close_project();
 	ProjectDocument doc;
 	Diagnostic error;
 	if (!::opennova::editor::open_project(dir, doc, error)) {
@@ -351,6 +366,7 @@ bool ProjectSession::open_project(const std::string &dir) {
 		touch(ViewConcern::Output);
 		return false;
 	}
+	if (!close_project()) return false;
 	paths_ = ProjectPaths::for_root(dir);
 	// The project's game install is its own (local.json); one that names none starts from the
 	// install last chosen in the editor.
@@ -376,17 +392,21 @@ bool ProjectSession::open_project(const std::string &dir) {
 	return true;
 }
 
-void ProjectSession::close_project() {
+bool ProjectSession::close_project() {
+	// Its operation goes first (the gate let a project switch through for its flow to cancel it
+	// here, once the request's own checks passed): a build is cancelled, and a Play waiting on it.
+	// One that cannot be cancelled keeps the project open.
+	if (!cancel_operation(false)) {
+		refuse_busy(std::string());
+		return false;
+	}
 	graph_->clear();
 	assets_->clear();
 	render_check_->clear();
 	validation_cache_ = ValidationCache();
 	document_findings_.clear();
 	validation_due_ = false;
-	if (!view_.project_open) return;
-	// Its operation goes with it (a project switch and Quit cancelled it at the gate already): a
-	// build is cancelled, and a Play waiting on it.
-	cancel_operation(false);
+	if (!view_.project_open) return true;
 	const std::string title = view_.document.title;
 	// What belongs to the project goes with it: its documents, their selections, a prompt
 	// waiting on them (an answer to it afterwards is refused: nothing waits), and the boot
@@ -427,6 +447,7 @@ void ProjectSession::close_project() {
 	// What the project was goes with it: every concern of the view moves.
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
 		touch(static_cast<ViewConcern>(concern));
+	return true;
 }
 
 // Re-read the project's files and re-evaluate the checklist through the engine's one
@@ -452,36 +473,38 @@ ImportRunResult ProjectSession::refresh(bool force_import, const std::string &on
 // copy and its values take effect once it is written, so a setting that failed is still
 // the one in effect and a retry writes it again, while one that was written is compared
 // with from then on. The result (the view's settings_result, under the request's serial)
-// lists what could not be written; each is also a finding.
+// lists what could not be written; each is also a finding. The request is never refused whole
+// (the settings dialog waits on its result): each part is weighed against the running operation
+// as what it reads and writes, and a part that conflicts is a failure the result carries, its
+// setting unchanged. The name writes the project; the features write it too and, through the
+// refresh the requirements follow them by (the import pass, the scan), read and write the files;
+// the game install writes the project's local settings. The editor's own settings hold nothing
+// an operation holds.
 void ProjectSession::apply_project_settings(const ProjectSettingsChange &change) {
 	std::vector<Diagnostic> failures;
+	const auto refuse_part = [this, &failures](const std::string &until) {
+		failures.push_back(make_diagnostic(DiagnosticSeverity::Warning, "operation.busy", busy_message(until)));
+	};
 	ProjectDocument project = view_.document;
 	bool project_changed = false, features_changed = false;
 	if (change.title && *change.title != project.title) {
 		if (change.title->empty()) {
 			failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.title_empty", "A project needs a name."));
+		} else if (busy_for(HoldsNothing, HoldsProject)) {
+			refuse_part("before renaming the project");
 		} else {
 			project.title = *change.title;
 			project_changed = true;
 		}
 	}
-	if (change.mission && *change.mission != project.features.mission) {
-		project.features.mission = *change.mission;
-		project_changed = features_changed = true;
-	}
-	if (change.multiplayer && *change.multiplayer != project.features.multiplayer) {
-		project.features.multiplayer = *change.multiplayer;
-		project_changed = features_changed = true;
-	}
-	// The requirements follow the features: their change reads the files again (the import pass,
-	// the scan), which an operation holding them (a build packing them) must not see change.
-	if (features_changed && busy_for(EditorRequestKind::Rescan)) {
-		failures.push_back(make_diagnostic(DiagnosticSeverity::Warning, "operation.busy",
-		                                   "Wait for the build to finish, or cancel it, before changing the "
-		                                   "project's features."));
-		project.features = view_.document.features;
-		features_changed = false;
-		project_changed = project.title != view_.document.title;
+	const bool mission = change.mission && *change.mission != project.features.mission;
+	const bool multiplayer = change.multiplayer && *change.multiplayer != project.features.multiplayer;
+	if ((mission || multiplayer) && busy_for(HoldsFiles, HoldsFiles | HoldsProject)) {
+		refuse_part("before changing the project's features");
+	} else {
+		if (mission) project.features.mission = *change.mission;
+		if (multiplayer) project.features.multiplayer = *change.multiplayer;
+		if (mission || multiplayer) project_changed = features_changed = true;
 	}
 	if (project_changed && !view_.project_open) {
 		failures.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.none",
@@ -502,9 +525,13 @@ void ProjectSession::apply_project_settings(const ProjectSettingsChange &change)
 	// which opennova-project reads too; the editor's machine setting keeps the install last
 	// chosen, where a project that names none starts. Both keep it absolute: a relative path
 	// is taken from the editor's working directory, not from wherever the command line runs.
-	const std::optional<std::string> install =
+	std::optional<std::string> install =
 	        change.retail_directory ? std::optional<std::string>(absolute_install_path(*change.retail_directory))
 	                                : std::nullopt;
+	if (install && view_.project_open && *install != local_.retail_root && busy_for(HoldsNothing, HoldsProject)) {
+		refuse_part("before changing the game install");
+		install.reset();
+	}
 	bool install_changed = false;
 	if (install && view_.project_open && *install != local_.retail_root) {
 		LocalSettings local = local_;
@@ -611,13 +638,21 @@ void ProjectSession::start_build(bool then_play) {
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
 	const BuildPlan plan = plan_build(paths_, view_.scan, view_.requirements, document_findings_);
-	// No directory a game runs from is pruned: this editor's game's, and every one whose lease
-	// names a process that still runs (a game left running across an editor restart); a lease
-	// whose game is gone is deleted (run/play_lease.h).
+	// No directory a game runs from is pruned, asked when the build publishes (a game started
+	// while it packed counts): this editor's game's, and every one whose lease names a process
+	// that may still run (a game left running across an editor restart; one the platform cannot
+	// check is kept); a lease whose game is gone is deleted (run/play_lease.h). The operation
+	// lives in the session's slot, so the session outlives every call.
 	const std::string output_root = paths_.build_dir + "/play";
-	std::vector<std::string> protected_dirs =
-	        live_leased_dirs(output_root, platform_, play_.state() != PlayState::Stopped ? play_.pid() : -1);
-	if (!play_.running_build_dir().empty()) protected_dirs.push_back(play_.running_build_dir());
+	ProtectedDirs protected_dirs = [this, output_root] {
+		const int64_t own = play_.state() != PlayState::Stopped ? play_.pid() : -1;
+		std::vector<std::string> dirs =
+		        leased_build_dirs(output_root, [this, own](int64_t pid, const std::string &executable) {
+			        return pid == own ? ProcessLiveness::Alive : platform_.process_liveness(pid, executable);
+		        });
+		if (!play_.running_build_dir().empty()) dirs.push_back(play_.running_build_dir());
+		return dirs;
+	};
 	// The build lands under the cache, which keeps itself out of the modder's repository;
 	// a cache that cannot be made fails the build's own first step, which says why.
 	std::string cache_error;
@@ -737,7 +772,10 @@ void ProjectSession::start_play() {
 	// The game's lease on the directory it runs from: a build leaves it alone while the game
 	// runs, this editor's and one started after the editor restarts (run/play_lease.h).
 	std::string lease_error;
-	if (!write_play_lease({plan.build_dir, play_.pid(), plan.executable}, lease_error))
+	PlayLease lease{plan.build_dir, play_.pid(), plan.executable};
+	if (write_play_lease(lease, lease_error))
+		play_lease_ = std::move(lease);
+	else
 		note("The game's lease could not be written (" + lease_error +
 		     "): a build after the editor restarts may remove its files while it runs.");
 	view_.play_state = play_.state();
@@ -845,7 +883,10 @@ void ProjectSession::absorb_boot_report(const std::string &line) {
 // its code and a Problems row (play.crashed) that stays, like the boot report, until Play
 // starts again or the project closes (a game of a project closed since reports nothing).
 void ProjectSession::absorb_play_exit() {
-	remove_play_lease(play_.plan().build_dir); // the game is gone: its directory is a build like any
+	// The game is gone: its lease goes, its own and no other (another game may run from the same
+	// build), and its directory is a build like any.
+	if (play_lease_.pid >= 0) remove_play_lease(play_lease_.build_dir, play_lease_.pid);
+	play_lease_ = PlayLease();
 	view_.play_exited_on_its_own = play_.exited_on_its_own();
 	view_.play_exit_code = play_.exit_code();
 	std::string line = view_.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
@@ -2078,18 +2119,14 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 		touch(ViewConcern::Output);
 		return;
 	}
+	// Its Save writes the files and the documents, as a Save All does, and its Discard drops
+	// documents, a write of them: each is weighed against the running operation (a build packing
+	// the files refuses a Save, never a Discard), the prompt kept when it is refused.
+	const RequestKindRow &save_all = request_kind_row(EditorRequestKind::SaveAll);
+	if (choice == UnsavedChoice::Save ? unsaved_answer_refused(save_all.reads, save_all.writes)
+	                                  : unsaved_answer_refused(HoldsNothing, HoldsDocuments))
+		return;
 	if (choice == UnsavedChoice::Save) {
-		// Its Save writes the files an operation may hold (a build packing them): refused as a
-		// Save All is, the prompt kept, unless what waits cancels that operation anyway (a project
-		// switch, Quit), which then cancels it first.
-		if (busy_for(EditorRequestKind::SaveAll)) {
-			if (request_kind_row(pending_request_->kind).on_busy != OnBusy::CancelRunning) {
-				refuse_busy(std::string());
-				outcome_.unsaved_prompt = true;
-				return;
-			}
-			cancel_operation(false);
-		}
 		end_edit_groups();
 		if (!save_documents(view_.unsaved_prompt.files, false)) {
 			outcome_.unsaved_prompt = true;
@@ -2113,6 +2150,17 @@ void ProjectSession::resolve_unsaved(UnsavedChoice choice) {
 		update_document_view();
 	}
 	handle(pending);
+}
+
+// What waits and cancels the operation anyway when it commits (a project switch, Quit) cancels it
+// now instead; the answer is refused when it cannot be cancelled, as for any other request.
+bool ProjectSession::unsaved_answer_refused(Holds reads, Holds writes) {
+	if (!busy_for(reads, writes)) return false;
+	if (request_kind_row(pending_request_->kind).on_busy == OnBusy::CancelRunning && cancel_operation(false))
+		return false;
+	refuse_busy(std::string());
+	outcome_.unsaved_prompt = true;
+	return true;
 }
 
 void ProjectSession::close_unsaved_prompt() {

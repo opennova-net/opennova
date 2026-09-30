@@ -786,7 +786,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_bool("done", false) && !document->dirty() &&
 	            session.view().operation.running());
 	// The build runs as an operation: the answer names it, and the view's operation block shows
-	// it stepping (its kind, its progress in bytes, what it holds) until it lands.
+	// it stepping (its kind, its progress in bytes, what it reads and writes) until it lands.
 	const double operation = action_outcome_to_json(session.outcome()).get_number("operation", 0.0);
 	TEST_EXPECT(operation > 0.0 && operation == double(view.operation.id));
 	json = session_view_to_json(view);
@@ -794,8 +794,9 @@ static int test_over_a_session() {
 	TEST_EXPECT(running && running->get_bool("running", false) && running->get_number("id", 0.0) == operation &&
 	            running->get_string("kind", "") == "build" && running->get_string("unit", "") == "bytes" &&
 	            running->get_bool("cancellable", false) && running->get_number("total", 0.0) > 0.0 &&
-	            running->get("holds") && running->get("holds")->array.size() == 1 &&
-	            running->get("holds")->array.front().string == "files");
+	            running->get("reads") && running->get("reads")->array.size() == 1 &&
+	            running->get("reads")->array.front().string == "files" && running->get("writes") &&
+	            running->get("writes")->array.size() == 1 && running->get("writes")->array.front().string == "slot");
 	TEST_EXPECT(json.get("build") && json.get("build")->get("running") == nullptr);
 	session.run_operations();
 	json = session_view_to_json(view);

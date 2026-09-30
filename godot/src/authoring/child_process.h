@@ -34,9 +34,11 @@ public:
 	bool kill(int64_t pid) override;
 	bool exit_code(int64_t pid, uint32_t &out) override;
 	void release(int64_t pid) override;
-	// A game this platform no longer holds (a Play lease's, across an editor restart): opened by
-	// its pid, alive while it has not exited and its image's file name is the lease's executable's.
-	bool process_alive(int64_t pid, const std::string &executable) override;
+	// A game this platform no longer holds (a Play lease's, across an editor restart), opened by
+	// its pid: Alive while it runs the lease's executable (the two long paths compared), Dead when no
+	// such process runs, it has exited or it runs another program, Unknown when it will not be opened
+	// (an elevated game denies the question) or runs a program of the same name by another path.
+	opennova::editor::ProcessLiveness process_liveness(int64_t pid, const std::string &executable) override;
 	int64_t now_ms() override;
 	void sleep_ms(int64_t ms) override;
 

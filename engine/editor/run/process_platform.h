@@ -7,6 +7,11 @@
 
 namespace opennova::editor {
 
+// Whether a process runs: Unknown where the platform cannot tell (it has no process seam, or the
+// process will not be opened for a question), which a caller about to delete something treats as
+// alive.
+enum class ProcessLiveness : uint8_t { Alive, Dead, Unknown };
+
 // The OS seam under PlaySession (ADR 0046 d8): spawn a child with a working directory,
 // ask whether it still runs, ask it to stop, force it, read the code it exited with,
 // forget it, and read a clock. The Godot layer implements it
@@ -37,12 +42,13 @@ public:
 	// Forget the child (release the handle spawn kept).
 	virtual void release(int64_t pid) = 0;
 	// Whether a process this platform did not spawn (or spawned before the editor restarted) still
-	// runs `executable` as `pid`: a Play lease's game (run/play_lease.h). The image's file name is
-	// compared, so a recycled pid running something else is not it. False where it cannot tell.
-	virtual bool process_alive(int64_t pid, const std::string &executable) {
+	// runs `executable` as `pid`: a Play lease's game (run/play_lease.h). Dead only when the
+	// platform knows it: no such process, or one running another program (a recycled pid).
+	// Unknown where it cannot tell, the default.
+	virtual ProcessLiveness process_liveness(int64_t pid, const std::string &executable) {
 		(void)pid;
 		(void)executable;
-		return false;
+		return ProcessLiveness::Unknown;
 	}
 	virtual int64_t now_ms() = 0;
 	// Yield between two observations of a blocking wait (PlaySession::wait); the

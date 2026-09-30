@@ -742,9 +742,13 @@ JsonValue operation_status_to_json(const OperationStatus &status) {
 	out.set("total", num(double(status.total)));
 	out.set("unit", str(operation_unit_token(status.unit)));
 	out.set("cancellable", boolean(status.cancellable));
-	JsonValue holds = JsonValue::make_array();
-	for (const char *token : holds_tokens(status.holds)) holds.push(str(token));
-	out.set("holds", std::move(holds));
+	// What it reads and writes: a request that writes either, or reads what it writes, waits.
+	JsonValue reads = JsonValue::make_array();
+	for (const char *token : holds_tokens(status.reads)) reads.push(str(token));
+	out.set("reads", std::move(reads));
+	JsonValue writes = JsonValue::make_array();
+	for (const char *token : holds_tokens(status.writes)) writes.push(str(token));
+	out.set("writes", std::move(writes));
 	return out;
 }
 

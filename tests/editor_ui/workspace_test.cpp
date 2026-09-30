@@ -823,7 +823,8 @@ void test_menu_bar_status() {
 	v.operation.unit = OperationUnit::Bytes;
 	v.operation.label = "Packing localres.pff";
 	v.operation.cancellable = true;
-	v.operation.holds = HoldsFiles;
+	v.operation.reads = HoldsFiles;
+	v.operation.writes = HoldsSlot;
 	v.status = "menus/a.mnu has no changes to save.";
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -851,10 +852,10 @@ void test_menu_bar_status() {
 	ui.activate(popup_item(unsaved, c->path().c_str()));
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == c->path(), "one of them made the active document");
-	// The gate's refusals are disabled: no Save all while the build holds the files (an edit goes
+	// The gate's refusals are disabled: no Save all while the build reads the files (an edit goes
 	// on).
 	CHECK(busy_refuses(EditorRequestKind::SaveAll, v.operation) && !busy_refuses(EditorRequestKind::EditRecord, v.operation),
-	      "Save All refused while the build holds the files; an edit is not");
+	      "Save All refused while the build reads the files; an edit is not");
 	ui.activate(item_id(bar, {"status", "##unsaved"}));
 	ui.activate(popup_item(unsaved, "Save all"));
 	CHECK(ui.drain().empty(), "no Save all while the build packs");

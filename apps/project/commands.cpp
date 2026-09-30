@@ -18,6 +18,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/requirements/requirements.h>
+#include <editor/run/play_lease.h>
 
 #include <editor/documents/document_types.h>
 #include <algorithm>
@@ -463,7 +464,13 @@ int command_build(int argc, const char *const *argv, std::FILE *out, std::FILE *
 		ensure_project_cache_dir(project.paths, cache_error);
 	}
 	PrintProgress progress(out);
-	const BuildReport report = run_build(plan, output_root, {}, &progress);
+	// A game the editor started may run from a build here: every directory a lease names is kept,
+	// asked when the build publishes. The command line cannot tell whether a lease's game still
+	// runs (the editor's platform can), so it keeps them all and deletes none (run/play_lease.h).
+	const ProtectedDirs leased = [&output_root] {
+		return leased_build_dirs(output_root, [](int64_t, const std::string &) { return ProcessLiveness::Unknown; });
+	};
+	const BuildReport report = run_build(plan, output_root, leased, &progress);
 	for (const Diagnostic &d : report.diagnostics) print_diagnostic(out, d);
 	if (!report.ok) {
 		std::fprintf(out, "not ok: build failed\n");

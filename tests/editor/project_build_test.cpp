@@ -3,11 +3,13 @@
 // engine's own VFS re-mounts, the incremental reuse of unchanged archives, what a
 // failure leaves behind, and the archives' name limit binding only the files they take; and
 // (S13 A1) the build stepped by bytes: every step bounded by its budget, a cancel between two
-// steps leaving nothing, and archives byte-identical to the single-call writer's however small
-// the steps.
+// steps leaving nothing, a file rewritten under a read of several steps failing the build, and
+// archives byte-identical to the single-call writer's however small the steps.
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -193,7 +195,7 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	                                    "{\"schema_version\":1,\"build_id\":\"someone-else\"}"));
 
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
-	const BuildReport second = run_build(p.plan(), p.output_root(), {first.build_dir});
+	const BuildReport second = run_build(p.plan(), p.output_root(), protect_dirs({first.build_dir}));
 	TEST_EXPECT(second.ok && second.build_dir != first.build_dir);
 	TEST_EXPECT(fs::is_directory(first.build_dir)); // a running child's build is never pruned
 	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
@@ -343,6 +345,83 @@ static int test_cancel_publishes_nothing() {
 	return 0;
 }
 
+// Rewrites `path` in place through a handle of its own (a build's read of it stays open) with
+// other bytes of the same size, dated two seconds after its last write: a read of the file over
+// several steps sees both, and neither its size nor its end tells.
+static bool rewrite_in_place(const std::string &path) {
+	std::error_code ec;
+	const uintmax_t size = fs::file_size(path, ec);
+	if (ec) return false;
+	const fs::file_time_type written = fs::last_write_time(path, ec);
+	if (ec) return false;
+	{
+		std::fstream file(path, std::ios::binary | std::ios::in | std::ios::out);
+		if (!file) return false;
+		const std::vector<char> bytes(static_cast<size_t>(size), 'X');
+		file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		if (!file) return false;
+	}
+	fs::last_write_time(path, written + std::chrono::seconds(2), ec);
+	return !ec && fs::file_size(path, ec) == size;
+}
+
+// S13 A1: a file rewritten in place while the build reads it over several steps, even to the
+// same size, is never built torn: each file is checked again when its last byte is read (its
+// size and its last write), so the hash pass, an archive's entry and a loose copy alike fail with
+// build.changed, naming the file, and nothing is published.
+static int test_file_rewritten_mid_read_fails() {
+	enum class Pass { Hash, Archive, Loose };
+	for (const Pass pass : {Pass::Hash, Pass::Archive, Pass::Loose}) {
+		Project p(pass == Pass::Hash      ? "opennova_editor_build_torn_hash_test"
+		          : pass == Pass::Archive ? "opennova_editor_build_torn_archive_test"
+		                                  : "opennova_editor_build_torn_loose_test");
+		TEST_EXPECT(p.create());
+		TEST_EXPECT(p.fill());
+		constexpr uint64_t kSize = 256 * 1024;
+		TEST_EXPECT(write_filler(p.root + "/music/big.sbf", kSize));  // a loose file
+		TEST_EXPECT(write_filler(p.root + "/extra/torn.xyz", kSize)); // packed: resource.pff
+		const BuildPlan plan = p.plan();
+		TEST_EXPECT(plan.ok);
+		// Where the file's bytes lie in the run's progress: the hash pass reads every archive's
+		// entries in the plan's order, then the loose files; the packing and the copies follow in
+		// the same order.
+		const std::string name = pass == Pass::Archive ? "torn.xyz" : "big.sbf";
+		std::string source;
+		uint64_t total = 0, offset = UINT64_MAX;
+		const auto walk = [&](const BuildEntry &entry) {
+			if (entry.logical_name == name) {
+				offset = total;
+				source = entry.source_path;
+			}
+			total += fs::file_size(entry.source_path);
+		};
+		bool packed = false;
+		for (const BuildArchive &archive : plan.archives)
+			for (const BuildEntry &entry : archive.entries) {
+				packed = packed || entry.logical_name == "torn.xyz";
+				walk(entry);
+			}
+		for (const BuildEntry &entry : plan.loose) walk(entry);
+		TEST_EXPECT(packed && offset != UINT64_MAX && !source.empty());
+		const uint64_t start = pass == Pass::Hash ? offset : total + offset;
+		BuildRun run(plan, p.output_root());
+		bool rewritten = false;
+		for (size_t steps = 0; !run.step(64 * 1024) && steps < 100000; ++steps) {
+			// A step into the file and not out of it: the next ones read the rest.
+			if (!rewritten && run.bytes_done() > start && run.bytes_done() < start + kSize) {
+				TEST_EXPECT(rewrite_in_place(source));
+				rewritten = true;
+			}
+		}
+		TEST_EXPECT(rewritten && run.done() && !run.cancelled() && !run.report().ok);
+		const std::vector<Diagnostic> &found = run.report().diagnostics;
+		TEST_EXPECT(found.size() == 1 && found[0].code == "build.changed" && found[0].asset == name);
+		TEST_EXPECT(run.report().build_dir.empty() && staging_dirs(p.output_root()) == 0 &&
+		            last_good_build_dir(p.output_root()).empty());
+	}
+	return 0;
+}
+
 // S13 A1: the stepped build's archives are byte for byte what the single-call writer makes of the
 // same entries (pff_write_archive over each file's bytes, in the plan's order), at steps of 7
 // bytes and of a whole build alike: the stream writer resumes across steps without a seam.
@@ -381,6 +460,7 @@ int main() {
 	int failures = 0;
 	failures += test_steps_are_bounded();
 	failures += test_cancel_publishes_nothing();
+	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();
 	failures += test_empty_project_is_blocked();

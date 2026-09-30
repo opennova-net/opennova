@@ -17,6 +17,7 @@
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
 #include <editor/run/launch_plan.h>
+#include <editor/run/play_lease.h>
 #include <editor/run/play_session.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
@@ -32,8 +33,9 @@ namespace opennova::editor {
 // same way. Requests come in typed (EditorRequest), the view goes out (SessionView).
 // A long job is an operation (session_operation.h, S13 A1): one at a time, stepped within
 // each poll's budget so the window that hosts the session keeps drawing while a project
-// packs; a request that needs what it holds is refused, joins it, supersedes it or
-// cancels it, as its row says (request_kinds.h), in handle(). An edit (a Set, an Add, an
+// packs; a request that conflicts with what it reads or writes is refused, joins it,
+// supersedes it or cancels it as it commits, as its row says (request_kinds.h), in
+// handle(). An edit (a Set, an Add, an
 // Undo) leaves the project's validation due rather than running it: a request from
 // outside returns validated, and a pump that holds validation (hold_validation) validates
 // once, at its poll, however many edits its requests made; Save, Build, Rescan and the
@@ -69,6 +71,10 @@ public:
 	// The running operation, and those its finish starts, run to their end and finished (a
 	// test, a command line).
 	void run_operations();
+	// `operation` started in the slot as a request starts one: its id, 0 while another runs (a
+	// test's, for an operation no request starts yet: one that cannot be cancelled, one that
+	// reads or writes what a build does not).
+	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
 
 	Document *document_for(const std::string &path = {});
 	bool documents_dirty() const;
@@ -82,17 +88,20 @@ private:
 	friend class BuildOperation; // its finish: absorb_build (S13 A2 gives it SessionCore's)
 
 	bool dispatch(const EditorRequest &request);
-	// The busy gate: true when the running operation holds what `request` needs and the
-	// request was refused or joined it (its row's on_busy); a CancelRunning cancels it and the
-	// request goes on (false).
+	// The busy gate (gate_answer): true when the request was refused or joined the running
+	// operation; false when it goes on (nothing it conflicts with runs, it superseded the
+	// operation, or it cancels the operation itself when it commits).
 	bool gate_busy(const EditorRequest &request);
-	// True when the running operation holds what a request of `kind` needs.
-	bool busy_for(EditorRequestKind kind) const;
+	// True when what reads `reads` and writes `writes` conflicts with the running operation.
+	bool busy_for(Holds reads, Holds writes) const;
+	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
+	std::string busy_message(const std::string &until) const;
 	void refuse_busy(const std::string &asset);
-	// A Build or a Play onto the running build; false when it does not take it.
-	bool join_operation(const EditorRequest &request);
-	// The running operation cancelled between two steps (`asked`: CancelOperation's own words).
-	void cancel_operation(bool asked);
+	// A Build or a Play onto the running build.
+	void join_operation(const EditorRequest &request);
+	// The running operation cancelled between two steps (`asked`: CancelOperation's own words);
+	// true when none runs now (none ran, or it was cancelled), false when it cannot be cancelled.
+	bool cancel_operation(bool asked);
 	// The operation the poll found done, finished: the view learns what it came to.
 	void finish_operation();
 	void show_operation();
@@ -101,6 +110,9 @@ private:
 	void rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files);
 	bool guard_unsaved(const EditorRequest &request);
 	void resolve_unsaved(UnsavedChoice choice);
+	// The prompt's answer, reading `reads` and writing `writes`, refused against the running
+	// operation (true, said why), unless what waits cancels it anyway and it was cancelled.
+	bool unsaved_answer_refused(Holds reads, Holds writes);
 	void close_unsaved_prompt();
 	bool apply_edits(Document &document, const std::vector<Edit> &edits);
 	void copy_records(Document &document, bool cut);
@@ -120,7 +132,9 @@ private:
 	void forget_file_state(const std::string &path);
 	bool new_project(const std::string &dir, const std::string &title);
 	bool open_project(const std::string &dir);
-	void close_project();
+	// The open project closed, its operation cancelled first; false (refused, said why, nothing
+	// closed) when that operation cannot be cancelled.
+	bool close_project();
 	ImportRunResult refresh(bool force_import = false, const std::string &only = std::string());
 	void apply_project_settings(const ProjectSettingsChange &change);
 	void select_first_screen();
@@ -174,6 +188,7 @@ private:
 	ProjectPaths paths_;
 	LocalSettings local_;
 	PlaySession play_;
+	PlayLease play_lease_; // the running game's lease, as written (pid -1: none)
 	PlayLauncher launcher_;
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;

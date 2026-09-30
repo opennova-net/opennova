@@ -42,6 +42,13 @@ int64_t last_write_of(const fs::path &path) {
 	return ec ? 0 : static_cast<int64_t>(time.time_since_epoch().count());
 }
 
+// True when `path` still has the size and the last write a read of it started from: a file
+// rewritten in place under a read of several steps, even to the same size, is not.
+bool still_as_read(const fs::path &path, uint64_t size, int64_t written) {
+	std::error_code ec;
+	return fs::file_size(path, ec) == size && !ec && last_write_of(path) == written;
+}
+
 Diagnostic changed_while_packing(const std::string &name) {
 	return make_diagnostic(DiagnosticSeverity::Error, "build.changed",
 	                       "The file " + name + " changed while the build packed it: build again.", name);
@@ -239,7 +246,8 @@ struct BuildRun::Streams {
 		const BuildEntry &entry = run.plan_.archives[self.archive].entries[index];
 		const Stamp &stamp = run.stamps_[run.stamp_index(self.archive, index)];
 		if ((offset == 0 && !self.open_unchanged(entry.source_path, stamp)) || !self.read(size) ||
-		    (self.in_done == stamp.size && !self.at_end())) {
+		    (self.in_done == stamp.size &&
+		     (!self.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written)))) {
 			self.failed_entry = entry.logical_name;
 			return 1;
 		}
@@ -247,6 +255,10 @@ struct BuildRun::Streams {
 		return 0;
 	}
 };
+
+ProtectedDirs protect_dirs(std::vector<std::string> dirs) {
+	return [dirs = std::move(dirs)] { return dirs; };
+}
 
 bool is_build_id(const std::string &name) {
 	if (name.size() != 16) return false;
@@ -264,7 +276,7 @@ std::string last_good_build_dir(const std::string &output_root) {
 	return fs::is_directory(dir, ec) ? dir.generic_string() : std::string();
 }
 
-BuildRun::BuildRun(BuildPlan plan, std::string output_root, std::vector<std::string> protected_dirs) :
+BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs) :
 		plan_(std::move(plan)), output_root_(std::move(output_root)), protected_dirs_(std::move(protected_dirs)),
 		streams_(std::make_unique<Streams>()) {
 	streams_->run = this;
@@ -421,7 +433,8 @@ void BuildRun::hash(uint64_t budget) {
 			advance(want);
 		}
 		if (s.in_done == s.in_size) {
-			if (!s.at_end()) return fail(changed_while_packing(entry.logical_name));
+			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
+				return fail(changed_while_packing(entry.logical_name));
 			++hash_entry_;
 		}
 	}
@@ -628,7 +641,8 @@ void BuildRun::copy_loose(uint64_t budget) {
 			advance(want);
 		}
 		if (s.in_done == s.in_size) {
-			if (!s.at_end()) return fail(changed_while_packing(entry.logical_name));
+			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
+				return fail(changed_while_packing(entry.logical_name));
 			s.out.close();
 			if (!s.out) {
 				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
@@ -666,16 +680,19 @@ void BuildRun::publish() {
 	                       io::json_write(record), io_error)) {
 		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
 	}
-	prune_old_builds(output_root_, report_.build_id, protected_dirs_);
+	// The directories games run from, asked now: a game started (or found alive) since the build
+	// began is as protected as one that ran when it started.
+	prune_old_builds(output_root_, report_.build_id,
+	                 protected_dirs_ ? protected_dirs_() : std::vector<std::string>());
 	report_.ok = true;
 	report_.build_dir = final_dir_;
 	bytes_done_ = bytes_total_;
 	phase_ = Phase::Done;
 }
 
-BuildReport run_build(const BuildPlan &plan, const std::string &output_root,
-                      const std::vector<std::string> &protected_dirs, BuildProgress *progress) {
-	BuildRun run(plan, output_root, protected_dirs);
+BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs,
+                      BuildProgress *progress) {
+	BuildRun run(plan, output_root, std::move(protected_dirs));
 	size_t reported = 0;
 	for (;;) {
 		const bool finished = run.step(kRunBuildStepBytes);

@@ -171,8 +171,9 @@ bool enabled_button(const char *label, bool enabled) {
 	return pressed && enabled;
 }
 
-// False while the running operation holds what a request of `kind` needs and its row refuses it
-// (request_kinds.h, the session's busy gate): the menus and the bar disable it then.
+// False while the session's busy gate would refuse a request of `kind` (request_kinds.h:
+// busy_refuses, the gate's own answer over the running operation's reads and writes): the menus
+// and the bar disable it then, exactly when the session would refuse it.
 bool allowed(const SessionView &v, EditorRequestKind kind) {
 	return !busy_refuses(kind, v.operation);
 }

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -19,11 +20,12 @@ namespace opennova::editor {
 // new directory in which unchanged archives are copied from the last good build and only
 // changed archives are re-packed. Everything lands in `<build-id>.tmp/` first, is
 // re-mounted through the engine's own VFS to prove every name resolves, and is renamed
-// into place last, so a failure leaves the last good build untouched. Directories the
-// caller names in `protected_dirs` (a running Play child's, a live lease's:
-// run/play_lease.h) are never pruned, and pruning only ever deletes a directory that
-// proves it is a build (its name is a build id and its record names the same id, or it
-// is a marked staging directory): the output root may be any folder the user chose.
+// into place last, so a failure leaves the last good build untouched. The directories the
+// caller's ProtectedDirs names when the build publishes (a running Play child's, those whose
+// lease names a process that may still run: run/play_lease.h) are never pruned, and pruning
+// only ever deletes a directory that proves it is a build (its name is a build id and its
+// record names the same id, or it is a marked staging directory): the output root may be any
+// folder the user chose.
 inline constexpr int kBuildRecordSchemaVersion = 1;
 inline constexpr const char *kBuildRecordFileName = "build.json";
 inline constexpr const char *kLastGoodBuildFileName = "last_good.json";
@@ -32,6 +34,12 @@ inline constexpr const char *kBuildStagingMarkerFileName = "build.staging";
 
 // True for a build id's spelling: 16 lower-case hex digits (a build directory's name).
 bool is_build_id(const std::string &name);
+
+// The directories a build must not prune, asked when it publishes (not when it starts: a game
+// may start from a build while another packs).
+using ProtectedDirs = std::function<std::vector<std::string>()>;
+// ProtectedDirs naming `dirs` whenever it is asked (the tests', a caller that knows them).
+ProtectedDirs protect_dirs(std::vector<std::string> dirs);
 
 struct BuildProgress {
 	virtual ~BuildProgress() = default;
@@ -58,10 +66,10 @@ struct BuildReport {
 // line and the tests run it to the end (run_build). No thread is involved, so a build never
 // races the project it reads: a file edited mid-build (its size or its last write no longer
 // what the hash read) fails that build ("changed while packing") instead of packing half of
-// each version.
+// each version: a file is checked when it is opened and again when its last byte is read.
 class BuildRun {
 public:
-	BuildRun(BuildPlan plan, std::string output_root, std::vector<std::string> protected_dirs = {});
+	BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs = {});
 	// A run left unfinished is cancelled: its staging directory goes.
 	~BuildRun();
 	BuildRun(const BuildRun &) = delete;
@@ -114,7 +122,7 @@ private:
 
 	BuildPlan plan_;
 	std::string output_root_;
-	std::vector<std::string> protected_dirs_;
+	ProtectedDirs protected_dirs_;
 	Phase phase_ = Phase::Prepare;
 	bool cancelled_ = false;
 	std::unique_ptr<Streams> streams_;
@@ -146,8 +154,7 @@ private:
 };
 
 // The whole build in one call (the command line, the tests).
-BuildReport run_build(const BuildPlan &plan, const std::string &output_root,
-                      const std::vector<std::string> &protected_dirs = {},
+BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs = {},
                       BuildProgress *progress = nullptr);
 
 // The last good build's directory under `output_root` ("" when none).
