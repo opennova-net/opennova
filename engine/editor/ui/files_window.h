@@ -55,6 +55,9 @@ public:
 
 	// The file a click selected (project-relative; "" = none).
 	const std::string &selected() const { return selected_; }
+	// How many times the tree and the counts were made again (refresh): once per change of what
+	// they read, never for a change of anything else (a line of Output, a build's step).
+	size_t rebuilds() const { return rebuilds_; }
 	// The file a ShowInFiles asked for (the view's reveal_file, each ask by its serial): Files
 	// comes forward (the workspace asks every frame, whether Files draws or not), then selects
 	// it, clears a filter that hides it, opens its folders, scrolls to it and, when the ask
@@ -76,9 +79,6 @@ private:
 		size_t warnings = 0;
 	};
 
-	// What the window keeps its caches by: the view's revision, which moves with the scan and
-	// the findings.
-	static uint64_t cache_key(const SessionView &view) { return view.revision; }
 	void refresh(const SessionView &view);
 	// The files the filter matches (their scan indices), found again only when the filter or the
 	// scan moved; each file's path as the filter compares it made only while a filter is set,
@@ -98,17 +98,28 @@ private:
 	NewFilePrompt &new_file_;
 	char filter_[128]{};
 	std::string selected_;
-	// What refresh() makes of the view, kept while its cache key stands; each file's path as the
-	// filter compares it (matching()'s, once a filter is set); the files the filter last matched
-	// and the filter they matched.
+	// What refresh() makes of the view, kept while what it reads stands (cache_key); each file's
+	// path as the filter compares it (matching()'s, once a filter is set); the files the filter
+	// last matched and the filter they matched.
 	const SessionView *view_ = nullptr;
-	uint64_t key_ = 0;
+	RevisionKey key_;
+	size_t rebuilds_ = 0;
 	std::vector<Folder> folders_; // [0]: the project's own folder
 	std::unordered_map<std::string, Counts> counts_;
 	std::vector<std::string> compared_;
 	std::string matched_;
 	bool matches_made_ = false;
 	std::vector<size_t> matches_;
+	// What References... lists of a file (the graph's edges both ways), kept while the graph
+	// stands.
+	struct Listed {
+		const SessionView *view = nullptr;
+		RevisionKey key;
+		std::string file;
+		std::vector<const GraphEdge *> references;
+		std::vector<const GraphEdge *> users;
+	};
+	Listed listed_;
 	// The file a menu asked to rename or to list the references of, and the name typed.
 	std::string renaming_;
 	std::string references_;

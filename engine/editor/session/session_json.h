@@ -67,7 +67,9 @@ struct SessionJsonOptions {
 	size_t import_limit = 200;
 };
 
-// The view: revision, status, the unsaved-changes prompt ({open}, and while it is open the
+// The view: revision (moves with any change: ViewRevisions::any), revisions (each concern's
+// counter by its token, session_revisions.h: a client waits on the concern it reads), status,
+// the unsaved-changes prompt ({open}, and while it is open the
 // waiting request's kind token as `action`, its `target`, the `files` it lists and
 // `can_discard`), project (its `files`: every file the scan lists, with its kind and whether
 // the editor opens it), requirements (rows included), documents (their paths, kinds,
@@ -95,7 +97,7 @@ bool problem_query_from_json(const io::JsonValue &json, ProblemQuery &query, siz
                              std::string &error);
 // What a query shows: {total, shown, counts {errors, warnings, infos} over every finding,
 // and the page of problems from `offset`, `limit` of them, each a finding with its `fixes`
-// (from `fixes`, which keeps them while the view's revision stands)}. Grouped, each problem
+// (from `fixes`, which keeps them while what they read stands)}. Grouped, each problem
 // also names its `group`, `group_count` is how many groups the query shows, and `groups`
 // holds those of the page's problems, in order, each whole: {key, title, first (the index of
 // its first row among the shown), count, errors, warnings, infos}.

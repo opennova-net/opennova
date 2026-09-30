@@ -62,6 +62,18 @@ const Document *open_document(const SessionView &view, const std::string &path) 
 	return nullptr;
 }
 
+// What the window's caches read of the view: the tree and each file's counts, the files and the
+// findings; a file's References..., the graph (its edges name their files by path and their
+// fields by the kind the scan gives: the graph moves when either does).
+struct CacheKey {
+	RevisionKey tree;
+	RevisionKey references;
+};
+CacheKey cache_key(const SessionView &view) {
+	return {revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Findings}),
+	        revision_key(view.revisions, {ViewConcern::Graph})};
+}
+
 } // namespace
 
 void NewFilePrompt::ask(AssetKind kind) {
@@ -109,11 +121,13 @@ void NewFilePrompt::draw(EditorHost &host) {
 	ImGui::EndPopup();
 }
 
-// The tree of the scan's folders and each file's findings, made again when the view moves.
+// The tree of the scan's folders and each file's findings, made again when what they read moves.
 void FilesWindow::refresh(const SessionView &view) {
-	if (view_ == &view && key_ == cache_key(view) && !folders_.empty()) return;
+	const RevisionKey key = cache_key(view).tree;
+	if (view_ == &view && key_ == key && !folders_.empty()) return;
 	view_ = &view;
-	key_ = cache_key(view);
+	key_ = key;
+	++rebuilds_;
 	folders_.assign(1, Folder());
 	compared_.clear(); // made again by matching(), once a filter is set
 	matches_made_ = false;
@@ -524,8 +538,17 @@ void FilesWindow::draw_references(const SessionView &view) {
 		return;
 	}
 	ImGui::TextUnformatted(entry->logical_name.c_str());
-	const std::vector<const GraphEdge *> references = view.graph->references_of(entry->relative_path);
-	const std::vector<const GraphEdge *> users = view.graph->usages_of(entry->relative_path);
+	// Both ways, asked of the graph once per file while it stands (its edges stay where they are).
+	const RevisionKey key = cache_key(view).references;
+	if (listed_.view != &view || listed_.key != key || listed_.file != entry->relative_path) {
+		listed_.view = &view;
+		listed_.key = key;
+		listed_.file = entry->relative_path;
+		listed_.references = view.graph->references_of(entry->relative_path);
+		listed_.users = view.graph->usages_of(entry->relative_path);
+	}
+	const std::vector<const GraphEdge *> &references = listed_.references;
+	const std::vector<const GraphEdge *> &users = listed_.users;
 	// Each line names a field by the name the inspector shows (its id in the tooltip).
 	if (ImGui::TreeNodeEx("references", ImGuiTreeNodeFlags_DefaultOpen, "References (%zu)", references.size())) {
 		if (references.empty()) ui_kit::empty_state("It names no other file or record.");

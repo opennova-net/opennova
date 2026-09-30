@@ -39,6 +39,17 @@ struct Diagnostic {
 	int material_type = -1;
 };
 
+// The same finding, every member alike (the session's Findings concern moves only when the
+// rows it composes differ).
+inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
+	return a.severity == b.severity && a.code == b.code && a.message == b.message &&
+			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
+			a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
+			a.role == b.role && a.target == b.target && a.reference == b.reference &&
+			a.scope == b.scope && a.material_type == b.material_type;
+}
+inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
+
 inline Diagnostic make_diagnostic(DiagnosticSeverity severity, std::string code,
                                   std::string message, std::string asset = std::string(),
                                   std::string field = std::string()) {

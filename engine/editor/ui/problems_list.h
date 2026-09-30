@@ -83,16 +83,20 @@ public:
 
 	ProblemsList();
 
-	// What the list keeps what it makes by, one key over all it reads of the view: the findings
-	// (the answer, each finding's key, the lines); the active document (the Active file scope)
-	// and the open documents (the Open files scope; a Reload, a Rewrite's unsaved edits); the
-	// project (a key is its project's); the files: the scan, the requirements and the game
-	// install's file names (whether a fix creates a file or imports it); the graph (a Use fix's
-	// rename); the settings (an Import's dependencies). Today the view's revision moves with
-	// each. The answer and the fixes are their caches' (problem_query, problem_fixes), each
-	// kept by what it reads; the list is made again whenever either is made anew as well, so
-	// a line never indexes an answer it was not made from.
-	static uint64_t cache_key(const SessionView &view) { return view.revision; }
+	// What the list keeps what it makes by for `query`, one key over all it reads of the view
+	// (session_revisions.h): the answer's (problem_query_key: the findings; which document is
+	// active for the Active file scope, which are open for the Open files scope) and the
+	// fixes' (problem_fix_key: the findings, the project, the files (the scan, the
+	// requirements, the game install's file names: whether a fix creates a file or imports
+	// it), the graph (a Use fix's rename), which documents are open and unsaved (a Reload, a
+	// Rewrite's unsaved edits), the settings (an Import's dependencies)); each finding's key,
+	// the lines, the Fix alls and a confirmation's proposal read both. The answer and the fixes
+	// are their caches' (problem_query, problem_fixes), each kept by its own key; the list is
+	// made again whenever either is made anew as well, so a line never indexes an answer it
+	// was not made from.
+	static RevisionKey cache_key(const SessionView &view, const ProblemQuery &query) {
+		return problem_query_key(view, query) | problem_fix_key(view);
+	}
 
 	// The query the window's filters set (grouped by kind until one is picked).
 	ProblemQuery &query() { return query_; }
@@ -133,7 +137,7 @@ public:
 	const std::vector<ProblemFix> &fixes(const SessionView &view, size_t finding) {
 		return fixes_.fixes(view, finding);
 	}
-	// How many findings' fixes are planned for the view's revision.
+	// How many findings' fixes are planned while what they read stands.
 	size_t fixes_asked() const { return fixes_.size(); }
 	// What a fix's control is known by for a press: its project, its finding's key, its request.
 	std::string fix_id(const SessionView &view, size_t finding, const ProblemFix &fix) const;
@@ -184,7 +188,7 @@ private:
 	// the fixes it read are their caches' still (their generations; stale_: a group folded or
 	// opened since); made_ counts the times it was made.
 	const SessionView *view_ = nullptr;
-	uint64_t key_ = 0;
+	RevisionKey key_;
 	ProblemQuery refreshed_;
 	uint64_t answered_ = 0;
 	uint64_t fixed_ = 0;

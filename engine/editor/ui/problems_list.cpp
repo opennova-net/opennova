@@ -73,11 +73,12 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	const ProblemAnswer &answer = answers_.answer(query_, view);
 	const uint64_t answered = answers_.generation();
 	const uint64_t fixed = fixes_.generation(view);
-	if (!stale_ && view_ == &view && key_ == cache_key(view) && refreshed_ == query_ &&
+	const RevisionKey key = cache_key(view, query_);
+	if (!stale_ && view_ == &view && key_ == key && refreshed_ == query_ &&
 	    answered_ == answered && fixed_ == fixed)
 		return answer;
 	view_ = &view;
-	key_ = cache_key(view);
+	key_ = key;
 	refreshed_ = query_;
 	answered_ = answered;
 	fixed_ = fixed;

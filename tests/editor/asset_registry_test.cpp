@@ -2,6 +2,7 @@
 // catalog, plus the editor-only kinds), the scan's exclusions, the import records (an
 // output that is not there, a record whose source is gone: S9c), and the flat-name rules
 // (the archives' length limit binding only a kind the build packs: S13 PR0).
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -18,6 +19,14 @@ using namespace opennova::editor;
 
 static std::vector<uint8_t> bytes_of(const char *text) {
 	return std::vector<uint8_t>(text, text + std::char_traits<char>::length(text));
+}
+
+// The entries in the order find reads them by: by key, then by path.
+static bool sorted_by_key(const AssetScan &scan) {
+	const auto before = [](const AssetEntry &a, const AssetEntry &b) {
+		return a.key != b.key ? a.key < b.key : a.relative_path < b.relative_path;
+	};
+	return std::is_sorted(scan.entries.begin(), scan.entries.end(), before);
 }
 
 static int test_classification() {
@@ -175,6 +184,73 @@ static int test_scan_exclusions_and_diagnostics() {
 			adjacent = true;
 	}
 	TEST_EXPECT(adjacent);
+
+	// S13 D1: each entry keyed by its normalized name, the entries sorted by key then path (the
+	// order find's binary search reads); each found by its logical name in any case (of the two
+	// "same" files, the first by path) and by its path as written; a name or a path the scan
+	// lacks, none.
+	TEST_EXPECT(sorted_by_key(scan));
+	for (const AssetEntry &entry : scan.entries) {
+		TEST_EXPECT(entry.key == normalized_logical_name(entry.logical_name));
+		const AssetEntry *named = scan.find(entry.logical_name);
+		TEST_EXPECT(named && named->key == entry.key);
+		TEST_EXPECT(named->relative_path <= entry.relative_path);
+		TEST_EXPECT(scan.at_path(entry.relative_path) == &entry);
+	}
+	TEST_EXPECT(scan.find("same.tga") && scan.find("same.tga")->relative_path == "a/Same.tga");
+	TEST_EXPECT(scan.find("menus/main.mnu") == nullptr); // a path is no logical name
+	TEST_EXPECT(scan.at_path("main.mnu") == nullptr && scan.at_path("Menus/main.mnu") == nullptr);
+	TEST_EXPECT(scan.at_path("menus/nothing.mnu") == nullptr);
+	return 0;
+}
+
+// The scan's lookups over a scan made by hand: 2,000 files named in the reverse of their order,
+// indexed (keyed, sorted, their paths indexed), each found by name and by path, in a copy of the
+// scan too (the index holds places, not addresses); what it lacks, none. Its entries changed
+// after index(): a file pushed is found by its name and its path, and a thousand erased are
+// found no more while the others still are, nothing read past the entries (the lookups walk
+// them until index() runs again).
+static int test_lookups() {
+	AssetScan scan;
+	for (int i = 1999; i >= 0; --i) {
+		char name[16];
+		std::snprintf(name, sizeof(name), "f%04d.def", i);
+		AssetEntry entry;
+		entry.logical_name = name;
+		entry.relative_path = std::string("defs/") + (i % 2 ? "odd/" : "even/") + name;
+		entry.kind = AssetKind::ItemDefs;
+		scan.entries.push_back(entry);
+	}
+	scan.index();
+	TEST_EXPECT(sorted_by_key(scan) && scan.entries.front().logical_name == "f0000.def");
+	const AssetScan copy = scan;
+	const AssetScan *const scans[] = {&scan, &copy};
+	for (const AssetScan *each : scans)
+		for (const AssetEntry &entry : each->entries) {
+			TEST_EXPECT(each->find(entry.logical_name) == &entry);
+			TEST_EXPECT(each->find(normalized_logical_name(entry.logical_name)) == &entry);
+			TEST_EXPECT(each->at_path(entry.relative_path) == &entry);
+		}
+	TEST_EXPECT(!scan.find("f2000.def") && !scan.find("") && !scan.find("f0000.de"));
+	TEST_EXPECT(!scan.at_path("defs/f0000.def") && !scan.at_path("defs/odd/f0000.def"));
+	TEST_EXPECT(!scan.at_path(""));
+	AssetScan changed = scan;
+	AssetEntry late;
+	late.logical_name = "Late.def";
+	late.relative_path = "defs/late/Late.def";
+	late.kind = AssetKind::ItemDefs;
+	changed.entries.push_back(late);
+	TEST_EXPECT(changed.find("late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.at_path("defs/late/Late.def") == &changed.entries.back());
+	TEST_EXPECT(changed.find("f0005.def") && changed.at_path("defs/odd/f0005.def"));
+	changed.entries.erase(changed.entries.begin(), changed.entries.begin() + 1000);
+	TEST_EXPECT(!changed.find("f0000.def") && !changed.at_path("defs/even/f0000.def"));
+	TEST_EXPECT(changed.find("f1999.def") && changed.at_path("defs/odd/f1999.def"));
+	TEST_EXPECT(changed.find("late.def") && changed.at_path("defs/late/Late.def"));
+	changed.index();
+	TEST_EXPECT(sorted_by_key(changed) && changed.entries.size() == 1001);
+	const AssetEntry *late_entry = changed.at_path("defs/late/Late.def");
+	TEST_EXPECT(late_entry && changed.find("LATE.DEF") == late_entry);
 	return 0;
 }
 
@@ -195,6 +271,7 @@ int main() {
 	failures += test_classification();
 	failures += test_name_rules();
 	failures += test_scan_exclusions_and_diagnostics();
+	failures += test_lookups();
 	failures += test_empty_project_scans_clean();
 	if (failures == 0) std::printf("editor_asset_registry: all tests passed\n");
 	return failures == 0 ? 0 : 1;

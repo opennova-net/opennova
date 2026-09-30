@@ -141,7 +141,7 @@ void test_field_marks() {
 	Diagnostic error;
 	CHECK(document->apply(set_edit(back, "position.left", int64_t(20)), error), "BACK's left moved");
 	CHECK(document->apply(set_edit(back, "position.right", int64_t(300)), error), "BACK's right written");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 	ui.away();
 	ui.frames();
@@ -178,20 +178,20 @@ void test_field_marks() {
 	add.address = {main.row, node_kind(MenuKind::Window), 0};
 	add.parent = main.child;
 	CHECK(document->apply(add, error), "a window added");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 	CHECK(drew_mark("Document/windows", Change::Added), "the added window marked");
 
 	// BACK and TITLE together, TITLE's Hidden set: the shared form marks it.
 	std::shared_ptr<MnuDocument> fresh = load_menu(dir);
-	v = menu_view(fresh);
+	replace_view(v, menu_view(fresh));
 	v.selection = named(*fresh, "BACK");
 	v.selected = {named(*fresh, "BACK"), named(*fresh, "TITLE")};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(!drew_mark("Inspector", Change::Changed) && !drew_mark("Document/windows", Change::Changed), "read fresh: nothing");
 	CHECK(fresh->apply(set_edit(named(*fresh, "TITLE"), "hidden", int64_t(1)), error), "TITLE hidden");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 	CHECK(drew_mark("Inspector", Change::Changed), "a field changed on one of the selected records is marked");
 	(void)title;
@@ -277,7 +277,7 @@ void test_reveal_field() {
 	CHECK(!before || before->LastFrameActive != GImGui->FrameCount, "its fields not drawn while folded");
 	v.reveal_field = folded->fields.back().id;
 	++v.reveal_serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(4);
 	const ImGuiTable *table = ImGui::TableFindByID(table_id);
 	CHECK(table && table->LastFrameActive == GImGui->FrameCount, "its section opened");
@@ -295,11 +295,11 @@ void test_reveal_field() {
 	// field asked again does, and lights it again.
 	ImGui::SetScrollY(ImGui::FindWindowByName("Inspector"), 0.0f);
 	ui.frames(2);
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(inspector && inspector->Scroll.y == 0.0f && !lit_row(top, bottom), "the same ask is shown once");
 	++v.reveal_serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(4);
 	CHECK(inspector && inspector->Scroll.y > 0.0f && lit_in_sight(), "asked again: scrolled to and lit again");
 	ui.drain();
@@ -436,7 +436,7 @@ void test_block_switch() {
 	CHECK(!drew_mark("Inspector", Change::Changed), "saved: nothing marked");
 	Diagnostic error;
 	CHECK(document->apply(set_edit(title, "string", int64_t(0)), error), "the block left out");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 
 	// From the form's end, the switch asked to show: its row (the first of its block's form)
@@ -448,7 +448,7 @@ void test_block_switch() {
 	ui.frames(2);
 	v.reveal_field = "string";
 	++v.reveal_serial;
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(4);
 	const ImGuiTable *form = ImGui::TableFindByID(item_id(Ui::window_id("Inspector"), {"string", "fields"}));
 	float top = 0.0f, bottom = 0.0f;
@@ -487,7 +487,7 @@ void test_block_switch() {
 		CHECK(document->get(title, "string", value) && std::get<int64_t>(value) == 0 && document->field_changed(title, "string"),
 		      "one undo: left out again");
 	}
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 	ui.drain();
 }
@@ -502,7 +502,7 @@ void test_revert_several() {
 	SessionView v = menu_view(document);
 	v.selection = back;
 	v.selected = {back, title};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Selection);
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);
 	ui.windows.set_view(&v);
@@ -510,7 +510,7 @@ void test_revert_several() {
 	Diagnostic error;
 	CHECK(document->apply(std::vector<Edit>{set_edit(back, "hidden", int64_t(1)), set_edit(title, "hidden", int64_t(1))}, error),
 	      "both hidden in one step");
-	++v.revision;
+	v.revisions.touch(ViewConcern::Documents);
 	ui.frames(3);
 	ui.away();
 	ui.frames();
@@ -558,7 +558,6 @@ void keep_clipboard(ImGuiContext *, const char *text) { g_clipboard = text ? tex
 // line on the clipboard; a finding's line in its severity's colour.
 void test_output_window() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Output";
 	v.document.title = "Output";
@@ -570,7 +569,7 @@ void test_output_window() {
 	ui.away();
 	CHECK(logged_frame(ui).find("Nothing yet.") != std::string::npos, "empty: nothing yet");
 	v.output = {"Opened Output.", "error: A broken thing.", "warning: A doubtful thing.", "game: a line"};
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Nothing yet.") == std::string::npos, "lines: no empty state");
 	const ImU32 error = ImGui::GetColorU32(ui_kit::severity_color(DiagnosticSeverity::Error));
@@ -605,7 +604,6 @@ ImGuiWindow *output_lines() {
 // Scrolled up to read, it stays where it was as more arrive.
 void test_output_follows() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Output";
 	v.document.title = "Output";
@@ -621,7 +619,7 @@ void test_output_follows() {
 	if (!lines) return;
 	const float before = lines->ScrollMax.y;
 	for (int i = 0; i < 20; ++i) v.output.push_back("more " + std::to_string(i));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->ScrollMax.y > before && lines->Scroll.y == lines->ScrollMax.y, "new lines followed");
 	// Scrolled up to read: more lines leave it there.
@@ -629,7 +627,7 @@ void test_output_follows() {
 	ui.frames(2);
 	CHECK(lines->Scroll.y == 0.0f, "scrolled up");
 	for (int i = 0; i < 20; ++i) v.output.push_back("later " + std::to_string(i));
-	++v.revision;
+	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->Scroll.y == 0.0f && lines->ScrollMax.y > before, "scrolled up: kept where it was");
 	CHECK(ui.drain().empty(), "raising nothing");
@@ -639,12 +637,12 @@ void test_output_follows() {
 // menu's Rename...); Ctrl+F gives the keyboard to the filter of the window with the focus.
 void test_shortcuts() {
 	SessionView v;
-	v.revision = 1;
 	v.project_open = true;
 	v.project_root = "C:/mods/Keys";
 	v.document.title = "Keys";
 	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
 	                  file_entry("readme.txt", "readme.txt", AssetKind::Text)};
+	v.scan.index();
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);

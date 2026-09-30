@@ -36,9 +36,9 @@ private:
 
 	bool ask_ = false;
 	char text_[128]{};
-	// The hits, kept while the view's revision and the text stand.
+	// The hits, kept while what they read (the graph) and the text stand.
 	const SessionView *view_ = nullptr;
-	uint64_t revision_ = 0;
+	RevisionKey key_;
 	std::string searched_;
 	std::vector<GraphSearchHit> hits_;
 	std::map<size_t, std::vector<Usage>> usages_; // by the result's index, kept with the hits
