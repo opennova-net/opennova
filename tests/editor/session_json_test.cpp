@@ -16,9 +16,11 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
+#include <editor/graph/reference_kinds.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -129,6 +131,50 @@ static int test_tokens() {
 	TEST_EXPECT(!editor_request_kind_from_token("create_document", kind));
 	// Output's Clear (S11e).
 	TEST_EXPECT(editor_request_kind_from_token("clear_output", kind) && kind == EditorRequestKind::ClearOutput);
+	return 0;
+}
+
+// The asset kinds' tokens on the wire (S13 D5): a scanned file's kind is its row's token, the
+// sound banks as the game names them (a .lwf the sound bank, a .sbf the music bank) and the
+// kinds S13 D5 added; the reference kind a menu SOUND names its bank by is sound_bank too, and
+// wave_bank names nothing (pre-1.0, no alias).
+static int test_asset_kind_tokens() {
+	editor_test::TempProjectDir dir("opennova_session_json_kinds");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Kinds"));
+	const std::string root = session.view().project_root;
+	TEST_EXPECT(!root.empty());
+	const std::pair<const char *, const char *> files[] = {
+	        {"sounds/menu.lwf", "sound_bank"},
+	        {"music/menumus.sbf", "music_bank"},
+	        {"sounds/boom.wav", "wave"},
+	        {"faces/head.grm", "face_animation"},
+	        {"CC.BIN", "country_code"},
+	        {"score.ini", "score"},
+	        {"missions/ASP.npz", "map_project"},
+	        {"game.ini", "config"},
+	};
+	for (const auto &file : files)
+		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	const JsonValue json = session_view_to_json(session.view());
+	for (const auto &file : files) {
+		const std::string name = std::filesystem::path(file.first).filename().string();
+		std::string kind;
+		for (const JsonValue &row : json.get("project")->get("files")->array)
+			if (row.get_string("name", "") == name) kind = row.get_string("kind", "");
+		if (kind != file.second)
+			std::fprintf(stderr, "%s is %s on the wire\n", name.c_str(), kind.c_str());
+		TEST_EXPECT(kind == file.second);
+	}
+	ReferenceKind reference = ReferenceKind::None;
+	TEST_EXPECT(std::string(reference_row(ReferenceKind::SoundBank).token) == "sound_bank");
+	TEST_EXPECT(reference_kind_from_token("sound_bank", reference));
+	TEST_EXPECT(reference == ReferenceKind::SoundBank);
+	TEST_EXPECT(!reference_kind_from_token("wave_bank", reference));
+	TEST_EXPECT(asset_kind_from_token("wave_bank") == AssetKind::Unknown);
 	return 0;
 }
 
@@ -907,10 +953,10 @@ struct MetadataRow : Node {
 
 class MetadataDocument : public Document {
 public:
-	const char *kind_label(NodeKind) const override { return "Light"; }
-	NodeKind kind_from_name(const std::string &name) const override { return name == "light" ? 0 : -1; }
-	bool is_top_kind(NodeKind kind) const override { return kind == 0; }
-	std::vector<KindSpec> top_kinds() const override { return {}; }
+	const std::vector<RecordKindRow> &kinds() const override {
+		static const std::vector<RecordKindRow> table = {{0, "light", "Light", "", true}};
+		return table;
+	}
 	std::vector<Collection> collections(const Node &, const NodeAddress &) const override { return {}; }
 	const std::vector<FieldSchema> &fields(NodeKind) const override {
 		static const std::vector<FieldSchema> fields = [] {
@@ -984,7 +1030,6 @@ protected:
 		error = "No collections.";
 		return false;
 	}
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &) override { return false; }
 };
 
 } // namespace
@@ -1206,6 +1251,7 @@ static int test_import_pages() {
 int main() {
 	int failures = 0;
 	failures += test_tokens();
+	failures += test_asset_kind_tokens();
 	failures += test_import_pages();
 	failures += test_request_round_trip();
 	failures += test_settings_json();

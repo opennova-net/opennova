@@ -711,7 +711,7 @@ PackedInt64Array EditorApp::get_child_records(int64_t p_id, const String &p_kind
 	if (!document) return children;
 	const std::string kind = opennova::to_std(p_kind);
 	for (const Document::Collection &collection : document->collections_of(document->address_of(uint64_t(p_id)))) {
-		if (!kind.empty() && kind != collection.spec.kind_name) continue;
+		if (!kind.empty() && kind != document->kind_token(collection.spec.kind)) continue;
 		for (const opennova::editor::NodeId id : collection.ids) children.push_back(int64_t(id));
 	}
 	return children;

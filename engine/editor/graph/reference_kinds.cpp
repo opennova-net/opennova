@@ -230,8 +230,8 @@ constexpr ReferenceKindRow kRows[] = {
 	// Opened by the name as written [orig: SoundBank_OpenFile @ 0x75caa0; ConfigFile_LoadGlobal @
 	// 0x760ad0]; a sound bank or a credits file that does not open adds nothing [orig:
 	// SoundBank_CollectionAddOrRef @ 0x652b40; CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0].
-	Row(ReferenceKind::WaveBank, "wave_bank", "the sound bank", "sound bank")
-	        .loads(AssetKind::WaveBank, nullptr)
+	Row(ReferenceKind::SoundBank, "sound_bank", "the sound bank", "sound bank")
+	        .loads(AssetKind::SoundBank, nullptr)
 	        .tolerated(bank_missing)
 	        .row,
 	Row(ReferenceKind::Credits, "credits", "the credits file", "credits file")

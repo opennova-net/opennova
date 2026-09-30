@@ -129,10 +129,16 @@ struct ImportPlanRow {
 	std::vector<ImportRival> rivals;
 };
 
+// Whether what a file names goes unread: its kind names files (AssetKindRow::names_files) and
+// the graph does not read the file (graph_reads_file: a kind it has no document type or
+// extractor for, a terrain, a script, the sound banks, the def tables beyond the catalogs and the
+// avatar table, a face; or a mission's .mis). An import takes such a file and lists it as not
+// followed.
+bool references_unread(AssetKind kind, const std::string &file);
+
 // What the walk does not follow, once per kind: references of a kind that names no file (a
 // symbol, a def's sound), with how many the planned files hold; or the planned files whose
-// references the graph does not read (of a kind it does not read, or a mission's .mis:
-// graph_reads_file). `first` is the file where it was met first.
+// references go unread (references_unread). `first` is the file where it was met first.
 struct ImportNotFollowed {
 	ReferenceKind reference = ReferenceKind::None; // the reference kind; None when `kind` is a file kind
 	AssetKind kind = AssetKind::Unknown;

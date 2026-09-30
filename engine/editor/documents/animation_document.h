@@ -42,10 +42,8 @@ struct ClipRow : Node {
 
 class AnimationDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override { return kind == node_kind(AnimationKind::Clip); }
-	std::vector<KindSpec> top_kinds() const override { return {}; }
+	// The clip, its row (the file's one, never added), then its bones and frame events.
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
 	// A bone's parent: none (a root), or one of the clip's bones by name.
@@ -73,7 +71,6 @@ protected:
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
 	bool accept_change(const Change &change, std::string &error) const override;
 };
 

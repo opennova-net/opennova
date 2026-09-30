@@ -904,7 +904,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(menu && menu->find("MAIN", main_window));
 	if (!menu) return 1;
 	for (const Document::Collection &collection : menu->collections_of(main_window))
-		if (std::string(collection.spec.kind_name) == "window" && collection.ids.size() == 2)
+		if (std::string(menu->kind_token(collection.spec.kind)) == "window" && collection.ids.size() == 2)
 			second_go = {main_window.row, collection.spec.kind, collection.ids[1]};
 	TEST_EXPECT(second_go.child && menu->record_name(second_go) == "GO" && v.selection == second_go);
 

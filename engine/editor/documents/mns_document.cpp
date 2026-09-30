@@ -1,6 +1,7 @@
 #include "mns_document.h"
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/project/project_files.h>
@@ -130,32 +131,19 @@ std::string StyleRow::name() const {
 	}
 }
 
-bool is_style_kind(AssetKind kind) { return kind == AssetKind::MenuStyle; }
-
-const char *MnsDocument::kind_label(NodeKind kind) const {
-	switch (kind) {
-	case kVariable: return "Variable";
-	case kComment: return "Comment";
-	case kBlank: return "Blank line";
-	case kConditional: return "Directive";
-	case kInactive: return "Switched-off line";
-	default: return "";
-	}
+bool is_style_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::Styles;
 }
 
-NodeKind MnsDocument::kind_from_name(const std::string &name) const {
-	if (name == "variable") return kVariable;
-	if (name == "comment") return kComment;
-	if (name == "blank") return kBlank;
-	if (name == "directive") return kConditional;
-	if (name == "inactive") return kInactive;
-	return -1;
-}
-
-bool MnsDocument::is_top_kind(NodeKind kind) const { return kind >= kVariable && kind <= kInactive; }
-
-std::vector<Document::KindSpec> MnsDocument::top_kinds() const {
-	return {{kVariable, "Add variable"}, {kComment, "Add comment"}, {kBlank, "Add blank line"}};
+const std::vector<RecordKindRow> &MnsDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = {
+	        {kVariable, "variable", "Variable", "Add variable", true},
+	        {kComment, "comment", "Comment", "Add comment", true},
+	        {kBlank, "blank", "Blank line", "Add blank line", true},
+	        {kConditional, "directive", "Directive", "", true},
+	        {kInactive, "inactive", "Switched-off line", "", true},
+	};
+	return table;
 }
 
 const std::vector<FieldSchema> &MnsDocument::fields(NodeKind kind) const {
@@ -438,11 +426,6 @@ bool MnsDocument::set_field(Node &node, const NodeAddress &address, const std::s
 
 bool MnsDocument::edit_collection(Node &, const Edit &, const IdAllocator &, NodeId &, std::string &error) {
 	error = "A stylesheet's lines hold no records.";
-	return false;
-}
-
-bool MnsDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "A stylesheet has no file-wide values.", path());
 	return false;
 }
 

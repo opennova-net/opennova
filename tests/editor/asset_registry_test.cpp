@@ -1,12 +1,15 @@
 // Pins the asset registry (ADR 0046 d6): classification (shared with the runtime
 // catalog, plus the editor-only kinds), the scan's exclusions, the import records (an
 // output that is not there, a record whose source is gone: S9c), and the flat-name rules
-// (the archives' length limit binding only a kind the build packs: S13 PR0).
+// (the archives' length limit binding only a kind the build packs: S13 PR0). S13 D5: the
+// kinds by the table's rows (asset_kinds): the sound banks named as the game names them (a
+// .sbf the music bank, a .lwf the sound bank), a face, a score table, a wave and a map project.
 #include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
@@ -58,8 +61,8 @@ static int test_classification() {
 	TEST_EXPECT(classify_asset("x.cpt", nullptr) == AssetKind::TerrainPolyData);
 	TEST_EXPECT(classify_asset("x.til", nullptr) == AssetKind::TileInfo);
 	TEST_EXPECT(classify_asset("x.env", nullptr) == AssetKind::Environment);
-	TEST_EXPECT(classify_asset("x.sbf", nullptr) == AssetKind::SoundBank);
-	TEST_EXPECT(classify_asset("x.lwf", nullptr) == AssetKind::WaveBank);
+	TEST_EXPECT(classify_asset("x.sbf", nullptr) == AssetKind::MusicBank);
+	TEST_EXPECT(classify_asset("x.lwf", nullptr) == AssetKind::SoundBank);
 	TEST_EXPECT(classify_asset("x.dbf", nullptr) == AssetKind::DialogBank);
 	TEST_EXPECT(classify_asset("x.ptl", nullptr) == AssetKind::Particles);
 	TEST_EXPECT(classify_asset("x.ptu", nullptr) == AssetKind::Particles);
@@ -71,6 +74,15 @@ static int test_classification() {
 	TEST_EXPECT(classify_asset("x.fx", nullptr) == AssetKind::Shader);
 	TEST_EXPECT(classify_asset("game.cfg", nullptr) == AssetKind::Config);
 	TEST_EXPECT(classify_asset("gt.ssc", nullptr) == AssetKind::Config);
+	TEST_EXPECT(classify_asset("assets.cd", nullptr) == AssetKind::Config);
+	TEST_EXPECT(classify_asset("game.ini", nullptr) == AssetKind::Config);
+	// score.ini by its whole name, before the .ini extension; the name without case.
+	TEST_EXPECT(classify_asset("score.ini", nullptr) == AssetKind::Score);
+	TEST_EXPECT(classify_asset("SCORE.INI", nullptr) == AssetKind::Score);
+	TEST_EXPECT(classify_asset("head.grm", nullptr) == AssetKind::FaceAnimation);
+	TEST_EXPECT(classify_asset("DltB086C.wav", nullptr) == AssetKind::Wave);
+	TEST_EXPECT(classify_asset("ASP_G7.npz", nullptr) == AssetKind::MapProject);
+	TEST_EXPECT(classify_asset("x.npj", nullptr) == AssetKind::MapProject);
 	TEST_EXPECT(classify_asset("earlyerr.txt", nullptr) == AssetKind::Text);
 	TEST_EXPECT(classify_asset("resource.pff", nullptr) == AssetKind::Archive);
 	TEST_EXPECT(classify_asset("readme.docx", nullptr) == AssetKind::Unknown);
@@ -96,9 +108,32 @@ static int test_classification() {
 	TEST_EXPECT(expected_asset_kind_for_required_name("main.mnu") == AssetKind::Menu);
 	TEST_EXPECT(std::string(asset_kind_token(AssetKind::ItemDefs)) == "item_defs");
 	TEST_EXPECT(std::string(asset_kind_label(AssetKind::Strings)) == "String table");
-	// Every kind's token reads back as that kind, the last one included.
-	for (int i = 0; i <= int(AssetKind::ImageSource); ++i)
+	// The sound banks as the game names them: the .lwf the sound bank [orig: SoundBank_OpenFile @
+	// 0x75caa0], the .sbf the music bank the music scripts stream.
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::SoundBank)) == "sound_bank" &&
+	            std::string(asset_kind_label(AssetKind::SoundBank)) == "Sound bank");
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::MusicBank)) == "music_bank" &&
+	            std::string(asset_kind_label(AssetKind::MusicBank)) == "Music bank");
+	TEST_EXPECT(asset_kind_from_token("wave_bank") == AssetKind::Unknown); // no alias, pre-1.0
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::FaceAnimation)) == "face_animation" &&
+	            std::string(asset_kind_label(AssetKind::FaceAnimation)) == "Face animation");
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Score)) == "score" &&
+	            std::string(asset_kind_label(AssetKind::Score)) == "Score table");
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::Wave)) == "wave" &&
+	            std::string(asset_kind_token(AssetKind::MapProject)) == "map_project");
+	// Every name a row lists types a file as that row's kind: its whole name, and a file of each
+	// of its extensions (a .bin without its content a raw table, a .png an image source).
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKindRow &row = asset_kind_row(AssetKind(i));
+		if (row.file_name) TEST_EXPECT(classify_asset(row.file_name, nullptr) == row.kind);
+		for (const char *const *extension = row.extensions; extension && *extension; ++extension)
+			TEST_EXPECT(classify_asset(std::string("x") + *extension, nullptr) == row.kind);
+	}
+	// Every kind's token reads back as that kind, the last one included, and a value past the last
+	// is the Unknown row's.
+	for (size_t i = 0; i < kAssetKindCount; ++i)
 		TEST_EXPECT(asset_kind_from_token(asset_kind_token(AssetKind(i))) == AssetKind(i));
+	TEST_EXPECT(std::string(asset_kind_token(AssetKind::kCount)) == "unknown");
 	return 0;
 }
 

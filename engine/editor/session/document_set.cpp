@@ -9,7 +9,6 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
-#include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
@@ -549,10 +548,9 @@ bool DocumentSet::apply_edits(Document &document, const std::vector<Edit> &edits
 	const std::string active = view_.active_document;
 	const NodeAddress primary = view_.selection;
 	const std::vector<NodeAddress> selected = view_.selected;
-	// A screen's or a window's new name follows into the references of its file that find it
-	// by the name it had when the edit's group began (graph/rename_transaction's
-	// plan_symbol_rename), in the same step.
-	if (!document.apply(edits, plan_symbol_rename, error)) {
+	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
+	// (RenameSymbol) rewrites them.
+	if (!document.apply(edits, error)) {
 		core_.report(error);
 		return false;
 	}

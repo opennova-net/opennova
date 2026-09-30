@@ -740,12 +740,13 @@ void collection_block(Workspace &workspace, ReferencePicker &picker, const Docum
                       const Document::Collection &records, bool titled) {
 	const Document::CollectionSpec &spec = records.spec;
 	const std::vector<NodeId> &ids = records.ids;
-	ImGui::PushID(*spec.kind_name ? spec.kind_name : spec.label);
+	const char *token = document.kind_token(spec.kind);
+	ImGui::PushID(*token ? token : spec.label);
 	if (titled) {
 		const std::string heading = std::string(spec.label) + " (" + std::to_string(ids.size()) + ")";
 		const float padding = ImGui::GetStyle().SeparatorTextPadding.x * 2.0f;
 		ImGui::SeparatorText(ui_kit::fit(heading, ImGui::GetContentRegionAvail().x - padding).c_str());
-		ui_kit::tooltip(heading + "\n" + spec.kind_name);
+		ui_kit::tooltip(heading + "\n" + token);
 	}
 	if (spec.applies == Applicability::Ignored) {
 		ImGui::PushStyleColor(ImGuiCol_Text, kIgnored);
@@ -824,7 +825,8 @@ void draw_section(Workspace &workspace, ReferencePicker &picker, const Document 
 	// A part's switch waits until the record holds the part (its collection's Add makes one).
 	bool part_missing = false;
 	for (const Document::Collection &collection : section.collections)
-		part_missing = part_missing || (section.key == collection.spec.kind_name && collection.ids.empty());
+		part_missing = part_missing || (section.key == document.kind_token(collection.spec.kind) &&
+		                                collection.ids.empty());
 	const bool block_switch = section.has_toggle && !part_missing;
 	if ((block_switch || !section.fields.empty()) && ImGui::BeginTable("fields", 2, ImGuiTableFlags_SizingStretchProp)) {
 		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
@@ -835,7 +837,8 @@ void draw_section(Workspace &workspace, ReferencePicker &picker, const Document 
 		ImGui::EndTable();
 	}
 	for (const Document::Collection &collection : section.collections)
-		collection_block(workspace, picker, document, owner, collection, section.key != collection.spec.kind_name);
+		collection_block(workspace, picker, document, owner, collection,
+		                 section.key != document.kind_token(collection.spec.kind));
 	ImGui::PopID();
 }
 

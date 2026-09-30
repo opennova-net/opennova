@@ -90,22 +90,6 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                   const AssetGraph &graph, const RenamePlan &plan, std::vector<Diagnostic> &findings);
 
-// A record's new name followed into its own file (ADR 0046 S9l). For each Set of `edits`
-// that renames a record other records find by that name (FieldSchema::defines: a menu
-// screen's or window's NAME), the Sets that give every reference in the same document
-// finding it by the old name the new one (a SCREEN ACTION's target naming this file's
-// screen; a WINDOW, TAB or GLB_FILTER ACTION's target or a URL's slot naming a window of
-// the screen). Only the sites that resolve to the renamed record are planned, read from
-// the document as it stands (its graph edges and symbols): a window of the same name on
-// another screen keeps its references, and a record no lookup finds (an earlier screen of
-// its name, a window under a window with no NAME) has none. A new name another record of
-// the scope already has follows nowhere, nor does a NAME cleared: the references keep the
-// old name (the duplicate is the validator's finding, the missing target the graph's).
-// References in other files keep the old name (the graph reports each that no longer
-// resolves). It is Document::apply's follow: a name typed one key at a time is planned
-// each time from the name its edit group began with.
-std::vector<Edit> plan_symbol_rename(const Document &document, const std::vector<Edit> &edits);
-
 // A name renamed everywhere (ADR 0046 S12, "Rename everywhere"): the field that defines a
 // symbol (a weapon's or an ammo's name, an item's id, a string's key, a style variable, a menu
 // screen or window's NAME, a model's user point) and every use that reaches exactly that

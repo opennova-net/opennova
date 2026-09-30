@@ -23,12 +23,17 @@
 // undo giving the bytes back; and a snapshot of the changed document, which serializes its
 // bytes, shares its identity, revision and records, answers record_change and field_changed as
 // it does, refuses an edit, a save and a load (document.snapshot), and after its document's
-// undo still finds every record where it was and answers what changed in it as it did.
+// undo still finds every record where it was and answers what changed in it as it did. S13 D5
+// adds the type's record kinds (kinds()): each named back by its token, no two sharing a kind or
+// a token, a kind the outline adds a row of being a row of the file; every row of the file of a
+// kind that is a row, and every record a collection holds of a kind the table has.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <set>
 #include <string>
+#include <typeinfo>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -56,6 +61,7 @@ int g_failures = 0;
 // took two coalesced Sets, records pasted, and snapshots.
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
+std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
 // it did.
@@ -127,11 +133,10 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	};
 }
 
-// Every registered document type, once each, in the order the asset kinds are declared (the
-// kinds run from 1 until the first value the kind table does not name).
+// Every registered document type, once each, in the order the asset kinds are declared.
 std::vector<const DocumentType *> registered_types() {
 	std::vector<const DocumentType *> out;
-	for (int i = 1; std::string(asset_kind_token(static_cast<AssetKind>(i))) != "unknown"; ++i) {
+	for (size_t i = 1; i < kAssetKindCount; ++i) {
 		const DocumentType *type = document_type_for(static_cast<AssetKind>(i));
 		if (type && std::find(out.begin(), out.end(), type) == out.end()) out.push_back(type);
 	}
@@ -319,6 +324,37 @@ Edit edit_of(EditOperation operation, const NodeAddress &address, const std::str
 
 // Every record's locator finds it again, and a second load of the same bytes gives every record
 // the identity the first gave it (a rename reloads a document and finds its records so).
+// The type's record kinds (kinds()): each named back by its token and holding a label, no two
+// sharing a kind or a token, a kind the outline adds a row of being a row of the file; every row
+// of the file of a kind that is a row, and every record a collection holds of a kind the table
+// has (its token the one its locator and a batch's add name it by).
+void check_kinds(const Fixture &fixture, const Document &document,
+                 const std::vector<NodeAddress> &records) {
+	const std::vector<RecordKindRow> &kinds = document.kinds();
+	check(!kinds.empty(), fixture.name, "the type declares its record kinds");
+	for (size_t i = 0; i < kinds.size(); ++i) {
+		const RecordKindRow &row = kinds[i];
+		const std::string where = fixture.name + " kind " + row.token;
+		check(*row.token && *row.label && document.kind_from_name(row.token) == row.kind &&
+		              document.kind_row(row.kind) == &row,
+		      where, "a kind has a token and a label, and its token names it back");
+		check(!*row.add_label || row.top, where, "a kind the outline adds is a row of the file");
+		for (size_t j = 0; j < i; ++j)
+			check(kinds[j].kind != row.kind && std::string(kinds[j].token) != row.token, where,
+			      "no two kinds share a kind or a token");
+		g_kinds.insert(std::string(typeid(document).name()) + "/" + row.token);
+	}
+	for (const NodeAddress &address : records) {
+		const std::string where = where_of(fixture, document, address, "");
+		const RecordKindRow *kind = document.kind_row(address.kind);
+		check(kind && kind->top == (address.child == 0), where,
+		      "a row of the file is of a kind that is a row, a nested record of one the table has");
+		for (const Document::Collection &collection : document.collections_of(address))
+			check(document.kind_row(collection.spec.kind) != nullptr, where,
+			      "every kind a collection holds has its row");
+	}
+}
+
 void check_places(const DocumentType &type, const Fixture &fixture, const Document &document,
                   const std::vector<NodeAddress> &records) {
 	for (const NodeAddress &address : records)
@@ -667,6 +703,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 		      "parse, serialize, parse again serializes the same bytes and records");
 	}
 
+	check_kinds(fixture, *document, records);
 	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
@@ -689,7 +726,7 @@ int main() {
 		size_t checked = 0;
 		TypeCounts counts;
 		for (const Fixture &fixture : files) {
-			if (!type->handles(fixture.kind)) continue;
+			if (document_type_for(fixture.kind) != type) continue;
 			check(!fixture.bytes.empty(), fixture.name, "the fixture is present");
 			if (fixture.bytes.empty()) continue;
 			check_fixture(*type, fixture, counts);
@@ -712,8 +749,8 @@ int main() {
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
 		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
-		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots)\n",
+		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu record kinds)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
-		            g_changes, g_coalesced, g_pastes, g_snapshots);
+		            g_changes, g_coalesced, g_pastes, g_snapshots, g_kinds.size());
 	return g_failures == 0 ? 0 : 1;
 }

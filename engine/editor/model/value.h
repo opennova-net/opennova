@@ -56,7 +56,7 @@ enum class ReferenceKind {
 	Terrain,     // a .trn by base name (a mission's terrain)
 	Environment, // a .env by base name (a mission's environment)
 	MenuTexture, // a menu's texture: the file retail's menu loader picks by the name's extension
-	WaveBank,    // a .lwf sound bank by its file name (a menu SOUND's file)
+	SoundBank,   // a .lwf sound bank by its file name (a menu SOUND's file)
 	Credits,     // a .kda credits file by its file name (a marquee's DATASOURCE)
 	MenuScreen,  // a menu screen by NAME, in the menu file the scope names (an ACTION SCREEN's target)
 	MenuWindow,  // a menu window by NAME, on the screen the scope names (an ACTION WINDOW's target)

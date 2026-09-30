@@ -14,16 +14,20 @@
 // the game's own and resolving; a bare relative source; a cycle of menus ending; the cap
 // stopping the walk and the selection, a converter's outputs whole or not at all; a symbol,
 // a sound, a terrain and a mission's .mis listed as not followed; and nothing written
-// anywhere.
+// anywhere. S13 D5: what goes unread is the kinds table's rule (a kind that names files the
+// graph does not read), the kinds the hand list named before and a face and a map project.
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/sidecar.h>
@@ -357,6 +361,42 @@ static int test_plan_not_followed() {
 			row_named(text_plan, "m.mis")->kind == AssetKind::Mission);
 	for (const Diagnostic &d : text_plan.diagnostics)
 		TEST_EXPECT(d.code != "import.unreadable");
+	// A face names its textures, which nothing reads yet: taken, listed; a wave names nothing.
+	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "BASE_TEXTURE face.tga\r\n") &&
+	            editor_test::write_text(art + "/boom.wav", "RIFF"));
+	const ImportPlan face_plan = project.plan({{art + "/head.grm", {}}, {art + "/boom.wav", {}}});
+	const ImportNotFollowed *face =
+	        not_followed(face_plan, ReferenceKind::None, AssetKind::FaceAnimation);
+	TEST_EXPECT(face && face->count == 1 && face->first == "head.grm");
+	TEST_EXPECT(face_plan.not_followed.size() == 1 && row_named(face_plan, "head.grm"));
+	const ImportPlanRow *wave = row_named(face_plan, "boom.wav");
+	TEST_EXPECT(wave && wave->kind == AssetKind::Wave && wave->problem.empty());
+	return 0;
+}
+
+// What an import does not follow is the kinds table's rule (S13 D5): a file's references go
+// unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
+// file (graph_reads_file). Those are the kinds the hand-written list named (a terrain, a script,
+// the two sound banks, a dialog bank, the def tables beyond the catalogs and the avatar table)
+// and the ones S13 D5 added that name files (a face, a map project); a mission's .mis, which the
+// graph does not read, where its .bms is read.
+static int test_references_unread() {
+	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
+	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
+	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
+	        AssetKind::PowerupDefs, AssetKind::OtherDefs, AssetKind::FaceAnimation,
+	        AssetKind::MapProject};
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKind kind = AssetKind(i);
+		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";
+		const bool rule = asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+		TEST_EXPECT(references_unread(kind, file) == rule);
+		if (rule != (unread.count(kind) > 0))
+			std::fprintf(stderr, "references_unread(%s) moved\n", asset_kind_token(kind));
+		TEST_EXPECT(rule == (unread.count(kind) > 0));
+	}
+	TEST_EXPECT(references_unread(AssetKind::Mission, "m.mis"));
+	TEST_EXPECT(!references_unread(AssetKind::Mission, "M.BMS"));
 	return 0;
 }
 
@@ -570,6 +610,7 @@ int run_import_plan_tests() {
 	failures += test_plan_scene();
 	failures += test_plan_cycle_and_cap();
 	failures += test_plan_not_followed();
+	failures += test_references_unread();
 	failures += test_plan_competition();
 	failures += test_plan_material_sources();
 	failures += test_plan_stylesheets();

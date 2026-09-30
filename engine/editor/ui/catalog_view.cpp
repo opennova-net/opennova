@@ -48,9 +48,10 @@ void CatalogView::draw(Workspace &workspace, const DefCatalogDocument &document)
 	{
 		// Each kind's Add, then the selected record's tools, on a row that wraps.
 		ui_kit::WrapRow row;
-		for (const Document::KindSpec &spec : document.top_kinds())
-			if (ui_kit::tool(row, spec.label, true, "Adds one at the end of the file."))
-				edit(workspace, document, EditOperation::Add, {0, spec.kind, 0});
+		for (const RecordKindRow &kind : document.kinds())
+			if (*kind.add_label &&
+			    ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file."))
+				edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 		ui_kit::RowTools tools;
 		tools.add = nullptr;
 		tools.count = rows.size();

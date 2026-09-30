@@ -59,7 +59,7 @@ void draw_collection(Workspace &workspace, const Document &document, const Recor
                      const NodeAddress &owner, const Document::Collection &collection) {
 	const Document::CollectionSpec &spec = collection.spec;
 	const std::string label = std::string(spec.label) + " (" + std::to_string(collection.ids.size()) + ")";
-	ImGui::PushID(spec.kind_name);
+	ImGui::PushID(document.kind_token(spec.kind));
 	ImGui::PushID(static_cast<int>(owner.child ? owner.child : owner.row));
 	reveal.open_collection(owner, spec.kind);
 	const bool open = ImGui::TreeNodeEx("##collection", ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowOverlap,
@@ -91,15 +91,14 @@ void draw_collection(Workspace &workspace, const Document &document, const Recor
 	ImGui::PopID();
 }
 
-// Whether the file adds rows of `kind` at the top level (Document::top_kinds): those rows are
-// a list like any collection that is not fixed; the others are the file's fixed records.
+// Whether the file adds rows of `kind` at the top level (RecordKindRow::add_label): those rows
+// are a list like any collection that is not fixed; the others are the file's fixed records.
 bool adds_rows_of(const Document &document, NodeKind kind) {
-	for (const Document::KindSpec &spec : document.top_kinds())
-		if (spec.kind == kind) return true;
-	return false;
+	const RecordKindRow *row = document.kind_row(kind);
+	return row && *row->add_label;
 }
 
-// The rows the file adds (one tool per kind, top_kinds: a row at the end of the file), the
+// The rows the file adds (one tool per kind with an add_label: a row at the end of the file), the
 // selected record's name and its tools, Duplicate / Remove / Up / Down, where its list allows
 // them: a nested record's collection, or the rows of a kind the file adds (a collection's +
 // adds a nested one).
@@ -130,9 +129,10 @@ void draw_selection_tools(Workspace &workspace, const Document &document) {
 			tools.locked = "It is one of the file's own records: none is added, duplicated, removed or moved.";
 	}
 	ui_kit::WrapRow row;
-	for (const Document::KindSpec &spec : document.top_kinds())
-		if (ui_kit::tool(row, spec.label, true, "Adds one at the end of the file.", true))
-			edit(workspace, document, EditOperation::Add, {0, spec.kind, 0});
+	for (const RecordKindRow &kind : document.kinds())
+		if (*kind.add_label &&
+		    ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file.", true))
+			edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 	if (placed) {
 		const std::string title = document.record_title(selection), name = document.record_name(selection);
 		const std::string shown = ui_kit::fit(title, ImGui::GetFontSize() * 12.0f);
