@@ -1237,6 +1237,11 @@ void test_ai_boarding_moving_and_destroyed_carrier_admission() {
 	CHECK(r.player().health > 0);
 	r.veh().health = 0;
 	r.veh().last_attacker = r.veh_h;
+	brain.pos[0] += 9 * 65536;
+	r.sys.infantry_think(brain, r.w);
+	CHECK(r.player().health > 0); // zero health alone is not the dead bit [orig: @0x4BB211]
+	brain.pos[0] -= 9 * 65536;
+	r.veh().engine_flags |= kEntityFlagDead;
 	r.sys.infantry_think(brain, r.w);
 	CHECK(r.player().health > 0); // dead carrier, walker still at spawn
 	brain.pos[0] += 9 * 65536;

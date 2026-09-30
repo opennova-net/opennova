@@ -30,6 +30,8 @@
 #include <runtime/world/collision.h>           // stable replication LOS view epoch
 #include <runtime/world/geom.h>                // to_fixed
 #include <runtime/world/local_player.h>        // the listen host's live inventory (kit weight)
+#include <runtime/world/powerup.h>             // the remote players' powerup grants
+#include <runtime/world/weapon_inventory.h>    // the grant's pool arithmetic
 #include <runtime/world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <runtime/world/spawn_select.h>         // sorted SpawnZoneList index for capture events
 #include <runtime/world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
@@ -1743,11 +1745,67 @@ void Server_RecalculateAllPlayerKitWeights(
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
+// A remote player's powerup pickup: the per-class adds and the `allammo`
+// re-seed land on the owning connection's pools and slot rows, the way retail's
+// authority arms write the validated entity's per-connection tables (the listen
+// host's own player writes its live inventory inside world/powerup.cpp). The
+// joiner ran the same pickup on its own pools, so no message follows. Only the
+// slots the host has seeded take the re-seed (D-PWR-4, docs/world/powerup-re.md).
+// [orig: WeaponSlot_AddAmmo @0x540A20 -- Entity_ValidatePtr @0x540AC5, the pool
+//  add and cap clamp @0x540AD8..0x540AF1; Entity_UpdateWeaponOverlayFrameState
+//  @0x4DC340 -- WeaponSlots_SeedAmmoPoolsFromDefs @0x4DC373 then
+//  WeaponSlots_RecalculateAmmoFromCapacity @0x4DC38F over the slot tables]
+void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::World &world) {
+	if (world.out.powerup_grants.empty()) return;
+	const world::WeaponTable &table = world.tables.weapons;
+	for (const world::PowerupGrant &grant : world.out.powerup_grants) {
+		if (table.empty()) break;
+		for (NapiNPConnection &conn : roster) {
+			if (conn.phase < ConnectionPhase::PlayerAdded ||
+					conn.phase >= ConnectionPhase::Goodbye ||
+					conn.link.owned_entity != grant.picker)
+				continue;
+			const world::Entity *body = world.registry.get(grant.picker);
+			world::WeaponInventory inventory;
+			inventory.reset(table);
+			for (const auto &[combo, row] : conn.weapon_slots) {
+				world::WeaponInventorySlot *slot = inventory.slot(combo);
+				if (slot == nullptr) continue;
+				slot->adm_index = row.adm_index;
+				slot->clip = row.clip;
+			}
+			const size_t pool_count =
+					std::min(inventory.pools.size(), conn.reply.ammo_pools.size());
+			for (size_t i = 0; i < pool_count; ++i) {
+				inventory.pools[i] = conn.reply.ammo_pools[i];
+				inventory.shared_clips[i] = conn.reply.shared_clips[i];
+			}
+			if (grant.allammo) {
+				world::weapon_inventory_seed_pools(
+						table, inventory, body != nullptr ? body->player_class : 0);
+				world::weapon_inventory_recalc_clips(table, inventory);
+			}
+			for (const auto &[class_id, amount] : grant.ammo_adds)
+				world::weapon_pool_add(table, inventory, class_id, amount);
+			for (size_t i = 0; i < pool_count; ++i) {
+				conn.reply.ammo_pools[i] = inventory.pools[i];
+				conn.reply.shared_clips[i] = inventory.shared_clips[i];
+			}
+			for (auto &[combo, row] : conn.weapon_slots)
+				if (const world::WeaponInventorySlot *slot = inventory.slot(combo))
+					row.clip = static_cast<int16_t>(slot->clip);
+			break;
+		}
+	}
+	world.out.powerup_grants.clear();
+}
+
 static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	Server_RouteMedicInteractions(ctx, world);
+	Server_ApplyPowerupGrants(ctx.np_protocol.connection_list, world);
 	route_match_gameplay_events(ctx, world);
 	Server_RouteWaterCrossings(ctx, world);
 }

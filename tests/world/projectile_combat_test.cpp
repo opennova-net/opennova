@@ -366,7 +366,9 @@ void test_nodie_and_nontransparent_damage_gates() {
     CHECK(r.fire() >= 0);
     r.world.round_sim.tick(r.world, nullptr);
     CHECK(target->health == 10);
-    CHECK(r.world.round_sim.hits.empty());
+    // The gate zeroes the damage, not the class callback's hit.
+    CHECK(r.world.round_sim.hits.size() == 1);
+    if (!r.world.round_sim.hits.empty()) CHECK(r.world.round_sim.hits[0].damage == 0);
     CHECK(r.world.round_sim.impacts.size() == 1); // still a physical impact
     CHECK(r.world.round_sim.active_count == 1);   // persons pass the round
 
@@ -387,7 +389,12 @@ void test_nodie_and_nontransparent_damage_gates() {
     CHECK(r.world.round_sim.impacts.size() == 1);
     CHECK(r.world.round_sim.active_count == 1);
     CHECK(r.world.registry.get(farther)->health == 100);
-    CHECK(r.world.round_sim.hits.empty());
+    // The corpse's zero health caps the damage at 0; its callback still runs.
+    CHECK(r.world.round_sim.hits.size() == 1);
+    if (!r.world.round_sim.hits.empty()) {
+        CHECK(r.world.round_sim.hits[0].victim == r.target);
+        CHECK(r.world.round_sim.hits[0].damage == 0);
+    }
 }
 
 void test_posed_head_zone_multiplier() {
@@ -585,7 +592,9 @@ void test_body_armor_energy_and_impact_row() {
         r.target_entity()->carry_flags = 8;
         r.ammo().armor_density[0] = 1000; // stops a torso round entirely
         r.fire_and_tick();
-        CHECK(r.world.round_sim.hits.empty() == (section == 4));
+        CHECK(r.world.round_sim.hits.size() == 1);
+        if (!r.world.round_sim.hits.empty())
+            CHECK((r.world.round_sim.hits[0].damage == 0) == (section == 4));
         CHECK(r.world.round_sim.impacts.size() == (section == 4 ? 2u : 1u));
     }
     {
@@ -1598,9 +1607,11 @@ void test_signed_armor_equality_and_damage_state_gates() {
         CHECK(r.world.round_sim.active_count == 1);
         CHECK(target->armor_impact == expected_armor);
 		CHECK(r.world.registry.get(r.shooter)->hud_hit_feedback_serial == 1);
+        CHECK(r.world.round_sim.hits.size() == 1);
         if (expected_damage == 0) {
             CHECK(target->health == 100);
-            CHECK(r.world.round_sim.hits.empty());
+            if (!r.world.round_sim.hits.empty())
+                CHECK(r.world.round_sim.hits[0].damage == 0);
         } else {
             CHECK(target->health == 100 - expected_damage);
             CHECK(r.world.round_sim.hits.size() == 1);
@@ -1821,6 +1832,49 @@ void test_exact_one_hop_vehicle_parent_damage_routing() {
     CHECK(r.world.round_sim.hits[0].victim == r.target);
     CHECK(r.world.registry.get(r.target)->health == 75);
     CHECK(r.world.registry.get(vehicle_h)->health == 100);
+}
+
+// A hit that deals no damage still runs the struck hull's class callback with
+// event 1: an Indestructible (or armored) vehicle's machine queues its damage
+// event with the round owner, which its FOLLOWWP handler answers with evade.
+// Only the health write waits on a nonzero damage. 06TR's riders go to evade
+// this way when base fire strikes their bikes.
+// [orig: Projectile_ProcessDamageOnTarget health @0x4E81AB..0x4E81B3, callback
+//  @0x4E81FF..0x4E820E; EntityAI_ProcessGroundStateMachine event 1
+//  @0x4584F6..0x458530]
+void test_zero_damage_hit_still_notifies_the_vehicle_brain() {
+    Rig r;
+    r.world.ai.is_authority = true;
+    r.world.tables.ammo.entries[0].arm_age_ticks = 0;
+    Entity hull;
+    hull.kind = EntityKind::Item;
+    hull.has_item_def = true;
+    hull.item_type = 1;
+    hull.is_ai_capable = true;
+    hull.position = {100.0f, 100.0f, 100.0f};
+    hull.health = 100;
+    hull.engine_flags = kEntityFlagIndestructible;
+    const EntityHandle hull_h = r.world.registry.spawn(0, hull);
+    CHECK(r.world.ai.attach(hull_h) >= 0);
+    // The struck gunner routes the round to its vehicle parent.
+    Entity *gunner = r.world.registry.get(r.target);
+    gunner->item_attrib = 0x20u;
+    gunner->ground_target = hull_h;
+
+    CHECK(r.fire() >= 0);
+    r.world.round_sim.tick(r.world, nullptr);
+    CHECK(r.world.registry.get(hull_h)->health == 100);
+    CHECK(r.world.round_sim.hits.size() == 1);
+    if (!r.world.round_sim.hits.empty()) {
+        CHECK(r.world.round_sim.hits[0].victim == hull_h);
+        CHECK(r.world.round_sim.hits[0].damage == 0);
+    }
+    r.world.ai.apply_round_hits(r.world);
+    CHECK(r.world.ai.events.count() == 1);
+    if (r.world.ai.events.count() == 1) {
+        CHECK(r.world.ai.events.at(0).type() == 1);
+        CHECK(r.world.ai.events.at(0).f[3] == int32_t(r.shooter.packed) + 1);
+    }
 }
 
 void test_vehicle_occupant_reduction_count_cap_and_depth() {
@@ -3549,6 +3603,7 @@ int main() {
     test_signed_health_subtraction_wraps_at_entity_word();
     test_person_impact_tag_splits_on_identity_and_squad_health();
     test_exact_one_hop_vehicle_parent_damage_routing();
+    test_zero_damage_hit_still_notifies_the_vehicle_brain();
     test_vehicle_occupant_reduction_count_cap_and_depth();
     test_retail_force_order_and_stock_gates();
     test_retail_aerodynamic_drag_vectors();

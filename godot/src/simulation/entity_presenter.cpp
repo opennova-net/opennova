@@ -1034,6 +1034,15 @@ void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		release_part_anim_outputs();
 	}
 	++stat_plan_rebuilds_;
+	// A placed model whose row left the snapshot belongs to a destroyed entity
+	// (a scripted VaporizeSingle / removeSSN, a teammate removal): the original
+	// frees the pool row, so the render walk never submits it again
+	// (docs/world/world-wac-ai-re.md §40.3). Dropping it from the plan alone would
+	// freeze its last pose on screen; hide it instead. A row that comes back
+	// re-plans and restamps its own visibility.
+	std::vector<ObjectID> dropped;
+	dropped.reserve(rows_.size());
+	for (const Row &row : rows_) dropped.push_back(row.node_id);
 	release_planned_rows();
 	plan_revision_ = layout_revision;
 	plan_stride_ = stride;
@@ -1066,6 +1075,11 @@ void EntityPresenter::rebuild_row_plan(const float *p, int64_t size, int stride,
 		row.bms_id = bms_id;
 		row.handle = field_i(p, base, Simulation::PF_WIRE_HANDLE);
 		rows_.push_back(row);
+	}
+	for (const ObjectID id : dropped) {
+		ObjectModel *model = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id));
+		if (model != nullptr && !model->is_present_planned())
+			model->set_present_visible(false);
 	}
 }
 

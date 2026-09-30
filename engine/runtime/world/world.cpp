@@ -246,6 +246,10 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // [orig: Entity_ProcessWaypointInteraction @0x4AD820 (the is_authority
     //  test @0x4AD823), its caller @0x4B2FF5]
     if (ctx.is_authority) world.match.process_movement_contacts(world);
+    // The powerup touches run on every peer whose resolver produced them: the
+    // callback has no authority gate before the pickup [orig: the branch
+    //  @0x4B2FB8..0x4B2FE5 -> PowerupAction_Pickup @0x4428A0].
+    powerup_process_contacts(world, ctx);
     if (!world.epilog_screen_active()) ++world.entity_update_counter;
 }
 
@@ -411,6 +415,9 @@ void World::update_all_entities(const TickContext &ctx) {
     for (size_t slot = 0; slot < pool1; ++slot)
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
             e->pool1_visited = false;
+    // The powerup rows' +0x1C4 update callback is the respawn countdown
+    // [orig: Entity_TickFireTimer @0x442850, installed by sub_442D00 @0x442D20].
+    powerup_tick(*this, ctx);
     auto unvisited_parent = [this](const Entity *e) -> Entity * {
         if (e == nullptr) return nullptr;
         Entity *p = registry.get(e->ground_target);
@@ -884,6 +891,7 @@ void World::restore(const Snapshot &s) {
     out.destruction = DestructionEvents{};
     out.entity_events.clear();
     out.hud_relays.clear();
+    out.powerup_grants.clear();
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is

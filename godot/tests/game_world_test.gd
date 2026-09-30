@@ -149,6 +149,12 @@ func _fx_item_row(row: Dictionary) -> String:
 	var effect := String(row.get("effect", ""))
 	if not effect.is_empty():
 		text += "  particlefx %s %s\r\n" % [effect, String(row.get("userpoint", ""))]
+	# A Powerup item binds a powerup.def row at mission start or is destroyed
+	# there (world/powerup.h): a row authoring `powerupdef` also gets that
+	# powerup.def row staged by _stage_item_fx_fixture.
+	var powerupdef := String(row.get("powerupdef", ""))
+	if not powerupdef.is_empty():
+		text += "  powerupdef %s\r\n" % powerupdef
 	return text + "end\r\n"
 
 
@@ -166,9 +172,19 @@ func _stage_item_fx_fixture(name: String, rows: Array) -> String:
 				ProjectSettings.globalize_path("res://../fixtures/threedi/synth/" + pair[0]),
 				root_dir.path_join(pair[1] + ".3di")), OK)
 	var text := ""
+	var powerup_text := ""
 	for row_v in rows:
 		text += _fx_item_row(row_v as Dictionary)
+		var powerupdef := String((row_v as Dictionary).get("powerupdef", ""))
+		if not powerupdef.is_empty():
+			powerup_text += "powerup \"%s\"\r\nend\r\n" % powerupdef
 	_append_to_file(root_dir.path_join("items.def"), text)
+	if not powerup_text.is_empty():
+		var powerup_file := FileAccess.open(root_dir.path_join("powerup.def"), FileAccess.WRITE)
+		assert_not_null(powerup_file, "the staged root takes a powerup.def")
+		if powerup_file != null:
+			powerup_file.store_string(powerup_text)
+			powerup_file.close()
 	return root_dir
 
 
@@ -2471,7 +2487,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 		{"id": 108002, "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 		{"id": 108003, "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
-		{"id": 108004, "type": "building", "attribs": "Powerup",
+		{"id": 108004, "type": "building", "attribs": "Powerup", "powerupdef": "GATE_PU",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 		{"id": 108005, "type": "building", "attribs": "PlayerControl",
 				"effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
@@ -3203,8 +3219,13 @@ func test_world_owns_the_occlusion_culling_switch() -> void:
 
 
 func test_emit_callback_uses_live_particle_groups_on_fixed_ticks() -> void:
+	# The Powerup attrib keeps the load-time attachment off this row; a Powerup
+	# row without a powerup.def row is destroyed at mission start, as retail's
+	# init walk does [orig: PowerupEntity_InitFromDef @0x442D00], so the
+	# fixture authors one.
 	var root_dir := _stage_item_fx_fixture("emit_callback", [
 		{"id": 108077, "graphic": FX_GUN_GRAPHIC, "attribs": "Powerup",
+			"powerupdef": "EMIT_PU",
 			"ai_function": "emit", "effect": FX_PERSISTENT_EFFECT, "userpoint": "MFlash01"},
 	])
 	var world := WorldFixture.make_world(self)

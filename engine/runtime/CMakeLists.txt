@@ -188,6 +188,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/match.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/powerup.cpp     # the med/ammo pack pickups (powerup.def)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/world.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_commands.cpp   # the Entity_* command layer (split from world.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp

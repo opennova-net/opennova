@@ -1026,8 +1026,9 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     }
 
     // Powerup wins the retail attrib branch and suppresses both waypoint
-    // dispatch and solid force. A non-authority resolve likewise cannot author
-    // a gameplay contact.
+    // dispatch and solid force: it publishes on the Powerup stream instead,
+    // once per pair, for a player-class source on any peer (the pickup
+    // callback has no authority gate). [orig: @0x4B2FB8..0x4B2FE5]
     Rig powerup(box_model(1, 0, 2.0, 2.0, 3.0));
     target = powerup.world.registry.get(powerup.building);
     target->has_item_def = true;
@@ -1035,6 +1036,61 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     const auto powerup_pos = resolve_transition(powerup, true);
     CHECK(powerup_pos.second == powerup_pos.first);
     CHECK(powerup.cw.take_movement_callback_contacts().empty());
+    const auto powerup_contacts = powerup.cw.take_powerup_contacts();
+    CHECK(powerup_contacts.size() == 1);
+    if (!powerup_contacts.empty()) {
+        CHECK(powerup_contacts[0].source == powerup.soldier);
+        CHECK(powerup_contacts[0].target == powerup.building);
+    }
+    CHECK(powerup.cw.take_powerup_contacts().empty()); // drained
+
+    Rig powerup_joiner(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = powerup_joiner.world.registry.get(powerup_joiner.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribPowerup;
+    const auto joiner_pos = resolve_transition(powerup_joiner, false);
+    CHECK(joiner_pos.second == joiner_pos.first);
+    CHECK(powerup_joiner.cw.take_powerup_contacts().size() == 1);
+
+    // A consumed row awaiting its respawn has its model withdrawn: no bound,
+    // no contact, no pickup until the respawn restores it.
+    // [orig: PowerupAction_Pickup `+0x30 = 0` @0x442AE7]
+    Rig withdrawn(box_model(1, 0, 2.0, 2.0, 3.0));
+    target = withdrawn.world.registry.get(withdrawn.building);
+    target->has_item_def = true;
+    target->item_attrib = kItemAttribPowerup;
+    target->powerup_def_index = 0;
+    target->hidden = true;
+    const auto withdrawn_pos = resolve_transition(withdrawn, true);
+    CHECK(withdrawn_pos.second == withdrawn_pos.first);
+    CHECK(withdrawn.cw.take_powerup_contacts().empty());
+    target->hidden = false;
+    (void)resolve_transition(withdrawn, true);
+    CHECK(withdrawn.cw.take_powerup_contacts().size() == 1);
+
+    // A source without the Player class bit neither picks up nor is pushed.
+    {
+        Rig npc(box_model(1, 0, 2.0, 2.0, 3.0));
+        target = npc.world.registry.get(npc.building);
+        target->has_item_def = true;
+        target->item_attrib = kItemAttribPowerup;
+        npc.move_soldier(12.8, 10.0, 0.0);
+        int32_t pos[3] = {fx(12.8), fx(10.0), 0};
+        int32_t vel[3] = {0, 0, 0};
+        int16_t health = 100;
+        CollisionWorld::ResolveState state;
+        npc.cw.resolve_entity(npc.world, npc.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, false, true, 0, 43, 1u, health);
+        Entity *soldier = npc.world.registry.get(npc.soldier);
+        soldier->position.x = 11.6f;
+        npc.rebuild();
+        pos[0] = fx(11.6);
+        const int32_t before = pos[0];
+        npc.cw.resolve_entity(npc.world, npc.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, false, true, 1, 43, 1u, health);
+        CHECK(pos[0] == before);
+        CHECK(npc.cw.take_powerup_contacts().empty());
+    }
 
     Rig replica(box_model(1, 0, 2.0, 2.0, 3.0));
     target = replica.world.registry.get(replica.building);
