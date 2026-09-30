@@ -154,8 +154,9 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             continue;
         }
 
-        // These are alternate meanings of the original's type-specific union.
-        // Mixing both cannot be represented by a symbolic powerup definition.
+        // These are alternate meanings of the original's type-specific union at
+        // +0x890 (world/itemdef-re.md). Mixing both cannot be represented by a
+        // symbolic powerup definition.
         powerup_branch |= lower_match_key(lower, ll, "powerupdef", 10) != 0;
         for (const char *key : {"deathtime", "clipsize", "num_doors", "first_door", "first_subobject",
                 "door_type", "door_dir", "open_rate", "max_angle", "sqb_rate", "sqb_distance", "sqb_error",
@@ -164,9 +165,10 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
         int parsed = 0;
 
         if (lower_match_key(lower, ll, "powerupdef", 10)) {
-            // A symbolic powerup definition, not a death/door numeric value.
-            // [orig: ItemDef_ParseProperty @0x49EB00, powerupdef copies to the
-            // type-specific union at deathTime and sets attrib POWERUP]
+            // A symbolic powerup definition, not a death/door numeric value: the name
+            // lands in def+0x890 (the death/door union) and the same arm raises the
+            // Powerup attrib bit [orig: ItemDef_ParseProperty @0x49F698 -- the copy
+            // @0x49F6C4..0x49F6D0, `or [edx+54h],2` @0x49F6D2].
             consume_value_str(trimmed, tlen, 10, current.powerup_def, sizeof(current.powerup_def));
             current.attrib |= DEF_ITEM_ATTRIB_POWERUP;
             parsed = 1;

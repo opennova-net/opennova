@@ -243,7 +243,10 @@ void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &
 	if (severity != 3)
 		return;
 	const int32_t impact = length_q16(m.vel_x, m.vel_y, m.slide_z);
-	if (world.ai.is_authority && (vehicle.flags & 0x4000000u) == 0 &&
+	// Indestructible is the whole Flags word, which the port splits: the
+	// promote writes the bit to engine_flags. [orig: bike `test [esi+24h],
+	// 4000000h` @0x479E0D]
+	if (world.ai.is_authority && ((vehicle.flags | vehicle.engine_flags) & 0x4000000u) == 0 &&
 			traits.family != VehicleFamily::Tank && vehicle.health > 0) {
 		const int32_t moved = vehicle.saved_live_valid
 				? length_q16(io::bam_sub(px, vehicle.saved_live_pos[0]),

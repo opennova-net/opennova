@@ -98,7 +98,7 @@ static void run_boot_trace_gates() {
 		CHECK(kernel.boot(options, error));
 		const std::vector<std::string> expected = {
 				"ai_profiles", "mission_text", "load_mission", "infantry_anim",
-				"script_catalogs", "wac", "weapon_table", "ammo_table", "organic_init"};
+				"script_catalogs", "wac", "weapon_table", "ammo_table", "powerup_table", "organic_init"};
 		CHECK(kernel.boot_trace == expected);
 		CHECK(!kernel.local.has_local_player());
 	}
@@ -578,7 +578,7 @@ int main() {
 		const std::vector<std::string> expected = {
 				"ai_profiles", "mission_text", "load_mission", "infantry_anim",
 				"script_catalogs", "wac", "spawn_local_player", "weapon_table", "ammo_table",
-				"organic_init", "premission"};
+				"powerup_table", "organic_init", "premission"};
 		CHECK(kernel.boot_trace == expected);
 		if (kernel.boot_trace != expected)
 			for (const std::string &s : kernel.boot_trace) std::printf("  trace: %s\n", s.c_str());

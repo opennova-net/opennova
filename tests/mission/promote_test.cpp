@@ -977,6 +977,49 @@ static void test_bms_ai_attribute_fold() {
         std::exit(1);
 }
 
+// The three range slots read three different record fields: attack range from
+// max_attack_distance, sight from max_engagement_distance, the minimum from
+// min_engagement_distance, each empty field falling back to max_engagement.
+// 06TR's command post (2121..2123) authors 5 / 30 / attack 10.
+// [orig: Entity_SpawnFromBMSRecord @0x40EF79..0x40EFC1]
+static void test_bms_range_slots_read_their_own_fields() {
+    int failures = 0;
+    bms::File m{};
+    bms::Entity guard = organic(0, 0, 0, /*team=*/2, /*wp_id=*/0, /*wp_num=*/0);
+    guard.id = 1;
+    guard.min_engagement_distance = 5;
+    guard.max_engagement_distance = 30;
+    guard.max_attack_distance = 10;
+    m.organics.push_back(guard);
+    bms::Entity bare = organic(10 << 16, 0, 0, /*team=*/2, /*wp_id=*/0, /*wp_num=*/0);
+    bare.id = 2;
+    bare.min_engagement_distance = 0;
+    bare.max_engagement_distance = 320;
+    bare.max_attack_distance = 0;
+    m.organics.push_back(bare);
+    World world;
+    mission::promote_mission(m, world, mission::PromoteOptions{});
+
+    const Entity *g = world.registry.get(world.registry.find_by_net_id(1));
+    const AiEntity *gai = g != nullptr ? world.ai.for_handle(g->handle) : nullptr;
+    CHECK(gai != nullptr);
+    if (gai != nullptr) {
+        CHECK(gai->slot.f[AiSlot::kAttackRange] == (10 << 16));
+        CHECK(gai->slot.f[AiSlot::kEngageMin] == (5 << 16));
+        CHECK(gai->slot.f[AiSlot::kSightRange] == (30 << 16));
+    }
+    const Entity *b = world.registry.get(world.registry.find_by_net_id(2));
+    const AiEntity *bai = b != nullptr ? world.ai.for_handle(b->handle) : nullptr;
+    CHECK(bai != nullptr);
+    if (bai != nullptr) {
+        CHECK(bai->slot.f[AiSlot::kAttackRange] == (320 << 16));
+        CHECK(bai->slot.f[AiSlot::kEngageMin] == (320 << 16));
+        CHECK(bai->slot.f[AiSlot::kSightRange] == (320 << 16));
+    }
+    if (failures)
+        std::exit(1);
+}
+
 // A placed item takes a vehicle brain exactly when its def carries the AI-class
 // attrib AND its ai_function row is a brain class; authoring a control seat is
 // not the test. [orig: Entity_SpawnFromBMSRecord @0x40ED4E; the pool-1 class init
@@ -1013,6 +1056,7 @@ static void test_item_brain_follows_class_and_attrib() {
 int main() {
     test_item_brain_follows_class_and_attrib();
     test_bms_ai_attribute_fold();
+    test_bms_range_slots_read_their_own_fields();
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
     test_bms_admission_zeros_rejected_marker_projections();
@@ -1128,6 +1172,7 @@ int main() {
     CHECK(e0->profile.range_secondary == 0);
     CHECK(e0->slot.f[15] == (500 << 16));
     CHECK(e0->slot.f[16] == (50 << 16));
+    CHECK(e0->slot.f[17] == (500 << 16));
     CHECK(e0 != nullptr);
     // State 0 at spawn: retail organics carry no vehicle brain at all (the AiSlot drives
     // the infantry motor), and the former patrol_on_spawn 16 seed had no witness.
