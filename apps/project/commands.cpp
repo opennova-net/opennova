@@ -216,7 +216,7 @@ int command_validate(int argc, const char *const *argv, std::FILE *out, std::FIL
 	MenuRenderCheck render_check;
 	ProjectAssetSource files;
 	files.set_scan(project.paths.root, project.state.scan, project.doc.target_game);
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<std::string> boot_missing;
 	const std::vector<Diagnostic> none;
 	const ProjectFindings findings =
@@ -455,7 +455,7 @@ int command_build(int argc, const char *const *argv, std::FILE *out, std::FILE *
 	// The document gate is the same validation `validate` prints, run once here.
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<Diagnostic> findings = validate_project(
 			{ project.paths, project.doc, project.state.scan, open }, graph, cache);
 	const BuildPlan plan = plan_build(project.paths, project.state.scan, project.state.requirements, findings);

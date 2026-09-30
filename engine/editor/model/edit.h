@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include <editor/model/value.h>
@@ -9,8 +10,8 @@
 namespace opennova::editor {
 
 // What the windows and the shell ask a document to change: one typed operation on one
-// address, or a batch of them on one row (Document::apply). A document applies either as
-// a single undoable change.
+// address, or a batch of them on one row (DocumentBase::apply; the record document's,
+// Document::apply). A document applies either as a single undoable change.
 enum class EditOperation {
 	Set,          // field := value at address
 	Clear,        // an optional field left out of the file (its latent value kept)
@@ -25,6 +26,18 @@ enum class EditOperation {
 	Paste,        // value = a payload Document::copy made: its records into the owner `parent`
 	              // (0 = the row address.row) at position
 	SetFileValue, // a file-wide value (document type specific): field / position / value
+	Apply,        // payload: a change the document's type made in C++, applied to address (a record
+	              // type through Document::apply_payload; another kind of document takes its own)
+};
+
+// The change an Apply edit carries (ADR 0046 S13 D6): made in C++ by the document type that takes
+// it (a raster's brush stroke, a text's span replaced, a record type's own change) and immutable
+// once made, so whatever keeps it (a batch, a history of payloads) shares it. Its token names its
+// kind: a type takes the payloads it makes and refuses another's. The editor's JSON writes an
+// edit's payload as its token and reads none back: the editor MCP cannot send an Apply edit yet.
+struct EditPayload {
+	virtual ~EditPayload();
+	virtual const char *token() const = 0;
 };
 
 struct Edit {
@@ -43,13 +56,15 @@ struct Edit {
 	// one undo step on that row until the edit group ends (EndEdit); each applies to the
 	// record as the previous one left it. next_edit_gesture() hands out a fresh one.
 	uint64_t gesture = 0;
+	// Apply: the change (null for any other operation).
+	std::shared_ptr<const EditPayload> payload;
 };
 
 // Two edits that ask the same (a request read back from its wire form, S13 A4).
 inline bool operator==(const Edit &a, const Edit &b) {
 	return a.operation == b.operation && a.address == b.address && a.parent == b.parent &&
 	       a.field == b.field && a.value == b.value && a.position == b.position &&
-	       a.coalesce == b.coalesce && a.gesture == b.gesture;
+	       a.coalesce == b.coalesce && a.gesture == b.gesture && a.payload == b.payload;
 }
 inline bool operator!=(const Edit &a, const Edit &b) { return !(a == b); }
 

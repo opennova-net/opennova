@@ -4,7 +4,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/field_text.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 
 #include <map>
@@ -20,15 +20,15 @@ std::string field_title(const Document &document, NodeKind kind, const std::stri
 }
 
 std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
-	const AssetEntry *source = view.scan.at_path(edge.source);
+	const AssetEntry *source = view.project.scan->at_path(edge.source);
 	const DocumentType *type = source ? document_type_for(source->kind) : nullptr;
 	if (!type) return edge.field;
 	// A type's schema never depends on a file's content: a blank document of it, made once
 	// per kind, answers for every file of the kind.
 	static std::map<AssetKind, std::unique_ptr<Document>> blanks;
 	std::unique_ptr<Document> &blank = blanks[source->kind];
-	if (!blank) blank = type->make();
-	return field_title(*blank, edge.address.kind, edge.field);
+	if (!blank) blank = records_of(type->make());
+	return blank ? field_title(*blank, edge.address.kind, edge.field) : edge.field;
 }
 
 namespace {

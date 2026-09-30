@@ -15,5 +15,5 @@ namespace opennova::editor {
 // asset.name.duplicate, so an id is compared within its table). The references a
 // record makes (models, animation maps, ammo and weapon names, item ids, string ids) are the
 // asset graph's.
-std::vector<Diagnostic> validate_catalog_file(const Document &document);
+std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document);
 } // namespace opennova::editor

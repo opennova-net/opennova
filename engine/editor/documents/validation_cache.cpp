@@ -8,6 +8,17 @@
 
 namespace opennova::editor {
 
+namespace {
+
+// A file of a type whose documents hold no records (S13 D6): no validator reads it yet.
+Diagnostic no_records(const AssetEntry &asset) {
+	return make_diagnostic(DiagnosticSeverity::Error, "document.no_records",
+	                       "This file's document holds no records: no validator reads it yet.",
+	                       asset.relative_path);
+}
+
+} // namespace
+
 void ValidationCache::begin() {
 	const size_t passes = stats_.passes;
 	stats_ = ValidationStats();
@@ -23,13 +34,15 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	if (entry.asked)
 		return entry.findings; // asked again within the same validation: counted once
 	entry.asked = true;
-	const std::shared_ptr<const Document> open = input.open_document(asset);
+	const std::shared_ptr<const DocumentBase> open = input.open_document(asset);
 	// Kept while what they were made from holds: the same open document in the same state, or the
 	// same closed file.
 	bool same = entry.filled && entry.open == (open != nullptr);
 	if (same && open)
-		same = entry.identity == open->identity() && entry.revision == open->revision() &&
-				entry.dirty == open->dirty() && entry.wrote_file == open->wrote_file();
+		same = entry.identity == open->identity() &&
+				entry.load_generation == open->load_generation() &&
+				entry.revision == open->revision() && entry.dirty == open->dirty() &&
+				entry.wrote_file == open->wrote_file();
 	else if (same)
 		same = entry.size == asset.size_bytes && entry.modified == asset.modified_ticks &&
 				entry.kind == asset.kind && entry.game == input.project.target_game;
@@ -41,17 +54,24 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry.filled = entry.asked = true;
 	++stats_.files_validated;
 	const DocumentType *type = document_type_for(asset.kind);
-	const auto validate = [&entry, type](const Document &document) {
-		entry.findings = type->validate_file(document);
+	// A type whose documents hold no records (S13 D6): no validator reads them yet, the file
+	// unread.
+	const bool records = type && holds_records(*type);
+	const auto validate = [&entry, type](const DocumentBase &document) {
+		if (type->validate_file)
+			entry.findings = type->validate_file(document);
 		entry.checked = !document.blocked();
 	};
 	if (open) {
 		entry.open = true;
 		entry.identity = open->identity();
+		entry.load_generation = open->load_generation();
 		entry.revision = open->revision();
 		entry.dirty = open->dirty();
 		entry.wrote_file = open->wrote_file();
-		if (type)
+		if (type && !records)
+			entry.findings.push_back(no_records(asset));
+		else if (type)
 			validate(*open);
 		return entry.findings;
 	}
@@ -61,10 +81,14 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry.game = input.project.target_game;
 	if (!type)
 		return entry.findings;
+	if (!records) {
+		entry.findings.push_back(no_records(asset));
+		return entry.findings;
+	}
 	// The closed file, loaded for its findings alone: it goes when they are made (watched until
 	// it does, so a cache that kept one would show it: documents_alive).
 	++stats_.files_loaded;
-	const std::shared_ptr<Document> document = type->make();
+	const std::shared_ptr<DocumentBase> document = type->make();
 	loaded_.push_back(document);
 	Diagnostic error;
 	if (!document->load(
@@ -106,7 +130,7 @@ void ValidationCache::end() {
 	}
 }
 
-std::shared_ptr<const Document> ValidationInput::open_document(const AssetEntry &asset) const {
+std::shared_ptr<const DocumentBase> ValidationInput::open_document(const AssetEntry &asset) const {
 	for (const auto &candidate : open)
 		if (candidate && candidate->path() == asset.relative_path) return candidate;
 	return nullptr;

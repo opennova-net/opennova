@@ -100,7 +100,7 @@ public:
 	// variable's name; which files the project has, for a kind whose row says its words read
 	// them). The generation moves exactly when what the graph holds changed.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
-			const AssetScan &scan, const std::vector<std::shared_ptr<const Document>> &open);
+			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
 	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out
@@ -350,16 +350,17 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 // defines one, with what the type's lookup makes of it (Document::refine_symbol).
 void extract_from_document(const Document &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
-// loader decodes them): a document type's through its document (Document::load_bytes), a
+// loader decodes them): a record type's through its document (Document::load_bytes), a
 // native kind's through the engine's parser. `name` is what the edges and symbols name
 // the file by (the project-relative path in the graph). True with nothing for a file the
-// graph does not read (graph_reads_file).
+// graph does not read (graph_reads_file), a type's whose documents hold no records included.
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,
                         Extracted &out, Diagnostic &error);
-// True when files of this kind carry references or symbols the graph reads.
+// True when files of this kind carry references or symbols the graph reads: a record type's
+// (holds_records) or a native extractor's kind.
 bool graph_reads_kind(AssetKind kind);
 // The same for one file, by its name: false for a mission's .mis, the mission editors' text
 // form, which the mission document will read (the graph reads the .bms the game loads), so

@@ -1523,7 +1523,16 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                 // @0x4E80F7..0x4E8101 `test ax, ax; jle`, damage >= health
                 // @0x4E810A].
                 const int32_t pre_hit_health = target->health;
-                if (authoritative && damage != 0) {
+                // Only the health write waits on a nonzero damage. The shot
+                // relations, the attacker stamp and the class callback run on
+                // every hit, a zero-damage one (armor, the Indestructible bit,
+                // a damage_state hull) included, so a vehicle brain still takes
+                // its event 1 and a person its alert.
+                // [orig: Projectile_ProcessDamageOnTarget relations
+                //  @0x4E809C..0x4E80EF, health `test ebx, ebx` @0x4E81AB..0x4E81B3,
+                //  callback @0x4E81FF..0x4E820E; the ground brain queues the event
+                //  EntityAI_ProcessGroundStateMachine @0x4584F6..0x458530]
+                if (authoritative) {
                     if (shooter != nullptr) {
                         auto &rel = world.script.relations;
                         const int sg = shooter->group_id, ss = shooter->net_id;
@@ -1536,8 +1545,9 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
 
                     // The original writes the subtraction back through a signed 16-bit
                     // entity+286 field. Preserve its modulo-2^16 wrap explicitly.
-                    target->health = retail_signed_i16(
-                        static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
+                    if (damage != 0)
+                        target->health = retail_signed_i16(
+                            static_cast<int64_t>(target->health) - static_cast<int64_t>(damage));
                     hits.push_back(RoundHit{damage_entity, r.owner, damage,
                                             primary_section, secondary_section});
                     if (damage_target_is_person) {
@@ -1649,10 +1659,6 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
                         d.kill_event = target_not_dead; // [orig: @0x4E811F]
                         deaths.push_back(d);
                     }
-                } else if (authoritative && target->kind != EntityKind::Organic &&
-                           !target->is_ai_capable) {
-                    destruction_notify_item_damage(world, *target, 1,
-                            {collision.section_index, 0, r.yaw_bam, r.pitch_bam, r.roll_bam});
                 }
             }
         }

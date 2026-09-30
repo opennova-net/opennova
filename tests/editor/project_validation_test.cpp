@@ -222,7 +222,7 @@ struct Project {
 		const AssetEntry *asset = scan.at_path(path);
 		if (!asset)
 			return nullptr;
-		std::shared_ptr<Document> made = document_type_for(asset->kind)->make();
+		std::shared_ptr<Document> made = records_of(document_type_for(asset->kind)->make());
 		Diagnostic error;
 		return made->load(root + "/" + path, path, asset->kind, document.target_game, error)
 				? made
@@ -231,7 +231,7 @@ struct Project {
 };
 
 // The shell's stylesheet and the first item table open, each with an edit of its second row.
-bool open_edited(const Project &project, std::vector<std::shared_ptr<const Document>> &open) {
+bool open_edited(const Project &project, std::vector<std::shared_ptr<const DocumentBase>> &open) {
 	for (const char *path : { "menus/menu_style.mns", "defs/items.def" }) {
 		std::shared_ptr<Document> document = project.open(path);
 		if (!document || document->rows().size() < 2)
@@ -271,7 +271,7 @@ static int test_rows_as_before() {
 	for (const PinnedRows &pin : pinned) {
 		Project project;
 		TEST_EXPECT(project.make(pin.files()));
-		std::vector<std::shared_ptr<const Document>> open;
+		std::vector<std::shared_ptr<const DocumentBase>> open;
 		TEST_EXPECT(!pin.edited || open_edited(project, open));
 		AssetGraph graph;
 		ValidationCache cache;
@@ -298,7 +298,7 @@ static int test_what_a_validation_reads() {
 	TEST_EXPECT(project.make(style_and_item_files()));
 	AssetGraph graph;
 	ValidationCache cache;
-	std::vector<std::shared_ptr<const Document>> open;
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	const auto validate = [&] {
 		return validate_project(
 				{ project.paths, project.document, project.scan, open }, graph, cache);
@@ -356,7 +356,7 @@ static int test_findings_keep_their_records() {
 	TEST_EXPECT(project.make({ { "menus/nested.mnu", menu } }));
 	AssetGraph graph;
 	ValidationCache cache;
-	std::vector<std::shared_ptr<const Document>> open;
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	const auto own = [&] {
 		std::vector<Diagnostic> out;
 		for (const Diagnostic &d : validate_project(
@@ -423,7 +423,7 @@ static int test_style_name_as_reference() {
 	}));
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	size_t style_rows = 0;
 	for (const Diagnostic &d :
 			validate_project({ project.paths, project.document, project.scan, open }, graph, cache))
@@ -469,7 +469,7 @@ static int test_style_uses_by_what_names_them() {
 	}));
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<Diagnostic> rows =
 			validate_project({ project.paths, project.document, project.scan, open }, graph, cache);
 	size_t style_rows = 0, nope = 0;
@@ -534,7 +534,7 @@ static int test_item_ids_within_a_table() {
 	}));
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::vector<std::string> ids;
 	bool blocked = false;
 	for (const Diagnostic &d : validate_project(
@@ -595,7 +595,7 @@ static int test_retail_validation() {
 	TEST_EXPECT(exported > 0 && files == exported && models > 0);
 	AssetGraph graph;
 	ValidationCache cache;
-	std::vector<std::shared_ptr<const Document>> open;
+	std::vector<std::shared_ptr<const DocumentBase>> open;
 	const ValidationStats &stats = cache.stats();
 	const auto timed = [&](size_t &rows) {
 		const auto start = std::chrono::steady_clock::now();

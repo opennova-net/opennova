@@ -4,8 +4,9 @@
 // edit (owner and gesture included), its batch of edits, paths, names and imports, and so
 // does the request of every kind of fix; a malformed request or Problems query is refused
 // with a reason; the project settings are one request whose settings are each optional,
-// and the view says what the last one came to; and over a real session the view (the
-// selection and the field a request asked to show, the clipboard), a document with its
+// and the view says what the last one came to; the view's events page by seq, the last 64
+// held; and over a real session the view (the selection, the events a request posts when it
+// asks a record's field or a file shown, the clipboard), a document with its
 // records at every depth, a record (its path, locator, owner and fields as they apply) and
 // the findings serialize the state the windows draw, with the same edit reaching the record
 // through JSON as through the typed request; the Problems answer carries the counts, the
@@ -22,6 +23,7 @@
 
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/import/import_plan.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -29,7 +31,7 @@
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -88,7 +90,7 @@ static int test_tokens() {
 	TEST_EXPECT(editor_request_kind_tokens().size() == kEditorRequestKindCount);
 	TEST_EXPECT(std::string(editor_request_kind_token(EditorRequestKind::CancelOperation)) == "cancel_operation");
 	TEST_EXPECT(editor_request_kind_tokens().front() == "new_project");
-	for (int i = 0; i <= static_cast<int>(EditOperation::SetFileValue); ++i) {
+	for (int i = 0; i <= static_cast<int>(EditOperation::Apply); ++i) {
 		const auto operation = static_cast<EditOperation>(i);
 		EditOperation back = EditOperation::Set;
 		TEST_EXPECT(*edit_operation_token(operation) && edit_operation_from_token(edit_operation_token(operation), back) &&
@@ -154,7 +156,7 @@ static int test_asset_kind_tokens() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Kinds"));
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	TEST_EXPECT(!root.empty());
 	const std::pair<const char *, const char *> files[] = {
 	        {"sounds/menu.lwf", "sound_bank"},
@@ -566,8 +568,9 @@ static int test_request_table_samples() {
 
 // apply_project_settings (S11d): the one request the project settings take, its settings
 // each optional (one left out is not set), read strictly; the five requests it replaced are
-// no tokens. Over a session, the view says what the last one came to under its serial, and
-// names the runtime the settings name apart from the one Play resolves.
+// no tokens. Over a session, the view says what the last one could not write and its
+// settings_applied event carries the serial back, and the view names the runtime the settings
+// name apart from the one Play resolves.
 static int test_settings_json() {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
 	TEST_EXPECT(editor_request_kind_from_token("apply_project_settings", kind) && kind == EditorRequestKind::ApplyProjectSettings);
@@ -616,7 +619,14 @@ static int test_settings_json() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":[]}", back).find("settings") != std::string::npos);
 
-	// Over a session: the result of the last one under its serial, and the runtime setting.
+	// Over a session: the last one's result, its event with its serial, and the runtime setting.
+	const auto applied = [](const JsonValue &json) {
+		const JsonValue *items = json.get("events") ? json.get("events")->get("items") : nullptr;
+		return items && !items->array.empty() &&
+						items->array.back().get_string("kind", "") == "settings_applied"
+				? &items->array.back()
+				: nullptr;
+	};
 	editor_test::TempProjectDir dir("opennova_session_json_settings_test");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
@@ -629,17 +639,22 @@ static int test_settings_json() {
 	session.handle(back);
 	JsonValue view = session_view_to_json(session.view());
 	const JsonValue *result = view.get("settings_result");
-	TEST_EXPECT(result && result->get_int("serial", 0) == 4 && result->get("failures") && result->get("failures")->array.empty());
+	TEST_EXPECT(result && result->get("serial") == nullptr && result->get("failures") &&
+			result->get("failures")->array.empty());
+	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 4 &&
+			applied(view)->get("flag") == nullptr);
 	TEST_EXPECT(view.get("project") && view.get("project")->get_string("title", "") == "Harbor");
 	TEST_EXPECT(view.get("play") && view.get("play")->get_string("runtime_setting", "") == "C:/tools/opennova.exe");
-	// A name the project cannot take: the failure is the result's, under the next serial.
+	// A name the project cannot take: the failure is the result's, its event the next serial's,
+	// flagged.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":5,\"title\":\"\"}}", back).empty());
 	session.handle(back);
 	view = session_view_to_json(session.view());
 	result = view.get("settings_result");
-	TEST_EXPECT(result && result->get_int("serial", 0) == 5 && result->get("failures") &&
-	            result->get("failures")->array.size() == 1 &&
+	TEST_EXPECT(result && result->get("failures") && result->get("failures")->array.size() == 1 &&
 	            result->get("failures")->array[0].get_string("code", "") == "project.title_empty");
+	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 5 &&
+			applied(view)->get_bool("flag", false));
 	return 0;
 }
 
@@ -678,12 +693,12 @@ static int test_problem_query_json() {
 // (250 here, past what the editor MCP carries in one list) answers any page in a few.
 static int test_problem_groups_page() {
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	for (int i = 0; i < 250; ++i) {
 		const std::string file = "defs/f" + std::to_string(1000 + i) + ".def";
-		view.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "A finding.", file));
+		view.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "A finding.", file));
 		if (i == 20) // a second finding in one file: that group holds two rows
-			view.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "Another.", file));
+			view.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "Another.", file));
 	}
 	ProblemQuery by_file;
 	by_file.grouping = ProblemGrouping::File;
@@ -744,7 +759,7 @@ static int test_over_a_session() {
 	const JsonValue *requirements = json.get("requirements");
 	TEST_EXPECT(requirements->get_int("total", 0) > 0 &&
 	            requirements->get_int("missing", -1) == requirements->get_int("total", 0));
-	TEST_EXPECT(requirements->get("rows")->array.size() == view.requirements.rows.size());
+	TEST_EXPECT(requirements->get("rows")->array.size() == view.project.requirements->rows.size());
 	const JsonValue &first_row = requirements->get("rows")->array.front();
 	TEST_EXPECT(first_row.get_string("state", "") == "missing" && !first_row.get_string("role", "").empty() &&
 	            !first_row.get_string("phase", "").empty());
@@ -753,9 +768,10 @@ static int test_over_a_session() {
 	TEST_EXPECT(json.get("play")->get_int("mcp_port", -1) == 0 && json.get("play")->get("exit_code")->is_null());
 	TEST_EXPECT(json.get("recent_projects")->array.size() == 1);
 	TEST_EXPECT(json.get("graph")->get_int("missing", -1) == 0);
-	TEST_EXPECT(diagnostics_to_json(view.diagnostics).array.size() == view.diagnostics.size());
+	TEST_EXPECT(diagnostics_to_json(view.findings.diagnostics).array.size() ==
+			view.findings.diagnostics.size());
 	// The first row, the manifest's first: an optional file the game does without, a note.
-	const JsonValue first_finding = diagnostics_to_json(view.diagnostics).array.front();
+	const JsonValue first_finding = diagnostics_to_json(view.findings.diagnostics).array.front();
 	TEST_EXPECT(first_finding.get_string("severity", "") == "info" &&
 	            first_finding.get_string("code", "") == "requirement.optional_missing" &&
 	            first_finding.get_string("role", "") == "game_cfg" && first_finding.get_string("target", "") == "game.cfg");
@@ -767,11 +783,11 @@ static int test_over_a_session() {
 	ProblemFixCache fix_cache;
 	const JsonValue problems = problems_to_json(view, answer_problems(errors_only, view), 0, SIZE_MAX, fix_cache);
 	const int required = requirements->get_int("total", 0);
-	TEST_EXPECT(problems.get_int("total", 0) == int(view.diagnostics.size()) && problems.get_int("shown", 0) == required);
+	TEST_EXPECT(problems.get_int("total", 0) == int(view.findings.diagnostics.size()) && problems.get_int("shown", 0) == required);
 	const JsonValue *counts = problems.get("counts");
 	TEST_EXPECT(counts && counts->get_int("errors", 0) == required && counts->get_int("infos", 0) > 0 &&
 	            counts->get_int("errors", 0) + counts->get_int("warnings", 0) + counts->get_int("infos", 0) ==
-	                    int(view.diagnostics.size()));
+	                    int(view.findings.diagnostics.size()));
 	TEST_EXPECT(problems.get("groups") == nullptr && problems.get("problems")->array.size() == size_t(required));
 	const JsonValue &missing = problems.get("problems")->array.front();
 	TEST_EXPECT(missing.get_string("code", "") == "requirement.missing" && missing.get("asset") == nullptr &&
@@ -785,7 +801,7 @@ static int test_over_a_session() {
 	std::string parse_error;
 	TEST_EXPECT(create_fix.get("request") && editor_request_from_json(*create_fix.get("request"), request, parse_error));
 	TEST_EXPECT(request.kind == EditorRequestKind::CreateMissing && request.roles == std::vector<std::string>{"gameerr"});
-	TEST_EXPECT(session.handle(request) && session.outcome().done() && view.scan.find("gameerr.bin") != nullptr);
+	TEST_EXPECT(session.handle(request) && session.outcome().done() && view.project.scan->find("gameerr.bin") != nullptr);
 	// A page, and the rows grouped by kind: one group, its title in plain words.
 	const JsonValue page = problems_to_json(view, answer_problems(errors_only, view), 1, 2, fix_cache);
 	const JsonValue all = problems_to_json(view, answer_problems(errors_only, view), 0, SIZE_MAX, fix_cache);
@@ -806,7 +822,8 @@ static int test_over_a_session() {
 	// Create all missing through the wire, the roles of the checklist's unmet rows named (none
 	// named makes nothing), then open the startup menu: the document and its records serialize.
 	TEST_EXPECT(request_error("{\"kind\":\"create_missing\"}", request).empty() && session.handle(request));
-	TEST_EXPECT(session.outcome().done() && view.requirements.required_missing == required - 1);
+	TEST_EXPECT(session.outcome().done() &&
+			view.project.requirements->required_missing == required - 1);
 	std::string roles;
 	json = session_view_to_json(view);
 	for (const JsonValue &row : json.get("requirements")->get("rows")->array)
@@ -814,11 +831,12 @@ static int test_over_a_session() {
 			roles += (roles.empty() ? "\"" : ",\"") + row.get_string("role", "") + "\"";
 	TEST_EXPECT(request_error(("{\"kind\":\"create_missing\",\"roles\":[" + roles + "]}").c_str(), request).empty() &&
 	            session.handle(request));
-	TEST_EXPECT(view.requirements.required_missing == 0);
+	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	// Every file the scan lists, each with its kind and whether the editor opens it.
 	json = session_view_to_json(view);
 	bool menu_editable = false, some_not_editable = false;
-	TEST_EXPECT(json.get("project")->get("files")->array.size() == view.scan.entries.size());
+	TEST_EXPECT(
+			json.get("project")->get("files")->array.size() == view.project.scan->entries.size());
 	for (const JsonValue &file : json.get("project")->get("files")->array) {
 		if (file.get_string("name", "") == "main.mnu" && file.get_string("kind", "") == "menu")
 			menu_editable = file.get_bool("editable", false);
@@ -901,15 +919,15 @@ static int test_over_a_session() {
 	TEST_EXPECT(!font->get_string("reference_file", "").empty());
 	TEST_EXPECT(json.get("graph")->get_int("edges", 0) > 0 && json.get("graph")->get_int("symbols", 0) > 0);
 	// What the graph's last update did (S13 D3): its stats' counts, as the stats hold them.
-	const GraphStats &stats = view.graph->stats();
+	const GraphStats &stats = view.findings.graph->stats();
 	const JsonValue graph_json = *session_view_to_json(view).get("graph");
-	TEST_EXPECT(graph_json.get_int("edges", 0) == int64_t(view.graph->edge_count()) &&
-	            graph_json.get_int("missing", -1) == int64_t(view.graph->missing_count()) &&
-	            graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
-	            graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
-	            graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
-	TEST_EXPECT(!graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.empty());
-	TEST_EXPECT(graph_edges_to_json(*view.graph, view.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
+	TEST_EXPECT(graph_json.get_int("edges", 0) == int64_t(view.findings.graph->edge_count()) &&
+			graph_json.get_int("missing", -1) == int64_t(view.findings.graph->missing_count()) &&
+			graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
+			graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
+			graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
+	TEST_EXPECT(!graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.empty());
+	TEST_EXPECT(graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());
 	TEST_EXPECT(record_to_json(*document, NodeAddress{99999, 1, 0}, view).is_null());
 	// The root's font as its picker and its Go to see it (S12 Z2): the project's fonts and the
@@ -939,36 +957,58 @@ static int test_over_a_session() {
 	TEST_EXPECT(reference_targets_to_json(*document, main_address, "no_such_field", view).is_null());
 	TEST_EXPECT(reference_choices_to_json(*document, NodeAddress{99999, 1, 0}, "font.name", view).is_null());
 
-	// A request that names a record and one of its fields (a Problems row's): the view says
-	// which field to show until the selection moves. Each such ask moves the serial, the same
-	// ask again too (a second click on the row); one naming no field does not.
-	const uint64_t serial = view.reveal_serial;
+	// A request that names a record and one of its fields (a Problems row's): a RevealRecord
+	// event, in the view JSON's events from the seq a client read to. Each such ask posts one, the
+	// same ask again too (a second click on the row); one naming no field posts none; the view
+	// carries no reveal state of its own.
+	const uint64_t before = view.events.next_seq() - 1;
+	const auto reveals = [&view, before]() {
+		SessionJsonOptions options;
+		options.event_cursor = before + 1;
+		std::vector<JsonValue> out;
+		const JsonValue json = session_view_to_json(view, options);
+		for (const JsonValue &item : json.get("events")->get("items")->array)
+			if (item.get_string("kind", "") == "reveal_record") out.push_back(item);
+		return out;
+	};
 	const std::string reveal = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"address\":{\"row\":" +
 	                           std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
 	                           ",\"child\":" + std::to_string(title_address.child) + "},\"field\":\"string.value\"}";
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
-	TEST_EXPECT(view.selection == title_address && session_view_to_json(view).get_string("reveal_field", "") == "string.value");
-	TEST_EXPECT(view.reveal_serial == serial + 1);
-	TEST_EXPECT(session_view_to_json(view).get_number("reveal_serial", -1.0) == double(serial + 1));
+	std::vector<JsonValue> asked = reveals();
+	const JsonValue *asked_at = asked.size() == 1 ? asked[0].get("address") : nullptr;
+	TEST_EXPECT(view.documents.selection == title_address && asked.size() == 1 &&
+			asked[0].get_string("path", "") == document->path() &&
+			asked[0].get_string("field", "") == "string.value" && asked[0].get("flag") == nullptr &&
+			asked[0].get("tag") == nullptr);
+	TEST_EXPECT(asked_at && asked_at->get_int("row", 0) == int64_t(title_address.row) &&
+	            asked_at->get_int("kind", 0) == int64_t(title_address.kind) &&
+	            asked_at->get_int("child", 0) == int64_t(title_address.child));
+	TEST_EXPECT(session_view_to_json(view).get("reveal_field") == nullptr &&
+	            session_view_to_json(view).get("reveal_serial") == nullptr);
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
-	TEST_EXPECT(view.reveal_field == "string.value" && view.reveal_serial == serial + 2);
-	// The same field asked again: the JSON's serial moves with it, so a client sees the second ask.
-	TEST_EXPECT(session_view_to_json(view).get_number("reveal_serial", -1.0) == double(serial + 2));
+	// The same field asked again: a second event, so a client sees the second ask.
+	asked = reveals();
+	TEST_EXPECT(asked.size() == 2 && asked[1].get_int("seq", 0) == asked[0].get_int("seq", 0) + 1 &&
+	            asked[1].get_string("field", "") == "string.value");
 	const std::string named = "{\"kind\":\"open_document\",\"path\":\"main.mnu\",\"address\":{\"row\":" +
 	                          std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
 	                          ",\"child\":" + std::to_string(title_address.child) + "}}";
 	TEST_EXPECT(request_error(named.c_str(), request).empty() && session.handle(request));
-	TEST_EXPECT(view.reveal_field.empty() && view.reveal_serial == serial + 2);
+	TEST_EXPECT(reveals().size() == 2);
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
-	TEST_EXPECT(view.reveal_serial == serial + 3);
-	// Files asked to show a file and ask its new name (a Problems row, a Rename... fix): the view
-	// carries the file, the ask's serial and the rename, and the request writes back as read.
+	TEST_EXPECT(reveals().size() == 3);
+	// Files asked to show a file and ask its new name (a Problems row, a Rename... fix): a
+	// RevealFile event naming the file, its flag the rename, and the request writes back as read.
 	TEST_EXPECT(request_error("{\"kind\":\"show_in_files\",\"path\":\"main.mnu\",\"ask_name\":true}", request).empty() &&
 	            session.handle(request));
 	const JsonValue shown = session_view_to_json(view);
-	const JsonValue *reveal_file = shown.get("reveal_file");
-	TEST_EXPECT(reveal_file && reveal_file->get_string("path", "") == document->path() && reveal_file->get_bool("rename", false) &&
-	            reveal_file->get_int("serial", 0) == int64_t(view.reveal_file_serial) && view.reveal_file_serial > 0);
+	const JsonValue *items = shown.get("events") ? shown.get("events")->get("items") : nullptr;
+	const JsonValue *file_event = items && !items->array.empty() ? &items->array.back() : nullptr;
+	TEST_EXPECT(file_event && file_event->get_string("kind", "") == "reveal_file" &&
+			file_event->get_string("path", "") == document->path() &&
+			file_event->get_bool("flag", false) && file_event->get("address") == nullptr &&
+			shown.get("reveal_file") == nullptr);
 	TEST_EXPECT(editor_request_to_json(request).get_string("kind", "") == "show_in_files" &&
 	            editor_request_to_json(request).get_bool("ask_name", false));
 
@@ -1084,11 +1124,11 @@ static int test_over_a_session() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"choice\":\"save\"}", request).empty() &&
 	            session.handle(request));
 	TEST_EXPECT(action_outcome_to_json(session.outcome()).get_bool("done", false) && !document->dirty() &&
-	            session.view().operation.running());
+	            session.view().activity.operation.running());
 	// The build runs as an operation: the answer names it, and the view's operation block shows
 	// it stepping (its kind, its progress in bytes, what it reads and writes) until it lands.
 	const double operation = action_outcome_to_json(session.outcome()).get_number("operation", 0.0);
-	TEST_EXPECT(operation > 0.0 && operation == double(view.operation.id));
+	TEST_EXPECT(operation > 0.0 && operation == double(view.activity.operation.id));
 	json = session_view_to_json(view);
 	const JsonValue *running = json.get("operation");
 	TEST_EXPECT(running && running->get_bool("running", false) && running->get_number("id", 0.0) == operation &&
@@ -1113,15 +1153,15 @@ static int test_over_a_session() {
 	json = session_view_to_json(view);
 	const uint64_t first = uint64_t(json.get("output")->get_number("first", -1.0));
 	const uint64_t next = uint64_t(json.get("output")->get_number("next", 0.0));
-	TEST_EXPECT(first == view.output.first_index() && next == view.output.next_index() && next - first == view.output.size() &&
-	            view.output.size() > 1);
+	TEST_EXPECT(first == view.activity.output.first_index() && next == view.activity.output.next_index() && next - first == view.activity.output.size() &&
+	            view.activity.output.size() > 1);
 	SessionJsonOptions options;
 	options.output_cursor = first + 1;
 	options.output_limit = 1;
 	json = session_view_to_json(view, options);
 	TEST_EXPECT(json.get("output")->get("lines")->array.size() == 1 &&
 	            uint64_t(json.get("output")->get_number("next_cursor", 0.0)) == first + 2);
-	TEST_EXPECT(json.get("output")->get("lines")->array.front().string == view.output[1]);
+	TEST_EXPECT(json.get("output")->get("lines")->array.front().string == view.activity.output[1]);
 	options.output_cursor = next + 5;
 	json = session_view_to_json(view, options);
 	TEST_EXPECT(json.get("output")->get("lines")->array.empty() && uint64_t(json.get("output")->get_number("cursor", 0.0)) == next);
@@ -1257,7 +1297,7 @@ public:
 		return use.schema->id == "param";
 	}
 	SerializeResult serialize() const override { return {}; }
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<MetadataDocument>(*this); }
 
 protected:
 	void refine_field(const NodeAddress &, FieldUse &use) const override {
@@ -1349,12 +1389,11 @@ static int test_import_plan_json() {
 	            back.with_dependencies);
 
 	SessionView view;
-	view.import_dependencies = false;
-	SessionView::ImportPreview &preview = view.import_preview;
+	view.project.import_dependencies = false;
+	DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 	preview.open = true;
 	preview.with_dependencies = true;
 	preview.changed = true;
-	preview.serial = 7;
 	preview.choices = {{"C:/mod/menus.pff", "a.mnu"}, {"C:/mod/menus.pff", "b.mnu"}};
 	preview.roots = {preview.choices[0]};
 	ImportPlanRow chosen;
@@ -1390,17 +1429,20 @@ static int test_import_plan_json() {
 	gone.name = "gone.tga";
 	gone.kind = AssetKind::Texture;
 	gone.needed_by = {"a.mnu", "A/KEEP/Appearance 1", "value", ReferenceKind::MenuTexture, "gone.tga", -1};
-	preview.plan.rows = {chosen, font, gone, cut};
-	preview.plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
-	                             {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
-	preview.plan.truncated = true;
-	preview.plan.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable", "The file could not be read.", "b.mnu")};
+	ImportPlan planned;
+	planned.rows = {chosen, font, gone, cut};
+	planned.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
+	                        {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
+	planned.truncated = true;
+	planned.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+			"The file could not be read.", "b.mnu") };
+	preview.plan = std::make_shared<const ImportPlan>(std::move(planned));
 	const JsonValue json = session_view_to_json(view);
 	const JsonValue *import = json.get("import");
 	TEST_EXPECT(import != nullptr);
 	if (!import) return 1;
 	TEST_EXPECT(import->get_bool("open", false) && import->get_bool("with_dependencies", false) && import->get_bool("changed", false));
-	TEST_EXPECT(!import->get_bool("import_dependencies", true) && import->get_int("serial", 0) == 7);
+	TEST_EXPECT(!import->get_bool("import_dependencies", true) && import->get("serial") == nullptr);
 	TEST_EXPECT(import->get_bool("truncated", false) && import->get("choices") && import->get("choices")->array.size() == 2);
 	const JsonValue *roots = import->get("roots");
 	TEST_EXPECT(roots && roots->array.size() == 1 && roots->array[0].get_string("entry", "") == "a.mnu" &&
@@ -1457,9 +1499,9 @@ static int test_import_plan_json() {
 // it in_install, the import block counts its files as install_files; the retail keys are gone.
 static int test_game_install_keys() {
 	SessionView view;
-	view.retail_directory = "C:/games/JO";
-	view.play_retail = true;
-	view.retail_files = {"items.def", "main.mnu"};
+	view.project.retail_directory = "C:/games/JO";
+	view.project.play_retail = true;
+	view.project.retail_files = {"items.def", "main.mnu"};
 	const JsonValue json = session_view_to_json(view);
 	const JsonValue *play = json.get("play");
 	const JsonValue *import = json.get("import");
@@ -1471,8 +1513,9 @@ static int test_game_install_keys() {
 
 static int test_import_pages() {
 	SessionView view;
-	SessionView::ImportPreview &preview = view.import_preview;
+	DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 	preview.open = true;
+	ImportPlan plan;
 	for (int i = 0; i < 250; ++i) {
 		const ImportSource source{"C:/art/f" + std::to_string(i) + ".txt", "", false, false};
 		preview.choices.push_back(source);
@@ -1483,15 +1526,16 @@ static int test_import_pages() {
 		row.source = source;
 		row.name = "f" + std::to_string(i) + ".txt";
 		row.kind = AssetKind::Text;
-		preview.plan.rows.push_back(row);
+		plan.rows.push_back(row);
 	}
 	for (int i = 0; i < 3; ++i) {
 		ImportPlanRow gone;
 		gone.state = ImportPlanRow::State::NotFound;
 		gone.name = "gone" + std::to_string(i) + ".tga";
 		gone.kind = AssetKind::Texture;
-		preview.plan.rows.insert(preview.plan.rows.begin() + 100 * i, gone);
+		plan.rows.insert(plan.rows.begin() + 100 * i, gone);
 	}
+	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
 	const JsonValue first = session_view_to_json(view);
 	const JsonValue *import = first.get("import");
 	TEST_EXPECT(import != nullptr);
@@ -1521,8 +1565,162 @@ static int test_import_pages() {
 	return 0;
 }
 
+// S13 D6: an Apply edit's change is made in C++ by its document type (Edit::payload). A request's
+// JSON names it by the payload's token alone, and the reader takes neither an apply edit nor a
+// payload: the editor MCP cannot send one.
+static int test_apply_edit_json() {
+	struct Brush : EditPayload {
+		const char *token() const override { return "raster.brush"; }
+	};
+	Edit brush;
+	brush.operation = EditOperation::Apply;
+	brush.address = {3, 0, 0};
+	brush.payload = std::make_shared<Brush>();
+	EditorRequest request = request::edit_record("terrain.cpt", brush);
+	const JsonValue json = editor_request_to_json(request);
+	const JsonValue *edits = json.get("edits");
+	const JsonValue *edit = edits && edits->array.size() == 1 ? &edits->array[0] : nullptr;
+	TEST_EXPECT(edit && edit->get_string("operation", "") == "apply" &&
+	            edit->get_string("payload", "") == "raster.brush");
+	EditorRequest back;
+	std::string error;
+	const std::string apply_refused = "edits[0]: an apply edit carries a change its document type "
+	                                  "makes in C++; the editor's JSON cannot send one.";
+	const std::string payload_refused = "edits[1]: \"payload\" names a change a document type "
+	                                    "makes in C++; the editor's JSON cannot carry one.";
+	TEST_EXPECT(!editor_request_from_json(json, back, error) && error == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"apply\"}]}",
+	                          back) == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edits\":[{\"field\":\"name\"},"
+	                          "{\"field\":\"name\",\"payload\":\"raster.brush\"}]}",
+	                          back) == payload_refused);
+	// No payload on any other edit's JSON.
+	request.edits = {Edit()};
+	const JsonValue set = editor_request_to_json(request);
+	const JsonValue *set_edits = set.get("edits");
+	TEST_EXPECT(set_edits && set_edits->array.size() == 1 && !set_edits->array[0].get("payload"));
+	TEST_EXPECT(editor_request_from_json(set, back, error) && back.edits.size() == 1 &&
+	            !back.edits[0].payload);
+	return 0;
+}
+
+// The view events in the view JSON (S13 V4): a page by seq, as the output's, the last 64 held.
+// Seventy posted, the first six are gone: `first` is 7, `next` 71, and a page from 0 starts at the
+// first held. Paging by `next_cursor`, ten at a time, reads every held event once, in order, with
+// no gap; an event posted between two pages is on the next one; a cursor past `next` reads none.
+// Each item carries its seq, its kind's token and the fields its kind sets (none of the others);
+// the serials the events replaced are gone from the view.
+static int test_view_events_json() {
+	TEST_EXPECT(ViewEvents::kKept == 64);
+	for (size_t i = 0; i < kViewEventKindCount; ++i)
+		TEST_EXPECT(std::string(view_event_kind_token(static_cast<ViewEventKind>(i))) ==
+				kViewEventKindRows[i].token);
+	TEST_EXPECT(
+			std::string(view_event_kind_token(ViewEventKind::RevealRecord)) == "reveal_record" &&
+			std::string(view_event_kind_token(ViewEventKind::RevealFile)) == "reveal_file" &&
+			std::string(view_event_kind_token(ViewEventKind::AskRename)) == "ask_rename" &&
+			std::string(view_event_kind_token(ViewEventKind::SettingsApplied)) ==
+					"settings_applied" &&
+			std::string(view_event_kind_token(ViewEventKind::ImportPlanned)) == "import_planned");
+	SessionView view;
+	const JsonValue empty = session_view_to_json(view);
+	const JsonValue *events = empty.get("events");
+	TEST_EXPECT(events && events->get_int("first", 0) == 1 && events->get_int("next", 0) == 1 &&
+			events->get_int("cursor", 0) == 1 && events->get_int("next_cursor", 0) == 1 &&
+			events->get("items") && events->get("items")->array.empty());
+	for (int i = 0; i < 70; ++i) {
+		ViewEvent event;
+		event.kind = static_cast<ViewEventKind>(i % int(kViewEventKindCount));
+		event.path = "menus/m" + std::to_string(i) + ".mnu";
+		TEST_EXPECT(view.events.post(event) == uint64_t(i + 1));
+	}
+	TEST_EXPECT(view.events.held().size() == 64 && view.events.first_seq() == 7 &&
+			view.events.next_seq() == 71 && view.events.held().front().path == "menus/m6.mnu");
+	const JsonValue all = session_view_to_json(view);
+	events = all.get("events");
+	TEST_EXPECT(events && events->get_int("first", 0) == 7 && events->get_int("next", 0) == 71 &&
+			events->get_int("cursor", 0) == 7 && events->get_int("next_cursor", 0) == 71 &&
+			events->get("items")->array.size() == 64);
+	const auto page = [&view](uint64_t cursor, size_t limit) {
+		SessionJsonOptions options;
+		options.event_cursor = cursor;
+		options.event_limit = limit;
+		return session_view_to_json(view, options);
+	};
+	std::vector<int64_t> seqs;
+	uint64_t cursor = 0;
+	for (int pages = 0; pages < 20; ++pages) {
+		const JsonValue json = page(cursor, 10);
+		const JsonValue *listed = json.get("events");
+		TEST_EXPECT(listed && listed->get("items")->array.size() <= 10);
+		for (const JsonValue &item : listed->get("items")->array)
+			seqs.push_back(item.get_int("seq", 0));
+		cursor = uint64_t(listed->get_int("next_cursor", 0));
+		if (listed->get("items")->array.empty())
+			break;
+		if (pages == 2) {
+			// Posted between two pages: the next page carries it.
+			ViewEvent late;
+			late.kind = ViewEventKind::RevealFile;
+			late.path = "late.tga";
+			view.events.post(late);
+		}
+	}
+	TEST_EXPECT(seqs.size() == 65 && seqs.front() == 7 && seqs.back() == 71);
+	for (size_t i = 1; i < seqs.size(); ++i)
+		TEST_EXPECT(seqs[i] == seqs[i - 1] + 1);
+	const JsonValue past = page(500, 10);
+	TEST_EXPECT(past.get("events")->get_int("cursor", 0) == 72 &&
+			past.get("events")->get("items")->array.empty());
+	TEST_EXPECT(page(3, 1).get("events")->get("items")->array[0].get_int("seq", 0) == 8);
+
+	// An event's fields: those its kind sets, none of the others.
+	SessionView fields;
+	ViewEvent reveal;
+	reveal.kind = ViewEventKind::RevealRecord;
+	reveal.path = "menus/main.mnu";
+	reveal.address = { 12, 3, 45 };
+	reveal.field = "string.value";
+	fields.events.post(reveal);
+	ViewEvent file;
+	file.kind = ViewEventKind::RevealFile;
+	file.path = "art/a_name_too_long_for_archives.tga";
+	file.flag = true;
+	fields.events.post(file);
+	ViewEvent applied;
+	applied.kind = ViewEventKind::SettingsApplied;
+	applied.tag = 9;
+	fields.events.post(applied);
+	const JsonValue json = session_view_to_json(fields);
+	const std::vector<JsonValue> &items = json.get("events")->get("items")->array;
+	TEST_EXPECT(items.size() == 3);
+	if (items.size() != 3)
+		return 1;
+	const JsonValue *address = items[0].get("address");
+	TEST_EXPECT(items[0].get_int("seq", 0) == 1 &&
+			items[0].get_string("kind", "") == "reveal_record" &&
+			items[0].get_string("path", "") == "menus/main.mnu" &&
+			items[0].get_string("field", "") == "string.value" && address &&
+			address->get_int("row", 0) == 12 && address->get_int("kind", 0) == 3 &&
+			address->get_int("child", 0) == 45 && !items[0].get("flag") && !items[0].get("tag"));
+	TEST_EXPECT(items[1].get_string("kind", "") == "reveal_file" &&
+			items[1].get_bool("flag", false) &&
+			items[1].get_string("path", "") == "art/a_name_too_long_for_archives.tga" &&
+			!items[1].get("address") && !items[1].get("field") && !items[1].get("tag"));
+	TEST_EXPECT(items[2].get_string("kind", "") == "settings_applied" &&
+			items[2].get_int("tag", 0) == 9 && !items[2].get("path") && !items[2].get("flag"));
+	TEST_EXPECT(view_event_to_json(fields.events.held().back()).get_int("tag", 0) == 9);
+	// The serials the events replaced are gone.
+	for (const char *gone : { "reveal_field", "reveal_serial", "reveal_file" })
+		TEST_EXPECT(json.get(gone) == nullptr);
+	TEST_EXPECT(json.get("settings_result")->get("serial") == nullptr &&
+			json.get("import")->get("serial") == nullptr);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_apply_edit_json();
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();
 	failures += test_import_pages();
@@ -1537,6 +1735,7 @@ int main() {
 	failures += test_search_json();
 	failures += test_field_metadata();
 	failures += test_import_plan_json();
+	failures += test_view_events_json();
 	if (failures == 0) std::printf("editor_session_json: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -285,8 +285,49 @@ void VehicleSystem::suspension_airborne_loop(Entity &veh, const VehicleTraits &t
 		}
 		store_osc(m.wheel_osc[k], osc);
 		if (m.crashed == 0 && m.crash_request == 0)
-			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj,
-                    false, traits.family == VehicleFamily::Bike);
+			catch_up(m, k, growth, /*grounded=*/false, no_contact, corner_adj);
+	}
+}
+
+// The bike's own airborne loop, not the platform twin: no settled or crash
+// gate, the spring step per wheel, then the corner droop only while the nose
+// is above -0x1000 or the flight is under 16 ticks. The droop scales the
+// sink beyond one growth step by -1.5, and a front sink of 500+ within 500 of
+// the rear zeroes the rear sink, so the rear lags and the nose drops.
+// [orig: Entity_ProcessLightVehiclePhysics @0x479600 — the loop
+//  @0x47B401..0x47B4E6: compress @0x47B431 / oscillate @0x47B444, the gate
+//  @0x47B44C..0x47B45D (fwd.z from Math_ExtractRow0FromFixedPoint22 @0x4798D6,
+//  +0x3D4), the rear clear @0x47B461..0x47B48A, the droop `fmul flt_7C6F68`
+//  (-1.5f) @0x47B498..0x47B4BC, the hard-landing mark @0x47B4BE..0x47B4CE]
+void VehicleSystem::suspension_bike_airborne_loop(Entity &veh, const VehicleTraits &traits,
+		int32_t fwd_z16, int32_t corner_adj[2]) {
+	World &world = world_;
+	Entity::VehicleMotorState &m = veh.veh;
+	const int32_t travel = conform_travel_from_def(traits.spring_comp);
+	int32_t loose_shock = 0;
+	int32_t &shock = shock_field(world, veh, traits, loose_shock);
+	for (int k = 0; k < 2; ++k) {
+		ConformOscillator osc = load_osc(m.wheel_osc[k]);
+		if (osc.energy > 0) {
+			(void)conform_spring_compress(osc, m.wheel_comp[k], m.spring_energy,
+			                              kSpringStepCap, travel, traits.spring);
+		} else if (osc.amplitude != 0) {
+			(void)conform_spring_oscillate(osc, m.wheel_comp[k], m.spring_energy,
+			                               shock, traits.spring, m.slide_z);
+		}
+		store_osc(m.wheel_osc[k], osc);
+		if (fwd_z16 <= -0x1000 && m.plat_airborne_ticks >= 16)
+			continue;
+		const int32_t c = m.plat_acc[k] - kSinkGrowthBike;
+		if (m.plat_acc[0] >= 500 && std::abs(m.plat_acc[0] - m.plat_acc[1]) < 500)
+			m.plat_acc[1] = 0;
+		if (c <= 0)
+			continue;
+		const int32_t adj = static_cast<int32_t>(static_cast<float>(c) * -1.5f);
+		if (!m.wheelie_request)
+			corner_adj[k] += adj;
+		if (adj < kHardLandingCatchupBelow && m.slide_z < 0)
+			m.landing_2ee = 1;
 	}
 }
 

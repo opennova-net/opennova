@@ -45,7 +45,7 @@ public:
 	// A row by its slot's words (animation_key_title), a clip by its file.
 	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<AnimationMapDocument>(*this);
 	}
 	// The table as the engine reads it, rebuilt from the rows.
@@ -81,6 +81,6 @@ std::string animation_key_title(const std::string &key);
 // slot an earlier row names is a note (animation_map.slot_repeated: the game joins their
 // clips into one ring, and keeps only the last reset clip). A clip the project lacks is the
 // asset graph's.
-std::vector<Diagnostic> validate_animation_map_file(const Document &document);
+std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document);
 
 } // namespace opennova::editor

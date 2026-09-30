@@ -311,7 +311,7 @@ int findings_follow_rows() {
 		const AssetScan scan = scan_project_assets(paths, project);
 		AssetGraph graph;
 		ValidationCache cache;
-		const std::vector<std::shared_ptr<const Document>> open{ table };
+		const std::vector<std::shared_ptr<const DocumentBase>> open{ table };
 		for (const Diagnostic &d : validate_project({ paths, project, scan, open }, graph, cache))
 			if (d.code == "animation_map.ignored_input" && d.asset == "notes.adm") return d.row_id;
 		return NodeId(-1);
@@ -389,7 +389,7 @@ int validation_and_graph() {
 	const AssetScan scan = scan_project_assets(paths, project);
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<Diagnostic> findings =
 			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto find = [&](const char *code, const char *asset, size_t nth = 0) -> const Diagnostic * {

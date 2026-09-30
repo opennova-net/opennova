@@ -44,7 +44,7 @@ void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan
 	++generation_;
 }
 
-void ProjectAssetSource::set_open(const std::vector<std::shared_ptr<const Document>> &open) {
+void ProjectAssetSource::set_open(const std::vector<std::shared_ptr<const DocumentBase>> &open) {
 	std::map<std::string, Open> next;
 	for (const auto &document : open)
 		if (document) next[document->path()] = Open{document, document->identity(), document->revision()};

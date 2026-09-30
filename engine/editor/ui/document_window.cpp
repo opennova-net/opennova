@@ -1,7 +1,9 @@
 #include <editor/ui/document_window.h>
 
 #include <algorithm>
+#include <iterator>
 #include <map>
+#include <memory>
 
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mns_document.h>
@@ -9,7 +11,7 @@
 #include <editor/documents/strings_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/document_outline.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
@@ -22,11 +24,19 @@ namespace opennova::editor {
 
 void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
-	if (!view.project_open || view.documents.empty()) {
+	// The events of a document no longer open go with it.
+	for (auto held = events_.begin(); held != events_.end();) {
+		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
+				[&](const std::shared_ptr<const DocumentBase> &document) {
+					return document->path() == held->first;
+				});
+		held = open ? std::next(held) : events_.erase(held);
+	}
+	if (!view.project.open || view.documents.open.empty()) {
 		// No tab bar: the next one follows the active document from its first frame.
 		followed_.clear();
 		raised_.clear();
-		if (!view.project_open) draw_welcome(workspace_, form_);
+		if (!view.project.open) draw_welcome(workspace_, form_);
 		else ui_kit::empty_state("Double-click a file in Files to open it, or make one with New.");
 		return;
 	}
@@ -37,23 +47,23 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 	// The active document's tab is selected when the active document changes, and only then,
 	// so a click is never fought. ImGui shows it from the next frame: on this one the tab
 	// shown is still the one before, which says nothing of the user's choice.
-	const bool follow = view.active_document != followed_;
-	followed_ = view.active_document;
+	const bool follow = view.documents.active != followed_;
+	followed_ = view.documents.active;
 	// A file name two open documents share is told apart by the path.
 	std::map<std::string, int> names;
-	for (const auto &document : view.documents) ++names[basename_of(document->path())];
+	for (const auto &document : view.documents.open) ++names[basename_of(document->path())];
 	if (!ImGui::BeginTabBar("documents", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll |
 	                                          ImGuiTabBarFlags_TabListPopupButton))
 		return;
 	std::string shown; // the document whose tab shows
-	for (const auto &document : view.documents) {
+	for (const auto &document : view.documents.open) {
 		const std::string &path = document->path();
 		// A tab is known by its document's path. A close goes through the session: a file with
 		// unsaved changes keeps its tab while the session asks (UnsavedDocument), a saved one
 		// always closes.
 		ImGuiTabItemFlags flags = ImGuiTabItemFlags_NoTooltip;
 		if (document->dirty()) flags |= ImGuiTabItemFlags_UnsavedDocument;
-		if (follow && path == view.active_document) flags |= ImGuiTabItemFlags_SetSelected;
+		if (follow && path == view.documents.active) flags |= ImGuiTabItemFlags_SetSelected;
 		const std::string name = basename_of(path);
 		const std::string label = (names[name] > 1 ? path : name) + "###" + path;
 		bool open = true;
@@ -65,14 +75,23 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// Its view once it is the active document: the selection and the inspector are the
 		// active document's (a tab a click just showed waits the frame its OpenDocument takes).
 		// The find bar first: its Ctrl+F comes before the view's own filters'.
-		if (path == view.active_document) {
-			draw_find(*document);
-			draw_view(*document);
+		if (path == view.documents.active) {
+			if (const Document *records = records_of(*document)) {
+				draw_find(*records);
+				// The RevealRecord events its document was sent, taken as its view draws: the
+				// view shows the selection again.
+				const auto held = events_.find(path);
+				if (held != events_.end() && held->second.held()) {
+					held->second.take();
+					reveal_again(*records);
+				}
+				draw_view(*records);
+			}
 		}
 		ImGui::EndTabItem();
 	}
 	ImGui::EndTabBar();
-	if (shown == view.active_document) {
+	if (shown == view.documents.active) {
 		raised_.clear();
 	} else if (!follow && !shown.empty() && shown != raised_) {
 		// A tab the user chose (a click, the tab list) shows another document: it becomes the
@@ -187,6 +206,15 @@ void DocumentWindow::draw_find(const Document &document) {
 	}
 	ImGui::PopID();
 	ImGui::Separator();
+}
+
+// A RevealRecord event for `document`, handed to the view that draws it (a menu's window tree
+// follows the selection its own way: MenuView).
+void DocumentWindow::reveal_again(const Document &document) {
+	if (dynamic_cast<const DefCatalogDocument *>(&document)) catalog_.reveal_again();
+	else if (dynamic_cast<const StringsDocument *>(&document)) strings_.reveal_again();
+	else if (dynamic_cast<const MnsDocument *>(&document)) styles_.reveal_again();
+	else if (!dynamic_cast<const MnuDocument *>(&document)) outline_.ask();
 }
 
 // The view a document's tab shows, by its type: a catalog, a string table, a stylesheet and

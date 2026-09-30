@@ -60,7 +60,12 @@ func _tool_editor_state(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	if files_offset == null or int(files_offset) < 0 or files_limit == null or int(files_limit) < 0 \
 			or int(files_limit) > EditorMcpCatalog.PAGE_MAX:
 		return McpToolResult.error("editor_state takes files_offset >= 0 and files_limit from 0 to %d." % EditorMcpCatalog.PAGE_MAX)
-	var view := _view(int(cursor), int(limit), int(import_offset), int(import_limit))
+	var event_cursor: Variant = _integer_number(args.get("event_cursor", 0))
+	var event_limit: Variant = _integer_number(args.get("event_limit", EditorMcpCatalog.EVENTS_KEPT))
+	if event_cursor == null or int(event_cursor) < 0 or event_limit == null or int(event_limit) < 0 \
+			or int(event_limit) > EditorMcpCatalog.EVENTS_KEPT:
+		return McpToolResult.error("editor_state takes event_cursor >= 0 and event_limit from 0 to %d." % EditorMcpCatalog.EVENTS_KEPT)
+	var view := _view(int(cursor), int(limit), int(import_offset), int(import_limit), int(event_cursor), int(event_limit))
 	var project: Variant = view.get("project")
 	if project is Dictionary and (project as Dictionary).has("files"):
 		var page := _files_page(project as Dictionary, int(files_offset), int(files_limit))
@@ -781,8 +786,10 @@ static func _files_page(project: Dictionary, offset: int, limit: int) -> Diction
 	return {"file_count": files.size(), "file_offset": offset, "files": files.slice(offset, offset + limit)}
 
 
-func _view(cursor: int, limit: int, import_offset := 0, import_limit := EditorMcpCatalog.PAGE_MAX) -> Dictionary:
-	var view: Variant = _parsed(String(app.call("get_view_json", cursor, limit, import_offset, import_limit)))
+func _view(cursor: int, limit: int, import_offset := 0, import_limit := EditorMcpCatalog.PAGE_MAX, event_cursor := 0,
+		event_limit := EditorMcpCatalog.EVENTS_KEPT) -> Dictionary:
+	var view: Variant = _parsed(String(app.call("get_view_json", cursor, limit, import_offset, import_limit, event_cursor,
+			event_limit)))
 	return view if view is Dictionary else {}
 
 

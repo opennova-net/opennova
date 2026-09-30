@@ -5,18 +5,17 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/run/launch_plan.h>
+#include <editor/run/play_state.h>
 #include <editor/run/process_platform.h>
 
 namespace opennova::editor {
 
 // The editor's one managed game child (ADR 0046 d8/d10): Stopped, Running, or Stopping
-// after a stop request until the child is gone or the deadline forces it. One child at a
-// time: a start while another runs is refused. poll() is non-blocking and is what moves
-// the machine; the UI calls it every frame, the CLI in a loop. The project session
-// (editor/session/project_session.h) owns the one instance; the editor shell's
+// after a stop request until the child is gone or the deadline forces it (PlayState). One
+// child at a time: a start while another runs is refused. poll() is non-blocking and is
+// what moves the machine; the UI calls it every frame, the CLI in a loop. The project
+// session (editor/session/project_session.h) owns the one instance; the editor shell's
 // EditorApp supplies the platform (godot/src/authoring/child_process.h).
-enum class PlayState { Stopped, Running, Stopping };
-
 inline constexpr int64_t kPlayStopDeadlineMs = 5000;
 inline constexpr int64_t kPlayWaitStepMs = 10; // wait()'s pause between two observations
 
@@ -58,7 +57,5 @@ private:
 	bool exited_on_its_own_ = false;
 	int64_t exit_code_ = -1;
 };
-
-const char *play_state_label(PlayState state);
 
 } // namespace opennova::editor

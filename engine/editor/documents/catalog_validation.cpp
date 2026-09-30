@@ -43,7 +43,7 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 	}
 }
 }
-std::vector<Diagnostic> validate_catalog_file(const Document &document) {
+std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
 	if (!catalog) return findings;

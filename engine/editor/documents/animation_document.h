@@ -47,7 +47,7 @@ public:
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<AnimationDocument>(*this);
 	}
 
@@ -78,6 +78,6 @@ bool is_animation_kind(AssetKind kind);
 // and an event bit the engine does not read are notes; a bone whose parent does not come
 // before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
 // warning on its parent.
-std::vector<Diagnostic> validate_animation_file(const Document &document);
+std::vector<Diagnostic> validate_animation_file(const DocumentBase &document);
 
 } // namespace opennova::editor

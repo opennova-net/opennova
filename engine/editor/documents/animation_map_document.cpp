@@ -294,7 +294,7 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 	}
 }
 
-std::vector<Diagnostic> validate_animation_map_file(const Document &document) {
+std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *table = dynamic_cast<const AnimationMapDocument *>(&document);
 	if (!table) return findings;

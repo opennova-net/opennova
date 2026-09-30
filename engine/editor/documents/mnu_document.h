@@ -105,14 +105,15 @@ public:
 	// hold a value the format cannot carry back.
 	std::string copy(const std::vector<NodeAddress> &records) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<MnuDocument>(*this);
 	}
 
 	// The document as the runtime reads it, rebuilt from the rows.
 	mnu::Document native() const;
 	// The menu the game would read were the document saved now: serialize(), read back by
-	// the game's reader, once per revision (a revision names one state, undo included).
+	// the game's reader, once per state (its load generation and revision: a revision names one
+	// state of a load, undo included).
 	// Null when it cannot be written (`issues` gets serialize()'s) or does not read back.
 	std::shared_ptr<const mnu::Document> saved_image(std::vector<SourceIssue> *issues = nullptr) const;
 	// What serialize() makes of the current state, once per state: the text a Save writes and the
@@ -176,23 +177,23 @@ protected:
 private:
 	struct SavedImage {
 		bool made = false;
-		uint64_t revision = 0;
+		uint64_t load_generation = 0, revision = 0;
 		std::shared_ptr<const mnu::Document> image;
 		std::vector<SourceIssue> issues;
 	};
 	mutable SavedImage saved_;
-	// What saved_serialization made, and of which state.
+	// What saved_serialization made, and of which state (its load generation and revision).
 	struct Serialized {
 		bool made = false;
-		uint64_t revision = 0;
+		uint64_t load_generation = 0, revision = 0;
 		SerializeResult result;
 	};
 	mutable Serialized serialized_;
 	// The screens and windows (their identities) no by-name lookup returns, and why, once per
-	// revision.
+	// load generation and revision.
 	struct Lookups {
 		bool made = false;
-		uint64_t revision = 0;
+		uint64_t load_generation = 0, revision = 0;
 		std::unordered_map<NodeId, MenuLookupName::Found> unfound;
 	};
 	mutable Lookups lookups_;
@@ -218,6 +219,6 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 // row with no STATE it acts on) are warnings; the references a menu makes (fonts and colors
 // through the stylesheet, textures, sound banks, other menus and their screens, windows,
 // string tables and string ids) are the asset graph's.
-std::vector<Diagnostic> validate_menu_file(const Document &document);
+std::vector<Diagnostic> validate_menu_file(const DocumentBase &document);
 
 } // namespace opennova::editor

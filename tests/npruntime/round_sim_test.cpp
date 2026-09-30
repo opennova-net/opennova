@@ -1180,7 +1180,8 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 	}
 	{
 		// A zero-damage authoritative hit (the +0x124 damage-state gate) still
-		// runs the callback: the roll and the selection land, nothing else does.
+		// runs the callback: the roll, the selection and the hit's alert leg
+		// land; the health write and the kill do not.
 		DismembermentRig rig(3);
 		w::Entity *victim = rig.world.registry.get(rig.victim);
 		w::AiEntity *body = rig.ai.for_handle(rig.victim);
@@ -1188,7 +1189,8 @@ bool test_person_hit_presentation_legs_run_on_every_hit() {
 		body->health = 100;
 		victim->damage_state = 620;
 		rig.fire();
-		if (!expect(victim->health == 100 && rig.world.round_sim.hits.empty() &&
+		if (!expect(victim->health == 100 && rig.world.round_sim.hits.size() == 1 &&
+		                    rig.world.round_sim.hits[0].damage == 0 &&
 		                    rig.world.round_sim.deaths.empty(),
 		            "a damage-state-gated hit applies no damage"))
 			return false;

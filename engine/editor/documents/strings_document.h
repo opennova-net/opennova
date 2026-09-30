@@ -43,7 +43,7 @@ public:
 	// The ids of a section a first section of the same name shadows are inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<StringsDocument>(*this);
 	}
 	// The table as the engine reads it, rebuilt from the rows.
@@ -79,6 +79,6 @@ bool is_strings_kind(AssetKind kind);
 // reader's own rule (rtxt::File::section_index, the first section of a name in any case): an
 // empty name is an error, a name an earlier section has a warning (a section lookup never
 // reaches it).
-std::vector<Diagnostic> validate_strings_file(const Document &document);
+std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
 
 } // namespace opennova::editor

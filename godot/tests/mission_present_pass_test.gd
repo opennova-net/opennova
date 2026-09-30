@@ -1130,6 +1130,10 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 	assert_eq(_stat(p, "plan_rebuilds"), 3, "row removal cannot retain a stale base")
 	assert_almost_eq(a.position.x, 12.0, 0.001)
 	assert_almost_eq(b.position.x, 20.0, 0.001)
+	# A destroyed entity's row leaves the snapshot; its placed model must not
+	# stay on screen frozen in its last pose [orig: Entity_Destroy @0x43E810].
+	assert_false(b.is_present_visible(), "a model whose row left the snapshot is hidden")
+	assert_true(a.is_present_visible(), "the surviving row keeps its model")
 
 	snap.entities = [
 		{ "bms_id": 33, "handle": 4, "type_id": 103, "pos_x": 30.0 },
@@ -1139,6 +1143,8 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 			"same-size identity replacement is resolved against the new row")
 	assert_almost_eq(a.position.x, 12.0, 0.001)
 	assert_almost_eq(c.position.x, 30.0, 0.001)
+	assert_false(a.is_present_visible(), "the replaced row's model is hidden")
+	assert_true(c.is_present_visible(), "the replacement row's model is shown")
 
 
 func test_freeing_an_unplanned_model_keeps_the_typed_plan() -> void:

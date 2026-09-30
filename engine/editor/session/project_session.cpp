@@ -13,7 +13,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
@@ -125,6 +125,10 @@ std::string ProjectSession::problems_json(const std::string &query) {
 }
 
 Document *ProjectSession::document_for(const std::string &path) {
+	return impl_->documents.records_for(path);
+}
+
+DocumentBase *ProjectSession::document_base_for(const std::string &path) {
 	return impl_->documents.document_for(path);
 }
 
@@ -133,7 +137,7 @@ bool ProjectSession::documents_dirty() const {
 }
 
 bool ProjectSession::project_open() const {
-	return impl_->core.view().project_open;
+	return impl_->core.view().project.open;
 }
 
 const ValidationStats &ProjectSession::validation_stats() const {

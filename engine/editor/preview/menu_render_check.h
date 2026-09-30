@@ -80,7 +80,7 @@ private:
 		std::string game;
 		// The document the renders are of.
 		std::shared_ptr<const MnuDocument> document;
-		uint64_t identity = 0, revision = 0;
+		uint64_t identity = 0, load_generation = 0, revision = 0;
 		std::vector<Screen> screens;
 		std::vector<menu::MenuDependency> dependencies;
 		std::vector<std::string> variables; // the variables its text names, sorted (upper case)

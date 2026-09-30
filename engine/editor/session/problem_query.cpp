@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
@@ -71,9 +72,9 @@ bool about_the_file(const std::string &code) {
 bool in_scope(const Diagnostic &d, ProblemScope scope, const SessionView &view) {
 	switch (scope) {
 	case ProblemScope::Project: return true;
-	case ProblemScope::ActiveFile: return !d.asset.empty() && d.asset == view.active_document;
+	case ProblemScope::ActiveFile: return !d.asset.empty() && d.asset == view.documents.active;
 	case ProblemScope::OpenFiles:
-		for (const auto &document : view.documents)
+		for (const auto &document : view.documents.open)
 			if (document && document->path() == d.asset) return true;
 		return false;
 	}
@@ -106,7 +107,7 @@ std::string problem_family_title(const std::string &code) {
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view) {
 	ProblemAnswer answer;
 	answer.grouped = query.grouping != ProblemGrouping::None;
-	const std::vector<Diagnostic> &findings = view.diagnostics;
+	const std::vector<Diagnostic> &findings = view.findings.diagnostics;
 	for (const Diagnostic &d : findings) tally(d.severity, answer.errors, answer.warnings, answer.infos);
 	const std::string needle = strutil::to_lower(query.text);
 	// Only the fixable: the view's findings read once for all of them, not once per finding.
@@ -170,7 +171,7 @@ const ProblemAnswer &ProblemQueryCache::answer(const ProblemQuery &query, const 
 
 ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView &view) {
 	ProblemLocation location;
-	const AssetEntry *entry = view.scan.at_path(diagnostic.asset);
+	const AssetEntry *entry = view.project.scan->at_path(diagnostic.asset);
 	if (!entry) return location;
 	location.path = entry->relative_path;
 	location.in_files = !is_editable_kind(entry->kind) || about_the_file(diagnostic.code);

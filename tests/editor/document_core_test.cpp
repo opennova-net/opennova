@@ -14,7 +14,16 @@
 // batch filling in the records it makes (batch_made). S11a: the saved baseline and what
 // changed since it (a field, a record, the file-wide state, the edits that give a field
 // back), and the canonical rewrite. S11f: a document read from bytes alone has the rows a
-// file's load gives and no file to save to.
+// file's load gives and no file to save to. S13 D6: a change the type makes in C++ (an Apply
+// edit's payload) through apply_payload, to the record, what it holds and the file-wide state in
+// one step, one step with the batch's other edits and folding under its gesture, no step when it
+// changes nothing, and, naming no row, to the file-wide state alone (apply_file_payload); a
+// payload of another kind or none refused (document.payload); a load that fails leaving the
+// document as it was; and a document of another kind than records (DocumentBase alone, over a
+// byte blob) loaded, saved with its fingerprint, refusing a save over a file changed outside the
+// editor, changed by a payload its type made and undone through its own history, held by the
+// base to its rules (a snapshot and a blocked document take no edit, undo or redo, a blocked one
+// no save), holding no records.
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -27,9 +36,10 @@
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
+#include "editor/blob_document.h"
 #include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
@@ -143,6 +153,22 @@ bool read_records(std::istream &in, int base, std::vector<FakeItem> &items, std:
 	return true;
 }
 
+// A change made in C++, which an Apply edit carries to the fake type (S13 D6): an item's new name,
+// a leaf added to it with a fresh identity, the file's note; each left empty changes nothing.
+struct FakeChange : EditPayload {
+	std::string name, leaf, note;
+	const char *token() const override { return "fake.change"; }
+};
+
+std::shared_ptr<FakeChange> fake_change(std::string name, std::string leaf = {},
+                                        std::string note = {}) {
+	auto change = std::make_shared<FakeChange>();
+	change->name = std::move(name);
+	change->leaf = std::move(leaf);
+	change->note = std::move(note);
+	return change;
+}
+
 class FakeDocument : public Document {
 public:
 	const std::vector<RecordKindRow> &kinds() const override {
@@ -193,7 +219,7 @@ public:
 		}
 		return result;
 	}
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
 	// The payload: "items" or "leaves", then the records in the file's own form.
 	std::string copy(const std::vector<NodeAddress> &records) const override {
 		if (records.empty()) return std::string();
@@ -434,9 +460,56 @@ protected:
 		error = "Vetoed.";
 		return false;
 	}
+	// A change made in C++ (FakeChange) of an item and the note; any other change refused.
+	bool apply_payload(Node &node, const NodeAddress &address, const EditPayload &payload,
+	                   std::shared_ptr<const FileState> &state, const IdAllocator &allocate,
+	                   bool &changed, std::string &error) override {
+		const auto *change = dynamic_cast<const FakeChange *>(&payload);
+		FakeItem *item = nullptr;
+		if (change && address.kind == kItem) item = find_item(group_in(node).items, address.child);
+		if (!item) {
+			error = "Not a fake change.";
+			return false;
+		}
+		changed = false;
+		if (!change->name.empty() && change->name != item->name) {
+			item->name = change->name;
+			changed = true;
+		}
+		if (!change->leaf.empty()) {
+			item->leaves.push_back({allocate(), change->leaf});
+			changed = true;
+		}
+		bool noted = false;
+		if (!set_note(state, change->note, noted, error)) return false;
+		changed = changed || noted;
+		return true;
+	}
+	// The note alone (an Apply naming no row); a change naming an item's parts refused.
+	bool apply_file_payload(std::shared_ptr<const FileState> &state, const EditPayload &payload,
+	                        bool &changed, std::string &error) override {
+		const auto *change = dynamic_cast<const FakeChange *>(&payload);
+		if (!change || !change->name.empty() || !change->leaf.empty()) {
+			error = "A name or a leaf needs its item.";
+			return false;
+		}
+		return set_note(state, change->note, changed, error);
+	}
+	// The note set in a copy of `state` when it differs ("" leaves it).
+	static bool set_note(std::shared_ptr<const FileState> &state, const std::string &text,
+	                     bool &changed, std::string &) {
+		const auto *now = static_cast<const FakeState *>(state.get());
+		changed = !text.empty() && (!now || now->note != text);
+		if (!changed) return true;
+		auto note = now ? std::make_shared<FakeState>(*now) : std::make_shared<FakeState>();
+		note->note = text;
+		state = note;
+		return true;
+	}
 
 public:
 	std::function<bool(const Change &)> veto; // false refuses the change (unset: every change is accepted)
+	const std::string &game_name() const { return game(); }
 
 private:
 	FakeGroup &group_of(NodeId id) const { return const_cast<FakeGroup &>(static_cast<const FakeGroup &>(*row(id))); }
@@ -549,7 +622,7 @@ public:
 		}
 		return result;
 	}
-	std::unique_ptr<Document> snapshot() const override { return std::make_unique<FlatDocument>(*this); }
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<FlatDocument>(*this); }
 
 protected:
 	// A refinement that would make the read-only serial writable (the base puts the schema's
@@ -1106,8 +1179,8 @@ static int test_batch_made() {
 	TEST_EXPECT(document.record_path(copy) == "alpha/a2copy" && document.placement(copy, at) && at.index == 2);
 	// The session selects what no other made record holds: the new item and the copy.
 	SessionView view;
-	view.select_added(document);
-	TEST_EXPECT(view.selected == std::vector<NodeAddress>({fresh, copy}) && view.selection == fresh);
+	view.documents.select_added(document);
+	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({fresh, copy}) && view.documents.selection == fresh);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	document.redo();
@@ -1183,45 +1256,50 @@ static int test_selection() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	SessionView view;
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.y, SelectMode::Add);
-	TEST_EXPECT(view.selection == fake.y && view.selected == std::vector<NodeAddress>({fake.x, fake.y}));
-	view.select(document.path(), fake.y, SelectMode::Toggle);
-	TEST_EXPECT(view.selection == fake.x && view.selected == std::vector<NodeAddress>({fake.x}));
-	view.select(document.path(), fake.a2, SelectMode::Toggle);
-	TEST_EXPECT(view.selection == fake.a2 && view.selected.size() == 2);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.y, SelectMode::Add);
+	TEST_EXPECT(view.documents.selection == fake.y &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x, fake.y }));
+	view.documents.select(document.path(), fake.y, SelectMode::Toggle);
+	TEST_EXPECT(view.documents.selection == fake.x &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
+	view.documents.select(document.path(), fake.a2, SelectMode::Toggle);
+	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected.size() == 2);
 	// Another row (or another document) starts over, whatever the mode.
-	view.select(document.path(), fake.b1, SelectMode::Add);
-	TEST_EXPECT(view.selection == fake.b1 && view.selected == std::vector<NodeAddress>({fake.b1}));
-	view.select("other.txt", fake.x, SelectMode::Add);
-	TEST_EXPECT(view.active_document == "other.txt" && view.selected == std::vector<NodeAddress>({fake.x}));
-	view.select(document.path(), NodeAddress(), SelectMode::Replace);
-	TEST_EXPECT(view.selected.empty() && view.selection == NodeAddress());
+	view.documents.select(document.path(), fake.b1, SelectMode::Add);
+	TEST_EXPECT(view.documents.selection == fake.b1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.b1 }));
+	view.documents.select("other.txt", fake.x, SelectMode::Add);
+	TEST_EXPECT(view.documents.active == "other.txt" &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
+	view.documents.select(document.path(), NodeAddress(), SelectMode::Replace);
+	TEST_EXPECT(view.documents.selected.empty() && view.documents.selection == NodeAddress());
 
 	// Removing the primary selects its owner.
 	Diagnostic error;
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.a1b, SelectMode::Add);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.a1b, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a1b), error));
-	view.repair_selection(document, fake.a1);
-	TEST_EXPECT(view.selection == fake.a1 && view.selected == std::vector<NodeAddress>({fake.a1}));
+	view.documents.repair_selection(document, fake.a1);
+	TEST_EXPECT(view.documents.selection == fake.a1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.a1 }));
 	document.undo();
 	// A record removed that was selected but not the primary just drops out.
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.y, SelectMode::Add);
-	view.select(document.path(), fake.a2, SelectMode::Add);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.y, SelectMode::Add);
+	view.documents.select(document.path(), fake.a2, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error));
-	view.repair_selection(document, fake.alpha);
-	TEST_EXPECT(view.selection == fake.a2 && view.selected == std::vector<NodeAddress>({fake.x, fake.a2}));
+	view.documents.repair_selection(document, fake.alpha);
+	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected == std::vector<NodeAddress>({fake.x, fake.a2}));
 	document.undo();
 	// A record added is the selection; its undo leaves the last one still there, or none.
 	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
-	view.select_added(document);
+	view.documents.select_added(document);
 	const NodeAddress duplicate = document.address_of(document.last_added());
-	TEST_EXPECT(view.selection == duplicate && view.selected == std::vector<NodeAddress>({duplicate}));
+	TEST_EXPECT(view.documents.selection == duplicate && view.documents.selected == std::vector<NodeAddress>({duplicate}));
 	document.undo();
-	view.repair_selection(document, NodeAddress());
-	TEST_EXPECT(view.selection == NodeAddress() && view.selected.empty());
+	view.documents.repair_selection(document, NodeAddress());
+	TEST_EXPECT(view.documents.selection == NodeAddress() && view.documents.selected.empty());
 	return 0;
 }
 
@@ -1565,7 +1643,7 @@ static int test_snapshot() {
 	Diagnostic error;
 	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
 	const std::string edited = document.serialize().text;
-	std::unique_ptr<Document> snapshot = document.snapshot();
+	std::unique_ptr<Document> snapshot = records_of(document.snapshot());
 	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !document.is_snapshot());
 	TEST_EXPECT(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
 	            snapshot->dirty() && snapshot->can_undo() && snapshot->rows() == document.rows());
@@ -1608,8 +1686,274 @@ static int test_snapshot() {
 	return 0;
 }
 
+// S13 D6: a change the type makes in C++ (Edit Apply, its EditPayload), applied through the type's
+// apply_payload to the record, what it holds and the file-wide state: one undo step, undone and
+// redone byte for byte (a rename; a rename with the note; a leaf added under a fresh identity);
+// one step with the Set of its batch; a gesture's Applies folding into one; none for a payload
+// that changes nothing. Naming no row, the file-wide state alone (apply_file_payload): one step,
+// a gesture's folding into one, none when it changes nothing. Refused, nothing committed: another
+// type's payload or none (document.payload, the type's words or the base's), a batch holding one,
+// a file payload naming an item's parts; and every one by a type that takes none (the defaults).
+static int test_apply_payload() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	Value name;
+	const auto apply = [&](const NodeAddress &address, std::shared_ptr<const EditPayload> payload,
+	                       uint64_t gesture = 0) {
+		Edit edit = make(EditOperation::Apply, address);
+		edit.payload = std::move(payload);
+		edit.gesture = gesture;
+		return edit;
+	};
+	const auto name_of_a1 = [&] {
+		return document.get(fake.a1, "name", name) ? std::get<std::string>(name) : std::string();
+	};
+	const auto note = [&] {
+		const auto *state = static_cast<const FakeState *>(document.file_state());
+		return state ? state->note : std::string();
+	};
+	const auto text = [&] { return document.serialize().text; };
+	TEST_EXPECT(document.apply(apply(fake.a1, fake_change("renamed")), error));
+	TEST_EXPECT(name_of_a1() == "renamed" && document.revision() == 1);
+	TEST_EXPECT(document.dirty() && document.can_undo());
+	const std::string renamed = text();
+	TEST_EXPECT(renamed != fake.original);
+	document.undo();
+	TEST_EXPECT(text() == fake.original && !document.dirty());
+	document.redo();
+	TEST_EXPECT(text() == renamed && name_of_a1() == "renamed");
+	// A payload that changes nothing (the name the item has) is no step.
+	TEST_EXPECT(document.apply(apply(fake.a1, fake_change("renamed")), error));
+	TEST_EXPECT(document.revision() == 1);
+	// The record and the file-wide state in one step: the item renamed and the note written.
+	TEST_EXPECT(document.apply(apply(fake.a1, fake_change("noted", "", "a note")), error));
+	TEST_EXPECT(name_of_a1() == "noted" && note() == "a note" && document.revision() == 2);
+	TEST_EXPECT(document.file_state_changed() && text().rfind("N a note\n", 0) == 0);
+	document.undo();
+	TEST_EXPECT(text() == renamed && note().empty() && !document.file_state_changed());
+	// What the item holds: a leaf added under a fresh identity, found where it is, undone away.
+	TEST_EXPECT(document.apply(apply(fake.a1, fake_change("", "sprout")), error));
+	NodeId sprout = 0;
+	for (const Document::Collection &collection : document.collections_of(fake.a1))
+		if (collection.spec.kind == kLeaf && !collection.ids.empty())
+			sprout = collection.ids.back();
+	const NodeAddress sprouted = document.address_of(sprout);
+	TEST_EXPECT(sprout != fake.x.child && sprout != fake.y.child && sprouted.kind == kLeaf &&
+	            document.record_name(sprouted) == "sprout");
+	document.undo();
+	TEST_EXPECT(text() == renamed && !document.address_of(sprout).row);
+	// With a Set in its batch: one step.
+	const Edit again = apply(fake.a1, fake_change("again"));
+	TEST_EXPECT(document.apply({again, set(fake.x, "name", std::string("xx"))}, error));
+	TEST_EXPECT(name_of_a1() == "again" && document.revision() == 4);
+	document.undo();
+	TEST_EXPECT(text() == renamed);
+	// A gesture's Applies fold into one step.
+	const uint64_t gesture = next_edit_gesture();
+	for (const char *new_name : {"g1", "g2", "g3"})
+		TEST_EXPECT(document.apply(apply(fake.a1, fake_change(new_name), gesture), error));
+	document.end_edit_group();
+	TEST_EXPECT(name_of_a1() == "g3");
+	document.undo();
+	TEST_EXPECT(text() == renamed && name_of_a1() == "renamed");
+	// Naming no row: the file-wide state alone, one step; the same note again is no step; a
+	// gesture's fold into one.
+	const uint64_t before_note = document.revision();
+	TEST_EXPECT(document.apply(apply({}, fake_change("", "", "file")), error) && note() == "file");
+	TEST_EXPECT(document.revision() != before_note && text() == "N file\n" + renamed);
+	const uint64_t noted = document.revision();
+	TEST_EXPECT(document.apply(apply({}, fake_change("", "", "file")), error));
+	TEST_EXPECT(document.revision() == noted);
+	document.undo();
+	TEST_EXPECT(text() == renamed && note().empty());
+	const uint64_t strokes = next_edit_gesture();
+	for (const char *new_note : {"n1", "n2", "n3"})
+		TEST_EXPECT(document.apply(apply({}, fake_change("", "", new_note), strokes), error));
+	document.end_edit_group();
+	TEST_EXPECT(note() == "n3");
+	document.undo();
+	TEST_EXPECT(text() == renamed && note().empty());
+	// Refused, nothing committed: another's payload (the type's words), none at all, a batch
+	// holding one, a file payload naming an item's parts, and one alongside other edits.
+	struct Other : EditPayload {
+		const char *token() const override { return "other"; }
+	};
+	const uint64_t revision = document.revision();
+	const Edit other = apply(fake.a1, std::make_shared<Other>());
+	TEST_EXPECT(!document.apply(other, error) && error.code == "document.payload" &&
+	            error.message == "Not a fake change.");
+	TEST_EXPECT(!document.apply(make(EditOperation::Apply, fake.a1), error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(!document.apply({set(fake.x, "name", std::string("zz")), other}, error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(!document.apply(apply({}, fake_change("name")), error) &&
+	            error.code == "document.payload" &&
+	            error.message == "A name or a leaf needs its item.");
+	const Edit file_note = apply({}, fake_change("", "", "x"));
+	TEST_EXPECT(!document.apply({file_note, set(fake.x, "name", std::string("zz"))}, error) &&
+	            error.code == "document.batch");
+	TEST_EXPECT(document.revision() == revision && text() == renamed);
+	// A type that takes none refuses every one (the defaults).
+	FlatDocument flat;
+	TEST_EXPECT(flat.load_bytes(bytes_of("L a 1 TAG1\n"), "flat.txt", AssetKind::Unknown, "jo",
+	                            error));
+	const std::string refused = "This document does not take that change.";
+	TEST_EXPECT(!flat.apply(apply({flat.rows()[0]->id, kLine, 0}, fake_change("b")), error) &&
+	            error.code == "document.payload" && error.message == refused);
+	TEST_EXPECT(!flat.apply(apply({}, fake_change("", "", "n")), error) &&
+	            error.code == "document.payload" && error.message == refused);
+	TEST_EXPECT(flat.revision() == 0);
+	return 0;
+}
+
+// S13 D6: a load that fails leaves the document as it was: its rows, path, kind, game, load
+// generation and the file it matches.
+static int test_failed_load() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	const uint64_t generation = document.load_generation();
+	const std::vector<std::shared_ptr<const Node>> rows = document.rows();
+	TEST_EXPECT(!document.load_bytes(bytes_of("G broken\nI 3 too_deep\n"), "other.txt",
+	                                 AssetKind::Menu, "dfx", error));
+	TEST_EXPECT(error.code == "document.parse" && error.asset == "other.txt");
+	TEST_EXPECT(document.path() == "fake.txt" && document.kind() == AssetKind::Unknown &&
+	            document.game_name() == "jo");
+	TEST_EXPECT(document.load_generation() == generation && document.rows() == rows);
+	TEST_EXPECT(document.serialize().text == fake.original && document.matches_file());
+	TEST_EXPECT(!document.dirty());
+	// A file that does not read leaves it so too.
+	TEST_EXPECT(!document.load(fake.dir.file("missing.txt"), "missing.txt", AssetKind::Menu, "dfx",
+	                           error) &&
+	            error.code == "document.read");
+	TEST_EXPECT(document.path() == "fake.txt" && document.load_generation() == generation);
+	return 0;
+}
+
+// S13 D6: the lifecycle alone, over a document of another kind than records (BlobDocument, the
+// base alone): loaded (its fingerprint and a load generation taken, its ignored line an issue),
+// changed by a payload its type made and by nothing else, undone and redone through its own
+// history (dirty against its saved checkpoint), saved (the file holding what it serializes, the
+// issue gone with the line, nothing more to rewrite), a save refused over a file changed outside
+// the editor (document.conflict), a snapshot sharing it that the base refuses an edit, a save and
+// a load (document.snapshot) and whose undo it ignores, loaded again in place under a new load
+// generation, and a document read from bytes with no file to save to; a blocked one refused its
+// edits (document.parse), its undo and redo, and its save (document.unserializable, the first
+// blocking finding) by the base, the type testing neither; a load that fails leaving it as it
+// was; and no records (as_records, records_of).
+static int test_document_base() {
+	using editor_test::BlobDocument;
+	using editor_test::BlobReplace;
+	editor_test::TempProjectDir dir{"opennova_document_base_test"};
+	const std::string file = dir.file("blob.txt");
+	const auto file_text = [&] {
+		std::vector<uint8_t> bytes;
+		std::string message;
+		if (!read_file_bytes(file, bytes, message)) return std::string("<unread>");
+		return std::string(bytes.begin(), bytes.end());
+	};
+	const std::string original = "one\n# a note\ntwo\n", edited = "one\ntwo\nthree\n";
+	TEST_EXPECT(editor_test::write_text(file, original));
+	BlobDocument blob;
+	Diagnostic error;
+	TEST_EXPECT(blob.load_generation() == 0);
+	TEST_EXPECT(blob.load(file, "blob.txt", AssetKind::Unknown, "jo", error));
+	const uint64_t first_load = blob.load_generation();
+	TEST_EXPECT(first_load != 0 && blob.path() == "blob.txt" && blob.revision() == 0);
+	TEST_EXPECT(!blob.dirty() && !blob.can_undo() && blob.history_bytes() == 0);
+	TEST_EXPECT(blob.matches_file() && !blob.wrote_file());
+	TEST_EXPECT(blob.issues().size() == 1 && blob.ignored_lines() == 1 && !blob.blocked());
+	// The note it would drop: a rewrite.
+	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::Rewrite);
+	TEST_EXPECT(blob.as_records() == nullptr && records_of(blob) == nullptr);
+	// A payload its type made changes it; anything else is refused, nothing changed.
+	Edit replace;
+	replace.operation = EditOperation::Apply;
+	replace.payload = std::make_shared<BlobReplace>(edited);
+	TEST_EXPECT(blob.apply(replace, error) && blob.blob() == edited && blob.revision() == 1);
+	TEST_EXPECT(blob.dirty() && blob.can_undo() && blob.history_bytes() == original.size());
+	TEST_EXPECT(!blob.apply(set({1, 0, 0}, "name", std::string("x")), error) &&
+	            error.code == "document.payload");
+	TEST_EXPECT(blob.revision() == 1 && blob.blob() == edited);
+	// Its own history: undone to the file as loaded (clean again), redone.
+	blob.undo();
+	TEST_EXPECT(blob.blob() == original && blob.revision() == 0 && !blob.dirty());
+	TEST_EXPECT(blob.can_redo());
+	blob.redo();
+	TEST_EXPECT(blob.revision() == 1 && blob.dirty() && !blob.can_redo());
+	// Saved: the file holds what it serializes, the note's issue is gone with the line.
+	TEST_EXPECT(blob.save(error) && blob.wrote_file() && !blob.dirty() && blob.matches_file());
+	TEST_EXPECT(file_text() == edited && blob.issues().empty() && blob.ignored_lines() == 0);
+	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::None);
+	blob.undo();
+	TEST_EXPECT(blob.dirty());
+	blob.redo();
+	TEST_EXPECT(!blob.dirty()); // back at the saved checkpoint
+	// A file changed outside the editor: it no longer matches, and a save is refused.
+	TEST_EXPECT(editor_test::write_text(file, "changed\n") && !blob.matches_file());
+	replace.payload = std::make_shared<BlobReplace>("four\n");
+	TEST_EXPECT(blob.apply(replace, error) && !blob.save(error) &&
+	            error.code == "document.conflict");
+	TEST_EXPECT(file_text() == "changed\n" && blob.dirty());
+	// A snapshot shares it and takes nothing: the base refuses for the type.
+	const std::unique_ptr<DocumentBase> snapshot = blob.snapshot();
+	TEST_EXPECT(snapshot && snapshot->is_snapshot() && !blob.is_snapshot());
+	TEST_EXPECT(!snapshot->as_records() && snapshot->identity() == blob.identity());
+	TEST_EXPECT(snapshot->load_generation() == blob.load_generation() &&
+	            snapshot->revision() == blob.revision() && snapshot->serialize().text == "four\n");
+	TEST_EXPECT(!snapshot->apply(replace, error) && error.code == "document.snapshot");
+	snapshot->undo();
+	TEST_EXPECT(snapshot->revision() == blob.revision() &&
+	            snapshot->serialize().text == "four\n");
+	TEST_EXPECT(!snapshot->save(error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->load_bytes(bytes_of("x\n"), "blob.txt", AssetKind::Unknown, "jo",
+	                                  error) &&
+	            error.code == "document.snapshot");
+	// Loaded again in place: a new load generation, the revisions from 0, the file matching.
+	TEST_EXPECT(blob.load(file, "blob.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(blob.load_generation() > first_load && blob.revision() == 0);
+	TEST_EXPECT(!blob.dirty() && !blob.can_undo() && blob.blob() == "changed\n");
+	TEST_EXPECT(blob.matches_file() && !blob.wrote_file());
+	// A load that does not read leaves it as it was: path, kind, game, generation, the file.
+	const uint64_t loaded = blob.load_generation();
+	TEST_EXPECT(!blob.load_bytes(bytes_of("FAIL\n"), "other.txt", AssetKind::Menu, "dfx", error) &&
+	            error.code == "document.parse");
+	TEST_EXPECT(blob.path() == "blob.txt" && blob.kind() == AssetKind::Unknown &&
+	            blob.game_name() == "jo");
+	TEST_EXPECT(blob.load_generation() == loaded && blob.blob() == "changed\n");
+	TEST_EXPECT(blob.matches_file());
+	// Blocked by what its own save wrote (a line it cannot carry, read back): the base refuses its
+	// edit and its save, and does nothing on its undo or redo, though its history holds a step.
+	replace.payload = std::make_shared<BlobReplace>("one\n! cannot carry\n");
+	TEST_EXPECT(blob.apply(replace, error) && blob.save(error));
+	TEST_EXPECT(blob.blocked() && blob.can_undo());
+	const uint64_t blocked_at = blob.revision();
+	replace.payload = std::make_shared<BlobReplace>("five\n");
+	TEST_EXPECT(!blob.apply(replace, error) && error.code == "document.parse" &&
+	            blob.revision() == blocked_at);
+	TEST_EXPECT(!blob.save(error) && error.code == "document.unserializable" &&
+	            error.message == "The blob cannot carry this line.");
+	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
+	blob.undo();
+	TEST_EXPECT(blob.revision() == blocked_at && blob.blob() == "one\n! cannot carry\n");
+	blob.redo();
+	TEST_EXPECT(blob.revision() == blocked_at && file_text() == "one\n! cannot carry\n");
+	// Read from bytes: no file to save to.
+	BlobDocument bytes;
+	TEST_EXPECT(bytes.load_bytes(bytes_of("b\n"), "b.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(bytes.load_generation() > blob.load_generation());
+	TEST_EXPECT(!bytes.save(error) && error.code == "document.no_file");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_document_base();
+	failures += test_apply_payload();
+	failures += test_failed_load();
 	failures += test_per_call_costs();
 	failures += test_moved_rows();
 	failures += test_record_index();

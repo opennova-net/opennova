@@ -128,7 +128,7 @@ public:
 	// A user point past the first 16 is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
-	std::unique_ptr<Document> snapshot() const override {
+	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<ModelDocument>(*this);
 	}
 
@@ -172,6 +172,6 @@ bool is_model_kind(AssetKind kind);
 // user point names, a shader or register name the engine does not know, LOD thresholds
 // that do not descend are warnings; more than 16 user points and a material no strip
 // draws with are notes. Textures are the asset graph's.
-std::vector<Diagnostic> validate_model_file(const Document &document);
+std::vector<Diagnostic> validate_model_file(const DocumentBase &document);
 
 } // namespace opennova::editor

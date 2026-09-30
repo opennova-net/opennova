@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/strings_view.h>
 #include <editor/ui/styles_view.h>
+#include <editor/ui/view_event_mailbox.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
@@ -28,7 +30,9 @@ class NewProjectForm;
 // its document the active one, a click in the frame the active document changed included.
 // A tab shows its type's view (a catalog, a string table, a stylesheet, a menu; a model, a
 // clip or an animation table as its records' outline); each shows the selection a Go to, a
-// find or a Problems row moves there (RecordReveal; a menu's window tree its own way: MenuView).
+// find or a Problems row moves there (RecordReveal; a menu's window tree its own way: MenuView),
+// and again for each RevealRecord view event its document is sent, which waits until that
+// document's view draws.
 // With no project open it is the
 // welcome view; with nothing open it says how to open a file. Ctrl+F (Edit > Find...) opens the
 // find bar over the active tab's view: every field whose value as the Inspector shows it holds
@@ -52,10 +56,20 @@ public:
 	void draw_modals();
 	// Opens the find bar with the keyboard in its text (Edit > Find..., Ctrl+F).
 	void open_find();
+	// A RevealRecord event, held for the view of its document until that view draws (a document
+	// closed first drops it).
+	void receive(const ViewEvent &event) { events_[event.path].post(event); }
+	// The events held for the document at `path` until its view draws.
+	size_t held_events(const std::string &path) const {
+		const auto found = events_.find(path);
+		return found == events_.end() ? 0 : found->second.held();
+	}
 
 private:
 	void draw_tabs(const SessionView &view);
 	void draw_view(const Document &document);
+	// A RevealRecord event for `document`, handed to the view that draws it.
+	void reveal_again(const Document &document);
 	void draw_find(const Document &document);
 	// The find bar's hit `index` shown: its record selected, its field revealed.
 	void show_hit(const Document &document, size_t index);
@@ -67,6 +81,7 @@ private:
 	StylesView styles_;
 	MenuView menu_;
 	RecordReveal outline_; // the outline's reveal of the selection (a model, a clip, an animation table)
+	std::map<std::string, ViewEventMailbox<>> events_; // by the path of the document they are for
 	// The active document the tab bar last selected the tab of, and the document whose tab
 	// the user chose, the OpenDocument raised for it.
 	std::string followed_;

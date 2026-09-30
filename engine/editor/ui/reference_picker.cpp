@@ -1,7 +1,8 @@
 #include "reference_picker.h"
 
 #include <editor/graph/reference_queries.h>
-#include <editor/session/session_view.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -32,6 +33,10 @@ std::string choice_tip(const ReferenceChoice &choice) {
 
 } // namespace
 
+ReferencePicker::ReferencePicker() = default;
+
+ReferencePicker::~ReferencePicker() = default;
+
 ReferencePicker::ListKey ReferencePicker::cache_key(const SessionView &view,
 		const Document &document) {
 	const RevisionKey reads = revision_key(view.revisions, {ViewConcern::Graph, ViewConcern::Files,
@@ -46,8 +51,8 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	popup.view = &view;
 	popup.key = key;
 	++lists_made_;
-	popup.choices =
-			view.graph ? reference_choices(*view.graph, field) : std::vector<ReferenceChoice>();
+	popup.choices = view.findings.graph ? reference_choices(*view.findings.graph, field)
+										: std::vector<ReferenceChoice>();
 	if (!others)
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
 		                                   [&](const ReferenceChoice &choice) { return choice.kind != field.reference; }),
@@ -56,8 +61,8 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	// The finding the graph makes of this value, as Problems shows it, for its fixes (a %NAME% the
 	// stylesheets do not define: the variable's).
 	Diagnostic finding;
-	popup.missing =
-			view.graph && missing_finding(*view.graph, document, record, field, value, finding);
+	popup.missing = view.findings.graph &&
+			missing_finding(*view.findings.graph, document, record, field, value, finding);
 	if (popup.missing) popup.fixes = fixes_for(finding, view);
 }
 
@@ -67,7 +72,7 @@ void ReferencePicker::prune(const SessionView &view) {
 	pruned_view_ = &view;
 	pruned_key_ = key;
 	std::set<uint64_t> open;
-	for (const auto &document : view.documents)
+	for (const auto &document : view.documents.open)
 		if (document) open.insert(document->identity());
 	for (auto it = popups_.begin(); it != popups_.end();)
 		it = open.count(it->first.document) ? std::next(it) : popups_.erase(it);
@@ -196,7 +201,7 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field
 		const char *data = static_cast<const char *>(dragged->Data);
 		const std::string path(data, strnlen(data, size_t(dragged->DataSize)));
 		const AssetEntry *entry = nullptr;
-		for (const AssetEntry &candidate : view.scan.entries)
+		for (const AssetEntry &candidate : view.project.scan->entries)
 			if (candidate.relative_path == path) entry = &candidate;
 		if (entry && file_serves_reference(entry->kind, field.reference, field.loader_arg) &&
 		    ImGui::AcceptDragDropPayload(kFileDragPayload)) {

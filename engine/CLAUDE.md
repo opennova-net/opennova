@@ -44,10 +44,13 @@
     the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
     the request table (S13 A4, `request_kinds`: one row per request kind, its token, who
     serves it, the typed fields it takes (`request_fields`), its policy; a request of each
-    kind from `request_factories.h`); its wire form, and the record batch the editor MCP names
-    records by), `model` (the
+    kind from `request_factories.h`); its wire form, the view the windows read
+    (`session/view`, S13 V4: sub-views of the project, the documents, the findings, the
+    activity and the dialogs, and the events a request posts for one window to take once),
+    and the record batch the editor MCP names records by), `model` (the
     neutral editing core, ADR 0046 d9:
-    `Document`, `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
+    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the

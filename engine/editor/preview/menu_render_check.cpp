@@ -367,12 +367,14 @@ bool MenuRenderCheck::update(const ValidationInput &input, const FileSource &fil
 			continue;
 		}
 		bool stale = !kept.document || kept.identity != menu->identity() ||
+				kept.load_generation != menu->load_generation() ||
 				kept.revision != menu->revision() || names_changed(kept.variables);
 		for (size_t i = 0; !stale && i < kept.dependencies.size(); ++i)
 			stale = files.stamp(kept.dependencies[i].name) != kept.dependencies[i].stamp;
 		if (!stale) continue;
 		kept.document = document;
 		kept.identity = menu->identity();
+		kept.load_generation = menu->load_generation();
 		kept.revision = menu->revision();
 		render_menu_(kept, *menu, files, vars);
 		++rendered_;

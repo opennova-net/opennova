@@ -11,10 +11,11 @@
 #include <editor/documents/mns_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/mns/mns_document.h>
 
 #include "common/retail_paths.h"
@@ -298,13 +299,13 @@ static int test_validation() {
 	const SessionView &view = session.view();
 	const auto unused = [&view]() {
 		std::vector<std::string> names;
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "style.unused" && d.severity == DiagnosticSeverity::Info && d.field == "value")
 				names.push_back(d.record);
 		std::sort(names.begin(), names.end());
 		return names;
 	};
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code.rfind("style.", 0) == 0 && d.code != "style.unused") {
 			std::fprintf(stderr, "blank project: %s %s\n", d.code.c_str(), d.message.c_str());
 			return 1;
@@ -324,7 +325,7 @@ static int test_validation() {
 	TEST_EXPECT(left.size() == 5 && std::find(left.begin(), left.end(), "TRIM_COLOR") == left.end());
 	session.handle(request::undo(menu->path()));
 	session.handle(request::close_document(menu->path()));
-	const AssetEntry *style = view.scan.find("menu_style.mns");
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
 	// LF line ends, a lone backslash, a stray #else, and a stylesheet by another name.
@@ -332,19 +333,19 @@ static int test_validation() {
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
 	session.handle(request::rescan());
 	bool line_ending = false;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code == "style.line_ending") {
 			line_ending = true;
 			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.line == 1 && d.record == "A");
 		}
 	}
 	TEST_EXPECT(line_ending);
-	TEST_EXPECT(has_code(view.diagnostics, "style.lone_backslash"));
-	TEST_EXPECT(has_code(view.diagnostics, "style.unbalanced_else"));
-	TEST_EXPECT(has_code(view.diagnostics, "style.not_loaded"));
+	TEST_EXPECT(has_code(view.findings.diagnostics, "style.lone_backslash"));
+	TEST_EXPECT(has_code(view.findings.diagnostics, "style.unbalanced_else"));
+	TEST_EXPECT(has_code(view.findings.diagnostics, "style.not_loaded"));
 	// The LF sheet opens with CR LF rows: the game's reading of what Save writes. The file
 	// keeps its LF ends (and the finding) until Save writes it; then the build takes it.
-	const AssetEntry *brand = view.scan.find("brand.mns");
+	const AssetEntry *brand = view.project.scan->find("brand.mns");
 	TEST_EXPECT(brand != nullptr);
 	if (!brand) return 1;
 	const std::string brand_path = brand->relative_path;
@@ -357,10 +358,10 @@ static int test_validation() {
 	TEST_EXPECT(find_definition(AssetGraph(), *styles, "B", b));
 	EditorRequest edit = request::edit_record(brand_path, set(b, "value", std::string("3")));
 	session.handle(edit);
-	TEST_EXPECT(styles->dirty() && has_code(view.diagnostics, "style.line_ending"));
+	TEST_EXPECT(styles->dirty() && has_code(view.findings.diagnostics, "style.line_ending"));
 	session.handle(request::save_all());
 	TEST_EXPECT(!styles->dirty() && styles->wrote_file());
-	TEST_EXPECT(!has_code(view.diagnostics, "style.line_ending"));
+	TEST_EXPECT(!has_code(view.findings.diagnostics, "style.line_ending"));
 	std::string written, message;
 	TEST_EXPECT(read_file_text(dir.file("project") + "/" + brand_path, written, message) && written == "A x\\ y\r\nB 3\r\n");
 	const opennova::mns::EvaluationResult evaluated = styles->native().evaluate();
@@ -368,20 +369,20 @@ static int test_validation() {
 	TEST_EXPECT(opennova::mns::Document::parse(written).evaluate().sheet.variables == evaluated.sheet.variables);
 	session.handle(request::build());
 	session.run_operations();
-	for (const Diagnostic &d : view.last_build.diagnostics)
+	for (const Diagnostic &d : view.activity.last_build->diagnostics)
 		if (d.severity == DiagnosticSeverity::Error)
 			std::fprintf(stderr, "build: %s %s %s\n", d.code.c_str(), d.asset.c_str(), d.message.c_str());
-	TEST_EXPECT(view.last_build.ok);
+	TEST_EXPECT(view.activity.last_build->ok);
 	// A clean sheet with LF line ends: an explicit Save of it (no edit) rewrites it CR LF,
 	// and its finding is gone.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/note.mns", "N 1\nM 2\n"));
 	session.handle(request::rescan());
-	const AssetEntry *note = view.scan.find("note.mns");
+	const AssetEntry *note = view.project.scan->find("note.mns");
 	TEST_EXPECT(note != nullptr);
 	if (!note) return 1;
 	const std::string note_path = note->relative_path;
 	const auto line_ending_on = [&](const std::string &asset) {
-		for (const Diagnostic &d : view.diagnostics)
+		for (const Diagnostic &d : view.findings.diagnostics)
 			if (d.code == "style.line_ending" && d.asset == asset) return true;
 		return false;
 	};
@@ -392,7 +393,8 @@ static int test_validation() {
 	TEST_EXPECT(session.outcome().done() && !line_ending_on(note_path));
 	TEST_EXPECT(read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
 	session.handle(request::save(note_path));
-	TEST_EXPECT(session.outcome().done() && view.status == note_path + " has no changes to save.");
+	TEST_EXPECT(session.outcome().done() &&
+			view.activity.status == note_path + " has no changes to save.");
 	std::printf("test_validation passed\n");
 	return 0;
 }
@@ -435,7 +437,7 @@ static int test_style_value_use() {
 	session.handle(request::new_project(dir.file("project"), "Uses"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const AssetEntry *style = view.scan.find("menu_style.mns");
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	const std::string path = style->relative_path;
@@ -453,15 +455,40 @@ static int test_style_value_use() {
 	session.handle(request::rescan());
 	session.handle(request::open_document(path));
 	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(path));
-	TEST_EXPECT(styles != nullptr && view.graph != nullptr);
-	if (!styles || !view.graph) return 1;
+	const std::shared_ptr<const AssetGraph> &graph = view.findings.graph;
+	TEST_EXPECT(styles != nullptr && graph != nullptr);
+	if (!styles || !graph) return 1;
 	const auto colour = [&](const char *name) {
 		NodeAddress line;
-		if (!find_definition(*view.graph, *styles, name, line)) return -1;
-		return styles->style_value_use(line, view.graph.get(), view.graph->generation()).colour ? 1 : 0;
+		if (!find_definition(*graph, *styles, name, line)) return -1;
+		return styles->style_value_use(line, graph.get(), graph->generation()).colour ? 1 : 0;
 	};
 	TEST_EXPECT(colour("ID_ONLY") == 0 && colour("TEXT_ONLY") == 0);
 	TEST_EXPECT(colour("PAINT") == 1 && colour("SPARE") == 1);
+	return 0;
+}
+
+// S13 D6: a load in place starts the revisions again at 0 and the rows' identities from 1, so the
+// stylesheet's own memos (the sheet the game reads, what a line's value is used as) key on the load
+// generation as well: FOO a colour, then the file loaded again in place with FOO a font's file, at
+// the same revision and on the same row identity, answers from the new file.
+static int test_load_in_place() {
+	editor_test::TempProjectDir dir("opennova_styles_load_in_place");
+	MnsDocument document;
+	TEST_EXPECT(load(document, dir, "FOO FFFF0000\r\n"));
+	const NodeAddress foo = row_at(document, 0);
+	SymbolFacts colour;
+	document.refine_symbol(foo, colour);
+	TEST_EXPECT(colour.value == "FFFF0000" && !colour.inert &&
+	            document.style_value_use(foo, nullptr, 0).colour);
+	const uint64_t generation = document.load_generation();
+	TEST_EXPECT(load(document, dir, "FOO arial.fnt\r\n"));
+	TEST_EXPECT(document.revision() == 0 && document.load_generation() != generation &&
+	            row_at(document, 0) == foo);
+	SymbolFacts font;
+	document.refine_symbol(foo, font);
+	TEST_EXPECT(font.value == "arial.fnt" && !document.style_value_use(foo, nullptr, 0).colour);
+	std::printf("test_load_in_place passed\n");
 	return 0;
 }
 
@@ -469,6 +496,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_style_value_use();
+	failures += test_load_in_place();
 	failures += test_byte_identity();
 	failures += test_edits();
 	failures += test_refusals();

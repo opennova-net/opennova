@@ -40,6 +40,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_authored.cpp  # a member in the units its line writes
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_hudpos.cpp   # HUDPOS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_items.cpp    # ITEMS.DEF
+    ${CMAKE_CURRENT_SOURCE_DIR}/def/def_powerup.cpp  # POWERUP.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_scan.cpp     # the shared .def text scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_weapons.cpp  # WEAPONS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/def_schema.cpp

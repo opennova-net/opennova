@@ -25,13 +25,15 @@
 #include <editor/preview/menu_report.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_json.h>
+#include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_json.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -90,8 +92,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_json", "json"), &EditorApp::request_json);
 	ClassDB::bind_method(D_METHOD("get_outcome_json"), &EditorApp::get_outcome_json);
 	ClassDB::bind_method(D_METHOD("get_operation_json"), &EditorApp::get_operation_json);
-	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset", "import_limit"),
-			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200));
+	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset",
+								 "import_limit", "event_cursor", "event_limit"),
+			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200), DEFVAL(0),
+			DEFVAL(64));
 	ClassDB::bind_method(D_METHOD("get_document_json", "path", "with_rows"), &EditorApp::get_document_json);
 	ClassDB::bind_method(D_METHOD("get_record_json", "id"), &EditorApp::get_record_json);
 	ClassDB::bind_method(D_METHOD("get_reference_choices_json", "id", "field"), &EditorApp::get_reference_choices_json);
@@ -343,7 +347,7 @@ void EditorApp::pump() {
 	if (model_preview_) model_preview_->refresh(session_->view());
 #endif
 	apply_window_title();
-	if (session_->view().quit_requested) get_tree()->quit(0);
+	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }
 
 void EditorApp::set_poll_budget(int p_ms, int64_t p_step_bytes) {
@@ -477,7 +481,7 @@ int EditorApp::allocate_mcp_port() {
 // the project that was open before it open (or none).
 bool EditorApp::project_open_at(const std::string &p_dir) const {
 	return session_->project_open() &&
-			session_->view().project_root == opennova::editor::ProjectPaths::for_root(p_dir).root;
+			session_->view().project.root == opennova::editor::ProjectPaths::for_root(p_dir).root;
 }
 
 bool EditorApp::new_project(const String &p_dir, const String &p_title) {
@@ -503,7 +507,8 @@ void EditorApp::close_project() {
 
 int EditorApp::create_missing_files() {
 	ensure_session();
-	const auto roles = opennova::editor::unmet_required_roles(session_->view().requirements);
+	const auto roles =
+			opennova::editor::unmet_required_roles(*session_->view().project.requirements);
 	session_->handle(opennova::editor::request::create_missing(roles));
 	return get_required_missing();
 }
@@ -518,11 +523,11 @@ bool EditorApp::is_project_open() const {
 }
 
 String EditorApp::get_project_title() const {
-	return session_ ? opennova::to_gd(session_->view().document.title) : String();
+	return session_ ? opennova::to_gd(session_->view().project.document->title) : String();
 }
 
 String EditorApp::get_project_root() const {
-	return session_ ? opennova::to_gd(session_->view().project_root) : String();
+	return session_ ? opennova::to_gd(session_->view().project.root) : String();
 }
 
 int EditorApp::get_required_missing() const {
@@ -530,37 +535,38 @@ int EditorApp::get_required_missing() const {
 		return 0;
 	}
 	const SessionView &v = session_->view();
-	return v.requirements.required_missing + v.requirements.required_wrong_kind;
+	return v.project.requirements->required_missing + v.project.requirements->required_wrong_kind;
 }
 
 int EditorApp::get_required_total() const {
-	return session_ ? session_->view().requirements.required_total : 0;
+	return session_ ? session_->view().project.requirements->required_total : 0;
 }
 
 String EditorApp::get_last_build_dir() const {
-	return session_ ? opennova::to_gd(session_->view().last_build.build_dir) : String();
+	return session_ ? opennova::to_gd(session_->view().activity.last_build->build_dir) : String();
 }
 
 bool EditorApp::is_last_build_ok() const {
-	return session_ && session_->view().has_build && session_->view().last_build.ok;
+	return session_ && session_->view().activity.has_build &&
+			session_->view().activity.last_build->ok;
 }
 
 String EditorApp::get_play_state() const {
-	return session_ ? String(opennova::editor::play_state_label(session_->view().play_state)) : String("stopped");
+	return session_ ? String(opennova::editor::play_state_label(session_->view().activity.play_state)) : String("stopped");
 }
 
 bool EditorApp::did_game_exit_on_its_own() const {
-	return session_ && session_->view().play_exited_on_its_own;
+	return session_ && session_->view().activity.play_exited_on_its_own;
 }
 
 int EditorApp::get_problem_count() const {
-	return session_ ? static_cast<int>(session_->view().diagnostics.size()) : 0;
+	return session_ ? static_cast<int>(session_->view().findings.diagnostics.size()) : 0;
 }
 
 PackedStringArray EditorApp::get_output_lines() const {
 	PackedStringArray lines;
 	if (session_) {
-		for (const std::string &line : session_->view().output) {
+		for (const std::string &line : session_->view().activity.output) {
 			lines.push_back(opennova::to_gd(line));
 		}
 	}
@@ -570,7 +576,7 @@ PackedStringArray EditorApp::get_output_lines() const {
 PackedStringArray EditorApp::get_recent_projects() const {
 	PackedStringArray roots;
 	if (session_) {
-		for (const std::string &root : session_->view().recent_projects) {
+		for (const std::string &root : session_->view().project.recent_projects) {
 			roots.push_back(opennova::to_gd(root));
 		}
 	}
@@ -636,7 +642,7 @@ bool EditorApp::create_file(const String &p_path) {
 bool EditorApp::open_document(const String &p_path) {
 	ensure_session();
 	session_->handle(opennova::editor::request::open_document(opennova::to_std(p_path)));
-	return session_->document_for(opennova::to_std(p_path)) != nullptr;
+	return session_->document_base_for(opennova::to_std(p_path)) != nullptr;
 }
 int EditorApp::get_row_count() const {
 	const auto *document = session_ ? session_->document_for() : nullptr;
@@ -710,7 +716,7 @@ bool EditorApp::save_documents() {
 void EditorApp::undo() { ensure_session(); session_->handle(opennova::editor::request::undo()); }
 void EditorApp::redo() { ensure_session(); session_->handle(opennova::editor::request::redo()); }
 bool EditorApp::is_document_dirty() const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
+	const auto *document = session_ ? session_->document_base_for() : nullptr;
 	return document && document->dirty();
 }
 PackedInt64Array EditorApp::get_child_records(int64_t p_id, const String &p_kind) const {
@@ -737,7 +743,7 @@ String EditorApp::get_record_name(int64_t p_id) const {
 }
 int64_t EditorApp::find_record(const String &p_symbol, const String &p_scope) const {
 	const auto *document = session_ ? session_->document_for() : nullptr;
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	NodeAddress address;
 	if (!document || !graph ||
 	    !opennova::editor::find_definition(*graph, *document, opennova::to_std(p_symbol), address,
@@ -745,14 +751,16 @@ int64_t EditorApp::find_record(const String &p_symbol, const String &p_scope) co
 		return 0;
 	return identity_of(address);
 }
-bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view().unsaved_prompt.open; }
+bool EditorApp::has_unsaved_prompt() const { return session_ && session_->view().dialogs.unsaved_prompt.open; }
 void EditorApp::resolve_unsaved(int p_choice) {
 	if (p_choice < 0 || p_choice > 2) return;
 	ensure_session();
 	const auto choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
 	session_->handle(opennova::editor::request::resolve_unsaved(choice));
 }
-int EditorApp::get_play_mcp_port() const { return session_ ? session_->view().play_mcp_port : 0; }
+int EditorApp::get_play_mcp_port() const {
+	return session_ ? session_->view().activity.play_mcp_port : 0;
+}
 bool EditorApp::duplicate_record(int64_t p_id) {
 	ensure_session();
 	auto *document = session_->document_for();
@@ -793,7 +801,7 @@ bool EditorApp::select_record(int64_t p_id, const String &p_mode) {
 PackedInt64Array EditorApp::get_selected_records() const {
 	PackedInt64Array ids;
 	if (session_)
-		for (const NodeAddress &address : session_->view().selected) ids.push_back(identity_of(address));
+		for (const NodeAddress &address : session_->view().documents.selected) ids.push_back(identity_of(address));
 	return ids;
 }
 bool EditorApp::copy_records() {
@@ -817,7 +825,7 @@ bool EditorApp::paste_records(int64_t p_parent, int p_position) {
 }
 void EditorApp::end_edit() {
 	ensure_session();
-	if (auto *document = session_->document_for())
+	if (auto *document = session_->document_base_for())
 		session_->handle(opennova::editor::request::end_edit(document->path()));
 }
 
@@ -909,7 +917,7 @@ String EditorApp::request_json(const String &p_json) {
 		answer.set("outcome", opennova::editor::action_outcome_to_json(
 				served ? session_->outcome() : opennova::editor::ActionOutcome()));
 	}
-	answer.set("status", opennova::io::JsonValue::make_string(session_->view().status));
+	answer.set("status", opennova::io::JsonValue::make_string(session_->view().activity.status));
 	const double revision = double(session_->view().revisions.any());
 	answer.set("revision", opennova::io::JsonValue::make_number(revision));
 	return json_text(answer);
@@ -923,23 +931,28 @@ String EditorApp::get_operation_json() const {
 	opennova::io::JsonValue answer = opennova::io::JsonValue::make_object();
 	const SessionView empty;
 	const SessionView &view = session_ ? session_->view() : empty;
-	answer.set("operation", opennova::editor::operation_status_to_json(view.operation));
-	answer.set("last_operation", opennova::editor::operation_outcome_to_json(view.last_operation));
+	answer.set("operation", opennova::editor::operation_status_to_json(view.activity.operation));
+	answer.set("last_operation",
+			opennova::editor::operation_outcome_to_json(view.activity.last_operation));
 	return json_text(answer);
 }
 
-String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset, int p_import_limit) const {
+String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset,
+		int p_import_limit, int p_event_cursor, int p_event_limit) const {
 	if (!session_) return String("{}");
 	opennova::editor::SessionJsonOptions options;
 	options.output_cursor = size_t(std::max(p_output_cursor, 0));
 	options.output_limit = size_t(std::max(p_output_limit, 0));
 	options.import_offset = size_t(std::max(p_import_offset, 0));
 	options.import_limit = size_t(std::max(p_import_limit, 0));
+	options.event_cursor = uint64_t(std::max(p_event_cursor, 0));
+	options.event_limit = size_t(std::max(p_event_limit, 0));
 	return json_text(opennova::editor::session_view_to_json(session_->view(), options));
 }
 
 String EditorApp::get_document_json(const String &p_path, bool p_with_rows) const {
-	const Document *document = session_ ? session_->document_for(opennova::to_std(p_path)) : nullptr;
+	const std::string path = opennova::to_std(p_path);
+	const auto *document = session_ ? session_->document_base_for(path) : nullptr;
 	if (!document) return String("null");
 	return json_text(opennova::editor::document_to_json(*document, p_with_rows));
 }
@@ -990,19 +1003,19 @@ PackedStringArray EditorApp::get_request_kinds() const {
 }
 
 String EditorApp::get_references_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	if (!graph) return String("[]");
 	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->references_of(opennova::to_std(p_path))));
 }
 
 String EditorApp::get_referrers_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	if (!graph) return String("[]");
 	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->referrers_of_file(opennova::to_std(p_path))));
 }
 
 String EditorApp::get_symbol_referrers_json(const String &p_kind, const String &p_name, const String &p_scope) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	opennova::editor::ReferenceKind kind;
 	if (!graph || !opennova::editor::reference_kind_from_token(opennova::to_std(p_kind), kind)) return String("[]");
 	return json_text(opennova::editor::graph_edges_to_json(
@@ -1010,25 +1023,25 @@ String EditorApp::get_symbol_referrers_json(const String &p_kind, const String &
 }
 
 String EditorApp::get_usages_json(const String &p_path) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	if (!graph) return String("[]");
 	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->usages_of(opennova::to_std(p_path))));
 }
 
 String EditorApp::get_missing_references_json() const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	if (!graph) return String("[]");
 	return json_text(opennova::editor::graph_edges_to_json(*graph, graph->missing()));
 }
 
 String EditorApp::search_project_json(const String &p_text) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	if (!graph) return json_text(opennova::editor::graph_search_to_json({}));
 	return json_text(opennova::editor::graph_search_to_json(graph->search(opennova::to_std(p_text))));
 }
 
 String EditorApp::get_symbols_json(const String &p_kind) const {
-	const auto *graph = session_ ? session_->view().graph.get() : nullptr;
+	const auto *graph = session_ ? session_->view().findings.graph.get() : nullptr;
 	opennova::editor::ReferenceKind kind;
 	const bool filtered = !p_kind.is_empty();
 	if (!graph || (filtered && !opennova::editor::reference_kind_from_token(opennova::to_std(p_kind), kind))) return String("[]");
@@ -1072,17 +1085,17 @@ String EditorApp::menu_preview_hit_json(double p_x, double p_y) {
 String EditorApp::get_menu_render_json(const String &p_path, int64_t p_screen) const {
 	opennova::editor::MenuPreviewSnapshot none;
 	none.status = opennova::editor::MenuPreviewStatus::NoScreen;
-	if (!session_ || !session_->view().render_check) {
+	if (!session_ || !session_->view().findings.render_check) {
 		none.status = opennova::editor::MenuPreviewStatus::NoProject;
 		return json_text(opennova::editor::menu_preview_to_json(none));
 	}
 	const opennova::editor::SessionView &view = session_->view();
 	const std::string path = opennova::to_std(p_path);
-	const opennova::editor::MenuRenderCheck &check = *view.render_check;
+	const opennova::editor::MenuRenderCheck &check = *view.findings.render_check;
 	// The open document when the menu is open (its current state), else the file as the
 	// check read it.
 	const opennova::editor::MnuDocument *document = check.document(path);
-	for (const auto &open : view.documents) {
+	for (const auto &open : view.documents.open) {
 		if (open && open->path() == path) {
 			document = dynamic_cast<const opennova::editor::MnuDocument *>(open.get());
 		}

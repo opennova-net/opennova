@@ -806,6 +806,19 @@ struct Entity {
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
     bool destroy_timer_initialized = false;
+    // --- powerup row state (world/powerup.h) ---
+    // The bound powerup.def row (-1 = none): retail's row pointer at
+    // entity+0x2C0, the pickup/respawn ActionDefs at +0x2B8/+0x2BC beside it
+    // [orig: sub_442D00 @0x442D2A..0x442D3C]. Bound at mission start.
+    int32_t powerup_def_index = -1;
+    // The respawn countdown in ticks at entity+0x2B4: -1 idle, >0 counting,
+    // 0 fires the respawn [orig: @0x442D65 (idle), the pickup arm
+    //  @0x442AE1, Entity_TickFireTimer @0x442850]
+    int32_t powerup_respawn_timer = -1;
+    // The remaining respawns at entity+0x2C8: max_respawns-1, or -1 unlimited;
+    // 0 makes the next pickup destroy the row [orig: @0x442D51 / @0x442D59;
+    //  the pickup test @0x442AC7; the decrement @0x442895]
+    int32_t powerup_respawns_left = 0;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
     // the matching ordinal bone from person collision and presentation.
     // Distinct from spawned_piece_mask at +0x138.

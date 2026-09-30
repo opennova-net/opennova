@@ -8,10 +8,13 @@
 
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
-#include <editor/session/problem_fixes.h>
+#include <editor/session/view/view_revisions.h>
 #include <editor/ui/workspace.h>
 
 namespace opennova::editor {
+
+struct ProblemFix;
+struct SessionView;
 
 // What a Files row carries while it is dragged: its project-relative path, NUL-ended.
 inline constexpr const char *kFileDragPayload = "opennova.file";
@@ -30,6 +33,12 @@ inline constexpr const char *kFileDragPayload = "opennova.file";
 // holds them for the window drawing it, and forgets a document's once it is closed.
 class ReferencePicker {
 public:
+	// Out of line: a popup's fixes (problem_fixes.h) are the picker's own.
+	ReferencePicker();
+	~ReferencePicker();
+	ReferencePicker(const ReferencePicker &) = delete;
+	ReferencePicker &operator=(const ReferencePicker &) = delete;
+
 	// The button and its popup for `field` (a reference, as it applies to `record`), whose value
 	// is `value`: true when a name was picked this frame, `picked` holding it (the caller sets
 	// it). A fix the footer offers is raised through the workspace. `others`: the names of what the

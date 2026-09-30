@@ -15,9 +15,9 @@ namespace opennova::editor {
 
 ProblemsService::ProblemsService(SessionCore &core) :
 		core_(core), view_(core.view()), render_check_(std::make_shared<MenuRenderCheck>()) {
-	view_.graph = graph_;
-	view_.assets = assets_;
-	view_.render_check = render_check_;
+	view_.findings.graph = graph_;
+	view_.findings.assets = assets_;
+	view_.findings.render_check = render_check_;
 }
 
 // The project's findings now, composed as `opennova-project validate` composes them
@@ -43,15 +43,16 @@ void ProblemsService::compose(bool keep_reported) {
 	validation_due_ = false;
 	const uint64_t graph_generation = graph_->generation();
 	const std::vector<Diagnostic> open = core_.documents().findings();
-	const ProjectFindingsInput input{core_.paths(), view_.document, view_.scan, view_.requirements, view_.documents,
-	                                 view_.boot_missing, play_findings_, open, build_findings_};
+	const ProjectFindingsInput input{core_.paths(),        *view_.project.document,    *view_.project.scan,
+	                                 *view_.project.requirements, view_.documents.open, view_.activity.boot_missing,
+	                                 play_findings_,              open,                 build_findings_};
 	// The graph, each file's own findings and the render check first: when none of them moved, no
 	// other input the rows are made of did, no reported finding waits on this validation and the
 	// rows are as it left them, they stand. No row is composed, copied or compared then; the small
 	// inputs are compared with their copies (Composed::same), and the open documents' own findings
 	// are made again for it.
 	const bool moved = refresh_project_findings(input, *graph_, validation_cache_, *render_check_, *assets_);
-	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.diagnostics.size())) return;
+	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.findings.diagnostics.size())) return;
 	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *render_check_);
 	++compositions_;
 	gate_size_ = findings.gate_end - findings.gate_begin;
@@ -67,11 +68,11 @@ void ProblemsService::compose(bool keep_reported) {
 		}
 	trailing_ = findings.rows.size() - composed;
 	reported_.clear();
-	if (findings.rows != view_.diagnostics) {
-		view_.diagnostics = std::move(findings.rows);
+	if (findings.rows != view_.findings.diagnostics) {
+		view_.findings.diagnostics = std::move(findings.rows);
 		core_.touch(ViewConcern::Findings);
 	}
-	composed_.keep(input, view_.diagnostics.size());
+	composed_.keep(input, view_.findings.diagnostics.size());
 	if (graph_->generation() != graph_generation) core_.touch(ViewConcern::Graph);
 }
 
@@ -93,7 +94,7 @@ void ProblemsService::Composed::keep(const ProjectFindingsInput &input, size_t r
 }
 
 void ProblemsService::add_reported(const Diagnostic &d) {
-	view_.diagnostics.push_back(d);
+	view_.findings.diagnostics.push_back(d);
 	++trailing_;
 	reported_.push_back({d, validation_due_});
 	core_.touch(ViewConcern::Findings);
@@ -103,9 +104,9 @@ std::vector<Diagnostic> ProblemsService::gate_findings() {
 	// Every writer of the rows keeps the range where it is (compose, add_reported, and the Play's
 	// drop of its own rows, which sit before it); rows that no longer hold it are composed again,
 	// never a build planned on another gate.
-	if (gate_size_ + gate_tail_ + trailing_ > view_.diagnostics.size())
+	if (gate_size_ + gate_tail_ + trailing_ > view_.findings.diagnostics.size())
 		compose(false);
-	const auto end = view_.diagnostics.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
+	const auto end = view_.findings.diagnostics.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
 	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
 }
 

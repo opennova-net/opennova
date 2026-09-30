@@ -13,6 +13,8 @@ const BUILD_TIMEOUT_MS := 300_000
 ## at McpJson.MAX_ENTRIES, so a retail catalog's rows and a scan's findings page.
 const PAGE_MAX := McpJson.MAX_ENTRIES
 const PAGE_DEFAULT := 100
+## The view events editor_state holds at most (engine/editor/session/view/view_events.h kKept).
+const EVENTS_KEPT := 64
 
 const DOCUMENT_OPS: Array[String] = [
 	"list", "open", "create", "close", "reload", "rows", "record", "choices", "targets", "find", "search",
@@ -117,7 +119,6 @@ static func definitions() -> Array[McpToolDef]:
 			+ "opens it), "
 			+ "the requirements checklist with every row, the open documents, the "
 			+ "selection (the primary and every selected record) and the clipboard's size, the "
-			+ "file show_in_files last asked Files to show (reveal_file: path, serial, rename), the "
 			+ "operation that runs (operation: running, and while one does its id, kind (build), label "
 			+ "(what it works on), done and total in its unit (bytes), cancellable, and reads and "
 			+ "writes (of files, documents, project, slot: a request that writes what it reads or "
@@ -126,8 +127,8 @@ static func definitions() -> Array[McpToolDef]:
 			+ "build, Play (state, pid, the running game's mcp_port (0 when no game with an "
 			+ "endpoint runs), exit_code (the code the last game exited with on its own, null "
 			+ "when none; nonzero is a play.crashed problem), the runtime the settings name as "
-			+ "runtime_setting), what the last apply_project_settings came to "
-			+ "(settings_result: its serial and the settings that could not be written), the "
+			+ "runtime_setting), what the last apply_project_settings could not write "
+			+ "(settings_result: failures), the "
 			+ "import state (the dialog's preview: open, the choices a listing offers and the roots "
 			+ "chosen, as imports take them, with_dependencies, the plan's rows (state selected or "
 			+ "found, name, kind, source, destination, made_from, needed_by {file, record, field, "
@@ -136,10 +137,19 @@ static func definitions() -> Array[McpToolDef]:
 			+ "(import_limit entries at most) with its count (choice_count, root_count, row_count, "
 			+ "not_found_count), then not_followed, truncated, its diagnostics, changed when an import "
 			+ "found the files changed; import_dependencies, the editor's setting; the project's "
-			+ "imported sources), the problem counts, the recent projects and a page of the output "
+			+ "imported sources), the problem counts, the recent projects, a page of the output "
 			+ "lines by absolute index (output_cursor / output_limit: first is the oldest line held, "
 			+ "next one past the newest, and next_cursor continues without a line skipped or "
-			+ "repeated while the log drops its oldest past 2000).",
+			+ "repeated while the log drops its oldest past 2000) and a page of the view events, the "
+			+ "one-shot asks a request made of a window, by seq (events: first, next, cursor, "
+			+ "next_cursor, items; event_cursor / event_limit; the last 64 kept, next_cursor "
+			+ "continuing without one skipped or repeated): each item's seq and kind (reveal_record: "
+			+ "path, address and field, an open_document naming a record's field; reveal_file: path "
+			+ "and flag (Rename... asked: its ask_name), a show_in_files; ask_rename: path, field and "
+			+ "tag (the rename_preview's serial), a preview_rename with ask_name; settings_applied: "
+			+ "tag (the request's settings serial) and flag (a setting failed), an "
+			+ "apply_project_settings; "
+			+ "import_planned: flag (the files changed since the plan shown), an import plan made).",
 			{
 				"output_cursor": {"type": "integer", "minimum": 0, "default": 0},
 				"output_limit": {"type": "integer", "minimum": 0, "maximum": PAGE_MAX, "default": PAGE_MAX},
@@ -147,6 +157,8 @@ static func definitions() -> Array[McpToolDef]:
 				"import_limit": {"type": "integer", "minimum": 0, "maximum": PAGE_MAX, "default": PAGE_MAX},
 				"files_offset": {"type": "integer", "minimum": 0, "default": 0},
 				"files_limit": {"type": "integer", "minimum": 0, "maximum": PAGE_MAX, "default": PAGE_MAX},
+				"event_cursor": {"type": "integer", "minimum": 0, "default": 0},
+				"event_limit": {"type": "integer", "minimum": 0, "maximum": EVENTS_KEPT, "default": EVENTS_KEPT},
 			}, [], false),
 		McpToolDef.make("editor_request",
 			"Raise one typed editor request by kind, the same vocabulary the windows use. Each kind "
@@ -159,8 +171,9 @@ static func definitions() -> Array[McpToolDef]:
 			+ "its .opennova/local.json, which opennova-project reads too, and kept as the "
 			+ "editor's, where a project naming none starts), runtime_executable? ('' = the one "
 			+ "packaged beside the editor), play_in_install?}} (each setting left out stays as it is; "
-			+ "what differs from the setting in effect is written, and editor_state's settings_result "
-			+ "carries the serial back with the settings that could not be written), preview_import "
+			+ "what differs from the setting in effect is written; a settings_applied event carries "
+			+ "the serial back, flagged when a setting could not be written, and editor_state's "
+			+ "settings_result lists those settings), preview_import "
 			+ "{paths, with_dependencies?} (the import dialog planned: a loose file picked is chosen, "
 			+ "an archive's members are listed to choose from; with_dependencies: with the files they "
 			+ "need, found beside them or in the game install), plan_import {imports, "

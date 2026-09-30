@@ -370,7 +370,7 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 	}
 }
 
-std::vector<Diagnostic> validate_strings_file(const Document &document) {
+std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
 	if (!strings) return findings;

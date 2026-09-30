@@ -270,7 +270,7 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 	}
 }
 
-std::vector<Diagnostic> validate_model_file(const Document &document) {
+std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *model = dynamic_cast<const ModelDocument *>(&document);
 	const ModelRow *row = model ? model->model_row() : nullptr;

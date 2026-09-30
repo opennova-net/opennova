@@ -13,7 +13,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -32,7 +32,7 @@ JsonValue edges(const mnu::RectEdges &rect) {
 	return out;
 }
 
-bool names_menu(const Document &document, const std::string &path) {
+bool names_menu(const DocumentBase &document, const std::string &path) {
 	return document.path() == path ||
 	       normalized_logical_name(basename_of(document.path())) == normalized_logical_name(path);
 }
@@ -40,11 +40,11 @@ bool names_menu(const Document &document, const std::string &path) {
 // The menu's project-relative path: an open document's, else the scan's entry for it.
 std::string menu_path(const SessionView &view, const std::string &path) {
 	std::string wanted = path;
-	if (wanted.empty()) wanted = !view.menu_preview.path.empty() ? view.menu_preview.path : view.active_document;
+	if (wanted.empty()) wanted = !view.documents.previews.menu.path.empty() ? view.documents.previews.menu.path : view.documents.active;
 	if (wanted.empty()) return std::string();
-	for (const auto &open : view.documents)
+	for (const auto &open : view.documents.open)
 		if (open && is_menu_kind(open->kind()) && names_menu(*open, wanted)) return open->path();
-	for (const AssetEntry &entry : view.scan.entries) {
+	for (const AssetEntry &entry : view.project.scan->entries) {
 		if (!is_menu_kind(entry.kind)) continue;
 		if (entry.relative_path == wanted || normalized_logical_name(entry.logical_name) == normalized_logical_name(wanted))
 			return entry.relative_path;
@@ -53,7 +53,7 @@ std::string menu_path(const SessionView &view, const std::string &path) {
 }
 
 const MnuDocument *open_menu(const SessionView &view, const std::string &relative) {
-	for (const auto &open : view.documents)
+	for (const auto &open : view.documents.open)
 		if (open && open->path() == relative) return dynamic_cast<const MnuDocument *>(open.get());
 	return nullptr;
 }
@@ -61,9 +61,9 @@ const MnuDocument *open_menu(const SessionView &view, const std::string &relativ
 // The render check's render of a screen, and whether it shows the document as it is now.
 const MenuScreenRender *render_of(const SessionView &view, const MnuDocument &document, NodeId row, bool &current) {
 	current = false;
-	if (!view.render_check) return nullptr;
-	const MenuScreenRender *render = view.render_check->render(document.path(), row);
-	current = render && view.render_check->document(document.path()) == &document &&
+	if (!view.findings.render_check) return nullptr;
+	const MenuScreenRender *render = view.findings.render_check->render(document.path(), row);
+	current = render && view.findings.render_check->document(document.path()) == &document &&
 	          render->status() == MenuPreviewStatus::Ready && render->revision() == document.revision();
 	return render;
 }
@@ -129,7 +129,7 @@ const MnuDocument *menu_for(const SessionView &view, const std::string &path) {
 	const std::string relative = menu_path(view, path);
 	if (relative.empty()) return nullptr;
 	if (const MnuDocument *open = open_menu(view, relative)) return open;
-	return view.render_check ? view.render_check->document(relative) : nullptr;
+	return view.findings.render_check ? view.findings.render_check->document(relative) : nullptr;
 }
 
 io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path) {
@@ -172,7 +172,7 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 	out.set("path", json_string(document->path()));
 	std::map<std::string, size_t> counts{{"error", 0}, {"warning", 0}, {"info", 0}}, sources;
 	JsonValue problems = JsonValue::make_array();
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.asset != document->path()) continue;
 		const std::string source = finding_source(d.code);
 		++counts[diagnostic_severity_label(d.severity)];
@@ -199,7 +199,7 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 		screen.set("current", JsonValue::make_bool(current));
 		const size_t notes = render && render->status() == MenuPreviewStatus::Ready ? render->notes().size() : 0;
 		size_t rows = 0;
-		for (const Diagnostic &d : view.diagnostics) rows += d.asset == document->path() && d.row_id == row->id ? 1 : 0;
+		for (const Diagnostic &d : view.findings.diagnostics) rows += d.asset == document->path() && d.row_id == row->id ? 1 : 0;
 		screen.set("notes", json_number(double(notes)));
 		screen.set("problems", json_number(double(rows)));
 		screens.push(std::move(screen));

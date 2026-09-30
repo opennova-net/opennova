@@ -34,10 +34,10 @@ struct ValidationInput {
 	const ProjectPaths &paths;
 	const ProjectDocument &project;
 	const AssetScan &scan;
-	const std::vector<std::shared_ptr<const Document>> &open;
+	const std::vector<std::shared_ptr<const DocumentBase>> &open;
 
 	// The open document standing in for a file; null for a closed one.
-	std::shared_ptr<const Document> open_document(const AssetEntry &asset) const;
+	std::shared_ptr<const DocumentBase> open_document(const AssetEntry &asset) const;
 };
 
 // Each file's own findings (ADR 0046 d9, S9e, S13 D4), kept from one validation to the next: its
@@ -50,7 +50,8 @@ struct ValidationInput {
 // alone and reads no file. A closed file is loaded for its findings and let go: the cache keeps
 // the findings, never the document (a model's geometry included). A load gives the same file's
 // records the same identities, so a finding still names its record (row_id, child_id) in the
-// document a later load or an open of the file makes.
+// document a later load or an open of the file makes. A type whose documents hold no records
+// (holds_records, S13 D6) makes document.no_records for its file, the file unread.
 class ValidationCache {
 public:
 	// A validation starts: its counters restart and no file has been asked.
@@ -80,7 +81,8 @@ private:
 		// What the findings were made from: an open document, or a closed file as the scan lists
 		// it.
 		bool open = false;
-		uint64_t identity = 0, revision = 0;
+		// A load in place keeps the instance and starts the revision again: the load too.
+		uint64_t identity = 0, load_generation = 0, revision = 0;
 		bool dirty = false, wrote_file = false;
 		uint64_t size = 0;
 		int64_t modified = 0;
@@ -90,7 +92,7 @@ private:
 	};
 	std::map<std::string, Entry> entries_; // by project-relative path
 	ValidationStats stats_;
-	std::vector<std::weak_ptr<const Document>> loaded_; // the closed files this validation read
+	std::vector<std::weak_ptr<const DocumentBase>> loaded_; // the closed files this validation read
 };
 
 } // namespace opennova::editor

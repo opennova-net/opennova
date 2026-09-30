@@ -43,7 +43,7 @@
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include "../editor/editor_test_support.h"
 #include "../editor/menu_test_support.h"
 #include "common/test_paths.h"
@@ -114,7 +114,7 @@ void test_frame_bracket_follows_the_table() {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};
 	SessionView v;
-	v.active_document = "menus/main.mnu";
+	v.documents.active = "menus/main.mnu";
 	size_t deferred = 0, named = 0;
 	for (size_t i = 0; i < kEditorRequestKindCount; ++i) {
 		const auto kind = static_cast<K>(i);
@@ -132,7 +132,7 @@ void test_frame_bracket_follows_the_table() {
 		const EditorRequest &raised = first.kind == kind ? first : second;
 		const bool waited = first.kind == K::SelectRecord && kind != K::SelectRecord;
 		CHECK(waited == row.acts_on_saved, row.token);
-		CHECK(raised.path == (row.names_active ? v.active_document : std::string()), row.token);
+		CHECK(raised.path == (row.names_active ? v.documents.active : std::string()), row.token);
 		deferred += waited ? 1 : 0;
 		named += raised.path.empty() ? 0 : 1;
 	}
@@ -143,7 +143,7 @@ void test_frame_bracket_follows_the_table() {
 	windows.request(request::save());
 	windows.request(request::select_record("menus/other.mnu", {1, 1, 0}));
 	EditorRequest out;
-	CHECK(windows.take_request(out) && out.kind == K::Save && out.path == v.active_document, "outside a frame, in order");
+	CHECK(windows.take_request(out) && out.kind == K::Save && out.path == v.documents.active, "outside a frame, in order");
 }
 
 // --- S9h2: the menu view's tree and the inspector over the full menu schema ---------
@@ -438,8 +438,8 @@ void test_menu_window_ui() {
 		CHECK(editor_test::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
 		CHECK(extra->load(dir.file("extra.mnu"), "extra.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
 		CHECK(named(*extra, "TITLE") == named(*document, "TITLE"), "the same ids in both files");
-		v.documents.push_back(extra);
-		v.active_document = extra->path();
+		v.documents.open.push_back(extra);
+		v.documents.active = extra->path();
 		select_in(v, {extra->rows()[0]->id, kScreen, 0});
 		ui.frames(2);
 		ui.drain();
@@ -454,8 +454,8 @@ void test_menu_window_ui() {
 		CHECK(plain && plain->path == extra->path() && plain->address == named(*extra, "BACK") &&
 		              plain->mode == SelectMode::Replace,
 		      "another file: no range from a row of the first");
-		v.documents.pop_back();
-		v.active_document = document->path();
+		v.documents.open.pop_back();
+		v.documents.active = document->path();
 		select_in(v, {screen.id, kScreen, 0});
 		ui.frames(2);
 		ui.drain();
@@ -570,7 +570,7 @@ void test_menu_window_ui() {
 	select_in(v, back);
 	ui.frames(2);
 	ui.drain();
-	v.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
+	v.documents.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
 	ui.frames();
 	// Where a Paste goes is the window's to say: after the selected window among its siblings.
 	auto pasted_at = [&](const std::vector<EditorRequest> &raised, NodeId parent, size_t position) {
@@ -713,8 +713,8 @@ void test_inspector_ui() {
 	// S9k2: BACK and TITLE selected together (BACK the primary): the fields they share, the
 	// type marked mixed; a switch sets both in one batch.
 	const NodeAddress title = named(*document, "TITLE");
-	v.selection = back;
-	v.selected = {back, title};
+	v.documents.selection = back;
+	v.documents.selected = {back, title};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.drain();
@@ -800,21 +800,21 @@ void test_actions_after_edits() {
 	Diagnostic error;
 	CHECK(editor_test::write_text(dir.file("extra.mnu"), kMenu), "second menu fixture");
 	CHECK(other->load(dir.file("extra.mnu"), "extra.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
-	v.documents.push_back(other);
+	v.documents.open.push_back(other);
 	// A Problems row opens a file of the project the editor opens (problem_location): the
 	// scan lists this one.
 	AssetEntry other_entry;
 	other_entry.logical_name = "extra.mnu";
 	other_entry.relative_path = other->path();
 	other_entry.kind = AssetKind::Menu;
-	v.scan.entries.push_back(other_entry);
-	v.scan.index();
+	editor_test::own(v.project.scan).entries.push_back(other_entry);
+	editor_test::own(v.project.scan).index();
 	// A required file the project lacks names no file of it: its row (showing the file it is
 	// about) opens nothing.
 	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	lacking.role = "gametext";
 	lacking.target = "gametext.bin";
-	v.diagnostics = {lacking};
+	v.findings.diagnostics = {lacking};
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
@@ -829,9 +829,9 @@ void test_actions_after_edits() {
 	font_entry.logical_name = "Arial14b.fnt";
 	font_entry.relative_path = "fonts/Arial14b.fnt";
 	font_entry.kind = AssetKind::Font;
-	v.scan.entries.push_back(font_entry);
-	v.scan.index();
-	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
+	editor_test::own(v.project.scan).entries.push_back(font_entry);
+	editor_test::own(v.project.scan).index();
+	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
 	                                 font_entry.relative_path)};
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
@@ -846,7 +846,7 @@ void test_actions_after_edits() {
 	Diagnostic finding = make_diagnostic(DiagnosticSeverity::Error, "menu.test", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
-	v.diagnostics = {finding};
+	v.findings.diagnostics = {finding};
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.focus("Problems");
@@ -870,9 +870,9 @@ void test_actions_after_edits() {
 
 	// While the unsaved prompt is open no shortcut acts behind it (an Undo would make a file
 	// it does not list unsaved); the prompt says what waits and on which file.
-	v.unsaved_prompt.open = true;
-	v.unsaved_prompt.action = EditorRequestKind::Quit;
-	v.unsaved_prompt.files = {document->path()};
+	v.dialogs.unsaved_prompt.open = true;
+	v.dialogs.unsaved_prompt.action = EditorRequestKind::Quit;
+	v.dialogs.unsaved_prompt.files = {document->path()};
 	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
@@ -883,7 +883,7 @@ void test_actions_after_edits() {
 	CHECK(prompt.find("Quit") != std::string::npos && prompt.find(document->path()) != std::string::npos &&
 	              prompt.find("Save all") != std::string::npos && prompt.find("Discard") != std::string::npos,
 	      "the prompt names what waits, its file and its answers");
-	v.unsaved_prompt = SessionView::UnsavedPrompt();
+	v.dialogs.unsaved_prompt = DialogsView::UnsavedPrompt();
 	v.revisions.touch(ViewConcern::Dialogs);
 	ui.frames(2);
 	ui.drain();
@@ -957,8 +957,8 @@ void test_preview_canvas_smoke() {
 	FakePreview fake;
 	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
 	SessionView v = menu_view(document);
-	v.menu_preview.path = document->path();
-	v.menu_preview.screen = screen.id;
+	v.documents.previews.menu.path = document->path();
+	v.documents.previews.menu.screen = screen.id;
 	select_in(v, {screen.id, kScreen, 0});
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -1118,8 +1118,8 @@ void test_preview_gestures_end() {
 	FakePreview fake;
 	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
 	SessionView v = menu_view(document);
-	v.menu_preview.path = document->path();
-	v.menu_preview.screen = screen.id;
+	v.documents.previews.menu.path = document->path();
+	v.documents.previews.menu.screen = screen.id;
 	select_in(v, named(*document, "BOX"));
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -1137,10 +1137,10 @@ void test_preview_gestures_end() {
 	if (!preview) return;
 	// The model the active document, or the menu again.
 	const auto show_model = [&](bool on) {
-		v.documents = on ? std::vector<std::shared_ptr<const Document>>{document, model}
-		                 : std::vector<std::shared_ptr<const Document>>{document};
-		v.model_preview.path = on ? model->path() : std::string();
-		v.active_document = on ? model->path() : document->path();
+		v.documents.open = on ? std::vector<std::shared_ptr<const DocumentBase>>{document, model}
+		                      : std::vector<std::shared_ptr<const DocumentBase>>{document};
+		v.documents.previews.model.path = on ? model->path() : std::string();
+		v.documents.active = on ? model->path() : document->path();
 		v.revisions.touch(ViewConcern::Documents);
 		v.revisions.touch(ViewConcern::Selection);
 		ui.frames(2);
@@ -1228,8 +1228,8 @@ void test_preview_several_windows_ui() {
 	FakePreview fake;
 	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
 	SessionView v = menu_view(document);
-	v.menu_preview.path = document->path();
-	v.menu_preview.screen = screen.id;
+	v.documents.previews.menu.path = document->path();
+	v.documents.previews.menu.screen = screen.id;
 	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
 	select_in(v, box);
 	Ui ui;
@@ -1287,8 +1287,8 @@ void test_preview_several_windows_ui() {
 	      "Ctrl+click toggles a window");
 
 	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
-	v.selection = other;
-	v.selected = {box, other};
+	v.documents.selection = other;
+	v.documents.selected = {box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1339,7 +1339,7 @@ void test_preview_several_windows_ui() {
 	CHECK(only(chord(ImGuiKey_X), EditorRequestKind::Cut) != nullptr, "Ctrl+X cuts");
 	CHECK(only(chord(ImGuiKey_D), EditorRequestKind::Duplicate) != nullptr, "Ctrl+D duplicates");
 	CHECK(!only(chord(ImGuiKey_V), EditorRequestKind::Paste), "nothing to paste while the clipboard is empty");
-	v.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
+	v.documents.clipboard = "\xEF\xBB\xBF<SCREEN></SCREEN>";
 	ui.frames();
 	requests = chord(ImGuiKey_V);
 	const EditorRequest *paste = only(requests, EditorRequestKind::Paste);
@@ -1347,14 +1347,14 @@ void test_preview_several_windows_ui() {
 	      "Ctrl+V pastes after the primary window (OTHER)");
 	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
 	// window's list row) the preview raises none of them, as the menu view does not.
-	v.selected = {screen_address, box, other};
+	v.documents.selected = {screen_address, box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) && !only(chord(ImGuiKey_X), EditorRequestKind::Cut) &&
 	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
 	      "the screen selected with the windows: no Copy, Cut or Duplicate");
-	v.selected = {box, other};
+	v.documents.selected = {box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1379,8 +1379,8 @@ void test_preview_several_windows_ui() {
 	// MAIN and OTHER selected, OTHER the primary: a press on BOX (not selected, but inside
 	// MAIN's rect) is a press inside a selected window, so the drag moves MAIN (OTHER rides
 	// inside it), and MAIN becomes the primary with OTHER still selected.
-	v.selection = other;
-	v.selected = {main, other};
+	v.documents.selection = other;
+	v.documents.selected = {main, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1469,26 +1469,27 @@ constexpr const char *kMainMenu = "Missing required file main.mnu";
 // error on a record's field, a warning in the active menu and a note in the other open one.
 SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shared_ptr<MnuDocument> &b) {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Problems";
-	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs), file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
+	v.project.open = true;
+	v.project.root = "C:/mods/Problems";
+	editor_test::own(v.project.scan).entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs), file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
 	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
 	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
-	v.scan.index();
-	v.requirements.rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
-	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
-	v.requirements.required_total = 2;
-	v.requirements.required_missing = 2;
-	v.retail_files = {"gametext.bin"};
-	v.documents = {a, b};
-	v.active_document = a->path();
+	editor_test::own(v.project.scan).index();
+	editor_test::own(v.project.requirements).rows = { missing_row("gametext", "gametext.bin",
+															  AssetKind::Strings),
+		missing_row("main_menu", "main.mnu", AssetKind::Menu) };
+	editor_test::own(v.project.requirements).required_total = 2;
+	editor_test::own(v.project.requirements).required_missing = 2;
+	v.project.retail_files = {"gametext.bin"};
+	v.documents.open = {a, b};
+	v.documents.active = a->path();
 	Diagnostic type = make_diagnostic(DiagnosticSeverity::Error, "catalog.item_type", "Alpha: choose an item type.",
 	                                  "defs/items.def", "type");
 	type.record = "Marker";
 	type.line = 12;
 	type.row_id = 4;
 	type.record_kind = 2;
-	v.diagnostics = {missing_finding("gametext", "gametext.bin"), missing_finding("main_menu", "main.mnu"), type,
+	v.findings.diagnostics = {missing_finding("gametext", "gametext.bin"), missing_finding("main_menu", "main.mnu"), type,
 	                 make_diagnostic(DiagnosticSeverity::Warning, "menu.duplicate_window", "Bravo: two windows are named GO.",
 	                                 "menus/a.mnu"),
 	                 make_diagnostic(DiagnosticSeverity::Info, "style.unused", "Charlie: nothing uses it.", "menus/b.mnu")};
@@ -1676,10 +1677,11 @@ void test_problems_window_ui() {
 
 	// The summary's Fix alls: one Create for what factories make, one import list for what
 	// only the game data has (cmap.mnu), each asking first.
-	v.requirements.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
-	v.requirements.required_missing = 3;
-	v.retail_files = {"cmap.mnu", "gametext.bin"};
-	v.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
+	editor_test::own(v.project.requirements)
+			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
+	editor_test::own(v.project.requirements).required_missing = 3;
+	v.project.retail_files = {"cmap.mnu", "gametext.bin"};
+	v.findings.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
@@ -1687,7 +1689,7 @@ void test_problems_window_ui() {
 	CHECK(in_order(logged_frame(ui), {"The game cannot start: 3 required files are missing.", "Create 2",
 	                                  "Import 1 from the game data..."}),
 	      "the summary's Fix alls");
-	const ImGuiID summary = item_id(window, {v.project_root.c_str(), "required"});
+	const ImGuiID summary = item_id(window, {v.project.root.c_str(), "required"});
 	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::CreateMissing)), {"###fix"}));
 	CHECK(confirmation() && ui.drain().empty(), "the summary's Create asks first");
 	ui.click(confirmation_button(false));
@@ -1702,12 +1704,12 @@ void test_problems_window_ui() {
 	      "one import list for what the game data has");
 
 	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
-	v.requirements.rows.push_back(missing_row("brand_style", "brand.mns", AssetKind::MenuStyle, false));
+	editor_test::own(v.project.requirements).rows.push_back(missing_row("brand_style", "brand.mns", AssetKind::MenuStyle, false));
 	Diagnostic optional = make_diagnostic(DiagnosticSeverity::Info, "requirement.optional_missing",
 	                                      "Optional file brand.mns is not in the project.");
 	optional.role = "brand_style";
 	optional.target = "brand.mns";
-	v.diagnostics.push_back(optional);
+	v.findings.diagnostics.push_back(optional);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
@@ -1744,12 +1746,12 @@ void test_problems_confirmation_follows() {
 	ui.click(problems_lines().fix(0));
 	ui.frames(2);
 	CHECK(confirmation() != nullptr, "the Fix all asks");
-	const std::string root = v.project_root;
-	v.project_root = "C:/mods/Another";
+	const std::string root = v.project.root;
+	v.project.root = "C:/mods/Another";
 	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation(), "another project closes it");
-	v.project_root = root;
+	v.project.root = root;
 	v.revisions.touch(ViewConcern::Project);
 	ui.frames(2);
 	CHECK(!confirmation() && ui.drain().empty(), "and nothing it held is raised");
@@ -1764,9 +1766,9 @@ void test_problems_confirmation_follows() {
 	const ImVec2 pressed = confirmation_button(false);
 	ui.mouse(pressed.x, pressed.y);
 	ui.button(true);
-	v.diagnostics.erase(v.diagnostics.begin() + 1);
-	v.requirements.rows[1].state = RequirementState::Present;
-	v.requirements.required_missing = 1;
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin() + 1);
+	editor_test::own(v.project.requirements).rows[1].state = RequirementState::Present;
+	editor_test::own(v.project.requirements).required_missing = 1;
 	v.revisions.touch(ViewConcern::Findings);
 	v.revisions.touch(ViewConcern::Files);
 	ui.frames(2);
@@ -1792,13 +1794,13 @@ void test_problems_confirmation_follows() {
 	ui.click(problems_lines().more(1, "Create main.mnu"));
 	ui.away();
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") != std::string::npos, "More lists main.mnu's fixes");
-	v.diagnostics.erase(v.diagnostics.begin());
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin());
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	text = logged_frame(ui);
 	CHECK(text.find("Use a.mnu as main.mnu") != std::string::npos && text.find("Use spare.bin") == std::string::npos,
 	      "still main.mnu's when a finding before it goes");
-	v.diagnostics.erase(v.diagnostics.begin());
+	v.findings.diagnostics.erase(v.findings.diagnostics.begin());
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	CHECK(logged_frame(ui).find("Use a.mnu as main.mnu") == std::string::npos, "closed when its finding goes");
@@ -1860,9 +1862,9 @@ void test_problems_narrow() {
 // (its own finding says so, and the Save would be refused); Only fixable lists what has a fix.
 void test_problems_rewrite_hidden() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Rewrite";
-	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
+	v.project.open = true;
+	v.project.root = "C:/mods/Rewrite";
+	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
 	                                 "defs/weapon.def"),
 	                 make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
 	                                 "defs/weapon.def"),
@@ -1892,22 +1894,23 @@ void test_problems_rewrite_hidden() {
 // a click in the middle opens the finding under it too.
 void test_problems_many() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Many";
+	v.project.open = true;
+	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
 		const std::string name = "f" + std::to_string(file) + ".def";
-		v.scan.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+		editor_test::own(v.project.scan)
+				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
 		                               "Finding " + std::to_string(i) + ": a line the game ignores.",
-		                               v.scan.entries[i / 20].relative_path, "name");
+		                               v.project.scan->entries[i / 20].relative_path, "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
 		d.line = i + 1;
-		v.diagnostics.push_back(d);
+		v.findings.diagnostics.push_back(d);
 	}
-	v.scan.index();
+	editor_test::own(v.project.scan).index();
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -1992,16 +1995,16 @@ void test_styles_window_ui() {
 	CHECK(document->load(dir.file("menu_style.mns"), "menu_style.mns", AssetKind::MenuStyle, "jo", error),
 	      "the stylesheet loads");
 	SessionView v;
-	v.project_open = true;
-	v.project_root = dir.root();
+	v.project.open = true;
+	v.project.root = dir.root();
 	AssetEntry entry;
 	entry.logical_name = "menu_style.mns";
 	entry.relative_path = "menu_style.mns";
 	entry.kind = AssetKind::MenuStyle;
-	v.scan.entries.push_back(entry);
-	v.scan.index();
-	v.documents.push_back(document);
-	v.active_document = document->path();
+	editor_test::own(v.project.scan).entries.push_back(entry);
+	editor_test::own(v.project.scan).index();
+	v.documents.open.push_back(document);
+	v.documents.active = document->path();
 	const Node &fg = *document->rows()[1];
 	select_in(v, {fg.id, fg.kind, 0});
 	Ui ui;
@@ -2046,7 +2049,7 @@ void test_styles_lines_listed() {
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Styles"));
 	const SessionView &v = session.view();
-	CHECK(editor_test::write_text(v.project_root + "/menu_style.mns",
+	CHECK(editor_test::write_text(v.project.root + "/menu_style.mns",
 	                              "// Header\r\nA_FG FFFFFFFF\r\n// Colours below\n\r\nB_FG FF000000\r\n// Footer\r\n"),
 	      "stylesheet fixture");
 	session.handle(request::rescan());
@@ -2114,13 +2117,13 @@ void test_styles_lines_listed() {
 
 	// The comment selected as its Problems row selects it: the first line whose end is not CR LF.
 	ProblemLocation location;
-	for (const Diagnostic &d : v.diagnostics)
+	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
 	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
 	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);
 	ui.drain();
-	CHECK(v.selection.row == comment, "the Problems row selects the comment");
+	CHECK(v.documents.selection.row == comment, "the Problems row selects the comment");
 	for (const char *tool : {"Duplicate", "Remove", "Up", "Down"}) CHECK(press(tool).empty(), tool);
 	CHECK(text() == original, "no row tool acts on a line the table does not list");
 	const std::vector<EditorRequest> added = press("Add variable");
@@ -2152,7 +2155,7 @@ void test_go_to_ui() {
 	if (!style || !large.row) return;
 	EditorRequest select = request::select_record(style->path(), large);
 	session.handle(select);
-	const std::vector<const GraphEdge *> users = v.graph->referrers_of(ReferenceKind::StyleVar, "DEF_FONTNAME_LG");
+	const std::vector<const GraphEdge *> users = v.findings.graph->referrers_of(ReferenceKind::StyleVar, "DEF_FONTNAME_LG");
 	CHECK(!users.empty() && !users.front()->locator.empty(), "a menu names the large font");
 	if (users.empty()) return;
 	Ui ui;
@@ -2190,7 +2193,8 @@ void test_go_to_ui() {
 		if (schema.id == "font.name") font = menu->field_on(main, schema);
 	Value value;
 	CHECK(menu->get(main, "font.name", value), "the font's value");
-	const std::vector<ReferenceTarget> targets = reference_targets(*v.graph, v.scan, font, value);
+	const std::vector<ReferenceTarget> targets =
+			reference_targets(*v.findings.graph, *v.project.scan, font, value);
 	CHECK(targets.size() == 2 && targets[0].editable && !targets[1].editable, "the variable, then the font file");
 	if (targets.size() != 2) return;
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
@@ -2223,11 +2227,11 @@ void test_numeric_go_to_ui() {
 	session.handle(request::new_project(dir.file("project"), "Numbers"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	const AssetEntry *items_asset = v.scan.find("items.def");
+	const AssetEntry *items_asset = v.project.scan->find("items.def");
 	CHECK(items_asset != nullptr, "the project's item table");
 	if (!items_asset) return;
 	const std::string items_path = items_asset->relative_path;
-	CHECK(editor_test::write_text(v.project_root + "/" + items_path,
+	CHECK(editor_test::write_text(v.project.root + "/" + items_path,
 	                              "begin \"Carrier\"\nid 100164\ntype vehicle\naddeweap ewep01 100166\nend\n"
 	                              "begin \"Gun\"\nid 100166\ntype vehicle\nend\n"),
 	      "an item naming another by id");

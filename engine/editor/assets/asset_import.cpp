@@ -24,10 +24,6 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-std::string ImportSource::name() const {
-	return entry.empty() ? basename_of(path) : entry;
-}
-
 std::vector<ImportSource> list_import_sources(const std::vector<std::string> &paths,
                                              std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportSource> sources;

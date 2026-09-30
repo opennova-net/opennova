@@ -262,7 +262,7 @@ int validation() {
 	const AssetScan scan = scan_project_assets(paths, project);
 	AssetGraph graph;
 	ValidationCache cache;
-	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<Diagnostic> findings =
 			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto has = [&](const char *code, DiagnosticSeverity severity) {

@@ -575,6 +575,29 @@ requests it raises, and the devices its previews draw through. The Shell (`Edito
 the requests into the session and hands the devices in (`ui/workspace.h`).
 _Avoid_: host, editor host (host is the game host alone), UI (too broad), project (the data)
 
+**Document**:
+A file open in the editor: read as the game's loader reads it, changed through its own undo
+history, and written back over the file only while the file still holds what it was read from.
+That lifecycle is every document's (the base); what a document holds is its kind's. A record
+document holds rows of records, each edit naming a record and one of its fields (the def
+catalogs, string tables, menus, stylesheets, models, clips and animation tables); a document of
+another kind (a terrain's raster, a script's text) holds its own content and takes the changes
+its type makes (an Apply edit's payload).
+_Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
+project file by its logical name)
+
+**View event**:
+A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
+until the window it is for has had it: show a record's field (a Problems row, a Go to), show a
+file in Files, ask a name's new name (Rename everywhere), say how the settings' Apply came out,
+take a new import plan's checks. Each ask is an event of its own, with its place in the view's
+sequence (the last 64 kept), so the same ask made twice is two asks; the workspace hands each
+to the window it is for, which holds it until it draws (64 at most) and takes it once, passing
+over an ask a newer one or the selection has overtaken since. The editor MCP pages them by their
+place.
+_Avoid_: serial (the per-ask counters the events replaced), reveal state (the view keeps none),
+notification (the OS's), signal (Godot's)
+
 **Record / owner**:
 A row of a document or anything nested in one, at any depth; the record that holds a
 record is its owner (a menu window's owner is its parent window, a root window's is

@@ -12,10 +12,15 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
-#include <editor/session/session_view.h>
+#include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_preview_viewport.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_canvas.h>
+#include <editor/ui/workspace.h>
 #include <runtime/anim/anim_event_bits.h>
 
 namespace opennova::editor {
@@ -28,14 +33,55 @@ constexpr ImU32 kEventColor = IM_COL32(255, 220, 90, 255);
 
 // The model document the preview shows (open), or null.
 const ModelDocument *previewed(const SessionView &view, const std::string &path) {
-	for (const auto &open : view.documents)
+	for (const auto &open : view.documents.open)
 		if (open && open->path() == path) return dynamic_cast<const ModelDocument *>(open.get());
 	return nullptr;
 }
 
 } // namespace
 
+// The pane's own state and its drawing: the canvas, the model's half of it, the requests the
+// canvas raises and the toolbar's snap.
+class ModelPreviewPane::Impl {
+public:
+	explicit Impl(Workspace &workspace) : workspace_(workspace), requests_(workspace) {}
+	void draw();
+	void end_frame() {
+		model_canvas_.end_frame(requests_);
+		canvas_.end_frame();
+	}
+
+private:
+	void toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame);
+	void registers_(ModelPreviewModel &model);
+	void draw_canvas_(const ModelCanvasFrame &frame, float available_height);
+	void rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model);
+	void timeline_(ModelPreviewModel &model);
+
+	// The Shell's model device (the workspace's devices), null for none.
+	ModelPreviewViewport *viewport() const { return workspace_.devices().model; }
+
+	Workspace &workspace_;
+	ViewportCanvas canvas_;
+	ModelCanvas model_canvas_;
+	CanvasWindowRequests requests_;
+	int snap_ = 2; // kModelHandleSnaps: 1/16 m
+};
+
+ModelPreviewPane::ModelPreviewPane(Workspace &workspace) :
+		impl_(std::make_unique<Impl>(workspace)) {}
+
+ModelPreviewPane::~ModelPreviewPane() = default;
+
 void ModelPreviewPane::draw() {
+	impl_->draw();
+}
+
+void ModelPreviewPane::end_frame() {
+	impl_->end_frame();
+}
+
+void ModelPreviewPane::Impl::draw() {
 	if (!viewport()) {
 		ui_kit::empty_state(model_preview_status_message(ModelPreviewStatus::NoDevice, std::string()).c_str());
 		return;
@@ -80,8 +126,9 @@ void ModelPreviewPane::draw() {
 	frame.document = previewed(view, model.shown_path());
 	frame.model = &model;
 	frame.current = frame.document && model.shown_revision() == frame.document->revision();
-	if (frame.current && view.active_document == frame.document->path())
-		model_overlay_of(*frame.document, view.selection, frame.selected_kind, frame.selected);
+	if (frame.current && view.documents.active == frame.document->path())
+		model_overlay_of(
+				*frame.document, view.documents.selection, frame.selected_kind, frame.selected);
 	toolbar_(model, frame);
 	frame.overlays = model.overlays();
 	frame.snap = kModelHandleSnaps[std::clamp(snap_, 0, 4)];
@@ -92,7 +139,7 @@ void ModelPreviewPane::draw() {
 
 // The model an animation plays on: Auto (the one an item pairs with the table) or a model
 // of the project's.
-void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model) {
+void ModelPreviewPane::Impl::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model) {
 	const SessionView &view = workspace_.view();
 	ModelPreviewOptions options = model.options();
 	const float width = ImGui::GetFontSize() * 10.0f;
@@ -100,7 +147,7 @@ void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &mod
 	ImGui::SetNextItemWidth(width);
 	if (ImGui::BeginCombo("Plays on", options.rig_model.empty() ? "Auto" : options.rig_model.c_str())) {
 		if (ImGui::Selectable("Auto", options.rig_model.empty())) options.rig_model.clear();
-		for (const AssetEntry &entry : view.scan.entries)
+		for (const AssetEntry &entry : view.project.scan->entries)
 			if (entry.kind == AssetKind::Model &&
 			    ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == options.rig_model))
 				options.rig_model = entry.logical_name;
@@ -113,7 +160,7 @@ void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &mod
 
 // The clip the selection plays: run or hold it, step a tick, scrub; its trigger events
 // under the track (a click on one seeks there and, in the clip's own document, selects it).
-void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
+void ModelPreviewPane::Impl::timeline_(ModelPreviewModel &model) {
 	const int32_t length = model.clip_length_ticks();
 	if (model.clip_key().empty() || length <= 0) {
 		ImGui::TextDisabled("%s", model.rig().table.empty() || model.clip_key().empty()
@@ -189,7 +236,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	model.set_options(held);
 	// In the clip's own document the event is a record: select it.
 	const SessionView &view = workspace_.view();
-	for (const auto &open : view.documents) {
+	for (const auto &open : view.documents.open) {
 		const auto *clip = dynamic_cast<const AnimationDocument *>(open.get());
 		if (!clip || clip->path() != model.shown_path() || clip->rows().empty()) continue;
 		const Node &row = *clip->rows().front();
@@ -201,7 +248,7 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 
 // The level (Auto or one held), what Auto picks and why, the clock, what the overlays
 // mark, Frame, and the registers, on a row that wraps whole controls in a narrow window.
-void ModelPreviewPane::toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame) {
+void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame) {
 	const threedi::Threedi3di3 &shown = *model.model();
 	ModelPreviewOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
@@ -269,7 +316,7 @@ void ModelPreviewPane::toolbar_(ModelPreviewModel &model, const ModelCanvasFrame
 	}
 }
 
-void ModelPreviewPane::registers_(ModelPreviewModel &model) {
+void ModelPreviewPane::Impl::registers_(ModelPreviewModel &model) {
 	const threedi::Threedi3di3 &shown = *model.model();
 	ModelPreviewOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
@@ -293,7 +340,7 @@ void ModelPreviewPane::registers_(ModelPreviewModel &model) {
 // The canvas: the marker under the pointer, found once a frame; the markers where the device drew
 // the model (the camera as it placed it), then the pointer's gestures and F (an orbit moves the
 // camera the next frame draws with).
-void ModelPreviewPane::draw_canvas_(const ModelCanvasFrame &frame, float available_height) {
+void ModelPreviewPane::Impl::draw_canvas_(const ModelCanvasFrame &frame, float available_height) {
 	model_canvas_.follow(frame, requests_);
 	if (canvas_.begin(available_height, 0, 0)) {
 		const CanvasInput &in = canvas_.input();

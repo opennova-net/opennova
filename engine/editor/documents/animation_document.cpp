@@ -376,7 +376,7 @@ bool AnimationDocument::accept_change(const Change &change, std::string &error) 
 	return true;
 }
 
-std::vector<Diagnostic> validate_animation_file(const Document &document) {
+std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const uint32_t known = known_trigger_bits();
 	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);

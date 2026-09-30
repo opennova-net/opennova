@@ -2,8 +2,8 @@
 
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
-#include <editor/session/findings_index.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/findings_index.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/model/field_text.h>
@@ -44,7 +44,7 @@ const char *const kIgnoredTip = "The game does not read this here; the file stil
 const char *const kMixedTip = "The selected records differ here; a change sets it on every one.";
 const char *const kUnverifiedTip = "Whether the game reads this here is not witnessed yet.";
 
-// A field a request asked to show (the view's reveal_field) on the record it was for: its
+// A field a request asked to show (a RevealRecord event) on the record it was for: its
 // section opened and the form scrolled to it once, its row lit for a moment after.
 struct Reveal {
 	NodeAddress record;
@@ -54,7 +54,8 @@ struct Reveal {
 };
 
 const Document *active(const SessionView &view) {
-	for (const auto &document : view.documents) if (document->path() == view.active_document) return document.get();
+	for (const auto &document : view.documents.open)
+		if (document->path() == view.documents.active) return records_of(*document);
 	return nullptr;
 }
 
@@ -188,17 +189,18 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
                 const std::string &tip, const char *lead) {
 	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
 	const SessionView &view = workspace.view();
-	if (!view.graph) return;
+	if (!view.findings.graph) return;
 	if (pressed || hovered) {
 		const std::vector<ReferenceTarget> targets =
-				reference_targets(*view.graph, view.scan, field, value);
+				reference_targets(*view.findings.graph, *view.project.scan, field, value);
 		if (pressed && targets.size() == 1) go_to(workspace, targets.front());
 		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
 		if (hovered)
 			ui_kit::tooltip(targets.empty() ? tip : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets));
 	}
 	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target : reference_targets(*view.graph, view.scan, field, value))
+	for (const ReferenceTarget &target :
+			reference_targets(*view.findings.graph, *view.project.scan, field, value))
 		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
 	ImGui::EndPopup();
 }
@@ -211,8 +213,8 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
                       ui_kit::WrapRow *row) {
 	std::string symbol;
 	const SessionView &view = workspace.view();
-	const ReferenceStatus status = view.graph
-			? editor::reference_status(*view.graph, field, value, &symbol)
+	const ReferenceStatus status = view.findings.graph
+			? editor::reference_status(*view.findings.graph, field, value, &symbol)
 			: ReferenceStatus::Unverified;
 	if (status == ReferenceStatus::NotAReference) return;
 	const ImVec4 colour = ui_kit::reference_color(status);
@@ -313,13 +315,13 @@ void rename_hint(Workspace &workspace, const Document &document, const NodeAddre
                  const Value &value) {
 	const SessionView &view = workspace.view();
 	Value saved;
-	if (!view.graph || !document.field_changed(address, field.schema->id) ||
+	if (!view.findings.graph || !document.field_changed(address, field.schema->id) ||
 	    !document.saved_value(address, field.schema->id, saved))
 		return;
 	const std::string old = name_of(saved), now = name_of(value);
 	if (old.empty() || now.empty()) return;
 	size_t others = 0;
-	for (const GraphEdge *edge : view.graph->referrers_of(field.defines, old, field.scope))
+	for (const GraphEdge *edge : view.findings.graph->referrers_of(field.defines, old, field.scope))
 		if (edge->source != document.path()) ++others;
 	if (!others) return;
 	ImGui::PushStyleColor(ImGuiCol_Text, kIgnored);
@@ -710,7 +712,7 @@ void records_table(Workspace &workspace, ReferencePicker &picker, const Document
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, row);
 			ImGui::PushID(static_cast<int>(address.child));
 			ImGui::TableNextColumn();
-			const bool on = holds(workspace.view().selected, address);
+			const bool on = holds(workspace.view().documents.selected, address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
 			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
@@ -740,7 +742,7 @@ void records_list(Workspace &workspace, const Document &document, const NodeAddr
 		const std::string name =
 		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
 		                    ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((name + "###record").c_str(), holds(workspace.view().selected, address))) select_row(workspace, document, address);
+		if (ImGui::Selectable((name + "###record").c_str(), holds(workspace.view().documents.selected, address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
 		ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
 		row_menu(workspace, document, records.spec, address, i, records.ids.size());
@@ -769,7 +771,7 @@ void collection_block(Workspace &workspace, ReferencePicker &picker, const Docum
 	}
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
-		if (workspace.view().selection.kind == spec.kind && workspace.view().selection.child == ids[i]) selected = i;
+		if (workspace.view().documents.selection.kind == spec.kind && workspace.view().documents.selection.child == ids[i]) selected = i;
 	if (!spec.fixed) {
 		ImGui::BeginDisabled(document.blocked());
 		ui_kit::WrapRow row;
@@ -862,12 +864,12 @@ void draw_section(Workspace &workspace, ReferencePicker &picker, const Document 
 // goes to the use (graph/reference_queries' usage_target).
 void referenced_by(Workspace &workspace, const Document &document, const NodeAddress &record) {
 	const SessionView &view = workspace.view();
-	if (!view.graph) return;
+	if (!view.findings.graph) return;
 	std::vector<const GraphEdge *> users;
-	for (const GraphSymbol *symbol : view.graph->symbols_of(document.path(), document.record_path(record))) {
+	for (const GraphSymbol *symbol : view.findings.graph->symbols_of(document.path(), document.record_path(record))) {
 		if (symbol->inert) continue; // not what the game reads: nothing names this one
 		if (symbol->address.row && symbol->address != record) continue; // another record of the same path
-		for (const GraphEdge *edge : view.graph->referrers_of(symbol->kind, symbol->name, symbol->scope)) users.push_back(edge);
+		for (const GraphEdge *edge : view.findings.graph->referrers_of(symbol->kind, symbol->name, symbol->scope)) users.push_back(edge);
 	}
 	if (users.empty()) return;
 	ImGui::Separator();
@@ -880,7 +882,7 @@ void referenced_by(Workspace &workspace, const Document &document, const NodeAdd
 		const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
 		const bool pressed = ImGui::Selectable((shown + "###use").c_str());
 		if (pressed || ImGui::IsItemHovered()) {
-			const ReferenceTarget target = usage_target(view.scan, edge);
+			const ReferenceTarget target = usage_target(*view.project.scan, edge);
 			if (pressed) go_to(workspace, target);
 			ui_kit::tooltip(line + "\n" + edge.field + "\n" + go_to_words({target}));
 		}
@@ -920,7 +922,7 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 void findings(const SessionView &view, const FindingsIndex &index, const Document &document,
               const Node &row, const NodeAddress &selection) {
 	for (const size_t i : index.of_record(document.path(), row.id, selection.child)) {
-		const Diagnostic &d = view.diagnostics[i];
+		const Diagnostic &d = view.findings.diagnostics[i];
 		ui_kit::severity_marker(d.severity);
 		ImGui::SameLine();
 		ImGui::AlignTextToFramePadding();
@@ -933,33 +935,52 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 
 } // namespace
 
+void InspectorWindow::receive(const ViewEvent &event) {
+	const SessionView &view = workspace_.view();
+	HeldReveal held;
+	held.event = event;
+	held.selection = view.revisions.of(ViewConcern::Selection);
+	for (const std::shared_ptr<const DocumentBase> &document : view.documents.open)
+		if (document->path() == event.path) held.document = document->identity();
+	events_.post(std::move(held));
+}
+
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
+	// The fields asked to show since the Inspector last drew, each taken now (read below).
+	const std::vector<HeldReveal> reveals = events_.take();
 	const Document *document = active(view);
-	if (!document || !view.selection.row) {
+	if (!document || !view.documents.selection.row) {
 		ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
 		return;
 	}
-	const Node *row = document->row(view.selection.row);
+	const Node *row = document->row(view.documents.selection.row);
 	if (!row) {
 		ui_kit::empty_state("The selected record was removed.");
 		return;
 	}
-	const NodeAddress selection = view.selection;
-	// A field a request asks to show (a Problems row's): each ask (its serial, in this
-	// document) shown once, the filter cleared so nothing hides it; the same row clicked again
-	// is another ask, shown again.
-	if (view.reveal_field.empty()) {
-		reveal_field_.clear();
-	} else if (view.reveal_serial != reveal_serial_ || document->identity() != reveal_document_) {
-		reveal_serial_ = view.reveal_serial;
+	const NodeAddress selection = view.documents.selection;
+	// A field a request asks to show (a Problems row's): each ask on the record selected now, in
+	// this document, shown once, the filter cleared so nothing hides it; the same row clicked
+	// again is another ask, shown again. An ask about a record no longer selected shows nothing,
+	// nor one the selection moved from since it was sent (and back) or whose document was read
+	// again; the selection moving off the record shown lets its field go.
+	const uint64_t selected = view.revisions.of(ViewConcern::Selection);
+	for (const HeldReveal &held : reveals) {
+		const ViewEvent &reveal = held.event;
+		if (reveal.kind != ViewEventKind::RevealRecord || reveal.path != document->path() ||
+				reveal.address != selection || reveal.field.empty() ||
+				held.selection != selected || held.document != document->identity())
+			continue;
 		reveal_document_ = document->identity();
-		reveal_field_ = view.reveal_field;
+		reveal_field_ = reveal.field;
 		reveal_record_ = selection;
 		reveal_scroll_ = true;
 		reveal_time_ = ImGui::GetTime();
 		filter_[0] = '\0';
 	}
+	if (reveal_document_ != document->identity() || reveal_record_ != selection)
+		reveal_field_.clear();
 	Reveal reveal;
 	reveal.record = reveal_record_;
 	reveal.field = reveal_field_;
@@ -969,7 +990,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	breadcrumb(workspace_, *document, selection);
 	// Several records of one kind: the fields they share, each change set on every one.
 	Targets together{selection};
-	for (const NodeAddress &address : view.selected)
+	for (const NodeAddress &address : view.documents.selected)
 		if (address != selection) together.push_back(address);
 	const bool one_kind = std::all_of(together.begin(), together.end(),
 	                                  [&](const NodeAddress &address) { return address.kind == selection.kind; });

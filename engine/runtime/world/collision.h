@@ -1311,6 +1311,14 @@ public:
     // [orig: resolver attrib branches/call @0x4B2F90..0x4B2FF5]
     std::vector<GameplayContact> take_movement_callback_contacts();
 
+    // Drain successful first-pass Powerup contacts of a player-class source.
+    // Retail invokes the target's pickup callback inline, on every peer whose
+    // resolver ran the body, and treats the target as no solid geometry;
+    // world/powerup.h runs the callback in this order.
+    // [orig: the attrib&2 branch @0x4B2FB8, the source Flags&0x100 gate
+    //  @0x4B2FBD, Entity_InvokeCollisionCallback @0x4B2FCC]
+    std::vector<GameplayContact> take_powerup_contacts();
+
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
         bool prev_valid = false;
@@ -1562,9 +1570,11 @@ private:
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
     void record_change_team_contact(EntityHandle source, EntityHandle trigger);
     void record_movement_callback_contact(EntityHandle source, EntityHandle target);
+    void record_powerup_contact(EntityHandle source, EntityHandle target);
 
     std::vector<GameplayContact> change_team_contacts_;
     std::vector<GameplayContact> movement_callback_contacts_;
+    std::vector<GameplayContact> powerup_contacts_;
 
     struct Instance {
         int32_t model_id = -1;

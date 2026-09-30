@@ -25,7 +25,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include "common/file_io.h"
@@ -145,20 +145,21 @@ bool fill_strings(ProjectSession &session) {
 bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
 	if (!preview_project(session, dir)) return false;
 	const SessionView &v = session.view();
-	const AssetEntry *table = v.scan.find("gametext.bin");
-	const AssetEntry *style = v.scan.find("menu_style.mns");
+	const AssetEntry *table = v.project.scan->find("gametext.bin");
+	const AssetEntry *style = v.project.scan->find("menu_style.mns");
 	if (!table || !style) return false;
-	const std::vector<uint8_t> bytes = test_io::read_file(v.project_root + "/" + table->relative_path);
+	const std::vector<uint8_t> bytes = test_io::read_file(v.project.root + "/" + table->relative_path);
 	for (int i = 0; i < 30; ++i) {
 		char name[32];
 		std::snprintf(name, sizeof(name), "/strings/table%02d.bin", i);
-		if (!editor_test::write_bytes(v.project_root + name, bytes)) return false;
+		if (!editor_test::write_bytes(v.project.root + name, bytes)) return false;
 	}
-	if (!editor_test::write_text(v.project_root + "/" + style->relative_path, long_style()) ||
-	    !editor_test::write_text(v.project_root + "/menus/deep.mnu", deep_menu()))
+	if (!editor_test::write_text(v.project.root + "/" + style->relative_path, long_style()) ||
+	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()))
 		return false;
 	session.handle(request::rescan());
-	return v.scan.find("table29.bin") && v.scan.find("deep.mnu") && fill_strings(session);
+	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") &&
+			fill_strings(session);
 }
 
 // A finding whose message runs far past any line, on a record's field of a file.
@@ -184,8 +185,8 @@ struct Sweep {
 	// The session's view again, the long findings added, drawn until it settles.
 	void follow() {
 		view = session.view();
-		view.diagnostics.push_back(long_finding("defs/items.def", "catalog.test"));
-		view.diagnostics.push_back(long_finding("", "project.test"));
+		view.findings.diagnostics.push_back(long_finding("defs/items.def", "catalog.test"));
+		view.findings.diagnostics.push_back(long_finding("", "project.test"));
 		view.revisions.touch(ViewConcern::Findings);
 		ui.windows.set_view(&view);
 		for (int i = 0; i < 4; ++i) {
@@ -201,7 +202,8 @@ struct Sweep {
 	// itself, reach_last_tab), which would hide what the view draws past the window.
 	void open(const char *path, const char *record) {
 		std::vector<std::string> others;
-		for (const auto &document : session.view().documents) others.push_back(document->path());
+		for (const auto &document : session.view().documents.open)
+			others.push_back(document->path());
 		for (const std::string &other : others) session.handle(request::close_document(other));
 		session.handle(request::open_document(path));
 		const Document *document = session.document_for(path);
@@ -209,7 +211,7 @@ struct Sweep {
 		if (document && record && find_definition(AssetGraph(), *document, record, address)) {
 			EditorRequest select = request::select_record(document->path(), address);
 			session.handle(select);
-		} else if (document && !record && !document->rows().empty() && !session.view().selection.row) {
+		} else if (document && !record && !document->rows().empty() && !session.view().documents.selection.row) {
 			EditorRequest select = request::select_record(document->path(),
 					{ document->rows().front()->id, document->rows().front()->kind, 0 });
 			session.handle(select);
@@ -219,13 +221,14 @@ struct Sweep {
 	// Every section of the inspector's form open (those the file leaves out start folded), and
 	// the catalog's spawn registry: set open in the windows' own state, as a click leaves it.
 	void unfold() {
-		const Document *document = session.document_for(view.active_document);
+		const Document *document = session.document_for(view.documents.active);
 		ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
-		if (!document || !inspector || !view.selection.row) return;
-		NodeAddress owner = view.selection;
+		if (!document || !inspector || !view.documents.selection.row) return;
+		NodeAddress owner = view.documents.selection;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
-		for (const InspectorSection &section : plan_inspector(*document, view.selection, owner, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*document, view.documents.selection, owner, ""))
 			if (!section.key.empty()) inspector->StateStorage.SetInt(item_id(inspector->ID, {("###" + section.key).c_str()}), 1);
 		if (ImGuiWindow *window = ImGui::FindWindowByName("Document"))
 			window->StateStorage.SetInt(item_id(document_tab_id(document->path()), {"spawn"}), 1);
@@ -234,15 +237,16 @@ struct Sweep {
 	// The first reference field's picker in the inspector's form (Pick), open; false when the
 	// form has none or it did not open.
 	bool open_picker() {
-		const Document *document = session.document_for(view.active_document);
-		if (!document || !view.selection.row) return false;
-		NodeAddress owner = view.selection;
+		const Document *document = session.document_for(view.documents.active);
+		if (!document || !view.documents.selection.row) return false;
+		NodeAddress owner = view.documents.selection;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
-		for (const InspectorSection &section : plan_inspector(*document, view.selection, owner, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*document, view.documents.selection, owner, ""))
 			for (const FieldUse &field : section.fields) {
 				if (field.reference == ReferenceKind::None || field.schema->type != FieldType::Text) continue;
-				if (field.schema->optional && !document->present(view.selection, field.schema->id)) continue;
+				if (field.schema->optional && !document->present(view.documents.selection, field.schema->id)) continue;
 				ui.activate(item_id(Ui::window_id("Inspector"), {section.key.c_str(), "fields", field.schema->id.c_str(), "Pick"}));
 				ui.frames(2);
 				return GImGui->OpenPopupStack.Size > 0;
@@ -309,11 +313,11 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 	// The import dialog: a plan whose names, places and notes run long, with an archive's members
 	// to choose from (one of them named long), and changed since it was shown.
 	sweep.follow();
-	sweep.view.import_preview =
+	sweep.view.dialogs.import_preview =
 	        planned_import("C:/assets/a_folder_whose_path_runs_long_enough_to_be_cut_in_any_column", "_with_a_name_long_enough_to_cut");
-	sweep.view.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false},
+	sweep.view.dialogs.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false},
 	                                     {"C:/assets/data.pff", "a_member_whose_name_runs_long_enough_to_be_cut.mnu", false, false}};
-	sweep.view.import_preview.changed = true;
+	sweep.view.dialogs.import_preview.changed = true;
 	sweep.view.revisions.touch(ViewConcern::Dialogs);
 	sweep.ui.frames(4);
 	CHECK(ImGui::FindWindowByName("Import files") && ImGui::FindWindowByName("Import files")->Active,
@@ -327,7 +331,7 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 		sweep.check(layout + ", the import dialog 360 pixels wide");
 		ImGui::SetWindowSize("Import files", size);
 	}
-	sweep.view.import_preview = SessionView::ImportPreview();
+	sweep.view.dialogs.import_preview = DialogsView::ImportPreview();
 	sweep.view.revisions.touch(ViewConcern::Dialogs);
 	sweep.ui.frames(3);
 	// The project settings.

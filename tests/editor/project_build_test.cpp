@@ -152,7 +152,7 @@ struct Project {
 		const AssetScan scan = scan_project_assets(paths, doc);
 		AssetGraph graph;
 		ValidationCache cache;
-		const std::vector<std::shared_ptr<const Document>> open;
+		const std::vector<std::shared_ptr<const DocumentBase>> open;
 		return plan_build(paths, scan, evaluate_requirements(doc, scan),
 				validate_project({ paths, doc, scan, open }, graph, cache));
 	}

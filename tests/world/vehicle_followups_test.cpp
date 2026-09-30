@@ -188,9 +188,37 @@ void wheelie_vertical_cap_and_catchup() {
         v.veh.plat_acc[0] = 6100;
         v.veh.slide_z = -1000;
         int32_t adjustment[4] = {};
-        r.world.vehicles.suspension_airborne_loop(v, t, 2, 100, adjustment);
-        CHECK(adjustment[0] == (held ? 0 : -6000));
+        // The bike's droop is (sink - 100) x -1.5 [orig: flt_7C6F68 @0x47B49F].
+        r.world.vehicles.suspension_bike_airborne_loop(v, t, /*fwd_z16=*/0, adjustment);
+        CHECK(adjustment[0] == (held ? 0 : -9000));
         CHECK(v.veh.landing_2ee == 1);
+    }
+    // A front sink of 500+ within 500 of the rear clears the rear sink, so only
+    // the front droops [orig: @0x47B461..0x47B48A].
+    {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike);
+        auto &v = r.entity();
+        v.veh.plat_acc[0] = 900;
+        v.veh.plat_acc[1] = 700;
+        int32_t adjustment[4] = {};
+        r.world.vehicles.suspension_bike_airborne_loop(v, t, /*fwd_z16=*/0, adjustment);
+        CHECK(v.veh.plat_acc[1] == 0);
+        CHECK(adjustment[0] == -1200 && adjustment[1] == 0);
+    }
+    // Nose at or below -0x1000 after 16 airborne ticks: no droop, no clear
+    // [orig: @0x47B44C..0x47B45D].
+    for (int ticks : {15, 16}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike);
+        auto &v = r.entity();
+        v.veh.plat_acc[0] = 900;
+        v.veh.plat_acc[1] = 700;
+        v.veh.plat_airborne_ticks = ticks;
+        int32_t adjustment[4] = {};
+        r.world.vehicles.suspension_bike_airborne_loop(v, t, /*fwd_z16=*/-0x1000, adjustment);
+        CHECK(adjustment[0] == (ticks < 16 ? -1200 : 0));
+        CHECK(v.veh.plat_acc[1] == (ticks < 16 ? 0 : 700));
     }
 }
 
@@ -753,6 +781,23 @@ void tank_sleep_gate_compares_attitude() {
 }
 } // namespace
 
+// A severity-3 hit costs hull health unless the whole Flags word carries
+// Indestructible; the promote keeps that bit in engine_flags.
+// [orig: Entity_ProcessLightVehiclePhysics `test [esi+24h],4000000h` @0x479E0D]
+void bike_indestructible_hull_skips_impact_damage() {
+    for (int indestructible : {0, 1}) {
+        Rig r;
+        auto t = r.traits(VehicleFamily::Bike);
+        auto &v = r.entity();
+        v.veh.vel_x = 30000;
+        v.veh.speed = 30000;
+        if (indestructible) v.engine_flags |= kEntityFlagIndestructible;
+        const int32_t before = v.health;
+        detail::vehicle_contact_impact(r.world, v, t, 3, EntityHandle{}, 0, 0, 0);
+        CHECK(indestructible ? v.health == before : v.health < before);
+    }
+}
+
 int main() {
     tank_belly_support_keeps_corners_grounded();
     tank_airborne_fit_applies_corner_drop();
@@ -778,5 +823,6 @@ int main() {
     crashed_upright_depth_precedes_springs();
     bike_off_contact_planar_forward();
     vehicle_respawn_reseeds_destroy_timer();
+    bike_indestructible_hull_skips_impact_damage();
     return failures ? 1 : 0;
 }

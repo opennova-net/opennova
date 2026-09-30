@@ -341,19 +341,21 @@ add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
 # weapons and ammo run their inline blocks unconditionally and pin the shipped
 # tables from the reference fixture set as SKIP-LEG legs; every hudpos leg
 # reads the shipped table, so it gates whole on OPENNOVA_JO_ASSETS.
-foreach(test items weapons ammo hudpos item_attrib item_part_bytes item_type)
+foreach(test items weapons ammo powerup hudpos item_attrib item_part_bytes item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_formats)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test items weapons ammo item_attrib item_part_bytes item_type)
-    if(test MATCHES "^(items|weapons|ammo)$")
+foreach(test items weapons ammo powerup item_attrib item_part_bytes item_type)
+    if(test MATCHES "^(items|weapons|ammo|powerup)$")
         opennova_add_mixed_test(def_parse_${test} COMMAND def_parse_${test}_test)
     else()
         add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
     endif()
 endforeach()
 opennova_add_gated_test(def_parse_hudpos COMMAND def_parse_hudpos_test)
+# The powerup retail leg reads powerup.def off the packed install through the Vfs.
+target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
 # PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
@@ -2384,6 +2386,14 @@ target_link_libraries(match_test PRIVATE opennova_runtime)
 target_include_directories(match_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(match_test PRIVATE cxx_std_17)
 add_test(NAME match COMMAND match_test)
+# The powerup family: the med/ammo pack bind, pickup arms, consume outcomes,
+# respawn countdown and the remote-player grant (world/powerup.h;
+# docs/world/powerup-re.md).
+add_executable(powerup_test world/powerup_test.cpp)
+target_link_libraries(powerup_test PRIVATE opennova_runtime)
+target_include_directories(powerup_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(powerup_test PRIVATE cxx_std_17)
+add_test(NAME powerup COMMAND powerup_test)
 add_executable(match_scoring_test world/match_scoring_test.cpp)
 target_link_libraries(match_scoring_test PRIVATE opennova_runtime)
 target_include_directories(match_scoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3659,6 +3669,13 @@ add_executable(editor_document_set_test editor/document_set_test.cpp)
 target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
 target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_document_set COMMAND editor_document_set_test)
+
+# A document type of another kind than records (S13 D6), a test's standing in for the
+# stylesheet's: the graph, the validation, the rename and the session over it.
+add_executable(editor_non_record_document_test editor/non_record_document_test.cpp)
+target_link_libraries(editor_non_record_document_test PRIVATE opennova_editor)
+target_include_directories(editor_non_record_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_non_record_document COMMAND editor_non_record_document_test)
 
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)

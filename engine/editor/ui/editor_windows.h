@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <editor/session/editor_request.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/files_window.h>
 #include <editor/ui/import_dialog.h>
@@ -19,6 +19,7 @@
 namespace opennova::editor {
 
 class DocumentWindow;
+class InspectorWindow;
 class MenuPreviewViewport;
 class ModelPreviewViewport;
 class PreviewWindow;
@@ -43,16 +44,22 @@ public:
 
 	devtools::ImGuiPass &pass() { return pass_; }
 
-	// The session's view the windows draw from; must outlive the next draw.
-	void set_view(const SessionView *view) { view_ = view; }
+	// The session's view the windows draw from; must outlive the next draw. Another view's events
+	// are its own: the windows are sent those posted from now on (begin_frame).
+	void set_view(const SessionView *view);
 
 	// One layout pass (the pass's draw_frame) inside the frame bracket below: false when
 	// nothing was drawn.
 	bool draw_frame(uint64_t frame_index);
 	// The frame bracket, for a shell that drives the pass itself (EditorApp's layout pass):
-	// a request that acts on the files as saved, raised in between, waits for every other
-	// request of the frame (request()), and end_frame queues it after them, once the Preview
-	// window's canvases that did not draw this frame have ended their gestures.
+	// begin_frame sends each view event posted since the last frame (view_events.h) to the
+	// mailbox of the window it is for, which holds it until that window draws (a RevealRecord to
+	// the view of its document and to the Inspector, a RevealFile to Files, which comes forward
+	// for it, an AskRename to Rename everywhere, a SettingsApplied to the project settings, an
+	// ImportPlanned to the import dialog); a request that acts on the files as saved, raised in
+	// between, waits for every other request of the frame (request()), and end_frame queues it
+	// after them, once the Preview window's canvases that did not draw this frame have ended
+	// their gestures.
 	void begin_frame();
 	void end_frame();
 
@@ -90,14 +97,17 @@ public:
 
 private:
 	void draw_file_menu(const SessionView &v);
-	void draw_edit_menu(const SessionView &v, const Document *document);
+	void draw_edit_menu(const SessionView &v, const DocumentBase *document);
 	void draw_build_menu(const SessionView &v);
 	void draw_new_project();
-	void shortcuts(const SessionView &v, const Document *document);
+	void shortcuts(const SessionView &v, const DocumentBase *document);
+
+	void dispatch_events();
 
 	devtools::ImGuiPass pass_;
 	const SessionView *view_ = nullptr;
 	SessionView empty_;
+	uint64_t dispatched_ = 0; // the seq of the last view event sent to a window
 	WorkspaceDevices devices_; // the Shell's, handed in by the set_*_preview_viewport calls
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
@@ -111,6 +121,7 @@ private:
 	RenameDialog rename_;
 	FilesWindow *files_window_ = nullptr; // owned by the pass
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
+	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
 	PreviewWindow *preview_window_ = nullptr; // owned by the pass
 	devtools::Window *problems_window_ = nullptr; // owned by the pass
 };
