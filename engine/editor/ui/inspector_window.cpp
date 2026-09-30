@@ -531,9 +531,13 @@ void group_row(EditorHost &host, const Document &document, const Targets &target
 	std::vector<FieldUse> members;
 	std::vector<Value> values(fields.size());
 	std::vector<bool> mixed(fields.size());
+	// Each member's choices as they apply to the record (its own list where it has one).
+	std::vector<std::vector<FieldChoice>> own(fields.size());
+	std::vector<const std::vector<FieldChoice> *> choices(fields.size());
 	for (size_t i = 0; i < fields.size(); ++i) {
 		if (!document.get(address, fields[i]->schema->id, values[i])) return;
 		members.push_back(*fields[i]);
+		choices[i] = &document.choices_on(address, *fields[i], own[i]);
 		mixed[i] = field_mixed(document, targets, fields[i]->schema->id);
 	}
 	const float left = begin_row(reveal, address, fields);
@@ -546,7 +550,8 @@ void group_row(EditorHost &host, const Document &document, const Targets &target
 	ImGui::TableNextColumn();
 	ImGui::SetNextItemWidth(-FLT_MIN);
 	size_t changed = SIZE_MAX;
-	const field_widgets::Edited change = field_widgets::group(members, values, changed, mixed);
+	const field_widgets::Edited change =
+			field_widgets::group(members, choices, values, changed, mixed);
 	std::vector<Edit> batch;
 	for (size_t i = 0; change.changed && i < fields.size(); ++i)
 		for (const NodeAddress &target : targets) {

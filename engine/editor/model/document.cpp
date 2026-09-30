@@ -153,22 +153,58 @@ bool Document::placement_in(const Node &row, NodeId child, Placement &out) const
 	return found;
 }
 
+void Document::index_records() const {
+	if (records_known_ && records_revision_ == revision()) return;
+	// A version's records out of the index, those still indexed under its row (one another row
+	// has taken since keeps that row).
+	const auto take_out = [&](NodeId row, const std::shared_ptr<const Node> &version) {
+		for (const auto &record : row_index_of(version).placements) {
+			const auto entry = record_rows_.find(record.first);
+			if (entry != record_rows_.end() && entry->second == row) record_rows_.erase(entry);
+		}
+	};
+	for (const auto &row : rows_) {
+		std::shared_ptr<const Node> &indexed = indexed_rows_[row->id];
+		if (indexed == row) continue;
+		if (indexed) take_out(row->id, indexed);
+		record_rows_[row->id] = row->id;
+		for (const auto &record : row_index_of(row).placements)
+			record_rows_[record.first] = row->id;
+		indexed = row;
+	}
+	// A row no longer among the rows (one indexed that the loop above did not meet): its records
+	// out, itself too.
+	if (indexed_rows_.size() > rows_.size()) {
+		std::unordered_set<NodeId> current;
+		for (const auto &row : rows_) current.insert(row->id);
+		for (auto it = indexed_rows_.begin(); it != indexed_rows_.end();) {
+			if (current.count(it->first)) {
+				++it;
+				continue;
+			}
+			take_out(it->first, it->second);
+			const auto self = record_rows_.find(it->first);
+			if (self != record_rows_.end() && self->second == it->first) record_rows_.erase(self);
+			it = indexed_rows_.erase(it);
+		}
+	}
+	records_known_ = true;
+	records_revision_ = revision();
+}
+
 NodeAddress Document::address_of(NodeId id) const {
 	if (!id) return {};
-	if (!addresses_known_ || addresses_revision_ != revision()) {
-		// Every row and every record it holds, once per revision (each row's records through its
-		// own index, kept while the row stands).
-		addresses_.clear();
-		for (const auto &row : rows_) {
-			addresses_[row->id] = {row->id, row->kind, 0};
-			for (const auto &record : row_index_of(row).placements)
-				addresses_[record.first] = {row->id, record.second.spec.kind, record.first};
-		}
-		addresses_known_ = true;
-		addresses_revision_ = revision();
-	}
-	const auto found = addresses_.find(id);
-	return found == addresses_.end() ? NodeAddress() : found->second;
+	index_records();
+	const auto owner = record_rows_.find(id);
+	if (owner == record_rows_.end()) return {};
+	const size_t index = row_index(owner->second);
+	if (index >= rows_.size()) return {};
+	const std::shared_ptr<const Node> &row = rows_[index];
+	if (row->id == id) return {row->id, row->kind, 0};
+	const RowIndex &records = row_index_of(row);
+	const auto placed = records.placements.find(id);
+	if (placed == records.placements.end()) return {};
+	return {row->id, placed->second.spec.kind, id};
 }
 
 FieldUse Document::field_on(const NodeAddress &address, const FieldSchema &field) const {
@@ -823,7 +859,9 @@ void Document::set_baseline() {
 	// revisions again, so one may name another state).
 	row_changes_.clear();
 	moved_known_ = false;
-	addresses_known_ = false;
+	records_known_ = false;
+	record_rows_.clear();
+	indexed_rows_.clear();
 	defined_.reset();
 }
 
@@ -888,18 +926,23 @@ Document::RecordChange Document::record_change(const NodeAddress &address) const
 	const std::shared_ptr<const Node> now = current_row(address.row);
 	const std::shared_ptr<const Node> saved = saved_row(address.row);
 	if (!now) return RecordChange::Unchanged; // gone: nothing left to mark
-	// The baseline's own committed row: nothing in it changed, though the row may have moved.
-	if (now == saved) {
-		const bool moved = !address.child && now->kind == address.kind && row_moved(address.row);
-		return moved ? RecordChange::Changed : RecordChange::Unchanged;
+	// What the record itself holds against the baseline: nothing changed in the baseline's own
+	// committed row; else the two rows compared, the answer kept while they stand.
+	RecordChange change = RecordChange::Unchanged;
+	if (now != saved) {
+		std::unordered_map<NodeId, RecordChange> &records =
+				row_changes(address.row, now, saved).records;
+		const NodeId key = address.child ? address.child : address.row;
+		auto cached = records.find(key);
+		if (cached == records.end())
+			cached = records.emplace(key, compare_record(address, now, saved)).first;
+		change = cached->second;
 	}
-	std::unordered_map<NodeId, RecordChange> &records =
-			row_changes(address.row, now, saved).records;
-	const NodeId key = address.child ? address.child : address.row;
-	const auto cached = records.find(key);
-	if (cached != records.end()) return cached->second;
-	const RecordChange change = compare_record(address, now, saved);
-	records.emplace(key, change);
+	// A row's place among the rows depends on every row, not on its own two: asked on each call
+	// (row_moved answers once a revision), never kept with the row's own answer.
+	if (change == RecordChange::Unchanged && !address.child && now->kind == address.kind &&
+			row_moved(address.row))
+		change = RecordChange::Changed;
 	return change;
 }
 
@@ -915,7 +958,7 @@ Document::RecordChange Document::compare_record(const NodeAddress &address,
 	if (after.size() != before.size()) return RecordChange::Changed;
 	for (size_t i = 0; i < after.size(); ++i)
 		if (after[i].spec.kind != before[i].spec.kind || after[i].ids != before[i].ids) return RecordChange::Changed;
-	return !address.child && row_moved(address.row) ? RecordChange::Changed : RecordChange::Unchanged;
+	return RecordChange::Unchanged;
 }
 
 bool Document::row_moved(NodeId id) const {

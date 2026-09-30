@@ -63,12 +63,14 @@ float swatch_width();
 Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Value &value,
 		bool compact, bool mixed = false);
 
-// The fields of one group on one row (as they apply to the record, each with its schema's
-// choices), each at its share of the width set (after a swatch for a Channel group), with its
-// name and what it is in its tooltip. `values` in the order of `fields`; `mixed` which of them
+// The fields of one group on one row (as they apply to the record), each at its share of the
+// width set (after a swatch for a Channel group), with its name and what it is in its tooltip.
+// `choices` each member's choices as they apply there (Document::choices_on: a record's own list
+// where it has one), `values` their values, both in the order of `fields`; `mixed` which of them
 // differ across the records edited (empty: none). When one changed, `changed` is its index and
 // `values[changed]` its value; a swatch's pick changes every channel (`changed` SIZE_MAX).
-Edited group(const std::vector<FieldUse> &fields, std::vector<Value> &values, size_t &changed,
-             const std::vector<bool> &mixed = {});
+Edited group(const std::vector<FieldUse> &fields,
+		const std::vector<const std::vector<FieldChoice> *> &choices, std::vector<Value> &values,
+		size_t &changed, const std::vector<bool> &mixed = {});
 
 } // namespace opennova::editor::field_widgets

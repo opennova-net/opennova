@@ -1332,10 +1332,11 @@ static int test_changes_since_save() {
 // clones it once. What changed since the save reads no field of a line whose committed row is
 // the baseline's own, and each field of the edited line at most once a side, the answers kept
 // while the two rows compared stand (an undo gives the saved row back, a redo the same edited
-// one: neither reads a field). A record is found by its identity through one map a revision. A
+// one: neither reads a field). A record is found by its identity (test_record_index). A
 // field's use points at its schema, the same entry of the type's table for every record of every
 // document, its choices never copied; a type's refinement never makes a read-only field
-// writable; a record's own choices are the widgets' alone (the find never asks for them).
+// writable; a record's own choices reach the widgets and the find (a value found by its
+// choice's name), never the graph's extraction.
 static int test_per_call_costs() {
 	using Change = Document::RecordChange;
 	constexpr size_t kRows = 5000, kEdited = 2500;
@@ -1389,8 +1390,10 @@ static int test_per_call_costs() {
 	TEST_EXPECT(first.schema->choices.size() == kTags && first.schema->choices.data() == tag.choices.data());
 	TEST_EXPECT(sizeof(FieldUse) < sizeof(FieldSchema) / 2);
 	TEST_EXPECT(table[3].read_only && document.field_on(line(0), table[3]).read_only);
-	// A record's own choices: the widgets' (choices_on), never the find's.
-	TEST_EXPECT(document.apply(set(line(3), "title", std::string("own3")), error));
+	// A record's own choices: the widgets' and the find's (choices_on), a value found by its
+	// choice's name as the Inspector shows it; the graph's extraction never asks.
+	TEST_EXPECT(document.apply({set(line(3), "title", std::string("own3")), set(line(3), "tag", std::string("MINE"))},
+	                           error));
 	const FieldUse own_tag = document.field_on(line(3), tag);
 	std::vector<FieldChoice> own;
 	TEST_EXPECT(own_tag.own_choices && !first.own_choices);
@@ -1398,7 +1401,95 @@ static int test_per_call_costs() {
 	TEST_EXPECT(&document.choices_on(line(0), first, own) == &tag.choices);
 	const std::vector<DocumentHit> mine = find_in_document(document, "Mine");
 	const std::vector<DocumentHit> named = find_in_document(document, "own3");
-	TEST_EXPECT(mine.empty() && named.size() == 1 && named[0].address == line(3));
+	TEST_EXPECT(mine.size() == 1 && mine[0].address == line(3) && mine[0].field == "tag" && mine[0].text == "Mine");
+	TEST_EXPECT(named.size() == 1 && named[0].address == line(3));
+	return 0;
+}
+
+// S13 D2's review: a record is found by its identity through an index of every record's row that
+// each revision brings up to date one changed row at a time (its records taken out as its last
+// indexed version held them, put in as it holds them now; a row no longer there taken out). Over
+// a Set, a nested record removed and duplicated, a row moved, removed and duplicated, and every
+// undo and redo of them: each record a walk meets is found where it is, and each one met before
+// that is no longer there is found nowhere.
+static int test_record_index() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	std::vector<NodeId> met;
+	const auto every_found = [&] {
+		bool found = true;
+		std::vector<NodeId> here;
+		for (const auto &row : document.rows()) {
+			here.push_back(row->id);
+			found = found && document.address_of(row->id) == NodeAddress{row->id, row->kind, 0};
+			document.walk_records(*row, [&](const NodeAddress &record, const Document::Placement &) {
+				here.push_back(record.child);
+				found = found && document.address_of(record.child) == record;
+				return true;
+			});
+		}
+		for (const NodeId id : here)
+			if (std::find(met.begin(), met.end(), id) == met.end()) met.push_back(id);
+		for (const NodeId id : met)
+			if (std::find(here.begin(), here.end(), id) == here.end()) found = found && document.address_of(id) == NodeAddress();
+		return found;
+	};
+	TEST_EXPECT(every_found());
+	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a1, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Move, fake.beta, 0, 0), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error) && every_found());
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.beta), error) && every_found());
+	TEST_EXPECT(document.rows().size() == 2 && met.size() > 12);
+	while (document.can_undo()) {
+		document.undo();
+		TEST_EXPECT(every_found());
+	}
+	TEST_EXPECT(document.serialize().text == fake.original);
+	while (document.can_redo()) {
+		document.redo();
+		TEST_EXPECT(every_found());
+	}
+	return 0;
+}
+
+// S13 D2's review: a row's place among the rows depends on every row, so record_change asks it
+// on each call and never keeps it with the row's own answer. Saved a, b, c: a edited and given
+// back (its row a clone equal to the saved one); c moved to the top moves every row's place
+// among the rows both sides have, and moved back moves none. The other order: c to the top
+// first, a edited and given back while moved, c back: a is unchanged again.
+static int test_moved_rows() {
+	using Change = Document::RecordChange;
+	using Changes = std::vector<Change>;
+	const Change same = Change::Unchanged, moved = Change::Changed;
+	for (const bool move_first : {false, true}) {
+		FlatDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load_bytes(bytes_of("L a 1 TAG1\nL b 2 TAG1\nL c 3 TAG1\n"), "abc.txt", AssetKind::Unknown,
+		                                "jo", error));
+		const NodeAddress a{document.rows()[0]->id, kLine, 0}, b{document.rows()[1]->id, kLine, 0},
+		        c{document.rows()[2]->id, kLine, 0};
+		const auto changes = [&] { return Changes{document.record_change(a), document.record_change(b), document.record_change(c)}; };
+		const auto edit_and_give_back = [&] {
+			return document.apply(set(a, "title", std::string("a2")), error) &&
+			       document.apply(document.revert_edits(a, "title"), error) && !document.field_changed(a, "title");
+		};
+		if (!move_first) {
+			TEST_EXPECT(edit_and_give_back());
+			TEST_EXPECT(changes() == Changes({same, same, same}));
+		}
+		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 0), error));
+		TEST_EXPECT(changes() == Changes({moved, moved, moved}));
+		if (move_first) {
+			TEST_EXPECT(edit_and_give_back());
+			TEST_EXPECT(changes() == Changes({moved, moved, moved}));
+		}
+		TEST_EXPECT(document.apply(make(EditOperation::Move, c, 0, 2), error));
+		TEST_EXPECT(changes() == Changes({same, same, same}));
+	}
 	return 0;
 }
 
@@ -1460,6 +1551,8 @@ static int test_snapshot() {
 int main() {
 	int failures = 0;
 	failures += test_per_call_costs();
+	failures += test_moved_rows();
+	failures += test_record_index();
 	failures += test_snapshot();
 	failures += test_changes_since_save();
 	failures += test_structure();

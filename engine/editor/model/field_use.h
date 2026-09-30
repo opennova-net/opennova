@@ -30,7 +30,7 @@ struct FieldUse {
 	bool read_only = false;
 	// The record offers choices of its own in place of the schema's (Document::record_choices):
 	// a model's registers, parts and rotation frames by index, a clip's bones, an item's spawn
-	// slots. Only the widgets and the JSON ask for them; the graph and the find never do.
+	// slots. The widgets, the JSON and the find ask for them; the graph's extraction never does.
 	bool own_choices = false;
 	// The record holding the records those choices name by their index (a model's registers
 	// and frames: the model row; a clip's bones: the clip row); empty where they name no record

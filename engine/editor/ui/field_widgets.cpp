@@ -320,11 +320,13 @@ Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Val
 	return picked.changed || picked.finished ? picked : typed;
 }
 
-Edited group(const std::vector<FieldUse> &fields, std::vector<Value> &values, size_t &changed,
-             const std::vector<bool> &mixed) {
+Edited group(const std::vector<FieldUse> &fields,
+		const std::vector<const std::vector<FieldChoice> *> &choices, std::vector<Value> &values,
+		size_t &changed, const std::vector<bool> &mixed) {
 	Edited out;
 	changed = SIZE_MAX;
-	if (fields.empty() || values.size() != fields.size()) return out;
+	if (fields.empty() || values.size() != fields.size() || choices.size() != fields.size())
+		return out;
 	const ImGuiStyle &style = ImGui::GetStyle();
 	float width = ImGui::CalcItemWidth();
 	const bool channels = fields.size() == 3 && std::all_of(fields.begin(), fields.end(), [](const FieldUse &field) {
@@ -351,7 +353,8 @@ Edited group(const std::vector<FieldUse> &fields, std::vector<Value> &values, si
 		ImGui::PushID(schema.id.c_str());
 		ImGui::BeginDisabled(fields[i].read_only);
 		ImGui::SetNextItemWidth(cell);
-		const Edited one = value(fields[i], schema.choices, values[i], true, i < mixed.size() && mixed[i]);
+		const Edited one =
+				value(fields[i], *choices[i], values[i], true, i < mixed.size() && mixed[i]);
 		item_tip(field_title(schema) + "\n" + details(schema));
 		ImGui::EndDisabled();
 		ImGui::PopID();

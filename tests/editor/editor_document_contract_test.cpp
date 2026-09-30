@@ -12,17 +12,22 @@
 // reference_kinds row. S13 D2 adds what needs no multi-row edit: every record's locator finds it
 // again, and two loads of the file give every record the same identity; an optional field the
 // game reads on its record left out and written again (Clear, Write), a Clear of one left out
-// and a Write of one written no step, the undo giving the bytes back; a real change of a value,
+// and a Write of one written no step, the undo giving the bytes back (a type refuses one only as
+// always written, and a type with such fields leaves one of them out); a real change of a value,
 // the bytes before, after, after its undo and after its redo; the record and the field changed
 // since the save (no other row's record), and the edits that give the field back (revert_edits)
-// giving it its saved value (and the bytes, where the record is then as saved); two coalesced
-// Sets of a field one undo step; and a record copied and pasted where the type copies records,
-// the undo giving the bytes back.
+// giving it its saved value, the record and the bytes as the file held them (but for a def
+// member whose Set changes another of its record's, def_sync_derived); two coalesced Sets of a
+// field one undo step; a record copied and pasted where the type copies records, the undo giving
+// the bytes back; and a snapshot of the changed document, which serializes its bytes, shares its
+// identity, revision and records, answers record_change and field_changed as it does, and
+// refuses an edit, a save and a load (document.snapshot).
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -45,10 +50,16 @@ namespace {
 int g_failures = 0;
 // What was checked, for the summary line: records, fields set to their own value, symbols, and
 // lookups of a name in another scope that defines it too; optional fields left out and written
-// again, files with a real change and its undo, files whose field took two coalesced Sets, and
-// records pasted.
+// again and those a type keeps written, files with a real change and its undo, files whose field
+// took two coalesced Sets, records pasted, and snapshots.
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
-size_t g_presences = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0;
+size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
+
+// A type's optional fields over its files: those asked to be left out or written again, and those
+// it did.
+struct TypeCounts {
+	size_t optional = 0, presences = 0;
+};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -308,11 +319,19 @@ void check_places(const DocumentType &type, const Fixture &fixture, const Docume
 	check(loaded && records_of(*twin) == records, fixture.name, "two loads of the file give the same identities");
 }
 
+// The one refusal a type gives a Clear or a Write of an optional field it keeps as its record
+// writes it (a def line no tick of its own marks, a menu field no bit marks): always written.
+bool always_written(const Diagnostic &error) {
+	return error.code == "document.value" &&
+	       (error.message == "This field is always written." || error.message == "This line is always written.");
+}
+
 // Each writable optional field the game reads on its record left out and written again (Clear,
 // Write), its latent value kept; a Clear of a field left out and a Write of one written no step;
-// the undo giving the bytes back.
+// the undo giving the bytes back. A type may keep such a field written (always_written); any
+// other refusal fails, and counts says how many the type was asked and how many it did.
 void check_presence(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
-                    const std::string &serialized) {
+                    const std::string &serialized, TypeCounts &counts) {
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document.fields(address.kind)) {
 			if (!schema.optional || schema.read_only) continue;
@@ -325,8 +344,15 @@ void check_presence(const Fixture &fixture, Document &document, const std::vecto
 			Diagnostic error;
 			const bool nothing = document.apply(edit_of(written ? EditOperation::Write : EditOperation::Clear, address, schema.id), error);
 			check(nothing && document.revision() == revision, where, "a Write of a written field, a Clear of one left out: no step");
-			if (!document.apply(edit_of(written ? EditOperation::Clear : EditOperation::Write, address, schema.id), error))
-				continue; // the type keeps it as it is here (a block left out)
+			++counts.optional;
+			error = Diagnostic();
+			if (!document.apply(edit_of(written ? EditOperation::Clear : EditOperation::Write, address, schema.id), error)) {
+				check(always_written(error), where + " (" + error.code + ": " + error.message + ")",
+				      "a type keeps an optional field as it is only as always written");
+				++g_kept;
+				continue;
+			}
+			++counts.presences;
 			++g_presences;
 			Value kept;
 			check(document.present(address, schema.id) != written && document.get(address, schema.id, kept) && kept == latent,
@@ -383,11 +409,27 @@ template <class Try> void each_alternative(Document &document, const std::vector
 		}
 }
 
+// The def members whose Set changes another member of their record (def_sync_derived,
+// def_schema.cpp): an item's armor_kz its armor_blast, its powerup_def and default_aip bits of
+// its attrib, an action's function_args_count the arguments past it, a weapon's filter counts
+// the names past them. revert_edits gives the member back alone, so the other one stays as the
+// Set made it (for powerup_def and default_aip an open item, ADR 0046 S13 D2).
+bool derives_others(const Document &document, const NodeAddress &address, const std::string &field) {
+	using opennova::def::DefRecordKind;
+	static const std::pair<DefRecordKind, const char *> kCoupled[] = {
+	        {DefRecordKind::Item, "armor_kz"},           {DefRecordKind::Item, "powerup_def"},
+	        {DefRecordKind::Item, "default_aip"},        {DefRecordKind::Action, "function_args_count"},
+	        {DefRecordKind::Weapon, "charfilter_count"}, {DefRecordKind::Weapon, "teamfilter_count"}};
+	if (!dynamic_cast<const DefCatalogDocument *>(&document)) return false;
+	return std::any_of(std::begin(kCoupled), std::end(kCoupled), [&](const std::pair<DefRecordKind, const char *> &member) {
+		return member.first == def_kind(address.kind) && field == member.second;
+	});
+}
+
 // A real change of one value: the bytes before, after, after its undo and after its redo; the
 // record and the field changed since the save and no record of another row; revert_edits giving
-// the field its saved value back as one step (and the bytes, when that leaves the record as it
-// was: a field whose Set changes another of its record's, as a def's powerup_def its attrib,
-// keeps that other one changed).
+// the field its saved value back as one step, and the record and the bytes as the file held them
+// (but for a member that changes another of its record's, derives_others).
 void check_real_change(const Fixture &fixture, Document &document, const std::vector<NodeAddress> &records,
                        const std::string &serialized) {
 	bool done = false;
@@ -417,8 +459,10 @@ void check_real_change(const Fixture &fixture, Document &document, const std::ve
 			              document.saved_value(address, schema.id, saved) && document.get(address, schema.id, reverted) &&
 			              reverted == saved,
 			      where, "revert_edits gives the field its saved value back");
-			if (document.record_change(address) == Document::RecordChange::Unchanged)
-				check(document.serialize().text == serialized, where, "a record given back is the bytes the file held");
+			if (!derives_others(document, address, schema.id))
+				check(document.record_change(address) == Document::RecordChange::Unchanged &&
+				              document.serialize().text == serialized,
+				      where, "a field given back leaves its record and the bytes as the file held them");
 			document.undo();
 			check(document.serialize().text == after.text, where, "the revert is one step");
 			document.undo();
@@ -494,7 +538,78 @@ void check_copy_paste(const DocumentType &type, const Fixture &fixture, Document
 	}
 }
 
-void check_fixture(const DocumentType &type, const Fixture &fixture) {
+// A snapshot of the document with a real change in it: it serializes the document's bytes,
+// shares its identity, revision, rows and records, answers record_change and field_changed as it
+// does for every record and field, and refuses an edit, a save and a load (document.snapshot), its
+// undo and redo doing nothing; the document's own undo after leaves the snapshot as it was.
+void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &document,
+                    const std::vector<NodeAddress> &records, const std::string &serialized) {
+	bool done = false;
+	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
+	                                        const std::vector<Value> &options) {
+		for (const Value &option : options) {
+			Diagnostic error;
+			if (!document.apply(edit_of(EditOperation::Set, address, schema.id, option), error)) continue;
+			const SerializeResult after = document.serialize();
+			if (!after.ok() || after.text == serialized) {
+				while (document.can_undo()) document.undo();
+				continue;
+			}
+			done = true;
+			const std::string where = where_of(fixture, document, address, schema.id) + " (snapshot)";
+			const std::unique_ptr<Document> snapshot = document.snapshot();
+			check(snapshot && snapshot->is_snapshot() && !document.is_snapshot(), where, "snapshot() makes a snapshot");
+			if (!snapshot) {
+				while (document.can_undo()) document.undo();
+				return true;
+			}
+			++g_snapshots;
+			const std::vector<NodeAddress> now = records_of(document);
+			check(snapshot->serialize().text == after.text, where, "a snapshot serializes the document's bytes");
+			check(snapshot->identity() == document.identity() && snapshot->revision() == document.revision() &&
+			              snapshot->rows() == document.rows() && records_of(*snapshot) == now,
+			      where, "a snapshot shares the document's identity, revision, rows and records");
+			for (const NodeAddress &record : now) {
+				check(snapshot->record_change(record) == document.record_change(record), where_of(fixture, document, record, ""),
+				      "a snapshot answers record_change as its document does");
+				for (const FieldSchema &field : document.fields(record.kind))
+					check(snapshot->field_changed(record, field.id) == document.field_changed(record, field.id),
+					      where_of(fixture, document, record, field.id), "a snapshot answers field_changed as its document does");
+			}
+			Value saved;
+			check(document.saved_value(address, schema.id, saved), where, "the changed field has its saved value");
+			Diagnostic refused;
+			check(!snapshot->apply(edit_of(EditOperation::Set, address, schema.id, saved), refused) &&
+			              refused.code == "document.snapshot",
+			      where, "a snapshot refuses an edit (document.snapshot)");
+			snapshot->undo();
+			snapshot->redo();
+			refused = Diagnostic();
+			check(!snapshot->save(refused) && refused.code == "document.snapshot", where,
+			      "a snapshot refuses a save (document.snapshot)");
+			refused = Diagnostic();
+			check(!snapshot->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", refused) &&
+			              refused.code == "document.snapshot",
+			      where, "a snapshot refuses a load (document.snapshot)");
+			check(snapshot->revision() == document.revision() && snapshot->serialize().text == after.text &&
+			              document.serialize().text == after.text,
+			      where, "a snapshot's undo, redo and refusals leave it and its document as they were");
+			while (document.can_undo()) document.undo();
+			check(document.serialize().text == serialized && snapshot->serialize().text == after.text &&
+			              snapshot->record_change(address) == Document::RecordChange::Changed,
+			      where, "the document's undo leaves its snapshot as it was");
+			std::unique_ptr<Document> read = type.make();
+			check(read->load_bytes(text_bytes(snapshot->serialize().text), fixture.name, fixture.kind, "jo", refused) &&
+			              !read->blocked() && read->serialize().text == after.text,
+			      where, "what a snapshot serializes reads back");
+			return true;
+		}
+		return false;
+	});
+	check(done, fixture.name, "a document with a real change in it takes a snapshot");
+}
+
+void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<Document> document = type.make();
 	Diagnostic error;
 	const bool loaded = document->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
@@ -521,10 +636,11 @@ void check_fixture(const DocumentType &type, const Fixture &fixture) {
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
 	check_symbols(fixture, *document, records);
 	check_set_to_self(fixture, *document, records, first.text);
-	check_presence(fixture, *document, records, first.text);
+	check_presence(fixture, *document, records, first.text, counts);
 	check_real_change(fixture, *document, records, first.text);
 	check_coalescing(fixture, *document, records, first.text);
 	check_copy_paste(type, fixture, *document, records, first.text);
+	check_snapshot(type, fixture, *document, records, first.text);
 }
 
 } // namespace
@@ -535,14 +651,19 @@ int main() {
 	const std::vector<const DocumentType *> types = registered_types();
 	for (const DocumentType *type : types) {
 		size_t checked = 0;
+		TypeCounts counts;
 		for (const Fixture &fixture : files) {
 			if (!type->handles(fixture.kind)) continue;
 			check(!fixture.bytes.empty(), fixture.name, "the fixture is present");
 			if (fixture.bytes.empty()) continue;
-			check_fixture(*type, fixture);
+			check_fixture(*type, fixture, counts);
 			++checked;
 		}
 		check(checked > 0, type->name, "the document type has a file here to check");
+		check(counts.optional == 0 || counts.presences > 0, type->name,
+		      "a type with optional fields the game reads leaves one out and writes it again");
+		std::printf("  %s: %zu optional fields asked, %zu left out and written again\n", type->name, counts.optional,
+		            counts.presences);
 	}
 	for (const Fixture &fixture : files)
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
@@ -551,9 +672,9 @@ int main() {
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
-		            "%zu optional fields left out and written again, %zu real changes undone and redone, %zu "
-		            "coalesced, %zu records pasted)\n",
-		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_changes,
-		            g_coalesced, g_pastes);
+		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
+		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots)\n",
+		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
+		            g_changes, g_coalesced, g_pastes, g_snapshots);
 	return g_failures == 0 ? 0 : 1;
 }

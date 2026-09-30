@@ -20,9 +20,10 @@ size_t find_text(const std::string &in, const std::string &text, const SearchOpt
 std::vector<DocumentHit> find_in_document(const Document &document, const std::string &text, const SearchOptions &options) {
 	std::vector<DocumentHit> hits;
 	if (text.empty()) return hits;
-	// A record's own choices are the widgets' alone (Document::record_choices): a value naming
-	// one is found as the file writes it (a register's index, not its name).
-	static const std::vector<FieldChoice> none;
+	// A value naming one of its record's own choices is found by that choice's name, as the
+	// Inspector shows it (Document::choices_on: a register by its name, a spawn slot by its
+	// vehicle's id), the choices made into one list reused field after field.
+	std::vector<FieldChoice> own;
 	const auto search = [&](const NodeAddress &address) {
 		for (const FieldSchema &schema : document.fields(address.kind)) {
 			const FieldUse field = document.field_on(address, schema);
@@ -31,7 +32,7 @@ std::vector<DocumentHit> find_in_document(const Document &document, const std::s
 			Value value;
 			if (!document.get(address, schema.id, value)) continue;
 			DocumentHit hit;
-			hit.text = field_text(schema, field.own_choices ? none : schema.choices, value);
+			hit.text = field_text(schema, document.choices_on(address, field, own), value);
 			hit.at = find_text(hit.text, text, options);
 			if (hit.at == std::string::npos) continue;
 			hit.address = address;

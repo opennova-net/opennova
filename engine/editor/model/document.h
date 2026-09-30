@@ -160,8 +160,8 @@ public:
 	// every record it made (a Paste's records, not their descendants).
 	NodeId last_added() const { return last_added_; }
 	const std::vector<NodeId> &last_added_records() const { return added_; }
-	// The address of a row or nested record by identity (kind 0 / row 0 when unknown), from a
-	// map of every record made once per revision.
+	// The address of a row or nested record by identity (kind 0 / row 0 when unknown): its row
+	// from an index of every record's row (index_records), its place from that row's own index.
 	NodeAddress address_of(NodeId id) const;
 	const Node *row(NodeId id) const;
 
@@ -217,7 +217,8 @@ public:
 	FieldUse field_on(const NodeAddress &address, const FieldSchema &field) const;
 	// The choices a record offers of its own for a field whose use says so (FieldUse::
 	// own_choices: a model's registers by index), made into out; false for none (the default).
-	// The widgets and the JSON ask; the graph's extraction and the find never do.
+	// The widgets, the JSON and the find ask (a value by its choice's name, as shown); the
+	// graph's extraction never does.
 	virtual bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const;
 	// The choices a field offers on its record: the record's own where it has them
@@ -320,10 +321,12 @@ public:
 	virtual SerializeResult serialize() const = 0;
 	// This document as it stands, for another thread (the thread confinement above): a new
 	// instance of its type over the same committed rows and file-wide state, with its identity,
-	// revision, history and saved baseline and none of its memos, which it fills again as it is
-	// read. Read only: an edit, an undo, a redo, a load and a save of it do nothing or are
-	// refused (document.snapshot). A type makes it with its copy constructor over the base's
-	// (return std::make_unique<Type>(*this)).
+	// revision, history and saved baseline. None of the base's memos come with it (it fills them
+	// again as it is read); a type's own, which its copy constructor copies (a menu's saved image
+	// and lookups, a stylesheet's evaluated sheet), are each kept for one revision, which the
+	// snapshot shares, so they stay true. Read only: an edit, an undo, a redo, a load and a save
+	// of it do nothing or are refused (document.snapshot). A type makes it with its copy
+	// constructor over the base's (return std::make_unique<Type>(*this)).
 	virtual std::unique_ptr<Document> snapshot() const = 0;
 	bool is_snapshot() const { return snapshot_; }
 
@@ -446,6 +449,11 @@ private:
 		std::unordered_map<NodeId, Placement> placements;
 	};
 	const RowIndex &row_index_of(const std::shared_ptr<const Node> &row) const;
+	// Brings the index of every record's row (address_of's) to the revision one row at a time:
+	// a row whose committed version is not the one indexed has that version's records taken out
+	// (those still indexed under it) and its own put in; a row no longer among the rows has its
+	// records taken out. An edit of one row indexes that row again, not every record.
+	void index_records() const;
 	// A nested record's placement inside `row` by walking it (a clone a batch changes).
 	bool placement_in(const Node &row, NodeId child, Placement &out) const;
 	// Decoded as the game's loader decodes a stored file, then parsed (load, and the text a
@@ -468,12 +476,14 @@ private:
 	bool field_differs(const NodeAddress &address, const FieldSchema &field, const std::shared_ptr<const Node> &now,
 	                   const std::shared_ptr<const Node> &saved) const;
 	// What changed in a record between its committed row and the baseline's, two different
-	// rows (record_change).
+	// rows (record_change): Added, or Changed by a field or by what it holds; a row's place among
+	// the rows is not its own two rows' answer (record_change asks row_moved apart).
 	RecordChange compare_record(const NodeAddress &address, const std::shared_ptr<const Node> &now,
 			const std::shared_ptr<const Node> &saved) const;
-	// What changed since the baseline in one row: the record and field answers made while its
-	// committed row and the baseline's are these two (both rows kept, so neither address is
-	// reused under the answers), started again when either is another.
+	// What changed since the baseline in one row: the record and field answers its two rows give
+	// (compare_record, field_differs), made while its committed row and the baseline's are these
+	// two (both rows kept, so neither address is reused under the answers), started again when
+	// either is another.
 	struct RowChanges {
 		std::shared_ptr<const Node> now, saved;
 		std::unordered_map<NodeId, RecordChange> records;
@@ -526,16 +536,18 @@ private:
 	std::unordered_map<NodeId, size_t> saved_positions_;
 	bool snapshot_ = false;
 	// The memos (the thread confinement above), each forgotten by set_baseline: what changed in
-	// each row (row_changes); the rows whose place moved, for one revision; every record by
-	// identity (address_of), for one revision; the symbols the records define (find's), for one
+	// each row (row_changes); the rows whose place moved, for one revision; every record's row by
+	// identity and the committed version of each row it indexed (index_records), brought to a
+	// revision a changed row at a time; the symbols the records define (find's), for one
 	// revision.
 	mutable std::unordered_map<NodeId, RowChanges> row_changes_;
 	mutable bool moved_known_ = false;
 	mutable uint64_t moved_revision_ = 0;
 	mutable std::unordered_set<NodeId> moved_rows_;
-	mutable bool addresses_known_ = false;
-	mutable uint64_t addresses_revision_ = 0;
-	mutable std::unordered_map<NodeId, NodeAddress> addresses_;
+	mutable bool records_known_ = false;
+	mutable uint64_t records_revision_ = 0;
+	mutable std::unordered_map<NodeId, NodeId> record_rows_;
+	mutable std::unordered_map<NodeId, std::shared_ptr<const Node>> indexed_rows_;
 	mutable std::shared_ptr<const std::vector<GraphSymbol>> defined_;
 	mutable uint64_t defined_revision_ = 0;
 };
