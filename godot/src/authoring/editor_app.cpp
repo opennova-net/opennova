@@ -634,7 +634,7 @@ bool EditorApp::create_file(const String &p_path) {
 bool EditorApp::open_document(const String &p_path) {
 	ensure_session();
 	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenDocument, opennova::to_std(p_path)));
-	return session_->document_for(opennova::to_std(p_path)) != nullptr;
+	return session_->document_base_for(opennova::to_std(p_path)) != nullptr;
 }
 int EditorApp::get_row_count() const {
 	const auto *document = session_ ? session_->document_for() : nullptr;
@@ -705,7 +705,7 @@ bool EditorApp::save_documents() {
 void EditorApp::undo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Undo)); }
 void EditorApp::redo() { ensure_session(); session_->handle(opennova::editor::make_request(EditorRequestKind::Redo)); }
 bool EditorApp::is_document_dirty() const {
-	const auto *document = session_ ? session_->document_for() : nullptr;
+	const auto *document = session_ ? session_->document_base_for() : nullptr;
 	return document && document->dirty();
 }
 PackedInt64Array EditorApp::get_child_records(int64_t p_id, const String &p_kind) const {
@@ -814,7 +814,7 @@ bool EditorApp::paste_records(int64_t p_parent, int p_position) {
 }
 void EditorApp::end_edit() {
 	ensure_session();
-	if (auto *document = session_->document_for())
+	if (auto *document = session_->document_base_for())
 		session_->handle(opennova::editor::make_request(EditorRequestKind::EndEdit, document->path()));
 }
 
@@ -927,7 +927,8 @@ String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_i
 }
 
 String EditorApp::get_document_json(const String &p_path, bool p_with_rows) const {
-	const Document *document = session_ ? session_->document_for(opennova::to_std(p_path)) : nullptr;
+	const std::string path = opennova::to_std(p_path);
+	const auto *document = session_ ? session_->document_base_for(path) : nullptr;
 	if (!document) return String("null");
 	return json_text(opennova::editor::document_to_json(*document, p_with_rows));
 }

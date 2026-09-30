@@ -33,6 +33,23 @@ struct DocumentType {
 const DocumentType *document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
+// Whether the documents a type makes are record documents (DocumentBase::as_records): what the
+// graph's extraction, the validators and the rename read. A type of another kind (a raster, a
+// text) contributes nothing to them until its own hooks (S13 D9). Asked of a document the type
+// makes, once per registered type.
+bool holds_records(const DocumentType &type);
+
+// A test's document type in a registered one's place (S13 D6: a type of another kind than
+// records, before one ships): while it lives, document_type answers it for its id, and so
+// document_type_for for every asset kind whose row names that id. The registry's one seam:
+// nothing but a test makes one, one at a time.
+class DocumentTypeStandIn {
+public:
+	explicit DocumentTypeStandIn(const DocumentType &type);
+	~DocumentTypeStandIn();
+	DocumentTypeStandIn(const DocumentTypeStandIn &) = delete;
+	DocumentTypeStandIn &operator=(const DocumentTypeStandIn &) = delete;
+};
 
 // Every type's validation over the project, with the open documents standing in for
 // their files, then the asset graph's findings (a missing reference). `graph`, when

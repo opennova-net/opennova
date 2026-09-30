@@ -332,9 +332,14 @@ bool edit_from_json(const JsonValue &json, Edit &out, std::string &error) {
 	}
 	// An Apply's change is made in C++ by its document type (Edit::payload), which JSON names by
 	// its token alone: no request carries one yet.
-	if (edit.operation == EditOperation::Apply || json.get("payload")) {
-		error = "An apply edit carries a change its document type makes; the editor's JSON cannot "
-		        "send one.";
+	if (edit.operation == EditOperation::Apply) {
+		error = "An apply edit carries a change its document type makes in C++; the editor's JSON "
+		        "cannot send one.";
+		return false;
+	}
+	if (json.get("payload")) {
+		error = "\"payload\" names a change a document type makes in C++; the editor's JSON cannot "
+		        "carry one.";
 		return false;
 	}
 	for (const char *key : {"row", "child", "parent"}) {

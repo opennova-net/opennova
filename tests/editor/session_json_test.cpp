@@ -1277,13 +1277,16 @@ static int test_apply_edit_json() {
 	            edit->get_string("payload", "") == "raster.brush");
 	EditorRequest back;
 	std::string error;
-	TEST_EXPECT(!editor_request_from_json(json, back, error) &&
-	            error.find("apply edit") != std::string::npos);
-	TEST_EXPECT(!request_error("{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"apply\"}}",
-	                           back).empty());
-	TEST_EXPECT(!request_error("{\"kind\":\"edit_record\","
-	                           "\"edit\":{\"field\":\"name\",\"payload\":\"raster.brush\"}}",
-	                           back).empty());
+	const std::string apply_refused = "An apply edit carries a change its document type makes in "
+	                                  "C++; the editor's JSON cannot send one.";
+	const std::string payload_refused = "\"payload\" names a change a document type makes in C++; "
+	                                    "the editor's JSON cannot carry one.";
+	TEST_EXPECT(!editor_request_from_json(json, back, error) && error == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\",\"edit\":{\"operation\":\"apply\"}}",
+	                          back) == apply_refused);
+	TEST_EXPECT(request_error("{\"kind\":\"edit_record\","
+	                          "\"edit\":{\"field\":\"name\",\"payload\":\"raster.brush\"}}",
+	                          back) == payload_refused);
 	// No payload on any other edit's JSON.
 	request.edit = Edit();
 	const JsonValue set = editor_request_to_json(request);

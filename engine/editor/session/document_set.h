@@ -126,6 +126,10 @@ private:
 	};
 
 	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
+	// A request that acts on records with none to act on: refused as the file not open
+	// (document.not_open, in the words `not_open`), or as the document open there holding no
+	// records (document.no_records, S13 D6); nothing when no project is open.
+	void refuse_records(const std::string &path, const char *not_open);
 	void copy_records(Document &document, bool cut);
 	void paste_records(Document &document, const Edit &target);
 	void duplicate_records(Document &document);

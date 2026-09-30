@@ -84,9 +84,20 @@ bool parse_edit(const JsonValue &json, size_t index, const Document &document, s
 	if (!members_known(json, {"op", "id", "field", "value", "kind", "parent", "position", "as"}, error)) return false;
 	const std::string op = json.get_string("op", "");
 	Edit edit;
-	if (!edit_operation_from_token(op, edit.operation) || edit.operation == EditOperation::Paste ||
-	    edit.operation == EditOperation::SetFileValue || edit.operation == EditOperation::Apply) {
+	if (!edit_operation_from_token(op, edit.operation)) {
 		error = "Unknown edit op \"" + op + "\" (set, clear, write, add, duplicate, remove or move).";
+		return false;
+	}
+	// Operations the core knows that a batch does not send: an apply's change is made in C++ by
+	// its document type (Edit::payload, S13 D6); a paste and a file-wide value go one at a time.
+	if (edit.operation == EditOperation::Apply) {
+		error = "An apply edit carries a change its document type makes in C++: a batch cannot "
+		        "send one.";
+		return false;
+	}
+	if (edit.operation == EditOperation::Paste || edit.operation == EditOperation::SetFileValue) {
+		error = "A batch takes no \"" + op +
+		        "\" edit (set, clear, write, add, duplicate, remove or move).";
 		return false;
 	}
 	const bool adds = edit.operation == EditOperation::Add;
@@ -266,11 +277,18 @@ io::JsonValue record_batch_request(ProjectSession &session, const std::string &p
 	};
 	if (!request.is_object()) return refuse("The request is an object.");
 	Document *document = session.document_for(path);
-	if (!document && !path.empty() && session.project_open()) {
+	if (!document && !session.document_base_for(path) && !path.empty() && session.project_open()) {
 		session.handle(make_request(EditorRequestKind::OpenDocument, path));
 		document = session.document_for(path);
 	}
-	if (!document) return refuse(path.empty() ? "No document is open." : "No document " + path + " could be opened.");
+	if (!document) {
+		// A batch edits records: an open document of another kind holds none (S13 D6).
+		if (const DocumentBase *open = session.document_base_for(path))
+			return refuse(open->path() +
+			              " holds no records (document.no_records): a batch edits records.");
+		return refuse(path.empty() ? "No document is open."
+		                           : "No document " + path + " could be opened.");
+	}
 	RecordBatch batch;
 	std::string error;
 	if (const JsonValue *edits = request.get("edits")) {

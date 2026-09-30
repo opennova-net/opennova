@@ -30,7 +30,9 @@ class Document;
 // rows of records that every edit addresses by identity and field (as_records() is it; null for
 // any other kind of document); a raster (a terrain's depth map) or a text (a script) holds its
 // own content and takes its changes as Apply edits whose payload its type made (EditPayload),
-// overriding apply, the history, serialize and read_source.
+// implementing apply_edits, the history, serialize and read_source. The base keeps the rules
+// every kind obeys: a snapshot and a blocked document take no edit, undo or redo, and a blocked
+// one no save.
 class DocumentBase {
 public:
 	virtual ~DocumentBase() = default;
@@ -42,18 +44,20 @@ public:
 	// A file's bytes as stored (the game's loader decodes them), with the name it goes by in
 	// the project: what an import reads before anything is written (the import plan follows
 	// its references). A document loaded this way has no file: Save refuses it
-	// (document.no_file). A load gives the document a new load_generation().
+	// (document.no_file). A load gives the document a new load_generation(); one that fails
+	// leaves the document as it was (its path, kind and game too).
 	bool load_bytes(const std::vector<uint8_t> &bytes, const std::string &relative_path,
 	                AssetKind kind, const std::string &game, Diagnostic &error);
 	// Writes serialize()'s text over the file. The file's source findings are then those of
 	// the text written (the input the rewrite dropped is no longer reported); the content and
-	// the history stay, and the saved checkpoint moves to them (on_saved).
+	// the history stay, and the saved checkpoint moves to them (on_saved). A blocked document is
+	// refused with its first blocking finding (document.unserializable).
 	bool save(Diagnostic &error);
 	// What an explicit Save does with this document when it has no unsaved edits: nothing when
 	// it serializes to the bytes the file held when it was loaded or last saved; a write when it
 	// serializes to other bytes (the canonical rewrite: the lines the game ignores dropped, the
-	// line ends fixed, a table regrouped); a refusal when it does not serialize (Save says why,
-	// document.unserializable), never "no changes".
+	// line ends fixed, a table regrouped); a refusal when it does not serialize or is blocked
+	// (Save says why, document.unserializable), never "no changes".
 	enum class RewriteNeed { None, Rewrite, Unserializable };
 	RewriteNeed rewrite_need() const;
 	// True while the file holds the bytes this document was loaded from or last saved (the
@@ -66,17 +70,17 @@ public:
 
 	// --- the edits and the history -------------------------------------------------------------
 	// A batch of edits applied as one undoable change, nothing applied when any is refused (the
-	// refusal in `error`); an edit the document cannot take is refused, and a snapshot and a
-	// blocked document take none (document.snapshot, document.parse). What an edit may say is the
-	// kind's: the record document takes every operation (Document::apply), another kind of document
-	// the Apply edits whose payload its type made.
-	virtual bool apply(const std::vector<Edit> &edits, Diagnostic &error) = 0;
-	// One edit: a batch of one (a kind overriding the batch form names this one back into its
-	// scope: using DocumentBase::apply).
+	// refusal in `error`): a snapshot takes none (document.snapshot), nor does a blocked document
+	// (document.parse); else the kind's apply_edits, which refuses an edit it cannot take. What an
+	// edit may say is the kind's: the record document takes every operation, another kind of
+	// document the Apply edits whose payload its type made.
+	bool apply(const std::vector<Edit> &edits, Diagnostic &error);
+	// One edit: a batch of one.
 	bool apply(const Edit &edit, Diagnostic &error);
-	// One step back or forward through the history; nothing on a snapshot.
-	virtual void undo() = 0;
-	virtual void redo() = 0;
+	// One step back or forward through the history (the kind's undo_step, redo_step); nothing on
+	// a snapshot or a blocked document.
+	void undo();
+	void redo();
 	// The open edit group (a coalesced burst of typing, a gesture) ends: the next edit is a step
 	// of its own.
 	virtual void end_edit_group() = 0;
@@ -114,8 +118,8 @@ public:
 	// This document as it stands, for another thread (model/document.h's thread confinement): a
 	// new instance of its type over the same content, with its identity, load generation, revision,
 	// history and saved checkpoint, made through the type's copy constructor over the base's
-	// (return std::make_unique<Type>(*this)). Read only: an edit, a load and a save of it are
-	// refused (document.snapshot), an undo and a redo do nothing.
+	// (return std::make_unique<Type>(*this)). Read only: the base refuses an edit, a load and a
+	// save of it (document.snapshot) and does nothing on its undo and redo.
 	virtual std::unique_ptr<DocumentBase> snapshot() const = 0;
 	bool is_snapshot() const { return snapshot_; }
 	// The record document this is (model/document.h), null for another kind of document: what a
@@ -130,6 +134,11 @@ protected:
 	DocumentBase(const DocumentBase &other);
 	DocumentBase &operator=(const DocumentBase &) = delete;
 
+	// The kind's part of apply, undo and redo, which the base calls only for a document that is
+	// neither a snapshot nor blocked.
+	virtual bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) = 0;
+	virtual void undo_step() = 0;
+	virtual void redo_step() = 0;
 	// The kind's part of a load and of a save: the source, decoded as the game's loader decodes
 	// a stored file (the base decodes it and keeps the fingerprint of the bytes as stored), read
 	// into the kind's content. `adopt`: a load, whose content becomes the document's, its history
@@ -147,6 +156,8 @@ protected:
 	const std::string &game() const { return game_; }
 
 private:
+	// The first source finding that blocks (null for none): what a Save of a blocked document says.
+	const SourceIssue *first_blocking() const;
 	// Stored bytes decoded as the game's loader decodes them (the target game's SCR policy), then
 	// read_source.
 	bool decode_and_read(std::vector<uint8_t> bytes, bool adopt, std::vector<SourceIssue> &issues,

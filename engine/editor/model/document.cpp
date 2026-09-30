@@ -27,7 +27,8 @@ bool fail(Diagnostic &error, const std::string &path, const char *code, const st
 }
 
 // True for an edit that adds, removes or moves a whole row (or pastes rows at the top
-// level): it changes the row list, not one row.
+// level): it changes the row list, not one row; and for an Apply naming no row, which changes
+// the file-wide state alone.
 bool row_level(const Edit &edit) {
 	switch (edit.operation) {
 	case EditOperation::Add:
@@ -35,6 +36,7 @@ bool row_level(const Edit &edit) {
 	case EditOperation::Duplicate:
 	case EditOperation::Remove:
 	case EditOperation::Move: return edit.address.child == 0;
+	case EditOperation::Apply: return edit.address.row == 0;
 	default: return false;
 	}
 }
@@ -376,7 +378,15 @@ bool Document::edit_collection(Node &, const Edit &, const IdAllocator &, NodeId
 	return false;
 }
 
-bool Document::apply_payload(Node &, const NodeAddress &, const EditPayload &, std::string &error) {
+bool Document::apply_payload(Node &, const NodeAddress &, const EditPayload &,
+                             std::shared_ptr<const FileState> &, const IdAllocator &, bool &,
+                             std::string &error) {
+	error = "This document does not take that change.";
+	return false;
+}
+
+bool Document::apply_file_payload(std::shared_ptr<const FileState> &, const EditPayload &, bool &,
+                                  std::string &error) {
 	error = "This document does not take that change.";
 	return false;
 }
@@ -419,7 +429,8 @@ void Document::on_saved() {
 }
 
 // A whole row added, duplicated, removed or moved (or a file-wide value set): one edit,
-// one step, never folded.
+// one step, never folded. An Apply naming no row, the file-wide state alone: one step, a
+// gesture's folding into one.
 bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 	Change change;
 	change.before_state = change.after_state = file_state_;
@@ -430,6 +441,21 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 		return commit(std::move(change), {}, error);
 	}
 	std::string message;
+	if (edit.operation == EditOperation::Apply) {
+		if (!edit.payload)
+			return fail(error, path(), "document.payload", "This change carries nothing to apply.");
+		std::shared_ptr<const FileState> updated = file_state_;
+		bool changes = true;
+		if (!apply_file_payload(updated, *edit.payload, changes, message))
+			return fail(error, path(), "document.payload",
+			            message.empty() ? "This document does not take that change." : message);
+		if (!changes) return true; // the file-wide state as it was: no step
+		change.after_state = updated;
+		// A gesture's changes fold into one step, keyed by the file rather than a row.
+		const std::string key =
+		        edit.gesture ? "g" + std::to_string(edit.gesture) + "/file" : std::string();
+		return commit(std::move(change), key, error);
+	}
 	std::shared_ptr<Node> updated;
 	if (edit.operation == EditOperation::Paste)
 		return fail(error, path(), "document.paste", "Paste inside a record: select where the records go.");
@@ -498,12 +524,7 @@ bool Document::commit(Change change, const std::string &key, Diagnostic &error) 
 	return true;
 }
 
-bool Document::apply(const std::vector<Edit> &edits, Diagnostic &error) {
-	if (is_snapshot())
-		return fail(error, path(), "document.snapshot", "A snapshot is read, never edited.");
-	if (blocked())
-		return fail(error, path(), "document.parse",
-		            "Fix the reported source errors and reload this document before editing.");
+bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (edits.empty()) return true;
 	for (const Edit &edit : edits) {
 		if (edit.operation != EditOperation::SetFileValue && !row_level(edit)) continue;
@@ -596,6 +617,8 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	const IdAllocator allocate = [this] { return allocate_id(); };
 	std::vector<NodeId> added;
 	bool changed = false, reshaped = false;
+	// The file-wide state as the batch leaves it (an Apply's payload may change it too).
+	std::shared_ptr<const FileState> state = file_state_;
 	const std::string row_label = kind_label(current->kind);
 	// A nested record's placement: the committed row's index until an edit of this batch
 	// changes the row's shape, then a walk of the clone.
@@ -665,13 +688,16 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			break;
 		}
 		case EditOperation::Apply: {
-			// A change the type made in C++, to the record as the batch has left it.
+			// A change the type made in C++, to the record and the file-wide state as the batch
+			// has left them; one that changes nothing is no step, as a Set of the value held.
 			if (!edit.payload)
 				return fail(error, path(), "document.payload",
 				            "This change carries nothing to apply.");
-			if (!apply_payload(*updated, address, *edit.payload, message))
+			bool changes = true;
+			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
 				return fail(error, path(), "document.payload",
 				            message.empty() ? "This document does not take that change." : message);
+			if (!changes) continue;
 			break;
 		}
 		case EditOperation::Clear:
@@ -772,19 +798,13 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	out.changed = changed;
 	if (!changed) return true;
 	after_edit(*updated);
-	out.change.before_state = out.change.after_state = file_state_;
+	out.change.before_state = file_state_;
+	out.change.after_state = state;
 	out.change.before = current;
 	out.change.before_position = out.change.after_position = index;
 	out.change.after = updated;
 	out.added = std::move(added);
 	return true;
-}
-
-void Document::undo() {
-	if (!is_snapshot()) history_.undo();
-}
-void Document::redo() {
-	if (!is_snapshot()) history_.redo();
 }
 
 // --- the saved baseline ------------------------------------------------------------------

@@ -74,17 +74,17 @@ class Document : public DocumentBase {
 public:
 	Document() = default;
 
-	// One undoable change (the base's one-edit apply, a batch of one). Every address is checked
-	// against the document first: a stale identity, or one that names another kind than the
-	// address says, is refused (document.selection). A Move that leaves the record where it is, a
-	// Clear of a field already left out, a Write of one already written and a Set of the value a
-	// field holds (the field as the record reads it, and whether it is written, the same after the
-	// Set) succeed with no history step (the document stays clean). A coalesced Set applies to the
-	// record as its open group found it (Edit::coalesce), and one that gives the group's fields
-	// back the values they held leaves no step; edits sharing a gesture fold into one step
-	// (Edit::gesture). An Apply hands its payload to the type (apply_payload). The type may refuse
-	// any change before it commits (accept_change).
-	using DocumentBase::apply;
+	// What apply (the base's) does with a record document's edits (apply_edits). One edit: every
+	// address is checked against the document first: a stale identity, or one that names another
+	// kind than the address says, is refused (document.selection). A Move that leaves the record
+	// where it is, a Clear of a field already left out, a Write of one already written, a Set of
+	// the value a field holds (the field as the record reads it, and whether it is written, the
+	// same after the Set) and an Apply whose payload changes nothing succeed with no history step
+	// (the document stays clean). A coalesced Set applies to the record as its open group found it
+	// (Edit::coalesce), and one that gives the group's fields back the values they held leaves no
+	// step; edits sharing a gesture fold into one step (Edit::gesture). An Apply hands its payload
+	// to the type (apply_payload; one naming no row, apply_file_payload). The type may refuse any
+	// change before it commits (accept_change).
 	// A batch: every edit changes the same row (Sets, Clears, Writes, Applies, and Adds,
 	// Duplicates, Removes, Moves and Pastes inside it), cloned once and committed as one Change,
 	// one undo step; nothing is committed when any edit is refused or the type vetoes the change.
@@ -93,12 +93,10 @@ public:
 	// continuing its open group (typing) starts again from what the group found, the step
 	// before undone first, so a value typed on the way (an empty image or hotkey, a name)
 	// leaves nothing behind and the whole group stays one step (a refused one puts the group's
-	// step back as it was). Adding, removing or moving rows, and a file-wide value, go one edit
-	// at a time. A record's new name is its own edit: what names it elsewhere, in its file or
-	// another, is Rename everywhere's (graph/rename_transaction, plan_symbol_rename_project).
-	bool apply(const std::vector<Edit> &edits, Diagnostic &error) override;
-	void undo() override;
-	void redo() override;
+	// step back as it was). Adding, removing or moving rows, a file-wide value and an Apply
+	// naming no row go one edit at a time. A record's new name is its own edit: what names it
+	// elsewhere, in its file or another, is Rename everywhere's (graph/rename_transaction,
+	// plan_symbol_rename_project).
 	void end_edit_group() override { history_.end_edit_group(); }
 	bool dirty() const override { return history_.dirty(); }
 	bool can_undo() const override { return history_.can_undo(); }
@@ -281,6 +279,11 @@ protected:
 	// over the base's copy; no memo; read only.
 	Document(const Document &other);
 	Document &operator=(const Document &) = delete;
+	// The record half of apply (above), undo and redo, which the base calls only for a document
+	// that is neither a snapshot nor blocked.
+	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
+	void undo_step() override { history_.undo(); }
+	void redo_step() override { history_.redo(); }
 	// The record half of a load (DocumentBase::read_source): parse, and when adopting, the rows
 	// given their identities, the history started again and the baseline set.
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -340,12 +343,21 @@ protected:
 	virtual bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                           std::string &error);
 	// A change the type made in C++ (Edit Apply: its EditPayload, whose token says which) to the
-	// record `address` names inside `row`, a clone the batch commits once every edit of it is
+	// record `address` names inside `row`, the clone the batch commits once every edit of it is
 	// applied: a record type that makes such changes takes the ones it made (S13 D6; a raster's
-	// or a text's are its own document's, through DocumentBase::apply). The default refuses
+	// or a text's are its own document's, through its apply_edits). It may reshape the row (fresh
+	// identities from `allocate`) and replace `state`, the batch's file-wide state, with a changed
+	// copy, committed with the step; `changed` (true when called) false says the payload leaves
+	// both as they were, and the batch takes no step for it. The default refuses
 	// (document.payload).
 	virtual bool apply_payload(Node &row, const NodeAddress &address, const EditPayload &payload,
-	                           std::string &error);
+	                           std::shared_ptr<const FileState> &state, const IdAllocator &allocate,
+	                           bool &changed, std::string &error);
+	// An Apply naming no row: a change the type made to the file-wide state alone, `state` replaced
+	// with a changed copy; one step, a gesture's folding into one; `changed` as above. The default
+	// refuses (document.payload).
+	virtual bool apply_file_payload(std::shared_ptr<const FileState> &state,
+	                                const EditPayload &payload, bool &changed, std::string &error);
 	// A file-wide value set (Edit SetFileValue: an item table's vehicle spawn registry). The
 	// default refuses: the type has none (document.value).
 	virtual bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit,

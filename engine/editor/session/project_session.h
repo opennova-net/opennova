@@ -10,6 +10,7 @@
 namespace opennova::editor {
 
 class Document;
+class DocumentBase;
 class PreferencesStore;
 class SessionOperation;
 struct PollBudget;
@@ -87,8 +88,11 @@ public:
 	// fixes kept while what they read stands.
 	std::string problems_json(const std::string &query);
 	// The open record document at `path` (project-relative, or a logical name), "" the active one:
-	// null when none is open there, or the one open is not a record document (as_records).
+	// null when none is open there, or the one open is not a record document (as_records). What
+	// asks only the lifecycle (whether a file is open or unsaved, its JSON, the end of its edit
+	// group) takes document_base_for, the open document of any kind (S13 D6).
 	Document *document_for(const std::string &path = {});
+	DocumentBase *document_base_for(const std::string &path = {});
 	bool documents_dirty() const;
 	bool project_open() const;
 	// What the last validation read: the closed files it loaded and reused.

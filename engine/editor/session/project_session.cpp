@@ -271,6 +271,10 @@ Document *ProjectSession::document_for(const std::string &path) {
 	return impl_->documents.records_for(path);
 }
 
+DocumentBase *ProjectSession::document_base_for(const std::string &path) {
+	return impl_->documents.document_for(path);
+}
+
 bool ProjectSession::documents_dirty() const {
 	return impl_->documents.documents_dirty();
 }

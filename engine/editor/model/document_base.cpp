@@ -40,8 +40,25 @@ DocumentBase::DocumentBase(const DocumentBase &other)
 		  wrote_file_(other.wrote_file_), snapshot_(true),
 		  file_fingerprint_(other.file_fingerprint_) {}
 
+bool DocumentBase::apply(const std::vector<Edit> &edits, Diagnostic &error) {
+	if (snapshot_)
+		return fail(error, path(), "document.snapshot", "A snapshot is read, never edited.");
+	if (blocked_)
+		return fail(error, path(), "document.parse",
+		            "Fix the reported source errors and reload this document before editing.");
+	return apply_edits(edits, error);
+}
+
 bool DocumentBase::apply(const Edit &edit, Diagnostic &error) {
 	return apply(std::vector<Edit>{edit}, error);
+}
+
+void DocumentBase::undo() {
+	if (!snapshot_ && !blocked_) undo_step();
+}
+
+void DocumentBase::redo() {
+	if (!snapshot_ && !blocked_) redo_step();
 }
 
 size_t DocumentBase::ignored_lines() const {
@@ -73,8 +90,19 @@ bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::stri
 	if (snapshot_) return fail(error, relative, "document.snapshot", "A snapshot is never loaded.");
 	const uint64_t hash = fingerprint(bytes);
 	std::vector<SourceIssue> issues;
-	relative_path_ = relative; kind_ = kind; game_ = game;
-	if (!decode_and_read(bytes, true, issues, error)) return false;
+	// The kind reads the source as the file it names (its path, kind and game); a source that
+	// does not read leaves the document as it was, those too.
+	std::string previous_path = relative, previous_game = game;
+	AssetKind previous_kind = kind;
+	std::swap(relative_path_, previous_path);
+	std::swap(kind_, previous_kind);
+	std::swap(game_, previous_game);
+	if (!decode_and_read(bytes, true, issues, error)) {
+		relative_path_ = std::move(previous_path);
+		kind_ = previous_kind;
+		game_ = std::move(previous_game);
+		return false;
+	}
 	absolute_path_.clear(); // no file until load names one
 	issues_ = std::move(issues);
 	blocked_ = false;
@@ -90,6 +118,8 @@ bool DocumentBase::save(Diagnostic &error) {
 		return fail(error, path(), "document.snapshot", "A snapshot is read, never saved.");
 	if (absolute_path_.empty())
 		return fail(error, path(), "document.no_file", "This document was read from bytes, not from a file: it has no file to save to.");
+	if (const SourceIssue *blocking = first_blocking())
+		return fail(error, path(), "document.unserializable", blocking->message, blocking->field);
 	const SerializeResult output = serialize();
 	if (!output.ok())
 		return fail(error, path(), "document.unserializable", output.issues.front().message, output.issues.front().field);
@@ -116,7 +146,14 @@ bool DocumentBase::save(Diagnostic &error) {
 	return true;
 }
 
+const SourceIssue *DocumentBase::first_blocking() const {
+	for (const SourceIssue &issue : issues_)
+		if (issue.blocks) return &issue;
+	return nullptr;
+}
+
 DocumentBase::RewriteNeed DocumentBase::rewrite_need() const {
+	if (blocked_) return RewriteNeed::Unserializable;
 	const SerializeResult output = serialize();
 	if (!output.ok()) return RewriteNeed::Unserializable;
 	return fingerprint(output.text) != file_fingerprint_ ? RewriteNeed::Rewrite : RewriteNeed::None;

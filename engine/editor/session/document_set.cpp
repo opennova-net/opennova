@@ -34,6 +34,14 @@ Document *DocumentSet::records_for(const std::string &path) {
 	return document ? records_of(*document) : nullptr;
 }
 
+void DocumentSet::refuse_records(const std::string &path, const char *not_open) {
+	if (!view_.project_open) return;
+	if (const DocumentBase *document = document_for(path))
+		return core_.refuse_now("document.no_records", "This document holds no records.",
+		                        document->path());
+	core_.refuse_now("document.not_open", not_open, path);
+}
+
 bool DocumentSet::documents_dirty() const {
 	for (const auto &document : documents_) if (document->dirty()) return true;
 	return false;
@@ -343,7 +351,7 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 void DocumentSet::revert_to_saved(const EditorRequest &request) {
 	auto *document = records_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before reverting in it.", request.path);
+		refuse_records(request.path, "Open the file before reverting in it.");
 		return;
 	}
 	std::vector<Edit> batch;
@@ -363,7 +371,7 @@ void DocumentSet::revert_to_saved(const EditorRequest &request) {
 void DocumentSet::copy(const EditorRequest &request) {
 	auto *document = records_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before copying from it.", request.path);
+		refuse_records(request.path, "Open the file before copying from it.");
 		return;
 	}
 	copy_records(*document, request.kind == EditorRequestKind::Cut);
@@ -372,7 +380,7 @@ void DocumentSet::copy(const EditorRequest &request) {
 void DocumentSet::paste(const EditorRequest &request) {
 	auto *document = records_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before pasting into it.", request.path);
+		refuse_records(request.path, "Open the file before pasting into it.");
 		return;
 	}
 	paste_records(*document, request.edit);
@@ -381,7 +389,7 @@ void DocumentSet::paste(const EditorRequest &request) {
 void DocumentSet::duplicate(const EditorRequest &request) {
 	auto *document = records_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before duplicating in it.", request.path);
+		refuse_records(request.path, "Open the file before duplicating in it.");
 		return;
 	}
 	duplicate_records(*document);

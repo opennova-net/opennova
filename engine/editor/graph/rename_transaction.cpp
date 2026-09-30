@@ -83,6 +83,13 @@ Diagnostic refusal(const char *code, const std::string &message, const std::stri
 	return make_diagnostic(DiagnosticSeverity::Error, code, message, asset, field);
 }
 
+// Why a file's sites cannot be rewritten: its kind has no editor, or its editor's documents hold
+// no records a rename sets (a document of another kind, S13 D6).
+Diagnostic cannot_rewrite(const DocumentType *type, const std::string &file) {
+	if (!type) return refusal("rename.site", file + " has no editor to rewrite it.", file);
+	return refusal("rename.site", file + " holds no records for a rename to rewrite.", file);
+}
+
 // A field of a record kind of a document type, asked of a blank document of the type (a type's
 // schema never depends on a file's content), one made per kind of file.
 const FieldSchema *site_field(std::map<AssetKind, std::unique_ptr<Document>> &blanks, AssetKind file, NodeKind kind,
@@ -305,7 +312,7 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 		const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
 		std::unique_ptr<Document> document = type ? records_of(type->make()) : nullptr;
 		if (!document) {
-			findings.push_back(refusal("rename.site", entry.first + " has no editor to rewrite it.", entry.first));
+			findings.push_back(cannot_rewrite(type, entry.first));
 			ok = false;
 			continue;
 		}
@@ -530,7 +537,7 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 		const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
 		std::unique_ptr<Document> document = type ? records_of(type->make()) : nullptr;
 		if (!document) {
-			findings.push_back(refusal("rename.site", file + " has no editor to rewrite it.", file));
+			findings.push_back(cannot_rewrite(type, file));
 			ok = false;
 			continue;
 		}

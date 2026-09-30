@@ -30,7 +30,13 @@
 // kind that is a row, and every record a collection holds of a kind the table has. S13 D6: the
 // type's make gives a DocumentBase whose record document (as_records) is itself; a change of a
 // kind the type did not make (an Apply of another's payload) is refused (document.payload),
-// nothing committed; and a snapshot shares its document's load generation.
+// nothing committed; a snapshot shares its document's load generation; and what the type declares
+// it adds is added (make_node and edit_collection refuse by default): a row of every kind the
+// outline adds at the end, and a record into every kind of collection the file's records hold that
+// is not fixed (each owner kind and record kind once, a full one skipped; refused only by a rule of
+// the type's own), what serializes reading back with the record kept (a record the writer takes
+// only once filled in counted as waiting), a Remove giving the owner the records it held, and each
+// undo the bytes.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -63,10 +69,12 @@ int g_failures = 0;
 // What was checked, for the summary line: records, fields set to their own value, symbols, and
 // lookups of a name in another scope that defines it too; optional fields left out and written
 // again and those a type keeps written, files with a real change and its undo, files whose field
-// took two coalesced Sets, records pasted, snapshots, and files refusing another's Apply.
+// took two coalesced Sets, records pasted, snapshots, files refusing another's Apply, and the rows
+// and the records added (those the writer takes only once filled in, and the Adds a type's own rule
+// refused).
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
-size_t g_foreign = 0;
+size_t g_foreign = 0, g_row_adds = 0, g_record_adds = 0, g_adds_waiting = 0, g_adds_refused = 0;
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
@@ -735,6 +743,85 @@ void check_foreign_payload(const Fixture &fixture, Document &document,
 	      "committed");
 }
 
+// What the type declares it adds is added (make_node and edit_collection refuse by default, in the
+// base's words): a row of each kind the outline adds (add_label) at the end, the last row and of
+// its kind; a record into each kind of collection the file's records hold that is not fixed (each
+// owner kind and record kind once, a full one skipped), of the collection's kind, or refused in
+// the type's own words (a rule of its own: a model's LOD whose every part has its animation), and
+// its Remove giving the owner the records it held. After each Add, what serializes reads back with
+// the record kept; a new record the type's writer takes only once it is filled in (a catalog's
+// action, sight, attachment or effect with its defaults, an animation table's row or clip naming
+// none) is counted as waiting. Every Add's undo, and the Remove's, gives the bytes back.
+void check_adds(const DocumentType &type, const Fixture &fixture, Document &document,
+                const std::vector<NodeAddress> &records, const std::string &serialized) {
+	const auto reads_back = [&](const std::string &where) {
+		const SerializeResult text = document.serialize();
+		if (!text.ok()) {
+			++g_adds_waiting;
+			return;
+		}
+		std::unique_ptr<Document> read = records_of(type.make());
+		Diagnostic error;
+		const bool loaded =
+		        read->load_bytes(text_bytes(text.text), fixture.name, fixture.kind, "jo", error);
+		check(loaded && !read->blocked() &&
+		              every_record(*read).size() == every_record(document).size(),
+		      where + " (" + error.message + ")", "what an Add makes reads back, the record kept");
+	};
+	for (const RecordKindRow &row : document.kinds()) {
+		if (!*row.add_label) continue;
+		const std::string where = fixture.name + " (" + row.add_label + ")";
+		Diagnostic error;
+		const bool added = document.apply(edit_of(EditOperation::Add, {0, row.kind, 0}, ""), error);
+		check(added, where + " (" + error.message + ")",
+		      "a row of a kind the outline adds is added (make_node)");
+		if (!added) continue;
+		++g_row_adds;
+		check(document.rows().back()->kind == row.kind, where,
+		      "the row added is the last, of its kind");
+		reads_back(where);
+		document.undo();
+		check(document.serialize().text == serialized && !document.dirty(), where,
+		      "an Add's undo gives the bytes back");
+	}
+	std::set<std::pair<NodeKind, NodeKind>> tried;
+	for (const NodeAddress &owner : records) {
+		for (const Document::Collection &collection : document.collections_of(owner)) {
+			const bool full = collection.spec.max && collection.ids.size() >= collection.spec.max;
+			if (collection.spec.fixed || full) continue;
+			if (!tried.insert({owner.kind, collection.spec.kind}).second) continue;
+			const std::string where = where_of(fixture, document, owner, "") + " (Add " +
+			                          document.kind_token(collection.spec.kind) + ")";
+			Edit add = edit_of(EditOperation::Add, {owner.row, collection.spec.kind, 0}, "");
+			add.parent = owner.child;
+			Diagnostic error;
+			if (!document.apply(add, error)) {
+				check(error.message != "This collection cannot accept that edit.",
+				      where + " (" + error.message + ")",
+				      "an Add into a collection that is not fixed is taken, or refused by a rule "
+				      "of the type's own (edit_collection)");
+				++g_adds_refused;
+				continue;
+			}
+			++g_record_adds;
+			const NodeAddress made = document.address_of(document.last_added());
+			check(made.row && made.kind == collection.spec.kind, where,
+			      "the record added is of the collection's kind");
+			reads_back(where);
+			const bool removed = document.apply(edit_of(EditOperation::Remove, made, ""), error);
+			bool held = false;
+			for (const Document::Collection &now : document.collections_of(owner))
+				held = held || (now.spec.kind == collection.spec.kind && now.ids == collection.ids);
+			check(removed && held, where,
+			      "a Remove of the record added gives the owner the records it held");
+			document.undo();
+			if (removed) document.undo();
+			check(document.serialize().text == serialized && !document.dirty(), where,
+			      "the Add's and the Remove's undo give the bytes back");
+		}
+	}
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
@@ -763,6 +850,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 
 	check_kinds(fixture, *document, records);
 	check_foreign_payload(fixture, *document, records, first.text);
+	check_adds(type, fixture, *document, records, first.text);
 	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
@@ -809,8 +897,10 @@ int main() {
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
 		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
 		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu foreign "
-		            "changes refused, %zu record kinds)\n",
+		            "changes refused, %zu rows and %zu records added (%zu waiting for values, "
+		            "%zu Adds refused by a type's rule), %zu record kinds)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
-		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_kinds.size());
+		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
+		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size());
 	return g_failures == 0 ? 0 : 1;
 }

@@ -257,7 +257,12 @@ void extract_from_document(const Document &document, Extracted &out) {
 	}
 }
 
-bool graph_reads_kind(AssetKind kind) { return is_editable_kind(kind) || native_extractor(kind) != nullptr; }
+bool graph_reads_kind(AssetKind kind) {
+	// A record type's documents, whose records the extraction reads, or a native extractor; a type
+	// whose documents hold no records gives the graph nothing yet (S13 D6).
+	const DocumentType *type = document_type_for(kind);
+	return (type && holds_records(*type)) || native_extractor(kind) != nullptr;
+}
 
 bool graph_reads_file(AssetKind kind, const std::string &name) {
 	// A .mis is a mission too, the mission editors' text form (docs/mission/mis-format-re.md),
@@ -271,11 +276,14 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
                         const std::string &game, Extracted &out, Diagnostic &error) {
 	if (!graph_reads_file(kind, name))
 		return true;
+	// A record type's document, its records extracted; a type of another kind falls through to a
+	// native extractor, or gives nothing.
 	if (const DocumentType *type = document_type_for(kind)) {
-		std::unique_ptr<DocumentBase> document = type->make();
-		if (!document->load_bytes(bytes, name, kind, game, error)) return false;
-		if (const Document *records = records_of(*document)) extract_from_document(*records, out);
-		return true;
+		if (std::unique_ptr<Document> document = records_of(type->make())) {
+			if (!document->load_bytes(bytes, name, kind, game, error)) return false;
+			extract_from_document(*document, out);
+			return true;
+		}
 	}
 	const NativeExtractor extract = native_extractor(kind);
 	if (!extract) return true;
