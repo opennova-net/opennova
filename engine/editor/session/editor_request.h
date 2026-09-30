@@ -201,6 +201,10 @@ struct ActionOutcome {
 	uint64_t operation = 0;      // the operation it started or joined (the view's operation
 	                             // while it runs, its last_operation once it ends); 0 for none
 	std::vector<Diagnostic> findings;
+	// The records its edits made, in order (S13 A5): an EditRecord's adds and duplicates, a
+	// Paste's records, a Duplicate's copies (Document::last_added_records()); none for a request
+	// that made none.
+	std::vector<NodeId> added;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 
