@@ -12,9 +12,10 @@ namespace opennova::editor {
 // table declares, and a producer that names a code no enum has does not compile. A row says what
 // Problems does with a finding of its code: the fixes it offers (session/problem_fixes.h), what a
 // Rewrite of the file drops or normalizes, whether the finding says the file does not serialize,
-// where Problems takes it, the group it shows under and where it comes from. Everything that asks
-// about a finding reads its row, never its spelling; session/finding_codes.h is the lookup by a
-// token over every table and the columns' wire forms.
+// where Problems takes it, the group it shows under, where it comes from and, for a compiler note
+// of the render check, whether it is a Problems row at all. Everything that asks about a finding
+// reads its row, never its spelling; session/finding_codes.h is the lookup by a token over every
+// table and the columns' wire forms.
 
 // The fixes Problems offers for a finding of the code (session/problem_fixes.h words each one).
 enum class FindingFix {
@@ -77,12 +78,22 @@ inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::k
 // compiler note, a screen it could not map). The menu report reads it (a menu's rows by source).
 enum class FindingSource { Own, Graph, RenderCheck };
 
+// Whether a finding of the code is a Problems row, and at what severity, where its row decides it:
+// the render check's compiler notes (preview/menu_render_check.h's menu_note_problem reads it), a
+// Warning or an Info for a consequence the author may not mean, None for a note only the preview
+// shows (a name the project lacks, which is the asset graph's reference.missing; a few that only
+// explain the picture: a CUSTOM hook, a state held, a frame whose stencil did not load, a table or
+// marquee filled at run time). None on every other row, whose producer picks each finding's
+// severity.
+enum class FindingProblem { None, Info, Warning };
+
 // One finding code: `token` is the stable dotted code a finding of it carries (Diagnostic::code,
 // the wire's `code`); `fixes` what Problems offers; `rewrite_does` a Rewrite's words, what writing
 // the file again does ("with every line ending CR LF"), set exactly on a Rewrite row;
 // `blocks_save` that the finding says the file does not serialize (its Save is refused, so no
 // Rewrite is offered for the file); `place` where Problems takes it; `group` the group it shows
-// under; `source` what made it, when not its group's own part.
+// under; `source` what made it, when not its group's own part; `problem`, on a render check's row
+// alone, whether a finding of it is a Problems row and at what severity.
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -91,6 +102,7 @@ struct FindingCodeRow {
 	FindingPlace place = FindingPlace::Content;
 	FindingGroup group = FindingGroup::None;
 	FindingSource source = FindingSource::Own;
+	FindingProblem problem = FindingProblem::None;
 };
 
 // A table's rows, in the order of the enum it answers for.
@@ -153,12 +165,14 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 	return true;
 }
 
-// Whether no two rows of a table share a token (a table joined from two entry lists), and every
-// row has its group.
+// Whether no two rows of a table share a token (a table joined from two entry lists), every row
+// has its group, and only a render check's row says whether its findings are Problems rows.
 template <size_t N>
 constexpr bool finding_rows_well_formed(const std::array<FindingCodeRow, N> &rows) {
 	for (size_t i = 0; i < N; ++i) {
 		if (rows[i].group == FindingGroup::None || rows[i].group == FindingGroup::kCount) return false;
+		if (rows[i].problem != FindingProblem::None && rows[i].source != FindingSource::RenderCheck)
+			return false;
 		for (size_t j = 0; j < i; ++j)
 			if (same_finding_token(rows[i].token, rows[j].token)) return false;
 	}

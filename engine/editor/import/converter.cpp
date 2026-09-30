@@ -1,10 +1,10 @@
 #include <editor/import/converter.h>
-#include <editor/model/diagnostic.h>
 
 #include <filesystem>
 #include <sstream>
 
 #include <base/io/strutil.h>
+#include <editor/model/diagnostic.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_o3a_read.h>
 #include <formats/threedi/threedi_o3d_read.h>

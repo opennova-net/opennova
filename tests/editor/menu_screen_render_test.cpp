@@ -1,5 +1,6 @@
-// The menu render check (editor/preview, ADR 0046 S9j2): every menu screen of the project
-// compiled headless the way the game draws it, its compiler notes as Problems rows on the
+// The menu render check (editor/preview, ADR 0046 S9j2; the menu type's project check since
+// S13 V9, reached among the session's checks by menu_render_check): every menu screen of the
+// project compiled headless the way the game draws it, its compiler notes as Problems rows on the
 // record and the field they name, never a build's gate, and never a finding the asset
 // graph already makes. A new project's STARTUP screen renders clean: TITLE text sized in
 // its font from fonts/, the document's windows in the compiler's order. An edit that cuts
@@ -110,8 +111,10 @@ static int test_blank_startup() {
 	session.handle(request::new_project(dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.findings.render_check);
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	// A new project renders clean.
 	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code().c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
@@ -193,7 +196,10 @@ static int test_render_again_only_when_moved() {
 	session.handle(request::new_project(dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	// The files just made: every menu renders.
 	const size_t menus = check.rendered();
 	TEST_EXPECT(menus >= 1);
@@ -492,7 +498,10 @@ static int test_notes_alone_recompose() {
 	session.handle(request::new_project(dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	const std::string root = view.project.root;
 	std::string font;
 	for (const AssetEntry &asset : view.project.scan->entries)

@@ -20,8 +20,8 @@ namespace opennova::editor {
 // sees them. A name the scan lists twice resolves to its first entry (the scan reports
 // the duplicate). A payload
 // decodes the way a document's does (the target game's SCR policy). An open document
-// stands in for its file, with the bytes its Save would write (serialized once per
-// revision); one that cannot serialize leaves the file in place.
+// stands in for its file, with the bytes its Save would write (serialized once per state: its
+// identity, load and revision); one that cannot serialize leaves the file in place.
 class ProjectAssetSource : public FileSource {
 public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game);
@@ -31,10 +31,11 @@ public:
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override;
 	// A file's stamp follows its size and last write as the scan saw them (a file changed
 	// outside the editor moves on the next rescan); an open document's follows its
-	// identity and revision.
+	// identity, its load (a load in place keeps the identity and starts the revision again)
+	// and its revision.
 	uint64_t stamp(const std::string &name) const override;
 	// Moves whenever a stamp may have: a rescan, or an open document edited, undone,
-	// opened or closed.
+	// loaded again, opened or closed.
 	uint64_t generation() const { return generation_; }
 	// The project-relative path a name resolves to ("" when none).
 	std::string path_of(const std::string &name) const;
@@ -48,11 +49,13 @@ private:
 	struct Open {
 		std::shared_ptr<const DocumentBase> document;
 		uint64_t identity = 0;
+		uint64_t load_generation = 0;
 		uint64_t revision = 0;
 	};
 	struct Serialized {
 		bool made = false;
 		uint64_t identity = 0;
+		uint64_t load_generation = 0;
 		uint64_t revision = 0;
 		bool ok = false;
 		std::vector<uint8_t> bytes;

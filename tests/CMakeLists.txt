@@ -3649,6 +3649,15 @@ target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
 target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_project_validation COMMAND editor_project_validation_test)
 
+# The document types' project checks (S13 V9): a type's own check across the project's files,
+# made by its registry row (the menu type's render check) and kept by whoever validates; a
+# stand-in type's check runs once per validation, its findings after the build's gate, and its
+# answer that they moved is what composes the Problems rows again.
+add_executable(editor_project_checks_test editor/project_checks_test.cpp)
+target_link_libraries(editor_project_checks_test PRIVATE opennova_editor)
+target_include_directories(editor_project_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_checks COMMAND editor_project_checks_test)
+
 # The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
 # cancelled between two steps, finished once; the busy gate's four answers over a real build
 # (refused, joined, superseded as the table says, cancelled first); edits during a build.
@@ -3728,8 +3737,9 @@ target_include_directories(editor_canvas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME editor_canvas COMMAND editor_canvas_test)
 
 # The windows' models with no ImGui (S13 V1): what the Problems window lists, folds, proposes
-# and asks (ui/problems_list), and where the find bar is among a document's hits
-# (ui/find_cursor). Built with the windows (their sources are ui/'s).
+# and asks (ui/problems_list), where the find bar is among a document's hits (ui/find_cursor),
+# and what a document's outline lists (ui/outline_model, S13 V3). Built with the windows (their
+# sources are ui/'s).
 if(OPENNOVA_IMGUI)
     add_executable(editor_problems_list_test editor/problems_list_test.cpp)
     target_link_libraries(editor_problems_list_test PRIVATE opennova_editor)
@@ -3740,6 +3750,14 @@ if(OPENNOVA_IMGUI)
     target_link_libraries(editor_find_cursor_test PRIVATE opennova_editor)
     target_include_directories(editor_find_cursor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME editor_find_cursor COMMAND editor_find_cursor_test)
+
+    # A document's outline (S13 V3, ui/outline_model): its lines as a list, a tree and master and
+    # detail, what is open, the filter, the order, and the lines made again only when what they read
+    # moves.
+    add_executable(editor_outline_model_test editor/outline_model_test.cpp)
+    target_link_libraries(editor_outline_model_test PRIVATE opennova_editor)
+    target_include_directories(editor_outline_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_outline_model COMMAND editor_outline_model_test)
 endif()
 
 # The asset graph (S7): the extractors, the resolver the badges and Problems share,
@@ -3876,6 +3894,14 @@ if(OPENNOVA_IMGUI)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
     add_test(NAME editor_ui_groups COMMAND editor_ui_test --groups ${OPENNOVA_EDITOR_UI_GROUPS})
+
+    # The document views' contract (S13 V3, ui/document_views): every DocumentTypeId's view over a
+    # file of its type on the null backend, its row's role, no request raised by drawing, nothing
+    # wider than its tab, a RevealRecord held until it draws; two open documents a view each.
+    add_executable(editor_view_contract_test editor_ui/view_contract_test.cpp)
+    target_link_libraries(editor_view_contract_test PRIVATE opennova_editor opennova_imgui)
+    target_include_directories(editor_view_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_view_contract COMMAND editor_view_contract_test)
 endif()
 
 add_executable(project_cli_test editor/project_cli_test.cpp)

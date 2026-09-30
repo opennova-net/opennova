@@ -11,9 +11,9 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/blank/blank_factory.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
@@ -93,7 +93,7 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	return (fs::path(blank_placement_dir(kind)) / name).generic_string();
+	return (fs::path(asset_kind_row(kind).folder) / name).generic_string();
 }
 
 namespace {

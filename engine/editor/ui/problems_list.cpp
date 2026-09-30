@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/ui/problems_list.h>
 
 #include <algorithm>
@@ -7,6 +6,7 @@
 
 #include <base/io/json.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>

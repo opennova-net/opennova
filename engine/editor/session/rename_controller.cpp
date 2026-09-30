@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/session/rename_controller.h>
 
 #include <algorithm>
@@ -7,6 +6,7 @@
 #include <utility>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>

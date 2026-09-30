@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/project_build/build_run.h>
 
 #include <algorithm>
@@ -14,6 +13,7 @@
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>

@@ -1,10 +1,10 @@
-#include <editor/model/diagnostic.h>
 #include <editor/run/launch_plan.h>
 
 #include <filesystem>
 #include <utility>
 
 #include <base/resource_index/boot_policy.h>
+#include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;
 

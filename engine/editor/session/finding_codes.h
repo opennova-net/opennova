@@ -34,11 +34,13 @@ const char *finding_owner(const FindingCodeRow *row);
 // ("content", "file"); the group's key, what the Problems groups are keyed by ("requirement",
 // "requirement.optional_missing", "reference"...: the family every code of the group starts
 // with), and its title ("Required files"); where a finding of the row comes from, a menu's rows
-// by source ("graph", "render", else its group's key).
+// by source ("graph", "render", else its group's key); whether a render check's note is a
+// Problems row and at what severity ("none", "info", "warning").
 const char *finding_fix_token(FindingFix fixes);
 const char *finding_place_token(FindingPlace place);
 const char *finding_group_key(FindingGroup group);
 const char *finding_group_title(FindingGroup group);
 const char *finding_source_token(const FindingCodeRow &row);
+const char *finding_problem_token(FindingProblem problem);
 
 } // namespace opennova::editor

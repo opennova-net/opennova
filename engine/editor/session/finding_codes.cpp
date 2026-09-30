@@ -131,4 +131,13 @@ const char *finding_source_token(const FindingCodeRow &row) {
 	return finding_group_key(row.group);
 }
 
+const char *finding_problem_token(FindingProblem problem) {
+	switch (problem) {
+	case FindingProblem::Info: return "info";
+	case FindingProblem::Warning: return "warning";
+	case FindingProblem::None: break;
+	}
+	return "none";
+}
+
 } // namespace opennova::editor

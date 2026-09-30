@@ -312,7 +312,7 @@ std::vector<Document::Collection> ModelDocument::collections(const Node &node, c
 	        {spec(ModelKind::Occlusion, "Occlusion records", "", true), row.collections[3]}};
 }
 
-const std::vector<FieldSchema> &ModelDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &ModelDocument::schema(NodeKind kind) {
 	static const std::vector<std::vector<FieldSchema>> tables = [] {
 		std::vector<std::vector<FieldSchema>> out;
 		for (const KindRow &row : kKinds) {

@@ -132,7 +132,7 @@ std::vector<Document::Collection> AnimationDocument::collections(const Node &row
 	return {{bones, row.collections[0]}, {events, row.collections[1]}};
 }
 
-const std::vector<FieldSchema> &AnimationDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &AnimationDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	return kind == kClip ? clip_fields() : kind == kBone ? bone_fields() : kind == kEvent ? event_fields() : none;
 }

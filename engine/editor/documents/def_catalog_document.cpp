@@ -545,7 +545,7 @@ bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldU
 	return true;
 }
 
-const std::vector<FieldSchema> &DefCatalogDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &DefCatalogDocument::schema(NodeKind kind) {
 	// Every record kind's fields, made once for the process: a record's FieldUse points into
 	// them (the language makes the one initialisation, whichever thread asks first).
 	static const std::vector<std::vector<FieldSchema>> tables = [] {

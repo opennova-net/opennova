@@ -846,9 +846,10 @@ constexpr EditorQueryRow kRows[] = {
 			"editor's own table's, then each type's): its code, its table (core or the type's "
 			"name), the fixes Problems offers, what a Rewrite does, whether the finding says the "
 			"file does not serialize (blocks_save), where Problems takes it (content or file), the "
-			"group it shows under (its key), where it comes from (source) and how many of the "
-			"findings held now carry it (count); a row a held finding carries that no table lists "
-			"comes last, as table none.")
+			"group it shows under (its key), where it comes from (source), for a render check's note "
+			"that is a Problems row its severity (problem: info or warning, left out for none) and "
+			"how many of the findings held now carry it (count); a row a held finding carries that "
+			"no table lists comes last, as table none.")
 			.row,
 };
 
@@ -1107,6 +1108,8 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		entry.set("place", json_string(finding_place_token(row.place)));
 		entry.set("group", json_string(finding_group_key(row.group)));
 		entry.set("source", json_string(finding_source_token(row)));
+		if (row.problem != FindingProblem::None)
+			entry.set("problem", json_string(finding_problem_token(row.problem)));
 		entry.set("count", json_number(double(count)));
 		findings.push(std::move(entry));
 	};

@@ -40,7 +40,10 @@ public:
 	// A section, the file's row (Add section), and its strings.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// The ids of a section a first section of the same name shadows are inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;

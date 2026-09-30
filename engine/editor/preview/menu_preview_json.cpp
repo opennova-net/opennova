@@ -1,10 +1,10 @@
-#include <editor/model/diagnostic.h>
 #include <editor/preview/menu_preview_json.h>
 
 #include <cmath>
 #include <cstdio>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>

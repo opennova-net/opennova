@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 
 #include <cstdio>
@@ -8,6 +7,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;

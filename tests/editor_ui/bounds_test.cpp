@@ -26,6 +26,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/document_window.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include "common/file_io.h"
@@ -37,47 +38,6 @@
 namespace editor_ui_test {
 
 namespace {
-
-// Every window drawn in the last frame whose content is wider than what shows of it while it
-// does not scroll sideways (its content size against its content region), and every cell of
-// a table whose content runs past its column (a table that scrolls sideways moves its
-// columns, but each still clips its cells): by name, with the widths, for the failure to
-// list. A child ImGui makes for a widget is left to the widget (a multiline text box scrolls
-// its text itself; the child is named after its "##" label).
-std::vector<std::string> overflowing() {
-	std::vector<std::string> out;
-	ImGuiContext &g = *GImGui;
-	char line[320];
-	for (const ImGuiWindow *window : g.Windows) {
-		if (!window->Active || window->Hidden || window->SkipItems) continue;
-		if (window->Flags & (ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_HorizontalScrollbar |
-		                     ImGuiWindowFlags_AlwaysHorizontalScrollbar))
-			continue;
-		const char *child = std::strrchr(window->Name, '/');
-		if ((window->Flags & ImGuiWindowFlags_ChildWindow) && child && std::strncmp(child + 1, "##", 2) == 0) continue;
-		const float visible = window->ContentRegionRect.GetWidth();
-		if (window->ContentSize.x > visible + 1.0f) {
-			std::snprintf(line, sizeof(line), "window %s: content %.0f wide in %.0f", window->Name, window->ContentSize.x, visible);
-			out.push_back(line);
-		}
-	}
-	for (int i = 0; i < g.Tables.GetMapSize(); ++i) {
-		const ImGuiTable *table = g.Tables.TryGetMapData(i);
-		if (!table || table->LastFrameActive != g.FrameCount) continue;
-		if (!table->OuterWindow || table->OuterWindow->SkipItems) continue;
-		for (int c = 0; c < table->ColumnsCount; ++c) {
-			const ImGuiTableColumn &column = table->Columns[c];
-			if (!column.IsEnabled || !column.IsVisibleX) continue;
-			const float content = std::max(column.ContentMaxXFrozen, column.ContentMaxXUnfrozen);
-			if (content > column.WorkMaxX + 1.0f) {
-				std::snprintf(line, sizeof(line), "table %08x in %s, column %d: content to %.0f, past %.0f", table->ID,
-				              table->OuterWindow->Name, c, content, column.WorkMaxX);
-				out.push_back(line);
-			}
-		}
-	}
-	return out;
-}
 
 // Ten windows each inside the last, every name long: a tree deeper and wider than a narrow
 // dock.
@@ -218,8 +178,9 @@ struct Sweep {
 		}
 		follow();
 	}
-	// Every section of the inspector's form open (those the file leaves out start folded), and
-	// the catalog's spawn registry: set open in the windows' own state, as a click leaves it.
+	// Every section of the inspector's form open (those the file leaves out start folded): set open
+	// in the window's own state, as a click leaves it; and the catalog's file-wide values (the spawn
+	// registry), opened through its outline's model.
 	void unfold() {
 		const Document *document = session.document_for(view.documents.active);
 		ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
@@ -230,8 +191,10 @@ struct Sweep {
 		for (const InspectorSection &section :
 				plan_inspector(*document, view.documents.selection, owner, ""))
 			if (!section.key.empty()) inspector->StateStorage.SetInt(item_id(inspector->ID, {("###" + section.key).c_str()}), 1);
-		if (ImGuiWindow *window = ImGui::FindWindowByName("Document"))
-			window->StateStorage.SetInt(item_id(document_tab_id(document->path()), {"spawn"}), 1);
+		for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+			if (auto *documents = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
+				if (DocumentView *shown = documents->view_of(document->path()))
+					if (OutlineModel *outline = shown->outline()) outline->set_values_open(true);
 		ui.frames(3);
 	}
 	// The first reference field's picker in the inspector's form (Pick), open; false when the

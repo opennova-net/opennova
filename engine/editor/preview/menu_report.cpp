@@ -64,9 +64,10 @@ const MnuDocument *open_menu(const SessionView &view, const std::string &relativ
 // The render check's render of a screen, and whether it shows the document as it is now.
 const MenuScreenRender *render_of(const SessionView &view, const MnuDocument &document, NodeId row, bool &current) {
 	current = false;
-	if (!view.findings.render_check) return nullptr;
-	const MenuScreenRender *render = view.findings.render_check->render(document.path(), row);
-	current = render && view.findings.render_check->document(document.path()) == &document &&
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	if (!check) return nullptr;
+	const MenuScreenRender *render = check->render(document.path(), row);
+	current = render && check->document(document.path()) == &document &&
 	          render->status() == MenuPreviewStatus::Ready && render->revision() == document.revision();
 	return render;
 }
@@ -130,7 +131,8 @@ const MnuDocument *menu_for(const SessionView &view, const std::string &path) {
 	const std::string relative = menu_path(view, path);
 	if (relative.empty()) return nullptr;
 	if (const MnuDocument *open = open_menu(view, relative)) return open;
-	return view.findings.render_check ? view.findings.render_check->document(relative) : nullptr;
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	return check ? check->document(relative) : nullptr;
 }
 
 io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path) {
@@ -215,13 +217,14 @@ io::JsonValue menu_render_to_json(
 	MenuPreviewSnapshot none;
 	none.status = MenuPreviewStatus::NoScreen;
 	JsonValue out;
-	if (!view.findings.render_check) {
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	if (!render_check) {
 		none.status = MenuPreviewStatus::NoProject;
 		out = menu_preview_to_json(none);
 	} else {
 		const std::string relative = menu_path(view, path);
 		if (relative.empty()) return JsonValue::make_null();
-		const MenuRenderCheck &check = *view.findings.render_check;
+		const MenuRenderCheck &check = *render_check;
 		// The open document when the menu is open (its current state), else the file as the check
 		// read it.
 		const MnuDocument *document = check.document(relative);

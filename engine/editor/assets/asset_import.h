@@ -39,7 +39,7 @@ std::vector<ImportSource> list_retail_import_sources(const std::string &retail_r
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder
-// (blank_placement_dir).
+// (AssetKindRow::folder).
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind);
 // What `sources` make copied into the project (a converter's outputs, else the file
 // itself), the whole selection or none of it as far as the disk allows (ADR 0046 S11g).

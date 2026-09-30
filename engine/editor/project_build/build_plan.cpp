@@ -1,8 +1,9 @@
-#include <editor/model/diagnostic.h>
 #include <editor/project_build/build_plan.h>
 
 #include <algorithm>
 #include <filesystem>
+
+#include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;
 

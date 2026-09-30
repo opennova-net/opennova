@@ -26,6 +26,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
@@ -33,7 +34,6 @@
 #include <editor/graph/project_validation.h>
 #include <editor/graph/use_checks.h>
 #include <editor/import/import_plan.h>
-#include <editor/preview/menu_render_check.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_findings.h>
@@ -458,7 +458,7 @@ static int test_every_finding_has_a_row() {
 		const RequirementReport requirements = evaluate_requirements(project.document, project.scan);
 		AssetGraph graph;
 		ValidationCache cache;
-		MenuRenderCheck render_check;
+		ProjectChecks checks;
 		ProjectAssetSource files;
 		files.set_scan(project.paths.root, project.scan, project.document.target_game);
 		const std::vector<std::string> boot_missing;
@@ -466,7 +466,7 @@ static int test_every_finding_has_a_row() {
 		const ProjectFindings composed = compose_project_findings(
 				{ project.paths, project.document, project.scan, requirements, open, boot_missing,
 						none, none, none },
-				graph, cache, render_check, files);
+				graph, cache, checks, files);
 		TEST_EXPECT(!composed.rows.empty());
 		findings += composed.rows.size();
 		TEST_EXPECT(check_rows(made.name, composed.rows, project.scan, codes) == 0);
@@ -705,10 +705,11 @@ static int test_retail_validation() {
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == files && graph.stats().files_extracted == 0);
 	// S13 A6: every finding the install's files make, composed as the editor composes them (the
-	// render check's notes over the install's menus among them), carries a row's token.
+	// project checks' among them, the render check's notes over the install's menus), keeps a
+	// table's row.
 	{
 		const RequirementReport requirements = evaluate_requirements(project.document, project.scan);
-		MenuRenderCheck render_check;
+		ProjectChecks checks;
 		ProjectAssetSource source;
 		source.set_scan(project.paths.root, project.scan, project.document.target_game);
 		const std::vector<std::string> boot_missing;
@@ -716,7 +717,7 @@ static int test_retail_validation() {
 		const ProjectFindings composed = compose_project_findings(
 				{ project.paths, project.document, project.scan, requirements, open, boot_missing,
 						none, none, none },
-				graph, cache, render_check, source);
+				graph, cache, checks, source);
 		std::set<std::string> codes;
 		TEST_EXPECT(check_rows("retail", composed.rows, project.scan, codes) == 0);
 		std::printf("retail: every finding has a row: %zu findings of %zu codes\n",

@@ -8,6 +8,9 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+// The menu type's project check, by its hook alone: the render check runs the preview's headless
+// screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
+#include <editor/preview/make_menu_render_check.h>
 
 #include <array>
 #include <atomic>
@@ -27,32 +30,49 @@ std::unique_ptr<DocumentBase> make_animation_map() {
 
 constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
-			catalog_finding_codes },
+			DefCatalogDocument::schema, catalog_finding_codes },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
-			strings_finding_codes },
-	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, menu_finding_codes },
-	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, style_finding_codes },
-	{ DocumentTypeId::Model, "model", make_model, validate_model_file, model_finding_codes },
+			StringsDocument::schema, strings_finding_codes },
+	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,
+			menu_finding_codes, make_menu_render_check },
+	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
+			style_finding_codes },
+	{ DocumentTypeId::Model, "model", make_model, validate_model_file, ModelDocument::schema,
+			model_finding_codes },
 	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
-			animation_finding_codes },
+			AnimationDocument::schema, animation_finding_codes },
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
-			validate_animation_map_file, animation_map_finding_codes },
+			validate_animation_map_file, AnimationMapDocument::schema,
+			animation_map_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
-// files and declaring its finding codes.
+// files, naming its records' fields and declaring its finding codes.
 constexpr bool types_in_order() {
 	for (size_t i = 0; i < kDocumentTypeCount; ++i)
 		if (static_cast<size_t>(kTypes[i].id) != i + 1 || !kTypes[i].make ||
-				!kTypes[i].validate_file || !kTypes[i].findings)
+				!kTypes[i].validate_file || !kTypes[i].fields || !kTypes[i].findings)
 			return false;
+	return true;
+}
+
+// A type may have no project check; one it has is its own: two rows naming the same would make
+// two instances of it, each over the whole project, and list its findings twice.
+constexpr bool project_checks_own() {
+	for (size_t i = 0; i < kDocumentTypeCount; ++i)
+		for (size_t j = i + 1; j < kDocumentTypeCount; ++j)
+			if (kTypes[i].project_check && kTypes[i].project_check == kTypes[j].project_check)
+				return false;
 	return true;
 }
 
 static_assert(sizeof(kTypes) / sizeof(kTypes[0]) == kDocumentTypeCount,
               "every DocumentTypeId has exactly one type");
 static_assert(types_in_order(),
-		"the types follow DocumentTypeId's order, each with its make, validate_file and findings");
+		"the types follow DocumentTypeId's order, each with its make, validate_file, fields and "
+		"findings");
+static_assert(project_checks_own(),
+		"a type's project check is its own (a type may have none): no two rows name the same");
 
 // A test's type in a registered one's place (DocumentTypeStandIn), null for none.
 std::atomic<const DocumentType *> g_stand_in{nullptr};

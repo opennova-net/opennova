@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/session/play_controller.h>
 
 #include <algorithm>
@@ -11,6 +10,7 @@
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>

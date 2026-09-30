@@ -43,7 +43,10 @@ public:
 	// The clip, its row (the file's one, never added), then its bones and frame events.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A bone's parent: none (a root), or one of the clip's bones by name.
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;

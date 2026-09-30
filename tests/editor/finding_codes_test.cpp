@@ -17,6 +17,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/model/diagnostic.h>
+#include <editor/preview/menu_render_check.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <base/io/json.h>
@@ -117,6 +118,9 @@ static int test_tokens_unique() {
 		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second && !std::string(finding_fix_token(fix)).empty());
 	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
 	            std::string(finding_place_token(FindingPlace::File)) == "file");
+	TEST_EXPECT(std::string(finding_problem_token(FindingProblem::None)) == "none" &&
+	            std::string(finding_problem_token(FindingProblem::Info)) == "info" &&
+	            std::string(finding_problem_token(FindingProblem::Warning)) == "warning");
 	std::printf("%zu finding codes in %zu tables (%zu the editor's own)\n", rows, tables().size(),
 	            kCoreFindingCount);
 	return 0;
@@ -192,6 +196,41 @@ static int test_type_tables() {
 	}
 	TEST_EXPECT(menu_finding_codes().count ==
 	            static_cast<size_t>(MenuFinding::kCount) + size_t(menu::kMenuFrameNoteCodeCount));
+	// Whether a note is a Problems row, and at what severity, is its row's (the list the render
+	// check's switch held): menu_note_problem reads it.
+	for (int i = 0; i < menu::kMenuFrameNoteCodeCount; ++i) {
+		const auto note = static_cast<menu::MenuFrameNoteCode>(i);
+		const FindingProblem problem = finding_code(note).problem;
+		DiagnosticSeverity severity = DiagnosticSeverity::Error;
+		const bool listed = menu_note_problem(note, &severity);
+		TEST_EXPECT(listed == (problem != FindingProblem::None));
+		TEST_EXPECT(!listed || severity == (problem == FindingProblem::Info ? DiagnosticSeverity::Info
+		                                                                    : DiagnosticSeverity::Warning));
+	}
+	using Tokens = std::vector<std::string>;
+	const auto noted = [](FindingProblem problem) {
+		return tokens_where([problem](const FindingCodeRow &row) {
+			return row.source == FindingSource::RenderCheck && row.problem == problem &&
+			       std::string(row.token) != "menu.render.mapping";
+		});
+	};
+	TEST_EXPECT(noted(FindingProblem::None) ==
+	            Tokens({ "menu.render.appearance_custom", "menu.render.font_missing",
+	                     "menu.render.frame_stencil_unloaded", "menu.render.marquee_runtime_content",
+	                     "menu.render.scroll_extent_default", "menu.render.state_fallback",
+	                     "menu.render.style_var_unresolved", "menu.render.table_no_columns",
+	                     "menu.render.text_id_missing", "menu.render.text_table_missing",
+	                     "menu.render.texture_missing" }));
+	TEST_EXPECT(noted(FindingProblem::Info) ==
+	            Tokens({ "menu.render.image_height_shared", "menu.render.item_kind_not_drawn",
+	                     "menu.render.list_rows_clipped", "menu.render.table_cells_deferred",
+	                     "menu.render.type_interior_deferred" }));
+	TEST_EXPECT(noted(FindingProblem::Warning).size() == 21);
+	// Only a render check's row says it; its screen it could not map is an Error its check makes.
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) {
+		            return row.problem != FindingProblem::None && row.source != FindingSource::RenderCheck;
+	            }).empty());
+	TEST_EXPECT(finding_code(MenuFinding::RenderMapping).problem == FindingProblem::None);
 	for (size_t i = 0; i < mns::kDiagnosticCodeCount; ++i) {
 		const auto code = static_cast<mns::DiagnosticCode>(i);
 		std::string token = "style.";

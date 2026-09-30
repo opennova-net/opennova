@@ -7,6 +7,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iterator>
 #include <set>
@@ -66,6 +67,32 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	if (popup.missing) popup.fixes = fixes_for(finding, view);
 }
 
+void ReferencePicker::drop_list(Popup &popup) {
+	popup.view = nullptr;
+	popup.key = ListKey();
+	popup.choices = std::vector<ReferenceChoice>();
+	popup.missing = false;
+	popup.fixes = std::vector<ProblemFix>();
+}
+
+void ReferencePicker::let_go(int frame) {
+	for (size_t i = 0; i < held_.size();) {
+		const auto it = popups_.find(held_[i]);
+		if (it != popups_.end() && it->second.view && it->second.drawn + 1 >= frame) {
+			++i;
+			continue;
+		}
+		if (it != popups_.end()) drop_list(it->second);
+		held_.erase(held_.begin() + std::ptrdiff_t(i));
+	}
+}
+
+size_t ReferencePicker::lists_held() const {
+	size_t held = 0;
+	for (const auto &popup : popups_) held += popup.second.view ? 1 : 0;
+	return held;
+}
+
 void ReferencePicker::prune(const SessionView &view) {
 	const RevisionKey key = revision_key(view.revisions, {ViewConcern::DocumentSet});
 	if (pruned_view_ == &view && pruned_key_ == key) return;
@@ -87,9 +114,20 @@ bool ReferencePicker::draw(Workspace &workspace, const Document &document, const
 	// The popup's own id, the document and the record key its state: another record's field of
 	// the same place in the window has its own.
 	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("references")};
-	if (!ImGui::BeginPopup("references")) return false;
+	// A list whose popup is not drawn open goes as any popup of the picker draws: one closed, and
+	// one whose picker the window no longer draws (another record's, of the same popup id or not).
+	const int frame = ImGui::GetFrameCount();
+	let_go(frame);
+	if (!ImGui::BeginPopup("references")) {
+		// Closed (or never opened): a list it held goes now, made again as it opens.
+		const auto kept = popups_.find(key);
+		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+		return false;
+	}
 	prune(workspace.view());
 	Popup &popup = popups_[key];
+	popup.drawn = frame;
+	if (!popup.view) held_.push_back(key);
 	refresh(popup, workspace.view(), document, record, field, value, others);
 	const bool done = draw_popup(workspace, popup, picked);
 	ImGui::EndPopup();
@@ -141,35 +179,42 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 	const float line = ImGui::GetTextLineHeightWithSpacing();
 	ImGui::BeginChild("names", ImVec2(width, line * float(std::clamp<size_t>(shown.size(), 3, 14)) + line * 0.5f),
 	                  ImGuiChildFlags_Borders);
-	for (size_t i = 0; i < shown.size() && !chosen; ++i) {
-		const ReferenceChoice &choice = *shown[i];
-		ImGui::PushID(static_cast<int>(i));
-		const float x = ImGui::GetCursorPosX();
-		if (ImGui::Selectable("##choice", i == popup.cursor, ImGuiSelectableFlags_AllowOverlap)) {
-			picked = choice.name;
-			chosen = true;
-		}
-		if (i == popup.cursor && popup.moved) ImGui::SetScrollHereY(0.5f);
-		ui_kit::tooltip(choice_tip(choice));
-		ImGui::SameLine(0.0f, 0.0f);
-		ImGui::SetCursorPosX(x);
-		// The name, then where it is defined in what is left, then what it would be when not found.
-		const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
-		const char *word = found ? "" : ui_kit::reference_word(choice.status);
-		const float room = ImGui::GetContentRegionAvail().x - (found ? 0.0f : ui_kit::text_width(word));
-		const std::string name = ui_kit::fit(choice.name, room * 0.6f);
-		if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
-		else ImGui::TextUnformatted(name.c_str());
-		ImGui::SameLine();
-		const std::string where = ui_kit::fit(where_of(choice), room - ui_kit::text_width(name.c_str()) -
-		                                                                ImGui::GetStyle().ItemSpacing.x * 2.0f);
-		ImGui::TextDisabled("%s", where.c_str());
-		if (!found) {
+	// Only the names that show draw (a project's thousands of textures), and the highlighted one
+	// when the keys moved it, to scroll to.
+	ImGuiListClipper clipper;
+	clipper.Begin(static_cast<int>(shown.size()));
+	if (popup.moved && popup.cursor < shown.size()) clipper.IncludeItemByIndex(static_cast<int>(popup.cursor));
+	while (clipper.Step())
+		for (int row = clipper.DisplayStart; row < clipper.DisplayEnd && !chosen; ++row) {
+			const size_t i = size_t(row);
+			const ReferenceChoice &choice = *shown[i];
+			ImGui::PushID(row);
+			const float x = ImGui::GetCursorPosX();
+			if (ImGui::Selectable("##choice", i == popup.cursor, ImGuiSelectableFlags_AllowOverlap)) {
+				picked = choice.name;
+				chosen = true;
+			}
+			if (i == popup.cursor && popup.moved) ImGui::SetScrollHereY(0.5f);
+			ui_kit::tooltip_lazy([&] { return choice_tip(choice); });
+			ImGui::SameLine(0.0f, 0.0f);
+			ImGui::SetCursorPosX(x);
+			// The name, then where it is defined in what is left, then what it would be when not found.
+			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
+			const char *word = found ? "" : ui_kit::reference_word(choice.status);
+			const float room = ImGui::GetContentRegionAvail().x - (found ? 0.0f : ui_kit::text_width(word));
+			const std::string name = ui_kit::fit(choice.name, room * 0.6f);
+			if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
+			else ImGui::TextUnformatted(name.c_str());
 			ImGui::SameLine();
-			ImGui::TextColored(ui_kit::reference_color(choice.status), "%s", word);
+			const std::string where = ui_kit::fit(where_of(choice), room - ui_kit::text_width(name.c_str()) -
+			                                                                ImGui::GetStyle().ItemSpacing.x * 2.0f);
+			ImGui::TextDisabled("%s", where.c_str());
+			if (!found) {
+				ImGui::SameLine();
+				ImGui::TextColored(ui_kit::reference_color(choice.status), "%s", word);
+			}
+			ImGui::PopID();
 		}
-		ImGui::PopID();
-	}
 	if (popup.choices.empty()) ui_kit::empty_state("The project has no names of this kind yet.");
 	else if (shown.empty()) ui_kit::empty_state(popup.filter[0] ? "Nothing matches the filter." : "Every name is unreachable.");
 	ImGui::EndChild();

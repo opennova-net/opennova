@@ -5,15 +5,11 @@
 #include <map>
 #include <memory>
 
-#include <editor/documents/def_catalog_document.h>
-#include <editor/documents/mns_document.h>
-#include <editor/documents/mnu_document.h>
-#include <editor/documents/strings_document.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <editor/ui/document_outline.h>
-#include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/welcome_view.h>
@@ -22,16 +18,66 @@
 
 namespace opennova::editor {
 
-void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &view = workspace_.view();
-	// The events of a document no longer open go with it.
-	for (auto held = events_.begin(); held != events_.end();) {
+DocumentView *DocumentWindow::view_for(const DocumentBase &document) {
+	const DocumentTypeId type = asset_kind_row(document.kind()).document;
+	auto found = views_.find(document.path());
+	if (found != views_.end() && found->second.type != type) {
+		// Opened again as a document of another type: a view of that type's.
+		views_.erase(found);
+		found = views_.end();
+	}
+	if (found == views_.end()) {
+		Slot slot;
+		slot.view = make_view(document);
+		if (!slot.view) return nullptr;
+		slot.type = type;
+		slot.identity = document.identity();
+		slot.load = document.load_generation();
+		found = views_.emplace(document.path(), std::move(slot)).first;
+	} else if (found->second.identity != document.identity() || found->second.load != document.load_generation()) {
+		// Read again (another instance at the path, or the same one loaded again): the events it
+		// held name the old records and go; the view is kept and rebound.
+		Slot &slot = found->second;
+		slot.identity = document.identity();
+		slot.load = document.load_generation();
+		slot.view->drop_events();
+		slot.view->rebind(document);
+	}
+	return found->second.view.get();
+}
+
+void DocumentWindow::prune(const SessionView &view) {
+	// The view of a document no longer open goes with it, and the events it held.
+	for (auto slot = views_.begin(); slot != views_.end();) {
 		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
 				[&](const std::shared_ptr<const DocumentBase> &document) {
-					return document->path() == held->first;
+					return document->path() == slot->first;
 				});
-		held = open ? std::next(held) : events_.erase(held);
+		slot = open ? std::next(slot) : views_.erase(slot);
 	}
+}
+
+void DocumentWindow::receive(const ViewEvent &event) {
+	for (const std::shared_ptr<const DocumentBase> &document : workspace_.view().documents.open)
+		if (document->path() == event.path) {
+			if (DocumentView *view = view_for(*document)) view->receive(event);
+			return;
+		}
+}
+
+size_t DocumentWindow::held_events(const std::string &path) const {
+	const auto found = views_.find(path);
+	return found == views_.end() ? 0 : found->second.view->held_events();
+}
+
+DocumentView *DocumentWindow::view_of(const std::string &path) {
+	const auto found = views_.find(path);
+	return found == views_.end() ? nullptr : found->second.view.get();
+}
+
+void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
+	const SessionView &view = workspace_.view();
+	prune(view);
 	if (!view.project.open || view.documents.open.empty()) {
 		// No tab bar: the next one follows the active document from its first frame.
 		followed_.clear();
@@ -74,19 +120,12 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		shown = path;
 		// Its view once it is the active document: the selection and the inspector are the
 		// active document's (a tab a click just showed waits the frame its OpenDocument takes).
-		// The find bar first: its Ctrl+F comes before the view's own filters'.
+		// The find bar first: its Ctrl+F comes before the view's own filters'. The view takes the
+		// RevealRecord events its document was sent as it draws.
 		if (path == view.documents.active) {
-			if (const Document *records = records_of(*document)) {
-				draw_find(*records);
-				// The RevealRecord events its document was sent, taken as its view draws: the
-				// view shows the selection again.
-				const auto held = events_.find(path);
-				if (held != events_.end() && held->second.held()) {
-					held->second.take();
-					reveal_again(*records);
-				}
-				draw_view(*records);
-			}
+			if (const Document *records = records_of(*document)) draw_find(*records);
+			if (DocumentView *shown_view = view_for(*document)) shown_view->draw(workspace_, *document);
+			else ui_kit::empty_state("The editor has no view of this kind of file.");
 		}
 		ImGui::EndTabItem();
 	}
@@ -101,7 +140,10 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 	}
 }
 
-void DocumentWindow::draw_modals() { menu_.draw_remove_prompt(workspace_); }
+void DocumentWindow::draw_modals() {
+	for (auto &slot : views_) slot.second.view->draw_modals(workspace_);
+	prune(workspace_.view());
+}
 
 void DocumentWindow::open_find() {
 	find_.open = true;
@@ -206,33 +248,6 @@ void DocumentWindow::draw_find(const Document &document) {
 	}
 	ImGui::PopID();
 	ImGui::Separator();
-}
-
-// A RevealRecord event for `document`, handed to the view that draws it (a menu's window tree
-// follows the selection its own way: MenuView).
-void DocumentWindow::reveal_again(const Document &document) {
-	if (dynamic_cast<const DefCatalogDocument *>(&document)) catalog_.reveal_again();
-	else if (dynamic_cast<const StringsDocument *>(&document)) strings_.reveal_again();
-	else if (dynamic_cast<const MnsDocument *>(&document)) styles_.reveal_again();
-	else if (!dynamic_cast<const MnuDocument *>(&document)) outline_.ask();
-}
-
-// The view a document's tab shows, by its type: a catalog, a string table, a stylesheet and
-// a menu have their own; a model, a clip and an animation table are their records as an
-// outline (which adds, duplicates, removes and moves the rows a file adds).
-void DocumentWindow::draw_view(const Document &document) {
-	if (const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document)) {
-		catalog_.draw(workspace_, *catalog);
-	} else if (const auto *strings = dynamic_cast<const StringsDocument *>(&document)) {
-		strings_.draw(workspace_, *strings);
-	} else if (const auto *styles = dynamic_cast<const MnsDocument *>(&document)) {
-		styles_.draw(workspace_, *styles);
-	} else if (const auto *menu = dynamic_cast<const MnuDocument *>(&document)) {
-		menu_.draw(workspace_, *menu);
-	} else {
-		draw_document_toolbar(workspace_, document);
-		draw_document_outline(workspace_, document, outline_);
-	}
 }
 
 } // namespace opennova::editor

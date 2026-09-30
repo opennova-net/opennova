@@ -724,6 +724,8 @@ static int test_catalog() {
 					entry.get_string("place", "") == finding_place_token(row.place) &&
 					entry.get_string("group", "") == finding_group_key(row.group) &&
 					entry.get_string("source", "") == finding_source_token(row) &&
+					(entry.get("problem") != nullptr) == (row.problem != FindingProblem::None) &&
+					entry.get_string("problem", "none") == finding_problem_token(row.problem) &&
 					entry.get_number("count", -1.0) == double(expected));
 		}
 	}

@@ -35,7 +35,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
-    # the menu clipboard's one rule for the tree and the canvas
+    # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
+    # per type that has one, kept between validations
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
@@ -47,13 +48,15 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/source_issue_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/validation_cache.cpp
     # graph — the asset graph: the extractors, the reference kinds' table, the per-file slots and
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
     # fields ask, the rename transaction; what other files make of what one defines (the use
-    # checks) and the one validation pass over the project's files
+    # checks, and what a stylesheet line's value is used as) and the one validation pass over the
+    # project's files
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
@@ -62,6 +65,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the game's PCX), the sidecars, the import pass, and
     # the plan of an import with the files it needs
@@ -74,14 +78,15 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     # preview — the menu preview's portable half: what it shows and when to configure it
     # again, and its JSON (the device is the shell's MenuFrame); the headless render of a
-    # screen, the render check over every menu (the compiler notes as findings), and the
-    # texture header probe it measures with; what a drag of a window's handles writes, and
-    # what arranging several windows (align, distribute, drawing order) writes; a menu's
-    # tree and its findings as the editor MCP's editor_menu reads them; the model
-    # preview's portable half: its camera and the level the game draws, what it shows and
-    # when to build it again, and its JSON (the device is the shell's ObjectModel); the
-    # canvas's one gesture machine, and what a press on the menu's or the model's picture
-    # takes, what its drag writes and what is drawn over the picture
+    # screen, the render check over every menu (the menu type's project check: the compiler
+    # notes as findings), and the texture header probe it measures with; what a drag of a
+    # window's handles writes, and what arranging several windows (align, distribute, drawing
+    # order) writes; a menu's tree, its findings and a screen as the render check compiled it,
+    # as the menu_tree, menu_findings and menu_render queries read them; the model preview's
+    # portable half: its camera and the level the game draws, what it shows and when to build
+    # it again, and its JSON (the device is the shell's ObjectModel); the canvas's one gesture
+    # machine, and what a press on the menu's or the model's picture takes, what its drag
+    # writes and what is drawn over the picture
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -163,9 +168,8 @@ add_library(opennova_editor STATIC
 # consumer whether the windows exist in this build.
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_outline.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
@@ -177,6 +181,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_preview_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_preview_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/preview_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_list.cpp
@@ -187,9 +193,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/strings_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/table_cells.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp

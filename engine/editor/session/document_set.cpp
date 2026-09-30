@@ -1,4 +1,3 @@
-#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 
 #include <algorithm>
@@ -7,9 +6,11 @@
 #include <system_error>
 #include <utility>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -218,7 +219,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// inside the project.
 	FileNameProblem problem = FileNameProblem::None;
 	std::string message;
-	if (!check_project_file_name(paths_.root, blank_placement_dir(kind), request.path, kind, problem, message)) {
+	const char *const folder = asset_kind_row(kind).folder;
+	if (!check_project_file_name(paths_.root, folder, request.path, kind, problem, message)) {
 		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
 		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
 		                                                            : CoreFinding::DocumentName;
@@ -226,7 +228,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		return;
 	}
 	const auto *existing = view_.project.scan->find(request.path);
-	const std::string relative = (fs::path(blank_placement_dir(kind)) / request.path).generic_string();
+	const std::string relative = (fs::path(folder) / request.path).generic_string();
 	if (!existing) {
 		const auto target = fs::path(paths_.root) / relative;
 		std::error_code ec;
