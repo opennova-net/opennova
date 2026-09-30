@@ -10,6 +10,7 @@
 #include <editor/model/node.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_refresh.h>
+#include <editor/session/selection.h>
 #include <editor/session/session_operation.h>
 
 namespace opennova::editor {
@@ -28,8 +29,7 @@ public:
 	// What the modder was in when the rename started, kept through the reloads.
 	struct Kept {
 		std::string active;
-		NodeAddress selection;
-		std::vector<NodeAddress> selected;
+		Selection selection;
 	};
 
 	RenameOperation(const ProjectPaths &paths, const ProjectDocument &document, std::shared_ptr<const AssetScan> scan,

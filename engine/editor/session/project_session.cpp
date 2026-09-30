@@ -135,10 +135,10 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 		io::JsonValue came = action_outcome_to_json(outcome);
 		if (request.kind == EditorRequestKind::EditRecord) {
 			io::JsonValue made = io::JsonValue::make_object();
-			if (outcome.done() && outcome.added.size() == names.made_labels.size())
-				for (size_t i = 0; i < outcome.added.size(); ++i)
-					if (!names.made_labels[i].empty())
-						made.set(names.made_labels[i], io::json_number(double(outcome.added[i])));
+			if (outcome.done())
+				for (size_t i = 0; i < names.labels.size() && i < outcome.made.size(); ++i)
+					if (!names.labels[i].empty() && outcome.made[i])
+						made.set(names.labels[i], io::json_number(double(outcome.made[i])));
 			came.set("made", std::move(made));
 		}
 		answer.set("outcome", std::move(came));

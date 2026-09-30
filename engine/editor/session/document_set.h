@@ -14,6 +14,7 @@
 #include <editor/model/document.h>
 #include <editor/model/edit.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/selection.h>
 
 namespace opennova::editor {
 
@@ -25,7 +26,7 @@ struct SessionView;
 // selection each keeps while another is active, the ones whose file changed outside the editor
 // (stale, or in conflict with their unsaved edits), reading them, reading them again and closing
 // them, saving them and rewriting a file that is not open, the clipboard, the edits (a Set, an
-// Add, a batch on one row, a Revert to saved), Copy, Cut, Paste and Duplicate by one position
+// Add, a batch over any rows, a Revert to saved), Copy, Cut, Paste and Duplicate by one position
 // rule (position_after), and the edit groups (a coalesced burst of typing, a gesture) with the
 // validation a gesture's edits wait on. It keeps the view's documents, active document, selection
 // and clipboard, and moves DocumentSet when which documents are open, or which of them have unsaved
@@ -122,13 +123,12 @@ public:
 	static bool position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position);
 
 private:
-	// The selection each open document had when another became active (activate), by path.
-	struct Selection {
-		NodeAddress primary;
-		std::vector<NodeAddress> selected;
-	};
-
 	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
+	// After `document` moved from the state (load_generation, revision) by an edit, an undo or a
+	// redo: the active selection repaired against the rows that changed since (changes_since; all
+	// of them when the document cannot say), a gone primary giving way to `owner`.
+	void repair_selection(const DocumentBase &document, uint64_t load_generation, uint64_t revision,
+	                      const NodeAddress &owner);
 	// A request that acts on records with none to act on: refused as the file not open
 	// (document.not_open, in the words `not_open`), or as the document open there holding no
 	// records (document.no_records, S13 D6); nothing when no project is open.
@@ -147,6 +147,7 @@ private:
 	// Each open document's instance and whether it has unsaved edits, as the view last listed
 	// them: DocumentSet moves when they differ (update_view).
 	std::vector<std::pair<uint64_t, bool>> document_set_;
+	// The selection each open document had when another became active (activate), by path.
 	std::map<std::string, Selection> remembered_;
 	// The open documents whose file changed outside the editor and was not read again, by
 	// path: a clean one whose file no longer reads (the reason; it stays open as it was), and

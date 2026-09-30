@@ -393,26 +393,26 @@ bool texts_of(const JsonValue &json, const char *token, std::vector<std::string>
 	return true;
 }
 
-// A record's address: {row, kind, child}, each left out 0.
-bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error) {
+// A record's address: {row, kind, child}, each left out 0; `what` names it in a refusal.
+bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error,
+		const std::string &what = "address") {
 	if (!json.is_object()) {
-		error = "\"address\" must be an object {row, kind, child}.";
+		error = "\"" + what + "\" must be an object {row, kind, child}.";
 		return false;
 	}
-	if (!members_known(json, {"row", "kind", "child"}, "address", error)) return false;
+	if (!members_known(json, {"row", "kind", "child"}, what.c_str(), error)) return false;
+	// A member's value refused by its place ("address.row", "records[1].child").
+	const auto refuse = [&](const char *member, const char *must) {
+		error = "\"" + what + "." + member + "\" must be " + must + ".";
+		return false;
+	};
 	NodeAddress address;
-	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row)) {
-		error = "\"row\" must be a record identity.";
-		return false;
-	}
-	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind)) {
-		error = "\"kind\" must be a whole number.";
-		return false;
-	}
-	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child)) {
-		error = "\"child\" must be a record identity.";
-		return false;
-	}
+	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row))
+		return refuse("row", "a record identity");
+	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind))
+		return refuse("kind", "a whole number");
+	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child))
+		return refuse("child", "a record identity");
 	out = address;
 	return true;
 }
@@ -515,10 +515,25 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 					json, names, batch_form(request.kind), batch, error, !unresolved))
 			return false;
 		request.edits = std::move(batch.edits);
-		labels = std::move(batch.made_labels);
+		labels = std::move(batch.labels);
 		return true;
 	}
 	case F::Address: return address_from_json(json, request.address, error);
+	case F::Records: {
+		if (!json.is_array()) {
+			error = "\"records\" must be an array of addresses {row, kind, child}.";
+			return false;
+		}
+		std::vector<NodeAddress> records;
+		for (size_t i = 0; i < json.array.size(); ++i) {
+			NodeAddress address;
+			const std::string place = "records[" + std::to_string(i) + "]";
+			if (!address_from_json(json.array[i], address, error, place)) return false;
+			records.push_back(address);
+		}
+		request.records = std::move(records);
+		return true;
+	}
 	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
 	case F::Mode:
 		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
@@ -571,6 +586,10 @@ bool field_to_json(
 	case F::Address:
 		out = address_to_json(request.address);
 		return request.address != NodeAddress();
+	case F::Records:
+		out = JsonValue::make_array();
+		for (const NodeAddress &address : request.records) out.push(address_to_json(address));
+		return !request.records.empty();
 	case F::PasteAt:
 		out = paste_at_to_json(request.paste_at);
 		return !(request.paste_at == PasteAt());
@@ -729,7 +748,7 @@ bool editor_request_from_json(
 		}
 	}
 	out = std::move(request);
-	if (names) names->made_labels = std::move(labels);
+	if (names) names->labels = std::move(labels);
 	return true;
 }
 

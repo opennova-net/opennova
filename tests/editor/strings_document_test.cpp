@@ -205,14 +205,14 @@ int validation_and_session() {
 	session.handle(add);
 	const NodeId section = document->last_added();
 	TEST_EXPECT(
-			view.documents.selection.row == section && view.documents.selection.kind == kSection);
+			view.documents.selection.primary.row == section && view.documents.selection.primary.kind == kSection);
 	EditorRequest name = request::edit_record(
 			document->path(), set({ section, kSection, 0 }, "name", std::string("Custom")));
 	session.handle(name);
 	add.edits[0].address = {section, kString, 0};
 	session.handle(add);
 	const NodeId string = document->last_added();
-	TEST_EXPECT(view.documents.selection.row == section && view.documents.selection.child == string && view.documents.selection.kind == kString);
+	TEST_EXPECT(view.documents.selection.primary.row == section && view.documents.selection.primary.child == string && view.documents.selection.primary.kind == kString);
 	EditorRequest key = request::edit_record(
 			document->path(), set({ section, kString, string }, "key", std::string("HELLO")));
 	session.handle(key);
@@ -258,8 +258,8 @@ int validation_and_session() {
 	if (hello.size() != 1) return 1;
 	session.handle(request::open_document(hello[0]->file, hello[0]->locator, hello[0]->field));
 	document = session.document_for("gametext.bin");
-	TEST_EXPECT(document && view.documents.selection.kind == kString && view.documents.selection.row != 0 && editor_test::revealed_field(view) == "key");
-	TEST_EXPECT(document && text_of(*document, view.documents.selection, "key") == "HELLO");
+	TEST_EXPECT(document && view.documents.selection.primary.kind == kString && view.documents.selection.primary.row != 0 && editor_test::revealed_field(view) == "key");
+	TEST_EXPECT(document && text_of(*document, view.documents.selection.primary, "key") == "HELLO");
 	// A new table is created blank and opened when the request names the kind (a
 	// bare `.bin` name cannot say what it is); an unnamed kind is refused.
 	session.handle(request::create_file("extra.bin"));

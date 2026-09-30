@@ -35,7 +35,7 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 		return;
 	}
 	const std::string words = "Renaming " + plan.old_name + " to " + plan.new_name + "...";
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection, view_.documents.selected};
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(
 			paths_, *view_.project.document, view_.project.scan, core_.problems().graph(), std::move(plan), kept));
 	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
@@ -88,11 +88,12 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		const SymbolRenamePlan &plan = operation.symbol_plan();
 		if (!active.empty() && documents.document_for(active)) {
 			documents.activate(active);
-			view_.documents.select_only(keep_selection ? kept.selection : NodeAddress());
-			if (keep_selection) view_.documents.selected = kept.selected;
+			if (keep_selection) view_.documents.selection.restore(kept.selection);
+			else view_.documents.selection.select_only(active, NodeAddress());
 			// The renamed definition selected again where it was, its field shown.
 			if (!keep_selection && active == plan.file)
-				if (Document *defining = documents.records_for(active)) view_.documents.select_only(defining->address_at(plan.locator));
+				if (Document *defining = documents.records_for(active))
+					view_.documents.selection.select_only(active, defining->address_at(plan.locator));
 			documents.select_first_screen();
 		}
 	} else {
@@ -100,8 +101,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
 		if (active_open) {
 			documents.activate(active);
-			view_.documents.select_only(keep_selection ? kept.selection : NodeAddress());
-			if (keep_selection) view_.documents.selected = kept.selected;
+			if (keep_selection) view_.documents.selection.restore(kept.selection);
+			else view_.documents.selection.select_only(active, NodeAddress());
 			documents.select_first_screen();
 		}
 	}
@@ -228,7 +229,7 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 		return;
 	}
 	const std::string words = "Renaming " + plan.old_name + " to " + plan.new_name + " everywhere...";
-	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection, view_.documents.selected};
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
 	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(
 			paths_, *view_.project.document, view_.project.scan, core_.problems().graph(), std::move(plan), kept));
 	if (id == 0) return core_.refuse_busy(request.path); // the gate let no operation run beside it

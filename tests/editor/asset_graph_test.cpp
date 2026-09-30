@@ -576,7 +576,7 @@ static int test_catalog_symbols() {
 		}));
 		if (!targets.empty()) go_to(session, targets[0]);
 		TEST_EXPECT(view.documents.active == strings->path() && wepdes_key.size() == 1 &&
-				view.documents.selection == wepdes_key[0]->address &&
+				view.documents.selection.primary == wepdes_key[0]->address &&
 				editor_test::revealed_field(view) == "key");
 	}
 	edit_window(session, *weapon, {weapon->rows()[0]->id, weapon->kind_from_name("weapon"), 0}, "loadout_menu_textid", std::string("WEP_NOPE"));
@@ -1509,8 +1509,8 @@ static int test_symbol_locators() {
 	go_to(session, font[0]);
 	const Document *sheet = session.document_for(style_path);
 	TEST_EXPECT(sheet && view.documents.active == sheet->path() &&
-			view.documents.selection.row != 0 &&
-			sheet->record_name(view.documents.selection) == "DEF_FONTNAME_LG" &&
+			view.documents.selection.primary.row != 0 &&
+			sheet->record_name(view.documents.selection.primary) == "DEF_FONTNAME_LG" &&
 			editor_test::revealed_field(view) == "name");
 	return 0;
 }

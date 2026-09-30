@@ -35,6 +35,7 @@ struct AnimationMapRow : Node {
 	AnimationMapRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<AnimationMapRow>(*this); }
 	std::string name() const override { return key; }
+	size_t footprint() const override;
 };
 
 class AnimationMapDocument : public Document {
@@ -60,8 +61,11 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	// A new row: anim_reset when the table has none, else anim_idle, with no clip yet.
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	// A new row: anim_reset when the table (`rows`, as its batch has left them) has none, else
+	// anim_idle, with no clip yet.
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	// A row's clips: add, duplicate, remove, move; at most 8.

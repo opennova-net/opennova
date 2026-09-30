@@ -55,7 +55,7 @@ const REQUEST_PROSE := (
 		+ "engine/editor/session/request_kinds.cpp). Each kind takes its own fields, each field meaning one thing "
 		+ "whatever the kind; a field the kind does not take, or one it must carry left out, is refused naming "
 		+ "what it takes. path left out names the active document where the kind acts on one. edits is the "
-		+ "batch form: [{op, id, parent, kind, field, value, position, as, coalesce, gesture}] on one row, one "
+		+ "batch form: [{op, id, parent, kind, field, value, position, as, coalesce, gesture}] over any rows, one "
 		+ "undo step, a record by its identity (as editor_query document and record give it) or by the label "
 		+ "(as) an earlier add or duplicate of the batch gave, an add's kind by its token (op replace_list "
 		+ "{id, list, records}: the list replaced by these records); revert_to_saved's edits are [{id, field}]. "

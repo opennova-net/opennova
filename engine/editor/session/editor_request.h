@@ -86,9 +86,10 @@ enum class PickPurpose {
 // which pack the files on disk); Cancel runs nothing.
 enum class UnsavedChoice { Save, Discard, Cancel };
 
-// How SelectRecord changes the selection: Replace makes the record the only one; Add
-// joins it (the primary becomes it); Toggle joins it, or leaves it when it is selected.
-// A record in another row or document than the selection replaces it.
+// How SelectRecord changes the selection (Selection::select): Replace makes the records named the
+// selection; Add joins them (the primary becoming the one named); Toggle joins each that is not
+// selected and leaves each that is. Records of another document than the selection's replace it;
+// any rows of one document may be selected together (S13 D7).
 enum class SelectMode { Replace, Add, Toggle };
 
 // The settings ApplyProjectSettings sets, each one left out staying as it is: the
@@ -153,10 +154,12 @@ struct EditorRequest {
 	std::vector<std::string> paths;
 	// Import sources, as the view's import rows carry them.
 	std::vector<ImportSource> imports;
-	// A batch on one row, one undo step.
+	// A batch over any rows of one document, one undo step.
 	std::vector<Edit> edits;
-	// A record by its address; where a Paste goes.
+	// A record by its address; the records a selection takes with it (SelectRecord); where a Paste
+	// goes.
 	NodeAddress address;
+	std::vector<NodeAddress> records;
 	PasteAt paste_at;
 	SelectMode mode = SelectMode::Replace;
 	UnsavedChoice choice = UnsavedChoice::Cancel;
@@ -177,7 +180,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.locator == b.locator && a.field == b.field && a.new_name == b.new_name &&
 			a.role == b.role && a.file_kind == b.file_kind && a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
-			a.edits == b.edits && a.address == b.address && a.paste_at == b.paste_at &&
+			a.edits == b.edits && a.address == b.address && a.records == b.records &&
+			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
 			a.purpose == b.purpose && a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
@@ -201,10 +205,12 @@ struct ActionOutcome {
 	uint64_t operation = 0;      // the operation it started or joined (the view's operation
 	                             // while it runs, its last_operation once it ends); 0 for none
 	std::vector<Diagnostic> findings;
-	// The records its edits made, in order (S13 A5): an EditRecord's adds and duplicates, a
-	// Paste's records, a Duplicate's copies (Document::last_added_records()); none for a request
-	// that made none.
-	std::vector<NodeId> added;
+	// The records its edits made and kept, in order (S13 A5): an EditRecord's adds and
+	// duplicates, a Paste's records, a Duplicate's copies (Document::last_added_records());
+	// none for a request that made none. And an EditRecord's by its edits' indexes
+	// (Document::last_made(): 0 for an edit that made nothing or whose record a later edit
+	// removed), which its labels name.
+	std::vector<NodeId> added, made;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

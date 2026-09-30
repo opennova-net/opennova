@@ -127,9 +127,10 @@ bool layout_group_drag_edits(const Document &document, const LayoutGroup &group,
 
 // --- a drag in the preview (the Preview window's menu pane and the editor MCP) --------------
 
-// The selection's windows on the screen row `screen` (windows_holding over `selected`), with
-// the window holding the primary record `primary` among them: what a drag of a selected
-// window moves and what the arrows nudge.
+// The selection's windows on the screen row `screen` (windows_holding over `selected`, whose
+// records of other screens, a selection over rows since S13 D7, stay where they are), with the
+// window holding the primary record `primary` among them: what a drag of a selected window
+// moves and what the arrows nudge.
 std::vector<NodeAddress> selected_windows(const MnuDocument &document, const NodeAddress &primary,
                                           const std::vector<NodeAddress> &selected, NodeId screen);
 

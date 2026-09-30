@@ -90,7 +90,7 @@ void seed(SessionView &view, const std::shared_ptr<const DocumentBase> &document
 	view.documents.active = document->path();
 	if (const Document *records = records_of(*document); records && !records->rows().empty()) {
 		const NodeAddress first{records->rows()[0]->id, records->rows()[0]->kind, 0};
-		view.documents.select_only(first);
+		view.documents.selection.select_only(document->path(), first);
 	}
 	for (size_t concern = 0; concern < kViewConcernCount; ++concern)
 		view.revisions.touch(static_cast<ViewConcern>(concern));
@@ -190,7 +190,7 @@ void test_every_view() {
 			ViewEvent reveal;
 			reveal.kind = ViewEventKind::RevealRecord;
 			reveal.path = document->path();
-			reveal.address = workspace.seeded.documents.selection;
+			reveal.address = workspace.seeded.documents.selection.primary;
 			view->receive(reveal);
 			CHECK(view->held_events() == 1, (where + ": a RevealRecord held").c_str());
 			draw_frames(workspace, *view, *document, 520.0f, 1);

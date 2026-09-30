@@ -142,7 +142,7 @@ static int test_non_record_type() {
 		TEST_EXPECT(session.outcome().done());
 		DocumentBase *opened = session.document_base_for(path);
 		TEST_EXPECT(opened && !opened->as_records() && !session.document_for(path));
-		TEST_EXPECT(view.documents.active == path && !view.documents.selection.row);
+		TEST_EXPECT(view.documents.active == path && !view.documents.selection.primary.row);
 		TEST_EXPECT(!view.documents.open.empty() && !records_of(*view.documents.open.back()));
 		// An Apply of its type's payload is taken, undone and redone; a Set is not.
 		Edit replace;

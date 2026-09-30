@@ -60,7 +60,7 @@ struct PickerProject {
 	std::string section_of(const char *field) const {
 		const SessionView &v = session.view();
 		for (const InspectorSection &section :
-				plan_inspector(*items, v.documents.selection, v.documents.selection, ""))
+				plan_inspector(*items, v.documents.selection.primary, v.documents.selection.primary, ""))
 			for (const FieldUse &use : section.fields)
 				if (use.schema->id == field) return section.key;
 		return std::string();

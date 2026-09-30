@@ -6,10 +6,10 @@
 
 #include <editor/model/value.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/selection.h>
 
 namespace opennova::editor {
 
-class Document;
 class DocumentBase;
 
 // The open documents as the view shows them (ADR 0046 S13 V4; the Documents, DocumentSet,
@@ -19,12 +19,11 @@ struct DocumentsView {
 	// The open documents, each as the base: a window that reads rows asks records_of.
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::string active; // the active document's path ("" = none)
-	// The selection in the active document: the primary record (the inspector's, the one
-	// a new record goes beside) and every selected record, the primary among them, all
-	// inside one row. Repaired after every edit, undo and redo: a record that is gone
-	// drops out, a removed primary gives way to its owner, a new record is selected.
-	NodeAddress selection;
-	std::vector<NodeAddress> selected;
+	// The selection in the active document (S13 D7: its records over any of its rows, the primary
+	// among them; selection.document is `active`). Repaired after every edit, undo and redo: a
+	// record that is gone drops out, a removed primary gives way to its owner, what an edit made is
+	// selected.
+	Selection selection;
 	// What Copy and Cut put on the clipboard: the payload of the document type that made
 	// it (Document::copy), which Paste hands back to the same type.
 	std::string clipboard;
@@ -47,27 +46,8 @@ struct DocumentsView {
 	};
 	Previews previews;
 
-	// The selection is `address` alone (none for an empty address).
-	void select_only(const NodeAddress &address);
-	// SelectRecord in `path` (which becomes the active document): see SelectMode.
-	void select(const std::string &path, const NodeAddress &address, SelectMode mode);
-	// After an edit that added records to `document`: they are the selection (the first
-	// the primary; one another of them holds is left out) and the document is the active
-	// one.
-	void select_added(const Document &document);
-	// After an edit, an undo or a redo of the active `document`: the selected records it no
-	// longer has drop out; a primary that is gone gives way to `owner` (the owner the
-	// primary had before the edit) when it is still there, else to the last record
-	// still selected.
-	void repair_selection(const Document &document, const NodeAddress &owner);
 	// Follow the active document and the selection (every view change calls it).
 	void update_previews();
 };
-
-// Whether a selection's records (a view's `selected`) hold `address`: every list and tree of
-// records marks a row selected by it. The primary is one of them whenever there is one
-// (select_only, select, select_added and repair_selection keep it there), so a row is marked
-// exactly when Copy, Cut, Duplicate and Remove take it.
-bool holds(const std::vector<NodeAddress> &selected, const NodeAddress &address);
 
 } // namespace opennova::editor

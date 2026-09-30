@@ -196,7 +196,7 @@ def cmd_query(args: argparse.Namespace) -> int:
 
 
 def parse_list(text: str, flag: str, shape: str) -> list:
-    """--edits / --imports: a JSON array of objects."""
+    """--edits / --imports / --records: a JSON array of objects."""
     try:
         value = json.loads(text)
     except ValueError as error:
@@ -232,6 +232,8 @@ def request_of(args: argparse.Namespace) -> dict:
         request["imports"] = parse_list(args.imports, "--imports", "{path, entry?, install?, native?}")
     if args.edits:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
+    if args.records:
+        request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
     for field in ("address", "paste_at", "settings"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
@@ -489,8 +491,11 @@ def build_parser() -> argparse.ArgumentParser:
                               "{path, entry?, install?, native?} (query import_preview's rows carry each as source)")
     request.add_argument("--edits", default=None,
                          help="edit_record: the batch form as a JSON array of {op, id, parent, kind, field, value, "
-                              "position, as, ...}, one undo step; revert_to_saved: [{id, field}]")
+                              "position, as, ...} over any rows, one undo step; revert_to_saved: [{id, field}]")
     request.add_argument("--address", default=None, help="a record's address as a JSON object {row, kind, child}")
+    request.add_argument("--records", default=None,
+                         help="select_record: the records selected with --address (a marquee's, of any rows), "
+                              "a JSON array of {row, kind, child}")
     request.add_argument("--paste-at", dest="paste_at", default=None,
                          help="paste: where, as a JSON object {row, parent, position} (left out: after the selection)")
     request.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,

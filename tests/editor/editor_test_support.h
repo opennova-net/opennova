@@ -44,7 +44,7 @@ inline std::string revealed_field(const opennova::editor::SessionView &view) {
 	for (auto event = held.rbegin(); event != held.rend(); ++event) {
 		if (event->kind != opennova::editor::ViewEventKind::RevealRecord) continue;
 		const bool selected =
-				event->path == view.documents.active && event->address == view.documents.selection;
+				event->path == view.documents.active && event->address == view.documents.selection.primary;
 		return selected ? event->field : std::string();
 	}
 	return std::string();
