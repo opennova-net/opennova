@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
-#include <cstring>
 
 namespace opennova::editor {
 
@@ -27,13 +26,6 @@ uint64_t fingerprint(const uint8_t *data, size_t size) { return io::fnv1a64_byte
 uint64_t fingerprint(const std::vector<uint8_t> &bytes) { return fingerprint(bytes.data(), bytes.size()); }
 uint64_t fingerprint(const std::string &text) {
 	return fingerprint(reinterpret_cast<const uint8_t *>(text.data()), text.size());
-}
-
-// Two values the file would write alike: a real compared bit for bit (a NaN is itself).
-bool same_value(const Value &a, const Value &b) {
-	const double *x = std::get_if<double>(&a);
-	const double *y = std::get_if<double>(&b);
-	return x && y ? std::memcmp(x, y, sizeof(double)) == 0 : a == b;
 }
 
 bool fail(Diagnostic &error, const std::string &path, const char *code, const std::string &message,

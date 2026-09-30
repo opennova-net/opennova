@@ -56,7 +56,8 @@ struct RenamePlan {
 
 // Refused when: the file is unknown or an import output (rename its source); the new
 // name fails check_project_file_name (empty, has folders, exceeds the archive's 16 bytes
-// for a kind the build packs, reads as another kind), changes the extension (the kind
+// for a kind the build packs, reads as another kind), exceeds those 16 bytes for a file of
+// no kind the game knows (which the build packs too), changes the extension (the kind
 // comes from it), or is taken; when an import source's output would take a name that
 // does not fit an archive or is taken; when a site (of the file, or of an output renamed
 // with it) sits in a file the editor cannot rewrite (an environment, the avatar table, a

@@ -43,8 +43,9 @@ bool logical_name_fits_archive(std::string_view name);
 // outputs its source's importer made under the cache (a record whose source is gone
 // lists nothing and is an `import.orphan_record` warning; an output that is not there
 // is an `import.output_missing` warning). Classifies each file (reading only the `.bin`
-// files, whose kind needs a content peek); reports duplicate or over-long logical names
-// as errors and unknown kinds as warnings. It reads what is on disk: the import pass
+// files, whose kind needs a content peek); reports duplicate logical names, and over-long
+// ones of a kind the build packs (a loose kind takes any name, check_file_name's rule), as
+// errors and unknown kinds as warnings. It reads what is on disk: the import pass
 // (project/project_state.h) runs first wherever the outputs must be current.
 AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &doc);
 

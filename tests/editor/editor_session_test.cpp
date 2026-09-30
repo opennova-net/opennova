@@ -623,6 +623,24 @@ static int test_outcomes_and_refusals() {
 	std::string text, error;
 	TEST_EXPECT(read_file_text(root + "/logo2.tga", text, error) && text == "late");
 
+	// A file of no kind the game knows is packed all the same (route_asset): a new name past
+	// the archives' 16 characters is refused as for any packed kind, nothing moved, where the
+	// rename once passed and the scan then held asset.name.too_long against the build.
+	TEST_EXPECT(editor_test::write_text(root + "/notes/readme.docx", "notes"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(
+			make_request(EditorRequestKind::RenameAsset, "notes/readme.docx", "readme_notes.docx"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "rename.name"));
+	TEST_EXPECT(fs::exists(root + "/notes/readme.docx") &&
+			!fs::exists(root + "/notes/readme_notes.docx"));
+	// The name the rename refuses is the one the scan refuses.
+	TEST_EXPECT(editor_test::write_text(root + "/notes/readme_notes.docx", "notes"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(has_code(v.diagnostics, "asset.name.too_long"));
+	fs::remove_all(root + "/notes");
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(!has_code(v.diagnostics, "asset.name.too_long"));
+
 	// A table open with unsaved changes: the rename waits on the unsaved prompt (its edits
 	// would stay behind on the old name), which lists it and offers no discard; cancelled,
 	// the file and the edit are untouched.
