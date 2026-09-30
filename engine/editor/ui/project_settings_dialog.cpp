@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include <base/gameprofile/gameprofile.h>
+#include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -41,17 +43,27 @@ bool path_field(const char *label, char *buffer, size_t size, const char *browse
 	return ImGui::Button(browse);
 }
 
+// Whether no Apply was answered after the one the SettingsApplied event at `seq` answers: the
+// view's settings_result is then that Apply's (each answer replaces it). An answer the view no
+// longer holds is not known to be the last.
+bool last_settings_answer(const SessionView &view, uint64_t seq) {
+	if (seq < view.events.first_seq()) return false;
+	for (const ViewEvent &event : view.events.held())
+		if (event.kind == ViewEventKind::SettingsApplied && event.seq > seq) return false;
+	return true;
+}
+
 } // namespace
 
 void ProjectSettingsDialog::open(const SessionView &view) {
 	fields_ = Fields();
-	copy_into(fields_.title, view.document.title);
-	fields_.mission = view.document.features.mission;
-	fields_.multiplayer = view.document.features.multiplayer;
-	copy_into(fields_.game_install, view.retail_directory);
-	copy_into(fields_.runtime, view.runtime_setting);
-	fields_.play_in_install = view.play_retail;
-	root_ = view.project_root;
+	copy_into(fields_.title, view.project.document->title);
+	fields_.mission = view.project.document->features.mission;
+	fields_.multiplayer = view.project.document->features.multiplayer;
+	copy_into(fields_.game_install, view.project.retail_directory);
+	copy_into(fields_.runtime, view.project.runtime_setting);
+	fields_.play_in_install = view.project.play_retail;
+	root_ = view.project.root;
 	open_ = open_requested_ = true;
 	pick_ = PickPurpose::None;
 	waiting_ = false;
@@ -75,34 +87,47 @@ void ProjectSettingsDialog::set_picked(PickPurpose purpose, const std::string &p
 
 void ProjectSettingsDialog::draw(Workspace &workspace) {
 	const SessionView &v = workspace.view();
+	// The session's answers since the dialog last drew: its own Apply's is the one carrying its
+	// serial (a serial another client's Apply took is never the dialog's next), its flag set when
+	// a setting could not be written.
+	std::optional<ViewEvent> answer;
+	for (const ViewEvent &event : events_.take()) {
+		if (event.kind != ViewEventKind::SettingsApplied) continue;
+		if (event.tag == serial_) answer = event;
+		seen_ = std::max(seen_, event.tag);
+	}
 	if (open_requested_) {
 		open_requested_ = false;
 		ImGui::OpenPopup(kTitle);
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	// Its project, and only it: another project open, or none, closes it.
-	if (!open_ || !v.project_open || v.project_root != root_) {
+	if (!open_ || !v.project.open || v.project.root != root_) {
 		close();
 		ImGui::EndPopup();
 		return;
 	}
-	// The session's answer to its Apply: nothing failed, it is done; else it says what
-	// failed and stays open.
-	if (waiting_ && v.settings_result.serial == serial_) {
+	// The session's answer to its Apply, by its flag: nothing failed, it is done; else it stays
+	// open saying what failed, the view's settings_result while that is its Apply's (another
+	// client's Apply answered after it, before the dialog drew, replaces it: then it says only
+	// that a setting failed).
+	if (waiting_ && answer) {
 		waiting_ = false;
-		for (const Diagnostic &failure : v.settings_result.failures)
-			error_ += (error_.empty() ? "" : "\n") + failure.message;
-		if (error_.empty()) {
+		if (!answer->flag) {
 			close();
 			ImGui::EndPopup();
 			return;
 		}
+		if (last_settings_answer(v, answer->seq))
+			for (const Diagnostic &failure : v.project.settings_result.failures)
+				error_ += (error_.empty() ? "" : "\n") + failure.message;
+		if (error_.empty()) error_ = "A setting could not be saved: see Problems.";
 	}
 	// The project's folder, a long one cut (whole in its tooltip): the dialog fits its fields.
-	const std::string root = ui_kit::fit(v.project_root, field_width() * 1.5f);
+	const std::string root = ui_kit::fit(v.project.root, field_width() * 1.5f);
 	ImGui::TextDisabled("%s", root.c_str());
-	if (root != v.project_root) ui_kit::tooltip(v.project_root);
-	ImGui::Text("Game: %s", game_display_name(v.document.target_game));
+	if (root != v.project.root) ui_kit::tooltip(v.project.root);
+	ImGui::Text("Game: %s", game_display_name(v.project.document->target_game));
 	ImGui::SetNextItemWidth(field_width());
 	ImGui::InputText("Name", fields_.title, sizeof(fields_.title));
 	ImGui::Checkbox("Missions", &fields_.mission);
@@ -116,8 +141,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		workspace.request(request::pick_directory(PickPurpose::GameInstall));
 	}
 	ImGui::TextDisabled("Where the game is installed, kept with the project: its game data is imported from it.");
-	if (v.source_run) {
-		const std::string runtime = "OpenNova runtime: " + v.runtime_executable;
+	if (v.activity.source_run) {
+		const std::string runtime = "OpenNova runtime: " + v.activity.runtime_executable;
 		const std::string shown = ui_kit::fit(runtime, field_width() * 1.5f);
 		ImGui::TextUnformatted(shown.c_str());
 		if (shown != runtime) ui_kit::tooltip(runtime);
@@ -128,7 +153,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 			workspace.request(request::pick_file(PickPurpose::RuntimeExecutable));
 		}
 		ImGui::TextDisabled("opennova.exe; left empty, the one packaged beside the editor.");
-		ui_kit::tooltip(v.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.runtime_executable + ".");
+		ui_kit::tooltip(v.activity.runtime_executable.empty() ? "No runtime is found now." : "Play runs " + v.activity.runtime_executable + ".");
 	}
 	ImGui::Checkbox("Play in the game install", &fields_.play_in_install);
 	ui_kit::tooltip("Play starts the game install on the build instead of the OpenNova runtime.");
@@ -153,13 +178,13 @@ void ProjectSettingsDialog::apply(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	EditorRequest request = request::of(EditorRequestKind::ApplyProjectSettings);
 	ProjectSettingsChange &settings = request.settings;
-	serial_ = std::max(serial_, v.settings_result.serial) + 1;
+	serial_ = std::max(serial_, seen_) + 1;
 	settings.serial = serial_;
 	settings.title = std::string(fields_.title);
 	settings.mission = fields_.mission;
 	settings.multiplayer = fields_.multiplayer;
 	settings.game_install = std::string(fields_.game_install);
-	if (!v.source_run) settings.runtime_executable = std::string(fields_.runtime);
+	if (!v.activity.source_run) settings.runtime_executable = std::string(fields_.runtime);
 	settings.play_in_install = fields_.play_in_install;
 	waiting_ = true;
 	error_.clear();

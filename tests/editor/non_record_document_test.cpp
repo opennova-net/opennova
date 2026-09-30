@@ -27,7 +27,7 @@
 #include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/blob_document.h"
@@ -71,7 +71,7 @@ static int test_non_record_type() {
 	session.handle(request::new_project(dir.file("project"), "Blobs"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const AssetEntry *style = view.scan.find("menu_style.mns");
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	const AssetEntry asset = *style;
@@ -101,7 +101,8 @@ static int test_non_record_type() {
 		cache.begin();
 		std::vector<std::shared_ptr<const DocumentBase>> open;
 		{
-			const ValidationInput input{paths, view.document, view.scan, open, cache};
+			const ValidationInput input{paths, *view.project.document, *view.project.scan, open,
+			                            cache};
 			TEST_EXPECT(!input.document(asset, error) && error.code == "document.no_records");
 		}
 		auto blob = std::make_shared<BlobDocument>();
@@ -109,7 +110,8 @@ static int test_non_record_type() {
 		open.push_back(blob);
 		{
 			error = Diagnostic();
-			const ValidationInput input{paths, view.document, view.scan, open, cache};
+			const ValidationInput input{paths, *view.project.document, *view.project.scan, open,
+			                            cache};
 			TEST_EXPECT(!input.document(asset, error) && error.code == "document.no_records");
 		}
 		cache.end();
@@ -129,8 +131,8 @@ static int test_non_record_type() {
 		site.after = "TRIM_COLOUR";
 		plan.sites.push_back(site);
 		std::vector<Diagnostic> refusals;
-		TEST_EXPECT(!check_symbol_rename(paths, view.document, view.scan, AssetGraph(), plan, open,
-		                                 refusals));
+		TEST_EXPECT(!check_symbol_rename(paths, *view.project.document, *view.project.scan,
+		                                 AssetGraph(), plan, open, refusals));
 		TEST_EXPECT(refusals.size() == 1 && refusals.front().code == "rename.site" &&
 		            refusals.front().message.find("holds no records") != std::string::npos);
 
@@ -140,8 +142,8 @@ static int test_non_record_type() {
 		TEST_EXPECT(session.outcome().done());
 		DocumentBase *opened = session.document_base_for(path);
 		TEST_EXPECT(opened && !opened->as_records() && !session.document_for(path));
-		TEST_EXPECT(view.active_document == path && !view.selection.row);
-		TEST_EXPECT(!view.documents.empty() && !records_of(*view.documents.back()));
+		TEST_EXPECT(view.documents.active == path && !view.documents.selection.row);
+		TEST_EXPECT(!view.documents.open.empty() && !records_of(*view.documents.open.back()));
 		// An Apply of its type's payload is taken, undone and redone; a Set is not.
 		Edit replace;
 		replace.operation = EditOperation::Apply;

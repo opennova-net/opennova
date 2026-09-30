@@ -29,8 +29,8 @@ PlayController::~PlayController() {
 void PlayController::set_launcher_source(PlayLauncherSource source) {
 	source_ = std::move(source);
 	launcher_ = source_ ? source_(false) : PlayLauncher();
-	view_.source_run = launcher_.source_run;
-	view_.runtime_executable = resolve_runtime_executable();
+	view_.activity.source_run = launcher_.source_run;
+	view_.activity.runtime_executable = resolve_runtime_executable();
 	core_.touch(ViewConcern::Preferences);
 }
 
@@ -40,9 +40,11 @@ void PlayController::follow_launcher(const PlayLauncher &launcher) {
 	launcher_ = launcher;
 	launcher_.mcp_port = 0;
 	const std::string runtime = resolve_runtime_executable();
-	if (view_.source_run == launcher_.source_run && view_.runtime_executable == runtime) return;
-	view_.source_run = launcher_.source_run;
-	view_.runtime_executable = runtime;
+	if (view_.activity.source_run == launcher_.source_run &&
+			view_.activity.runtime_executable == runtime)
+		return;
+	view_.activity.source_run = launcher_.source_run;
+	view_.activity.runtime_executable = runtime;
 	core_.touch(ViewConcern::Preferences);
 }
 
@@ -72,23 +74,24 @@ bool PlayController::refused() {
 }
 
 void PlayController::start() {
-	const std::string &build_dir = view_.last_build.build_dir;
+	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
 	std::error_code ec;
 	// The last run's boot report and exit go, their rows with them (the next validation would
 	// make none); the game started now reports on this project.
-	view_.boot_missing.clear();
+	view_.activity.boot_missing.clear();
 	core_.problems().set_play_findings({});
-	const size_t rows = view_.diagnostics.size();
-	view_.diagnostics.erase(std::remove_if(view_.diagnostics.begin(), view_.diagnostics.end(),
-	                                       [](const Diagnostic &d) {
-		                                       return d.code == "play.boot_missing" || d.code == "play.crashed";
-	                                       }),
-	                        view_.diagnostics.end());
+	const size_t rows = view_.findings.diagnostics.size();
+	view_.findings.diagnostics.erase(
+			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
+					[](const Diagnostic &d) {
+						return d.code == "play.boot_missing" || d.code == "play.crashed";
+					}),
+			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
-	if (view_.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
-	boot_project_ = view_.project_root;
+	if (view_.findings.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
+	boot_project_ = view_.project.root;
 	const bool in_install = core_.preferences().values().play_in_install;
 	// What Play launches, asked of its source now that the build has landed: one answer, which the
 	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
@@ -99,7 +102,7 @@ void PlayController::start() {
 	if (in_install) {
 		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, plan, error)) {
 			core_.report(error);
-			view_.status = "The game install could not be prepared; see Problems.";
+			view_.activity.status = "The game install could not be prepared; see Problems.";
 			core_.touch(ViewConcern::Output);
 			return;
 		}
@@ -110,16 +113,16 @@ void PlayController::start() {
 			                             executable.empty()
 			                                     ? "No game runtime is set; choose opennova.exe in File > Project settings..."
 			                                     : "The game runtime was not found: " + executable));
-			view_.status = "The game runtime was not found.";
+			view_.activity.status = "The game runtime was not found.";
 			core_.touch(ViewConcern::Output);
 			return;
 		}
 		plan = launcher.source_run
-		               ? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
-		                                         view_.document.target_game, launcher.mcp_port, std::string(),
-		                                         launcher.engine_args)
-		               : make_play_launch_plan(executable, build_dir, view_.document.target_game,
-		                                       launcher.mcp_port, std::string(), launcher.engine_args);
+				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
+						  view_.project.document->target_game, launcher.mcp_port, std::string(),
+						  launcher.engine_args)
+				: make_play_launch_plan(executable, build_dir, view_.project.document->target_game,
+						  launcher.mcp_port, std::string(), launcher.engine_args);
 	}
 	// The game rewrites its log; drop the previous run's so the tail starts clean.
 	fs::remove(plan.log_file, ec);
@@ -128,7 +131,7 @@ void PlayController::start() {
 	game_log_partial_.clear();
 	if (!play_.start(plan, error)) {
 		core_.report(error);
-		view_.status = "The game could not be started.";
+		view_.activity.status = "The game could not be started.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
@@ -145,22 +148,22 @@ void PlayController::start() {
 	else
 		core_.note("The game's lease could not be written (" + lease_error +
 		           "): a build after the editor restarts may remove its files while it runs.");
-	view_.play_state = play_.state();
-	view_.play_pid = play_.pid();
-	view_.play_mcp_port = plan.mcp_port;
-	view_.play_command_line = launch_plan_command_line(plan);
-	view_.play_exited_on_its_own = false;
-	view_.play_exit_code = -1;
-	core_.note("Running: " + view_.play_command_line);
-	view_.status = in_install ? "Game install running." : "Game running.";
+	view_.activity.play_state = play_.state();
+	view_.activity.play_pid = play_.pid();
+	view_.activity.play_mcp_port = plan.mcp_port;
+	view_.activity.play_command_line = launch_plan_command_line(plan);
+	view_.activity.play_exited_on_its_own = false;
+	view_.activity.play_exit_code = -1;
+	core_.note("Running: " + view_.activity.play_command_line);
+	view_.activity.status = in_install ? "Game install running." : "Game running.";
 	core_.touch(ViewConcern::Run);
 }
 
 void PlayController::stop() {
 	if (play_.state() != PlayState::Running) return;
 	play_.stop();
-	view_.play_state = play_.state();
-	view_.status = "Stopping the game...";
+	view_.activity.play_state = play_.state();
+	view_.activity.status = "Stopping the game...";
 	core_.note("Stop requested.");
 	core_.touch(ViewConcern::Run);
 }
@@ -174,16 +177,16 @@ void PlayController::poll() {
 			tail_game_log();
 			absorb_exit();
 		}
-		view_.play_state = now;
-		view_.play_pid = play_.pid();
-		if (now == PlayState::Stopped) view_.play_mcp_port = 0;
+		view_.activity.play_state = now;
+		view_.activity.play_pid = play_.pid();
+		if (now == PlayState::Stopped) view_.activity.play_mcp_port = 0;
 		core_.touch(ViewConcern::Run);
 		core_.problems().validate_pending();
 	}
 }
 
 void PlayController::forget_project() {
-	view_.boot_missing.clear();
+	view_.activity.boot_missing.clear();
 	boot_project_.clear();
 	core_.problems().set_play_findings({});
 }
@@ -243,9 +246,9 @@ void PlayController::absorb_boot_report(const std::string &line) {
 	while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
 	const std::string name = line.substr(start, end - start);
 	if (name.empty()) return;
-	if (!view_.project_open || view_.project_root != boot_project_) return;
-	if (view_.missing_at_boot(name)) return;
-	view_.boot_missing.push_back(name);
+	if (!view_.project.open || view_.project.root != boot_project_) return;
+	if (view_.activity.missing_at_boot(name)) return;
+	view_.activity.boot_missing.push_back(name);
 	core_.touch(ViewConcern::Run);
 	core_.problems().validate_later();
 }
@@ -259,18 +262,19 @@ void PlayController::absorb_exit() {
 	// build), and its directory is a build like any.
 	if (play_lease_.pid >= 0) remove_play_lease(play_lease_.build_dir, play_lease_.pid);
 	play_lease_ = PlayLease();
-	view_.play_exited_on_its_own = play_.exited_on_its_own();
-	view_.play_exit_code = play_.exit_code();
-	std::string line = view_.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
-	if (view_.play_exited_on_its_own && view_.play_exit_code > 0) {
-		std::string code = std::to_string(view_.play_exit_code);
-		if (view_.play_exit_code > 0xFFFF) {
+	view_.activity.play_exited_on_its_own = play_.exited_on_its_own();
+	view_.activity.play_exit_code = play_.exit_code();
+	std::string line =
+			view_.activity.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
+	if (view_.activity.play_exited_on_its_own && view_.activity.play_exit_code > 0) {
+		std::string code = std::to_string(view_.activity.play_exit_code);
+		if (view_.activity.play_exit_code > 0xFFFF) {
 			char hex[16];
-			std::snprintf(hex, sizeof(hex), "0x%08llX", static_cast<unsigned long long>(view_.play_exit_code));
+			std::snprintf(hex, sizeof(hex), "0x%08llX", static_cast<unsigned long long>(view_.activity.play_exit_code));
 			code += std::string(" (") + hex + ")";
 		}
 		line = "The game exited with code " + code + ".";
-		if (view_.project_open && view_.project_root == boot_project_) {
+		if (view_.project.open && view_.project.root == boot_project_) {
 			core_.problems().set_play_findings({make_diagnostic(DiagnosticSeverity::Error, "play.crashed",
 			                                                    "The game ended with exit code " + code +
 			                                                            ": it crashed or stopped on an error. Its log is in Output.")});
@@ -278,7 +282,7 @@ void PlayController::absorb_exit() {
 		}
 	}
 	core_.note(line);
-	view_.status = line;
+	view_.activity.status = line;
 }
 
 } // namespace opennova::editor

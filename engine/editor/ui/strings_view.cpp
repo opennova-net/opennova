@@ -1,7 +1,7 @@
 #include "strings_view.h"
 
 #include <editor/documents/strings_document.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/table_cells.h>
@@ -56,7 +56,7 @@ void draw_sections(Workspace &workspace, const StringsDocument &document, const 
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name = ui_kit::kChangeRoom + section->name();
 		const std::string shown = ui_kit::fit(name, ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((shown + "###section").c_str(), view.selection.row == section->id)) select(workspace, document, at);
+		if (ImGui::Selectable((shown + "###section").c_str(), view.documents.selection.row == section->id)) select(workspace, document, at);
 		reveal.scroll_to(at, true);
 		const Document::RecordChange change = document.record_change(at);
 		ui_kit::change_dot(change, x);
@@ -88,7 +88,7 @@ void StringsView::draw(Workspace &workspace, const StringsDocument &document) {
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX;
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.row) index = i;
 	const Node *selected = index < rows.size() ? rows[index].get() : nullptr;
 	// The sections down the left, in a column that resizes (first as wide as its widest tool at
 	// least), the selected section's strings on the right (or, filtered over every section,
@@ -125,7 +125,9 @@ void StringsView::draw_strings(Workspace &workspace, const StringsDocument &docu
 		const std::vector<NodeId> &ids = section->collections.empty() ? std::vector<NodeId>() : section->collections[0];
 		size_t at = SIZE_MAX;
 		for (size_t i = 0; i < ids.size(); ++i)
-			if (view.selection.row == section->id && view.selection.child == ids[i]) at = i;
+			if (view.documents.selection.row == section->id &&
+					view.documents.selection.child == ids[i])
+				at = i;
 		ImGui::PushID("strings");
 		ui_kit::WrapRow row;
 		ui_kit::RowTools tools;
@@ -169,7 +171,8 @@ void StringsView::draw_strings(Workspace &workspace, const StringsDocument &docu
 	for (const NodeAddress &string : shown) {
 		ImGui::PushID(int(string.child));
 		ImGui::TableNextRow();
-		const bool on = view.selection.row == string.row && view.selection.child == string.child;
+		const bool on = view.documents.selection.row == string.row &&
+				view.documents.selection.child == string.child;
 		if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
 		ImGui::TableNextColumn();
 		const float x = ImGui::GetCursorScreenPos().x;

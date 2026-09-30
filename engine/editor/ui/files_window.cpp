@@ -10,9 +10,11 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/rename_transaction.h>
+#include <editor/import/import_run.h>
 #include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -53,13 +55,13 @@ const char *name_hint(AssetKind kind) {
 }
 
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
-	for (const AssetEntry &entry : view.scan.entries)
+	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.relative_path == path) return &entry;
 	return nullptr;
 }
 
 const DocumentBase *open_document(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents)
+	for (const auto &document : view.documents.open)
 		if (document->path() == path) return document.get();
 	return nullptr;
 }
@@ -91,7 +93,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	}
 	if (!ImGui::BeginPopupModal("New file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	const SessionView &v = workspace.view();
-	if (!v.project_open) {
+	if (!v.project.open) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -107,7 +109,7 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const bool named = name_[0] != '\0';
 	bool fits = named && check_file_name(name_, kind_, problem, message);
 	if (fits && kind_ == AssetKind::Texture) fits = can_make_blank_texture(name_, message);
-	const bool taken = named && v.scan.find(name_) != nullptr;
+	const bool taken = named && v.project.scan->find(name_) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
 	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name_);
 	const bool ready = fits && !taken && v.allows(EditorRequestKind::CreateFile);
@@ -134,8 +136,8 @@ void FilesWindow::refresh(const SessionView &view) {
 	compared_.clear(); // made again by matching(), once a filter is set
 	matches_made_ = false;
 	std::map<std::string, size_t> index;
-	for (size_t i = 0; i < view.scan.entries.size(); ++i) {
-		const AssetEntry &entry = view.scan.entries[i];
+	for (size_t i = 0; i < view.project.scan->entries.size(); ++i) {
+		const AssetEntry &entry = view.project.scan->entries[i];
 		// An imported file sits in the cache: it shows beside its source.
 		const std::string &place = entry.imported_from.empty() ? entry.relative_path : entry.imported_from;
 		size_t at = 0;
@@ -157,7 +159,7 @@ void FilesWindow::refresh(const SessionView &view) {
 			return normalized_logical_name(folders_[a].name) < normalized_logical_name(folders_[b].name);
 		});
 	counts_.clear();
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.asset.empty()) continue;
 		Counts &counts = counts_[d.asset];
 		if (d.severity == DiagnosticSeverity::Error) ++counts.errors;
@@ -176,9 +178,9 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	matches_made_ = true;
 	matched_ = filter_;
 	matches_.clear();
-	if (compared_.size() != view.scan.entries.size()) {
+	if (compared_.size() != view.project.scan->entries.size()) {
 		compared_.clear();
-		for (const AssetEntry &entry : view.scan.entries)
+		for (const AssetEntry &entry : view.project.scan->entries)
 			compared_.push_back(normalized_logical_name(entry.relative_path));
 	}
 	const std::string wanted = normalized_logical_name(filter_);
@@ -187,20 +189,15 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	return matches_;
 }
 
-void FilesWindow::follow_reveal(const SessionView &view) {
-	if (view.reveal_file_serial == reveal_serial_) return;
-	reveal_serial_ = view.reveal_file_serial;
-	if (view.reveal_file.empty()) return;
-	reveal_ = view.reveal_file;
-	reveal_rename_ = view.reveal_file_rename;
+void FilesWindow::receive(const ViewEvent &event) {
+	events_.post(event);
 	request_focus();
 }
 
 // The file an ask names, selected; a filter that hides it cleared; the folders on its way
 // (an imported file's are its source's) to open and the row to scroll to as they draw.
-void FilesWindow::show_revealed(const SessionView &view) {
-	const AssetEntry *entry = entry_at(view, reveal_);
-	reveal_.clear();
+void FilesWindow::show_revealed(const SessionView &view, const ViewEvent &event) {
+	const AssetEntry *entry = entry_at(view, event.path);
 	if (!entry) return;
 	selected_ = entry->relative_path;
 	if (filter_[0] != '\0' &&
@@ -208,20 +205,27 @@ void FilesWindow::show_revealed(const SessionView &view) {
 		filter_[0] = '\0';
 	scroll_to_ = entry->relative_path;
 	open_to_ = entry->imported_from.empty() ? entry->relative_path : entry->imported_from;
-	if (reveal_rename_) start_rename(*entry);
+	if (event.flag) start_rename(*entry);
 }
 
 void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &v = workspace_.view();
-	if (!v.project_open) {
+	// The RevealFile events held since Files last drew, taken now: the newest is shown (its file
+	// selected, Rename... opened on it when it asks), as the view's one reveal was, each ask
+	// overwriting the one before; an older ask is passed over, its Rename... too. With no project
+	// open none shows.
+	const std::vector<ViewEvent> reveals = events_.take();
+	if (!v.project.open) {
 		ui_kit::empty_state("No project open.", "Make one or open one in the Document window.");
 		return;
 	}
 	refresh(v);
-	if (!reveal_.empty()) show_revealed(v);
+	const auto newest = std::find_if(reveals.rbegin(), reveals.rend(),
+			[](const ViewEvent &event) { return event.kind == ViewEventKind::RevealFile; });
+	if (newest != reveals.rend()) show_revealed(v, *newest);
 	draw_toolbar(v);
 	// The filter, and beside it how many files the project has (under it in a narrow dock).
-	const size_t count = v.scan.entries.size();
+	const size_t count = v.project.scan->entries.size();
 	const std::string files = std::to_string(count) + (count == 1 ? " file" : " files");
 	{
 		const float spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -240,7 +244,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		if (const AssetEntry *entry = entry_at(v, selected_)) start_rename(*entry);
 	// A filter lists the files it matches flat.
 	const std::vector<size_t> &matches = matching(v);
-	if (v.scan.entries.empty()) {
+	if (v.project.scan->entries.empty()) {
 		ui_kit::empty_state("The project has no files yet.", "Import files, or make one with New.");
 	} else if (filter_[0] != '\0' && matches.empty()) {
 		ui_kit::empty_state("No file matches the filter.");
@@ -257,7 +261,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
 		ImGui::TableHeadersRow();
 		if (filter_[0] != '\0') {
-			for (const size_t i : matches) draw_file(v, v.scan.entries[i], false);
+			for (const size_t i : matches) draw_file(v, v.project.scan->entries[i], false);
 		} else {
 			draw_folder(v, folders_.front());
 		}
@@ -286,21 +290,25 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
 		const bool game_data =
-		        !view.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
+		        !view.project.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
 		ImGui::BeginDisabled(!game_data);
 		if (ImGui::Selectable("From the game data...") && game_data)
-			workspace_.request(request::preview_install_import({}, view.import_dependencies));
+			workspace_.request(
+					request::preview_install_import({}, view.project.import_dependencies));
 		ImGui::EndDisabled();
-		ui_kit::tooltip(!view.retail_directory.empty() ? "Files of the game install, copied into the project."
+		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
-		const bool reimports = !view.imports.empty() && view.allows(EditorRequestKind::Reimport);
+		const bool reimports =
+				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);
 		if (ImGui::Selectable("Reimport all") && reimports)
 			workspace_.request(request::reimport(std::string(), true));
 		ImGui::EndDisabled();
-		ui_kit::tooltip(view.imports.empty() ? "No file of the project is imported from a source."
-		                                     : "Run every importer again (" + std::to_string(view.imports.size()) +
-		                                               (view.imports.size() == 1 ? " source)." : " sources)."));
+		ui_kit::tooltip(view.project.imports->empty()
+						? "No file of the project is imported from a source."
+						: "Run every importer again (" +
+								std::to_string(view.project.imports->size()) +
+								(view.project.imports->size() == 1 ? " source)." : " sources)."));
 		ImGui::EndCombo();
 	}
 	const float new_width = ui_kit::button_width("New") + arrow;
@@ -330,7 +338,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			const BlankFactory &factory = *blank_factory_at(i);
 			const gameprofile::RequiredResource *resource = gameprofile::gameprofile_required_resource_by_role(factory.role);
 			if (!resource) continue;
-			const bool present = view.scan.find(resource->name) != nullptr;
+			const bool present = view.project.scan->find(resource->name) != nullptr;
 			ImGui::PushID(static_cast<int>(i));
 			ImGui::BeginDisabled(present || !creates);
 			if (ImGui::Selectable(resource->name) && !present && creates)
@@ -360,7 +368,8 @@ void FilesWindow::draw_folder(const SessionView &view, const Folder &folder) {
 		draw_folder(view, inner);
 		ImGui::TreePop();
 	}
-	for (const size_t index : folder.files) draw_file(view, view.scan.entries[index], true);
+	for (const size_t index : folder.files)
+		draw_file(view, view.project.scan->entries[index], true);
 }
 
 // A file's row: a selectable under the whole row, its name (cut to what its dot and counts
@@ -447,13 +456,14 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 		workspace_.request(request::open_document(entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
-	if (ImGui::MenuItem("References...", nullptr, false, view.graph != nullptr) && view.graph) {
+	if (ImGui::MenuItem("References...", nullptr, false, view.findings.graph != nullptr) &&
+			view.findings.graph) {
 		references_ = entry.relative_path;
 		open_references_ = true;
 	}
 	const bool reveals = view.allows(EditorRequestKind::RevealPath);
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
-		workspace_.request(request::reveal_path((fs::path(view.project_root) / entry.relative_path).generic_string()));
+		workspace_.request(request::reveal_path((fs::path(view.project.root) / entry.relative_path).generic_string()));
 	const bool reimports = view.allows(EditorRequestKind::Reimport);
 	const bool source = entry.kind == AssetKind::ImageSource;
 	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
@@ -495,7 +505,7 @@ void FilesWindow::draw_rename(const SessionView &view) {
 		previewed_ = rename_;
 		workspace_.request(request::preview_file_rename(entry->relative_path, previewed_));
 	}
-	const SessionView::RenamePreview &plan = view.rename_preview;
+	const DialogsView::RenamePreview &plan = view.dialogs.rename_preview;
 	if (changed && !plan.symbol && plan.path == entry->relative_path && plan.requested == rename_) {
 		for (const Diagnostic &refusal : plan.refusals) {
 			ui_kit::severity_marker(refusal.severity);
@@ -504,16 +514,17 @@ void FilesWindow::draw_rename(const SessionView &view) {
 			ImGui::TextWrapped("%s", refusal.message.c_str());
 			ImGui::PopTextWrapPos();
 		}
+		const std::vector<RenameSite> &sites = *plan.sites;
 		if (plan.refusals.empty())
-			ImGui::TextDisabled("%s", plan.sites.empty() ? "Nothing names it." :
-			                          ("Rewrites " + std::to_string(plan.sites.size()) + " reference" +
-			                           (plan.sites.size() == 1 ? ":" : "s:")).c_str());
-		for (size_t i = 0; i < plan.sites.size() && i < 12; ++i) {
-			const RenameSite &site = plan.sites[i];
+			ImGui::TextDisabled("%s", sites.empty() ? "Nothing names it." :
+			                          ("Rewrites " + std::to_string(sites.size()) + " reference" +
+			                           (sites.size() == 1 ? ":" : "s:")).c_str());
+		for (size_t i = 0; i < sites.size() && i < 12; ++i) {
+			const RenameSite &site = sites[i];
 			ImGui::BulletText("%s", (site.file + ": " + (site.record.empty() ? "" : site.record + " - ") + site.field + ": " +
 			                         site.before + " -> " + site.after).c_str());
 		}
-		if (plan.sites.size() > 12) ImGui::TextDisabled("and %zu more", plan.sites.size() - 12);
+		if (sites.size() > 12) ImGui::TextDisabled("and %zu more", sites.size() - 12);
 	}
 	const bool allowed = view.allows(EditorRequestKind::RenameAsset);
 	ImGui::BeginDisabled(!changed || !allowed);
@@ -540,7 +551,7 @@ void FilesWindow::draw_references(const SessionView &view) {
 	ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 24.0f));
 	if (!ImGui::BeginPopup("References")) return;
 	const AssetEntry *entry = entry_at(view, references_);
-	if (!entry || !view.graph) {
+	if (!entry || !view.findings.graph) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
@@ -552,8 +563,8 @@ void FilesWindow::draw_references(const SessionView &view) {
 		listed_.view = &view;
 		listed_.key = key;
 		listed_.file = entry->relative_path;
-		listed_.references = view.graph->references_of(entry->relative_path);
-		listed_.users = view.graph->usages_of(entry->relative_path);
+		listed_.references = view.findings.graph->references_of(entry->relative_path);
+		listed_.users = view.findings.graph->usages_of(entry->relative_path);
 	}
 	const std::vector<const GraphEdge *> &references = listed_.references;
 	const std::vector<const GraphEdge *> &users = listed_.users;
@@ -562,7 +573,7 @@ void FilesWindow::draw_references(const SessionView &view) {
 		if (references.empty()) ui_kit::empty_state("It names no other file or record.");
 		for (const GraphEdge *edge : references) {
 			std::string file;
-			const ReferenceStatus status = edge->target.empty() ? ReferenceStatus::NotAReference : view.graph->resolve(*edge, &file);
+			const ReferenceStatus status = edge->target.empty() ? ReferenceStatus::NotAReference : view.findings.graph->resolve(*edge, &file);
 			const std::string field = edge_field_title(view, *edge);
 			ImGui::BulletText("%s%s = %s", edge->record.empty() ? "" : (edge->record + " - ").c_str(), field.c_str(),
 			                  edge->value.c_str());
@@ -582,7 +593,7 @@ void FilesWindow::draw_references(const SessionView &view) {
 			        edge.source + ": " + (edge.record.empty() ? "" : edge.record + " - ") + edge_field_title(view, edge);
 			const bool pressed = ImGui::Selectable((line + "###use").c_str());
 			if (pressed || ImGui::IsItemHovered()) {
-				const ReferenceTarget target = usage_target(view.scan, edge);
+				const ReferenceTarget target = usage_target(*view.project.scan, edge);
 				if (pressed) window_requests::go_to(workspace_, target);
 				ui_kit::tooltip(edge.field + "\n" +
 				                (target.editable ? "Open " + target.file + " at it." : "Show " + target.file + " in Files."));

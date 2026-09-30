@@ -12,6 +12,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
@@ -114,13 +115,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), what Problems
-    # shows of its findings and offers to do about them, and the findings by file and record
+    # imports, renames, the unsaved guard, the preferences over their store), and what Problems
+    # shows of its findings and offers to do about them
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/findings_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
@@ -135,8 +135,17 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
+    # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,
+    # the documents, the findings, the activity, the dialogs), the events a request posts, and
+    # the findings by file and record
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/documents_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the

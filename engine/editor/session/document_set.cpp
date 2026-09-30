@@ -23,7 +23,7 @@ DocumentSet::DocumentSet(SessionCore &core) : core_(core), view_(core.view()), p
 // --- what is open ----------------------------------------------------------------------------
 
 DocumentBase *DocumentSet::document_for(const std::string &path) {
-	const std::string &wanted = path.empty() ? view_.active_document : path;
+	const std::string &wanted = path.empty() ? view_.documents.active : path;
 	for (auto &document : documents_)
 		if (document->path() == wanted || normalized_logical_name(fs::path(document->path()).filename().string()) == normalized_logical_name(wanted))
 			return document.get();
@@ -36,7 +36,7 @@ Document *DocumentSet::records_for(const std::string &path) {
 }
 
 void DocumentSet::refuse_records(const std::string &path, const char *not_open) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	if (const DocumentBase *document = document_for(path))
 		return core_.refuse_now("document.no_records", "This document holds no records.",
 		                        document->path());
@@ -56,9 +56,9 @@ std::vector<std::string> DocumentSet::dirty_files() const {
 }
 
 void DocumentSet::update_view() {
-	view_.documents.clear();
-	for (const auto &document : documents_) view_.documents.push_back(document);
-	core_.problems().set_open(view_.documents);
+	view_.documents.open.clear();
+	for (const auto &document : documents_) view_.documents.open.push_back(document);
+	core_.problems().set_open(view_.documents.open);
 	core_.touch(ViewConcern::Documents);
 	// Which documents are open, each as read and whether it has unsaved edits: an edit that
 	// leaves its document as unsaved as it was moves Documents alone.
@@ -82,18 +82,18 @@ const DocumentBase *DocumentSet::open_at(const std::string &path) const {
 // one, or was read again since: a menu then shows its first screen), repaired against its
 // records as they are now. A caller with a record to show selects it after.
 void DocumentSet::activate(const std::string &path) {
-	if (path == view_.active_document) return;
-	if (open_at(view_.active_document)) remembered_[view_.active_document] = {view_.selection, view_.selected};
-	view_.active_document = path;
-	view_.select_only({});
+	if (path == view_.documents.active) return;
+	if (open_at(view_.documents.active)) remembered_[view_.documents.active] = {view_.documents.selection, view_.documents.selected};
+	view_.documents.active = path;
+	view_.documents.select_only({});
 	const auto kept = remembered_.find(path);
 	if (kept != remembered_.end()) {
-		view_.selection = kept->second.primary;
-		view_.selected = kept->second.selected;
+		view_.documents.selection = kept->second.primary;
+		view_.documents.selected = kept->second.selected;
 		remembered_.erase(kept);
 		if (const DocumentBase *document = open_at(path))
 			if (const Document *records = records_of(*document))
-				view_.repair_selection(*records, NodeAddress());
+				view_.documents.repair_selection(*records, NodeAddress());
 	}
 	select_first_screen();
 	core_.touch(ViewConcern::ActiveDocument); // the caller touches Selection
@@ -102,11 +102,11 @@ void DocumentSet::activate(const std::string &path) {
 // A menu made the active document, or read again, with nothing selected shows its first
 // screen: the menu view lists the selected screen's windows and the preview draws it.
 void DocumentSet::select_first_screen() {
-	if (view_.selection.row) return;
+	if (view_.documents.selection.row) return;
 	const Document *document = records_for();
 	if (!document || document->kind() != AssetKind::Menu || document->rows().empty()) return;
 	const Node &screen = *document->rows().front();
-	view_.select_only({screen.id, screen.kind, 0});
+	view_.documents.select_only({screen.id, screen.kind, 0});
 }
 
 // --- the files -------------------------------------------------------------------------------
@@ -119,7 +119,7 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 		return nullptr;
 	}
 	std::shared_ptr<DocumentBase> document = type->make();
-	if (!document->load((fs::path(paths_.root) / relative).generic_string(), relative, kind, view_.document.target_game,
+	if (!document->load((fs::path(paths_.root) / relative).generic_string(), relative, kind, view_.project.document->target_game,
 	                    error))
 		return nullptr;
 	return document;
@@ -157,7 +157,7 @@ void DocumentSet::reload_changed() {
 		}
 		forget_file_state(path);
 		remembered_.erase(path); // read again: its records' identities are gone
-		if (path == view_.active_document) view_.select_only({});
+		if (path == view_.documents.active) view_.documents.select_only({});
 		document = loaded;
 		changed = true;
 		core_.note("Reloaded " + path + ": it changed outside the editor.");
@@ -196,7 +196,7 @@ void DocumentSet::forget_file_state(const std::string &path) {
 // --- the requests ------------------------------------------------------------------------------
 
 void DocumentSet::create_file(const EditorRequest &request) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	// A name alone cannot say what a new `.bin` is; the request's file_kind may name the kind.
 	const AssetKind kind = request.file_kind.empty() ? classify_asset(request.path, nullptr)
 	                                                 : asset_kind_from_token(request.file_kind);
@@ -205,8 +205,8 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// be made; one the editor does not edit (a font) is made and not opened.
 	BlankRequest blank;
 	blank.logical_name = request.path;
-	blank.project_title = view_.document.title;
-	for (const RequirementRow &row : view_.requirements.rows)
+	blank.project_title = view_.project.document->title;
+	for (const RequirementRow &row : view_.project.requirements->rows)
 		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(request.path))
 			blank.role = row.role;
 	if (!find_blank_factory_for_role(blank.role) && !find_blank_factory_for_kind(kind)) {
@@ -220,7 +220,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document." + problem, message, request.path));
 		return;
 	}
-	const auto *existing = view_.scan.find(request.path);
+	const auto *existing = view_.project.scan->find(request.path);
 	const std::string relative = (fs::path(blank_placement_dir(kind)) / request.path).generic_string();
 	if (!existing) {
 		const auto target = fs::path(paths_.root) / relative;
@@ -242,25 +242,31 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	if (is_editable_kind(kind)) {
 		open_document(request::open_document(request.path));
 	} else {
-		view_.status = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
+		view_.activity.status = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
 		core_.touch(ViewConcern::Output);
 	}
 }
 
 void DocumentSet::open_document(const EditorRequest &request) {
-	if (!view_.project_open) return;
-	const std::string path = request.path.empty() ? view_.active_document : request.path;
+	if (!view_.project.open) return;
+	const std::string path = request.path.empty() ? view_.documents.active : request.path;
 	// The record a request names (by its address, or by its locator: a Go to) is selected,
-	// and its field (a Problems row's, the defining field a Go to shows) shown.
+	// and its field (a Problems row's, the defining field a Go to shows) shown: a RevealRecord
+	// event for the document's view and the Inspector, one per ask (the same row clicked again
+	// shows it again).
 	const auto select_named = [this, &request](const DocumentBase &document) {
 		const Document *records = records_of(document);
 		if (!records) return; // a document of another kind holds no records to select
 		const NodeAddress record =
 		        request.locator.empty() ? request.address : records->address_at(request.locator);
-		view_.select_only(record);
+		view_.documents.select_only(record);
 		if (!record.row || request.field.empty()) return;
-		view_.reveal_field = request.field;
-		++view_.reveal_serial;
+		ViewEvent reveal;
+		reveal.kind = ViewEventKind::RevealRecord;
+		reveal.path = document.path();
+		reveal.address = record;
+		reveal.field = request.field;
+		view_.events.post(std::move(reveal));
 	};
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
 		// An open document comes back with the selection it had, unless the request names
@@ -271,7 +277,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		core_.touch(ViewConcern::Selection);
 		return;
 	}
-	for (const auto &asset : view_.scan.entries) {
+	for (const auto &asset : view_.project.scan->entries) {
 		if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
@@ -279,8 +285,11 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
-		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(), asset.relative_path,
-			asset.kind, view_.document.target_game, error)) { core_.report(error); return; }
+		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(),
+					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
+			core_.report(error);
+			return;
+		}
 		for (auto it = documents_.begin(); it != documents_.end(); ++it)
 			if ((*it)->path() == asset.relative_path) { documents_.erase(it); break; }
 		remembered_.erase(asset.relative_path); // read again: its records have new identities
@@ -295,28 +304,30 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", path));
 }
 
-// Files shows the file (and asks its new name when the request says so); every ask is
-// shown again, the same file too.
+// Files shows the file (and asks its new name when the request says so): a RevealFile event,
+// one per ask, so the same file asked again is shown again.
 void DocumentSet::show_in_files(const EditorRequest &request) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	const AssetEntry *asset = core_.project_file(request.path);
 	if (!asset) {
 		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", request.path));
 		return;
 	}
-	view_.reveal_file = asset->relative_path;
-	view_.reveal_file_rename = request.ask_name;
-	++view_.reveal_file_serial;
+	ViewEvent reveal;
+	reveal.kind = ViewEventKind::RevealFile;
+	reveal.path = asset->relative_path;
+	reveal.flag = request.ask_name;
+	view_.events.post(std::move(reveal));
 	core_.touch(ViewConcern::Selection);
 }
 
 void DocumentSet::close_document(const std::string &requested) {
-	const std::string path = requested.empty() ? view_.active_document : requested;
+	const std::string path = requested.empty() ? view_.documents.active : requested;
 	for (auto it = documents_.begin(); it != documents_.end(); ++it)
 		if ((*it)->path() == path) { documents_.erase(it); break; }
 	remembered_.erase(path);
 	forget_file_state(path);
-	if (view_.active_document == path) {
+	if (view_.documents.active == path) {
 		activate(documents_.empty() ? "" : documents_.back()->path());
 		core_.touch(ViewConcern::Selection);
 	}
@@ -328,24 +339,24 @@ void DocumentSet::close_document(const std::string &requested) {
 // the active one, the record alone selected.
 void DocumentSet::select_record(const EditorRequest &request) {
 	const DocumentBase *document = document_for(request.path);
-	const std::string path = document ? document->path() : request.path.empty() ? view_.active_document : request.path;
-	if (path != view_.active_document) {
+	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
+	if (path != view_.documents.active) {
 		activate(path);
-		view_.select_only(request.address);
+		view_.documents.select_only(request.address);
 	} else {
-		view_.select(path, request.address, request.mode);
+		view_.documents.select(path, request.address, request.mode);
 	}
 	core_.touch(ViewConcern::Selection);
 }
 
 void DocumentSet::edit_record(const EditorRequest &request) {
 	// A fix's edit opens its document first (a Problems row about a file not open).
-	if (!document_for(request.path) && request.open_first && view_.project_open &&
+	if (!document_for(request.path) && request.open_first && view_.project.open &&
 	    !request.path.empty())
 		open_document(request::open_document(request.path));
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before editing it.", request.path);
+		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before editing it.", request.path);
 		return;
 	}
 	apply_edits(*document, request.edits);
@@ -401,16 +412,16 @@ void DocumentSet::duplicate(const EditorRequest &request) {
 void DocumentSet::undo_redo(const EditorRequest &request) {
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project_open) core_.refuse_now("document.not_open", "Open the file before undoing or redoing in it.", request.path);
+		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before undoing or redoing in it.", request.path);
 		return;
 	}
 	const uint64_t before = document->revision();
-	const NodeAddress primary = view_.selection;
-	const std::vector<NodeAddress> selected = view_.selected;
+	const NodeAddress primary = view_.documents.selection;
+	const std::vector<NodeAddress> selected = view_.documents.selected;
 	if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
 	if (const Document *records = records_of(*document))
-		view_.repair_selection(*records, NodeAddress());
-	if (view_.selection != primary || view_.selected != selected) core_.touch(ViewConcern::Selection);
+		view_.documents.repair_selection(*records, NodeAddress());
+	if (view_.documents.selection != primary || view_.documents.selected != selected) core_.touch(ViewConcern::Selection);
 	update_view();
 	// An undo or a redo ends a gesture: the validation its edits left waiting runs now.
 	if (document->revision() != before || gesture_validation_due_) core_.problems().validate_later();
@@ -426,7 +437,7 @@ void DocumentSet::end_edit(const std::string &path) {
 void DocumentSet::save(const std::string &path) {
 	if (DocumentBase *document = document_for(path)) {
 		save_documents({document->path()}, true);
-	} else if (view_.project_open) {
+	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
 		if (path.empty()) core_.refuse_now("document.not_open", "Open a file before saving it.");
 		else rewrite_file(path);
@@ -450,7 +461,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 			    (document->dirty() || (rewrite && document->rewrite_need() != DocumentBase::RewriteNeed::None)))
 				writes.push_back(document.get());
 	if (writes.empty()) {
-		view_.status = paths.size() == 1 ? paths.front() + " has no changes to save." : "No file has unsaved changes.";
+		view_.activity.status = paths.size() == 1 ? paths.front() + " has no changes to save." : "No file has unsaved changes.";
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
@@ -474,7 +485,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	core_.refresh();
 	// Reported after the refresh, which rebuilds the Problems rows.
 	for (const Diagnostic &d : failures) core_.report(d);
-	view_.status = "Saved " + std::to_string(saved) + " file(s)" +
+	view_.activity.status = "Saved " + std::to_string(saved) + " file(s)" +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
 	core_.touch(ViewConcern::Output);
 	return failures.empty();
@@ -494,19 +505,19 @@ void DocumentSet::rewrite_file(const std::string &path) {
 	const std::shared_ptr<DocumentBase> document = load(relative, asset->kind, error);
 	if (!document) return core_.report(error);
 	if (document->rewrite_need() == DocumentBase::RewriteNeed::None) {
-		view_.status = relative + " has no changes to save.";
+		view_.activity.status = relative + " has no changes to save.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
 	if (!document->save(error)) { // one that does not serialize says why here
 		core_.report(error);
-		view_.status = relative + " could not be saved: see Problems.";
+		view_.activity.status = relative + " could not be saved: see Problems.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
 	core_.note("Saved " + relative);
 	core_.refresh();
-	view_.status = "Saved 1 file(s).";
+	view_.activity.status = "Saved 1 file(s).";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -566,13 +577,14 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 	const Document *records = records_of(document);
 	NodeAddress owner;
 	Document::Placement at;
-	if (records && document.path() == view_.active_document && records->placement(view_.selection, at))
+	if (records && document.path() == view_.documents.active &&
+	    records->placement(view_.documents.selection, at))
 		owner = at.owner;
 	Diagnostic error;
 	const uint64_t before = document.revision();
-	const std::string active = view_.active_document;
-	const NodeAddress primary = view_.selection;
-	const std::vector<NodeAddress> selected = view_.selected;
+	const std::string active = view_.documents.active;
+	const NodeAddress primary = view_.documents.selection;
+	const std::vector<NodeAddress> selected = view_.documents.selected;
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
 	if (!document.apply(edits, error)) {
@@ -588,11 +600,12 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 	}
 	if (adds && document.revision() != before) {
 		activate(document.path()); // what an edit adds is selected, in its own document
-		if (records) view_.select_added(*records);
+		if (records) view_.documents.select_added(*records);
 	} else if (records) {
-		view_.repair_selection(*records, owner);
+		view_.documents.repair_selection(*records, owner);
 	}
-	if (view_.active_document != active || view_.selection != primary || view_.selected != selected)
+	if (view_.documents.active != active || view_.documents.selection != primary ||
+			view_.documents.selected != selected)
 		core_.touch(ViewConcern::Selection);
 	update_view();
 	// A Move that leaves a record where it is changes nothing to validate; a gesture's
@@ -601,7 +614,7 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 		if (gesture) gesture_validation_due_ = true;
 		else core_.problems().validate_later();
 	}
-	view_.status = "Edited " + document.path() + ".";
+	view_.activity.status = "Edited " + document.path() + ".";
 	core_.touch(ViewConcern::Output);
 	return true;
 }
@@ -609,17 +622,17 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 void DocumentSet::copy_records(Document &document, bool cut) {
 	last_edit_ok_ = false;
 	const std::vector<NodeAddress> records =
-	        document.path() == view_.active_document ? document.outermost(view_.selected) : std::vector<NodeAddress>();
+	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now("document.copy", "Select the records to copy first.", document.path());
 	std::string payload = document.copy(records);
 	if (payload.empty())
 		return core_.refuse_now("document.copy", "These records cannot be copied.", document.path());
-	view_.clipboard = std::move(payload);
+	view_.documents.clipboard = std::move(payload);
 	core_.touch(ViewConcern::Selection);
 	if (!cut) {
 		last_edit_ok_ = true;
-		view_.status = "Copied " + std::to_string(records.size()) + " record(s).";
+		view_.activity.status = "Copied " + std::to_string(records.size()) + " record(s).";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
@@ -630,26 +643,26 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 		edit.address = record;
 		removes.push_back(edit);
 	}
-	if (apply_edits(document, removes)) view_.status = "Cut " + std::to_string(records.size()) + " record(s).";
+	if (apply_edits(document, removes)) view_.activity.status = "Cut " + std::to_string(records.size()) + " record(s).";
 }
 
 void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 	last_edit_ok_ = false;
-	if (view_.clipboard.empty())
+	if (view_.documents.clipboard.empty())
 		return core_.refuse_now("document.paste", "The clipboard is empty: copy records first.", document.path());
 	Edit edit;
 	edit.operation = EditOperation::Paste;
 	edit.address.row = target.row;
 	edit.parent = target.parent;
 	edit.position = target.position;
-	edit.value = view_.clipboard;
+	edit.value = view_.documents.clipboard;
 	if (!target.named()) {
 		// No target named: beside the selected record (the one position rule, position_after), or
 		// into the selected row, at its end.
-		if (document.path() != view_.active_document || !view_.selection.row)
+		if (document.path() != view_.documents.active || !view_.documents.selection.row)
 			return core_.refuse_now("document.paste", "Select where to paste.", document.path());
-		edit.address.row = view_.selection.row;
-		if (!view_.selection.child || !position_after(document, view_.selection, edit.parent, edit.position)) {
+		edit.address.row = view_.documents.selection.row;
+		if (!view_.documents.selection.child || !position_after(document, view_.documents.selection, edit.parent, edit.position)) {
 			edit.parent = 0;
 			edit.position = SIZE_MAX;
 		}
@@ -663,7 +676,7 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 void DocumentSet::duplicate_records(Document &document) {
 	last_edit_ok_ = false;
 	const std::vector<NodeAddress> records =
-	        document.path() == view_.active_document ? document.outermost(view_.selected) : std::vector<NodeAddress>();
+	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now("document.duplicate", "Select the records to duplicate first.", document.path());
 	if (!records.front().child) {
@@ -673,7 +686,7 @@ void DocumentSet::duplicate_records(Document &document) {
 		edit.address = records.front();
 		NodeId rows = 0;
 		position_after(document, edit.address, rows, edit.position);
-		if (apply_edits(document, {edit})) view_.status = "Duplicated a record.";
+		if (apply_edits(document, {edit})) view_.activity.status = "Duplicated a record.";
 		return;
 	}
 	// In document order; a copy lands after its original, so the originals after it in the
@@ -707,7 +720,7 @@ void DocumentSet::duplicate_records(Document &document) {
 		edit.position += before;
 		edits.push_back(edit);
 	}
-	if (apply_edits(document, edits)) view_.status = "Duplicated " + std::to_string(edits.size()) + " record(s).";
+	if (apply_edits(document, edits)) view_.activity.status = "Duplicated " + std::to_string(edits.size()) + " record(s).";
 }
 
 } // namespace opennova::editor

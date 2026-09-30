@@ -21,29 +21,29 @@ RenameController::RenameController(SessionCore &core) : core_(core), view_(core.
 // reaches here with them: it waits on the unsaved prompt first (UnsavedGuard), whose Save
 // writes them.
 void RenameController::rename_asset(const std::string &file, const std::string &new_name) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	DocumentSet &documents = core_.documents();
 	// The plan reads the graph: its rows validate first (`validates`, request_kinds.cpp), so an
 	// edit a held pump made reaches it (and the Problems rows), and a reference it added is
 	// planned or refused like any other.
-	const RenamePlan plan = plan_rename(paths_, view_.scan, core_.problems().graph(), file, new_name);
+	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
 	if (!plan.ok()) {
 		for (const Diagnostic &d : plan.refusals) core_.report(d);
-		view_.status = "The rename was refused.";
+		view_.activity.status = "The rename was refused.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
 	std::vector<Diagnostic> findings;
-	const bool ok = apply_rename(paths_, view_.document, view_.scan, core_.problems().graph(), plan, findings);
+	const bool ok = apply_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, findings);
 	std::vector<std::string> reload;
 	for (const RenameSite &site : plan.sites)
 		if (documents.document_for(site.file) && std::find(reload.begin(), reload.end(), site.file) == reload.end()) reload.push_back(site.file);
 	// The document the modder was in stays active through the closes and reloads below
 	// (the renamed file's own document follows it to the new name). A reloaded document
 	// holds new records, so only an untouched one keeps its selection.
-	std::string active = view_.active_document;
-	const NodeAddress selection = view_.selection;
-	const std::vector<NodeAddress> selected = view_.selected;
+	std::string active = view_.documents.active;
+	const NodeAddress selection = view_.documents.selection;
+	const std::vector<NodeAddress> selected = view_.documents.selected;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	// A refused commit leaves the file where it was: its open document stays.
 	DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
@@ -54,7 +54,7 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 		core_.refresh();
 		documents.open_document(request::open_document(plan.new_path));
 		if (was_active) {
-			active = view_.active_document;
+			active = view_.documents.active;
 			keep_selection = false;
 		}
 	}
@@ -64,8 +64,8 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
 	if (active_open) {
 		documents.activate(active);
-		view_.select_only(keep_selection ? selection : NodeAddress());
-		if (keep_selection) view_.selected = selected;
+		view_.documents.select_only(keep_selection ? selection : NodeAddress());
+		if (keep_selection) view_.documents.selected = selected;
 		documents.select_first_screen();
 	}
 	// Reported last: the refresh and the reloads above rebuild the Problems rows.
@@ -73,9 +73,9 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	if (ok) {
 		core_.note("Renamed " + plan.old_name + " to " + plan.new_name + " (" + std::to_string(plan.sites.size()) +
 		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten)");
-		view_.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
+		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
 	} else {
-		view_.status = "The rename did not finish.";
+		view_.activity.status = "The rename did not finish.";
 	}
 	core_.touch(ViewConcern::Selection); // the active document and its selection, kept or started over
 	core_.touch(ViewConcern::Output);
@@ -90,7 +90,7 @@ bool RenameController::saved_file_uses(const std::string &path, const SymbolRena
 	const AssetEntry *asset = core_.project_file(path);
 	Extracted saved;
 	Diagnostic error;
-	if (!renamed || renamed->inert || !asset || !extract_from_asset(paths_, view_.document, *asset, saved, error)) return false;
+	if (!renamed || renamed->inert || !asset || !extract_from_asset(paths_, *view_.project.document, *asset, saved, error)) return false;
 	for (const GraphEdge &edge : saved.edges)
 		if (edge.kind == plan.kind && graph.resolve_symbol(edge.kind, edge.value, edge.scope) == renamed) return true;
 	return false;
@@ -111,24 +111,25 @@ SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
 		                                        request.path, request.field));
 		return none;
 	}
-	return plan_symbol_rename_project(view_.scan, graph, *symbol, request.new_name);
+	return plan_symbol_rename_project(*view_.project.scan, graph, *symbol, request.new_name);
 }
 
 // What a rename would do, planned into the view (nothing written, nothing reported): a name's
 // rename everywhere, or a file's (no field). Its row validates first: the plan reads the graph.
+// One that asks the new name (ask_name) posts an AskRename event naming the preview by its
+// serial: the Rename everywhere dialog opens on it.
 void RenameController::preview(const EditorRequest &request) {
-	if (!view_.project_open) return;
-	SessionView::RenamePreview preview;
-	preview.serial = view_.rename_preview.serial + 1;
-	preview.ask_serial = view_.rename_preview.ask_serial + (request.ask_name ? 1 : 0);
+	if (!view_.project.open) return;
+	DialogsView::RenamePreview preview;
+	preview.serial = view_.dialogs.rename_preview.serial + 1;
 	preview.requested = request.new_name;
 	if (request.field.empty()) {
 		const RenamePlan plan =
-		        plan_rename(paths_, view_.scan, core_.problems().graph(), request.path, request.new_name);
+		        plan_rename(paths_, *view_.project.scan, core_.problems().graph(), request.path, request.new_name);
 		preview.path = plan.path.empty() ? request.path : plan.path;
 		preview.old_name = plan.old_name;
 		preview.new_name = plan.new_name;
-		preview.sites = plan.sites;
+		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
 		preview.refusals = plan.refusals;
 	} else {
 		SymbolRenamePlan plan = plan_symbol(request);
@@ -139,7 +140,7 @@ void RenameController::preview(const EditorRequest &request) {
 			        core_.documents().documents();
 			std::vector<std::shared_ptr<const DocumentBase>> open(documents.begin(),
 			                                                      documents.end());
-			check_symbol_rename(paths_, view_.document, view_.scan, core_.problems().graph(), plan, open, plan.refusals);
+			check_symbol_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, open, plan.refusals);
 		}
 		preview.symbol = true;
 		preview.kind = plan.kind;
@@ -148,10 +149,19 @@ void RenameController::preview(const EditorRequest &request) {
 		preview.field = request.field;
 		preview.old_name = plan.old_name;
 		preview.new_name = plan.new_name;
-		preview.sites = plan.sites;
+		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
 		preview.refusals = plan.refusals;
 	}
-	view_.rename_preview = std::move(preview);
+	view_.dialogs.rename_preview = std::move(preview);
+	if (request.ask_name) {
+		const DialogsView::RenamePreview &made = view_.dialogs.rename_preview;
+		ViewEvent ask;
+		ask.kind = ViewEventKind::AskRename;
+		ask.path = made.path;
+		ask.field = made.field;
+		ask.tag = made.serial;
+		view_.events.post(std::move(ask));
+	}
 	core_.touch(ViewConcern::Dialogs);
 }
 
@@ -160,35 +170,35 @@ void RenameController::preview(const EditorRequest &request) {
 // unsaved edits never reaches here with them: it waits on the unsaved prompt first
 // (UnsavedGuard), whose Save writes them.
 void RenameController::rename_symbol(const EditorRequest &request) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	DocumentSet &documents = core_.documents();
 	const SymbolRenamePlan plan = plan_symbol(request);
 	if (!plan.ok()) {
 		for (const Diagnostic &d : plan.refusals) core_.report(d);
-		view_.status = "The rename was refused.";
+		view_.activity.status = "The rename was refused.";
 		core_.touch(ViewConcern::Output);
 		return;
 	}
 	std::vector<Diagnostic> findings;
-	const bool ok = apply_symbol_rename(paths_, view_.document, view_.scan, core_.problems().graph(), plan, findings);
+	const bool ok = apply_symbol_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, findings);
 	std::vector<std::string> reload;
 	for (const RenameSite &site : plan.sites)
 		if (documents.document_for(site.file) && std::find(reload.begin(), reload.end(), site.file) == reload.end()) reload.push_back(site.file);
 	// The document the modder was in stays active; one read again holds new records, so only an
 	// untouched one keeps its selection.
-	const std::string active = view_.active_document;
-	const NodeAddress selection = view_.selection;
-	const std::vector<NodeAddress> selected = view_.selected;
+	const std::string active = view_.documents.active;
+	const NodeAddress selection = view_.documents.selection;
+	const std::vector<NodeAddress> selected = view_.documents.selected;
 	const bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	core_.refresh();
 	for (const std::string &path : reload) documents.open_document(request::reload_document(path));
 	if (!active.empty() && documents.document_for(active)) {
 		documents.activate(active);
-		view_.select_only(keep_selection ? selection : NodeAddress());
-		if (keep_selection) view_.selected = selected;
+		view_.documents.select_only(keep_selection ? selection : NodeAddress());
+		if (keep_selection) view_.documents.selected = selected;
 		// The renamed definition selected again where it was, its field shown.
 		if (!keep_selection && active == plan.file)
-			if (Document *defining = documents.records_for(active)) view_.select_only(defining->address_at(plan.locator));
+			if (Document *defining = documents.records_for(active)) view_.documents.select_only(defining->address_at(plan.locator));
 		documents.select_first_screen();
 	}
 	for (const Diagnostic &d : findings) core_.report(d);
@@ -196,9 +206,10 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 		const size_t uses = plan.sites.size() - 1;
 		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
 		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)");
-		view_.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
+		view_.activity.status =
+				"Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
 	} else {
-		view_.status = "The rename did not finish.";
+		view_.activity.status = "The rename did not finish.";
 	}
 	core_.touch(ViewConcern::Selection); // the active document and its selection, kept or started over
 	core_.touch(ViewConcern::Output);
@@ -207,7 +218,7 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 // A requirement satisfied by renaming a project file of the expected kind to the name
 // the engine demands.
 void RenameController::assign_requirement(const std::string &role, const std::string &file) {
-	if (!view_.project_open) return;
+	if (!view_.project.open) return;
 	const RequirementRow *row = core_.requirement_row(role);
 	if (!row) {
 		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.unknown", "No requirement has the role '" + role + "'."));
@@ -244,7 +255,7 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		// stopped naming it would leave the saved use behind); none when the plan is refused
 		// anyway (the rename then says why, with nothing to save first). Saved, the rename is
 		// planned again.
-		if (view_.project_open && documents.documents_dirty()) {
+		if (view_.project.open && documents.documents_dirty()) {
 			const SymbolRenamePlan plan = plan_symbol(request);
 			if (!plan.ok()) return;
 			for (const auto &document : documents.documents()) {
@@ -272,9 +283,9 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 // save first). The plan reads the graph: an edit a held pump made first reaches it.
 void RenameController::rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project_open || !documents.documents_dirty()) return;
+	if (!view_.project.open || !documents.documents_dirty()) return;
 	core_.problems().validate_pending();
-	const RenamePlan plan = plan_rename(paths_, view_.scan, core_.problems().graph(), file, new_name);
+	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
 	if (!plan.ok()) return;
 	for (const auto &document : documents.documents()) {
 		if (!document->dirty()) continue;

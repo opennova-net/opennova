@@ -23,7 +23,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/pff/pff.h>
 
 #include "commands.h"
@@ -433,7 +433,7 @@ static int test_validate_matches_the_editor() {
 	session.handle(opennova::editor::request::open_project(root));
 	std::vector<std::string> shown;
 	bool render_note = false;
-	for (const opennova::editor::Diagnostic &d : session.view().diagnostics) {
+	for (const opennova::editor::Diagnostic &d : session.view().findings.diagnostics) {
 		shown.push_back(printed(d));
 		render_note = render_note || d.code.rfind("menu.render.", 0) == 0;
 	}
@@ -477,14 +477,14 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(root));
-		TEST_EXPECT(session.project_open() && session.view().retail_directory.empty());
+		TEST_EXPECT(session.project_open() && session.view().project.retail_directory.empty());
 		opennova::editor::EditorRequest apply =
 		        opennova::editor::request::of(opennova::editor::EditorRequestKind::ApplyProjectSettings);
 		fs::current_path(dir.path, ec);
 		TEST_EXPECT(!ec);
 		apply.settings.game_install = "art/../Joint Ops"; // from the editor's working directory
 		session.handle(apply);
-		TEST_EXPECT(session.view().retail_directory == install && session.view().settings_result.failures.empty());
+		TEST_EXPECT(session.view().project.retail_directory == install && session.view().project.settings_result.failures.empty());
 	}
 	// The command line elsewhere.
 	fs::current_path(root, ec);
@@ -504,7 +504,7 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(other));
-		TEST_EXPECT(session.project_open() && session.view().retail_directory == install);
+		TEST_EXPECT(session.project_open() && session.view().project.retail_directory == install);
 	}
 	TEST_EXPECT(run_capture(capture, {"status", other}, text) == 0 && has("game install: " + install + "\n"));
 	return 0;
@@ -539,7 +539,7 @@ static int test_older_local_settings() {
 		warnings += d.code == "local_settings.schema_version.unsupported" &&
 				d.severity == opennova::editor::DiagnosticSeverity::Warning;
 	TEST_EXPECT(session.project_open() && session.outcome().done() && warnings == 1 &&
-			session.view().retail_directory.empty());
+			session.view().project.retail_directory.empty());
 	opennova::editor::ProjectSettingsChange change;
 	change.game_install = install;
 	session.handle(opennova::editor::request::apply_project_settings(change));

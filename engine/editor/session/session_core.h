@@ -13,8 +13,8 @@
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_revisions.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/view_revisions.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -96,11 +96,11 @@ public:
 	const ActionOutcome &outcome() const { return outcome_; }
 	ActionOutcome &outcome() { return outcome_; }
 
-	// A change of `concern` in the view: its counter and `any` move (session_revisions.h), and the
+	// A change of `concern` in the view: its counter and `any` move (view_revisions.h), and the
 	// previews follow the active document and the selection. The only way the session moves a
 	// counter.
 	void touch(ViewConcern concern) {
-		view_.update_previews();
+		view_.documents.update_previews();
 		view_.revisions.touch(concern);
 	}
 	// A line in Output.

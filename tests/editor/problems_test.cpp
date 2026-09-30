@@ -28,13 +28,13 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
-#include <editor/session/findings_index.h>
+#include <editor/session/view/findings_index.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -93,7 +93,7 @@ std::vector<std::string> labels_of(const std::vector<ProblemFix> &fixes) {
 
 // The session's finding of `code` about the requirement `role`.
 const Diagnostic *requirement_finding(const SessionView &view, const char *code, const char *role) {
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == code && d.role == role) return &d;
 	return nullptr;
 }
@@ -113,12 +113,12 @@ std::shared_ptr<const Document> menu_document(const editor_test::TempProjectDir 
 static int test_query() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_query");
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	const auto a = menu_document(dir, "a.mnu", "menus/a.mnu");
 	const auto b = menu_document(dir, "b.mnu", "menus/b.mnu");
 	TEST_EXPECT(a && b);
-	view.documents = {a, b};
-	view.active_document = "menus/a.mnu";
+	view.documents.open = {a, b};
+	view.documents.active = "menus/a.mnu";
 	Diagnostic font = finding(DiagnosticSeverity::Error, "reference.missing", "'MAIN' in b.mnu names the font 'nofont.fnt'.",
 	                          "menus/b.mnu", "B/MAIN", "font.name");
 	font.reference = ReferenceKind::Font;
@@ -126,7 +126,7 @@ static int test_query() {
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	required.role = "gametext";
 	required.target = "gametext.bin";
-	view.diagnostics = {
+	view.findings.diagnostics = {
 		finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows are named GO.", "menus/a.mnu", "A/MAIN/GO", "name"),
 		required,
 		finding(DiagnosticSeverity::Info, "style.unused", "Nothing uses it.", "menus/menu_style.mns", "DEF_ONLY"),
@@ -193,7 +193,7 @@ static int test_query() {
 	TEST_EXPECT(files.groups[3].key == "menus/a.mnu" && files.groups[4].key == "defs/items.def");
 	TEST_EXPECT(files.rows == std::vector<size_t>({1, 3, 4, 2, 0, 5}));
 	// By kind: the code's family, titled in plain words (a family the table lacks, its own name).
-	view.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "rename.exists", "The project already has x.tga."));
+	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "rename.exists", "The project already has x.tga."));
 	view.revisions.touch(ViewConcern::Findings);
 	query.grouping = ProblemGrouping::Kind;
 	const ProblemAnswer kinds = answer_problems(query, view);
@@ -216,7 +216,7 @@ static int test_query() {
 	ProblemQueryCache cache;
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
 	const uint64_t made = cache.generation();
-	view.diagnostics.pop_back();
+	view.findings.diagnostics.pop_back();
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7 && cache.generation() == made);
 	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6 &&
@@ -253,7 +253,7 @@ static int test_fixes() {
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Fixes"));
 	const SessionView &v = session.view();
-	const std::string root = v.project_root;
+	const std::string root = v.project.root;
 	blank.logical_name = "spare.bin";
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
 	TEST_EXPECT(editor_test::write_bytes(root + "/strings/spare.bin", table) && editor_test::write_bytes(root + "/strings/other.bin", table));
@@ -383,7 +383,8 @@ static int test_fixes() {
 	Diagnostic table_ref = font;
 	table_ref.reference = ReferenceKind::TextTable;
 	table_ref.target = "foo.bin";
-	TEST_EXPECT(v.scan.find("foo.bin") && v.scan.find("foo.bin")->kind == AssetKind::RawBin);
+	TEST_EXPECT(v.project.scan->find("foo.bin") &&
+			v.project.scan->find("foo.bin")->kind == AssetKind::RawBin);
 	TEST_EXPECT(fixes_for(table_ref, v).empty() && !has_fixes(table_ref, v));
 	table_ref.target = "freshtable.bin";
 	TEST_EXPECT(labels_of(fixes_for(table_ref, v)) == std::vector<std::string>({"Create freshtable.bin"}));
@@ -430,7 +431,7 @@ static int test_fixes() {
 	const Diagnostic other = make_diagnostic(DiagnosticSeverity::Error, "menu.duplicate_window", "Two windows.", "menus/a.mnu");
 	TEST_EXPECT(fixes_for(other, v).empty() && bulk_fixes_for(other, v).empty());
 	size_t bulk_seen = 0;
-	for (const Diagnostic &d : v.diagnostics) {
+	for (const Diagnostic &d : v.findings.diagnostics) {
 		TEST_EXPECT(has_fixes(d, v) == !fixes_for(d, v).empty());
 		std::vector<std::string> bulk;
 		for (const ProblemFix &fix : fixes_for(d, v))
@@ -453,18 +454,18 @@ static int test_fixes() {
 // input that a rewrite drops keeps its Rewrite.
 static int test_rewrite_unserializable() {
 	SessionView view;
-	view.project_open = true;
-	view.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/weapon.def"),
+	view.project.open = true;
+	view.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/weapon.def"),
 	                    finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/weapon.def"),
 	                    finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "A key the game ignores.", "defs/ammo.def"),
 	                    finding(DiagnosticSeverity::Warning, "strings.regrouped", "A section read twice.", "strings/menu.bin"),
 	                    finding(DiagnosticSeverity::Error, "strings.invalid_input", "A string it cannot hold.", "strings/menu.bin")};
 	for (const size_t blocked : {size_t(0), size_t(3)}) {
-		const Diagnostic &d = view.diagnostics[blocked];
+		const Diagnostic &d = view.findings.diagnostics[blocked];
 		TEST_EXPECT(fixes_for(d, view).empty() && !has_fixes(d, view) && bulk_fixes_for(d, view).empty());
 	}
-	TEST_EXPECT(labels_of(fixes_for(view.diagnostics[2], view)) == std::vector<std::string>({"Rewrite ammo.def"}));
-	TEST_EXPECT(bulk_fixes_for(view.diagnostics[2], view).size() == 1 && has_fixes(view.diagnostics[2], view));
+	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite ammo.def"}));
+	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1 && has_fixes(view.findings.diagnostics[2], view));
 	ProblemQuery fixable;
 	fixable.fixable = true;
 	const ProblemAnswer answer = answer_problems(fixable, view);
@@ -478,8 +479,8 @@ static int test_rewrite_unserializable() {
 // cache's generation (which a reader of the fixes follows) moving once.
 static int test_fix_cache() {
 	SessionView view;
-	view.project_open = true;
-	view.diagnostics = {finding(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/menu_style.mns"),
+	view.project.open = true;
+	view.findings.diagnostics = {finding(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/menu_style.mns"),
 	                    finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows.", "menus/a.mnu")};
 	ProblemFixCache cache;
 	const uint64_t started = cache.generation(view);
@@ -487,7 +488,7 @@ static int test_fix_cache() {
 	TEST_EXPECT(first->size() == 1 && (*first)[0].label == "Rewrite menu_style.mns");
 	TEST_EXPECT(cache.fixes(view, 1).empty() && cache.fixes(view, 7).empty());
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
-	view.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
+	view.findings.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
 	TEST_EXPECT(cache.fixes(view, 0).size() == 1 && cache.generation(view) == started);
 	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.fixes(view, 0).empty() && cache.generation(view) == started + 1);
@@ -537,7 +538,7 @@ static int test_merge() {
 // list as a path.
 static int test_location() {
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	const auto entry = [](const char *name, const char *path, AssetKind kind) {
 		AssetEntry asset;
 		asset.logical_name = name;
@@ -545,9 +546,9 @@ static int test_location() {
 		asset.kind = kind;
 		return asset;
 	};
-	view.scan.entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImageSource),
+	editor_test::own(view.project.scan).entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImageSource),
 	                     entry("Arial14b.fnt", "fonts/Arial14b.fnt", AssetKind::Font)};
-	view.scan.index();
+	editor_test::own(view.project.scan).index();
 	Diagnostic required = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");
 	required.role = "main_menu";
 	required.target = "main.mnu";
@@ -591,7 +592,7 @@ static int test_location() {
 // it, so a .tga is no .pcx), an optional one none, the same file there.
 static int test_use_required_only() {
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	const auto row = [](const char *role, const char *name, bool required) {
 		RequirementRow out;
 		out.role = role;
@@ -601,22 +602,22 @@ static int test_use_required_only() {
 		out.state = RequirementState::Missing;
 		return out;
 	};
-	view.requirements.rows = {row("test_screen", "screen.pcx", true), row("test_splash", "splash.pcx", false)};
+	editor_test::own(view.project.requirements).rows = {row("test_screen", "screen.pcx", true), row("test_splash", "splash.pcx", false)};
 	for (const char *name : {"art.tga", "art.pcx"}) {
 		AssetEntry entry;
 		entry.logical_name = name;
 		entry.relative_path = std::string("art/") + name;
 		entry.kind = AssetKind::Texture;
-		view.scan.entries.push_back(entry);
+		editor_test::own(view.project.scan).entries.push_back(entry);
 	}
-	view.scan.index();
+	editor_test::own(view.project.scan).index();
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file screen.pcx.");
 	required.role = "test_screen";
 	required.target = "screen.pcx";
 	Diagnostic optional = finding(DiagnosticSeverity::Info, "requirement.optional_missing", "Optional file splash.pcx.");
 	optional.role = "test_splash";
 	optional.target = "splash.pcx";
-	view.diagnostics = {required, optional};
+	view.findings.diagnostics = {required, optional};
 	TEST_EXPECT(labels_of(fixes_for(required, view)) == std::vector<std::string>({"Use art.pcx as screen.pcx"}));
 	TEST_EXPECT(fixes_for(optional, view).empty() && !has_fixes(optional, view) && bulk_fixes_for(optional, view).empty());
 	return 0;
@@ -628,17 +629,17 @@ static int test_use_required_only() {
 // findings, one of whose files does not serialize.
 static int test_fix_index() {
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	for (size_t i = 0; i < 3000; ++i) {
 		const std::string file = "defs/f" + std::to_string(i % 30) + ".def";
-		view.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "An unknown key.", file.c_str()));
+		view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "catalog.ignored_input", "An unknown key.", file.c_str()));
 	}
-	view.diagnostics.push_back(finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/f7.def"));
+	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Error, "catalog.unserializable", "It cannot be written.", "defs/f7.def"));
 	const ProblemFixIndex index(view);
 	TEST_EXPECT(index.unserializable.size() == 1 && index.unserializable.count("defs/f7.def"));
 	ProblemFixCache cache;
 	for (size_t i : {size_t(0), size_t(7), size_t(8), size_t(37), size_t(2999), size_t(3000)}) {
-		const Diagnostic &d = view.diagnostics[i];
+		const Diagnostic &d = view.findings.diagnostics[i];
 		const bool fixable = d.asset != "defs/f7.def" && d.code == "catalog.ignored_input";
 		TEST_EXPECT(has_fixes(d, view) == fixable && has_fixes(d, view, &index) == fixable);
 		TEST_EXPECT(labels_of(fixes_for(d, view, &index)) == labels_of(fixes_for(d, view)));
@@ -668,7 +669,7 @@ static int test_placeholders() {
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Placeholders"));
 	const SessionView &v = session.view();
-	const std::string root = v.project_root;
+	const std::string root = v.project.root;
 	// armory.3di names armry.tga on a diffuse row (type 0); c.mnu an image, fx.ptl a graphic.
 	const fs::path model = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "synth" / "armory.3di";
 	std::error_code ec;
@@ -684,7 +685,7 @@ static int test_placeholders() {
 	                                                      "\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
 	session.handle(request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
-		for (const Diagnostic &d : v.diagnostics)
+		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code == "reference.missing" && d.reference == kind && d.target == target) return &d;
 		return nullptr;
 	};
@@ -765,7 +766,7 @@ static int test_placeholders() {
 	if (!skin) return 1;
 	session.handle(fixes_for(*skin, v).front().request);
 	TEST_EXPECT(session.outcome().done());
-	const AssetEntry *made = v.scan.find("armry.tga");
+	const AssetEntry *made = v.project.scan->find("armry.tga");
 	TEST_EXPECT(made && made->kind == AssetKind::Texture && made->relative_path == "armry.tga");
 	BlankRequest blank;
 	blank.logical_name = "armry.tga";
@@ -774,16 +775,16 @@ static int test_placeholders() {
 	TEST_EXPECT(make_blank(blank, AssetKind::Texture, checkerboard, error) && test_io::read_file(root + "/armry.tga") == checkerboard);
 	TEST_EXPECT(missing(ReferenceKind::Texture, "armry.tga") == nullptr);
 	bool found = false;
-	for (const GraphEdge *edge : v.graph->references_of("models/armory.3di")) {
+	for (const GraphEdge *edge : v.findings.graph->references_of("models/armory.3di")) {
 		if (edge->kind != ReferenceKind::Texture || edge->value != "armry.tga") continue;
 		std::string file;
-		TEST_EXPECT(v.graph->resolve(*edge, &file) == ReferenceStatus::Present && file == "armry.tga");
+		TEST_EXPECT(v.findings.graph->resolve(*edge, &file) == ReferenceStatus::Present && file == "armry.tga");
 		found = true;
 	}
 	TEST_EXPECT(found);
 	// The Build packs it into an archive under its name.
 	bool packed = false;
-	for (const BuildArchive &archive : plan_build(ProjectPaths::for_root(root), v.scan, v.requirements, {}).archives)
+	for (const BuildArchive &archive : plan_build(ProjectPaths::for_root(root), *v.project.scan, *v.project.requirements, {}).archives)
 		for (const BuildEntry &entry : archive.entries) packed = packed || entry.logical_name == "armry.tga";
 	TEST_EXPECT(packed);
 	return 0;
@@ -793,11 +794,11 @@ static int test_placeholders() {
 // (by kind: "Optional files"), so a group of notes alone can fold away from the errors.
 static int test_optional_group() {
 	SessionView view;
-	view.project_open = true;
+	view.project.open = true;
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
 	Diagnostic optional = finding(DiagnosticSeverity::Info, "requirement.optional_missing", "Optional file brand.mns.");
 	Diagnostic wrong = finding(DiagnosticSeverity::Error, "requirement.wrong_kind", "main.mnu is not a menu.", "menus/main.mnu");
-	view.diagnostics = {optional, required, wrong};
+	view.findings.diagnostics = {optional, required, wrong};
 	ProblemQuery query;
 	query.grouping = ProblemGrouping::Kind;
 	const ProblemAnswer kinds = answer_problems(query, view);
@@ -839,9 +840,9 @@ static int test_locations_and_fixes() {
 	editor_test::create_missing_files(session);
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
-	const std::string root = v.project_root;
-	const AssetEntry *items_entry = v.scan.find("items.def");
-	const AssetEntry *gameerr_entry = v.scan.find("gameerr.bin");
+	const std::string root = v.project.root;
+	const AssetEntry *items_entry = v.project.scan->find("items.def");
+	const AssetEntry *gameerr_entry = v.project.scan->find("gameerr.bin");
 	TEST_EXPECT(items_entry && gameerr_entry);
 	if (!items_entry || !gameerr_entry) return 1;
 	const std::string items_path = items_entry->relative_path, gameerr_path = gameerr_entry->relative_path;
@@ -884,7 +885,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
 	session.handle(request::rescan());
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
-		for (const Diagnostic &d : v.diagnostics)
+		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code == code && d.asset == asset) return &d;
 		return nullptr;
 	};
@@ -902,7 +903,7 @@ static int test_locations_and_fixes() {
 	for (const Document::Collection &collection : menu->collections_of(main_window))
 		if (std::string(menu->kind_token(collection.spec.kind)) == "window" && collection.ids.size() == 2)
 			second_go = {main_window.row, collection.spec.kind, collection.ids[1]};
-	TEST_EXPECT(second_go.child && menu->record_name(second_go) == "GO" && v.selection == second_go);
+	TEST_EXPECT(second_go.child && menu->record_name(second_go) == "GO" && v.documents.selection == second_go);
 
 	// An ungrouped table: on the first string the game reads under another section.
 	const Diagnostic *regrouped = finding_in("strings.regrouped", "strings/ungrouped.bin");
@@ -910,7 +911,7 @@ static int test_locations_and_fixes() {
 	if (!regrouped) return 1;
 	session.handle(problem_location(*regrouped, v).request());
 	const Document *strings = session.document_for("strings/ungrouped.bin");
-	TEST_EXPECT(strings && v.active_document == strings->path() && strings->record_name(v.selection) == "MM_Cafe");
+	TEST_EXPECT(strings && v.documents.active == strings->path() && strings->record_name(v.documents.selection) == "MM_Cafe");
 
 	// A table with no anim_reset row: on its first row's key; the fix opens the table and adds
 	// the row, one step Undo takes back.
@@ -926,7 +927,7 @@ static int test_locations_and_fixes() {
 	Document *adm = session.document_for("anims/noreset.adm");
 	TEST_EXPECT(session.outcome().done() && adm && adm->dirty() && adm->rows().size() == 2);
 	if (!adm) return 1;
-	TEST_EXPECT(adm->record_name(v.selection) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
+	TEST_EXPECT(adm->record_name(v.documents.selection) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
 	session.handle(request::undo(adm->path()));
 	TEST_EXPECT(!adm->dirty() && finding_in("animation_map.no_reset", adm->path()));
 
@@ -940,7 +941,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(same_id && same_id->field == "id" && same_id->record == "Crate" &&
 	            same_id->severity == DiagnosticSeverity::Warning && same_id->message.find("\"Marker\"") != std::string::npos);
 	size_t catalog_findings = 0;
-	for (const Diagnostic &d : v.diagnostics)
+	for (const Diagnostic &d : v.findings.diagnostics)
 		catalog_findings += d.asset == items_path && (d.code == "catalog.name_duplicate" || d.code == "catalog.item_identity");
 	TEST_EXPECT(catalog_findings == 2); // on the later record alone
 
@@ -956,13 +957,19 @@ static int test_locations_and_fixes() {
 	if (fixes.size() != 1) return 1;
 	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::ShowInFiles && fixes[0].request.ask_name &&
 	            fixes[0].request.path == long_path && !fixes[0].bulk);
-	const uint64_t serial = v.reveal_file_serial;
+	// Each ask one RevealFile event, the same file asked again another: Files shows it again.
+	const uint64_t before = v.events.next_seq() - 1;
 	session.handle(fixes[0].request);
-	TEST_EXPECT(session.outcome().done() && v.reveal_file == long_path && v.reveal_file_rename && v.reveal_file_serial == serial + 1);
+	std::vector<ViewEvent> shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
+	TEST_EXPECT(session.outcome().done() && shown.size() == 1 && shown[0].path == long_path &&
+			shown[0].flag && !shown[0].address.row && shown[0].field.empty() && shown[0].tag == 0);
 	session.handle(request::show_in_files("a_name_too_long_for_archives.tga"));
-	TEST_EXPECT(v.reveal_file == long_path && !v.reveal_file_rename && v.reveal_file_serial == serial + 2);
+	shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
+	TEST_EXPECT(shown.size() == 2 && shown[1].path == long_path && !shown[1].flag &&
+			shown[1].seq == shown[0].seq + 1);
 	session.handle(request::show_in_files("nowhere.tga"));
-	TEST_EXPECT(!session.outcome().done() && v.reveal_file_serial == serial + 2);
+	TEST_EXPECT(!session.outcome().done() &&
+			editor_test::events_after(v, before, ViewEventKind::RevealFile).size() == 2);
 	const Diagnostic unstorable =
 	        make_diagnostic(DiagnosticSeverity::Error, "build.name_unstorable", "The name is too long.", long_path);
 	TEST_EXPECT(labels_of(fixes_for(unstorable, v)) == std::vector<std::string>({"Rename a_name_too_long_for_archives.tga..."}));
@@ -971,26 +978,28 @@ static int test_locations_and_fixes() {
 	// reaches the first, which the game finds: renaming the second rewrites nothing, and c.mnu
 	// still reaches the first.
 	std::string twin;
-	for (const Diagnostic &d : v.diagnostics)
+	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code == "asset.name.duplicate") twin = d.asset;
 	TEST_EXPECT(twin == "other/twin.tga");
 	Diagnostic duplicate = make_diagnostic(DiagnosticSeverity::Error, "asset.name.duplicate", "Two files.", twin);
 	fixes = fixes_for(duplicate, v);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.path == twin);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	const RenamePlan first_plan = plan_rename(paths, v.scan, *v.graph, "art/twin.tga", "twin3.tga");
+	const RenamePlan first_plan =
+			plan_rename(paths, *v.project.scan, *v.findings.graph, "art/twin.tga", "twin3.tga");
 	TEST_EXPECT(first_plan.ok() && first_plan.sites.size() == 1 && first_plan.sites[0].file == "menus/c.mnu");
-	const RenamePlan second_plan = plan_rename(paths, v.scan, *v.graph, twin, "twin2.tga");
+	const RenamePlan second_plan =
+			plan_rename(paths, *v.project.scan, *v.findings.graph, twin, "twin2.tga");
 	TEST_EXPECT(second_plan.ok() && second_plan.path == twin && second_plan.sites.empty());
 	session.handle(request::rename_asset(twin, "twin2.tga"));
 	const std::string moved = (fs::path(twin).parent_path() / "twin2.tga").generic_string();
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/" + moved) && !fs::exists(root + "/" + twin));
 	TEST_EXPECT(fs::exists(root + "/art/twin.tga") &&
-	            std::none_of(v.diagnostics.begin(), v.diagnostics.end(),
+	            std::none_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
 	                         [](const Diagnostic &d) { return d.code == "rename.partial"; }));
 	std::string c_menu, read_error;
 	TEST_EXPECT(read_file_text(root + "/menus/c.mnu", c_menu, read_error) && c_menu.find(">twin.tga<") != std::string::npos);
-	TEST_EXPECT(v.scan.find("twin.tga") && !finding_in("asset.name.duplicate", twin) && !finding_in("reference.missing", "menus/c.mnu"));
+	TEST_EXPECT(v.project.scan->find("twin.tga") && !finding_in("asset.name.duplicate", twin) && !finding_in("reference.missing", "menus/c.mnu"));
 
 	// A required name another kind of file holds: Import the game's own, or Rename that file
 	// (no Create or Use while the name is taken).
@@ -1009,7 +1018,7 @@ static int test_locations_and_fixes() {
 	Diagnostic style = make_diagnostic(DiagnosticSeverity::Warning, "reference.missing", "A variable.", "menus/a.mnu", "font.name");
 	style.reference = ReferenceKind::StyleVar;
 	style.target = "%NOPE%";
-	const AssetEntry *stylesheet = v.scan.find("menu_style.mns");
+	const AssetEntry *stylesheet = v.project.scan->find("menu_style.mns");
 	fixes = fixes_for(style, v);
 	TEST_EXPECT(stylesheet && labels_of(fixes) == std::vector<std::string>({"Open menu_style.mns"}));
 	if (!stylesheet || fixes.size() != 1) return 1;
@@ -1029,14 +1038,14 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(fixes_for(text_id, v).empty());
 	// A table of its kind that defines nothing yet: the one the game reads (a weapon table and
 	// a stylesheet emptied).
-	const AssetEntry *weapons = v.scan.find("weapon.def");
+	const AssetEntry *weapons = v.project.scan->find("weapon.def");
 	TEST_EXPECT(weapons != nullptr);
 	if (!weapons) return 1;
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
 	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
 	session.handle(request::rescan());
 	bool any = false;
-	v.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
+	v.findings.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
 		any = any ||
 				(symbol.kind == ReferenceKind::Weapon || symbol.kind == ReferenceKind::StyleVar);
 	});
@@ -1064,10 +1073,10 @@ static int test_findings_index() {
 		d.child_id = child;
 		return d;
 	};
-	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "project"),
-	                 on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"),
-	                 on("b.mnu", 5, 0, "other file"), on("a.mnu", 0, 0, "the file"),
-	                 on("a.mnu", 6, 7, "another row")};
+	v.findings.diagnostics = { make_diagnostic(
+									   DiagnosticSeverity::Error, "requirement.missing", "project"),
+		on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"), on("b.mnu", 5, 0, "other file"),
+		on("a.mnu", 0, 0, "the file"), on("a.mnu", 6, 7, "another row") };
 	FindingsIndex index;
 	index.follow(v);
 	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1, 2, 4, 5}));
@@ -1079,19 +1088,19 @@ static int test_findings_index() {
 	TEST_EXPECT(index.of_record("a.mnu", 9, 0).empty());
 	// Kept while the view and its findings stand; made again once the findings' counter moves,
 	// they are another count or elsewhere in memory, or for another view.
-	v.diagnostics[3].asset = "c.mnu"; // in place, unmarked
+	v.findings.diagnostics[3].asset = "c.mnu"; // in place, unmarked
 	index.follow(v);
 	TEST_EXPECT(index.of_file("b.mnu") == std::vector<size_t>({3}) &&
 	            index.of_file("c.mnu").empty());
-	v.diagnostics[3].asset = "b.mnu";
-	v.diagnostics.push_back(on("c.mnu", 1, 0, "later")); // unmarked, but one more
+	v.findings.diagnostics[3].asset = "b.mnu";
+	v.findings.diagnostics.push_back(on("c.mnu", 1, 0, "later")); // unmarked, but one more
 	index.follow(v);
 	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
 	v.revisions.touch(ViewConcern::Findings);
 	index.follow(v);
 	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
 	// Two findings left, asked before the index follows: what it names past them is left out.
-	v.diagnostics.resize(2);
+	v.findings.diagnostics.resize(2);
 	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
 	            index.of_file("c.mnu").empty());
 	TEST_EXPECT(index.of_record("a.mnu", 5, 0) == std::vector<size_t>({1}) &&
@@ -1100,7 +1109,7 @@ static int test_findings_index() {
 	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
 	            index.of_file("b.mnu").empty());
 	SessionView other = v;
-	other.diagnostics.clear();
+	other.findings.diagnostics.clear();
 	index.follow(other);
 	TEST_EXPECT(index.of_file("a.mnu").empty());
 	return 0;

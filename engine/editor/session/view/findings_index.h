@@ -8,7 +8,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/value.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -19,7 +19,7 @@ namespace opennova::editor {
 // leaves out any past their end, so an index the findings outran reads nothing.
 class FindingsIndex {
 public:
-	// What the index is kept by (session_revisions.h): the findings.
+	// What the index is kept by (view_revisions.h): the findings.
 	static RevisionKey cache_key(const SessionView &view) {
 		return revision_key(view.revisions, {ViewConcern::Findings});
 	}

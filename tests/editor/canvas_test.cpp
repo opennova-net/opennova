@@ -43,7 +43,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -915,8 +915,8 @@ ModelCanvasFrame model_frame(
 	frame.document = &document;
 	frame.model = &model;
 	frame.current = model.shown_revision() == document.revision();
-	if (frame.current && view.active_document == document.path())
-		model_overlay_of(document, view.selection, frame.selected_kind, frame.selected);
+	if (frame.current && view.documents.active == document.path())
+		model_overlay_of(document, view.documents.selection, frame.selected_kind, frame.selected);
 	frame.overlays = model.overlays();
 	return frame;
 }

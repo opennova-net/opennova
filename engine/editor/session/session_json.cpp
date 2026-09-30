@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <variant>
 
@@ -10,6 +11,10 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/graph/rename_transaction.h>
+#include <editor/import/import_plan.h>
+#include <editor/import/import_run.h>
+#include <editor/project_build/build_run.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_session.h>
 #include <editor/session/request_fields.h>
@@ -916,7 +921,7 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	}
 	JsonValue problems = JsonValue::make_array();
 	for (size_t i = first; i < last; ++i) {
-		JsonValue row = diagnostic_to_json(view.diagnostics[answer.rows[i]]);
+		JsonValue row = diagnostic_to_json(view.findings.diagnostics[answer.rows[i]]);
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));
@@ -976,22 +981,25 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		revisions.set(view_concern_token(concern), json_number(double(view.revisions.of(concern))));
 	}
 	out.set("revisions", std::move(revisions));
-	out.set("status", json_string(view.status));
+	out.set("status", json_string(view.activity.status));
 	// What waits on the unsaved-changes prompt, and the files its Save writes.
 	JsonValue prompt = JsonValue::make_object();
-	prompt.set("open", boolean(view.unsaved_prompt.open));
-	if (view.unsaved_prompt.open) {
-		prompt.set("action", json_string(editor_request_kind_token(view.unsaved_prompt.action)));
-		if (!view.unsaved_prompt.target.empty()) prompt.set("target", json_string(view.unsaved_prompt.target));
+	prompt.set("open", boolean(view.dialogs.unsaved_prompt.open));
+	if (view.dialogs.unsaved_prompt.open) {
+		prompt.set("action",
+				json_string(editor_request_kind_token(view.dialogs.unsaved_prompt.action)));
+		if (!view.dialogs.unsaved_prompt.target.empty())
+			prompt.set("target", json_string(view.dialogs.unsaved_prompt.target));
 		JsonValue files = JsonValue::make_array();
-		for (const std::string &file : view.unsaved_prompt.files) files.push(json_string(file));
+		for (const std::string &file : view.dialogs.unsaved_prompt.files)
+			files.push(json_string(file));
 		prompt.set("files", std::move(files));
-		prompt.set("can_discard", boolean(view.unsaved_prompt.can_discard));
+		prompt.set("can_discard", boolean(view.dialogs.unsaved_prompt.can_discard));
 	}
 	out.set("unsaved_prompt", std::move(prompt));
 	// What the last preview_rename planned: every site, before and after, and the refusals.
-	if (view.rename_preview.serial) {
-		const SessionView::RenamePreview &rename = view.rename_preview;
+	if (view.dialogs.rename_preview.serial) {
+		const DialogsView::RenamePreview &rename = view.dialogs.rename_preview;
 		JsonValue preview = JsonValue::make_object();
 		preview.set("serial", json_number(double(rename.serial)));
 		preview.set("symbol", boolean(rename.symbol));
@@ -1002,7 +1010,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		preview.set("old_name", json_string(rename.old_name));
 		preview.set("new_name", json_string(rename.new_name));
 		JsonValue sites = JsonValue::make_array();
-		for (const RenameSite &site : rename.sites) {
+		for (const RenameSite &site : *rename.sites) {
 			JsonValue entry = JsonValue::make_object();
 			entry.set("file", json_string(site.file));
 			if (!site.record.empty()) entry.set("record", json_string(site.record));
@@ -1017,30 +1025,30 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		preview.set("ok", boolean(rename.refusals.empty()));
 		out.set("rename_preview", std::move(preview));
 	}
-	// What the last apply_project_settings came to, under its serial.
+	// What the last apply_project_settings could not write (its settings_applied event says it
+	// came).
 	JsonValue settings_result = JsonValue::make_object();
-	settings_result.set("serial", json_number(double(view.settings_result.serial)));
-	settings_result.set("failures", diagnostics_to_json(view.settings_result.failures));
+	settings_result.set("failures", diagnostics_to_json(view.project.settings_result.failures));
 	out.set("settings_result", std::move(settings_result));
-	out.set("quit_requested", boolean(view.quit_requested));
+	out.set("quit_requested", boolean(view.dialogs.quit_requested));
 
 	JsonValue project = JsonValue::make_object();
-	project.set("open", boolean(view.project_open));
-	if (view.project_open) {
-		project.set("root", json_string(view.project_root));
-		project.set("title", json_string(view.document.title));
-		project.set("id", json_string(view.document.project_id));
-		project.set("target_game", json_string(view.document.target_game));
+	project.set("open", boolean(view.project.open));
+	if (view.project.open) {
+		project.set("root", json_string(view.project.root));
+		project.set("title", json_string(view.project.document->title));
+		project.set("id", json_string(view.project.document->project_id));
+		project.set("target_game", json_string(view.project.document->target_game));
 		JsonValue features = JsonValue::make_object();
-		features.set("menu", boolean(view.document.features.menu));
-		features.set("mission", boolean(view.document.features.mission));
-		features.set("multiplayer", boolean(view.document.features.multiplayer));
+		features.set("menu", boolean(view.project.document->features.menu));
+		features.set("mission", boolean(view.project.document->features.mission));
+		features.set("multiplayer", boolean(view.project.document->features.multiplayer));
 		project.set("features", std::move(features));
-		project.set("assets", json_number(double(view.scan.entries.size())));
+		project.set("assets", json_number(double(view.project.scan->entries.size())));
 		// Every file the scan lists, as Files lists them, each with its kind and whether the
 		// editor opens it, so a client need not guess at kinds.
 		JsonValue files = JsonValue::make_array();
-		for (const AssetEntry &entry : view.scan.entries) {
+		for (const AssetEntry &entry : view.project.scan->entries) {
 			JsonValue file = JsonValue::make_object();
 			file.set("path", json_string(entry.relative_path));
 			file.set("name", json_string(entry.logical_name));
@@ -1053,11 +1061,12 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	out.set("project", std::move(project));
 
 	JsonValue requirements = JsonValue::make_object();
-	requirements.set("total", json_number(double(view.requirements.required_total)));
-	requirements.set("missing", json_number(double(view.requirements.required_missing)));
-	requirements.set("wrong_kind", json_number(double(view.requirements.required_wrong_kind)));
+	requirements.set("total", json_number(double(view.project.requirements->required_total)));
+	requirements.set("missing", json_number(double(view.project.requirements->required_missing)));
+	requirements.set(
+			"wrong_kind", json_number(double(view.project.requirements->required_wrong_kind)));
 	JsonValue rows = JsonValue::make_array();
-	for (const RequirementRow &row : view.requirements.rows) {
+	for (const RequirementRow &row : view.project.requirements->rows) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("role", json_string(row.role));
 		entry.set("name", json_string(row.name));
@@ -1068,79 +1077,71 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		entry.set("expected_kind", json_string(asset_kind_token(row.expected_kind)));
 		if (!row.asset_path.empty()) entry.set("asset", json_string(row.asset_path));
 		if (row.found_kind != AssetKind::Unknown) entry.set("found_kind", json_string(asset_kind_token(row.found_kind)));
-		if (view.missing_at_boot(row.name)) entry.set("boot_missing", boolean(true));
+		if (view.activity.missing_at_boot(row.name)) entry.set("boot_missing", boolean(true));
 		rows.push(std::move(entry));
 	}
 	requirements.set("rows", std::move(rows));
 	out.set("requirements", std::move(requirements));
 
 	JsonValue documents = JsonValue::make_array();
-	for (const auto &document : view.documents) {
+	for (const auto &document : view.documents.open) {
 		if (document) documents.push(document_to_json(*document, false));
 	}
 	out.set("documents", std::move(documents));
-	out.set("active_document", json_string(view.active_document));
-	out.set("selection", address_to_json(view.selection));
+	out.set("active_document", json_string(view.documents.active));
+	out.set("selection", address_to_json(view.documents.selection));
 	JsonValue selected = JsonValue::make_array();
-	for (const NodeAddress &address : view.selected) selected.push(address_to_json(address));
+	for (const NodeAddress &address : view.documents.selected)
+		selected.push(address_to_json(address));
 	out.set("selected", std::move(selected));
-	if (!view.reveal_field.empty()) {
-		out.set("reveal_field", json_string(view.reveal_field));
-		out.set("reveal_serial", json_number(double(view.reveal_serial)));
-	}
-	if (!view.reveal_file.empty()) {
-		JsonValue reveal = JsonValue::make_object();
-		reveal.set("path", json_string(view.reveal_file));
-		reveal.set("serial", json_number(double(view.reveal_file_serial)));
-		if (view.reveal_file_rename) reveal.set("rename", boolean(true));
-		out.set("reveal_file", std::move(reveal));
-	}
-	out.set("clipboard_bytes", json_number(double(view.clipboard.size())));
+	out.set("clipboard_bytes", json_number(double(view.documents.clipboard.size())));
 
 	// The operation that runs (a build stepping) and what the last one came to; the build block
 	// is the last build's.
-	out.set("operation", operation_status_to_json(view.operation));
-	out.set("last_operation", operation_outcome_to_json(view.last_operation));
+	out.set("operation", operation_status_to_json(view.activity.operation));
+	out.set("last_operation", operation_outcome_to_json(view.activity.last_operation));
 	JsonValue build = JsonValue::make_object();
-	build.set("has_build", boolean(view.has_build));
-	if (view.has_build) {
-		build.set("ok", boolean(view.last_build.ok));
-		build.set("id", json_string(view.last_build.build_id));
-		build.set("dir", json_string(view.last_build.build_dir));
-		build.set("reused_existing", boolean(view.last_build.reused_existing));
-		build.set("archives_written", json_number(double(view.last_build.archives_written.size())));
-		build.set("archives_reused", json_number(double(view.last_build.archives_reused.size())));
-		build.set("loose_written", json_number(double(view.last_build.loose_written.size())));
-		build.set("diagnostics", diagnostics_to_json(view.last_build.diagnostics));
+	build.set("has_build", boolean(view.activity.has_build));
+	if (view.activity.has_build) {
+		build.set("ok", boolean(view.activity.last_build->ok));
+		build.set("id", json_string(view.activity.last_build->build_id));
+		build.set("dir", json_string(view.activity.last_build->build_dir));
+		build.set("reused_existing", boolean(view.activity.last_build->reused_existing));
+		build.set("archives_written",
+				json_number(double(view.activity.last_build->archives_written.size())));
+		build.set("archives_reused",
+				json_number(double(view.activity.last_build->archives_reused.size())));
+		build.set("loose_written",
+				json_number(double(view.activity.last_build->loose_written.size())));
+		build.set("diagnostics", diagnostics_to_json(view.activity.last_build->diagnostics));
 	}
 	out.set("build", std::move(build));
 
 	JsonValue play = JsonValue::make_object();
-	play.set("state", json_string(play_state_label(view.play_state)));
-	play.set("pid", json_number(double(view.play_pid)));
-	play.set("mcp_port", json_number(double(view.play_mcp_port)));
-	play.set("command_line", json_string(view.play_command_line));
-	play.set("exited_on_its_own", boolean(view.play_exited_on_its_own));
-	play.set("exit_code", view.play_exit_code >= 0 ? json_number(double(view.play_exit_code)) : JsonValue::make_null());
-	play.set("in_install", boolean(view.play_retail));
-	play.set("game_install", json_string(view.retail_directory));
-	play.set("source_run", boolean(view.source_run));
-	play.set("runtime_executable", json_string(view.runtime_executable));
-	play.set("runtime_setting", json_string(view.runtime_setting));
+	play.set("state", json_string(play_state_label(view.activity.play_state)));
+	play.set("pid", json_number(double(view.activity.play_pid)));
+	play.set("mcp_port", json_number(double(view.activity.play_mcp_port)));
+	play.set("command_line", json_string(view.activity.play_command_line));
+	play.set("exited_on_its_own", boolean(view.activity.play_exited_on_its_own));
+	play.set("exit_code", view.activity.play_exit_code >= 0 ? json_number(double(view.activity.play_exit_code)) : JsonValue::make_null());
+	play.set("in_install", boolean(view.project.play_retail));
+	play.set("game_install", json_string(view.project.retail_directory));
+	play.set("source_run", boolean(view.activity.source_run));
+	play.set("runtime_executable", json_string(view.activity.runtime_executable));
+	play.set("runtime_setting", json_string(view.project.runtime_setting));
 	JsonValue boot_missing = JsonValue::make_array();
-	for (const std::string &name : view.boot_missing) boot_missing.push(json_string(name));
+	for (const std::string &name : view.activity.boot_missing) boot_missing.push(json_string(name));
 	play.set("boot_missing", std::move(boot_missing));
 	out.set("play", std::move(play));
 
 	// The import dialog: what it lists to choose from, the files chosen, and their plan, each
 	// list a page (options.import_offset / import_limit) with its count.
-	const SessionView::ImportPreview &preview = view.import_preview;
+	const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 	JsonValue import = JsonValue::make_object();
 	import.set("open", boolean(preview.open));
-	import.set("import_dependencies", boolean(view.import_dependencies));
+	import.set("import_dependencies", boolean(view.project.import_dependencies));
 	import.set("with_dependencies", boolean(preview.with_dependencies));
 	if (preview.changed) import.set("changed", boolean(true));
-	import.set("serial", json_number(double(preview.serial)));
 	import.set("offset", json_number(double(options.import_offset)));
 	const auto on_page = [&options](size_t index) {
 		return index >= options.import_offset && index - options.import_offset < options.import_limit;
@@ -1158,7 +1159,8 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	JsonValue planned = JsonValue::make_array();
 	JsonValue not_found = JsonValue::make_array();
 	size_t row_count = 0, not_found_count = 0;
-	for (const ImportPlanRow &row : preview.plan.rows) {
+	const ImportPlan &plan = *preview.plan;
+	for (const ImportPlanRow &row : plan.rows) {
 		const bool found = row.state != ImportPlanRow::State::NotFound;
 		if (!on_page(found ? row_count++ : not_found_count++)) continue;
 		JsonValue entry = JsonValue::make_object();
@@ -1200,7 +1202,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	import.set("not_found_count", json_number(double(not_found_count)));
 	import.set("not_found", std::move(not_found));
 	JsonValue not_followed = JsonValue::make_array();
-	for (const ImportNotFollowed &kind : preview.plan.not_followed) {
+	for (const ImportNotFollowed &kind : plan.not_followed) {
 		JsonValue entry = JsonValue::make_object();
 		if (kind.reference != ReferenceKind::None) entry.set("reference", json_string(reference_row(kind.reference).token));
 		else entry.set("kind", json_string(asset_kind_token(kind.kind)));
@@ -1209,11 +1211,11 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		not_followed.push(std::move(entry));
 	}
 	import.set("not_followed", std::move(not_followed));
-	import.set("truncated", boolean(preview.plan.truncated));
-	import.set("diagnostics", diagnostics_to_json(preview.plan.diagnostics));
+	import.set("truncated", boolean(plan.truncated));
+	import.set("diagnostics", diagnostics_to_json(plan.diagnostics));
 	// The importable sources in the project and what their importers made.
 	JsonValue imported = JsonValue::make_array();
-	for (const ImportedSource &source : view.imports) {
+	for (const ImportedSource &source : *view.project.imports) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("source", json_string(source.source));
 		entry.set("sidecar", json_string(source.sidecar));
@@ -1226,32 +1228,32 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		imported.push(std::move(entry));
 	}
 	import.set("imported", std::move(imported));
-	import.set("install_files", json_number(double(view.retail_files.size())));
+	import.set("install_files", json_number(double(view.project.retail_files.size())));
 	out.set("import", std::move(import));
 
 	size_t errors = 0, warnings = 0, infos = 0;
-	for (const Diagnostic &d : view.diagnostics) {
+	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.severity == DiagnosticSeverity::Error) ++errors;
 		else if (d.severity == DiagnosticSeverity::Warning) ++warnings;
 		else ++infos;
 	}
 	JsonValue problems = JsonValue::make_object();
-	problems.set("count", json_number(double(view.diagnostics.size())));
+	problems.set("count", json_number(double(view.findings.diagnostics.size())));
 	problems.set("errors", json_number(double(errors)));
 	problems.set("warnings", json_number(double(warnings)));
 	problems.set("infos", json_number(double(infos)));
 	out.set("problems", std::move(problems));
 
 	JsonValue recent = JsonValue::make_array();
-	for (const std::string &root : view.recent_projects) recent.push(json_string(root));
+	for (const std::string &root : view.project.recent_projects) recent.push(json_string(root));
 	out.set("recent_projects", std::move(recent));
 
 	JsonValue graph = JsonValue::make_object();
-	if (view.graph) {
-		const GraphStats &stats = view.graph->stats();
-		graph.set("edges", json_number(double(view.graph->edge_count())));
-		graph.set("symbols", json_number(double(view.graph->symbol_count())));
-		graph.set("missing", json_number(double(view.graph->missing_count())));
+	if (view.findings.graph) {
+		const GraphStats &stats = view.findings.graph->stats();
+		graph.set("edges", json_number(double(view.findings.graph->edge_count())));
+		graph.set("symbols", json_number(double(view.findings.graph->symbol_count())));
+		graph.set("missing", json_number(double(view.findings.graph->missing_count())));
 		graph.set("files_extracted", json_number(double(stats.files_extracted)));
 		graph.set("files_reused", json_number(double(stats.files_reused)));
 		graph.set("files_failed", json_number(double(stats.files_failed)));
@@ -1265,8 +1267,8 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	// `next` one past the newest; a cursor below `first` missed the lines dropped since, one past
 	// `next` waits for lines to come.
 	JsonValue output = JsonValue::make_object();
-	const uint64_t first = view.output.first_index();
-	const uint64_t next = view.output.next_index();
+	const uint64_t first = view.activity.output.first_index();
+	const uint64_t next = view.activity.output.next_index();
 	const uint64_t cursor = std::min<uint64_t>(std::max<uint64_t>(options.output_cursor, first), next);
 	const uint64_t last = std::min<uint64_t>(cursor + options.output_limit, next);
 	output.set("first", json_number(double(first)));
@@ -1274,9 +1276,41 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	output.set("cursor", json_number(double(cursor)));
 	output.set("next_cursor", json_number(double(last)));
 	JsonValue lines = JsonValue::make_array();
-	for (uint64_t i = cursor; i < last; ++i) lines.push(json_string(view.output.at(i)));
+	for (uint64_t i = cursor; i < last; ++i) lines.push(json_string(view.activity.output.at(i)));
 	output.set("lines", std::move(lines));
 	out.set("output", std::move(output));
+
+	// A page of the events by seq (ViewEvents), as the output's: `first` is the oldest held, `next`
+	// one past the newest; a client reading from its last `next_cursor` neither skips nor repeats
+	// one, and a cursor below `first` missed the ones dropped since.
+	JsonValue events = JsonValue::make_object();
+	const std::deque<ViewEvent> &held = view.events.held();
+	const uint64_t first_event = view.events.first_seq();
+	const uint64_t next_event = view.events.next_seq();
+	const uint64_t event_cursor =
+			std::min<uint64_t>(std::max<uint64_t>(options.event_cursor, first_event), next_event);
+	const uint64_t last_event = std::min<uint64_t>(event_cursor + options.event_limit, next_event);
+	events.set("first", json_number(double(first_event)));
+	events.set("next", json_number(double(next_event)));
+	events.set("cursor", json_number(double(event_cursor)));
+	events.set("next_cursor", json_number(double(last_event)));
+	JsonValue items = JsonValue::make_array();
+	for (uint64_t seq = event_cursor; seq < last_event; ++seq)
+		items.push(view_event_to_json(held[size_t(seq - first_event)]));
+	events.set("items", std::move(items));
+	out.set("events", std::move(events));
+	return out;
+}
+
+JsonValue view_event_to_json(const ViewEvent &event) {
+	JsonValue out = JsonValue::make_object();
+	out.set("seq", json_number(double(event.seq)));
+	out.set("kind", json_string(view_event_kind_token(event.kind)));
+	if (!event.path.empty()) out.set("path", json_string(event.path));
+	if (event.address.row) out.set("address", address_to_json(event.address));
+	if (!event.field.empty()) out.set("field", json_string(event.field));
+	if (event.flag) out.set("flag", boolean(true));
+	if (event.tag) out.set("tag", json_number(double(event.tag)));
 	return out;
 }
 
@@ -1422,13 +1456,14 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		if (field.reference != ReferenceKind::None) {
 			entry.set("reference", json_string(reference_row(field.reference).token));
 			std::string symbol;
-			const ReferenceStatus status = view.graph
-					? reference_status(*view.graph, field, value, &symbol)
+			const ReferenceStatus status = view.findings.graph
+					? reference_status(*view.findings.graph, field, value, &symbol)
 					: ReferenceStatus::Unverified;
 			entry.set("reference_status", json_string(reference_status_token(status)));
 			if (!symbol.empty()) entry.set("symbol", json_string(symbol));
-			const std::string target =
-					view.graph ? reference_target_file(*view.graph, field, value) : std::string();
+			const std::string target = view.findings.graph
+					? reference_target_file(*view.findings.graph, field, value)
+					: std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
@@ -1489,8 +1524,9 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices =
-	        view.graph ? reference_choices(*view.graph, field) : std::vector<ReferenceChoice>();
+	const std::vector<ReferenceChoice> choices = view.findings.graph
+			? reference_choices(*view.findings.graph, field)
+			: std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceChoice &choice : choices) {
 		JsonValue entry = JsonValue::make_object();
@@ -1519,8 +1555,8 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceTarget> targets = view.graph
-			? reference_targets(*view.graph, view.scan, field, value)
+	const std::vector<ReferenceTarget> targets = view.findings.graph
+			? reference_targets(*view.findings.graph, *view.project.scan, field, value)
 			: std::vector<ReferenceTarget>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceTarget &target : targets) {

@@ -18,7 +18,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -82,13 +82,14 @@ static int test_paste_and_duplicate_agree() {
 
 		// Copy, then Paste with no target: after the selected record, by the rule.
 		menus.select(record);
-		TEST_EXPECT(menus.act(EditorRequestKind::Copy) && !v.clipboard.empty());
+		TEST_EXPECT(menus.act(EditorRequestKind::Copy) && !v.documents.clipboard.empty());
 		TEST_EXPECT(menus.act(EditorRequestKind::Paste));
 		const std::string pasted = menus.menu().serialize().text;
 		Document::Placement pasted_at;
-		TEST_EXPECT(pasted != original && menus.menu().placement(v.selection, pasted_at) &&
-		            pasted_at.owner.child == parent && pasted_at.index == position);
-		const std::string pasted_name = menus.menu().record_name(v.selection);
+		TEST_EXPECT(pasted != original &&
+				menus.menu().placement(v.documents.selection, pasted_at) &&
+				pasted_at.owner.child == parent && pasted_at.index == position);
+		const std::string pasted_name = menus.menu().record_name(v.documents.selection);
 		menus.session.handle(request::undo(menus.menu().path()));
 		TEST_EXPECT(menus.menu().serialize().text == original);
 
@@ -96,8 +97,8 @@ static int test_paste_and_duplicate_agree() {
 		menus.select(menus.at(locator));
 		TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
 		Document::Placement duplicated_at;
-		TEST_EXPECT(menus.menu().placement(v.selection, duplicated_at) && duplicated_at.owner.child == parent &&
-		            duplicated_at.index == position && menus.menu().record_name(v.selection) == pasted_name);
+		TEST_EXPECT(menus.menu().placement(v.documents.selection, duplicated_at) && duplicated_at.owner.child == parent &&
+		            duplicated_at.index == position && menus.menu().record_name(v.documents.selection) == pasted_name);
 		TEST_EXPECT(menus.menu().serialize().text == pasted);
 		menus.session.handle(request::undo(menus.menu().path()));
 		TEST_EXPECT(menus.menu().serialize().text == original);
@@ -112,7 +113,7 @@ static int test_paste_and_duplicate_agree() {
 	TEST_EXPECT(DocumentSet::position_after(menus.menu(), screen, parent, position) && parent == 0 && position == 1);
 	menus.select(screen);
 	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
-	TEST_EXPECT(menus.menu().rows().size() == 2 && v.selection.row == menus.menu().rows()[1]->id && !v.selection.child);
+	TEST_EXPECT(menus.menu().rows().size() == 2 && v.documents.selection.row == menus.menu().rows()[1]->id && !v.documents.selection.child);
 	menus.session.handle(request::undo(menus.menu().path()));
 	TEST_EXPECT(menus.menu().serialize().text == original);
 	// A row selected takes a Paste into itself, at its end: a copy of TITLE lands after MAIN, a root
@@ -122,7 +123,7 @@ static int test_paste_and_duplicate_agree() {
 	menus.select(screen);
 	TEST_EXPECT(menus.act(EditorRequestKind::Paste));
 	Document::Placement into;
-	TEST_EXPECT(menus.menu().placement(v.selection, into) && into.owner.child == 0 && into.index == 1);
+	TEST_EXPECT(menus.menu().placement(v.documents.selection, into) && into.owner.child == 0 && into.index == 1);
 	// A record the document does not hold has no place.
 	TEST_EXPECT(!DocumentSet::position_after(menus.menu(), {screen.row, screen.kind, 987654}, parent, position));
 	TEST_EXPECT(!DocumentSet::position_after(menus.menu(), {987654, screen.kind, 0}, parent, position));
@@ -139,25 +140,26 @@ static int test_remembered_selections() {
 	const std::string menu = menus.menu().path();
 	menus.select(menus.at(kTitle));
 	menus.select(menus.at(kExit), SelectMode::Add);
-	TEST_EXPECT(v.selection == menus.at(kExit) && v.selected.size() == 2);
+	TEST_EXPECT(v.documents.selection == menus.at(kExit) && v.documents.selected.size() == 2);
 
 	// Another document active: its own selection; then back, the menu's as it was.
 	menus.session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	const Document *extra = menus.session.document_for("extra.mnu");
-	TEST_EXPECT(extra && v.active_document == extra->path());
-	TEST_EXPECT(v.selection.row == extra->rows().front()->id && !v.selection.child); // its first screen
+	TEST_EXPECT(extra && v.documents.active == extra->path());
+	TEST_EXPECT(v.documents.selection.row == extra->rows().front()->id && !v.documents.selection.child); // its first screen
 	const NodeAddress extra_main = extra->address_at(kMain);
 	menus.select(extra_main, SelectMode::Replace, extra->path());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.active_document == menu && v.selection == menus.at(kExit) &&
-	            v.selected == std::vector<NodeAddress>({menus.at(kTitle), menus.at(kExit)}));
+	TEST_EXPECT(v.documents.active == menu && v.documents.selection == menus.at(kExit) &&
+			v.documents.selected ==
+					std::vector<NodeAddress>({ menus.at(kTitle), menus.at(kExit) }));
 	menus.session.handle(request::open_document("extra.mnu"));
-	TEST_EXPECT(v.active_document == extra->path() && v.selection == extra_main && v.selected.size() == 1);
+	TEST_EXPECT(v.documents.active == extra->path() && v.documents.selection == extra_main && v.documents.selected.size() == 1);
 
 	// The menu's file changed outside the editor: a Rescan reads it again, and it keeps no
 	// selection (its records are new ones).
 	{
-		const std::string path = menus.view().project_root + "/" + menu;
+		const std::string path = menus.view().project.root + "/" + menu;
 		std::string bytes;
 		std::string error;
 		TEST_EXPECT(read_file_text(path, bytes, error));
@@ -165,16 +167,17 @@ static int test_remembered_selections() {
 	}
 	menus.session.handle(request::rescan());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.active_document == menu && v.selected.size() == 1 && v.selection.row == menus.menu().rows().front()->id &&
-	            !v.selection.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 && v.documents.selection.row == menus.menu().rows().front()->id &&
+	            !v.documents.selection.child);
 
 	// Selected again, then closed while another is active, and opened again: none kept.
 	menus.select(menus.at(kTitle));
 	menus.session.handle(request::open_document("extra.mnu"));
 	menus.session.handle(request::close_document(menu));
-	TEST_EXPECT(!menus.session.document_for(menu) && v.active_document == extra->path());
+	TEST_EXPECT(!menus.session.document_for(menu) && v.documents.active == extra->path());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.active_document == menu && v.selected.size() == 1 && !v.selection.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 &&
+			!v.documents.selection.child);
 	return 0;
 }
 

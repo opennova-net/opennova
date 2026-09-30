@@ -13,7 +13,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_operation.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
@@ -137,7 +137,7 @@ bool ProjectSession::documents_dirty() const {
 }
 
 bool ProjectSession::project_open() const {
-	return impl_->core.view().project_open;
+	return impl_->core.view().project.open;
 }
 
 const ValidationStats &ProjectSession::validation_stats() const {

@@ -3,8 +3,10 @@
 #include <string>
 
 #include <editor/model/document.h>
+#include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_preview_viewport.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -14,7 +16,7 @@ namespace opennova::editor {
 namespace {
 
 const DocumentBase *open_document(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents)
+	for (const auto &document : view.documents.open)
 		if (document && document->path() == path) return document.get();
 	return nullptr;
 }
@@ -35,11 +37,11 @@ PreviewFamily preview_family_of(AssetKind kind) {
 
 PreviewFamily preview_family(const SessionView &view, PreviewFamily last) {
 	PreviewFamily family = last;
-	if (const DocumentBase *active = open_document(view, view.active_document))
+	if (const DocumentBase *active = open_document(view, view.documents.active))
 		if (preview_family_of(active->kind()) != PreviewFamily::None) family = preview_family_of(active->kind());
 	// What each has to show: the view keeps a preview's target until its document closes.
-	const PreviewFamily menu = view.menu_preview.path.empty() ? PreviewFamily::None : PreviewFamily::Menu;
-	const PreviewFamily model = view.model_preview.path.empty() ? PreviewFamily::None : PreviewFamily::Model;
+	const PreviewFamily menu = view.documents.previews.menu.path.empty() ? PreviewFamily::None : PreviewFamily::Menu;
+	const PreviewFamily model = view.documents.previews.model.path.empty() ? PreviewFamily::None : PreviewFamily::Model;
 	const auto either = [](PreviewFamily first, PreviewFamily second) { return first != PreviewFamily::None ? first : second; };
 	return family == PreviewFamily::Model ? either(model, menu) : either(menu, model);
 }
@@ -69,12 +71,13 @@ void PreviewWindow::end_frame() {
 // "main.mnu - STARTUP", "skinned.3di" or "walk.bad on skinned.3di", cut to the width the
 // dot after it leaves; the whole of it, the path and whether it is unsaved in its tooltip.
 void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
-	const std::string &path = family == PreviewFamily::Menu ? view.menu_preview.path : view.model_preview.path;
+	const std::string &path = family == PreviewFamily::Menu ? view.documents.previews.menu.path : view.documents.previews.model.path;
 	const DocumentBase *document = open_document(view, path);
 	const Document *records = document ? records_of(*document) : nullptr;
 	std::string text = basename_of(path);
 	if (family == PreviewFamily::Menu) {
-		if (const Node *screen = records ? records->row(view.menu_preview.screen) : nullptr)
+		if (const Node *screen =
+						records ? records->row(view.documents.previews.menu.screen) : nullptr)
 			text += " - " + screen->name();
 	} else if (ModelPreviewViewport *device = workspace_.devices().model) {
 		// The model pane's device: the line names the rig's model.

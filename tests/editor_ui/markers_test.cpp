@@ -6,12 +6,12 @@
 // records selected, a field changed on any of them is marked, and its Revert gives every one
 // its saved value in one step. A block's switch is marked, reverted and shown as a field is.
 // A changed and an added record are marked in the menu view's window tree and in an outline
-// (an animation table's rows, by their slots' words); a field a request asks to show
-// (reveal_field) opens its section, scrolls to it and lights it a moment, again each time it
-// is asked. Output says when it has nothing yet, clears through the session, copies every
-// line, colours a finding's line and keeps to the newest line unless scrolled up; F2
-// renames the file Files has selected, and Ctrl+F gives the keyboard to the filter of the
-// window that has the focus.
+// (an animation table's rows, by their slots' words); a field a request asks to show (a
+// RevealRecord view event) opens its section, scrolls to it and lights it a moment, again each
+// time it is asked, and waits while the Inspector does not draw. Output says when it has nothing
+// yet, clears through the session, copies every line, colours a finding's line and keeps to the
+// newest line unless scrolled up; F2 renames the file Files has selected, and Ctrl+F gives the
+// keyboard to the filter of the window that has the focus.
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -26,9 +26,10 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/inspector_window.h>
 #include <editor/ui/ui_kit.h>
 #include <formats/rtxt/rtxt.h>
 #include "editor_ui_test_support.h"
@@ -189,8 +190,8 @@ void test_field_marks() {
 	// BACK and TITLE together, TITLE's Hidden set: the shared form marks it.
 	std::shared_ptr<MnuDocument> fresh = load_menu(dir);
 	replace_view(v, menu_view(fresh));
-	v.selection = named(*fresh, "BACK");
-	v.selected = {named(*fresh, "BACK"), named(*fresh, "TITLE")};
+	v.documents.selection = named(*fresh, "BACK");
+	v.documents.selected = {named(*fresh, "BACK"), named(*fresh, "TITLE")};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(!drew_mark("Inspector", Change::Changed) && !drew_mark("Document/windows", Change::Changed), "read fresh: nothing");
@@ -252,10 +253,10 @@ void test_outline_marks() {
 	      "undone: none");
 }
 
-// A field the view asks to show (a Problems row's): its section, folded while the file leaves
-// it out, opens, the form scrolls the field itself into sight and lights its row, the light
-// gone after a moment. Scrolled away, the same ask again (the same row clicked again: the
-// view's serial moved) shows and lights it again; a view that moved otherwise does not.
+// A field a request asks to show (a Problems row's RevealRecord event): its section, folded while
+// the file leaves it out, opens, the form scrolls the field itself into sight and lights its row,
+// the light gone after a moment. Scrolled away, the same ask again (the same row clicked again:
+// another event) shows and lights it again; a view that moved otherwise does not.
 void test_reveal_field() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_test");
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
@@ -279,9 +280,8 @@ void test_reveal_field() {
 	CHECK(inspector && inspector->Scroll.y == 0.0f, "the form at its top");
 	const ImGuiTable *before = ImGui::TableFindByID(table_id);
 	CHECK(!before || before->LastFrameActive != GImGui->FrameCount, "its fields not drawn while folded");
-	v.reveal_field = folded->fields.back().schema->id;
-	++v.reveal_serial;
-	v.revisions.touch(ViewConcern::Selection);
+	const std::string field = folded->fields.back().schema->id;
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
 	ui.frames(4);
 	const ImGuiTable *table = ImGui::TableFindByID(table_id);
 	CHECK(table && table->LastFrameActive == GImGui->FrameCount, "its section opened");
@@ -302,10 +302,150 @@ void test_reveal_field() {
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(inspector && inspector->Scroll.y == 0.0f && !lit_row(top, bottom), "the same ask is shown once");
-	++v.reveal_serial;
-	v.revisions.touch(ViewConcern::Selection);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
 	ui.frames(4);
 	CHECK(inspector && inspector->Scroll.y > 0.0f && lit_in_sight(), "asked again: scrolled to and lit again");
+	ui.drain();
+}
+
+// A field asked to show while the Inspector is closed (S13 V4): its RevealRecord event waits in the
+// Inspector's mailbox, nothing lit, however many frames go by; opened again, the Inspector takes it
+// the first frame it draws: the section opens, the form scrolls to the field and lights it, the
+// mailbox empty. Taken once: scrolled back up, frames go by and nothing moves; the same ask posted
+// again (a second click on the row) is another event and shows it again; an ask about a record no
+// longer selected shows nothing.
+void test_reveal_waits_for_the_inspector() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_waits");
+	std::shared_ptr<MnuDocument> document = load_menu(dir);
+	const NodeAddress back = named(*document, "BACK");
+	const NodeAddress title = named(*document, "TITLE");
+	SessionView v = menu_view(document);
+	select_in(v, back);
+	Ui ui;
+	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 600.0f);
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	const std::vector<InspectorSection> plan = plan_inspector(*document, back, back, "");
+	const InspectorSection *folded = nullptr;
+	for (const InspectorSection &section : plan)
+		if (!section.key.empty() && !section.written && !section.fields.empty())
+			folded = &section;
+	devtools::Window *window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Inspector") == 0)
+			window = &ui.windows.pass().window(i);
+	const InspectorWindow *inspector = dynamic_cast<const InspectorWindow *>(window);
+	CHECK(folded != nullptr && inspector != nullptr,
+			"a folded section with fields, and the Inspector");
+	if (!folded || !inspector)
+		return;
+	const std::string field = folded->fields.back().schema->id;
+	window->open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(6);
+	float top = 0.0f, bottom = 0.0f;
+	CHECK(inspector->events().held() == 1, "held while the Inspector does not draw");
+	window->open = true;
+	ui.frames(4);
+	const ImGuiWindow *form = ImGui::FindWindowByName("Inspector");
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y > 0.0f && lit_in_sight(),
+			"taken the first frame it draws: the field scrolled to and lit");
+	ui.frames(80);
+	CHECK(!lit_row(top, bottom), "the light gone after its moment");
+	ImGui::SetScrollY(ImGui::FindWindowByName("Inspector"), 0.0f);
+	ui.frames(6);
+	CHECK(form && form->Scroll.y == 0.0f && !lit_row(top, bottom),
+			"taken once: nothing shown again");
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(4);
+	CHECK(form && form->Scroll.y > 0.0f && lit_in_sight(),
+			"the same ask again: another event, shown again");
+	// An ask about a record no longer selected: taken, nothing shown.
+	ui.frames(80);
+	ImGui::SetScrollY(ImGui::FindWindowByName("Inspector"), 0.0f);
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), title, "string");
+	ui.frames(4);
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y == 0.0f &&
+					!lit_row(top, bottom),
+			"an ask about another record shows nothing");
+	ui.drain();
+}
+
+// A field asked to show while the Inspector is closed goes with the selection it was asked on
+// (S13 V4, as the view's one reveal went with the next selection): the selection moved off its
+// record and back before the Inspector draws, the waiting ask shows nothing; nor does one whose
+// document was read again meanwhile (its records numbered anew, the same record number another
+// load's), though the selection did not move. An ask made after the reload shows.
+void test_reveal_goes_with_the_selection() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_reveal_selection");
+	std::shared_ptr<MnuDocument> document = load_menu(dir);
+	const NodeAddress back = named(*document, "BACK");
+	const NodeAddress title = named(*document, "TITLE");
+	SessionView v = menu_view(document);
+	select_in(v, back);
+	Ui ui;
+	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 600.0f);
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	const std::vector<InspectorSection> plan = plan_inspector(*document, back, back, "");
+	const InspectorSection *folded = nullptr;
+	for (const InspectorSection &section : plan)
+		if (!section.key.empty() && !section.written && !section.fields.empty())
+			folded = &section;
+	devtools::Window *window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Inspector") == 0)
+			window = &ui.windows.pass().window(i);
+	const InspectorWindow *inspector = dynamic_cast<const InspectorWindow *>(window);
+	CHECK(folded != nullptr && inspector != nullptr,
+			"a folded section with fields, and the Inspector");
+	if (!folded || !inspector)
+		return;
+	const std::string field = folded->fields.back().schema->id;
+	float top = 0.0f, bottom = 0.0f;
+
+	// Asked on BACK, the Inspector closed; TITLE selected, then BACK again; the Inspector opened.
+	window->open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(2);
+	select_in(v, title);
+	ui.frames(2);
+	select_in(v, back);
+	ui.frames(2);
+	CHECK(inspector->events().held() == 1, "held while the Inspector does not draw");
+	window->open = true;
+	ui.frames(4);
+	const ImGuiWindow *form = ImGui::FindWindowByName("Inspector");
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y == 0.0f &&
+					!lit_row(top, bottom),
+			"the selection moved off and back since: taken, nothing shown");
+
+	// Asked on BACK, the Inspector closed; the document read again, BACK still selected by the
+	// same record number.
+	window->open = false;
+	ui.frames(2);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), back, field);
+	ui.frames(2);
+	std::shared_ptr<MnuDocument> fresh = load_menu(dir);
+	CHECK(fresh->identity() != document->identity() && named(*fresh, "BACK") == back,
+			"another load, its BACK the same record number");
+	v.documents.open = { fresh };
+	v.revisions.touch(ViewConcern::Documents);
+	v.revisions.touch(ViewConcern::DocumentSet);
+	ui.frames(2);
+	window->open = true;
+	ui.frames(4);
+	CHECK(inspector->events().held() == 0 && form && form->Scroll.y == 0.0f &&
+					!lit_row(top, bottom),
+			"its document read again since: taken, nothing shown");
+	post_event(v, ViewEventKind::RevealRecord, fresh->path(), back, field);
+	ui.frames(4);
+	CHECK(form && form->Scroll.y > 0.0f && lit_in_sight(), "an ask on the new load shows");
 	ui.drain();
 }
 
@@ -355,10 +495,10 @@ void test_reveal_in_views() {
 	}
 	std::vector<uint8_t> bytes;
 	std::string io_error;
-	CHECK(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(v.project_root + "/strings/many.bin", bytes),
+	CHECK(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(v.project.root + "/strings/many.bin", bytes),
 	      "a table of 200 keys");
 	session.handle(request::rescan());
-	const AssetEntry *many = v.scan.find("many.bin");
+	const AssetEntry *many = v.project.scan->find("many.bin");
 	CHECK(many != nullptr, "the table scanned");
 	if (!many) return;
 	const std::string strings_path = many->relative_path;
@@ -417,7 +557,7 @@ void test_reveal_in_views() {
 	ui.frames(3);
 	go_to(model->path(), model->locator(point), "name");
 	ui.frames(4);
-	CHECK(v.selection == point && drew_selected("Document/outline"), "the outline opened to the point");
+	CHECK(v.documents.selection == point && drew_selected("Document/outline"), "the outline opened to the point");
 	ui.drain();
 }
 
@@ -450,9 +590,7 @@ void test_block_switch() {
 	if (!inspector) return;
 	ImGui::SetScrollY(inspector, inspector->ScrollMax.y);
 	ui.frames(2);
-	v.reveal_field = "string";
-	++v.reveal_serial;
-	v.revisions.touch(ViewConcern::Selection);
+	post_event(v, ViewEventKind::RevealRecord, document->path(), title, "string");
 	ui.frames(4);
 	const ImGuiTable *form = ImGui::TableFindByID(item_id(Ui::window_id("Inspector"), {"string", "fields"}));
 	float top = 0.0f, bottom = 0.0f;
@@ -504,8 +642,8 @@ void test_revert_several() {
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK"), title = named(*document, "TITLE");
 	SessionView v = menu_view(document);
-	v.selection = back;
-	v.selected = {back, title};
+	v.documents.selection = back;
+	v.documents.selected = {back, title};
 	v.revisions.touch(ViewConcern::Selection);
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);
@@ -562,9 +700,9 @@ void keep_clipboard(ImGuiContext *, const char *text) { g_clipboard = text ? tex
 // line on the clipboard; a finding's line in its severity's colour.
 void test_output_window() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Output";
-	v.document.title = "Output";
+	v.project.open = true;
+	v.project.root = "C:/mods/Output";
+	editor_test::own(v.project.document).title = "Output";
 	Ui ui;
 	ImGui::GetPlatformIO().Platform_SetClipboardTextFn = keep_clipboard;
 	ui.windows.set_view(&v);
@@ -573,7 +711,7 @@ void test_output_window() {
 	ui.away();
 	CHECK(logged_frame(ui).find("Nothing yet.") != std::string::npos, "empty: nothing yet");
 	for (const char *line : {"Opened Output.", "error: A broken thing.", "warning: A doubtful thing.", "game: a line"})
-		v.output.append(line);
+		v.activity.output.append(line);
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Nothing yet.") == std::string::npos, "lines: no empty state");
@@ -609,10 +747,10 @@ ImGuiWindow *output_lines() {
 // Scrolled up to read, it stays where it was as more arrive.
 void test_output_follows() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Output";
-	v.document.title = "Output";
-	for (int i = 0; i < 200; ++i) v.output.append("line " + std::to_string(i));
+	v.project.open = true;
+	v.project.root = "C:/mods/Output";
+	editor_test::own(v.project.document).title = "Output";
+	for (int i = 0; i < 200; ++i) v.activity.output.append("line " + std::to_string(i));
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);
 	ui.windows.set_view(&v);
@@ -623,7 +761,7 @@ void test_output_follows() {
 	CHECK(lines && lines->ScrollMax.y > 0.0f && lines->Scroll.y == lines->ScrollMax.y, "opened at the newest line");
 	if (!lines) return;
 	const float before = lines->ScrollMax.y;
-	for (int i = 0; i < 20; ++i) v.output.append("more " + std::to_string(i));
+	for (int i = 0; i < 20; ++i) v.activity.output.append("more " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->ScrollMax.y > before && lines->Scroll.y == lines->ScrollMax.y, "new lines followed");
@@ -631,22 +769,22 @@ void test_output_follows() {
 	ImGui::SetScrollY(lines, 0.0f);
 	ui.frames(2);
 	CHECK(lines->Scroll.y == 0.0f, "scrolled up");
-	for (int i = 0; i < 20; ++i) v.output.append("later " + std::to_string(i));
+	for (int i = 0; i < 20; ++i) v.activity.output.append("later " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->Scroll.y == 0.0f && lines->ScrollMax.y > before, "scrolled up: kept where it was");
 	// At the log's cap the count of lines stands while they move on: the newest is followed still.
 	ImGui::SetScrollY(lines, lines->ScrollMax.y);
-	for (size_t i = v.output.size(); i < OutputLog::kMaxLines; ++i) v.output.append("filler " + std::to_string(i));
+	for (size_t i = v.activity.output.size(); i < OutputLog::kMaxLines; ++i) v.activity.output.append("filler " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
-	CHECK(v.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "at the cap: at the newest line");
+	CHECK(v.activity.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "at the cap: at the newest line");
 	ImGui::SetScrollY(lines, lines->ScrollMax.y - 1.0f);
 	ui.frames(1);
-	for (int i = 0; i < 20; ++i) v.output.append("past the cap " + std::to_string(i));
+	for (int i = 0; i < 20; ++i) v.activity.output.append("past the cap " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
-	CHECK(v.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "past the cap: followed");
+	CHECK(v.activity.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "past the cap: followed");
 	CHECK(ui.drain().empty(), "raising nothing");
 }
 
@@ -654,12 +792,13 @@ void test_output_follows() {
 // menu's Rename...); Ctrl+F gives the keyboard to the filter of the window with the focus.
 void test_shortcuts() {
 	SessionView v;
-	v.project_open = true;
-	v.project_root = "C:/mods/Keys";
-	v.document.title = "Keys";
-	v.scan.entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
-	                  file_entry("readme.txt", "readme.txt", AssetKind::Text)};
-	v.scan.index();
+	v.project.open = true;
+	v.project.root = "C:/mods/Keys";
+	editor_test::own(v.project.document).title = "Keys";
+	editor_test::own(v.project.scan).entries = { file_entry("items.def", "defs/items.def",
+														 AssetKind::ItemDefs),
+		file_entry("readme.txt", "readme.txt", AssetKind::Text) };
+	editor_test::own(v.project.scan).index();
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -706,6 +845,8 @@ void run_marker_tests() {
 	test_field_marks();
 	test_outline_marks();
 	test_reveal_field();
+	test_reveal_waits_for_the_inspector();
+	test_reveal_goes_with_the_selection();
 	test_reveal_in_views();
 	test_block_switch();
 	test_revert_several();

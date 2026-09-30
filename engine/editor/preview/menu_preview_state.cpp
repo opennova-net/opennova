@@ -1,8 +1,9 @@
 #include <editor/preview/menu_preview_state.h>
 
 #include <base/io/strutil.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/mnu_document.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 #include <runtime/menu/menu_frame_assets.h>
 
 namespace opennova::editor {
@@ -135,30 +136,30 @@ bool MenuPreviewModel::dependencies_moved_(const FileSource &files) const {
 
 MenuPreviewAction MenuPreviewModel::follow(const SessionView &view) {
 	retired_.reset(); // the device has configured past the image it replaced
-	if (!view.project_open || !view.assets) {
+	if (!view.project.open || !view.findings.assets) {
 		have_shown_ = false;
 		return stop_(MenuPreviewStatus::NoProject, std::string());
 	}
 	const MnuDocument *document = nullptr;
 	bool menu_open = false; // a menu is open, though no screen of it is selected yet
-	for (const auto &open : view.documents) {
+	for (const auto &open : view.documents.open) {
 		const auto *menu = dynamic_cast<const MnuDocument *>(open.get());
 		menu_open = menu_open || menu;
-		if (menu && menu->path() == view.menu_preview.path) document = menu;
+		if (menu && menu->path() == view.documents.previews.menu.path) document = menu;
 	}
-	const Node *row = document ? document->row(view.menu_preview.screen) : nullptr;
+	const Node *row = document ? document->row(view.documents.previews.menu.screen) : nullptr;
 	if (!document || !row) {
 		have_shown_ = false;
 		return stop_(menu_open ? MenuPreviewStatus::NoScreen : MenuPreviewStatus::NoMenu, std::string());
 	}
 	const Key key{document->identity(), document->revision(), options_serial_, row->id};
-	const uint64_t generation = view.assets->generation();
+	const uint64_t generation = view.findings.assets->generation();
 	if (have_shown_ && key == shown_) {
 		// A menu the game could not read stays that way until it changes.
 		if (failed_) return MenuPreviewAction::Keep;
 		if (generation == generation_) return MenuPreviewAction::Keep;
 		generation_ = generation;
-		if (!dependencies_moved_(*view.assets)) return MenuPreviewAction::Keep;
+		if (!dependencies_moved_(*view.findings.assets)) return MenuPreviewAction::Keep;
 	}
 	have_shown_ = true;
 	shown_ = key;
@@ -179,7 +180,7 @@ MenuPreviewAction MenuPreviewModel::follow(const SessionView &view) {
 	if (image != image_) retired_ = std::move(image_);
 	image_ = std::move(image);
 	screen_ = &image_->screens[position];
-	style_vars_ = style_.vars(*view.assets);
+	style_vars_ = style_.vars(*view.findings.assets);
 	forced_index_ = -1;
 	if (options_.force_window) {
 		const NodeAddress forced = document->address_of(options_.force_window);

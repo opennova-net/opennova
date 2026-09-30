@@ -36,7 +36,7 @@
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
 #include <editor/project/project_files.h>
-#include <editor/session/session_view.h>
+#include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
 #include "editor/blob_document.h"
@@ -1179,8 +1179,8 @@ static int test_batch_made() {
 	TEST_EXPECT(document.record_path(copy) == "alpha/a2copy" && document.placement(copy, at) && at.index == 2);
 	// The session selects what no other made record holds: the new item and the copy.
 	SessionView view;
-	view.select_added(document);
-	TEST_EXPECT(view.selected == std::vector<NodeAddress>({fresh, copy}) && view.selection == fresh);
+	view.documents.select_added(document);
+	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({fresh, copy}) && view.documents.selection == fresh);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	document.redo();
@@ -1256,45 +1256,50 @@ static int test_selection() {
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
 	SessionView view;
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.y, SelectMode::Add);
-	TEST_EXPECT(view.selection == fake.y && view.selected == std::vector<NodeAddress>({fake.x, fake.y}));
-	view.select(document.path(), fake.y, SelectMode::Toggle);
-	TEST_EXPECT(view.selection == fake.x && view.selected == std::vector<NodeAddress>({fake.x}));
-	view.select(document.path(), fake.a2, SelectMode::Toggle);
-	TEST_EXPECT(view.selection == fake.a2 && view.selected.size() == 2);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.y, SelectMode::Add);
+	TEST_EXPECT(view.documents.selection == fake.y &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x, fake.y }));
+	view.documents.select(document.path(), fake.y, SelectMode::Toggle);
+	TEST_EXPECT(view.documents.selection == fake.x &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
+	view.documents.select(document.path(), fake.a2, SelectMode::Toggle);
+	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected.size() == 2);
 	// Another row (or another document) starts over, whatever the mode.
-	view.select(document.path(), fake.b1, SelectMode::Add);
-	TEST_EXPECT(view.selection == fake.b1 && view.selected == std::vector<NodeAddress>({fake.b1}));
-	view.select("other.txt", fake.x, SelectMode::Add);
-	TEST_EXPECT(view.active_document == "other.txt" && view.selected == std::vector<NodeAddress>({fake.x}));
-	view.select(document.path(), NodeAddress(), SelectMode::Replace);
-	TEST_EXPECT(view.selected.empty() && view.selection == NodeAddress());
+	view.documents.select(document.path(), fake.b1, SelectMode::Add);
+	TEST_EXPECT(view.documents.selection == fake.b1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.b1 }));
+	view.documents.select("other.txt", fake.x, SelectMode::Add);
+	TEST_EXPECT(view.documents.active == "other.txt" &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
+	view.documents.select(document.path(), NodeAddress(), SelectMode::Replace);
+	TEST_EXPECT(view.documents.selected.empty() && view.documents.selection == NodeAddress());
 
 	// Removing the primary selects its owner.
 	Diagnostic error;
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.a1b, SelectMode::Add);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.a1b, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a1b), error));
-	view.repair_selection(document, fake.a1);
-	TEST_EXPECT(view.selection == fake.a1 && view.selected == std::vector<NodeAddress>({fake.a1}));
+	view.documents.repair_selection(document, fake.a1);
+	TEST_EXPECT(view.documents.selection == fake.a1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.a1 }));
 	document.undo();
 	// A record removed that was selected but not the primary just drops out.
-	view.select(document.path(), fake.x, SelectMode::Replace);
-	view.select(document.path(), fake.y, SelectMode::Add);
-	view.select(document.path(), fake.a2, SelectMode::Add);
+	view.documents.select(document.path(), fake.x, SelectMode::Replace);
+	view.documents.select(document.path(), fake.y, SelectMode::Add);
+	view.documents.select(document.path(), fake.a2, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error));
-	view.repair_selection(document, fake.alpha);
-	TEST_EXPECT(view.selection == fake.a2 && view.selected == std::vector<NodeAddress>({fake.x, fake.a2}));
+	view.documents.repair_selection(document, fake.alpha);
+	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected == std::vector<NodeAddress>({fake.x, fake.a2}));
 	document.undo();
 	// A record added is the selection; its undo leaves the last one still there, or none.
 	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
-	view.select_added(document);
+	view.documents.select_added(document);
 	const NodeAddress duplicate = document.address_of(document.last_added());
-	TEST_EXPECT(view.selection == duplicate && view.selected == std::vector<NodeAddress>({duplicate}));
+	TEST_EXPECT(view.documents.selection == duplicate && view.documents.selected == std::vector<NodeAddress>({duplicate}));
 	document.undo();
-	view.repair_selection(document, NodeAddress());
-	TEST_EXPECT(view.selection == NodeAddress() && view.selected.empty());
+	view.documents.repair_selection(document, NodeAddress());
+	TEST_EXPECT(view.documents.selection == NodeAddress() && view.documents.selected.empty());
 	return 0;
 }
 

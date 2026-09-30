@@ -16,6 +16,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
@@ -68,7 +69,7 @@ static int test_menu_references() {
 	TEST_EXPECT(document);
 	if (!document) return 1;
 	const SessionView &view = session.view();
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	NodeAddress exit;
 	TEST_EXPECT(find_definition(graph, *document, "EXIT", exit));
 	const FieldSchema *font = nullptr, *value = nullptr;
@@ -80,7 +81,7 @@ static int test_menu_references() {
 	TEST_EXPECT(font && value);
 	if (!font || !value) return 1;
 	edit_window(session, *document, exit, "font.name", std::string("%NOPE%"));
-	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Warning));
 	const FieldUse font_use = document->field_on(exit, *font);
 	std::string symbol;
 	TEST_EXPECT(reference_status(graph, font_use, std::string("%NOPE%"), &symbol) ==
@@ -90,7 +91,8 @@ static int test_menu_references() {
 			ReferenceStatus::Present);
 	TEST_EXPECT(reference_status(graph, font_use, std::string()) == ReferenceStatus::NotAReference);
 	// The finding says what it misses (S11b): the reference's kind and name, as written.
-	const Diagnostic *nope = missing_of(view.diagnostics, "font.name", ReferenceKind::StyleVar);
+	const Diagnostic *nope =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
 	TEST_EXPECT(nope && nope->target == "%NOPE%");
 	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
 	// define it), never a font file named %NOPE%; a variable that resolves makes none.
@@ -110,28 +112,33 @@ static int test_menu_references() {
 	// A name the game's expansion stops inside (a space) is no variable: a font file of
 	// that name (S12 B2).
 	edit_window(session, *document, exit, "font.name", std::string("%NO PE%"));
-	TEST_EXPECT(!missing_of(view.diagnostics, "font.name", ReferenceKind::StyleVar));
-	const Diagnostic *spaced = missing_of(view.diagnostics, "font.name", ReferenceKind::Font);
+	TEST_EXPECT(!missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar));
+	const Diagnostic *spaced =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(spaced && spaced->target == "%NO PE%");
 	edit_window(session, *document, exit, "font.name", std::string("nofont.fnt"));
-	TEST_EXPECT(has_missing(view.diagnostics, "font.name", DiagnosticSeverity::Error));
-	const Diagnostic *nofont = missing_of(view.diagnostics, "font.name", ReferenceKind::Font);
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Error));
+	const Diagnostic *nofont =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(nofont && nofont->target == "nofont.fnt" && nofont->scope.empty() && nofont->role.empty());
 	TEST_EXPECT(
 			missing_finding(graph, *document, exit, font_use, std::string("nofont.fnt"), picked) &&
 			picked.reference == ReferenceKind::Font && picked.target == "nofont.fnt");
 	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one.
 	set_image(session, *document, exit, "missing.tga");
-	TEST_EXPECT(has_missing(view.diagnostics, "value", DiagnosticSeverity::Error));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
 	TEST_EXPECT(reference_status(graph, document->field_on(row, *value),
 						std::string("missing.tga")) == ReferenceStatus::Missing);
-	const Diagnostic *texture = missing_of(view.diagnostics, "value", ReferenceKind::MenuTexture);
+	const Diagnostic *texture =
+			missing_of(view.findings.diagnostics, "value", ReferenceKind::MenuTexture);
 	TEST_EXPECT(texture && texture->target == "missing.tga");
 	edit_window(session, *document, exit, "string.type", std::string("ID"));
 	edit_window(session, *document, exit, "string.value", std::string("NO_SUCH_ID"));
-	TEST_EXPECT(has_missing(view.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(
+			has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// A string id's scope is where it was looked up: the "menu" section of its window's table.
-	const Diagnostic *text_id = missing_of(view.diagnostics, "string.value", ReferenceKind::TextId);
+	const Diagnostic *text_id =
+			missing_of(view.findings.diagnostics, "string.value", ReferenceKind::TextId);
 	TEST_EXPECT(text_id && text_id->target == "NO_SUCH_ID" && text_id->scope.find("/menu") != std::string::npos);
 	// Every ACTION's file is an edge (a second action's too), every SOUND's file a sound
 	// bank the game opens by that name (a warning while the project lacks it).
@@ -149,7 +156,7 @@ static int test_menu_references() {
 	}
 	TEST_EXPECT(action_files == 2 && sounds == 1);
 	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Missing);
-	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(view.findings.diagnostics, "file", DiagnosticSeverity::Warning));
 	// The font picker: the project's fonts, then the stylesheet's variables, each as the field
 	// would reference it.
 	const std::vector<ReferenceChoice> fonts = reference_choices(graph, font_use);
@@ -164,7 +171,7 @@ static int test_menu_references() {
 	// The finding names the record and the session's address, so Problems can select it.
 	const NodeAddress second_action = menu_test::child_of(*document, exit, "action", 1);
 	bool located = false;
-	for (const Diagnostic &d : view.diagnostics)
+	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
 		    d.child_id == second_action.child && d.record == "STARTUP/MAIN/EXIT/Action 2")
 			located = true;
@@ -173,7 +180,7 @@ static int test_menu_references() {
 	session.handle(request::save_all());
 	session.handle(request::build());
 	session.run_operations();
-	TEST_EXPECT(!view.last_build.ok);
+	TEST_EXPECT(!view.activity.last_build->ok);
 	return 0;
 }
 
@@ -189,7 +196,7 @@ static int test_go_to_targets() {
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
+	const std::string root = session.view().project.root;
 	const std::string go = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
 	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n"
 	                         "<ACTION TYPE=\"WINDOW\" STATE=\"HIDE\">TITLE</ACTION>\r\n";
@@ -207,7 +214,7 @@ static int test_go_to_targets() {
 	TEST_EXPECT(menu && menu->rows().size() == 2);
 	if (!menu || menu->rows().size() != 2) return 1;
 	const SessionView &view = session.view();
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	NodeAddress go_window, back_window, home_title, away_title;
 	TEST_EXPECT(found_alike(graph, *menu, "GO", go_window) &&
 			found_alike(graph, *menu, "BACK", back_window));
@@ -241,12 +248,12 @@ static int test_go_to_targets() {
 		TEST_EXPECT(screen_symbol && menu->address_at(screen_symbol->locator) == away_screen);
 		// A definition opens where it is defined, the use where it is made.
 		if (screen_symbol) {
-			const ReferenceTarget defined = symbol_target(view.scan, *screen_symbol);
+			const ReferenceTarget defined = symbol_target(*view.project.scan, *screen_symbol);
 			TEST_EXPECT(defined.file == menu->path() && defined.editable &&
 					defined.field == screen_symbol->field &&
 					defined.label.find("AWAY") != std::string::npos);
 		}
-		const ReferenceTarget used = usage_target(view.scan, *jump);
+		const ReferenceTarget used = usage_target(*view.project.scan, *jump);
 		TEST_EXPECT(used.file == "other.mnu" && used.editable && used.locator == jump->locator &&
 		            used.label == "other.mnu: OTHER/JUMP/Action 1");
 	}
@@ -254,12 +261,12 @@ static int test_go_to_targets() {
 	std::string font_file;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(),
 						&font_file) == ReferenceStatus::Present);
-	TEST_EXPECT(!file_target(view.scan, font_file).editable &&
-			file_target(view.scan, "other.mnu").editable &&
-			file_target(view.scan, "other.mnu").locator.empty());
+	TEST_EXPECT(!file_target(*view.project.scan, font_file).editable &&
+			file_target(*view.project.scan, "other.mnu").editable &&
+			file_target(*view.project.scan, "other.mnu").locator.empty());
 	// The same file: the Go to selects the record there, its NAME shown.
 	if (to_away_title.size() == 1) go_to(session, to_away_title[0]);
-	TEST_EXPECT(view.active_document == menu->path() && view.selection == away_title && view.reveal_field == "name");
+	TEST_EXPECT(view.documents.active == menu->path() && view.documents.selection == away_title && editor_test::revealed_field(view) == "name");
 	const std::vector<const GraphEdge *> uses = graph.usages_of(menu->path());
 	const auto used_by = [&uses](const char *source, const char *record) {
 		return std::any_of(uses.begin(), uses.end(), [&](const GraphEdge *edge) {
@@ -284,11 +291,11 @@ static int test_find_definition() {
 	session.handle(request::new_project(dir.file("project"), "Find"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const AssetEntry *style = view.scan.find("menu_style.mns");
+	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	const std::string style_path = style->relative_path;
-	const std::string style_file = view.project_root + "/" + style_path;
+	const std::string style_file = view.project.root + "/" + style_path;
 	const std::string style_dir = style_file.substr(0, style_file.rfind('/'));
 	std::string text, problem;
 	TEST_EXPECT(read_file_text(style_file, text, problem));
@@ -300,7 +307,7 @@ static int test_find_definition() {
 	Document *sheet = session.document_for(style_path);
 	TEST_EXPECT(sheet != nullptr);
 	if (!sheet) return 1;
-	const AssetGraph &graph = *view.graph;
+	const AssetGraph &graph = *view.findings.graph;
 	// The slot is current: the graph's definitions are read, each with the stylesheet's own inert.
 	size_t read = 0, own_inert = 0, published_inert = 0;
 	TEST_EXPECT(graph.for_each_definition(*sheet, [&](const GraphSymbol &symbol, bool inert) {
