@@ -92,8 +92,8 @@ private:
 // Where a finding takes Problems: a project file the scan lists. One the editor opens is
 // opened, the record the finding names selected and its field shown; one the editor does not
 // open (a font, an environment, an archive), or a finding about the file itself rather than
-// what it holds (its name: asset.name.*, build.name_unstorable; its place:
-// build.archive_in_project), is shown in Files (`in_files`). Empty when the finding names no
+// what it holds (its code's row's place: its name, asset.name.* and build.name_unstorable; its
+// place, build.archive_in_project), is shown in Files (`in_files`). Empty when the finding names no
 // file of the project (a required file the project lacks): Problems then only selects its row.
 struct ProblemLocation {
 	std::string path;

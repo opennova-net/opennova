@@ -292,7 +292,7 @@ protected:
 			}
 		}
 		if (!flush()) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "Malformed fake document.", path());
+			error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Malformed fake document.", path());
 			return false;
 		}
 		return true;
@@ -447,7 +447,7 @@ protected:
 	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override {
 		const auto *text = std::get_if<std::string>(&edit.value);
 		if (!text) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "The note is text.", path());
+			error = editor_test::finding_of(DiagnosticSeverity::Error, "document.value", "The note is text.", path());
 			return false;
 		}
 		auto note = std::make_shared<FakeState>();
@@ -651,7 +651,7 @@ protected:
 		while (in >> tag) {
 			auto line = std::make_shared<FlatLine>();
 			if (tag != "L" || !(in >> line->title >> line->weight >> line->tag)) {
-				error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "Not a line.", path());
+				error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Not a line.", path());
 				return false;
 			}
 			rows.push_back(line);

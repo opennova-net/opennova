@@ -5,6 +5,7 @@
 #include <base/gameprofile/required_resources.h>
 #include <editor/graph/project_validation.h>
 #include <editor/preview/menu_render_check.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -17,9 +18,8 @@ Diagnostic boot_finding(const std::string &name) {
 	const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_find(name.c_str());
 	std::string message = "The game could not find " + name + " when it started";
 	message += row != nullptr && row->failure != nullptr ? std::string(". Without it: ") + row->failure + "." : ".";
-	Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "play.boot_missing", message);
-	d.role = row != nullptr ? row->role : "";
-	d.target = row != nullptr ? row->name : name;
+	Diagnostic d = make_finding(CoreFinding::PlayBootMissing, DiagnosticSeverity::Error, message);
+	d.subject = RequirementSubject{ row != nullptr ? row->role : "", row != nullptr ? row->name : name };
 	return d;
 }
 

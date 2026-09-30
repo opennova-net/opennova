@@ -225,12 +225,12 @@ SerializeResult AnimationDocument::serialize() const {
 bool AnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                               std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
 	if (!is_animation_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a clip.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a clip.", path());
 		return false;
 	}
 	const assets::BoneAnimation base = assets::parse_bone_animation(bytes.data(), bytes.size());
 	if (!base) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "The clip could not be read.", path());
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, "The clip could not be read.", path());
 		return false;
 	}
 	auto row = std::make_shared<ClipRow>();
@@ -376,6 +376,27 @@ bool AnimationDocument::accept_change(const Change &change, std::string &error) 
 	return true;
 }
 
+namespace {
+
+constexpr FindingCodeEntry<AnimationFinding> kFindingEntries[] = {
+	{ AnimationFinding::Fps, { "animation.fps" } },
+	{ AnimationFinding::ParentOrder, { "animation.parent_order" } },
+	{ AnimationFinding::TriggerUnknown, { "animation.trigger_unknown" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationFinding::kCount),
+		"every AnimationFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the clip's rows follow AnimationFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries);
+
+} // namespace
+
+const FindingCodeRow &finding_code(AnimationFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable animation_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const uint32_t known = known_trigger_bits();
@@ -383,10 +404,10 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 	const ClipRow *row = clip_document ? clip_document->clip() : nullptr;
 	if (!row) return findings;
 	if (row->fps != 30) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.fps",
-		                               "This clip plays at " + std::to_string(row->fps) +
-		                                       " frames per second; every retail clip plays at 30.",
-		                               document.path(), "fps");
+		Diagnostic d = make_finding(AnimationFinding::Fps, DiagnosticSeverity::Info,
+		                            "This clip plays at " + std::to_string(row->fps) +
+		                                    " frames per second; every retail clip plays at 30.",
+		                            document.path(), "fps");
 		d.row_id = row->id;
 		d.record_kind = kClip;
 		findings.push_back(std::move(d));
@@ -404,7 +425,7 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 		                          "order, so the parent's is not built yet when " + name + " reads it."
 		                : "Bone " + name + "'s parent, " + std::to_string(parent) +
 		                          ", is no bone of the clip: the rig builds each bone's pose on its parent's.";
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "animation.parent_order", message, document.path(), "parent");
+		Diagnostic d = make_finding(AnimationFinding::ParentOrder, DiagnosticSeverity::Warning, message, document.path(), "parent");
 		d.row_id = row->id;
 		d.record_kind = kBone;
 		d.child_id = row->collections[0][i];
@@ -413,9 +434,9 @@ std::vector<Diagnostic> validate_animation_file(const DocumentBase &document) {
 	}
 	for (size_t i = 0; i < row->events.size(); ++i) {
 		if ((static_cast<uint32_t>(row->events[i].trigger) & ~known) == 0) continue;
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.trigger_unknown",
-		                               "Frame " + std::to_string(i) + " sets a trigger bit the engine does not read.",
-		                               document.path(), "trigger");
+		Diagnostic d = make_finding(AnimationFinding::TriggerUnknown, DiagnosticSeverity::Info,
+		                            "Frame " + std::to_string(i) + " sets a trigger bit the engine does not read.",
+		                            document.path(), "trigger");
 		d.row_id = row->id;
 		d.record_kind = kEvent;
 		d.child_id = row->collections[1][i];

@@ -1,4 +1,5 @@
 #include <editor/project_build/build_plan.h>
+#include <editor/session/finding_codes.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -34,8 +35,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	for (const AssetEntry &asset : scan.entries) {
 		if (asset_kind_row(asset.kind).import_source) continue; // its outputs are in the scan
 		if (!asset_is_packable(asset)) {
-			plan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "build.archive_in_project",
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
 			        asset.logical_name + " is an archive; the build packs the project's files itself, so "
 			                             "unpack it into the project or remove it.",
 			        asset.relative_path));
@@ -51,8 +52,8 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			continue;
 		}
 		if (!logical_name_fits_archive(asset.logical_name)) {
-			plan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "build.name_unstorable",
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildNameUnstorable, DiagnosticSeverity::Error,
 			        "The game cannot store " + asset.logical_name + " in an archive (the name is too long).",
 			        asset.relative_path));
 			continue;

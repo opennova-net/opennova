@@ -69,7 +69,7 @@ static size_t count_code(const std::vector<Diagnostic> &diagnostics, const char 
 static const Diagnostic *finding_about(const std::vector<Diagnostic> &diagnostics, const char *code,
                                        const std::string &target) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code && d.target == target) return &d;
+		if (d.code == code && subject_target(d) == target) return &d;
 	return nullptr;
 }
 
@@ -245,7 +245,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.activity.boot_missing.size() == 1 && v.activity.boot_missing[0] == "MAIN.MNU");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 1);
 	const Diagnostic *boot = finding_about(v.findings.diagnostics, "play.boot_missing", "main.mnu");
-	TEST_EXPECT(boot && boot->asset.empty() && boot->role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(boot && boot->asset.empty() && editor_test::requirement_of(*boot).role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos && boot->message.find("Without it") != std::string::npos);
 	TEST_EXPECT(v.activity.missing_at_boot("main.mnu"));
 	{
@@ -1668,8 +1668,8 @@ static int test_boot_findings() {
 			finding_about(v.findings.diagnostics, "play.boot_missing", "gametext.bin");
 	const Diagnostic *mystery =
 			finding_about(v.findings.diagnostics, "play.boot_missing", "mystery.dat");
-	TEST_EXPECT(table && table->role == "gametext" && table->asset.empty());
-	TEST_EXPECT(mystery && mystery->role.empty() && mystery->message.find("Without it") == std::string::npos);
+	TEST_EXPECT(table && editor_test::requirement_of(*table).role == "gametext" && table->asset.empty());
+	TEST_EXPECT(mystery && editor_test::requirement_of(*mystery).role.empty() && mystery->message.find("Without it") == std::string::npos);
 	// An edit and its undo validate again, and so does a rescan: the rows stay, once each.
 	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");
@@ -1747,7 +1747,7 @@ static int test_optional_rows() {
 	TEST_EXPECT(lacking > 0 && count_code(v.findings.diagnostics, "requirement.optional_missing") == lacking);
 	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code == "requirement.optional_missing")
-			TEST_EXPECT(d.severity == DiagnosticSeverity::Info && !d.role.empty() && !d.target.empty() && d.asset.empty());
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Info && !editor_test::requirement_of(d).role.empty() && !subject_target(d).empty() && d.asset.empty());
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(v.activity.last_build->ok && !has_code(v.activity.last_build->diagnostics, "requirement.optional_missing"));

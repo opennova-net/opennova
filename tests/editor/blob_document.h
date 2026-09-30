@@ -17,6 +17,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/document_base.h>
 #include <editor/model/edit.h>
+#include <editor/session/finding_codes.h>
 
 namespace editor_test {
 
@@ -63,7 +64,8 @@ protected:
 			                              ? dynamic_cast<const BlobReplace *>(edit.payload.get())
 			                              : nullptr;
 			if (!replace)
-				return refuse(error, "document.payload", "A blob takes its own replacements only.");
+				return refuse(error, opennova::editor::CoreFinding::DocumentPayload,
+				              "A blob takes its own replacements only.");
 			next = replace->text;
 		}
 		if (next == blob_) return true;
@@ -80,7 +82,7 @@ protected:
 	                 opennova::editor::Diagnostic &error) override {
 		const std::string text(decoded.begin(), decoded.end());
 		if (text.rfind("FAIL", 0) == 0)
-			return refuse(error, "document.parse", "The blob does not read.");
+			return refuse(error, opennova::editor::CoreFinding::DocumentParse, "The blob does not read.");
 		std::istringstream in(text);
 		size_t number = 0;
 		const auto issue = [&](bool blocking, const char *message) {
@@ -115,9 +117,9 @@ private:
 		revision_ = from.back().revision;
 		from.pop_back();
 	}
-	static bool refuse(opennova::editor::Diagnostic &error, const char *code, const char *message) {
-		error = opennova::editor::make_diagnostic(opennova::editor::DiagnosticSeverity::Error, code,
-		                                          message);
+	static bool refuse(opennova::editor::Diagnostic &error, opennova::editor::CoreFinding code,
+	                   const char *message) {
+		error = opennova::editor::make_finding(code, opennova::editor::DiagnosticSeverity::Error, message);
 		return false;
 	}
 	std::string blob_;

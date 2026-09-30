@@ -10,6 +10,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
@@ -38,9 +39,9 @@ Document *DocumentSet::records_for(const std::string &path) {
 void DocumentSet::refuse_records(const std::string &path, const char *not_open) {
 	if (!view_.project.open) return;
 	if (const DocumentBase *document = document_for(path))
-		return core_.refuse_now("document.no_records", "This document holds no records.",
+		return core_.refuse_now(CoreFinding::DocumentNoRecords, "This document holds no records.",
 		                        document->path());
-	core_.refuse_now("document.not_open", not_open, path);
+	core_.refuse_now(CoreFinding::DocumentNotOpen, not_open, path);
 }
 
 bool DocumentSet::documents_dirty() const {
@@ -115,7 +116,7 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
                                                 Diagnostic &error) const {
 	const DocumentType *type = document_type_for(kind);
 	if (!type) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This kind of file has no editor yet.", relative);
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", relative);
 		return nullptr;
 	}
 	std::shared_ptr<DocumentBase> document = type->make();
@@ -173,18 +174,18 @@ void DocumentSet::reload_changed() {
 std::vector<Diagnostic> DocumentSet::findings() const {
 	std::vector<Diagnostic> findings;
 	for (const auto &[path, reason] : stale_) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "document.stale",
-		                               "This file changed outside the editor and could not be read again, so the editor "
-		                               "shows it as it was: " + reason.message + " Correct the file and Refresh, or close it.",
-		                               path);
+		Diagnostic d = make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error,
+		                            "This file changed outside the editor and could not be read again, so the editor "
+		                            "shows it as it was: " + reason.message + " Correct the file and Refresh, or close it.",
+		                            path);
 		d.line = reason.line;
 		findings.push_back(std::move(d));
 	}
 	for (const std::string &path : conflicts_)
-		findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "document.conflict",
-		                                   "This file changed outside the editor while it has unsaved edits: Save is "
-		                                   "refused until it is read again, which discards the edits.",
-		                                   path));
+		findings.push_back(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Warning,
+		                                "This file changed outside the editor while it has unsaved edits: Save is "
+		                                "refused until it is read again, which discards the edits.",
+		                                path));
 	return findings;
 }
 
@@ -210,14 +211,18 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(request.path))
 			blank.role = row.role;
 	if (!find_blank_factory_for_role(blank.role) && !find_blank_factory_for_kind(kind)) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.kind", "The editor cannot create this kind of file.", request.path));
+		core_.report(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "The editor cannot create this kind of file.", request.path));
 		return;
 	}
 	// A plain name the archives can carry, whose extension is the kind's, landing
 	// inside the project.
-	std::string problem, message;
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
 	if (!check_project_file_name(paths_.root, blank_placement_dir(kind), request.path, kind, problem, message)) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document." + problem, message, request.path));
+		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
+		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
+		                                                            : CoreFinding::DocumentName;
+		core_.report(make_finding(code, DiagnosticSeverity::Error, message, request.path));
 		return;
 	}
 	const auto *existing = view_.project.scan->find(request.path);
@@ -226,14 +231,14 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		const auto target = fs::path(paths_.root) / relative;
 		std::error_code ec;
 		if (fs::exists(target, ec) || ec) {
-			core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.conflict", "Refresh before creating this file.", request.path));
+			core_.report(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Error, "Refresh before creating this file.", request.path));
 			return;
 		}
 		std::vector<uint8_t> bytes; Diagnostic error;
 		if (!make_blank(blank, kind, bytes, error)) { core_.report(error); return; }
 		if (!ensure_directory(target.parent_path().generic_string(), message) ||
 			!write_file_atomic(target.generic_string(), bytes.data(), bytes.size(), message)) {
-			core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.write", message, request.path));
+			core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
 			return;
 		}
 		core_.refresh();
@@ -281,7 +286,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
-			core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This kind of file has no editor yet.", path));
+			core_.report(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
@@ -301,7 +306,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		core_.touch(ViewConcern::Selection);
 		update_view(); core_.problems().validate_documents(); return;
 	}
-	core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", path));
+	core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
 }
 
 // Files shows the file (and asks its new name when the request says so): a RevealFile event,
@@ -310,7 +315,7 @@ void DocumentSet::show_in_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	const AssetEntry *asset = core_.project_file(request.path);
 	if (!asset) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", request.path));
+		core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", request.path));
 		return;
 	}
 	ViewEvent reveal;
@@ -356,7 +361,7 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 		open_document(request::open_document(request.path));
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before editing it.", request.path);
+		if (view_.project.open) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open the file before editing it.", request.path);
 		return;
 	}
 	apply_edits(*document, request.edits);
@@ -373,7 +378,7 @@ void DocumentSet::revert_to_saved(const EditorRequest &request) {
 		for (Edit &edit : document->revert_edits(target.address, target.field)) batch.push_back(std::move(edit));
 	if (batch.empty()) {
 		last_edit_ok_ = false;
-		core_.refuse_now("document.revert_nothing",
+		core_.refuse_now(CoreFinding::DocumentRevertNothing,
 		                 "Nothing to revert: the field is as the saved file holds it, or the saved file does not have "
 		                 "it to go back to.",
 		                 document->path());
@@ -412,7 +417,7 @@ void DocumentSet::duplicate(const EditorRequest &request) {
 void DocumentSet::undo_redo(const EditorRequest &request) {
 	auto *document = document_for(request.path);
 	if (!document) {
-		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before undoing or redoing in it.", request.path);
+		if (view_.project.open) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open the file before undoing or redoing in it.", request.path);
 		return;
 	}
 	const uint64_t before = document->revision();
@@ -439,7 +444,7 @@ void DocumentSet::save(const std::string &path) {
 		save_documents({document->path()}, true);
 	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
-		if (path.empty()) core_.refuse_now("document.not_open", "Open a file before saving it.");
+		if (path.empty()) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
 		else rewrite_file(path);
 	}
 }
@@ -472,7 +477,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		if (!document->save(error)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
 			// until the document is read again (its Reload fix).
-			if (error.code == "document.conflict" && document->dirty()) conflicts_.insert(document->path());
+			if (error.code == finding_code(CoreFinding::DocumentConflict).token && document->dirty()) conflicts_.insert(document->path());
 			failures.push_back(error);
 			continue;
 		}
@@ -499,7 +504,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 // files of one name, the one project_file picks: the path named, else the first of the name.
 void DocumentSet::rewrite_file(const std::string &path) {
 	const AssetEntry *asset = core_.project_file(path);
-	if (!asset) return core_.report(make_diagnostic(DiagnosticSeverity::Error, "document.missing", "The file was not found.", path));
+	if (!asset) return core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
 	const std::string relative = asset->relative_path;
 	Diagnostic error;
 	const std::shared_ptr<DocumentBase> document = load(relative, asset->kind, error);
@@ -624,10 +629,10 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 	const std::vector<NodeAddress> records =
 	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
 	if (records.empty())
-		return core_.refuse_now("document.copy", "Select the records to copy first.", document.path());
+		return core_.refuse_now(CoreFinding::DocumentCopy, "Select the records to copy first.", document.path());
 	std::string payload = document.copy(records);
 	if (payload.empty())
-		return core_.refuse_now("document.copy", "These records cannot be copied.", document.path());
+		return core_.refuse_now(CoreFinding::DocumentCopy, "These records cannot be copied.", document.path());
 	view_.documents.clipboard = std::move(payload);
 	core_.touch(ViewConcern::Selection);
 	if (!cut) {
@@ -649,7 +654,7 @@ void DocumentSet::copy_records(Document &document, bool cut) {
 void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 	last_edit_ok_ = false;
 	if (view_.documents.clipboard.empty())
-		return core_.refuse_now("document.paste", "The clipboard is empty: copy records first.", document.path());
+		return core_.refuse_now(CoreFinding::DocumentPaste, "The clipboard is empty: copy records first.", document.path());
 	Edit edit;
 	edit.operation = EditOperation::Paste;
 	edit.address.row = target.row;
@@ -660,7 +665,7 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 		// No target named: beside the selected record (the one position rule, position_after), or
 		// into the selected row, at its end.
 		if (document.path() != view_.documents.active || !view_.documents.selection.row)
-			return core_.refuse_now("document.paste", "Select where to paste.", document.path());
+			return core_.refuse_now(CoreFinding::DocumentPaste, "Select where to paste.", document.path());
 		edit.address.row = view_.documents.selection.row;
 		if (!view_.documents.selection.child || !position_after(document, view_.documents.selection, edit.parent, edit.position)) {
 			edit.parent = 0;
@@ -678,7 +683,7 @@ void DocumentSet::duplicate_records(Document &document) {
 	const std::vector<NodeAddress> records =
 	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
 	if (records.empty())
-		return core_.refuse_now("document.duplicate", "Select the records to duplicate first.", document.path());
+		return core_.refuse_now(CoreFinding::DocumentDuplicate, "Select the records to duplicate first.", document.path());
 	if (!records.front().child) {
 		// A row: after itself among the rows (the selection stays inside one row, so it is alone).
 		Edit edit;
@@ -699,7 +704,7 @@ void DocumentSet::duplicate_records(Document &document) {
 	for (const NodeAddress &record : records) {
 		Item item{record, {}};
 		if (!document.placement(record, item.at))
-			return core_.refuse_now("document.selection", "The selected record no longer exists.", document.path());
+			return core_.refuse_now(CoreFinding::DocumentSelection, "The selected record no longer exists.", document.path());
 		items.push_back(item);
 	}
 	std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) {

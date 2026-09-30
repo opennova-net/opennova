@@ -16,6 +16,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 #include <formats/mns/mns.h>
 #include <runtime/menu/menu_style.h>
 
@@ -182,8 +183,8 @@ public:
 			return;
 		}
 		const std::string name = source.name();
-		const auto fail = [&](const char *code, const std::string &message) {
-			plan_.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, code, message, name));
+		const auto fail = [&](CoreFinding code, const std::string &message) {
+			plan_.diagnostics.push_back(make_finding(code, DiagnosticSeverity::Error, message, name));
 		};
 		const ImportOrigin *from = nullptr;
 		std::string found_in, error;
@@ -191,11 +192,11 @@ public:
 		if (source.install || !source.entry.empty()) {
 			from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error);
 			if (!from) {
-				fail(source.install ? "import.install" : "import.archive", error);
+				fail(source.install ? CoreFinding::ImportInstall : CoreFinding::ImportArchive, error);
 				return;
 			}
 			if (!from->read(source.entry, bytes)) {
-				fail("import.read", source.install ? "The game data has no file named " + name + "."
+				fail(CoreFinding::ImportRead, source.install ? "The game data has no file named " + name + "."
 				                                  : "Could not read " + name + " from " + source.path);
 				return;
 			}
@@ -203,7 +204,7 @@ public:
 		} else {
 			std::string io_error;
 			if (!read_file_bytes(source.path, bytes, io_error)) {
-				fail("import.read", io_error);
+				fail(CoreFinding::ImportRead, io_error);
 				return;
 			}
 			// The folder it sits in (a bare name's is the working folder): where the files it
@@ -217,10 +218,10 @@ public:
 			if (walk) {
 				from = origin(ImportOrigin::Kind::Folder, folder, error);
 				if (!from)
-					plan_.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.folder",
-					                                            error + " The files " + name +
-					                                                    " names are not looked for there.",
-					                                            name));
+					plan_.diagnostics.push_back(make_finding(CoreFinding::ImportFolder, DiagnosticSeverity::Warning,
+					                                         error + " The files " + name +
+					                                                 " names are not looked for there.",
+					                                         name));
 			}
 		}
 		// A converter's outputs are made in memory: the textures an .o3d names are its model's
@@ -329,7 +330,8 @@ private:
 	void place(ImportPlanRow &row) const {
 		row.destination = import_destination(scan_, row.name, row.kind);
 		if (!row.problem.empty()) return;
-		std::string problem, message;
+		FileNameProblem problem = FileNameProblem::None;
+		std::string message;
 		if (row.kind == AssetKind::Unknown || row.kind == AssetKind::Archive)
 			row.problem = "Unsupported asset type: " + row.name;
 		else if (!check_project_file_name(paths_.root, fs::path(row.destination).parent_path().generic_string(), row.name,
@@ -377,8 +379,8 @@ private:
 			node.read = Node::Read::Failed;
 			std::string reason = error.message.empty() ? std::string("The file could not be read.") : error.message;
 			if (reason.back() != '.') reason += '.';
-			plan_.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
-			                                            reason + " The files it names are not looked for.", row.name));
+			plan_.diagnostics.push_back(make_finding(CoreFinding::ImportUnreadable, DiagnosticSeverity::Warning,
+			                                         reason + " The files it names are not looked for.", row.name));
 			return false;
 		}
 		node.read = Node::Read::Done;
@@ -589,8 +591,8 @@ ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_depen
 		std::string error;
 		const ImportOrigin *install = planner.origin(ImportOrigin::Kind::GameInstall, retail_directory, error);
 		if (!install)
-			plan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.install",
-			                                           error + " The files the import needs are not looked for there."));
+			plan.diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Warning,
+			                                        error + " The files the import needs are not looked for there."));
 		planner.set_install(install);
 	}
 	for (const ImportSource &source : sources) {

@@ -696,9 +696,9 @@ static int test_problem_groups_page() {
 	view.project.open = true;
 	for (int i = 0; i < 250; ++i) {
 		const std::string file = "defs/f" + std::to_string(1000 + i) + ".def";
-		view.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "A finding.", file));
+		view.findings.diagnostics.push_back(editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "A finding.", file));
 		if (i == 20) // a second finding in one file: that group holds two rows
-			view.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.test", "Another.", file));
+			view.findings.diagnostics.push_back(editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "Another.", file));
 	}
 	ProblemQuery by_file;
 	by_file.grouping = ProblemGrouping::File;
@@ -1434,7 +1434,7 @@ static int test_import_plan_json() {
 	planned.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
 	                        {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
 	planned.truncated = true;
-	planned.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+	planned.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read.", "b.mnu") };
 	preview.plan = std::make_shared<const ImportPlan>(std::move(planned));
 	const JsonValue json = session_view_to_json(view);

@@ -1,6 +1,7 @@
 #include <editor/requirements/requirements.h>
 
 #include <editor/assets/asset_type_registry.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -51,25 +52,24 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 
 		// The finding names its row (the role, the required name); a missing file is the
 		// project's finding, since no file of the project is at fault.
-		const auto finding = [&row](DiagnosticSeverity severity, const char *code, const std::string &message,
+		const auto finding = [&row](DiagnosticSeverity severity, CoreFinding code, const std::string &message,
 		                            const std::string &asset) {
-			Diagnostic d = make_diagnostic(severity, code, message, asset);
-			d.role = row.role;
-			d.target = row.name;
+			Diagnostic d = make_finding(code, severity, message, asset);
+			d.subject = RequirementSubject{ row.role, row.name };
 			return d;
 		};
 		if (row.required) {
 			++report.required_total;
 			if (row.state == RequirementState::Missing) {
 				++report.required_missing;
-				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, "requirement.missing",
+				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, CoreFinding::RequirementMissing,
 				                                     "Missing required file " + row.name + " (" +
 				                                             requirement_phase_label(row.phase) + "). Without it: " +
 				                                             resource->failure + ".",
 				                                     std::string()));
 			} else if (row.state == RequirementState::WrongKind) {
 				++report.required_wrong_kind;
-				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, "requirement.wrong_kind",
+				report.diagnostics.push_back(finding(DiagnosticSeverity::Error, CoreFinding::RequirementWrongKind,
 				                                     row.name + " is present but is not a " +
 				                                             std::string(asset_kind_label(row.expected_kind)) +
 				                                             " (found: " + asset_kind_label(row.found_kind) + ").",
@@ -77,7 +77,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			}
 		} else if (row.state == RequirementState::Missing) {
 			// An optional file the game does without: a note that says how.
-			report.diagnostics.push_back(finding(DiagnosticSeverity::Info, "requirement.optional_missing",
+			report.diagnostics.push_back(finding(DiagnosticSeverity::Info, CoreFinding::RequirementOptionalMissing,
 			                                     "Optional file " + row.name + " is not in the project (" +
 			                                             requirement_phase_label(row.phase) + "). Without it: " +
 			                                             resource->failure + ".",

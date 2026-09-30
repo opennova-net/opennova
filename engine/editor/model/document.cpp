@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cstdlib>
 
+#include <editor/session/finding_codes.h>
+
 namespace opennova::editor {
 
 uint64_t next_edit_gesture() {
@@ -20,9 +22,9 @@ Document::Document(const Document &other)
 
 namespace {
 
-bool fail(Diagnostic &error, const std::string &path, const char *code, const std::string &message,
+bool fail(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
           const std::string &field = {}) {
-	error = make_diagnostic(DiagnosticSeverity::Error, code, message, path, field);
+	error = make_finding(code, DiagnosticSeverity::Error, message, path, field);
 	return false;
 }
 
@@ -397,7 +399,7 @@ bool Document::paste_records(Node &, const Edit &, const IdAllocator &, std::vec
 }
 
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	return fail(error, path(), "document.value", "This document has no file-wide values.");
+	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
 
 bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -443,11 +445,11 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 	std::string message;
 	if (edit.operation == EditOperation::Apply) {
 		if (!edit.payload)
-			return fail(error, path(), "document.payload", "This change carries nothing to apply.");
+			return fail(error, path(), CoreFinding::DocumentPayload, "This change carries nothing to apply.");
 		std::shared_ptr<const FileState> updated = file_state_;
 		bool changes = true;
 		if (!apply_file_payload(updated, *edit.payload, changes, message))
-			return fail(error, path(), "document.payload",
+			return fail(error, path(), CoreFinding::DocumentPayload,
 			            message.empty() ? "This document does not take that change." : message);
 		if (!changes) return true; // the file-wide state as it was: no step
 		change.after_state = updated;
@@ -458,17 +460,17 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 	}
 	std::shared_ptr<Node> updated;
 	if (edit.operation == EditOperation::Paste)
-		return fail(error, path(), "document.paste", "Paste inside a record: select where the records go.");
+		return fail(error, path(), CoreFinding::DocumentPaste, "Paste inside a record: select where the records go.");
 	if (edit.operation == EditOperation::Add) {
 		const NodeId id = allocate_id();
 		updated = make_node(edit.address.kind, id, message);
-		if (!updated) return fail(error, path(), "document.kind", message.empty() ? "This document cannot add that record." : message);
+		if (!updated) return fail(error, path(), CoreFinding::DocumentKind, message.empty() ? "This document cannot add that record." : message);
 		updated->id = id;
 		assign_ids(*updated);
 		// The new row's field, set in the same step (Edit::field on an Add).
 		if (!edit.field.empty()) {
 			if (!set_field(*updated, {id, edit.address.kind, 0}, edit.field, edit.value, message))
-				return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
+				return fail(error, path(), CoreFinding::DocumentValue, message.empty() ? "Unknown field." : message, edit.field);
 			after_edit(*updated);
 		}
 		change.after = updated;
@@ -479,11 +481,11 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 		return true;
 	}
 	const size_t index = row_index(edit.address.row);
-	if (index == rows_.size()) return fail(error, path(), "document.selection", "The selected record no longer exists.");
+	if (index == rows_.size()) return fail(error, path(), CoreFinding::DocumentSelection, "The selected record no longer exists.");
 	if (rows_[index]->kind != edit.address.kind)
-		return fail(error, path(), "document.selection",
+		return fail(error, path(), CoreFinding::DocumentSelection,
 		            std::string("Wrong kind: the record is ") + kind_label(rows_[index]->kind) + ", the address says " + kind_words(*this, edit.address.kind) + ".");
-	if (edit.parent) return fail(error, path(), "document.collection", "A row moves among the rows only.");
+	if (edit.parent) return fail(error, path(), CoreFinding::DocumentCollection, "A row moves among the rows only.");
 	change.before = rows_[index];
 	change.before_position = index;
 	if (edit.operation == EditOperation::Remove) {
@@ -519,7 +521,7 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 bool Document::commit(Change change, const std::string &key, Diagnostic &error) {
 	std::string message;
 	if (!accept_change(change, message))
-		return fail(error, path(), "document.structure", message.empty() ? "This document refuses that change." : message);
+		return fail(error, path(), CoreFinding::DocumentStructure, message.empty() ? "This document refuses that change." : message);
 	history_.commit(std::move(change), key);
 	return true;
 }
@@ -529,7 +531,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	for (const Edit &edit : edits) {
 		if (edit.operation != EditOperation::SetFileValue && !row_level(edit)) continue;
 		if (edits.size() == 1) return apply_row_edit(edit, error);
-		return fail(error, path(), "document.batch", "Rows and file-wide values change one edit at a time, not in a batch.");
+		return fail(error, path(), CoreFinding::DocumentBatch, "Rows and file-wide values change one edit at a time, not in a batch.");
 	}
 	NodeId row = 0;
 	if (!batch_row(edits, row, error)) return false;
@@ -555,7 +557,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	// The change is the type's to refuse before it commits.
 	std::string message;
 	if (!accept_change(batch.change, message)) {
-		fail(error, path(), "document.structure",
+		fail(error, path(), CoreFinding::DocumentStructure,
 		     message.empty() ? "This document refuses that change." : message);
 		return refused();
 	}
@@ -578,13 +580,13 @@ bool Document::batch_row(const std::vector<Edit> &edits, NodeId &row, Diagnostic
 			if (!id) continue;
 		} else if (into && edit.parent) {
 			const NodeAddress owner = address_of(edit.parent);
-			if (!owner.row) return fail(error, path(), "document.selection", "The record to add into no longer exists.");
+			if (!owner.row) return fail(error, path(), CoreFinding::DocumentSelection, "The record to add into no longer exists.");
 			if (edit.address.row && edit.address.row != owner.row)
-				return fail(error, path(), "document.selection", "The record to add into is in another row than the edit names.");
+				return fail(error, path(), CoreFinding::DocumentSelection, "The record to add into is in another row than the edit names.");
 			id = owner.row;
 		}
 		if (row && id != row)
-			return fail(error, path(), "document.batch", "A batch edits one row: edit other rows in another change.");
+			return fail(error, path(), CoreFinding::DocumentBatch, "A batch edits one row: edit other rows in another change.");
 		row = id;
 	}
 	return true;
@@ -610,7 +612,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 	NodeId row_id = 0;
 	if (!batch_row(edits, row_id, error)) return false;
 	const size_t index = row_index(row_id);
-	if (index == rows_.size()) return fail(error, path(), "document.selection", "The selected record no longer exists.");
+	if (index == rows_.size()) return fail(error, path(), CoreFinding::DocumentSelection, "The selected record no longer exists.");
 	const std::shared_ptr<const Node> current = rows_[index];
 	std::shared_ptr<Node> updated = current->clone();
 
@@ -651,7 +653,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			return true;
 		};
 		if (!resolve_made(edit.address.child) || !resolve_made(edit.parent))
-			return fail(error, path(), "document.batch", "An edit names a record that no earlier edit of its batch made.");
+			return fail(error, path(), CoreFinding::DocumentBatch, "An edit names a record that no earlier edit of its batch made.");
 		if (!edit.address.row) edit.address.row = row_id;
 		std::string message;
 		const NodeAddress &address = edit.address;
@@ -663,12 +665,12 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 		if (edit.operation != EditOperation::Add && edit.operation != EditOperation::Paste) {
 			if (!address.child) {
 				if (updated->kind != address.kind)
-					return fail(error, path(), "document.selection",
+					return fail(error, path(), CoreFinding::DocumentSelection,
 					            std::string("Wrong kind: the record is ") + row_label + ", the address says " + kind_words(*this, address.kind) + ".");
 			} else if (!place(address.child, at)) {
-				return fail(error, path(), "document.selection", "The selected record no longer exists.");
+				return fail(error, path(), CoreFinding::DocumentSelection, "The selected record no longer exists.");
 			} else if (at.spec.kind != address.kind) {
-				return fail(error, path(), "document.selection",
+				return fail(error, path(), CoreFinding::DocumentSelection,
 				            std::string("Wrong kind: the record is ") + kind_label(at.spec.kind) + ", the address says " + kind_words(*this, address.kind) + ".");
 			}
 		}
@@ -681,7 +683,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			const bool read_before = read(*updated, address, edit.field, before);
 			const bool written_before = read_present(*updated, address, edit.field);
 			if (!set_field(*updated, address, edit.field, edit.value, message))
-				return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
+				return fail(error, path(), CoreFinding::DocumentValue, message.empty() ? "Unknown field." : message, edit.field);
 			if (read_before && read(*updated, address, edit.field, after) && after == before &&
 			    read_present(*updated, address, edit.field) == written_before)
 				continue;
@@ -691,11 +693,11 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			// A change the type made in C++, to the record and the file-wide state as the batch
 			// has left them; one that changes nothing is no step, as a Set of the value held.
 			if (!edit.payload)
-				return fail(error, path(), "document.payload",
+				return fail(error, path(), CoreFinding::DocumentPayload,
 				            "This change carries nothing to apply.");
 			bool changes = true;
 			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
-				return fail(error, path(), "document.payload",
+				return fail(error, path(), CoreFinding::DocumentPayload,
 				            message.empty() ? "This document does not take that change." : message);
 			if (!changes) continue;
 			break;
@@ -703,75 +705,75 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 		case EditOperation::Clear:
 		case EditOperation::Write: {
 			const FieldSchema *schema = field_schema(address.kind, edit.field);
-			if (!schema) return fail(error, path(), "document.value", "Unknown field.", edit.field);
+			if (!schema) return fail(error, path(), CoreFinding::DocumentValue, "Unknown field.", edit.field);
 			if (!schema->optional || schema->read_only)
-				return fail(error, path(), "document.value", "This field is always written.", edit.field);
+				return fail(error, path(), CoreFinding::DocumentValue, "This field is always written.", edit.field);
 			const bool written = edit.operation == EditOperation::Write;
 			// A field already left out (Clear) or already written (Write) changes nothing. The
 			// committed row answers while no earlier edit of the batch has changed the clone.
 			if (!changed && present(address, edit.field) == written) continue;
 			if (!set_present(*updated, address, edit.field, written, message))
-				return fail(error, path(), "document.value", message.empty() ? "This field is always written." : message, edit.field);
+				return fail(error, path(), CoreFinding::DocumentValue, message.empty() ? "This field is always written." : message, edit.field);
 			break;
 		}
 		case EditOperation::Add:
 		case EditOperation::Paste: {
 			NodeAddress owner;
 			if (!owner_of(edit.parent, owner))
-				return fail(error, path(), "document.selection", "The record to add into no longer exists.");
+				return fail(error, path(), CoreFinding::DocumentSelection, "The record to add into no longer exists.");
 			hook.parent = owner.child;
 			if (edit.operation == EditOperation::Paste) {
 				std::vector<NodeId> pasted;
 				if (!paste_records(*updated, hook, allocate, pasted, message))
-					return fail(error, path(), "document.paste", message.empty() ? "These records cannot be pasted here." : message);
+					return fail(error, path(), CoreFinding::DocumentPaste, message.empty() ? "These records cannot be pasted here." : message);
 				added.insert(added.end(), pasted.begin(), pasted.end());
 				if (!pasted.empty()) made[i] = pasted.front();
 				break;
 			}
 			Collection collection;
 			if (!find_collection(owner, address.kind, collection))
-				return fail(error, path(), "document.collection",
+				return fail(error, path(), CoreFinding::DocumentCollection,
 				            std::string(kind_label(owner.kind)) + " records hold no " + kind_words(*this, address.kind) + " records.");
 			if (collection.spec.fixed)
-				return fail(error, path(), "document.collection", std::string("The ") + collection.spec.label + " of this " +
+				return fail(error, path(), CoreFinding::DocumentCollection, std::string("The ") + collection.spec.label + " of this " +
 				            kind_label(owner.kind) + " is fixed: nothing is added to it.");
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
-				return fail(error, path(), "document.collection", message.empty() ? "This collection cannot accept that edit." : message);
+				return fail(error, path(), CoreFinding::DocumentCollection, message.empty() ? "This collection cannot accept that edit." : message);
 			if (one) added.push_back(one);
 			made[i] = one;
 			// The new record's field, set in the same step (Edit::field on an Add).
 			if (!edit.field.empty() && (!one || !set_field(*updated, {row_id, address.kind, one}, edit.field, edit.value, message)))
-				return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
+				return fail(error, path(), CoreFinding::DocumentValue, message.empty() ? "Unknown field." : message, edit.field);
 			break;
 		}
 		case EditOperation::Duplicate:
 		case EditOperation::Remove:
 		case EditOperation::Move: {
-			if (!address.child) return fail(error, path(), "document.collection", "A row is duplicated, removed or moved on its own.");
+			if (!address.child) return fail(error, path(), CoreFinding::DocumentCollection, "A row is duplicated, removed or moved on its own.");
 			if (at.spec.fixed)
-				return fail(error, path(), "document.collection", std::string("The ") + at.spec.label + " of this " +
+				return fail(error, path(), CoreFinding::DocumentCollection, std::string("The ") + at.spec.label + " of this " +
 				            kind_label(at.owner.kind) + " is fixed: it stays where it is.");
 			hook.parent = at.owner.child;
 			if (edit.operation == EditOperation::Move) {
 				NodeAddress destination = at.owner;
 				if (edit.parent && !owner_of(edit.parent, destination)) {
 					const NodeAddress elsewhere = address_of(edit.parent);
-					return fail(error, path(), "document.collection",
+					return fail(error, path(), CoreFinding::DocumentCollection,
 					            elsewhere.row && elsewhere.row != row_id ? "A record moves within its own " + row_label + "."
 					                                                     : std::string("The destination no longer exists."));
 				}
 				Collection collection;
 				if (!find_collection(destination, address.kind, collection))
-					return fail(error, path(), "document.collection",
+					return fail(error, path(), CoreFinding::DocumentCollection,
 					            std::string(kind_label(destination.kind)) + " records hold no " + kind_words(*this, address.kind) + " records.");
 				if (collection.spec.fixed)
-					return fail(error, path(), "document.collection", std::string("The ") + collection.spec.label + " of this " +
+					return fail(error, path(), CoreFinding::DocumentCollection, std::string("The ") + collection.spec.label + " of this " +
 					            kind_label(destination.kind) + " is fixed: nothing moves into it.");
 				// Never into the record itself or anything it holds.
 				for (NodeAddress up = destination; up.child;) {
 					if (up.child == address.child)
-						return fail(error, path(), "document.collection", "A record cannot move inside itself.");
+						return fail(error, path(), CoreFinding::DocumentCollection, "A record cannot move inside itself.");
 					Placement above;
 					if (!place(up.child, above)) break;
 					up = above.owner;
@@ -784,13 +786,13 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			}
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
-				return fail(error, path(), "document.collection", message.empty() ? "This collection cannot accept that edit." : message);
+				return fail(error, path(), CoreFinding::DocumentCollection, message.empty() ? "This collection cannot accept that edit." : message);
 			if (one) added.push_back(one);
 			made[i] = one;
 			break;
 		}
 		default:
-			return fail(error, path(), "document.batch", "Rows and file-wide values change one edit at a time, not in a batch.");
+			return fail(error, path(), CoreFinding::DocumentBatch, "Rows and file-wide values change one edit at a time, not in a batch.");
 		}
 		changed = true;
 		reshaped = reshaped || structural(edit.operation);

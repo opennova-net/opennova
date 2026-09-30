@@ -810,11 +810,18 @@ JsonValue diagnostic_to_json(const Diagnostic &d) {
 		out.set("child", json_number(double(d.child_id)));
 		out.set("kind", json_number(double(d.record_kind)));
 	}
-	if (!d.role.empty()) out.set("role", json_string(d.role));
-	if (!d.target.empty()) out.set("target", json_string(d.target));
-	if (d.reference != ReferenceKind::None) out.set("reference", json_string(reference_row(d.reference).token));
-	if (!d.scope.empty()) out.set("scope", json_string(d.scope));
-	if (d.loader_arg >= 0) out.set("loader_arg", json_number(double(d.loader_arg)));
+	// What it is about: a required file's role and name, or a reference's kind, name, scope and
+	// what its loader picks the file by (each key only when it holds something).
+	if (const RequirementSubject *requirement = requirement_subject(d)) {
+		if (!requirement->role.empty()) out.set("role", json_string(requirement->role));
+		if (!requirement->target.empty()) out.set("target", json_string(requirement->target));
+	} else if (const ReferenceSubject *reference = reference_subject(d)) {
+		if (!reference->target.empty()) out.set("target", json_string(reference->target));
+		if (reference->kind != ReferenceKind::None)
+			out.set("reference", json_string(reference_row(reference->kind).token));
+		if (!reference->scope.empty()) out.set("scope", json_string(reference->scope));
+		if (reference->loader_arg >= 0) out.set("loader_arg", json_number(double(reference->loader_arg)));
+	}
 	return out;
 }
 

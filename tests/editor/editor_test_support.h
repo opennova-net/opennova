@@ -2,18 +2,22 @@
 // Shared plumbing for the editor core tests: a throwaway project directory under the
 // system temp directory (std::filesystem::temp_directory_path, so no env read of our
 // own) that is wiped on construction and destruction, a file writer, every missing
-// required file of a session's project created, the project settings applied, and an operation
-// that holds the documents.
+// required file of a session's project created, the project settings applied, an operation
+// that holds the documents, and a finding made by its code's token with what it is about.
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <editor/requirements/requirements.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
@@ -125,6 +129,45 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 
 inline bool write_text(const std::string &path, const std::string &text) {
 	return write_bytes(path, std::vector<uint8_t>(text.begin(), text.end()));
+}
+
+// A finding of a code a table declares, by its token (session/finding_codes.h: finding_row), as a
+// producer makes it; a token no table declares stops the test, since nothing can make one.
+inline opennova::editor::Diagnostic finding_of(opennova::editor::DiagnosticSeverity severity,
+		const std::string &code, std::string message, std::string asset = std::string(),
+		std::string field = std::string()) {
+	const opennova::editor::FindingCodeRow *row = opennova::editor::finding_row(code);
+	if (!row) {
+		std::fprintf(stderr, "no finding code row declares %s\n", code.c_str());
+		std::abort();
+	}
+	return opennova::editor::make_finding(*row, severity, std::move(message), std::move(asset),
+			std::move(field));
+}
+
+// What a finding is about, as a test reads it: its subject of that kind, or one holding nothing
+// (no role, no target, ReferenceKind::None, no scope, loader_arg -1) when it has none.
+inline const opennova::editor::ReferenceSubject &reference_of(const opennova::editor::Diagnostic &d) {
+	static const opennova::editor::ReferenceSubject none;
+	const opennova::editor::ReferenceSubject *subject = opennova::editor::reference_subject(d);
+	return subject ? *subject : none;
+}
+inline const opennova::editor::RequirementSubject &requirement_of(const opennova::editor::Diagnostic &d) {
+	static const opennova::editor::RequirementSubject none;
+	const opennova::editor::RequirementSubject *subject = opennova::editor::requirement_subject(d);
+	return subject ? *subject : none;
+}
+// A hand-made finding's subject of that kind, the test's to set (the finding is about that kind
+// from then on).
+inline opennova::editor::ReferenceSubject &own_reference(opennova::editor::Diagnostic &d) {
+	if (!std::holds_alternative<opennova::editor::ReferenceSubject>(d.subject))
+		d.subject = opennova::editor::ReferenceSubject();
+	return std::get<opennova::editor::ReferenceSubject>(d.subject);
+}
+inline opennova::editor::RequirementSubject &own_requirement(opennova::editor::Diagnostic &d) {
+	if (!std::holds_alternative<opennova::editor::RequirementSubject>(d.subject))
+		d.subject = opennova::editor::RequirementSubject();
+	return std::get<opennova::editor::RequirementSubject>(d.subject);
 }
 
 } // namespace editor_test

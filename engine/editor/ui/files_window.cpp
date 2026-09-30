@@ -105,7 +105,8 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	                                            ImGuiInputTextFlags_EnterReturnsTrue);
 	// The project's name rules, as the session checks them again when it creates the file; a
 	// texture is the texture factory's placeholder, made only for a name it takes.
-	std::string problem, message;
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
 	const bool named = name_[0] != '\0';
 	bool fits = named && check_file_name(name_, kind_, problem, message);
 	if (fits && kind_ == AssetKind::Texture) fits = can_make_blank_texture(name_, message);

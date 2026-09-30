@@ -52,8 +52,8 @@ static int test_row_set_follows_the_manifest_and_features() {
 		if (d.code == "requirement.missing" && d.severity == DiagnosticSeverity::Error) ++errors;
 		if (d.code == "requirement.optional_missing" && d.severity == DiagnosticSeverity::Info) ++notes;
 		// What each is about is the row's, and no file of the project is at fault.
-		const RequirementRow *row = row_named(menu_only, d.target.c_str());
-		TEST_EXPECT(row && row->role == d.role && d.asset.empty());
+		const RequirementRow *row = row_named(menu_only, subject_target(d).c_str());
+		TEST_EXPECT(row && row->role == editor_test::requirement_of(d).role && d.asset.empty());
 		TEST_EXPECT(d.message.find("Without it: ") != std::string::npos);
 	}
 	TEST_EXPECT(errors == expected_required && notes == expected_rows - expected_required);
@@ -117,11 +117,11 @@ static int test_files_satisfy_rows_by_name_and_kind() {
 		if (d.code == "requirement.wrong_kind") ++wrong;
 		if (d.code == "requirement.missing") ++missing;
 		// A missing file names no file of the project (Problems opens nothing for it).
-		if (d.code == "requirement.missing" && d.target == "keyhelp.bin" && d.role == "keyhelp" && d.asset.empty())
+		if (d.code == "requirement.missing" && subject_target(d) == "keyhelp.bin" && editor_test::requirement_of(d).role == "keyhelp" && d.asset.empty())
 			keyhelp_reported = true;
 		// A file of the wrong kind is the offending file's finding.
-		if (d.code == "requirement.wrong_kind" && d.asset == "text/vmacros.bin" && d.role == "vmacros" &&
-		    d.target == "vmacros.bin")
+		if (d.code == "requirement.wrong_kind" && d.asset == "text/vmacros.bin" && editor_test::requirement_of(d).role == "vmacros" &&
+		    subject_target(d) == "vmacros.bin")
 			vmacros_reported = true;
 	}
 	TEST_EXPECT(wrong == 1 && keyhelp_reported && vmacros_reported);

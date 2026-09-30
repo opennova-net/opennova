@@ -4,6 +4,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::io {
 struct JsonValue;
@@ -57,6 +58,6 @@ bool open_local_settings(const ProjectPaths &paths, const std::string &seed_inst
 // gone: each member but its schema version, a string or a switch with its value as written, a
 // list by its length, in the file's order; `afterwards` says what is in effect instead.
 Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json,
-		int schema_version, const char *code, const char *afterwards);
+		int schema_version, CoreFinding code, const char *afterwards);
 
 } // namespace opennova::editor

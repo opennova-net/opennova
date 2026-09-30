@@ -1,5 +1,6 @@
 #include "blank_makers.h"
 
+#include <editor/session/finding_codes.h>
 #include <formats/mns/mns_document.h>
 
 namespace opennova::editor {
@@ -46,7 +47,7 @@ bool make_blank_menu_style(const BlankRequest &request, std::vector<uint8_t> &ou
 	for (const StyleDefine &define : k_defines) {
 		std::string add_error;
 		if (!doc.add_define(define.name, define.value, -1, std::string(), &add_error)) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "blank.style", add_error, request.logical_name);
+			error = make_finding(CoreFinding::BlankStyle, DiagnosticSeverity::Error, add_error, request.logical_name);
 			return false;
 		}
 	}

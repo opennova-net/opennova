@@ -678,6 +678,17 @@ the file alone.
 _Avoid_: cross-file validation (the use checks are one table, by the kind of file), validation (a
 file's own findings)
 
+**Finding code**:
+A finding's stable dotted token (`reference.missing`, `style.line_ending`) and the row it is made
+from: what Problems offers for it (its fixes; a Rewrite, with what writing the file again does),
+whether it says the file does not serialize (its Save refused, no Rewrite offered) and where
+Problems takes it (the record and field in the file's document, or the file itself in Files). The
+editor's own codes are one table and each document type declares its own, a family of its name
+(`menu.`, `style.`); every finding is made from a row, so a code no table declares cannot be made.
+The wire's `code` is the token.
+_Avoid_: error code (a finding may be a warning or a note), message id, diagnostic code (Diagnostic
+is the record's type, the code its row's token)
+
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells
 a click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the

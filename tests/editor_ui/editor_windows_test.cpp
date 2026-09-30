@@ -811,9 +811,8 @@ void test_actions_after_edits() {
 	editor_test::own(v.project.scan).index();
 	// A required file the project lacks names no file of it: its row (showing the file it is
 	// about) opens nothing.
-	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	lacking.role = "gametext";
-	lacking.target = "gametext.bin";
+	Diagnostic lacking = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
+	lacking.subject = RequirementSubject{"gametext", "gametext.bin"};
 	v.findings.diagnostics = {lacking};
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Files);
@@ -831,7 +830,7 @@ void test_actions_after_edits() {
 	font_entry.kind = AssetKind::Font;
 	editor_test::own(v.project.scan).entries.push_back(font_entry);
 	editor_test::own(v.project.scan).index();
-	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
+	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
 	                                 font_entry.relative_path)};
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
@@ -843,7 +842,7 @@ void test_actions_after_edits() {
 	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::ShowInFiles &&
 	              requests[0].path == font_entry.relative_path && !requests[0].ask_name,
 	      "a font's row shows it in Files");
-	Diagnostic finding = make_diagnostic(DiagnosticSeverity::Error, "menu.test", "A finding in the other menu.", other->path());
+	Diagnostic finding = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_screen", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
 	v.findings.diagnostics = {finding};
@@ -1455,9 +1454,8 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind, b
 }
 
 Diagnostic missing_finding(const char *role, const char *name) {
-	Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", std::string("Missing required file ") + name + ".");
-	d.role = role;
-	d.target = name;
+	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", std::string("Missing required file ") + name + ".");
+	d.subject = RequirementSubject{role, name};
 	return d;
 }
 
@@ -1483,16 +1481,16 @@ SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shar
 	v.project.retail_files = {"gametext.bin"};
 	v.documents.open = {a, b};
 	v.documents.active = a->path();
-	Diagnostic type = make_diagnostic(DiagnosticSeverity::Error, "catalog.item_type", "Alpha: choose an item type.",
-	                                  "defs/items.def", "type");
+	Diagnostic type = editor_test::finding_of(DiagnosticSeverity::Error, "catalog.item_type", "Alpha: choose an item type.",
+	                                          "defs/items.def", "type");
 	type.record = "Marker";
 	type.line = 12;
 	type.row_id = 4;
 	type.record_kind = 2;
 	v.findings.diagnostics = {missing_finding("gametext", "gametext.bin"), missing_finding("main_menu", "main.mnu"), type,
-	                 make_diagnostic(DiagnosticSeverity::Warning, "menu.duplicate_window", "Bravo: two windows are named GO.",
-	                                 "menus/a.mnu"),
-	                 make_diagnostic(DiagnosticSeverity::Info, "style.unused", "Charlie: nothing uses it.", "menus/b.mnu")};
+	                 editor_test::finding_of(DiagnosticSeverity::Warning, "menu.duplicate_window", "Bravo: two windows are named GO.",
+	                                         "menus/a.mnu"),
+	                 editor_test::finding_of(DiagnosticSeverity::Info, "style.unused", "Charlie: nothing uses it.", "menus/b.mnu")};
 	return v;
 }
 
@@ -1705,10 +1703,9 @@ void test_problems_window_ui() {
 
 	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
 	editor_test::own(v.project.requirements).rows.push_back(missing_row("brand_style", "brand.mns", AssetKind::MenuStyle, false));
-	Diagnostic optional = make_diagnostic(DiagnosticSeverity::Info, "requirement.optional_missing",
-	                                      "Optional file brand.mns is not in the project.");
-	optional.role = "brand_style";
-	optional.target = "brand.mns";
+	Diagnostic optional = editor_test::finding_of(DiagnosticSeverity::Info, "requirement.optional_missing",
+	                                              "Optional file brand.mns is not in the project.");
+	optional.subject = RequirementSubject{"brand_style", "brand.mns"};
 	v.findings.diagnostics.push_back(optional);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
@@ -1864,12 +1861,12 @@ void test_problems_rewrite_hidden() {
 	SessionView v;
 	v.project.open = true;
 	v.project.root = "C:/mods/Rewrite";
-	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
+	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
 	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
-	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Foxtrot: a key the game ignores.",
-	                                 "defs/ammo.def")};
+	                 editor_test::finding_of(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
+	                                         "defs/weapon.def"),
+	                 editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input", "Foxtrot: a key the game ignores.",
+	                                         "defs/ammo.def")};
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -1902,9 +1899,9 @@ void test_problems_many() {
 				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
-		                               "Finding " + std::to_string(i) + ": a line the game ignores.",
-		                               v.project.scan->entries[i / 20].relative_path, "name");
+		Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input",
+		                                       "Finding " + std::to_string(i) + ": a line the game ignores.",
+		                                       v.project.scan->entries[i / 20].relative_path, "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
 		d.line = i + 1;

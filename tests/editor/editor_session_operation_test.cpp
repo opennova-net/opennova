@@ -15,6 +15,7 @@
 
 #include <editor/project/project_files.h>
 #include <editor/session/editor_preferences.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -73,7 +74,9 @@ struct FakeOperation : SessionOperation {
 	OperationOutcome finish(SessionCore &) override {
 		++tally.finishes;
 		OperationOutcome outcome;
-		outcome.findings.push_back(make_diagnostic(DiagnosticSeverity::Info, "fake.done", "Faked."));
+		// The fake's own code: a row of the test's, which no table of the editor holds.
+		static constexpr FindingCodeRow kFaked{"fake.done"};
+		outcome.findings.push_back(make_finding(kFaked, DiagnosticSeverity::Info, "Faked."));
 		return outcome;
 	}
 };

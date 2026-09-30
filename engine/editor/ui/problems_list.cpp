@@ -9,6 +9,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/session_json.h>
@@ -31,8 +32,11 @@ std::string joined(const std::vector<std::string> &names, const char *between) {
 // record (its address and name), the field, the line and what it names (the file or symbol,
 // the role). Findings alike in all of it are told apart by their order (refresh()).
 std::string identity(const Diagnostic &d) {
+	static const std::string none;
+	const RequirementSubject *requirement = requirement_subject(d);
 	std::string out = d.code;
-	for (const std::string *part : {&d.asset, &d.record, &d.field, &d.target, &d.role})
+	for (const std::string *part :
+	     {&d.asset, &d.record, &d.field, &subject_target(d), requirement ? &requirement->role : &none})
 		out += '\x1f' + *part;
 	for (const uint64_t number :
 	     {uint64_t(d.row_id), uint64_t(d.record_kind), uint64_t(d.child_id), uint64_t(d.line)})
@@ -169,7 +173,8 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	}
 	required_.clear();
 	for (size_t i = 0; i < view.findings.diagnostics.size(); ++i)
-		if (view.findings.diagnostics[i].code == "requirement.missing") required_.push_back(i);
+		if (view.findings.diagnostics[i].code == finding_code(CoreFinding::RequirementMissing).token)
+			required_.push_back(i);
 	required_fixes_ = propose(view, fix_all_of(view, required_));
 	return answer;
 }
@@ -288,7 +293,7 @@ bool ProblemsList::follow(const SessionView &view) {
 }
 
 std::string ProblemsList::location_of(const Diagnostic &d, bool whole_path) {
-	std::string where = d.asset.empty() ? d.target : whole_path ? d.asset : basename_of(d.asset);
+	std::string where = d.asset.empty() ? subject_target(d) : whole_path ? d.asset : basename_of(d.asset);
 	if (!d.asset.empty() && d.line) where += ":" + std::to_string(d.line);
 	for (const std::string *part : {&d.record, &d.field})
 		if (!part->empty()) where += (where.empty() ? "" : " - ") + *part;

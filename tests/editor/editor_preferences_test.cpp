@@ -83,7 +83,7 @@ struct RefusingStore : PreferencesStore {
 		return true;
 	}
 	bool save(const Preferences &, Diagnostic &error) override {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.write", "refused");
+		error = editor_test::finding_of(DiagnosticSeverity::Error, "editor_settings.write", "refused");
 		return false;
 	}
 };

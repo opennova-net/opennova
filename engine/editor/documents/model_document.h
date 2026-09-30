@@ -8,6 +8,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/session/finding_codes.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_schema.h>
 #include <runtime/assets/asset_store.h>
@@ -173,5 +174,27 @@ bool is_model_kind(AssetKind kind);
 // that do not descend are warnings; more than 16 user points and a material no strip
 // draws with are notes. Textures are the asset graph's.
 std::vector<Diagnostic> validate_model_file(const DocumentBase &document);
+
+// The model type's own finding codes (DocumentType::findings), each a row of its table
+// (model_document_edits.cpp, beside the validator, static_asserted into this order): more seats
+// than the game keeps, a user point name repeated, more user points than the game reads, a
+// register or a frame the model lacks, a shader or register name the engine does not know, a
+// material no strip draws with, a light on a part LOD 0 lacks, LOD thresholds that do not
+// descend.
+enum class ModelFinding {
+	Seats,
+	UserPointDuplicate,
+	UserPoints,
+	RegisterMissing,
+	ShaderUnknown,
+	MaterialUnused,
+	LightPart,
+	RegisterUnknown,
+	LodOrder,
+	FrameMissing,
+	kCount
+};
+const FindingCodeRow &finding_code(ModelFinding code);
+FindingTable model_finding_codes();
 
 } // namespace opennova::editor

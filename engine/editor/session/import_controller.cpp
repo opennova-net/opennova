@@ -8,6 +8,7 @@
 #include <editor/import/import_run.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 
@@ -46,8 +47,8 @@ void ImportController::preview_install(const EditorRequest &request) {
 		});
 		if (found == sources.end()) {
 			if (diagnostics.empty())
-				diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.source",
-				                                      "The game data has no file named " + name + "."));
+				diagnostics.push_back(make_finding(CoreFinding::ImportSource, DiagnosticSeverity::Error,
+				                                   "The game data has no file named " + name + "."));
 			continue;
 		}
 		named.push_back(*found);
@@ -181,7 +182,7 @@ void ImportController::import_files(const EditorRequest &request) {
 			view_.activity.status = "The files changed since the preview: nothing was imported.";
 			core_.touch(ViewConcern::Dialogs);
 			core_.touch(ViewConcern::Output);
-			return core_.refuse_now("import.changed",
+			return core_.refuse_now(CoreFinding::ImportChanged,
 			                        "The files changed since the preview: nothing was imported. Check the import again.");
 		}
 		for (const ImportSource &import : request.imports) {
@@ -189,8 +190,8 @@ void ImportController::import_files(const EditorRequest &request) {
 				return row.state != ImportPlanRow::State::NotFound && row.source == import;
 			});
 			if (!planned)
-				return core_.report(make_diagnostic(DiagnosticSeverity::Error, "import.not_planned",
-				                                    import.name() + " is not in the import preview: plan it first.", import.name()));
+				return core_.report(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error,
+				                                 import.name() + " is not in the import preview: plan it first.", import.name()));
 		}
 	}
 	view_.dialogs.import_preview = DialogsView::ImportPreview();

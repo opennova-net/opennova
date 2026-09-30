@@ -1,6 +1,7 @@
 #include "blank_makers.h"
 
 #include <editor/blank/blank_font_art.h>
+#include <editor/session/finding_codes.h>
 #include <formats/fnt/fnt.h>
 
 namespace opennova::editor {
@@ -13,8 +14,8 @@ bool make_blank_font(const BlankRequest &request, std::vector<uint8_t> &out, Dia
 	fnt_font_t font{};
 	if (blank_font::build_font(&font) != FNT_OK || fnt_validate(&font) != FNT_OK) {
 		fnt_free(&font);
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.font", "The built-in font could not be built.",
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankFont, DiagnosticSeverity::Error, "The built-in font could not be built.",
+		                     request.logical_name);
 		return false;
 	}
 	const size_t size = fnt_calculate_file_size(font.num_pages);
@@ -24,8 +25,8 @@ bool make_blank_font(const BlankRequest &request, std::vector<uint8_t> &out, Dia
 	fnt_free(&font);
 	if (!ok) {
 		out.clear();
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.font", "The built-in font could not be written.",
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankFont, DiagnosticSeverity::Error, "The built-in font could not be written.",
+		                     request.logical_name);
 	}
 	return ok;
 }

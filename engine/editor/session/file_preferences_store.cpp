@@ -7,6 +7,7 @@
 #include <base/io/json.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 
 namespace fs = std::filesystem;
 
@@ -23,13 +24,13 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	std::string io_error;
 	if (!read_file_text(path, text, io_error)) {
 		finding =
-				make_diagnostic(DiagnosticSeverity::Error, "editor_settings.unreadable", io_error);
+				make_finding(CoreFinding::EditorSettingsUnreadable, DiagnosticSeverity::Error, io_error);
 		return false;
 	}
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) {
-		finding = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.json",
+		finding = make_finding(CoreFinding::EditorSettingsJson, DiagnosticSeverity::Error,
 				path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
@@ -37,7 +38,7 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 	// retail_directory): the file is set aside, read as absent, and the next save writes a new one.
 	if (json.get_int("schema_version", -1) != kPreferencesSchemaVersion) {
 		finding = settings_set_aside(path, json, kPreferencesSchemaVersion,
-				"editor_settings.schema_version.unsupported",
+				CoreFinding::EditorSettingsSchemaVersionUnsupported,
 				"The editor starts from its defaults, as with no settings file, "
 				"and its next save writes a new file.");
 		out = Preferences();
@@ -71,7 +72,7 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	std::string io_error;
 	if (!ensure_directory(fs::path(path).parent_path().generic_string(), io_error) ||
 	    !write_file_atomic(path, io::json_write(json), io_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.write", io_error);
+		error = make_finding(CoreFinding::EditorSettingsWrite, DiagnosticSeverity::Error, io_error);
 		return false;
 	}
 	return true;

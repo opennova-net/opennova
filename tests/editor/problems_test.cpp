@@ -22,12 +22,14 @@
 #include <vector>
 
 #include <editor/blank/blank_factory.h>
+#include <editor/documents/document_types.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
@@ -76,7 +78,7 @@ const char *const kNotUndoable = "cannot be undone with Undo";
 
 Diagnostic finding(DiagnosticSeverity severity, const char *code, const char *message, const char *asset = "",
                    const char *record = "", const char *field = "") {
-	Diagnostic d = make_diagnostic(severity, code, message, asset, field);
+	Diagnostic d = editor_test::finding_of(severity, code, message, asset, field);
 	d.record = record;
 	return d;
 }
@@ -94,7 +96,7 @@ std::vector<std::string> labels_of(const std::vector<ProblemFix> &fixes) {
 // The session's finding of `code` about the requirement `role`.
 const Diagnostic *requirement_finding(const SessionView &view, const char *code, const char *role) {
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == code && d.role == role) return &d;
+		if (d.code == code && editor_test::requirement_of(d).role == role) return &d;
 	return nullptr;
 }
 
@@ -121,11 +123,9 @@ static int test_query() {
 	view.documents.active = "menus/a.mnu";
 	Diagnostic font = finding(DiagnosticSeverity::Error, "reference.missing", "'MAIN' in b.mnu names the font 'nofont.fnt'.",
 	                          "menus/b.mnu", "B/MAIN", "font.name");
-	font.reference = ReferenceKind::Font;
-	font.target = "nofont.fnt";
+	font.subject = ReferenceSubject{ReferenceKind::Font, "nofont.fnt"};
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	required.role = "gametext";
-	required.target = "gametext.bin";
+	required.subject = RequirementSubject{"gametext", "gametext.bin"};
 	view.findings.diagnostics = {
 		finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows are named GO.", "menus/a.mnu", "A/MAIN/GO", "name"),
 		required,
@@ -319,24 +319,22 @@ static int test_fixes() {
 	TEST_EXPECT(loading && fixes_for(*loading, v).empty() && !has_fixes(*loading, v));
 	// The game's boot report of a required file: the fixes of its requirement; none once the
 	// project has the file (the row is then only a place to look).
-	Diagnostic boot = make_diagnostic(DiagnosticSeverity::Error, "play.boot_missing", "The game could not find gameerr.bin.");
-	boot.role = "gameerr";
-	boot.target = "gameerr.bin";
+	Diagnostic boot = editor_test::finding_of(DiagnosticSeverity::Error, "play.boot_missing", "The game could not find gameerr.bin.");
+	boot.subject = RequirementSubject{"gameerr", "gameerr.bin"};
 	gameerr = requirement_finding(v, "requirement.missing", "gameerr");
 	TEST_EXPECT(gameerr && labels_of(fixes_for(boot, v)) == labels_of(fixes_for(*gameerr, v)));
 	EditorRequest create = request::create_missing({"gameerr"});
 	session.handle(create);
 	TEST_EXPECT(session.outcome().done() && fixes_for(boot, v).empty() && !has_fixes(boot, v));
 	Diagnostic unknown = boot;
-	unknown.role.clear();
+	editor_test::own_requirement(unknown).role.clear();
 	TEST_EXPECT(fixes_for(unknown, v).empty());
 
 	// A missing reference to a file: Import a name its loader reads from the game data, then
 	// Create it blank when its kind has a free-form factory (not in bulk).
-	Diagnostic font = make_diagnostic(DiagnosticSeverity::Error, "reference.missing", "The font is missing.", "menus/a.mnu",
-	                                  "font.name");
-	font.reference = ReferenceKind::Font;
-	font.target = "Custom.fnt";
+	Diagnostic font = editor_test::finding_of(DiagnosticSeverity::Error, "reference.missing", "The font is missing.", "menus/a.mnu",
+	                                          "font.name");
+	font.subject = ReferenceSubject{ReferenceKind::Font, "Custom.fnt"};
 	fixes = fixes_for(font, v);
 	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Import Custom.fnt from the game data...", "Create Custom.fnt"}));
 	if (fixes.size() != 2) return 1;
@@ -346,13 +344,12 @@ static int test_fixes() {
 	TEST_EXPECT(fixes[1].detail.find(kNotUndoable) != std::string::npos);
 	// A menu texture: the .dds its .tga falls back to, then (S11h) a placeholder as its .tga.
 	Diagnostic texture = font;
-	texture.reference = ReferenceKind::MenuTexture;
-	texture.target = "logo.tga";
+	texture.subject = ReferenceSubject{ReferenceKind::MenuTexture, "logo.tga"};
 	TEST_EXPECT(labels_of(fixes_for(texture, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	// A .png the menu names: a texture as the scan lists a PNG with no import record, so the
 	// game data's is offered; no placeholder is a .png.
-	texture.target = "badge.png";
+	editor_test::own_reference(texture).target = "badge.png";
 	TEST_EXPECT(labels_of(fixes_for(texture, v)) == std::vector<std::string>({"Import badge.png from the game data..."}));
 	// A model's texture row (S11f): the file its type's loader reads from what the game data
 	// has, a diffuse row's .dds sibling; a plain row (type 1) reads its own name alone, which
@@ -360,57 +357,71 @@ static int test_fixes() {
 	// stem's .dds among the names (S11h); each takes a placeholder as the name it opens once
 	// that is there (S11h).
 	Diagnostic skin = font;
-	skin.reference = ReferenceKind::Texture;
-	skin.target = "logo.tga";
-	skin.loader_arg = 0;
+	skin.subject = ReferenceSubject{ReferenceKind::Texture, "logo.tga", std::string(), 0};
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
-	skin.loader_arg = 1;
+	editor_test::own_reference(skin).loader_arg = 1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) == std::vector<std::string>({"Create a placeholder logo.tga"}));
-	skin.loader_arg = -1;
+	editor_test::own_reference(skin).loader_arg = -1;
 	TEST_EXPECT(labels_of(fixes_for(skin, v)) ==
 	            std::vector<std::string>({"Import logo.dds from the game data...", "Create a placeholder logo.tga"}));
 	// A name the game data lacks with no factory, and a symbol: nothing to do but look.
 	Diagnostic model = font;
-	model.reference = ReferenceKind::Model;
-	model.target = "tank";
+	model.subject = ReferenceSubject{ReferenceKind::Model, "tank"};
 	Diagnostic text_id = font;
-	text_id.reference = ReferenceKind::TextId;
-	text_id.target = "NO_SUCH_ID";
+	text_id.subject = ReferenceSubject{ReferenceKind::TextId, "NO_SUCH_ID"};
 	TEST_EXPECT(fixes_for(model, v).empty() && fixes_for(text_id, v).empty() && !has_fixes(text_id, v));
 	// No Create for a name another kind of file holds (it would only open, the reference still
 	// missing), nor for one the project's name rules refuse (past the archive's 16 bytes).
 	Diagnostic table_ref = font;
-	table_ref.reference = ReferenceKind::TextTable;
-	table_ref.target = "foo.bin";
+	table_ref.subject = ReferenceSubject{ReferenceKind::TextTable, "foo.bin"};
 	TEST_EXPECT(v.project.scan->find("foo.bin") &&
 			v.project.scan->find("foo.bin")->kind == AssetKind::RawBin);
 	TEST_EXPECT(fixes_for(table_ref, v).empty() && !has_fixes(table_ref, v));
-	table_ref.target = "freshtable.bin";
+	editor_test::own_reference(table_ref).target = "freshtable.bin";
 	TEST_EXPECT(labels_of(fixes_for(table_ref, v)) == std::vector<std::string>({"Create freshtable.bin"}));
 	Diagnostic long_menu = font;
-	long_menu.reference = ReferenceKind::Menu;
-	long_menu.target = "averyveryverylongname.mnu";
+	long_menu.subject = ReferenceSubject{ReferenceKind::Menu, "averyveryverylongname.mnu"};
 	TEST_EXPECT(fixes_for(long_menu, v).empty());
 
 	// A missing import output: import its source again.
-	const Diagnostic output = make_diagnostic(DiagnosticSeverity::Warning, "import.output_missing", "logo.pcx has not been made.",
-	                                          "art/logo.png");
+	const Diagnostic output = editor_test::finding_of(DiagnosticSeverity::Warning, "import.output_missing", "logo.pcx has not been made.",
+	                                                  "art/logo.png");
 	fixes = fixes_for(output, v);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Import logo.png again" && fixes[0].bulk);
 	if (fixes.size() != 1) return 1;
 	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::Reimport && fixes[0].request.path == "art/logo.png" &&
 	            fixes[0].request.force && fixes[0].detail.find(kNotUndoable) != std::string::npos);
-	// Input a rewrite drops or normalizes: Rewrite the file (a Save of it), saying what goes.
-	for (const char *code :
-	     {"style.line_ending", "catalog.ignored_input", "menu.ignored_input", "animation_map.ignored_input", "strings.regrouped"}) {
-		const Diagnostic rewrite = make_diagnostic(DiagnosticSeverity::Warning, code, "A rewrite fixes this.", "menus/a.mnu");
+	// Input a rewrite drops or normalizes: Rewrite the file (a Save of it), saying what goes. Every
+	// Rewrite row of the tables, the editor's and the types' (S13 A6: the five the fixes named
+	// before, each saying what its row's rewrite_does says); none while a finding of the file
+	// says it does not serialize (a blocks_save row's).
+	std::vector<const FindingCodeRow *> rewrites;
+	for (const FindingCodeRow &row : core_finding_codes())
+		if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
+	for (size_t i = 1; i <= kDocumentTypeCount; ++i)
+		for (const FindingCodeRow &row : document_type(static_cast<DocumentTypeId>(i))->findings())
+			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
+	std::vector<std::string> rewrite_tokens;
+	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
+	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
+	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input", "catalog.ignored_input",
+	                                                        "menu.ignored_input", "strings.regrouped",
+	                                                        "style.line_ending"}));
+	for (const FindingCodeRow *row : rewrites) {
+		const Diagnostic rewrite = make_finding(*row, DiagnosticSeverity::Warning, "A rewrite fixes this.", "menus/a.mnu");
 		fixes = fixes_for(rewrite, v);
 		TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Rewrite a.mnu" && fixes[0].bulk);
 		if (fixes.size() != 1) return 1;
 		TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::Save && fixes[0].request.path == "menus/a.mnu");
-		TEST_EXPECT(fixes[0].detail.find("Writes menus/a.mnu again") == 0 && fixes[0].detail.find("unsaved") == std::string::npos &&
+		TEST_EXPECT(fixes[0].detail == std::string("Writes menus/a.mnu again ") + row->rewrite_does + "." +
+		                                       " It cannot be undone with Undo." &&
 		            fixes[0].detail.find(kNotUndoable) != std::string::npos);
+		SessionView blocked = v;
+		blocked.findings.diagnostics.push_back(
+		        editor_test::finding_of(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/a.mnu"));
+		blocked.revisions.touch(ViewConcern::Findings);
+		TEST_EXPECT(fixes_for(rewrite, blocked).empty() && !has_fixes(rewrite, blocked));
 	}
 	// Open with unsaved edits, the rewrite saves them too, and says so.
 	session.handle(request::open_document("menus/a.mnu"));
@@ -424,11 +435,11 @@ static int test_fixes() {
 	edit.edits[0].value = int64_t(20);
 	session.handle(edit);
 	TEST_EXPECT(menu->dirty());
-	const Diagnostic ending = make_diagnostic(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/a.mnu");
+	const Diagnostic ending = editor_test::finding_of(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/a.mnu");
 	TEST_EXPECT(fixes_for(ending, v).front().detail.find("unsaved edits") != std::string::npos);
 	// Anything else has none; has_fixes agrees with fixes_for on every finding of the session,
 	// and bulk_fixes_for (which plans no rename) gives fixes_for's bulk ones, in order.
-	const Diagnostic other = make_diagnostic(DiagnosticSeverity::Error, "menu.duplicate_window", "Two windows.", "menus/a.mnu");
+	const Diagnostic other = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_window", "Two windows.", "menus/a.mnu");
 	TEST_EXPECT(fixes_for(other, v).empty() && bulk_fixes_for(other, v).empty());
 	size_t bulk_seen = 0;
 	for (const Diagnostic &d : v.findings.diagnostics) {
@@ -488,7 +499,7 @@ static int test_fix_cache() {
 	TEST_EXPECT(first->size() == 1 && (*first)[0].label == "Rewrite menu_style.mns");
 	TEST_EXPECT(cache.fixes(view, 1).empty() && cache.fixes(view, 7).empty());
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
-	view.findings.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
+	view.findings.diagnostics[0].code = "menu.duplicate_screen"; // unmarked: still the answer kept
 	TEST_EXPECT(cache.fixes(view, 0).size() == 1 && cache.generation(view) == started);
 	view.revisions.touch(ViewConcern::Findings);
 	TEST_EXPECT(cache.fixes(view, 0).empty() && cache.generation(view) == started + 1);
@@ -549,11 +560,10 @@ static int test_location() {
 	editor_test::own(view.project.scan).entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImageSource),
 	                     entry("Arial14b.fnt", "fonts/Arial14b.fnt", AssetKind::Font)};
 	editor_test::own(view.project.scan).index();
-	Diagnostic required = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");
-	required.role = "main_menu";
-	required.target = "main.mnu";
+	Diagnostic required = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");
+	required.subject = RequirementSubject{"main_menu", "main.mnu"};
 	TEST_EXPECT(problem_location(required, view).empty());
-	Diagnostic catalog = make_diagnostic(DiagnosticSeverity::Error, "catalog.item_type", "Choose an item type.", "defs/items.def", "type");
+	Diagnostic catalog = editor_test::finding_of(DiagnosticSeverity::Error, "catalog.item_type", "Choose an item type.", "defs/items.def", "type");
 	catalog.record = "Marker";
 	catalog.row_id = 4;
 	catalog.record_kind = 2;
@@ -563,19 +573,29 @@ static int test_location() {
 	const EditorRequest open = opened.request();
 	TEST_EXPECT(open.kind == EditorRequestKind::OpenDocument && open.path == "defs/items.def" &&
 	            open.address == (NodeAddress{4, 2, 0}) && open.field == "type" && open.locator.empty());
-	const ProblemLocation file = problem_location(make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
-	                                                              "An unknown key.", "defs/items.def", "subtype"),
+	const ProblemLocation file = problem_location(editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input",
+	                                                                      "An unknown key.", "defs/items.def", "subtype"),
 	                                              view);
 	TEST_EXPECT(file.path == "defs/items.def" && file.record == NodeAddress() && file.field.empty());
 	// S12: a file of a kind the editor does not open is shown in Files (ShowInFiles), as is a
 	// file whose name or place is the finding, one the editor opens too; a name the scan does
 	// not list as a path goes nowhere.
 	for (const char *asset : {"fonts/Arial14b.fnt", "art/logo.png"}) {
-		const ProblemLocation shown = problem_location(make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
+		const ProblemLocation shown = problem_location(editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
 		TEST_EXPECT(shown.path == asset && shown.in_files && shown.request().kind == EditorRequestKind::ShowInFiles &&
 		            shown.request().path == asset && !shown.request().ask_name);
 	}
-	for (const char *code : {"asset.name.too_long", "asset.name.duplicate", "build.name_unstorable", "build.archive_in_project"}) {
+	// The rows about the file as a whole (FindingPlace::File: S13 A6, the four the location named
+	// before).
+	std::vector<std::string> about_files;
+	for (const FindingCodeRow &row : core_finding_codes())
+		if (row.place == FindingPlace::File) about_files.push_back(row.token);
+	for (size_t i = 1; i <= kDocumentTypeCount; ++i)
+		for (const FindingCodeRow &row : document_type(static_cast<DocumentTypeId>(i))->findings())
+			if (row.place == FindingPlace::File) about_files.push_back(row.token);
+	TEST_EXPECT(about_files == std::vector<std::string>({"asset.name.duplicate", "asset.name.empty", "asset.name.too_long",
+	                                                     "build.archive_in_project", "build.name_unstorable"}));
+	for (const std::string &code : about_files) {
 		Diagnostic named = catalog;
 		named.code = code;
 		const ProblemLocation shown = problem_location(named, view);
@@ -583,7 +603,7 @@ static int test_location() {
 		            shown.request().kind == EditorRequestKind::ShowInFiles);
 	}
 	for (const char *asset : {"defs/weapon.def", "items.def"})
-		TEST_EXPECT(problem_location(make_diagnostic(DiagnosticSeverity::Error, "x.y", "A finding.", asset), view).empty());
+		TEST_EXPECT(problem_location(editor_test::finding_of(DiagnosticSeverity::Error, "graph.unreadable", "A finding.", asset), view).empty());
 	return 0;
 }
 
@@ -612,11 +632,9 @@ static int test_use_required_only() {
 	}
 	editor_test::own(view.project.scan).index();
 	Diagnostic required = finding(DiagnosticSeverity::Error, "requirement.missing", "Missing required file screen.pcx.");
-	required.role = "test_screen";
-	required.target = "screen.pcx";
+	required.subject = RequirementSubject{"test_screen", "screen.pcx"};
 	Diagnostic optional = finding(DiagnosticSeverity::Info, "requirement.optional_missing", "Optional file splash.pcx.");
-	optional.role = "test_splash";
-	optional.target = "splash.pcx";
+	optional.subject = RequirementSubject{"test_splash", "splash.pcx"};
 	view.findings.diagnostics = {required, optional};
 	TEST_EXPECT(labels_of(fixes_for(required, view)) == std::vector<std::string>({"Use art.pcx as screen.pcx"}));
 	TEST_EXPECT(fixes_for(optional, view).empty() && !has_fixes(optional, view) && bulk_fixes_for(optional, view).empty());
@@ -686,13 +704,13 @@ static int test_placeholders() {
 	session.handle(request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
-			if (d.code == "reference.missing" && d.reference == kind && d.target == target) return &d;
+			if (d.code == "reference.missing" && editor_test::reference_of(d).kind == kind && subject_target(d) == target) return &d;
 		return nullptr;
 	};
 	const Diagnostic *skin = missing(ReferenceKind::Texture, "armry.tga");
 	const Diagnostic *logo = missing(ReferenceKind::MenuTexture, "logo.tga");
 	const Diagnostic *puff = missing(ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(skin && skin->loader_arg == 0 && logo && puff && puff->loader_arg == -1);
+	TEST_EXPECT(skin && editor_test::reference_of(*skin).loader_arg == 0 && logo && puff && editor_test::reference_of(*puff).loader_arg == -1);
 	if (!skin || !logo || !puff) return 1;
 	std::vector<ProblemFix> firsts;
 	for (const auto &expected : {std::make_pair(skin, "armry.tga"), std::make_pair(logo, "logo.tga"), std::make_pair(puff, "puff.tga")}) {
@@ -715,39 +733,39 @@ static int test_placeholders() {
 	// None for a model's chunk row (it reads a chunk container), nor for a name no placeholder
 	// is made for (a menu's .png).
 	Diagnostic chunk = *skin;
-	chunk.loader_arg = 16;
+	editor_test::own_reference(chunk).loader_arg = 16;
 	Diagnostic png = *logo;
-	png.target = "badge.png";
+	editor_test::own_reference(png).target = "badge.png";
 	TEST_EXPECT(fixes_for(chunk, v).empty() && fixes_for(png, v).empty() && !has_fixes(png, v));
 	// A particle's graphic, as the runtime's texture lookup reads it: that lookup reads a name
 	// with an extension first, so one the factory cannot write takes none; a name with none
 	// takes the lookup's first name the factory makes, its .tga.
 	Diagnostic particle = *puff;
-	particle.target = "puff.png";
+	editor_test::own_reference(particle).target = "puff.png";
 	TEST_EXPECT(fixes_for(particle, v).empty() && !has_fixes(particle, v));
-	particle.target = "foo";
+	editor_test::own_reference(particle).target = "foo";
 	TEST_EXPECT(labels_of(fixes_for(particle, v)) == std::vector<std::string>({"Create a placeholder foo.tga"}));
 	// A model row takes a placeholder only in the format its reader reads the name as: a plain
 	// row reads a.tga.pcx through its TGA reader (the factory would write a PCX) but a.pcx.tga
 	// as the TGA it is; a diffuse row reads a.tga.pcx as its query, a.tga; a normal map reads no
 	// PCX at all, a height producer no .mdt (renderer::material_texture_source).
 	Diagnostic compound = *skin;
-	compound.loader_arg = 1;
-	compound.target = "a.tga.pcx";
+	editor_test::own_reference(compound).loader_arg = 1;
+	editor_test::own_reference(compound).target = "a.tga.pcx";
 	TEST_EXPECT(fixes_for(compound, v).empty());
-	compound.target = "a.pcx.tga";
+	editor_test::own_reference(compound).target = "a.pcx.tga";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder a.pcx.tga"}));
-	compound.loader_arg = 0;
-	compound.target = "a.tga.pcx";
+	editor_test::own_reference(compound).loader_arg = 0;
+	editor_test::own_reference(compound).target = "a.tga.pcx";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder a.tga"}));
-	compound.loader_arg = 4;
-	compound.target = "bump.pcx";
+	editor_test::own_reference(compound).loader_arg = 4;
+	editor_test::own_reference(compound).target = "bump.pcx";
 	TEST_EXPECT(fixes_for(compound, v).empty());
-	compound.target = "bump.tga";
+	editor_test::own_reference(compound).target = "bump.tga";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder bump.tga"}));
-	compound.target = "bump.mdt";
+	editor_test::own_reference(compound).target = "bump.mdt";
 	TEST_EXPECT(labels_of(fixes_for(compound, v)) == std::vector<std::string>({"Create a placeholder bump.mdt"}));
-	compound.loader_arg = 6;
+	editor_test::own_reference(compound).loader_arg = 6;
 	TEST_EXPECT(fixes_for(compound, v).empty());
 	// With the game install holding the menu texture's .dds: Import it first, the placeholder after.
 	const std::string install = dir.file("install");
@@ -971,7 +989,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(!session.outcome().done() &&
 			editor_test::events_after(v, before, ViewEventKind::RevealFile).size() == 2);
 	const Diagnostic unstorable =
-	        make_diagnostic(DiagnosticSeverity::Error, "build.name_unstorable", "The name is too long.", long_path);
+	        editor_test::finding_of(DiagnosticSeverity::Error, "build.name_unstorable", "The name is too long.", long_path);
 	TEST_EXPECT(labels_of(fixes_for(unstorable, v)) == std::vector<std::string>({"Rename a_name_too_long_for_archives.tga..."}));
 	// Two files of one name: the fix renames the one the finding is on (other/twin.tga, the
 	// second), and the rename takes that one, not the other of its name. c.mnu's reference
@@ -981,7 +999,7 @@ static int test_locations_and_fixes() {
 	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code == "asset.name.duplicate") twin = d.asset;
 	TEST_EXPECT(twin == "other/twin.tga");
-	Diagnostic duplicate = make_diagnostic(DiagnosticSeverity::Error, "asset.name.duplicate", "Two files.", twin);
+	Diagnostic duplicate = editor_test::finding_of(DiagnosticSeverity::Error, "asset.name.duplicate", "Two files.", twin);
 	fixes = fixes_for(duplicate, v);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.path == twin);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
@@ -1015,9 +1033,8 @@ static int test_locations_and_fixes() {
 	// A missing symbol: the file where it belongs, opened (a style variable's stylesheet, the
 	// menu a screen is looked up in, the table a string id's scope names); none for a string
 	// id whose window names no table.
-	Diagnostic style = make_diagnostic(DiagnosticSeverity::Warning, "reference.missing", "A variable.", "menus/a.mnu", "font.name");
-	style.reference = ReferenceKind::StyleVar;
-	style.target = "%NOPE%";
+	Diagnostic style = editor_test::finding_of(DiagnosticSeverity::Warning, "reference.missing", "A variable.", "menus/a.mnu", "font.name");
+	style.subject = ReferenceSubject{ReferenceKind::StyleVar, "%NOPE%"};
 	const AssetEntry *stylesheet = v.project.scan->find("menu_style.mns");
 	fixes = fixes_for(style, v);
 	TEST_EXPECT(stylesheet && labels_of(fixes) == std::vector<std::string>({"Open menu_style.mns"}));
@@ -1025,16 +1042,12 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(fixes[0].request.kind == EditorRequestKind::OpenDocument && fixes[0].request.path == stylesheet->relative_path &&
 	            !fixes[0].bulk && fixes[0].detail.find(kNotUndoable) == std::string::npos);
 	Diagnostic screen = style;
-	screen.reference = ReferenceKind::MenuScreen;
-	screen.target = "B";
-	screen.scope = "A.MNU";
+	screen.subject = ReferenceSubject{ReferenceKind::MenuScreen, "B", "A.MNU"};
 	TEST_EXPECT(labels_of(fixes_for(screen, v)) == std::vector<std::string>({"Open a.mnu"}));
 	Diagnostic text_id = style;
-	text_id.reference = ReferenceKind::TextId;
-	text_id.target = "NO_ID";
-	text_id.scope = "UNGROUPED.BIN/Menu";
+	text_id.subject = ReferenceSubject{ReferenceKind::TextId, "NO_ID", "UNGROUPED.BIN/Menu"};
 	TEST_EXPECT(labels_of(fixes_for(text_id, v)) == std::vector<std::string>({"Open ungrouped.bin"}));
-	text_id.scope = "/menu";
+	editor_test::own_reference(text_id).scope = "/menu";
 	TEST_EXPECT(fixes_for(text_id, v).empty());
 	// A table of its kind that defines nothing yet: the one the game reads (a weapon table and
 	// a stylesheet emptied).
@@ -1051,8 +1064,7 @@ static int test_locations_and_fixes() {
 	});
 	TEST_EXPECT(!any);
 	Diagnostic weapon = style;
-	weapon.reference = ReferenceKind::Weapon;
-	weapon.target = "NOPE";
+	weapon.subject = ReferenceSubject{ReferenceKind::Weapon, "NOPE"};
 	fixes = fixes_for(weapon, v);
 	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Open weapon.def"}) && fixes[0].request.path == weapons_path);
 	fixes = fixes_for(style, v);
@@ -1067,13 +1079,13 @@ static int test_locations_and_fixes() {
 // names, the ones past their end are left out.
 static int test_findings_index() {
 	SessionView v;
-	const auto on = [](const char *file, NodeId row, NodeId child, const char *code) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, code, code, file);
+	const auto on = [](const char *file, NodeId row, NodeId child, const char *what) {
+		Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_window", what, file);
 		d.row_id = row;
 		d.child_id = child;
 		return d;
 	};
-	v.findings.diagnostics = { make_diagnostic(
+	v.findings.diagnostics = { editor_test::finding_of(
 									   DiagnosticSeverity::Error, "requirement.missing", "project"),
 		on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"), on("b.mnu", 5, 0, "other file"),
 		on("a.mnu", 0, 0, "the file"), on("a.mnu", 6, 7, "another row") };

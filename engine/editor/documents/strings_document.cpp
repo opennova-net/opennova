@@ -227,7 +227,7 @@ SerializeResult StringsDocument::serialize() const {
 bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                             std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	if (!is_strings_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a string table.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a string table.", path());
 		return false;
 	}
 	rtxt::File file;
@@ -235,7 +235,7 @@ bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	// The empty-file guard of the loader hands a single NUL for an empty file; a
 	// table with no bytes is an empty table.
 	if (!(bytes.size() == 1 && bytes[0] == 0) && !rtxt::parse(bytes.data(), bytes.size(), file, message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", message, path());
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, message, path());
 		return false;
 	}
 	if (!file.is_grouped()) {
@@ -370,13 +370,39 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 	}
 }
 
+namespace {
+
+constexpr FindingCodeEntry<StringsFinding> kFindingEntries[] = {
+	{ StringsFinding::InvalidInput, { "strings.invalid_input", FindingFix::None, nullptr, true } },
+	{ StringsFinding::Regrouped, { "strings.regrouped", FindingFix::Rewrite,
+				"with its strings grouped by section the way the game reads them" } },
+	{ StringsFinding::SectionEmpty, { "strings.section_empty" } },
+	{ StringsFinding::SectionDuplicate, { "strings.section_duplicate" } },
+	{ StringsFinding::KeyEmpty, { "strings.key_empty" } },
+	{ StringsFinding::KeyDuplicate, { "strings.key_duplicate" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(StringsFinding::kCount),
+		"every StringsFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the string table's rows follow StringsFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries);
+
+} // namespace
+
+const FindingCodeRow &finding_code(StringsFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable strings_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *strings = dynamic_cast<const StringsDocument *>(&document);
 	if (!strings) return findings;
 	// On the string it names, when the table holds it, wherever it is now (source_address; a
 	// string of a section the table does not have, or one removed since: the file alone).
-	source_issue_findings(*strings, "strings.invalid_input", "strings.regrouped", findings);
+	source_issue_findings(*strings, finding_code(StringsFinding::InvalidInput),
+			finding_code(StringsFinding::Regrouped), findings);
 	if (document.blocked()) return findings;
 	// The sections by the reader's rule (rtxt::File::section_index): a lookup finds the first
 	// section of a name, in any case, so a later one of the name is never read by section (the
@@ -390,13 +416,13 @@ std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 		const size_t found = names.section_index(name);
 		if (!name.empty() && found == s) continue;
 		auto diagnostic = name.empty()
-		        ? make_diagnostic(DiagnosticSeverity::Error, "strings.section_empty",
-		                          "Enter a name for this section: a lookup finds a section by its name.", document.path(), "name")
-		        : make_diagnostic(DiagnosticSeverity::Warning, "strings.section_duplicate",
-		                          "Section " + std::to_string(found + 1) + " is named '" + retail_text_to_utf8(names.sections[found].name) +
-		                                  "' too, and a lookup by section reads the first: this one's strings are reached only by a "
-		                                  "lookup of the key alone.",
-		                          document.path(), "name");
+		        ? make_finding(StringsFinding::SectionEmpty, DiagnosticSeverity::Error,
+		                       "Enter a name for this section: a lookup finds a section by its name.", document.path(), "name")
+		        : make_finding(StringsFinding::SectionDuplicate, DiagnosticSeverity::Warning,
+		                       "Section " + std::to_string(found + 1) + " is named '" + retail_text_to_utf8(names.sections[found].name) +
+		                               "' too, and a lookup by section reads the first: this one's strings are reached only by a "
+		                               "lookup of the key alone.",
+		                       document.path(), "name");
 		diagnostic.record = retail_text_to_utf8(name);
 		diagnostic.row_id = node.id;
 		diagnostic.record_kind = kSection;
@@ -407,17 +433,17 @@ std::vector<Diagnostic> validate_strings_file(const DocumentBase &document) {
 		std::set<std::string> keys;
 		for (size_t i = 0; i < section.entries.size(); ++i) {
 			const rtxt::Entry &entry = section.entries[i];
-			auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
-				auto diagnostic = make_diagnostic(severity, code, message, document.path(), "key");
+			auto add = [&](DiagnosticSeverity severity, StringsFinding code, const std::string &message) {
+				auto diagnostic = make_finding(code, severity, message, document.path(), "key");
 				diagnostic.record = section.section_name;
 				diagnostic.row_id = node->id;
 				diagnostic.child_id = section.collections[0][i];
 				diagnostic.record_kind = kString;
 				findings.push_back(std::move(diagnostic));
 			};
-			if (entry.key.empty()) add(DiagnosticSeverity::Error, "strings.key_empty", "Enter a key for this string in section '" + section.section_name + "'.");
+			if (entry.key.empty()) add(DiagnosticSeverity::Error, StringsFinding::KeyEmpty, "Enter a key for this string in section '" + section.section_name + "'.");
 			else if (!keys.insert(strutil::to_upper(entry.key)).second)
-				add(DiagnosticSeverity::Warning, "strings.key_duplicate",
+				add(DiagnosticSeverity::Warning, StringsFinding::KeyDuplicate,
 				    "Section '" + section.section_name + "' has more than one '" + entry.key + "'; the game reads the first.");
 		}
 	}

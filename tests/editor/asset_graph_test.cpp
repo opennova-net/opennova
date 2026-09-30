@@ -961,7 +961,7 @@ static int test_stylesheet_bindings() {
 		if (d.code == "reference.missing" && d.message.find("nofont.fnt") != std::string::npos) {
 			++missing_fonts;
 			TEST_EXPECT(fs::path(d.asset).filename() == "brand.mns" && d.record == "DEF_FONTNAME_LG");
-			TEST_EXPECT(d.reference == ReferenceKind::Font && d.target == "nofont.fnt");
+			TEST_EXPECT(editor_test::reference_of(d).kind == ReferenceKind::Font && subject_target(d) == "nofont.fnt");
 		}
 	TEST_EXPECT(missing_fonts == 1);
 
@@ -1622,11 +1622,11 @@ static int test_model_texture_references() {
 	// (in its JSON too).
 	const auto finding_for = [&](const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "reference.missing" && d.asset == model && d.target == target) return &d;
+			if (d.code == "reference.missing" && d.asset == model && subject_target(d) == target) return &d;
 		return nullptr;
 	};
 	const Diagnostic *plain = finding_for("plain.tga");
-	TEST_EXPECT(plain && plain->reference == ReferenceKind::Texture && plain->loader_arg == 1);
+	TEST_EXPECT(plain && editor_test::reference_of(*plain).kind == ReferenceKind::Texture && editor_test::reference_of(*plain).loader_arg == 1);
 	TEST_EXPECT(plain && diagnostic_to_json(*plain).get("loader_arg") &&
 	            diagnostic_to_json(*plain).get("loader_arg")->number == 1.0 &&
 	            !diagnostic_to_json(*plain).get("material_type"));

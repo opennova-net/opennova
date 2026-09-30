@@ -18,9 +18,13 @@
 // compared member for member, when the review wrote a row's reference kind by its token (its
 // number moved with MenuText) and dropped those rows. The retail leg (OPENNOVA_JO_DIR)
 // exports the install's files a document type opens into a project and times a first
-// validation, one with nothing changed and one after an edit of the open item table.
+// validation, one with nothing changed and one after an edit of the open item table. S13 A6:
+// every finding the four projects make, composed as the editor and the command line compose
+// them, is made from a row of the finding codes' tables, and so is every finding of the install's
+// files in the retail leg.
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
@@ -29,8 +33,12 @@
 #include <editor/graph/project_validation.h>
 #include <editor/graph/use_checks.h>
 #include <editor/import/import_plan.h>
+#include <editor/preview/menu_render_check.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
+#include <editor/project/project_findings.h>
+#include <editor/requirements/requirements.h>
+#include <editor/session/finding_codes.h>
 
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
@@ -41,6 +49,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,14 +75,18 @@ std::string text_of(const std::vector<uint8_t> &bytes) {
 }
 
 // A finding as one line, every member of it (its reference kind by its token, which a new kind
-// leaves as it is).
+// leaves as it is; what it is about as the line wrote it before S13 A6 gave the finding its
+// subject: a role, a target, a reference kind, a scope and a loader's argument, each its default
+// where the subject has none).
 std::string row_of(const Diagnostic &d) {
+	const RequirementSubject &requirement = editor_test::requirement_of(d);
+	const ReferenceSubject &reference = editor_test::reference_of(d);
 	return std::string(diagnostic_severity_label(d.severity)) + "|" + d.code + "|" + d.asset + "|" +
 			std::to_string(d.line) + "|" + d.record + "|" + d.field + "|" +
 			std::to_string(d.row_id) + "|" + std::to_string(d.child_id) + "|" +
-			std::to_string(d.record_kind) + "|" + d.role + "|" + d.target + "|" +
-			reference_row(d.reference).token + "|" + d.scope + "|" + std::to_string(d.loader_arg) +
-			"|" + d.message;
+			std::to_string(d.record_kind) + "|" + requirement.role + "|" + subject_target(d) + "|" +
+			reference_row(reference.kind).token + "|" + reference.scope + "|" +
+			std::to_string(reference.loader_arg) + "|" + d.message;
 }
 
 // The rows as a sorted list: the comparison is of the rows, not their order.
@@ -391,6 +404,52 @@ static int test_findings_keep_their_records() {
 // The cross-file checks are a table (graph/use_checks): one row per asset kind that has one, the
 // stylesheet's, on a kind a document type opens (the item table's is gone: two item tables are
 // two files of one name).
+// S13 A6: every finding the four projects make, composed as the editor and the command line
+// compose them (the scan's, the requirements', each file's own, the use checks', the graph's and
+// the render check's notes), carries the token of a row of the finding codes' tables.
+static int test_every_finding_has_a_row() {
+	const struct {
+		const char *name;
+		Files (*files)();
+		bool edited;
+	} projects[] = {
+		{ "fixtures", fixture_files, false },
+		{ "styles", style_files, false },
+		{ "items", item_files, false },
+		{ "open", style_and_item_files, true },
+	};
+	size_t findings = 0;
+	std::set<std::string> codes;
+	for (const auto &made : projects) {
+		Project project;
+		TEST_EXPECT(project.make(made.files()));
+		std::vector<std::shared_ptr<const DocumentBase>> open;
+		TEST_EXPECT(!made.edited || open_edited(project, open));
+		const RequirementReport requirements = evaluate_requirements(project.document, project.scan);
+		AssetGraph graph;
+		ValidationCache cache;
+		MenuRenderCheck render_check;
+		ProjectAssetSource files;
+		files.set_scan(project.paths.root, project.scan, project.document.target_game);
+		const std::vector<std::string> boot_missing;
+		const std::vector<Diagnostic> none;
+		const ProjectFindings composed = compose_project_findings(
+				{ project.paths, project.document, project.scan, requirements, open, boot_missing,
+						none, none, none },
+				graph, cache, render_check, files);
+		TEST_EXPECT(!composed.rows.empty());
+		for (const Diagnostic &d : composed.rows) {
+			++findings;
+			codes.insert(d.code);
+			if (!finding_row(d.code))
+				std::fprintf(stderr, "%s: %s has no row\n", made.name, d.code.c_str());
+			TEST_EXPECT(finding_row(d.code) != nullptr);
+		}
+	}
+	std::printf("every finding has a row: %zu findings of %zu codes\n", findings, codes.size());
+	return 0;
+}
+
 static int test_use_check_table() {
 	size_t rows = 0;
 	for (size_t k = 0; k < kAssetKindCount; ++k) {
@@ -481,7 +540,7 @@ static int test_style_uses_by_what_names_them() {
 		}
 		if (d.code == "reference.missing" && d.record == "MAIN/D") {
 			++nope;
-			TEST_EXPECT(d.field == "string.value" && d.reference == ReferenceKind::StyleVar &&
+			TEST_EXPECT(d.field == "string.value" && editor_test::reference_of(d).kind == ReferenceKind::StyleVar &&
 					d.severity == DiagnosticSeverity::Warning &&
 					d.message.find("%NOPE%") != std::string::npos);
 		}
@@ -620,6 +679,29 @@ static int test_retail_validation() {
 			stats.files_reused, stats.files_loaded, again);
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == files && graph.stats().files_extracted == 0);
+	// S13 A6: every finding the install's files make, composed as the editor composes them (the
+	// render check's notes over the install's menus among them), carries a row's token.
+	{
+		const RequirementReport requirements = evaluate_requirements(project.document, project.scan);
+		MenuRenderCheck render_check;
+		ProjectAssetSource source;
+		source.set_scan(project.paths.root, project.scan, project.document.target_game);
+		const std::vector<std::string> boot_missing;
+		const std::vector<Diagnostic> none;
+		const ProjectFindings composed = compose_project_findings(
+				{ project.paths, project.document, project.scan, requirements, open, boot_missing,
+						none, none, none },
+				graph, cache, render_check, source);
+		std::set<std::string> codes;
+		for (const Diagnostic &d : composed.rows) {
+			codes.insert(d.code);
+			if (!finding_row(d.code))
+				std::fprintf(stderr, "retail: %s has no row\n", d.code.c_str());
+			TEST_EXPECT(finding_row(d.code) != nullptr);
+		}
+		std::printf("retail: every finding has a row: %zu findings of %zu codes\n",
+				composed.rows.size(), codes.size());
+	}
 	const AssetEntry *items_entry = project.scan.find("items.def");
 	TEST_EXPECT(items_entry != nullptr);
 	if (!items_entry)
@@ -651,6 +733,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_rows_as_before();
+	failures += test_every_finding_has_a_row();
 	failures += test_what_a_validation_reads();
 	failures += test_findings_keep_their_records();
 	failures += test_use_check_table();

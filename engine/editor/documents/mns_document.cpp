@@ -102,6 +102,46 @@ const std::vector<FieldSchema> &source_fields() {
 	return fields;
 }
 
+constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
+	{ StyleFinding::LineEnding, { "style.line_ending", FindingFix::Rewrite, "with every line ending CR LF" } },
+	{ StyleFinding::NotLoaded, { "style.not_loaded" } },
+	{ StyleFinding::XmlChar, { "style.xml_char" } },
+	{ StyleFinding::NestedVar, { "style.nested_var" } },
+	{ StyleFinding::Backslash, { "style.backslash" } },
+	{ StyleFinding::ReadDifferently, { "style.read_differently" } },
+	{ StyleFinding::DirectiveForm, { "style.directive_form" } },
+	{ StyleFinding::IfWithoutArgument, { "style.if_without_argument" } },
+	{ StyleFinding::NoncanonicalIfArg, { "style.noncanonical_if_arg" } },
+	{ StyleFinding::UnbalancedElse, { "style.unbalanced_else" } },
+	{ StyleFinding::DuplicateElse, { "style.duplicate_else" } },
+	{ StyleFinding::UnbalancedEndif, { "style.unbalanced_endif" } },
+	{ StyleFinding::UnknownDirective, { "style.unknown_directive" } },
+	{ StyleFinding::DirectiveTail, { "style.directive_tail" } },
+	{ StyleFinding::LoneBackslash, { "style.lone_backslash" } },
+	{ StyleFinding::ValueIsDirective, { "style.value_is_directive" } },
+	{ StyleFinding::ValueStartsWithHash, { "style.value_starts_with_hash" } },
+	{ StyleFinding::ValueOnNextLine, { "style.value_on_next_line" } },
+	{ StyleFinding::DuplicateName, { "style.duplicate_name" } },
+	{ StyleFinding::ContinuedDuplicate, { "style.continued_duplicate" } },
+	{ StyleFinding::NulByte, { "style.nul_byte" } },
+	{ StyleFinding::InvalidNameChar, { "style.invalid_name_char" } },
+	{ StyleFinding::MissingValueDelimiter, { "style.missing_value_delimiter" } },
+	{ StyleFinding::NoValue, { "style.no_value" } },
+	{ StyleFinding::ContinuationAtEof, { "style.continuation_at_eof" } },
+	{ StyleFinding::UnterminatedIf, { "style.unterminated_if" } },
+	{ StyleFinding::Hangs, { "style.hangs" } },
+	{ StyleFinding::Stops, { "style.stops" } },
+	{ StyleFinding::OverriddenByBrand, { "style.overridden_by_brand" } },
+	{ StyleFinding::Unused, { "style.unused" } },
+	{ StyleFinding::NotAColor, { "style.not_a_color" } },
+	{ StyleFinding::MixedUse, { "style.mixed_use" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(StyleFinding::kCount),
+		"every StyleFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the stylesheet's rows follow StyleFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries);
+
 const std::string *text_of(const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
 	if (!text) error = "This field takes text.";
@@ -115,11 +155,15 @@ std::string sentence(std::string message) {
 	return message;
 }
 
-// "lone-backslash" -> "style.lone_backslash".
-std::string style_code(const std::string &code) {
-	std::string out = "style.";
-	for (char c : code) out += c == '-' ? '_' : c;
-	return out;
+// What the stylesheet reader says of a line, as the stylesheet's row: its code (mns::Diagnostic::code,
+// "lone-backslash") is the row's token after "style.", '_' for '-' (style.lone_backslash). A code the
+// reader adds that no row has yet is reported as a reading the game makes otherwise than shown.
+StyleFinding reader_finding(const std::string &code) {
+	std::string token = "style.";
+	for (char c : code) token += c == '-' ? '_' : c;
+	for (size_t i = 0; i < kFindingRows.size(); ++i)
+		if (token == kFindingRows[i].token) return static_cast<StyleFinding>(i);
+	return StyleFinding::ReadDifferently;
 }
 
 } // namespace
@@ -344,7 +388,7 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &,
                         Diagnostic &error) {
 	if (!is_style_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a menu stylesheet.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu stylesheet.", path());
 		return false;
 	}
 	// The loader hands a single NUL for an empty file: an empty stylesheet.
@@ -475,6 +519,12 @@ bool MnsDocument::accept_change(const Change &change, std::string &error) const 
 	return false;
 }
 
+const FindingCodeRow &finding_code(StyleFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable style_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *styles = dynamic_cast<const MnsDocument *>(&document);
@@ -500,10 +550,10 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		return last != last_of.end() && last->second == row.id;
 	};
 	// A finding on the row a line is in (row_at_line's).
-	auto on_line = [&](DiagnosticSeverity severity, const std::string &code,
+	auto on_line = [&](DiagnosticSeverity severity, StyleFinding code,
 						   const std::string &message, int line,
 						   const std::string &field = std::string()) {
-		Diagnostic d = make_diagnostic(severity, code, message, path, field);
+		Diagnostic d = make_finding(code, severity, message, path, field);
 		d.line = size_t(line > 0 ? line : 0);
 		const size_t at = size_t(std::upper_bound(first_lines.begin(), first_lines.end(), line) -
 				first_lines.begin());
@@ -520,18 +570,18 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	for (const mns::Diagnostic &d : evaluated.diagnostics)
 		on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error
 												   : DiagnosticSeverity::Warning,
-				style_code(d.code), sentence(d.message), d.line);
+				reader_finding(d.code), sentence(d.message), d.line);
 	// The rows end CR LF; the file keeps the line ends it was read with until Save
 	// writes it (the build packs the file).
 	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
 	if (file && file->line_end_line && !styles->wrote_file())
-		on_line(DiagnosticSeverity::Error, "style.line_ending",
+		on_line(DiagnosticSeverity::Error, StyleFinding::LineEnding,
 				sentence(file->line_end_message) +
 						" The editor ends every line CR LF when it saves the file.",
 				file->line_end_line);
 	// The game reads only the shell's two [orig: Menu_InitShellResources @ 0x552604, @ 0x552616].
 	if (!styles->read_by_game()) {
-		findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.not_loaded",
+		findings.push_back(make_finding(StyleFinding::NotLoaded, DiagnosticSeverity::Warning,
 				"The game reads only menu_style.mns and brand.mns: nothing reads " +
 						basename_of(path) + ".",
 				path));
@@ -549,7 +599,7 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		if (value.empty())
 			continue; // a name the game ignores (no-value)
 		if (value.find_first_of("<>&\"") != std::string::npos)
-			on_line(DiagnosticSeverity::Warning, "style.xml_char",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::XmlChar,
 					"The game pastes " + name +
 							"'s value into each menu before reading the menu, so its < > & or \" "
 							"can break the menus that use it.",
@@ -557,22 +607,22 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		// The game pastes a value and scans on after it, so a reference in it stays as
 		// written [orig: NapiXML_ExpandVariablesInText @ 0x63a000, the copy @ 0x63a450..0x63a4d1].
 		if (mns::holds_variable_reference(value))
-			on_line(DiagnosticSeverity::Warning, "style.nested_var",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::NestedVar,
 					"The game does not expand a %NAME% inside a value: the menus get " + name +
 							"'s value as written.",
 					line, "value");
 		if (value.find("\\\\") != std::string::npos)
-			on_line(DiagnosticSeverity::Info, "style.backslash",
+			on_line(DiagnosticSeverity::Info, StyleFinding::Backslash,
 					"The game keeps both backslashes of each '\\\\' in " + name + "'s value.", line,
 					"value");
 		// The document's reading against the game's own, where the game reads this far.
 		if (evaluated.stopped_line && line >= evaluated.stopped_line)
 			continue;
 		if (!evaluated.sheet.has(name))
-			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::ReadDifferently,
 					"The game does not read " + name + " as it stands here.", line, "value");
 		else if (evaluated.sheet.get(name) != value)
-			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::ReadDifferently,
 					"The game reads " + name + " as '" + evaluated.sheet.get(name) +
 							"', not as shown.",
 					line, "value");

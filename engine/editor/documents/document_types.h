@@ -7,6 +7,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -27,6 +28,10 @@ struct DocumentType {
 	// is the asset graph's; graph/project_validation.h runs the three over the project, the
 	// validation cache keeping each file's findings until the file changes.
 	std::vector<Diagnostic> (*validate_file)(const DocumentBase &document) = nullptr;
+	// The type's own finding codes (ADR 0046 S13 A6): its table, in the order of its enum, every
+	// code its validator, its parse and the checks it answers for (a use check of the files it
+	// defines, the render check of a menu) make beside the editor's own (session/finding_codes.h).
+	FindingTable (*findings)() = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a

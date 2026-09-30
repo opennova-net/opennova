@@ -512,12 +512,12 @@ SerializeResult ModelDocument::serialize() const {
 bool ModelDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                           std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) {
 	if (!is_model_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a model.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a model.", path());
 		return false;
 	}
 	const assets::Model base = assets::parse_model(bytes.data(), bytes.size());
 	if (!base) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "The model could not be read.", path());
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, "The model could not be read.", path());
 		return false;
 	}
 	auto row = std::make_shared<ModelRow>();

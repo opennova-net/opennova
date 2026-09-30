@@ -52,7 +52,9 @@ inline bool has_missing(const std::vector<editor::Diagnostic> &diagnostics,
 inline const editor::Diagnostic *missing_of(const std::vector<editor::Diagnostic> &diagnostics,
                                             const std::string &field, editor::ReferenceKind kind) {
 	for (const editor::Diagnostic &d : diagnostics)
-		if (d.code == "reference.missing" && d.field == field && d.reference == kind) return &d;
+		if (const editor::ReferenceSubject *missing = editor::reference_subject(d);
+		    missing && d.code == "reference.missing" && d.field == field && missing->kind == kind)
+			return &d;
 	return nullptr;
 }
 

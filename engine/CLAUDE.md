@@ -47,7 +47,10 @@
     kind from `request_factories.h`); its wire form, the view the windows read
     (`session/view`, S13 V4: sub-views of the project, the documents, the findings, the
     activity and the dialogs, and the events a request posts for one window to take once),
-    and the record batch the editor MCP names records by), `model` (the
+    the record batch the editor MCP names records by, and the finding codes (S13 A6,
+    `finding_codes`: every finding is made from a row, the editor's own `CoreFinding` table's or
+    its document type's `findings`, never from free text; what Problems does with a finding
+    reads the row)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
     over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
@@ -85,9 +88,10 @@
     (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
     child never carry it. Inside it five libraries are ranked, model < documents < graph <
     session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
-    includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
-    include; the upward includes the tree still makes are the lint's listed exceptions, each
-    naming the slice that removes it, and an exception the tree no longer makes fails the lint.
+    includes only its own rank and below, `graph/reference_kinds.h` and `session/finding_codes.h`
+    being seam headers any may include; the upward includes the tree still makes are the lint's
+    listed exceptions, each naming the slice that removes it, and an exception the tree no longer
+    makes fails the lint.
     The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
     allowlist by the `editor/` prefix. No directory under it may start with `build`
     (the lints skip such directories; the build lib is `project_build/`).

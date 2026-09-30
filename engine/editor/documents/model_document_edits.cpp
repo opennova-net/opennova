@@ -270,14 +270,42 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 	}
 }
 
+namespace {
+
+constexpr FindingCodeEntry<ModelFinding> kFindingEntries[] = {
+	{ ModelFinding::Seats, { "model.seats" } },
+	{ ModelFinding::UserPointDuplicate, { "model.user_point_duplicate" } },
+	{ ModelFinding::UserPoints, { "model.user_points" } },
+	{ ModelFinding::RegisterMissing, { "model.register_missing" } },
+	{ ModelFinding::ShaderUnknown, { "model.shader_unknown" } },
+	{ ModelFinding::MaterialUnused, { "model.material_unused" } },
+	{ ModelFinding::LightPart, { "model.light_part" } },
+	{ ModelFinding::RegisterUnknown, { "model.register_unknown" } },
+	{ ModelFinding::LodOrder, { "model.lod_order" } },
+	{ ModelFinding::FrameMissing, { "model.frame_missing" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(ModelFinding::kCount),
+		"every ModelFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the model's rows follow ModelFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries);
+
+} // namespace
+
+const FindingCodeRow &finding_code(ModelFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable model_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *model = dynamic_cast<const ModelDocument *>(&document);
 	const ModelRow *row = model ? model->model_row() : nullptr;
 	if (!row) return findings;
-	const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message, ModelKind kind,
+	const auto add = [&](DiagnosticSeverity severity, ModelFinding code, const std::string &message, ModelKind kind,
 	                     size_t collection, size_t index, const char *field) {
-		Diagnostic d = make_diagnostic(severity, code, message, document.path(), field);
+		Diagnostic d = make_finding(code, severity, message, document.path(), field);
 		d.row_id = row->id;
 		d.record_kind = node_kind(kind);
 		if (collection < row->collections.size() && index < row->collections[collection].size()) {
@@ -296,18 +324,18 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	for (size_t i = 0; i < row->user_points.size(); ++i) {
 		const ThreediUserPoint &u = row->user_points[i];
 		if (threedi_user_point_is_sitex(u.name) && ++seats == THREEDI_SITEX_SEAT_LIMIT + 1)
-			add(DiagnosticSeverity::Warning, "model.seats",
+			add(DiagnosticSeverity::Warning, ModelFinding::Seats,
 			    "More than " + std::to_string(THREEDI_SITEX_SEAT_LIMIT) +
 			            " sitex seats: the game takes the ninth for the control seat, and its seat scan reads no "
 			            "user point after it.",
 			    ModelKind::UserPoint, 3, i, "name");
 		if (!names.emplace(strutil::to_upper(u.name), i).second)
-			add(DiagnosticSeverity::Warning, "model.user_point_duplicate",
+			add(DiagnosticSeverity::Warning, ModelFinding::UserPointDuplicate,
 			    std::string("Two user points are named '") + u.name + "'; a lookup by name finds the first.",
 			    ModelKind::UserPoint, 3, i, "name");
 	}
 	if (row->user_points.size() > THREEDI_USER_POINT_SCAN_LIMIT)
-		add(DiagnosticSeverity::Info, "model.user_points",
+		add(DiagnosticSeverity::Info, ModelFinding::UserPoints,
 		    std::to_string(row->user_points.size()) + " user points: the item-effect attach scan reads the first 16.",
 		    ModelKind::Model, SIZE_MAX, 0, "");
 	// The CTRL registers the records name by index: a generator's, a light's or a loaded
@@ -352,7 +380,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 		DiagnosticSeverity severity;
 		std::string message;
 		if (register_finding(index, reads_register, kind == ModelKind::Light, whose, severity, message))
-			add(severity, "model.register_missing", message, kind, collection, at, field);
+			add(severity, ModelFinding::RegisterMissing, message, kind, collection, at, field);
 	};
 	// Which styles read the register they name is their consumer's rule
 	// (threedi_generator_reads_register); a flipbook names one only when it reads it
@@ -378,10 +406,10 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			               "texanim.time", "");
 		uint32_t flags = 0;
 		if (!shader_flags(mt.shader_name, flags))
-			add(DiagnosticSeverity::Warning, "model.shader_unknown",
+			add(DiagnosticSeverity::Warning, ModelFinding::ShaderUnknown,
 			    std::string("The engine's shader table has no '") + mt.shader_name + "'.", ModelKind::Material, 1, m, "shader");
 		if (row->materials[m].source < 0 || !material_is_drawn(*row, row->materials[m].source))
-			add(DiagnosticSeverity::Info, "model.material_unused", "No strip draws with this material.",
+			add(DiagnosticSeverity::Info, ModelFinding::MaterialUnused, "No strip draws with this material.",
 			    ModelKind::Material, 1, m, "shader");
 	}
 	for (size_t i = 0; i < row->lights.size(); ++i) {
@@ -390,25 +418,25 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			check_register(l.phase, threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, l.style),
 			               ModelKind::Light, 2, i, "param", "");
 		if (l.subobj_index != 0 && (row->lods.empty() || l.subobj_index >= row->lods[0].lod.render_object_count))
-			add(DiagnosticSeverity::Error, "model.light_part", "This light names a part LOD 0 does not have.",
+			add(DiagnosticSeverity::Error, ModelFinding::LightPart, "This light names a part LOD 0 does not have.",
 			    ModelKind::Light, 2, i, "part");
 	}
 	for (size_t i = 0; i < row->registers.size(); ++i)
 		if (threedi_ctrl_register_ordinal(row->registers[i].name) == THREEDI_CTRL_REGISTER_NOT_FOUND)
-			add(DiagnosticSeverity::Warning, "model.register_unknown",
+			add(DiagnosticSeverity::Warning, ModelFinding::RegisterUnknown,
 			    std::string("'") + row->registers[i].name + "' is no CTRL register the engine knows: the game reads LOD_FRAC.",
 			    ModelKind::Register, 4, i, "name");
 	for (size_t l = 0; l < row->lods.size(); ++l) {
 		const ModelLod &lod = row->lods[l];
 		if (l > 0 && lod.lod.lod_threshold > row->lods[l - 1].lod.lod_threshold)
-			add(DiagnosticSeverity::Warning, "model.lod_order",
+			add(DiagnosticSeverity::Warning, ModelFinding::LodOrder,
 			    "LOD " + std::to_string(l) + " takes over at more pixels than LOD " + std::to_string(l - 1) + ".",
 			    ModelKind::Lod, 0, l, "threshold");
 		for (size_t p = 0; p < lod.panm.size(); ++p) {
 			const ThreediPartAnimation &pa = lod.panm[p];
-			const auto on_row = [&](DiagnosticSeverity severity, const char *code, const std::string &message,
+			const auto on_row = [&](DiagnosticSeverity severity, ModelFinding code, const std::string &message,
 			                        const std::string &field) {
-				Diagnostic d = make_diagnostic(severity, code, message, document.path(), field);
+				Diagnostic d = make_finding(code, severity, message, document.path(), field);
 				d.row_id = row->id;
 				d.record_kind = node_kind(ModelKind::PartAnimation);
 				d.child_id = lod.panm_ids[p];
@@ -420,7 +448,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			// the one it is handed whole (threedi_panm_build_node_matrices).
 			const int frame = threedi_panm_frame_row(pa);
 			if (frame > 0 && static_cast<size_t>(frame) >= row->frames.size())
-				on_row(DiagnosticSeverity::Error, "model.frame_missing",
+				on_row(DiagnosticSeverity::Error, ModelFinding::FrameMissing,
 				       "Rotation frame " + std::to_string(frame) + " is not one of the model's " +
 				               std::to_string(row->frames.size()) + ".",
 				       "matrix");
@@ -432,7 +460,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 				    register_finding(tr.control_param,
 				                     threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, tr.control),
 				                     false, "", severity, message))
-					on_row(severity, "model.register_missing", message,
+					on_row(severity, ModelFinding::RegisterMissing, message,
 					       std::string(threedi_panm_track_label(t)) + ".param");
 			}
 		}

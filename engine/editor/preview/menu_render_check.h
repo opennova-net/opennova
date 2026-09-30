@@ -28,8 +28,6 @@ std::string menu_note_message(const menu::MenuFrameNote &note);
 // the picture (a CUSTOM hook, a state held, a frame whose stencil did not load, a table
 // or marquee filled at run time).
 bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severity);
-// "menu.render.<token>": a note's finding code.
-std::string menu_note_code(menu::MenuFrameNoteCode code);
 // Where a note sits in the document: the screen row, the window, or the record of the
 // window's list the note names (an empty field when that record is not there).
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,

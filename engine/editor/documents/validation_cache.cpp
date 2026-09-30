@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <editor/documents/document_types.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -12,9 +13,9 @@ namespace {
 
 // A file of a type whose documents hold no records (S13 D6): no validator reads it yet.
 Diagnostic no_records(const AssetEntry &asset) {
-	return make_diagnostic(DiagnosticSeverity::Error, "document.no_records",
-	                       "This file's document holds no records: no validator reads it yet.",
-	                       asset.relative_path);
+	return make_finding(CoreFinding::DocumentNoRecords, DiagnosticSeverity::Error,
+	                    "This file's document holds no records: no validator reads it yet.",
+	                    asset.relative_path);
 }
 
 } // namespace

@@ -164,9 +164,8 @@ void test_windows_show_the_gate() {
 	editor_test::own(v.project.requirements).rows = {gametext};
 	editor_test::own(v.project.requirements).required_total = 1;
 	editor_test::own(v.project.requirements).required_missing = 1;
-	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	lacking.role = "gametext";
-	lacking.target = "gametext.bin";
+	Diagnostic lacking = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
+	lacking.subject = RequirementSubject{"gametext", "gametext.bin"};
 	v.findings.diagnostics = {lacking};
 
 	Ui ui;

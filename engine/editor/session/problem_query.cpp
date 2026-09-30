@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
 
@@ -62,11 +63,12 @@ bool matches_text(const Diagnostic &d, const std::string &needle) {
 	return false;
 }
 
-// A finding about a file as a whole in the project, which Files shows and renames: its name
-// (it does not fit the archives, another file has it) or its place (an archive the build does
-// not pack).
+// A finding about a file as a whole in the project, which Files shows and renames: its code's
+// row places it there (FindingPlace::File: its name, which does not fit the archives or another
+// file has; its place, an archive the build does not pack).
 bool about_the_file(const std::string &code) {
-	return code.rfind("asset.name.", 0) == 0 || code == "build.name_unstorable" || code == "build.archive_in_project";
+	const FindingCodeRow *row = finding_row(code);
+	return row && row->place == FindingPlace::File;
 }
 
 bool in_scope(const Diagnostic &d, ProblemScope scope, const SessionView &view) {

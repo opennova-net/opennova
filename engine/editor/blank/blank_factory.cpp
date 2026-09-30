@@ -1,4 +1,5 @@
 #include <editor/blank/blank_factory.h>
+#include <editor/session/finding_codes.h>
 
 #include "blank_makers.h"
 
@@ -78,10 +79,10 @@ bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t
 	const BlankFactory *factory = find_blank_factory_for_role(request.role);
 	if (factory == nullptr) factory = find_blank_factory_for_kind(kind);
 	if (factory == nullptr) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.unavailable",
-		                        "The editor cannot create " + request.logical_name +
-		                                " yet: no writer exists for this kind of file.",
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankUnavailable, DiagnosticSeverity::Error,
+		                     "The editor cannot create " + request.logical_name +
+		                             " yet: no writer exists for this kind of file.",
+		                     request.logical_name);
 		return false;
 	}
 	return factory->make(request, out, error);

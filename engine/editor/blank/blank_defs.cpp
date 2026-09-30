@@ -1,4 +1,5 @@
 #include "blank_makers.h"
+#include <editor/session/finding_codes.h>
 #include <formats/def/def_write.h>
 #include <cstring>
 
@@ -6,7 +7,7 @@ namespace opennova::editor {
 namespace {
 bool emit(const def::DefWriteResult &result, std::vector<uint8_t> &out, Diagnostic &error) {
 	if (!result.ok()) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.def", result.diagnostics.front().message);
+		error = make_finding(CoreFinding::BlankDef, DiagnosticSeverity::Error, result.diagnostics.front().message);
 		return false;
 	}
 	out.assign(result.text.begin(), result.text.end()); return true;

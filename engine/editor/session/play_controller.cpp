@@ -11,6 +11,7 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/session/editor_preferences.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 
@@ -60,14 +61,14 @@ std::string PlayController::resolve_runtime_executable() const {
 // one would fight it for its files). True when refused, said why.
 bool PlayController::refused() {
 	if (!core_.platform().can_spawn()) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "play.unsupported",
-		                             "Play is Windows-only for now: the editor cannot start the game on this system. "
-		                             "Build works here."));
+		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
+		                          "Play is Windows-only for now: the editor cannot start the game on this system. "
+		                          "Build works here."));
 		return true;
 	}
 	if (play_.state() != PlayState::Stopped) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "play.already_running",
-		                             "The game is already running; stop it before starting it again."));
+		core_.report(make_finding(CoreFinding::PlayAlreadyRunning, DiagnosticSeverity::Error,
+		                          "The game is already running; stop it before starting it again."));
 		return true;
 	}
 	return false;
@@ -86,7 +87,8 @@ void PlayController::start() {
 	view_.findings.diagnostics.erase(
 			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
 					[](const Diagnostic &d) {
-						return d.code == "play.boot_missing" || d.code == "play.crashed";
+						return d.code == finding_code(CoreFinding::PlayBootMissing).token ||
+						       d.code == finding_code(CoreFinding::PlayCrashed).token;
 					}),
 			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
@@ -109,10 +111,10 @@ void PlayController::start() {
 	} else {
 		const std::string executable = resolve_runtime_executable();
 		if (executable.empty() || !fs::is_regular_file(executable, ec)) {
-			core_.report(make_diagnostic(DiagnosticSeverity::Error, "play.runtime_missing",
-			                             executable.empty()
-			                                     ? "No game runtime is set; choose opennova.exe in File > Project settings..."
-			                                     : "The game runtime was not found: " + executable));
+			core_.report(make_finding(CoreFinding::PlayRuntimeMissing, DiagnosticSeverity::Error,
+			                          executable.empty()
+			                                  ? "No game runtime is set; choose opennova.exe in File > Project settings..."
+			                                  : "The game runtime was not found: " + executable));
 			view_.activity.status = "The game runtime was not found.";
 			core_.touch(ViewConcern::Output);
 			return;
@@ -275,9 +277,9 @@ void PlayController::absorb_exit() {
 		}
 		line = "The game exited with code " + code + ".";
 		if (view_.project.open && view_.project.root == boot_project_) {
-			core_.problems().set_play_findings({make_diagnostic(DiagnosticSeverity::Error, "play.crashed",
-			                                                    "The game ended with exit code " + code +
-			                                                            ": it crashed or stopped on an error. Its log is in Output.")});
+			core_.problems().set_play_findings({make_finding(CoreFinding::PlayCrashed, DiagnosticSeverity::Error,
+			                                                 "The game ended with exit code " + code +
+			                                                         ": it crashed or stopped on an error. Its log is in Output.")});
 			core_.problems().validate_later();
 		}
 	}

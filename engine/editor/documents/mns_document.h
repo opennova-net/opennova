@@ -9,6 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
+#include <editor/session/finding_codes.h>
 #include <formats/mns/mns_document.h>
 
 namespace opennova::editor {
@@ -150,5 +151,52 @@ bool is_style_kind(AssetKind kind);
 // (a name brand.mns redefines, a value used as a colour that is not one, a value used as more
 // than one of colour, font and image, a name no menu uses) is graph/use_checks'.
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document);
+
+// The stylesheet type's own finding codes (DocumentType::findings), each a row of its table
+// (mns_document.cpp, static_asserted into this order): its validator's (a line end the game does
+// not read, which a rewrite ends CR LF; a stylesheet the game does not read; a value's markup, a
+// %NAME% inside it, a doubled backslash, a value the game reads otherwise than shown), then the
+// stylesheet reader's, one per mns::Diagnostic code (style. and the code, '_' for '-': the
+// reader's line-ending is LineEnding), then the use checks' of its variables
+// (graph/use_checks.h).
+enum class StyleFinding {
+	LineEnding,
+	NotLoaded,
+	XmlChar,
+	NestedVar,
+	Backslash,
+	ReadDifferently,
+	// the stylesheet reader's (mns::Diagnostic::code)
+	DirectiveForm,
+	IfWithoutArgument,
+	NoncanonicalIfArg,
+	UnbalancedElse,
+	DuplicateElse,
+	UnbalancedEndif,
+	UnknownDirective,
+	DirectiveTail,
+	LoneBackslash,
+	ValueIsDirective,
+	ValueStartsWithHash,
+	ValueOnNextLine,
+	DuplicateName,
+	ContinuedDuplicate,
+	NulByte,
+	InvalidNameChar,
+	MissingValueDelimiter,
+	NoValue,
+	ContinuationAtEof,
+	UnterminatedIf,
+	Hangs,
+	Stops,
+	// the use checks'
+	OverriddenByBrand,
+	Unused,
+	NotAColor,
+	MixedUse,
+	kCount
+};
+const FindingCodeRow &finding_code(StyleFinding code);
+FindingTable style_finding_codes();
 
 } // namespace opennova::editor

@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/session/finding_codes.h>
 #include <formats/bad/bad.h>
 #include <runtime/assets/asset_store.h>
 
@@ -79,5 +80,17 @@ bool is_animation_kind(AssetKind kind);
 // before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
 // warning on its parent.
 std::vector<Diagnostic> validate_animation_file(const DocumentBase &document);
+
+// The clip type's own finding codes (DocumentType::findings), each a row of its table
+// (animation_document.cpp, static_asserted into this order): a frame rate other than retail's, a
+// bone whose parent does not come before it, an event bit the engine does not read.
+enum class AnimationFinding {
+	Fps,
+	ParentOrder,
+	TriggerUnknown,
+	kCount
+};
+const FindingCodeRow &finding_code(AnimationFinding code);
+FindingTable animation_finding_codes();
 
 } // namespace opennova::editor

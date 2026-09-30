@@ -1,5 +1,6 @@
 #include "blank_makers.h"
 
+#include <editor/session/finding_codes.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -14,8 +15,8 @@ bool write_table(const File &table, const BlankRequest &request, std::vector<uin
 	std::string write_error;
 	if (!write(table, out, write_error)) {
 		out.clear();
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.strings", write_error,
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankStrings, DiagnosticSeverity::Error, write_error,
+		                     request.logical_name);
 		return false;
 	}
 	return true;

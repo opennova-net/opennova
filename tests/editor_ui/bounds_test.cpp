@@ -167,7 +167,7 @@ Diagnostic long_finding(const std::string &asset, const char *code) {
 	std::string message = "A finding whose message runs on";
 	for (int i = 0; i < 12; ++i) message += " and on, past what any line of a window shows";
 	message += ".";
-	Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, code, message, asset, "a_field_with_a_long_identifier");
+	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Warning, code, message, asset, "a_field_with_a_long_identifier");
 	d.record = "A_RECORD_WITH_A_NAME_LONG_ENOUGH_TO_CUT";
 	d.line = 1234;
 	return d;
@@ -185,8 +185,8 @@ struct Sweep {
 	// The session's view again, the long findings added, drawn until it settles.
 	void follow() {
 		view = session.view();
-		view.findings.diagnostics.push_back(long_finding("defs/items.def", "catalog.test"));
-		view.findings.diagnostics.push_back(long_finding("", "project.test"));
+		view.findings.diagnostics.push_back(long_finding("defs/items.def", "catalog.name_duplicate"));
+		view.findings.diagnostics.push_back(long_finding("", "project.field.invalid"));
 		view.revisions.touch(ViewConcern::Findings);
 		ui.windows.set_view(&view);
 		for (int i = 0; i < 4; ++i) {

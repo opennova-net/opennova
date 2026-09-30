@@ -7,6 +7,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/session/finding_codes.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
 
@@ -261,10 +262,6 @@ bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severit
 	return false;
 }
 
-std::string menu_note_code(menu::MenuFrameNoteCode code) {
-	return std::string("menu.render.") + menu::menu_frame_note_token(code);
-}
-
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
                               std::string *field) {
 	if (field) *field = note.field;
@@ -292,7 +289,7 @@ Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocume
                                 DiagnosticSeverity severity) {
 	std::string field;
 	const NodeAddress address = menu_note_address(note, document, screen_row, &field);
-	Diagnostic d = make_diagnostic(severity, menu_note_code(note.code), menu_note_message(note), document.path(), field);
+	Diagnostic d = make_finding(finding_code(note.code), severity, menu_note_message(note), document.path(), field);
 	d.row_id = address.row;
 	d.child_id = address.child;
 	d.record_kind = address.kind;
@@ -421,10 +418,10 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 				         std::get<std::string>(name) == compiler.widget_name(index);
 			}
 			if (!mapped) {
-				Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "menu.render.mapping",
-				                               "The menu the game would read has other windows on this screen than "
-				                               "the editor shows, so the screen's render notes are left out.",
-				                               document.path());
+				Diagnostic d = make_finding(MenuFinding::RenderMapping, DiagnosticSeverity::Error,
+				                            "The menu the game would read has other windows on this screen than "
+				                            "the editor shows, so the screen's render notes are left out.",
+				                            document.path());
 				d.row_id = row->id;
 				d.record_kind = node_kind(MenuKind::Screen);
 				d.record = row->name();

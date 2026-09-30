@@ -3,6 +3,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -16,4 +17,22 @@ namespace opennova::editor {
 // record makes (models, animation maps, ammo and weapon names, item ids, string ids) are the
 // asset graph's.
 std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document);
+
+// The catalog type's own finding codes (DocumentType::findings), each a row of its table
+// (catalog_validation.cpp, static_asserted into this order): input the reader leaves out, which
+// the game ignores and a rewrite drops, or which the typed model cannot carry (the file does not
+// serialize); a value the file cannot write; a record with no name, or with one an earlier record
+// of its kind has; an item with the id of an earlier item of the file; an item with no type.
+enum class CatalogFinding {
+	InvalidInput,
+	IgnoredInput,
+	Unserializable,
+	NameEmpty,
+	NameDuplicate,
+	ItemIdentity,
+	ItemType,
+	kCount
+};
+const FindingCodeRow &finding_code(CatalogFinding code);
+FindingTable catalog_finding_codes();
 } // namespace opennova::editor

@@ -6,6 +6,7 @@
 #include <base/io/hash.h>
 #include <base/io/json.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 
 namespace opennova::editor {
 
@@ -34,17 +35,17 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 	if (!std::filesystem::exists(path, ec)) return false;
 	std::string text, message;
 	if (!read_file_text(path, text, message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "import.sidecar", message, path);
+		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, message, path);
 		return false;
 	}
 	io::JsonValue json;
 	if (!io::json_parse(text, json, message) || !json.is_object()) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "import.sidecar", "The import record is not valid JSON: " + message, path);
+		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, "The import record is not valid JSON: " + message, path);
 		return false;
 	}
 	if (json.get_int("schema_version", -1) != kImportSidecarSchemaVersion) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "import.sidecar",
-		                        "The import record has an unknown schema version.", path);
+		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error,
+		                     "The import record has an unknown schema version.", path);
 		return false;
 	}
 	ImportSidecar sidecar;
@@ -58,7 +59,7 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 		for (const io::JsonValue &output : outputs->array)
 			if (output.is_string()) sidecar.outputs.push_back(output.string);
 	if (sidecar.importer.empty()) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "import.sidecar", "The import record names no importer.", path);
+		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, "The import record names no importer.", path);
 		return false;
 	}
 	out = std::move(sidecar);
@@ -68,7 +69,7 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 bool save_import_sidecar(const std::string &path, const ImportSidecar &sidecar, Diagnostic &error) {
 	std::string message;
 	if (!write_file_atomic(path, sidecar_text(sidecar), message)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "import.sidecar", message, path);
+		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, message, path);
 		return false;
 	}
 	return true;
