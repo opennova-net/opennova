@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 namespace opennova::editor {
@@ -9,12 +10,15 @@ namespace opennova::editor {
 // shared source for every kind the runtime browses; this enum adds the kinds the
 // editor must also know (the name-keyed .def family, scripts, textures, banks,
 // videos, plain text) so a requirement row and a scanned file compare by one type.
+// What each kind is (its token, words, names, archive, document type) is its row in
+// assets/asset_kinds: a new kind is one value here, before kCount, and one row there.
 enum class AssetKind {
 	Unknown = 0,
 	Archive,        // .pff (never a project asset: a build output)
 	Model,          // .3di
 	Animation,      // .bad
 	AnimationMap,   // .adm
+	Face,           // .grm (a head's facial texture mesh and its gesture offsets)
 	AiProfile,      // .aip
 	Texture,        // .tga .pcx .dds .mdt, and a model's material chunk container by its content
 	Font,           // .fnt
@@ -23,14 +27,16 @@ enum class AssetKind {
 	RawBin,         // .bin with neither magic (raw tables, exp_info style)
 	Credits,        // .kda
 	Mission,        // .bms .mis
+	MapProject,     // .npj .npz (the mission editor's project, the mission list's other scan)
 	Terrain,        // .trn
 	TerrainPolyData, // .cpt
 	TileInfo,       // .til
 	Environment,    // .env
 	Menu,           // .mnu
 	MenuStyle,      // .mns
-	SoundBank,      // .sbf
-	WaveBank,       // .lwf
+	MusicBank,      // .sbf (the music a music script plays, streamed by path)
+	SoundBank,      // .lwf (the sound sets, each naming its waves)
+	Wave,           // .wav (a sound bank's single, loaded from the archives by name)
 	DialogBank,     // .dbf
 	Particles,      // .ptl .ptu .ptg
 	Script,         // .wac
@@ -48,12 +54,17 @@ enum class AssetKind {
 	Video,          // .bik
 	PlayerSave,     // .sav
 	Shader,         // .fx
-	Config,         // .cfg .ini .ssc
+	Config,         // .cfg .ini .ssc .cd
+	Score,          // score.ini (the scoring table per game type)
 	Text,           // .txt
 	ImageSource,    // .png: a source the image importer turns into a texture (never packed itself)
+	kCount,         // the number of kinds, not a kind
 };
 
-// The stable lower-case token for a kind ("mission", "item_defs"); "unknown" for Unknown.
+inline constexpr size_t kAssetKindCount = static_cast<size_t>(AssetKind::kCount);
+
+// The stable lower-case token for a kind ("mission", "item_defs"); "unknown" for Unknown
+// (its row's, assets/asset_kinds).
 const char *asset_kind_token(AssetKind kind);
 
 // The user-facing label ("Mission", "Item definitions").

@@ -499,7 +499,7 @@ static int test_apply_retail_menu() {
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		skipped.insert(entry.reference != ReferenceKind::None ? reference_row(entry.reference).token
 		                                                      : asset_kind_token(entry.kind));
-	TEST_EXPECT(skipped == std::set<std::string>({"style_var", "menu_screen", "menu_window", "text_id", "wave_bank"}));
+	TEST_EXPECT(skipped == std::set<std::string>({"style_var", "menu_screen", "menu_window", "text_id", "sound_bank"}));
 	import(project.session, selected_sources(plan));
 	TEST_EXPECT(project.session.outcome().done() && !view.import_preview.open);
 	size_t references = 0;

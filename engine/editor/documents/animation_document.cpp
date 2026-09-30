@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_write.h>
@@ -111,23 +112,23 @@ ClipRow::ClipRow() {
 	collections.resize(2);
 }
 
-bool is_animation_kind(AssetKind kind) { return kind == AssetKind::Animation; }
-
-const char *AnimationDocument::kind_label(NodeKind kind) const {
-	return kind == kClip ? "Clip" : kind == kBone ? "Bone" : kind == kEvent ? "Frame event" : "";
+bool is_animation_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::Animation;
 }
 
-NodeKind AnimationDocument::kind_from_name(const std::string &name) const {
-	if (name == "clip") return kClip;
-	if (name == "bone") return kBone;
-	if (name == "event") return kEvent;
-	return -1;
+const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = {
+	        {kClip, "clip", "Clip", "", true},
+	        {kBone, "bone", "Bone"},
+	        {kEvent, "event", "Frame event"},
+	};
+	return table;
 }
 
 std::vector<Document::Collection> AnimationDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kClip || owner.child != 0) return {};
-	CollectionSpec bones{kBone, "Bones", "name", "bone", true};
-	CollectionSpec events{kEvent, "Frame events", "", "event", true};
+	CollectionSpec bones{kBone, "Bones", "name", true};
+	CollectionSpec events{kEvent, "Frame events", "", true};
 	return {{bones, row.collections[0]}, {events, row.collections[1]}};
 }
 
@@ -364,11 +365,6 @@ bool AnimationDocument::set_field(Node &node, const NodeAddress &address, const 
 
 bool AnimationDocument::edit_collection(Node &, const Edit &, const IdAllocator &, NodeId &, std::string &error) {
 	error = "The bones and frames are the clip's motion: export the clip again from Blender to change them.";
-	return false;
-}
-
-bool AnimationDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "A clip has no file-wide values.", path());
 	return false;
 }
 

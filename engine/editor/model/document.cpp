@@ -68,9 +68,17 @@ bool structural(EditOperation operation) {
 	       operation == EditOperation::Remove || operation == EditOperation::Move || operation == EditOperation::Paste;
 }
 
-// The kind token a locator names a collection by.
-std::string kind_token(const Document::CollectionSpec &spec) {
-	return *spec.kind_name ? std::string(spec.kind_name) : std::to_string(spec.kind);
+// A kind as a message names it: its label, else its number (an address may name a kind the
+// document does not hold).
+std::string kind_words(const Document &document, NodeKind kind) {
+	const char *label = document.kind_label(kind);
+	return *label ? std::string(label) : "kind " + std::to_string(kind);
+}
+
+// The token a locator names a collection's kind by: its row's, else its number.
+std::string locator_token(const Document &document, NodeKind kind) {
+	const char *token = document.kind_token(kind);
+	return *token ? std::string(token) : std::to_string(kind);
 }
 
 bool whole_number(const std::string &text, size_t &out) {
@@ -82,6 +90,28 @@ bool whole_number(const std::string &text, size_t &out) {
 }
 
 } // namespace
+
+const RecordKindRow *Document::kind_row(NodeKind kind) const {
+	for (const RecordKindRow &row : kinds())
+		if (row.kind == kind) return &row;
+	return nullptr;
+}
+
+const char *Document::kind_label(NodeKind kind) const {
+	const RecordKindRow *row = kind_row(kind);
+	return row ? row->label : "";
+}
+
+const char *Document::kind_token(NodeKind kind) const {
+	const RecordKindRow *row = kind_row(kind);
+	return row ? row->token : "";
+}
+
+NodeKind Document::kind_from_name(const std::string &token) const {
+	for (const RecordKindRow &row : kinds())
+		if (token == row.token) return row.kind;
+	return -1;
+}
 
 size_t Document::ignored_lines() const {
 	size_t count = 0;
@@ -310,7 +340,7 @@ std::string Document::locator(const NodeAddress &address) const {
 	Placement at;
 	for (size_t i = 1; i < chain.size(); ++i) {
 		if (!placement(chain[i], at)) return std::string();
-		out += "/" + kind_token(at.spec) + ":" + std::to_string(at.index);
+		out += "/" + locator_token(*this, at.spec.kind) + ":" + std::to_string(at.index);
 	}
 	return out;
 }
@@ -342,7 +372,8 @@ NodeAddress Document::address_in(const std::vector<std::shared_ptr<const Node>> 
 		const std::string token = parts[i].substr(0, colon);
 		bool found = false;
 		for (const Collection &collection : collections(top, current)) {
-			if (kind_token(collection.spec) != token || position >= collection.ids.size()) continue;
+			if (locator_token(*this, collection.spec.kind) != token) continue;
+			if (position >= collection.ids.size()) continue;
 			current = {top.id, collection.spec.kind, collection.ids[position]};
 			found = true;
 			break;
@@ -364,6 +395,10 @@ bool Document::set_present(Node &, const NodeAddress &, const std::string &, boo
 bool Document::paste_records(Node &, const Edit &, const IdAllocator &, std::vector<NodeId> &, std::string &error) {
 	error = "This document cannot paste records.";
 	return false;
+}
+
+bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
+	return fail(error, path(), "document.value", "This document has no file-wide values.");
 }
 
 bool Document::read_source(std::vector<uint8_t> bytes, std::vector<std::shared_ptr<Node>> &rows,
@@ -500,7 +535,7 @@ bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
 	if (index == rows_.size()) return fail(error, path(), "document.selection", "The selected record no longer exists.");
 	if (rows_[index]->kind != edit.address.kind)
 		return fail(error, path(), "document.selection",
-		            std::string("Wrong kind: the record is ") + kind_label(rows_[index]->kind) + ", the address says " + kind_label(edit.address.kind) + ".");
+		            std::string("Wrong kind: the record is ") + kind_label(rows_[index]->kind) + ", the address says " + kind_words(*this, edit.address.kind) + ".");
 	if (edit.parent) return fail(error, path(), "document.collection", "A row moves among the rows only.");
 	change.before = rows_[index];
 	change.before_position = index;
@@ -542,9 +577,7 @@ bool Document::commit(Change change, const std::string &key, Diagnostic &error) 
 	return true;
 }
 
-bool Document::apply(const std::vector<Edit> &edits, Diagnostic &error) { return apply(edits, nullptr, error); }
-
-bool Document::apply(const std::vector<Edit> &edits, const FollowEdits &follow, Diagnostic &error) {
+bool Document::apply(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (snapshot_)
 		return fail(error, path(), "document.snapshot", "A snapshot is read, never edited.");
 	if (blocked_) return fail(error, path(), "document.parse", "Fix the reported source errors and reload this document before editing.");
@@ -558,61 +591,34 @@ bool Document::apply(const std::vector<Edit> &edits, const FollowEdits &follow, 
 	if (!batch_row(edits, row, error)) return false;
 	bool builds = false;
 	const std::string key = step_key(edits, row, builds);
-	// A coalesced batch (typing) applies to the rows as its group found them, so the group's
-	// one step is those rows plus the latest value and what follows from it: an empty value
-	// typed on the way to a new one (an image or a hotkey cleared and retyped, a name) cannot
-	// drop what the new value keeps, and a group that ends empty is the clear. A gesture's
-	// edits build on each other instead.
+	// A coalesced batch (typing) applies to the row as its group found it, so the group's one
+	// step is that row plus the latest value: an empty value typed on the way to a new one (an
+	// image or a hotkey cleared and retyped, a name) cannot drop what the new value keeps, and a
+	// group that ends empty is the clear. A gesture's edits build on each other instead.
 	const bool reopened = !builds && history_.reopen(key);
 	const auto refused = [&]() {
 		if (reopened) history_.resume(); // the group's step as it was
 		return false;
 	};
-	std::vector<std::vector<Edit>> batches{edits};
-	std::vector<NodeId> batch_rows{row};
-	if (follow) {
-		for (const Edit &site : follow(*this, edits)) {
-			const auto same_site = [&](const Edit &edit) { return edit.address == site.address && edit.field == site.field; };
-			if (std::any_of(edits.begin(), edits.end(), same_site)) continue; // the batch sets it itself
-			if (site.operation != EditOperation::Set && site.operation != EditOperation::Clear &&
-			    site.operation != EditOperation::Write) {
-				fail(error, path(), "document.batch", "What follows from an edit changes fields; it adds, removes and moves nothing.");
-				return refused();
-			}
-			const size_t at = size_t(std::find(batch_rows.begin(), batch_rows.end(), site.address.row) - batch_rows.begin());
-			if (at == batches.size()) {
-				batches.push_back({site});
-				batch_rows.push_back(site.address.row);
-			} else {
-				batches[at].push_back(site);
-			}
-		}
-	}
-	std::vector<Change> changes;
-	std::vector<NodeId> added;
-	for (const std::vector<Edit> &batch_edits : batches) {
-		RowBatch batch;
-		if (!prepare_row_batch(batch_edits, batch, error)) return refused();
-		if (!batch.changed) continue;
-		// Every change is the type's to refuse before any commits.
-		std::string message;
-		if (!accept_change(batch.change, message)) {
-			fail(error, path(), "document.structure", message.empty() ? "This document refuses that change." : message);
-			return refused();
-		}
-		changes.push_back(std::move(batch.change));
-		added.insert(added.end(), batch.added.begin(), batch.added.end());
-	}
-	if (changes.empty()) {
+	RowBatch batch;
+	if (!prepare_row_batch(edits, batch, error)) return refused();
+	if (!batch.changed) {
 		// Nothing changes. A reopened group typed back to the values it found is no step at all:
 		// the document stays as the group found it (clean again when that was saved).
 		if (reopened) history_.drop();
 		return true;
 	}
-	history_.commit(std::move(changes), key);
-	if (!added.empty()) {
-		added_ = added;
-		last_added_ = added.front();
+	// The change is the type's to refuse before it commits.
+	std::string message;
+	if (!accept_change(batch.change, message)) {
+		fail(error, path(), "document.structure",
+		     message.empty() ? "This document refuses that change." : message);
+		return refused();
+	}
+	history_.commit(std::move(batch.change), key);
+	if (!batch.added.empty()) {
+		added_ = batch.added;
+		last_added_ = batch.added.front();
 	}
 	return true;
 }
@@ -712,12 +718,12 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			if (!address.child) {
 				if (updated->kind != address.kind)
 					return fail(error, path(), "document.selection",
-					            std::string("Wrong kind: the record is ") + row_label + ", the address says " + kind_label(address.kind) + ".");
+					            std::string("Wrong kind: the record is ") + row_label + ", the address says " + kind_words(*this, address.kind) + ".");
 			} else if (!place(address.child, at)) {
 				return fail(error, path(), "document.selection", "The selected record no longer exists.");
 			} else if (at.spec.kind != address.kind) {
 				return fail(error, path(), "document.selection",
-				            std::string("Wrong kind: the record is ") + kind_label(at.spec.kind) + ", the address says " + kind_label(address.kind) + ".");
+				            std::string("Wrong kind: the record is ") + kind_label(at.spec.kind) + ", the address says " + kind_words(*this, address.kind) + ".");
 			}
 		}
 		switch (edit.operation) {
@@ -766,7 +772,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			Collection collection;
 			if (!find_collection(owner, address.kind, collection))
 				return fail(error, path(), "document.collection",
-				            std::string(kind_label(owner.kind)) + " records hold no " + kind_label(address.kind) + " records.");
+				            std::string(kind_label(owner.kind)) + " records hold no " + kind_words(*this, address.kind) + " records.");
 			if (collection.spec.fixed)
 				return fail(error, path(), "document.collection", std::string("The ") + collection.spec.label + " of this " +
 				            kind_label(owner.kind) + " is fixed: nothing is added to it.");
@@ -799,7 +805,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 				Collection collection;
 				if (!find_collection(destination, address.kind, collection))
 					return fail(error, path(), "document.collection",
-					            std::string(kind_label(destination.kind)) + " records hold no " + kind_label(address.kind) + " records.");
+					            std::string(kind_label(destination.kind)) + " records hold no " + kind_words(*this, address.kind) + " records.");
 				if (collection.spec.fixed)
 					return fail(error, path(), "document.collection", std::string("The ") + collection.spec.label + " of this " +
 					            kind_label(destination.kind) + " is fixed: nothing moves into it.");

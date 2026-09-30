@@ -88,8 +88,8 @@ static int collections() {
 	// A weapon holds its actions and sights (owner-scoped, S9g); an action holds nothing.
 	const NodeAddress weapon_row{parent, node_kind(DefRecordKind::Weapon), 0};
 	const std::vector<Document::Collection> held = document.collections_of(weapon_row);
-	TEST_EXPECT(held.size() == 2 && std::string(held[0].spec.kind_name) == "action" && held[0].ids == std::vector<NodeId>{child} &&
-	            std::string(held[1].spec.kind_name) == "sight" && held[1].ids.empty());
+	TEST_EXPECT(held.size() == 2 && std::string(document.kind_token(held[0].spec.kind)) == "action" && held[0].ids == std::vector<NodeId>{child} &&
+	            std::string(document.kind_token(held[1].spec.kind)) == "sight" && held[1].ids.empty());
 	Document::Placement at;
 	TEST_EXPECT(document.collections_of(action).empty() && document.placement(action, at) && at.owner == weapon_row);
 	// B5: the only action moved to its own place is no edit.

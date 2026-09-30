@@ -27,4 +27,17 @@ std::string resource_kind_for_name_and_magic(const std::string &name, bool is_rt
 // the caller has none; only `.bin` names are peeked).
 std::string resource_kind_for_file(const std::string &name, const std::vector<uint8_t> *bytes);
 
+// One rule of the classifier: the kind a file takes by its whole name, by its extension, or,
+// for a `.bin`, by the magic its content starts with.
+struct ResourceKindRule {
+	const char *name;      // a whole file name, lower case ("avatars.def"); "" for another rule
+	const char *extension; // the extension, lower case with the dot (".trn"); a name rule's own
+	const char *magic;     // a `.bin`'s first four bytes ("RTXT"); "" for another rule
+	const char *kind;      // the kind it gives ("terrain")
+};
+
+// Every rule resource_kind_for_name_and_magic applies, in its order (a whole name before an
+// extension), so another classifier can be held to the same facts (the editor's asset kinds).
+const std::vector<ResourceKindRule> &resource_kind_rules();
+
 } // namespace opennova

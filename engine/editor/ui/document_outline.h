@@ -13,7 +13,7 @@ namespace opennova::editor {
 // collection adds a record at its end (+), and the selected record has Duplicate, Remove,
 // Up and Down where its collection is not fixed (the type refuses what its format does
 // not allow, and says why in Problems). The rows are a list the same way where the file
-// adds rows of their kind (Document::top_kinds: an animation table's rows, one Add per
+// adds rows of their kind (RecordKindRow::add_label: an animation table's rows, one Add per
 // kind); a file's other rows are its fixed records. Long collections are clipped, so a model's
 // thousands of bullet faces draw only what shows; a deep tree scrolls sideways. The selection
 // moved there (a Go to) is revealed: the records and collections holding it open, and it

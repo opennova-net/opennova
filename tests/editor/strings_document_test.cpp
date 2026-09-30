@@ -133,7 +133,7 @@ int load_edit_save() {
 	const NodeAddress hello{custom, kString, document.last_added()};
 	// A section holds its strings (owner-scoped, S9g); a string holds nothing.
 	const std::vector<Document::Collection> strings = document.collections_of({custom, kSection, 0});
-	TEST_EXPECT(strings.size() == 1 && std::string(strings[0].spec.kind_name) == "string" && strings[0].ids.size() == 1);
+	TEST_EXPECT(strings.size() == 1 && std::string(document.kind_token(strings[0].spec.kind)) == "string" && strings[0].ids.size() == 1);
 	TEST_EXPECT(document.collections_of(hello).empty() && document.locator(hello) == "2/string:0");
 	// B5: the only string moved to its own place is no edit.
 	const uint64_t revision = document.revision();

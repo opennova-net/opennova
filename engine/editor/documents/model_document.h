@@ -119,10 +119,9 @@ struct ComposedModel {
 
 class ModelDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override;
-	std::vector<KindSpec> top_kinds() const override { return {}; }
+	// The model's and its collision's rows (the file's two, never added), then every record
+	// kind they hold (model_document_detail::kKinds).
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
 	// What an index field names on this record: the model's CTRL registers by name, LOD 0's
@@ -164,7 +163,6 @@ protected:
 	// the collision records are fixed.
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
 	// A model keeps its two rows.
 	bool accept_change(const Change &change, std::string &error) const override;
 };

@@ -1,0 +1,186 @@
+// S13 D5 (ADR 0046 S13): the rule the maintainer set for the editor's roadmap, that every
+// resource format the game reads at runtime will be editable, made checkable so that no runtime
+// format arrives untyped or unrouted. Every rule the runtime's classifier types a file by
+// (base/resource_index's resource_kind_rules: a whole name, an extension, a `.bin`'s magic) and
+// every row of the required-resources manifest (base/gameprofile: a literal name, each name a
+// pattern stands for) maps to an asset kind that is not Unknown and has an archive slot (an
+// archive or loose), but an archive, which the build makes; a runtime kind lands on the row that
+// names its catalog token, and no row names a token the runtime does not give. The table's own
+// shape (one row per kind, in order; a token, a runtime token, a file name or an extension named
+// once) is its static_asserts'; here, what they cannot say: every document type is a row's, an
+// import source packs nowhere and is no runtime format, and Unknown is no runtime format (it packs
+// into resource.pff until S13 A8 stops packing it).
+#include <cstdio>
+#include <cstring>
+#include <set>
+#include <string>
+#include <vector>
+
+#include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
+#include <base/resource_index/resource_kind.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/documents/document_types.h>
+
+#include "common/test_expect.h"
+
+using namespace opennova;
+using namespace opennova::editor;
+
+namespace {
+
+// A kind a runtime format may land on: one the game knows, which the build puts somewhere.
+bool typed_and_routed(AssetKind kind) {
+	return kind != AssetKind::Unknown && asset_kind_row(kind).archive_slot != ArchiveSlot::None;
+}
+
+// The file names a manifest row stands for: its literal, or for a pattern each of its
+// alternatives ("*.npj/*.npz") by the file name after its folders, a placeholder or a wildcard
+// standing for a letter ("expansion\<n>\<n>.pff" is x.pff).
+std::vector<std::string> names_of(const gameprofile::RequiredResource &row) {
+	if (!(row.flags & gameprofile::RES_F_PATTERN)) return {row.name};
+	std::vector<std::string> out;
+	const std::string text = row.name;
+	size_t start = 0;
+	for (;;) {
+		const size_t slash = text.find('/', start);
+		const size_t length = slash == std::string::npos ? std::string::npos : slash - start;
+		std::string part = text.substr(start, length);
+		const size_t folder = part.find_last_of('\\');
+		if (folder != std::string::npos) part = part.substr(folder + 1);
+		std::string name;
+		for (size_t i = 0; i < part.size(); ++i) {
+			if (part[i] == '*') {
+				name += 'x';
+			} else if (part[i] == '<') {
+				const size_t close = part.find('>', i);
+				name += 'x';
+				i = close == std::string::npos ? part.size() : close;
+			} else {
+				name += part[i];
+			}
+		}
+		out.push_back(name);
+		if (slash == std::string::npos) break;
+		start = slash + 1;
+	}
+	return out;
+}
+
+// The file a rule types: its whole name, or a name of its extension (x.trn), a `.bin` with the
+// magic its content starts with.
+std::string probe_of(const ResourceKindRule &rule) {
+	return *rule.name ? std::string(rule.name) : std::string("x") + rule.extension;
+}
+
+// What the editor's classifier makes of a rule's file.
+AssetKind kind_of(const ResourceKindRule &rule) {
+	if (!*rule.magic) return classify_asset(probe_of(rule), nullptr);
+	std::vector<uint8_t> bytes(rule.magic, rule.magic + std::strlen(rule.magic));
+	bytes.resize(16, 0);
+	return classify_asset(probe_of(rule), &bytes);
+}
+
+} // namespace
+
+// Every rule of the runtime's classifier lands on the row naming its catalog token, typed and
+// routed; every row naming a catalog token is one a rule gives.
+static int test_runtime_formats() {
+	std::set<std::string> given;
+	size_t rules = 0;
+	for (const ResourceKindRule &rule : resource_kind_rules()) {
+		const AssetKind kind = kind_of(rule);
+		const AssetKindRow &row = asset_kind_row(kind);
+		given.insert(rule.kind);
+		++rules;
+		if (!typed_and_routed(kind) || std::string(row.runtime) != rule.kind)
+			std::fprintf(stderr, "the runtime's %s %s (%s) is %s here\n", probe_of(rule).c_str(),
+			             rule.magic, rule.kind, row.token);
+		TEST_EXPECT(typed_and_routed(kind));
+		TEST_EXPECT(std::string(row.runtime) == rule.kind);
+		TEST_EXPECT(asset_kind_for_runtime(rule.kind) == kind);
+	}
+	TEST_EXPECT(rules > 0);
+	std::printf("editor_asset_kinds: %zu rules of the runtime's classifier\n", rules);
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKindRow &row = asset_kind_row(AssetKind(i));
+		if (!*row.runtime) continue;
+		if (!given.count(row.runtime))
+			std::fprintf(stderr, "no rule gives %s's %s\n", row.token, row.runtime);
+		TEST_EXPECT(given.count(row.runtime) == 1);
+	}
+	return 0;
+}
+
+// Every row of the required-resources manifest, by each name it stands for, is a kind the game
+// knows that the build puts somewhere; the boot table's archives and the expansion archive are
+// archives, which the build makes.
+static int test_required_files() {
+	const int count = gameprofile::gameprofile_required_resource_count();
+	TEST_EXPECT(count > 0);
+	size_t names = 0, archives = 0;
+	for (int i = 0; i < count; ++i) {
+		const auto &row = *gameprofile::gameprofile_required_resource_at(i);
+		for (const std::string &name : names_of(row)) {
+			const AssetKind kind = expected_asset_kind_for_required_name(name);
+			++names;
+			if (strutil::ends_with_icase(name, ".pff")) {
+				TEST_EXPECT(kind == AssetKind::Archive);
+				++archives;
+				continue;
+			}
+			if (!typed_and_routed(kind))
+				std::fprintf(stderr, "the required %s (%s) is %s here\n", name.c_str(), row.role,
+				             asset_kind_token(kind));
+			TEST_EXPECT(typed_and_routed(kind));
+		}
+	}
+	TEST_EXPECT(archives == 4); // resource, localres, language and an expansion's
+	std::printf("editor_asset_kinds: %d manifest rows, %zu names, %zu of them archives\n", count,
+	            names, archives);
+	return 0;
+}
+
+// What the static_asserts cannot say: every document type is a row's (and opens it), an import
+// source packs nowhere and no runtime format is one, and Unknown is no runtime format.
+static int test_the_table() {
+	std::set<DocumentTypeId> edited;
+	for (size_t i = 0; i < kAssetKindCount; ++i) {
+		const AssetKind kind = AssetKind(i);
+		const AssetKindRow &row = asset_kind_row(kind);
+		TEST_EXPECT(row.kind == kind && asset_kind_from_token(row.token) == kind);
+		if (row.document != DocumentTypeId::None) {
+			edited.insert(row.document);
+			const DocumentType *type = document_type(row.document);
+			TEST_EXPECT(type && document_type_for(kind) == type && asset_kind_packed(kind));
+		} else {
+			TEST_EXPECT(document_type_for(kind) == nullptr);
+		}
+		if (row.import_source) TEST_EXPECT(!asset_kind_packed(kind) && !*row.runtime);
+	}
+	TEST_EXPECT(edited.size() == kDocumentTypeCount);
+	for (size_t id = 1; id <= kDocumentTypeCount; ++id) {
+		const DocumentType *type = document_type(DocumentTypeId(id));
+		TEST_EXPECT(type && type->id == DocumentTypeId(id));
+	}
+	TEST_EXPECT(document_type(DocumentTypeId::None) == nullptr);
+	const AssetKindRow &unknown = asset_kind_row(AssetKind::Unknown);
+	TEST_EXPECT(!*unknown.runtime && !unknown.file_name && !unknown.extensions);
+	// Until S13 A8 stops packing it.
+	TEST_EXPECT(asset_kind_packed(AssetKind::Unknown));
+	TEST_EXPECT(unknown.archive_slot == ArchiveSlot::Resource);
+	TEST_EXPECT(&asset_kind_row(AssetKind::kCount) == &unknown);
+	return 0;
+}
+
+int main() {
+	int failures = 0;
+	failures += test_runtime_formats();
+	failures += test_required_files();
+	failures += test_the_table();
+	if (failures == 0)
+		std::printf("editor_asset_kinds: every runtime format and required file has a kind and a "
+		            "slot\n");
+	return failures == 0 ? 0 : 1;
+}

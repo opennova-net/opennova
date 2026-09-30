@@ -41,10 +41,8 @@ struct AnimationMapRow : Node {
 
 class AnimationMapDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override { return kind == node_kind(AnimationMapKind::Row); }
-	std::vector<KindSpec> top_kinds() const override;
+	// A row, which the outline adds, and its clips.
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
 	// A row by its slot's words (animation_key_title), a clip by its file.
@@ -68,7 +66,6 @@ protected:
 	// A row's clips: add, duplicate, remove, move; at most 8.
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
 };
 
 bool is_animation_map_kind(AssetKind kind);

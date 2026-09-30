@@ -3582,6 +3582,14 @@ target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
 target_include_directories(editor_asset_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_asset_registry COMMAND editor_asset_registry_test)
 
+# The rule the asset kinds' table makes checkable (S13 D5, ADR 0046 S13): every format the
+# runtime's classifier types and every file the required-resources manifest names is a kind the
+# editor knows, with a place in the build.
+add_executable(editor_asset_kinds_test editor/asset_kinds_test.cpp)
+target_link_libraries(editor_asset_kinds_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_kinds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_asset_kinds COMMAND editor_asset_kinds_test)
+
 add_executable(editor_requirements_test editor/requirements_test.cpp)
 target_link_libraries(editor_requirements_test PRIVATE opennova_editor)
 target_include_directories(editor_requirements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

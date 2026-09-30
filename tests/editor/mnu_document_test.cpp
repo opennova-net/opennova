@@ -12,7 +12,8 @@
 // through the document (a Set of every field's own value, then a structural edit of every
 // list kind, undone byte for byte and read back after a save), a SKIP-LEG per root. S9p1:
 // a parse note on input retail ignores warns, one on input retail crashes or hangs on
-// blocks the menu and the build.
+// blocks the menu and the build. S13 D5: a screen's or a window's NAME set is its own edit, and
+// Rename everywhere rewrites its uses.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/session/project_session.h>
@@ -310,12 +311,12 @@ int windows_at_depth() {
 	TEST_EXPECT(top.size() == 1 && !top[0].spec.fixed && top[0].ids == std::vector<NodeId>{root.child});
 	const std::vector<Document::Collection> lists = document->collections_of(root);
 	TEST_EXPECT(lists.size() == mnu::schema_lists(mnu::SchemaShape::Window).size());
-	TEST_EXPECT(std::string(lists.back().spec.kind_name) == "window" &&
+	TEST_EXPECT(std::string(document->kind_token(lists.back().spec.kind)) == "window" &&
 	            lists.back().ids == std::vector<NodeId>({title.child, exit.child}));
-	TEST_EXPECT(std::string(lists[2].spec.kind_name) == "action" && lists[2].spec.kind == menu_kind("action"));
+	TEST_EXPECT(std::string(document->kind_token(lists[2].spec.kind)) == "action" && lists[2].spec.kind == menu_kind("action"));
 	// Which lists the root's type reads: a generic window reads no ITEMS, a button no LIST_BOX.
 	for (const Document::Collection &collection : lists) {
-		const std::string token = collection.spec.kind_name;
+		const std::string token = document->kind_token(collection.spec.kind);
 		if (token == "items.item" || token == "list_box" || token == "datasource")
 			TEST_EXPECT(collection.spec.applies == Applicability::Ignored);
 		if (token == "appearance" || token == "action" || token == "window")
@@ -504,7 +505,7 @@ int every_list() {
 	const std::string original = document.serialize().text;
 	Diagnostic error;
 	for (const Document::Collection &collection : document.collections_of(back)) {
-		const std::string token = collection.spec.kind_name;
+		const std::string token = document.kind_token(collection.spec.kind);
 		const NodeKind kind = collection.spec.kind;
 		const bool part = token == "list_box" || token == "spinup" || token == "spindown" || token == "scrollbar";
 		auto step = [&](const Edit &edit) { return document.apply(edit, error) && document.identities_match(); };
@@ -800,7 +801,7 @@ int duplicate_selection() {
 	TEST_EXPECT(duplicate());
 	std::vector<std::string> states;
 	for (const Document::Collection &collection : document->collections_of(exit))
-		if (std::string(collection.spec.kind_name) == "appearance")
+		if (std::string(document->kind_token(collection.spec.kind)) == "appearance")
 			for (const NodeId id : collection.ids) states.push_back(text_of(*document, {exit.row, collection.spec.kind, id}, "state"));
 	TEST_EXPECT(states.size() == 6 && states[0] == states[1] && states[3] == states[4] && states[1] != states[2] &&
 	            states[4] != states[5]);
@@ -1344,6 +1345,83 @@ int blank_menu_edits() {
 	return 0;
 }
 
+// A screen's or a window's NAME set in the Inspector is its own edit (S13 D5 cut the same-file
+// follow of S9l): the ACTIONs naming it by the old NAME keep it, the graph reporting each that no
+// longer resolves, and one undo gives the NAME back; Rename everywhere (RenameSymbol) is what
+// rewrites the uses, the definition and each ACTION reaching it.
+int name_is_its_own_edit() {
+	editor_test::TempProjectDir dir("opennova_menu_name_edit_test");
+	NoProcess platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Names"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string place = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT>"
+	                          "<BOTTOM>20</BOTTOM></POSITION>\r\n";
+	const auto window = [&](const char *type, const char *name, const std::string &body) {
+		return std::string("<WINDOW TYPE=\"") + type + "\" NAME=\"" + name + "\">\r\n" + place +
+		       body + "</WINDOW>\r\n";
+	};
+	const std::string go = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">AWAY</ACTION>\r\n"
+	                       "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
+	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n";
+	const std::string panel =
+	        window("STATIC", "PANEL", window("BUTTON", "GO", go) + window("STATIC", "TITLE", ""));
+	TEST_EXPECT(editor_test::write_text(view.project_root + "/flow.mnu",
+	                                    "<SCREEN>\r\n<NAME>HOME</NAME>\r\n" + panel +
+	                                            "</SCREEN>\r\n<SCREEN>\r\n<NAME>AWAY</NAME>\r\n" +
+	                                            window("BUTTON", "BACK", back) + "</SCREEN>\r\n"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(make_request(EditorRequestKind::OpenDocument, "flow.mnu"));
+	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
+	TEST_EXPECT(menu && menu->rows().size() == 2);
+	if (!menu || menu->rows().size() != 2) return 1;
+	const NodeAddress home{menu->rows()[0]->id, kScreen, 0};
+	NodeAddress go_window, back_window, title;
+	TEST_EXPECT(menu->find("GO", go_window) && menu->find("BACK", back_window));
+	TEST_EXPECT(menu->find("TITLE", title));
+	const NodeAddress show_title = child_of(*menu, go_window, "action", 1);
+	const NodeAddress go_home = child_of(*menu, back_window, "action", 0);
+	const auto rename = [&](const NodeAddress &record, const char *name) {
+		EditorRequest request = make_request(EditorRequestKind::EditRecord, menu->path());
+		request.edit = typed(record, "name", name); // as the Inspector sets it
+		session.handle(request);
+		return session.outcome().done();
+	};
+	const auto missing = [&](const char *record) {
+		for (const Diagnostic &d : view.diagnostics)
+			if (d.code == "reference.missing" && d.record == record) return true;
+		return false;
+	};
+	TEST_EXPECT(!missing("HOME/PANEL/GO/Action 2") && !missing("AWAY/BACK/Action 1"));
+	// The window: GO's WINDOW target keeps TITLE, which nothing defines now.
+	TEST_EXPECT(rename(title, "HEADLINE") && text_of(*menu, title, "name") == "HEADLINE");
+	TEST_EXPECT(text_of(*menu, show_title, "target") == "TITLE");
+	TEST_EXPECT(missing("HOME/PANEL/GO/Action 2"));
+	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	TEST_EXPECT(text_of(*menu, title, "name") == "TITLE" && !menu->can_undo());
+	TEST_EXPECT(!missing("HOME/PANEL/GO/Action 2"));
+	// The screen: BACK's SCREEN target keeps HOME.
+	TEST_EXPECT(rename(home, "START") && text_of(*menu, home, "name") == "START");
+	TEST_EXPECT(text_of(*menu, go_home, "target") == "HOME" && missing("AWAY/BACK/Action 1"));
+	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
+	TEST_EXPECT(text_of(*menu, home, "name") == "HOME" && !menu->can_undo());
+	// Rename everywhere: the window and the ACTION reaching it, on disk.
+	EditorRequest everywhere =
+	        make_request(EditorRequestKind::RenameSymbol, menu->path(), menu->locator(title));
+	everywhere.edit.field = "name";
+	everywhere.edit.value = std::string("HEADLINE");
+	session.handle(everywhere);
+	TEST_EXPECT(session.outcome().done());
+	menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
+	NodeAddress headline, go_again;
+	TEST_EXPECT(menu && menu->find("HEADLINE", headline) && menu->find("GO", go_again));
+	if (!menu || !go_again.child) return 1;
+	TEST_EXPECT(text_of(*menu, child_of(*menu, go_again, "action", 1), "target") == "HEADLINE" &&
+	            !missing("HOME/PANEL/GO/Action 2"));
+	return 0;
+}
+
 // --- The lookup: the editor's by-name finds are the game's (S12 A1) ----------------------
 //
 // MnuDocument::lookup_names (the duplicate-name Problems rows, the graph's menu names) and
@@ -1576,9 +1654,10 @@ void sweep_structure(MnuDocument &document, const std::string &label, const std:
 		});
 		for (const NodeAddress &owner : owners)
 			for (const Document::Collection &collection : document.collections_of(owner)) {
-				kinds[collection.spec.kind_name] = collection.spec.kind;
-				if (collection.ids.empty()) empty.emplace(collection.spec.kind_name, Owner{owner, 0});
-				else full.emplace(collection.spec.kind_name, Owner{owner, collection.ids.front()});
+				const std::string token = document.kind_token(collection.spec.kind);
+				kinds[token] = collection.spec.kind;
+				if (collection.ids.empty()) empty.emplace(token, Owner{owner, 0});
+				else full.emplace(token, Owner{owner, collection.ids.front()});
 			}
 	}
 	Diagnostic error;
@@ -1907,6 +1986,7 @@ int main(int argc, char **argv) {
 	       window_index_matches_the_compiler() || copy_and_paste() || duplicate_selection() || copy_between_encodings() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||
 	       nested_lists() || shipped_shape_edits() ||
-	       typed_clear_and_retype() || parse_notes() || blank_menu_edits() || lookup_matches_the_runtime() ||
+	       typed_clear_and_retype() || parse_notes() || blank_menu_edits() || name_is_its_own_edit() ||
+	       lookup_matches_the_runtime() ||
 	       retail_sweep();
 }

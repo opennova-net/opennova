@@ -4,7 +4,9 @@
 // failure leaves behind, and the archives' name limit binding only the files they take; and
 // (S13 A1) the build stepped by bytes: every step bounded by its budget, a cancel between two
 // steps leaving nothing, a file rewritten under a read of several steps failing the build, and
-// archives byte-identical to the single-call writer's however small the steps.
+// archives byte-identical to the single-call writer's however small the steps. S13 D5: every
+// kind's slot, read from its row, as the switch it replaced answered it, and the kinds it added
+// planned where their rows say.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -14,6 +16,7 @@
 #include <vector>
 
 #include <base/vfs/vfs.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/blank/create_missing.h>
 #include <editor/documents/document_types.h>
@@ -54,25 +57,79 @@ static AssetEntry entry_of(const char *name, AssetKind kind) {
 	return e;
 }
 
+// Every kind's slot as the switch route_asset read before S13 D5 answered it, now its row's
+// (asset_kinds). Every kind the build packs routes as it did. The two it never packs answered
+// Resource only because the switch had to answer and route to None: an archive, which the build
+// refuses, and an import source, whose outputs pack. The kinds S13 D5 added: a face with the art,
+// a wave and a map project in localres, the score table loose where retail ships it.
+struct Route {
+	AssetKind kind;
+	ArchiveSlot slot;
+};
+const Route kRoutes[] = {
+	{AssetKind::Unknown, ArchiveSlot::Resource}, // packed all the same until S13 A8
+	{AssetKind::Archive, ArchiveSlot::None},
+	{AssetKind::Model, ArchiveSlot::Resource},
+	{AssetKind::Animation, ArchiveSlot::Resource},
+	{AssetKind::AnimationMap, ArchiveSlot::Resource},
+	{AssetKind::Face, ArchiveSlot::Resource},
+	{AssetKind::AiProfile, ArchiveSlot::Resource},
+	{AssetKind::Texture, ArchiveSlot::Resource},
+	{AssetKind::Font, ArchiveSlot::Localres},
+	{AssetKind::Strings, ArchiveSlot::Language},
+	{AssetKind::MusicScript, ArchiveSlot::Localres},
+	{AssetKind::RawBin, ArchiveSlot::Language},
+	{AssetKind::Credits, ArchiveSlot::Localres},
+	{AssetKind::Mission, ArchiveSlot::Localres},
+	{AssetKind::MapProject, ArchiveSlot::Localres},
+	{AssetKind::Terrain, ArchiveSlot::Resource},
+	{AssetKind::TerrainPolyData, ArchiveSlot::Resource},
+	{AssetKind::TileInfo, ArchiveSlot::Resource},
+	{AssetKind::Environment, ArchiveSlot::Resource},
+	{AssetKind::Menu, ArchiveSlot::Localres},
+	{AssetKind::MenuStyle, ArchiveSlot::Localres},
+	{AssetKind::MusicBank, ArchiveSlot::Loose},   // the .sbf, SoundBank before S13 D5
+	{AssetKind::SoundBank, ArchiveSlot::Resource}, // the .lwf, WaveBank before S13 D5
+	{AssetKind::Wave, ArchiveSlot::Localres},
+	{AssetKind::DialogBank, ArchiveSlot::Localres},
+	{AssetKind::Particles, ArchiveSlot::Resource},
+	{AssetKind::Script, ArchiveSlot::Localres},
+	{AssetKind::ItemDefs, ArchiveSlot::Localres},
+	{AssetKind::WeaponDefs, ArchiveSlot::Localres},
+	{AssetKind::AmmoDefs, ArchiveSlot::Localres},
+	{AssetKind::HudPosDefs, ArchiveSlot::Localres},
+	{AssetKind::HudFxDefs, ArchiveSlot::Localres},
+	{AssetKind::AvatarDefs, ArchiveSlot::Localres},
+	{AssetKind::SoundProfileDefs, ArchiveSlot::Localres},
+	{AssetKind::CharAttrDefs, ArchiveSlot::Localres},
+	{AssetKind::PowerupDefs, ArchiveSlot::Localres},
+	{AssetKind::OtherDefs, ArchiveSlot::Localres},
+	{AssetKind::StringTableCoo, ArchiveSlot::Loose},
+	{AssetKind::Video, ArchiveSlot::Loose},
+	{AssetKind::PlayerSave, ArchiveSlot::Loose},
+	{AssetKind::Shader, ArchiveSlot::Resource},
+	{AssetKind::Config, ArchiveSlot::Loose},
+	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
+	{AssetKind::Text, ArchiveSlot::Loose},
+	{AssetKind::ImageSource, ArchiveSlot::None},
+};
+
 static int test_routing() {
+	TEST_EXPECT(sizeof(kRoutes) / sizeof(kRoutes[0]) == kAssetKindCount);
+	for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); ++i) {
+		const Route &route = kRoutes[i];
+		TEST_EXPECT(route.kind == AssetKind(i)); // each kind once, in the enum's order
+		if (route_asset(route.kind) != route.slot)
+			std::fprintf(stderr, "route_asset(%s) moved\n", asset_kind_token(route.kind));
+		TEST_EXPECT(route_asset(route.kind) == route.slot);
+		TEST_EXPECT(asset_kind_packed(route.kind) == (route.slot != ArchiveSlot::None));
+	}
 	TEST_EXPECT(route_asset(entry_of("gametext.bin", AssetKind::Strings)) == ArchiveSlot::Language);
-	TEST_EXPECT(route_asset(entry_of("menutxt.bin", AssetKind::Strings)) == ArchiveSlot::Language);
-	TEST_EXPECT(route_asset(entry_of("main.mnu", AssetKind::Menu)) == ArchiveSlot::Localres);
-	TEST_EXPECT(route_asset(entry_of("items.def", AssetKind::ItemDefs)) == ArchiveSlot::Localres);
-	TEST_EXPECT(route_asset(entry_of("x.bms", AssetKind::Mission)) == ArchiveSlot::Localres);
-	TEST_EXPECT(route_asset(entry_of("Arial14b.fnt", AssetKind::Font)) == ArchiveSlot::Localres);
-	TEST_EXPECT(route_asset(entry_of("menumus.bin", AssetKind::MusicScript)) == ArchiveSlot::Localres);
-	TEST_EXPECT(route_asset(entry_of("x.trn", AssetKind::Terrain)) == ArchiveSlot::Resource);
-	TEST_EXPECT(route_asset(entry_of("x.3di", AssetKind::Model)) == ArchiveSlot::Resource);
-	TEST_EXPECT(route_asset(entry_of("x.tga", AssetKind::Texture)) == ArchiveSlot::Resource);
-	TEST_EXPECT(route_asset(entry_of("x.env", AssetKind::Environment)) == ArchiveSlot::Resource);
-	TEST_EXPECT(route_asset(entry_of("menumus.sbf", AssetKind::SoundBank)) == ArchiveSlot::Loose);
-	TEST_EXPECT(route_asset(entry_of("earlyerr.txt", AssetKind::Text)) == ArchiveSlot::Loose);
-	TEST_EXPECT(route_asset(entry_of("intro.BIK", AssetKind::Video)) == ArchiveSlot::Loose);
-	TEST_EXPECT(route_asset(entry_of("nw_cdata.coo", AssetKind::StringTableCoo)) == ArchiveSlot::Loose);
+	TEST_EXPECT(route_asset(entry_of("menumus.sbf", AssetKind::MusicBank)) == ArchiveSlot::Loose);
 	TEST_EXPECT(!asset_is_packable(entry_of("resource.pff", AssetKind::Archive)));
 	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Language)) == "language.pff");
 	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Loose)).empty());
+	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::None)).empty());
 	return 0;
 }
 
@@ -250,6 +307,32 @@ static int test_long_names_bind_packed_files_only() {
 		if (d.code == "asset.name.too_long")
 			too_long.push_back(d.asset);
 	TEST_EXPECT(too_long == std::vector<std::string>{ texture });
+	return 0;
+}
+
+// The kinds S13 D5 added, planned where their rows say: a wave and a map project in localres.pff,
+// a face in resource.pff, the score table copied loose (as a Config it was before).
+static int test_new_kinds_land_where_their_rows_say() {
+	Project p("opennova_editor_build_new_kinds_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(editor_test::write_text(p.root + "/sounds/boom.wav", "RIFF"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.npz", "0ZPN"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/faces/head.grm", "BASE_TEXTURE face.tga\r\n"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "VERSION 40\r\n"));
+	const BuildPlan plan = p.plan();
+	for (const Diagnostic &d : plan.diagnostics)
+		std::fprintf(stderr, "%s: %s\n", d.code.c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok && plan.archives.size() == 3);
+	const auto in = [](const std::vector<BuildEntry> &entries, const char *name) {
+		for (const BuildEntry &entry : entries)
+			if (entry.logical_name == name) return true;
+		return false;
+	};
+	TEST_EXPECT(in(plan.archives[1].entries, "boom.wav"));
+	TEST_EXPECT(in(plan.archives[1].entries, "ASP_G7.npz"));
+	TEST_EXPECT(in(plan.archives[2].entries, "head.grm"));
+	TEST_EXPECT(in(plan.loose, "score.ini"));
 	return 0;
 }
 
@@ -463,6 +546,7 @@ int main() {
 	failures += test_file_rewritten_mid_read_fails();
 	failures += test_archives_match_the_single_call_writer();
 	failures += test_routing();
+	failures += test_new_kinds_land_where_their_rows_say();
 	failures += test_empty_project_is_blocked();
 	failures += test_filled_project_builds_and_mounts();
 	failures += test_protected_build_survives_and_archives_are_refused();

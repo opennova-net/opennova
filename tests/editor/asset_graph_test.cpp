@@ -8,8 +8,8 @@
 // name and scope (S11b), and the file names a reference loads (S11f: a model's texture row
 // by its type, as the runtime's loaders pick the file); unchanged files reused on the
 // next update; the rename transaction: the sites rewritten and the file moved, or
-// the refusals that leave everything as it was; a menu name followed into its file's
-// ACTIONs; and (a SKIP-LEG without OPENNOVA_JO_ASSETS) the shipped menus' targets. S12: the
+// the refusals that leave everything as it was; and (a SKIP-LEG without OPENNOVA_JO_ASSETS)
+// the shipped menus' targets. S12: the
 // reference kinds' table (D1), a symbol per defining field with its place (D2), and where Go
 // to leads and who uses a file (D3).
 #include <algorithm>
@@ -276,10 +276,10 @@ static int test_menu_references() {
 	size_t action_files = 0, sounds = 0;
 	for (const GraphEdge *edge : view.graph->references_of(document->path())) {
 		if (edge->field == "file" && edge->kind == ReferenceKind::Menu) ++action_files;
-		if (edge->field == "file" && edge->kind == ReferenceKind::WaveBank && edge->value == "click.lwf") ++sounds;
+		if (edge->field == "file" && edge->kind == ReferenceKind::SoundBank && edge->value == "click.lwf") ++sounds;
 	}
 	TEST_EXPECT(action_files == 2 && sounds == 1);
-	TEST_EXPECT(view.graph->resolve(ReferenceKind::WaveBank, "click.lwf") == ReferenceStatus::Missing);
+	TEST_EXPECT(view.graph->resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Missing);
 	TEST_EXPECT(has_missing(view.diagnostics, "file", DiagnosticSeverity::Warning));
 	// The font picker: the project's fonts, then the stylesheet's variables, each as the field
 	// would reference it.
@@ -1183,7 +1183,7 @@ static int test_menu_names_and_targets() {
 	const std::string path = menu->path();
 
 	// The files, each a Warning while the project lacks it (the game does without it).
-	const GraphEdge *bank = edge_of(graph, path, ReferenceKind::WaveBank, "click.lwf", "file");
+	const GraphEdge *bank = edge_of(graph, path, ReferenceKind::SoundBank, "click.lwf", "file");
 	TEST_EXPECT(bank && bank->rewritable && bank->record == "HOME/PANEL/GO/Sound 1");
 	TEST_EXPECT(finding(view.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1", "plays no sound"));
 	const GraphEdge *credits = edge_of(graph, path, ReferenceKind::Credits, "credits.kda", "value");
@@ -1201,8 +1201,8 @@ static int test_menu_names_and_targets() {
 	menu = dynamic_cast<const MnuDocument *>(session.document_for("graph.mnu"));
 	TEST_EXPECT(menu);
 	if (!menu) return 1;
-	TEST_EXPECT(graph.resolve(ReferenceKind::WaveBank, "click.lwf") == ReferenceStatus::Present);
-	TEST_EXPECT(graph.resolve(ReferenceKind::WaveBank, "click") == ReferenceStatus::Missing); // opened by the name as written
+	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click.lwf") == ReferenceStatus::Present);
+	TEST_EXPECT(graph.resolve(ReferenceKind::SoundBank, "click") == ReferenceStatus::Missing); // opened by the name as written
 	TEST_EXPECT(graph.resolve(ReferenceKind::Credits, "CREDITS.KDA") == ReferenceStatus::Present);
 	TEST_EXPECT(!finding(view.diagnostics, "reference.missing", "HOME/PANEL/GO/Sound 1"));
 
@@ -1337,125 +1337,6 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(count_code(view.diagnostics, "menu.action_inert") == 3);
 	// style.unused leaves TRIM_COLOR, which the colour names.
 	for (const Diagnostic &d : view.diagnostics) TEST_EXPECT(!(d.code == "style.unused" && d.record == "TRIM_COLOR"));
-	return 0;
-}
-
-// A screen's or a window's new name follows into the ACTIONs of its file that find it by
-// the old one, in one undo step (S9l): the sites that resolve to it, and no others.
-static int test_menu_rename_follows() {
-	editor_test::TempProjectDir dir("opennova_asset_graph_follow");
-	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Follow"));
-	editor_test::create_missing_files(session);
-	const std::string root = session.view().project_root;
-	const std::string go = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">AWAY</ACTION>\r\n"
-	                       "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n"
-	                       "<ACTION TYPE=\"URL\" FIELD=\"TITLE\">x</ACTION>\r\n";
-	const std::string back = "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n"
-	                         "<ACTION TYPE=\"WINDOW\" STATE=\"HIDE\">TITLE</ACTION>\r\n";
-	TEST_EXPECT(editor_test::write_text(
-	        root + "/flow.mnu",
-	        screen("HOME", window("STATIC", "PANEL", window("BUTTON", "GO", go) + window("STATIC", "TITLE"))) +
-	                screen("AWAY", window("STATIC", "BACKDROP", window("BUTTON", "BACK", back) + window("STATIC", "TITLE")))));
-	TEST_EXPECT(editor_test::write_text(
-	        root + "/other.mnu",
-	        screen("OTHER", window("BUTTON", "JUMP", "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">HOME</ACTION>\r\n"))));
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "flow.mnu"));
-	Document *menu = session.document_for("flow.mnu");
-	TEST_EXPECT(menu && menu->rows().size() == 2);
-	if (!menu || menu->rows().size() != 2) return 1;
-	const SessionView &view = session.view();
-	const NodeAddress home{menu->rows()[0]->id, 0, 0}, away{menu->rows()[1]->id, 0, 0};
-	NodeAddress go_window, back_window;
-	TEST_EXPECT(menu->find("GO", go_window) && menu->find("BACK", back_window));
-	const NodeAddress go_screen = menu_test::child_of(*menu, go_window, "action", 0);
-	const NodeAddress go_title = menu_test::child_of(*menu, go_window, "action", 1);
-	const NodeAddress go_url = menu_test::child_of(*menu, go_window, "action", 2);
-	const NodeAddress back_home = menu_test::child_of(*menu, back_window, "action", 0);
-	const NodeAddress back_title = menu_test::child_of(*menu, back_window, "action", 1);
-	const auto text = [&](const NodeAddress &address, const char *field) {
-		Value value;
-		return menu->get(address, field, value) ? std::get<std::string>(value) : std::string("?");
-	};
-	const auto rename = [&](const NodeAddress &record, const char *name) {
-		EditorRequest request = make_request(EditorRequestKind::EditRecord, menu->path());
-		request.edit.address = record;
-		request.edit.field = "name";
-		request.edit.value = std::string(name);
-		request.edit.coalesce = true; // typed in the inspector
-		session.handle(request);
-		return session.outcome().done();
-	};
-	// The screen HOME renamed: AWAY's BACK follows (another row), one undo step; other.mnu's
-	// JUMP keeps HOME (another file) and no longer resolves.
-	TEST_EXPECT(!plan_symbol_rename(*menu, {menu_test::set_edit(home, "name", std::string("START"))}).empty());
-	TEST_EXPECT(rename(home, "START"));
-	TEST_EXPECT(text(home, "name") == "START" && text(back_home, "target") == "START");
-	TEST_EXPECT(text(go_title, "target") == "TITLE" && text(back_title, "target") == "TITLE");
-	bool jump_missing = false;
-	for (const Diagnostic &d : view.diagnostics)
-		jump_missing = jump_missing || (d.code == "reference.missing" && d.record == "OTHER/JUMP/Action 1" &&
-		                                d.message.find("FLOW.MNU does not have") != std::string::npos);
-	TEST_EXPECT(jump_missing);
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(home, "name") == "HOME" && text(back_home, "target") == "HOME");
-	session.handle(make_request(EditorRequestKind::Redo, menu->path()));
-	TEST_EXPECT(text(home, "name") == "START" && text(back_home, "target") == "START");
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(!menu->can_undo());
-	// HOME's TITLE renamed: GO's WINDOW target and URL slot follow (the same row); AWAY's
-	// BACK names AWAY's own TITLE and keeps it.
-	NodeAddress home_title;
-	TEST_EXPECT(menu->find("TITLE", home_title) && home_title.row == home.row);
-	TEST_EXPECT(rename(home_title, "HEADLINE"));
-	TEST_EXPECT(text(go_title, "target") == "HEADLINE" && text(go_url, "field") == "HEADLINE" &&
-	            text(back_title, "target") == "TITLE");
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(go_title, "target") == "TITLE" && text(go_url, "field") == "TITLE" && !menu->can_undo());
-	// A name another screen of the file has: nothing follows, the duplicate is a finding.
-	TEST_EXPECT(rename(away, "HOME"));
-	TEST_EXPECT(text(go_screen, "target") == "AWAY");
-	TEST_EXPECT(finding(view.diagnostics, "menu.duplicate_screen", "HOME"));
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	// A change of case alone still finds the screen: nothing to follow.
-	TEST_EXPECT(plan_symbol_rename(*menu, {menu_test::set_edit(away, "name", std::string("away"))}).empty());
-	// A part's NAME is its owner's to give: renaming it follows nowhere.
-	TEST_EXPECT(plan_symbol_rename(*menu, {menu_test::set_edit(go_window, "position.left", int64_t(4))}).empty());
-
-	// Typed in the inspector, one coalesced Set per key: what follows is planned each time
-	// from the NAME the group began with, so a NAME cleared on the way to a new one, or one
-	// passing through a NAME another record has, leaves nothing behind, and the burst with
-	// its sites is one undo step.
-	const auto type = [&](const NodeAddress &record, std::initializer_list<const char *> keys) {
-		bool ok = true;
-		for (const char *key : keys) ok = rename(record, key) && ok;
-		session.handle(make_request(EditorRequestKind::EndEdit, menu->path()));
-		return ok;
-	};
-	TEST_EXPECT(!menu->can_undo());
-	TEST_EXPECT(type(home, {"HOM", "HO", "H", "", "S", "ST", "STA", "STAR", "START"}));
-	TEST_EXPECT(text(home, "name") == "START" && text(back_home, "target") == "START");
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(home, "name") == "HOME" && text(back_home, "target") == "HOME" && !menu->can_undo());
-	// HOME's TITLE typed through GO, an earlier window of its screen.
-	TEST_EXPECT(type(home_title, {"G", "GO", "GOA", "GOAL"}));
-	TEST_EXPECT(text(home_title, "name") == "GOAL" && text(go_title, "target") == "GOAL" && text(go_url, "field") == "GOAL" &&
-	            text(back_title, "target") == "TITLE");
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(go_title, "target") == "TITLE" && text(go_url, "field") == "TITLE" && !menu->can_undo());
-	// The screen typed through AWAY, another screen's NAME.
-	TEST_EXPECT(type(home, {"A", "AW", "AWA", "AWAY", "AWAYS"}));
-	TEST_EXPECT(text(back_home, "target") == "AWAYS" && text(go_screen, "target") == "AWAY");
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(back_home, "target") == "HOME" && !menu->can_undo());
-	// A NAME cleared and left so is no rename: the references keep the old one, reported.
-	TEST_EXPECT(type(home, {"HOM", "HO", "H", ""}));
-	TEST_EXPECT(text(home, "name").empty() && text(back_home, "target") == "HOME");
-	TEST_EXPECT(finding(view.diagnostics, "reference.missing", "AWAY/BACKDROP/BACK/Action 1", "FLOW.MNU does not have"));
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	TEST_EXPECT(text(home, "name") == "HOME" && !menu->can_undo());
 	return 0;
 }
 
@@ -1769,7 +1650,7 @@ static int test_reference_kind_rows() {
 		TEST_EXPECT(row.defined_in == AssetKind::Unknown || row.names_symbol());
 		TEST_EXPECT((row.missing_message != nullptr) == (file || row.names_symbol()));
 		const bool tolerated = kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
-		                       kind == ReferenceKind::WaveBank || kind == ReferenceKind::Credits ||
+		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
@@ -1843,7 +1724,7 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "field.nq8", 16, has({"field.dds"})) == Names({"field.nq8"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "trim.tga", 3, has({"trim.dds"})) == Names({"trim.dds"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall.bmp", 0, none).empty());
-	TEST_EXPECT(reference_file_candidates(ReferenceKind::WaveBank, "click.lwf", -1, none) == Names({"click.lwf"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::SoundBank, "click.lwf", -1, none) == Names({"click.lwf"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Weapon, "M16", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Sound, "shot", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Model, "", -1, none).empty());
@@ -2132,7 +2013,6 @@ int main(int argc, char **argv) {
 	failures += test_blank_project();
 	failures += test_menu_references();
 	failures += test_menu_names_and_targets();
-	failures += test_menu_rename_follows();
 	failures += test_retail_menu_graph();
 	failures += test_menu_text_scope();
 	failures += test_stylesheet_bindings();

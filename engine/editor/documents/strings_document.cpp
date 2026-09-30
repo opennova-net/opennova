@@ -2,6 +2,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
@@ -127,24 +128,22 @@ StringsSection::StringsSection() {
 	collections.resize(1);
 }
 
-bool is_strings_kind(AssetKind kind) { return kind == AssetKind::Strings; }
-
-const char *StringsDocument::kind_label(NodeKind kind) const {
-	return kind == kSection ? "Section" : kind == kString ? "String" : "";
+bool is_strings_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::Strings;
 }
 
-NodeKind StringsDocument::kind_from_name(const std::string &name) const {
-	if (name == "section") return kSection;
-	if (name == "string") return kString;
-	return -1;
+const std::vector<RecordKindRow> &StringsDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = {
+	        {kSection, "section", "Section", "Add section", true},
+	        {kString, "string", "String"},
+	};
+	return table;
 }
-
-std::vector<Document::KindSpec> StringsDocument::top_kinds() const { return {{kSection, "Add section"}}; }
 
 // A section holds its strings; a string holds nothing.
 std::vector<Document::Collection> StringsDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kSection || owner.child || row.collections.empty()) return {};
-	return {{{kString, "Strings", "key", "string"}, row.collections[0]}};
+	return {{{kString, "Strings", "key"}, row.collections[0]}};
 }
 
 const std::vector<FieldSchema> &StringsDocument::fields(NodeKind kind) const {
@@ -370,11 +369,6 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 		error = "This collection cannot accept that edit.";
 		return false;
 	}
-}
-
-bool StringsDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "A string table has no file-wide values.", path());
-	return false;
 }
 
 std::vector<Diagnostic> validate_strings(const ValidationInput &input, const AssetGraph &) {

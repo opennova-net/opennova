@@ -1,5 +1,6 @@
 #include <base/resource_index/resource_kind.h>
 
+#include <cstring>
 #include <filesystem>
 
 #include <base/io/strutil.h>
@@ -35,73 +36,74 @@ bool resource_bin_has_scr_magic(const std::vector<uint8_t> &bytes) {
 	return has_magic(bytes, "SCR0");
 }
 
+const std::vector<ResourceKindRule> &resource_kind_rules() {
+	static const std::vector<ResourceKindRule> rules = {
+	        // Avatars.def is the singular player-character database. Matched by NAME, not
+	        // extension: the .def extension is
+	        // shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
+	        // runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
+	        // opens "Avatars.def" by exact name]
+	        {"avatars.def", ".def", "", "avatar"},
+	        // The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all
+	        // share .def and are consumed at runtime by name). Only hudpos.def is a browsable kind,
+	        // for the HUD layout catalog; the rest stay unclassified.
+	        {"hudpos.def", ".def", "", "hudpos"},
+	        {"", ".bms", "", "mission"},
+	        {"", ".mis", "", "mission"},
+	        {"", ".trn", "", "terrain"},
+	        {"", ".env", "", "environment"},
+	        {"", ".3di", "", "object_model"},
+	        {"", ".kda", "", "credits"},
+	        {"", ".fnt", "", "font"},
+	        // The effect catalog is one grammar across three extensions. `.ptl` is the base
+	        // set; `.ptu` and `.ptg` are the US and German gore sets, parsed by the SAME
+	        // section callback and differing only in which one the runtime selects
+	        // [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
+	        // OR the selected extension @0x5f64f3 and parses both through
+	        // CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
+	        // CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
+	        // File_ParseASCIIFile + callback]. The index carries all three so the browser
+	        // and the loader can both see them; particle_extension() owns the SELECTION.
+	        {"", ".ptl", "", "particle"},
+	        {"", ".ptu", "", "particle"},
+	        {"", ".ptg", "", "particle"},
+	        {"", ".mnu", "", "menu"},
+	        {"", ".mns", "", "menu_style"},
+	        {"", ".sbf", "", "sbf"},
+	        {"", ".lwf", "", "sound"},
+	        // NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
+	        // It is consumed at runtime by name (DbfData); classifying it as an LWF sound
+	        // profile would conflate two unrelated formats.
+	        // A `.bin` by its content: the music script's SCR container, then the RTXT
+	        // string table (resource_bin_has_scr_magic, resource_bin_has_rtxt_magic).
+	        {"", ".bin", "SCR0", "music_script"},
+	        {"", ".bin", "RTXT", "strings"},
+	};
+	return rules;
+}
+
 std::string resource_kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin,
                                              bool is_scr_bin) {
 	const std::string extension = resource_extension_for_name(name);
-	// Avatars.def is the singular player-character database. Matched by NAME, not
-	// extension: the .def extension is
-	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
-	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
-	// opens "Avatars.def" by exact name]
-	if (strutil::to_lower(fs::path(name).filename().string()) == "avatars.def") {
-		return "avatar";
-	}
-	if (extension == ".bms" || extension == ".mis") {
-		return "mission";
-	}
-	if (extension == ".trn") {
-		return "terrain";
-	}
-	if (extension == ".env") {
-		return "environment";
-	}
-	if (extension == ".3di") {
-		return "object_model";
-	}
-	if (extension == ".kda") {
-		return "credits";
-	}
-	if (extension == ".fnt") {
-		return "font";
-	}
-	// The effect catalog is one grammar across three extensions. `.ptl` is the base
-	// set; `.ptu` and `.ptg` are the US and German gore sets, parsed by the SAME
-	// section callback and differing only in which one the runtime selects
-	// [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
-	// OR the selected extension @0x5f64f3 and parses both through
-	// CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
-	// CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
-	// File_ParseASCIIFile + callback]. The index carries all three so the browser
-	// and the loader can both see them; particle_extension() owns the SELECTION.
-	if (extension == ".ptl" || extension == ".ptu" || extension == ".ptg") {
-		return "particle";
-	}
-	if (extension == ".mnu") {
-		return "menu";
-	}
-	if (extension == ".mns") {
-		return "menu_style";
-	}
-	if (extension == ".sbf") {
-		return "sbf";
-	}
-	if (extension == ".lwf") {
-		return "sound";
-	}
-	// The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all share
-	// .def and are consumed at runtime by name). Only hudpos.def is a browsable kind, for the
-	// HUD layout catalog; the rest stay unclassified.
-	if (extension == ".def" && strutil::to_lower(fs::path(name).filename().string()) == "hudpos.def") {
-		return "hudpos";
-	}
-	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
-	// It is consumed at runtime by name (DbfData); classifying it as an LWF sound
-	// profile would conflate two unrelated formats.
-	if (extension == ".bin" && is_scr_bin) {
-		return "music_script";
-	}
-	if (extension == ".bin" && is_rtxt_bin) {
-		return "strings";
+	const std::string basename = strutil::to_lower(fs::path(name).filename().string());
+	for (const ResourceKindRule &rule : resource_kind_rules()) {
+		if (*rule.name) {
+			if (basename == rule.name) {
+				return rule.kind;
+			}
+			continue;
+		}
+		if (extension != rule.extension) {
+			continue;
+		}
+		if (!*rule.magic) {
+			return rule.kind;
+		}
+		// The two peeks the caller made of a `.bin`'s first four bytes.
+		const bool scr = std::strcmp(rule.magic, "SCR0") == 0;
+		if ((scr && is_scr_bin) || (!scr && std::strcmp(rule.magic, "RTXT") == 0 && is_rtxt_bin)) {
+			return rule.kind;
+		}
 	}
 	return "";
 }

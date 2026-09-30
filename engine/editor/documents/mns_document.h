@@ -65,10 +65,9 @@ struct StyleFileState : FileState {
 
 class MnsDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override;
-	std::vector<KindSpec> top_kinds() const override;
+	// One row per line, every kind a row: a variable, a comment and a blank line the outline adds;
+	// a directive and a switched-off line, which the file holds as written.
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &, const NodeAddress &) const override { return {}; }
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
 	// The row's own fields (read), and what its place in the document says: its first
@@ -116,7 +115,6 @@ protected:
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
 	bool accept_change(const Change &change, std::string &error) const override;
 
 private:

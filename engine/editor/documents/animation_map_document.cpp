@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/anim_slot_names.h>
@@ -88,7 +89,9 @@ AnimationMapRow::AnimationMapRow() {
 	collections.resize(1);
 }
 
-bool is_animation_map_kind(AssetKind kind) { return kind == AssetKind::AnimationMap; }
+bool is_animation_map_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::AnimationMap;
+}
 
 std::string animation_key_title(const std::string &key) {
 	// The slot keys by their lower case, as the key's choices name them.
@@ -106,21 +109,17 @@ std::string AnimationMapDocument::record_title(const NodeAddress &address) const
 	return address.child ? name : animation_key_title(name);
 }
 
-const char *AnimationMapDocument::kind_label(NodeKind kind) const {
-	return kind == kRow ? "Row" : kind == kClip ? "Clip" : "";
+const std::vector<RecordKindRow> &AnimationMapDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = {
+	        {kRow, "row", "Row", "Add row", true},
+	        {kClip, "clip", "Clip"},
+	};
+	return table;
 }
-
-NodeKind AnimationMapDocument::kind_from_name(const std::string &name) const {
-	if (name == "row") return kRow;
-	if (name == "clip") return kClip;
-	return -1;
-}
-
-std::vector<Document::KindSpec> AnimationMapDocument::top_kinds() const { return {{kRow, "Add row"}}; }
 
 std::vector<Document::Collection> AnimationMapDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kRow || owner.child != 0) return {};
-	CollectionSpec clips{kClip, "Clips (served last to first)", "clip", "clip"};
+	CollectionSpec clips{kClip, "Clips (served last to first)", "clip"};
 	clips.max = adm::ADM_MAX_VARIANTS;
 	return {{clips, row.collections[0]}};
 }
@@ -293,11 +292,6 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 		error = "A row's clips cannot take that edit.";
 		return false;
 	}
-}
-
-bool AnimationMapDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "An animation map has no file-wide values.", path());
-	return false;
 }
 
 std::vector<Diagnostic> validate_animation_maps(const ValidationInput &input, const AssetGraph &) {

@@ -32,7 +32,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
 
 	for (const AssetEntry &asset : scan.entries) {
-		if (asset.kind == AssetKind::ImageSource) continue; // its outputs are in the scan
+		if (asset_kind_row(asset.kind).import_source) continue; // its outputs are in the scan
 		if (!asset_is_packable(asset)) {
 			plan.diagnostics.push_back(make_diagnostic(
 			        DiagnosticSeverity::Error, "build.archive_in_project",

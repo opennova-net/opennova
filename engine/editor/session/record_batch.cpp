@@ -218,7 +218,7 @@ bool list_batch_from_json(const Document &document, NodeId owner, const std::str
 	const Document::Collection *collection = nullptr;
 	const std::vector<Document::Collection> collections = document.collections_of(holder);
 	for (const Document::Collection &candidate : collections)
-		if (list == candidate.spec.kind_name) collection = &candidate;
+		if (list == document.kind_token(candidate.spec.kind)) collection = &candidate;
 	if (!collection) {
 		error = document.record_name(holder) + " holds no \"" + list + "\" list.";
 		return false;
