@@ -123,7 +123,7 @@ static int test_export_dir_and_local_settings() {
 
 	LocalSettings local;
 	TEST_EXPECT(load_local_settings(paths, local, error)); // absent = defaults
-	TEST_EXPECT(local.runtime_executable.empty() && local.retail_root.empty());
+	TEST_EXPECT(local.runtime_executable.empty() && local.game_install.empty());
 	local.runtime_executable = "C:/games/opennova.exe";
 	// Saved into a project whose .opennova/ is gone: made again, ignored, before the file.
 	std::error_code ec;
@@ -140,11 +140,11 @@ static int test_export_dir_and_local_settings() {
 	// keeps it; no seed (the command line) writes nothing. The seed is a path this platform
 	// calls absolute ("C:/..." is relative on Linux), so it is kept as it is.
 	const std::string install = dir.file("Joint Ops");
-	TEST_EXPECT(open_local_settings(paths, std::string(), back, error) && back.retail_root.empty());
-	TEST_EXPECT(open_local_settings(paths, install, back, error) && back.retail_root == install);
-	TEST_EXPECT(load_local_settings(paths, back, error) && back.retail_root == install &&
+	TEST_EXPECT(open_local_settings(paths, std::string(), back, error) && back.game_install.empty());
+	TEST_EXPECT(open_local_settings(paths, install, back, error) && back.game_install == install);
+	TEST_EXPECT(load_local_settings(paths, back, error) && back.game_install == install &&
 	            back.runtime_executable == "C:/games/opennova.exe");
-	TEST_EXPECT(open_local_settings(paths, dir.file("Other"), back, error) && back.retail_root == install);
+	TEST_EXPECT(open_local_settings(paths, dir.file("Other"), back, error) && back.game_install == install);
 	// The install kept absolute: a relative seed is taken from the working directory.
 	TEST_EXPECT(absolute_install_path("").empty());
 	TEST_EXPECT(absolute_install_path("games/../Joint Ops") ==
@@ -152,11 +152,53 @@ static int test_export_dir_and_local_settings() {
 	LocalSettings bare;
 	TEST_EXPECT(save_local_settings(paths, bare, error));
 	TEST_EXPECT(open_local_settings(paths, "Joint Ops", back, error) &&
-	            back.retail_root == (fs::current_path() / "Joint Ops").lexically_normal().generic_string());
+	            back.game_install == (fs::current_path() / "Joint Ops").lexically_normal().generic_string());
+	// Another schema is set aside (S13 A4, pre-1.0: no reader for it): read as absent, the warning
+	// naming the file, its schema and what it held; a seed then writes a new file over it.
 	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, "{\"schema_version\": 9}\n"));
-	TEST_EXPECT(!load_local_settings(paths, back, error));
-	TEST_EXPECT(error.code == "local_settings.schema_version.unsupported");
-	TEST_EXPECT(!open_local_settings(paths, install, back, error) && back.retail_root.empty());
+	Diagnostic finding;
+	TEST_EXPECT(load_local_settings(paths, back, finding) && back.game_install.empty() &&
+			back.runtime_executable.empty());
+	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
+			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.message.find(paths.local_settings_file + " is set aside") == 0 &&
+			finding.message.find("(schema 9; this editor reads schema 2)") != std::string::npos);
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
+			back.game_install == install &&
+			finding.code == "local_settings.schema_version.unsupported");
+	std::string text;
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+			text.find("\"schema_version\": 2") != std::string::npos &&
+			text.find("\"game_install\": \"" + install + "\"") != std::string::npos);
+	// The game install's key as S13 A4 named it, schema 2; the file an older editor wrote (schema
+	// 1, the install under retail_root) set aside, the warning naming each thing it held, now
+	// gone: with no seed (the command line) nothing writes over it, and with one a new file.
+	LocalSettings named;
+	named.game_install = install;
+	TEST_EXPECT(save_local_settings(paths, named, error));
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+	            text.find("\"game_install\": \"" + install + "\"") != std::string::npos &&
+	            text.find("\"schema_version\": 2") != std::string::npos && text.find("retail") == std::string::npos);
+	const std::string older = "{\"retail_root\": \"" + install +
+			"\", \"runtime_executable\": \"C:/games/opennova.exe\", \"schema_version\": 1}\n";
+	TEST_EXPECT(editor_test::write_text(paths.local_settings_file, older));
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, std::string(), back, finding) &&
+			back.game_install.empty() && back.runtime_executable.empty());
+	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
+			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.message.find("retail_root \"" + install + "\"") != std::string::npos &&
+			finding.message.find("runtime_executable \"C:/games/opennova.exe\"") !=
+					std::string::npos);
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) && text == older);
+	finding = Diagnostic();
+	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
+			back.game_install == install && back.runtime_executable.empty() &&
+			finding.code == "local_settings.schema_version.unsupported");
+	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
+			text.find("\"schema_version\": 2") != std::string::npos &&
+			text.find("retail") == std::string::npos);
 	return 0;
 }
 

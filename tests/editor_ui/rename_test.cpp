@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/graph/reference_queries.h>
+#include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include "editor_ui_test_support.h"
 
@@ -26,7 +27,7 @@ void test_rename_everywhere_ui() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
+	session.handle(request::new_project(dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *weapons = v.scan.find("weapon.def");
@@ -38,14 +39,13 @@ void test_rename_everywhere_ui() {
 	              editor_test::write_text(v.project_root + "/" + items->relative_path,
 	                                      "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"),
 	      "the fixtures");
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, weapons_path));
+	session.handle(request::rescan());
+	session.handle(request::open_document(weapons_path));
 	const Document *document = session.document_for(weapons_path);
 	NodeAddress gun;
 	CHECK(document && find_definition(AssetGraph(), *document, "GUN_A", gun), "the weapon");
 	if (!document || !gun.row) return;
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, weapons_path);
-	select.edit.address = gun;
+	EditorRequest select = request::select_record(weapons_path, gun);
 	session.handle(select);
 	std::string section;
 	for (const InspectorSection &candidate : plan_inspector(*document, gun, gun, ""))
@@ -59,8 +59,8 @@ void test_rename_everywhere_ui() {
 	ui.drain();
 	const auto asks = [&](const std::vector<EditorRequest> &requests) {
 		const EditorRequest *preview = only(requests, EditorRequestKind::PreviewRename);
-		return preview && preview->flag && preview->path == weapons_path && preview->text == document->locator(gun) &&
-		       preview->edit.field == "weapon_name" && std::get<std::string>(preview->edit.value) == "GUN_A";
+		return preview && preview->ask_name && preview->path == weapons_path && preview->locator == document->locator(gun) &&
+		       preview->field == "weapon_name" && preview->new_name == "GUN_A";
 	};
 	ui.activate(item_id(Ui::window_id("Inspector"), {section.c_str(), "fields", "weapon_name", "Rename..."}));
 	std::vector<EditorRequest> requests = ui.drain();
@@ -80,8 +80,8 @@ void test_rename_everywhere_ui() {
 	// replaces it).
 	requests = ui.drain();
 	const EditorRequest *typed = requests.empty() ? nullptr : &requests.back();
-	CHECK(typed && typed->kind == EditorRequestKind::PreviewRename && !typed->flag, "the plan asked again");
-	const std::string name = typed ? std::get<std::string>(typed->edit.value) : std::string();
+	CHECK(typed && typed->kind == EditorRequestKind::PreviewRename && !typed->ask_name, "the plan asked again");
+	const std::string name = typed ? typed->new_name : std::string();
 	CHECK(name.size() >= 5 && name.compare(name.size() - 5, 5, "GUN_X") == 0, "the name typed");
 	serve(session, requests);
 	ui.frames(2);
@@ -92,8 +92,7 @@ void test_rename_everywhere_ui() {
 	ui.key(ImGuiKey_Enter, false);
 	requests = ui.drain();
 	const EditorRequest *rename = only(requests, EditorRequestKind::RenameSymbol);
-	CHECK(rename && rename->path == weapons_path && rename->edit.field == "weapon_name" &&
-	              std::get<std::string>(rename->edit.value) == name,
+	CHECK(rename && rename->path == weapons_path && rename->field == "weapon_name" && rename->new_name == name,
 	      "Enter renames it everywhere to the name typed");
 	CHECK(GImGui->OpenPopupStack.Size == 0, "and the dialog closes");
 }
@@ -106,7 +105,7 @@ void test_hint_on_a_fallback() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Hint"));
+	session.handle(request::new_project(dir.file("project"), "Hint"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *sheet = v.scan.find("menu_style.mns");
@@ -122,19 +121,18 @@ void test_hint_on_a_fallback() {
 	                                      "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%X_COLOR%</APPEARANCE>\r\n"
 	                                      "</WINDOW>\r\n</SCREEN>\r\n"),
 	      "the fixtures");
-	session.handle(make_request(EditorRequestKind::Rescan));
-	session.handle(make_request(EditorRequestKind::OpenDocument, brand_path));
+	session.handle(request::rescan());
+	session.handle(request::open_document(brand_path));
 	const Document *brand = session.document_for(brand_path);
 	NodeAddress line;
 	CHECK(brand && find_definition(AssetGraph(), *brand, "X_COLOR", line), "brand.mns's line");
 	if (!brand || !line.row) return;
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, brand_path);
-	select.edit.address = line;
+	EditorRequest select = request::select_record(brand_path, line);
 	session.handle(select);
-	EditorRequest rename = make_request(EditorRequestKind::EditRecord, brand_path);
-	rename.edit.address = line;
-	rename.edit.field = "name";
-	rename.edit.value = std::string("Y_COLOR");
+	EditorRequest rename = request::edit_record(brand_path, Edit());
+	rename.edits[0].address = line;
+	rename.edits[0].field = "name";
+	rename.edits[0].value = std::string("Y_COLOR");
 	session.handle(rename);
 	CHECK(v.graph->resolve(ReferenceKind::StyleVar, "%X_COLOR%") == ReferenceStatus::Present,
 	      "the use now reaches menu_style.mns's X_COLOR");

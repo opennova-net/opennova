@@ -141,7 +141,7 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 
 	# An unsaved string table edit shows: MAIN names menutxt.bin, TITLE's STRING is an id.
 	var created: Variant = JSON.parse_string(String(_app.request_json(JSON.stringify(
-			{"kind": "create_file", "path": "menutxt.bin", "text": "strings"}))))
+			{"kind": "create_file", "path": "menutxt.bin", "file_kind": "strings"}))))
 	assert_true(created is Dictionary and bool((created as Dictionary).get("ok", false)), str(created))
 	var exit_string := _string_record("menutxt.bin", "MM_Exit")
 	assert_gt(exit_string, 0)

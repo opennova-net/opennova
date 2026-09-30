@@ -23,6 +23,7 @@
 #include <editor/preview/model_preview_state.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/menu_preview_pane.h>
@@ -200,6 +201,13 @@ inline const EditorRequest *only(const std::vector<EditorRequest> &requests, Edi
 // The request when `requests` is exactly one of `kind`.
 inline const EditorRequest *one(const std::vector<EditorRequest> &requests, EditorRequestKind kind) {
 	return requests.size() == 1 && requests[0].kind == kind ? &requests[0] : nullptr;
+}
+
+// The one edit an EditRecord the windows raise carries (a batch of one); an empty edit (a Set of
+// no field) for a batch of another size, so a check on it fails rather than reads past the batch.
+inline const Edit &edit_of(const EditorRequest &request) {
+	static const Edit none;
+	return request.edits.size() == 1 ? request.edits.front() : none;
 }
 
 // What a frame of the workspace writes as text (ImGui's log), for the lines a window shows.
@@ -390,7 +398,7 @@ struct ModelDevice : ModelPreviewViewport {
 // model and its clips from the Blender add-on's scene texts with a catalog item pairing the
 // two, and armory.3di (user points).
 inline bool preview_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
-	if (!session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Preview"))) return false;
+	if (!session.handle(request::new_project(dir.file("project"), "Preview"))) return false;
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
@@ -398,7 +406,7 @@ inline bool preview_project(ProjectSession &session, const editor_test::TempProj
 	if (!editor_test::write_bytes(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
 	    !editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips))
 		return false;
-	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	if (!editor_test::write_text(v.project_root + "/defs/items.def",
@@ -406,7 +414,7 @@ inline bool preview_project(ProjectSession &session, const editor_test::TempProj
 	    !editor_test::write_bytes(v.project_root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")))
 		return false;
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	return v.scan.find("skinned.3di") && v.scan.find("SKIN.adm") && v.scan.find("walk.bad") && v.scan.find("armory.3di");
 }
 

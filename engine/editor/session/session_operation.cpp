@@ -22,7 +22,7 @@ constexpr OperationKindRow kOperationKindRows[] = {
 	 "the refresh"},
 	{OperationKind::Build, "build", HoldsFiles, HoldsSlot, {K::Build, K::Play}, {}, "Building", "the build"},
 	{OperationKind::ImportPlan, "import_plan", HoldsFiles, HoldsSlot, {},
-	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewRetailImport}, "Planning the import",
+	 {K::PreviewImport, K::PlanImport, K::SetImportDependencies, K::PreviewInstallImport}, "Planning the import",
 	 "the import's plan"},
 	{OperationKind::ImportApply, "import_apply", kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, {}, {},
 	 "Importing", "the import"},

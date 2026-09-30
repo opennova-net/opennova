@@ -89,14 +89,14 @@ void PlayController::start() {
 	core_.touch(ViewConcern::Run);
 	if (view_.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
 	boot_project_ = view_.project_root;
-	const bool play_retail = core_.preferences().values().play_retail;
+	const bool in_install = core_.preferences().values().play_in_install;
 	// What Play launches, asked of its source now that the build has landed: one answer, which the
 	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
 	// options) with the port of the game's MCP endpoint allocated now (none for the game install,
 	// which has no endpoint); the view's runtime follows it.
-	const PlayLauncher launcher = source_ ? source_(!play_retail) : launcher_;
+	const PlayLauncher launcher = source_ ? source_(!in_install) : launcher_;
 	follow_launcher(launcher);
-	if (play_retail) {
+	if (in_install) {
 		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, plan, error)) {
 			core_.report(error);
 			view_.status = "The game install could not be prepared; see Problems.";
@@ -152,7 +152,7 @@ void PlayController::start() {
 	view_.play_exited_on_its_own = false;
 	view_.play_exit_code = -1;
 	core_.note("Running: " + view_.play_command_line);
-	view_.status = play_retail ? "Game install running." : "Game running.";
+	view_.status = in_install ? "Game install running." : "Game running.";
 	core_.touch(ViewConcern::Run);
 }
 

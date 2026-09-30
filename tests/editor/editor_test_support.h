@@ -13,6 +13,7 @@
 
 #include <editor/requirements/requirements.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/session_view.h>
 
@@ -21,22 +22,19 @@ namespace editor_test {
 // Create all missing, as the editor asks for it: the roles of every Required row the
 // project does not meet (a CreateMissing naming none makes nothing).
 inline void create_missing_files(opennova::editor::ProjectSession &session) {
-	opennova::editor::EditorRequest request = opennova::editor::make_request(opennova::editor::EditorRequestKind::CreateMissing);
-	request.names = opennova::editor::unmet_required_roles(session.view().requirements);
-	session.handle(request);
+	session.handle(opennova::editor::request::create_missing(
+	        opennova::editor::unmet_required_roles(session.view().requirements)));
 }
 
 // The project settings dialog's Apply with only the settings `change` names, the others as
 // they are (what came of it is the view's settings_result); and two of them alone: the
 // game install folder, the missions feature.
 inline void apply_settings(opennova::editor::ProjectSession &session, const opennova::editor::ProjectSettingsChange &change) {
-	opennova::editor::EditorRequest request = opennova::editor::make_request(opennova::editor::EditorRequestKind::ApplyProjectSettings);
-	request.settings = change;
-	session.handle(request);
+	session.handle(opennova::editor::request::apply_project_settings(change));
 }
-inline void set_retail_directory(opennova::editor::ProjectSession &session, const std::string &dir) {
+inline void set_game_install(opennova::editor::ProjectSession &session, const std::string &dir) {
 	opennova::editor::ProjectSettingsChange change;
-	change.retail_directory = dir;
+	change.game_install = dir;
 	apply_settings(session, change);
 }
 inline void set_missions(opennova::editor::ProjectSession &session, bool on) {

@@ -36,12 +36,15 @@ SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferenc
 		platform_(platform), preferences_(preferences) {}
 
 void SessionCore::start() {
-	Diagnostic error;
-	if (!preferences_.load(error)) report(error); // the defaults are in effect
+	// A store that cannot be read, or a settings file set aside (another schema): said, the
+	// defaults in effect.
+	Diagnostic finding;
+	if (!preferences_.load(finding) || !finding.code.empty())
+		report(finding);
 	const Preferences &settings = preferences_.values();
 	view_.recent_projects = settings.recent_projects;
-	view_.retail_directory = settings.retail_directory;
-	view_.play_retail = settings.play_retail;
+	view_.retail_directory = settings.game_install;
+	view_.play_retail = settings.play_in_install;
 	view_.runtime_setting = settings.runtime_executable;
 	view_.import_dependencies = settings.import_dependencies;
 	view_.status = "No project open.";
@@ -199,10 +202,12 @@ bool SessionCore::open_project(const std::string &dir) {
 	if (!close_project()) return false;
 	paths_ = ProjectPaths::for_root(dir);
 	// The project's game install is its own (local.json); one that names none starts from the
-	// install last chosen in the editor.
-	Diagnostic local_error;
-	if (!open_local_settings(paths_, preferences_.values().retail_directory, local_, local_error))
-		report(local_error);
+	// install last chosen in the editor. A local.json of another schema is set aside, a warning:
+	// the project opens as one with none.
+	Diagnostic local_finding;
+	if (!open_local_settings(paths_, preferences_.values().game_install, local_, local_finding) ||
+			!local_finding.code.empty())
+		report(local_finding);
 	view_.project_open = true;
 	view_.project_root = paths_.root;
 	view_.document = doc;
@@ -211,7 +216,7 @@ bool SessionCore::open_project(const std::string &dir) {
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
 	view_.runtime_executable = play().resolve_runtime_executable();
-	imports().refresh_retail_files();
+	imports().refresh_install_files();
 	refresh();
 	// Output names the project; the menu bar's tooltip on what was said names its folder.
 	note("Opened " + doc.title + ".");
@@ -343,16 +348,16 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	// chosen, where a project that names none starts. Both keep it absolute: a relative path
 	// is taken from the editor's working directory, not from wherever the command line runs.
 	std::optional<std::string> install =
-	        change.retail_directory ? std::optional<std::string>(absolute_install_path(*change.retail_directory))
+	        change.game_install ? std::optional<std::string>(absolute_install_path(*change.game_install))
 	                                : std::nullopt;
-	if (install && view_.project_open && *install != local_.retail_root && busy_for(HoldsNothing, HoldsProject)) {
+	if (install && view_.project_open && *install != local_.game_install && busy_for(HoldsNothing, HoldsProject)) {
 		refuse_part("before changing the game install");
 		install.reset();
 	}
 	bool install_changed = false;
-	if (install && view_.project_open && *install != local_.retail_root) {
+	if (install && view_.project_open && *install != local_.game_install) {
 		LocalSettings local = local_;
-		local.retail_root = *install;
+		local.game_install = *install;
 		Diagnostic error;
 		if (save_local_settings(paths_, local, error)) {
 			local_ = std::move(local);
@@ -363,16 +368,16 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	}
 	const Preferences &settings = preferences_.values();
 	Preferences editor = settings;
-	if (install) editor.retail_directory = *install;
+	if (install) editor.game_install = *install;
 	if (change.runtime_executable) editor.runtime_executable = *change.runtime_executable;
-	if (change.play_retail) editor.play_retail = *change.play_retail;
-	bool editor_changed = editor.retail_directory != settings.retail_directory ||
+	if (change.play_in_install) editor.play_in_install = *change.play_in_install;
+	bool editor_changed = editor.game_install != settings.game_install ||
 	                      editor.runtime_executable != settings.runtime_executable ||
-	                      editor.play_retail != settings.play_retail;
+	                      editor.play_in_install != settings.play_in_install;
 	if (editor_changed) {
 		Diagnostic error;
 		if (preferences_.write(editor, error)) {
-			view_.play_retail = preferences_.values().play_retail;
+			view_.play_retail = preferences_.values().play_in_install;
 			view_.runtime_setting = preferences_.values().runtime_executable;
 			view_.runtime_executable = play().resolve_runtime_executable();
 		} else {
@@ -383,7 +388,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	if (game_install() != view_.retail_directory) {
 		view_.retail_directory = game_install();
 		touch(ViewConcern::Preferences);
-		imports().refresh_retail_files();
+		imports().refresh_install_files();
 	}
 	for (const Diagnostic &failure : failures) report(failure);
 	view_.settings_result = {change.serial, failures};
@@ -430,19 +435,35 @@ void SessionCore::forget_recent(const std::string &root) {
 	save_preferences();
 }
 
+void SessionCore::clear_output() {
+	view_.output.clear();
+	touch(ViewConcern::Output);
+}
+
+// The running operation goes first (a build's staging directory with it); one that cannot be
+// cancelled keeps the editor open.
+void SessionCore::quit() {
+	if (!cancel_operation(false)) {
+		refuse_busy(std::string());
+		return;
+	}
+	view_.quit_requested = true;
+	touch(ViewConcern::Project);
+}
+
 void SessionCore::save_preferences() {
 	Diagnostic error;
 	if (!preferences_.save(error)) report(error);
 	const Preferences &settings = preferences_.values();
 	view_.recent_projects = settings.recent_projects;
 	view_.retail_directory = game_install();
-	view_.play_retail = settings.play_retail;
+	view_.play_retail = settings.play_in_install;
 	view_.import_dependencies = settings.import_dependencies;
 	touch(ViewConcern::Preferences);
 }
 
 std::string SessionCore::game_install() const {
-	return view_.project_open ? local_.retail_root : preferences_.values().retail_directory;
+	return view_.project_open ? local_.game_install : preferences_.values().game_install;
 }
 
 const RequirementRow *SessionCore::requirement_row(const std::string &role) const {
