@@ -157,7 +157,8 @@ bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &
 	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()))
 		return false;
 	session.handle(make_request(EditorRequestKind::Rescan));
-	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") && fill_strings(session);
+	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") &&
+			fill_strings(session);
 }
 
 // A finding whose message runs far past any line, on a record's field of a file.
@@ -200,7 +201,8 @@ struct Sweep {
 	// itself, reach_last_tab), which would hide what the view draws past the window.
 	void open(const char *path, const char *record) {
 		std::vector<std::string> others;
-		for (const auto &document : session.view().documents.open) others.push_back(document->path());
+		for (const auto &document : session.view().documents.open)
+			others.push_back(document->path());
 		for (const std::string &other : others) session.handle(make_request(EditorRequestKind::CloseDocument, other));
 		session.handle(make_request(EditorRequestKind::OpenDocument, path));
 		const Document *document = session.document_for(path);
@@ -225,7 +227,8 @@ struct Sweep {
 		NodeAddress owner = view.documents.selection;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
-		for (const InspectorSection &section : plan_inspector(*document, view.documents.selection, owner, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*document, view.documents.selection, owner, ""))
 			if (!section.key.empty()) inspector->StateStorage.SetInt(item_id(inspector->ID, {("###" + section.key).c_str()}), 1);
 		if (ImGuiWindow *window = ImGui::FindWindowByName("Document"))
 			window->StateStorage.SetInt(item_id(document_tab_id(document->path()), {"spawn"}), 1);
@@ -239,7 +242,8 @@ struct Sweep {
 		NodeAddress owner = view.documents.selection;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
-		for (const InspectorSection &section : plan_inspector(*document, view.documents.selection, owner, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*document, view.documents.selection, owner, ""))
 			for (const FieldUse &field : section.fields) {
 				if (field.reference == ReferenceKind::None || field.schema->type != FieldType::Text) continue;
 				if (field.schema->optional && !document->present(view.documents.selection, field.schema->id)) continue;

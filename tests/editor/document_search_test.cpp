@@ -55,7 +55,8 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	return v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") && v.project.scan->find("armory.3di");
+	return v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") &&
+			v.project.scan->find("armory.3di");
 }
 
 std::string upper(std::string text) {

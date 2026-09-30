@@ -203,15 +203,19 @@ static int test_apply_changed() {
 	TEST_EXPECT(!project.session.outcome().done() &&
 	            finding(project.session.outcome(), "import.changed", DiagnosticSeverity::Warning, std::string()));
 	TEST_EXPECT(snapshot(root) == before && !view.project.scan->find("a.mnu"));
-	// Planned again before writing: one ImportPlanned event, flagged as the plan the files changed to.
-	const std::vector<ViewEvent> planned = editor_test::events_after(view, seen, ViewEventKind::ImportPlanned);
-	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.changed && planned.size() == 1 &&
-	            planned[0].flag && planned[0].path.empty() && planned[0].tag == 0);
+	// Planned again before writing: one ImportPlanned event, flagged (the files changed).
+	const std::vector<ViewEvent> planned =
+			editor_test::events_after(view, seen, ViewEventKind::ImportPlanned);
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.changed &&
+			planned.size() == 1 && planned[0].flag && planned[0].path.empty() &&
+			planned[0].tag == 0);
 	const ImportPlanRow *added = row_named(*view.dialogs.import_preview.plan, "new.tga");
-	TEST_EXPECT(added && added->state == State::Found && added->selected && !row_named(*view.dialogs.import_preview.plan, "gone.tga"));
+	TEST_EXPECT(added && added->state == State::Found && added->selected &&
+			!row_named(*view.dialogs.import_preview.plan, "gone.tga"));
 	import(project.session, selected_sources(*view.dialogs.import_preview.plan));
 	TEST_EXPECT(project.session.outcome().done() && !view.dialogs.import_preview.open);
-	TEST_EXPECT(view.project.scan->find("a.mnu") && view.project.scan->find("new.tga") && view.project.scan->find("LOGO.TGA"));
+	TEST_EXPECT(view.project.scan->find("a.mnu") && view.project.scan->find("new.tga") &&
+			view.project.scan->find("LOGO.TGA"));
 
 	// A dependency gone since the preview.
 	const std::string more = project.dir.file("more");
@@ -289,7 +293,8 @@ static int test_apply_partial_publish() {
 	            !fs::exists(root + "/menus/c.mnu") && !staged_left(root));
 	TEST_EXPECT(said(view, "Imported menus/a.mnu") && said(view, "Not imported menus/b.mnu") &&
 	            said(view, "Not imported menus/c.mnu"));
-	TEST_EXPECT(view.activity.status == "1 of 3 files imported: the import stopped at menus/b.mnu.");
+	TEST_EXPECT(
+			view.activity.status == "1 of 3 files imported: the import stopped at menus/b.mnu.");
 	TEST_EXPECT(view.project.scan->find("a.mnu") && !view.project.scan->find("c.mnu"));
 	return 0;
 }
@@ -322,7 +327,8 @@ static int test_apply_reads_the_disk() {
 	import(project.session, selected_sources(*view.dialogs.import_preview.plan));
 	TEST_EXPECT(project.session.outcome().done() && fs::is_regular_file(root + "/menus/a.mnu") &&
 	            fs::is_regular_file(root + "/fonts/arial99.fnt"));
-	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "arial99") == ReferenceStatus::Present);
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "arial99") ==
+			ReferenceStatus::Present);
 	return 0;
 }
 
@@ -412,7 +418,8 @@ static int test_apply_record_with_its_file() {
 	const SessionView &view = project.view();
 	TEST_EXPECT(project.session.outcome().done() && fs::is_regular_file(root + "/logo.png.import") &&
 	            fs::is_regular_file(root + "/menus/extra.mnu") && !staged_left(root));
-	TEST_EXPECT(view.project.imports->size() == 1 && (*view.project.imports)[0].source == "logo.png");
+	TEST_EXPECT(
+			view.project.imports->size() == 1 && (*view.project.imports)[0].source == "logo.png");
 	return 0;
 }
 

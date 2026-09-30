@@ -193,7 +193,8 @@ void StylesView::draw(Workspace &workspace, const MnsDocument &document) {
 			const StyleValueUse &use =
 			        document.style_value_use(line, view.findings.graph.get(), cache_key(view));
 			std::vector<const GraphEdge *> users;
-			if (use.bound) users = view.findings.graph->referrers_of(ReferenceKind::StyleVar, row->name());
+			if (use.bound)
+				users = view.findings.graph->referrers_of(ReferenceKind::StyleVar, row->name());
 			text_cell(workspace, document, line, "name");
 			if (ImGui::IsItemActivated()) select(workspace, document, line);
 			ImGui::TableNextColumn();

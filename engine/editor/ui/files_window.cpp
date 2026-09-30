@@ -298,7 +298,8 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
-		const bool reimports = !view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
+		const bool reimports =
+				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);
 		if (ImGui::Selectable("Reimport all") && reimports) {
 			EditorRequest all = make_request(EditorRequestKind::Reimport);
@@ -306,9 +307,11 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 			workspace_.request(all);
 		}
 		ImGui::EndDisabled();
-		ui_kit::tooltip(view.project.imports->empty() ? "No file of the project is imported from a source."
-		                                     : "Run every importer again (" + std::to_string(view.project.imports->size()) +
-		                                               (view.project.imports->size() == 1 ? " source)." : " sources)."));
+		ui_kit::tooltip(view.project.imports->empty()
+						? "No file of the project is imported from a source."
+						: "Run every importer again (" +
+								std::to_string(view.project.imports->size()) +
+								(view.project.imports->size() == 1 ? " source)." : " sources)."));
 		ImGui::EndCombo();
 	}
 	const float new_width = ui_kit::button_width("New") + arrow;
@@ -368,7 +371,8 @@ void FilesWindow::draw_folder(const SessionView &view, const Folder &folder) {
 		draw_folder(view, inner);
 		ImGui::TreePop();
 	}
-	for (const size_t index : folder.files) draw_file(view, view.project.scan->entries[index], true);
+	for (const size_t index : folder.files)
+		draw_file(view, view.project.scan->entries[index], true);
 }
 
 // A file's row: a selectable under the whole row, its name (cut to what its dot and counts
@@ -455,7 +459,8 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 		workspace_.request(make_request(EditorRequestKind::OpenDocument, entry.relative_path));
 	const bool renames = view.allows(EditorRequestKind::RenameAsset);
 	if (ImGui::MenuItem("Rename...", "F2", false, renames) && renames) start_rename(entry);
-	if (ImGui::MenuItem("References...", nullptr, false, view.findings.graph != nullptr) && view.findings.graph) {
+	if (ImGui::MenuItem("References...", nullptr, false, view.findings.graph != nullptr) &&
+			view.findings.graph) {
 		references_ = entry.relative_path;
 		open_references_ = true;
 	}

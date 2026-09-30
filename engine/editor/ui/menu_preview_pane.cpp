@@ -66,7 +66,9 @@ bool editable(mnu::WindowType type) { return type == mnu::WindowType::Edit || ty
 class MenuPreviewPane::Impl {
 public:
 	explicit Impl(Workspace &workspace) :
-			workspace_(workspace), canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight), requests_(workspace) {}
+			workspace_(workspace),
+			canvas_(menu::kMenuDesignWidth, menu::kMenuDesignHeight),
+			requests_(workspace) {}
 	void draw();
 	void end_frame();
 
@@ -121,7 +123,8 @@ void MenuPreviewPane::Impl::end_frame() {
 
 // The held state follows the selection: a newly selected window is the one held, and what
 // its type does not have (a check, a list, a caret) is let go.
-void MenuPreviewPane::Impl::follow_selection_(const MnuDocument &document, const NodeAddress &selected) {
+void MenuPreviewPane::Impl::follow_selection_(
+		const MnuDocument &document, const NodeAddress &selected) {
 	if (selected.child == followed_) return;
 	followed_ = selected.child;
 	MenuPreviewOptions options = viewport()->options();
@@ -254,7 +257,8 @@ void MenuPreviewPane::Impl::draw() {
 	for (const auto &open : view.documents.open)
 		if (open->path() == view.documents.previews.menu.path)
 			canvas.document = dynamic_cast<const MnuDocument *>(open.get());
-	canvas.screen = canvas.document ? canvas.document->row(view.documents.previews.menu.screen) : nullptr;
+	canvas.screen =
+			canvas.document ? canvas.document->row(view.documents.previews.menu.screen) : nullptr;
 	if (status != MenuPreviewStatus::Ready || !canvas.document || !canvas.screen) {
 		ImGui::PushTextWrapPos(0.0f);
 		ImGui::TextDisabled("%s", menu_preview_status_message(status, detail).c_str());
@@ -281,8 +285,8 @@ void MenuPreviewPane::Impl::draw() {
 	// the window holding it, every selected window, and what the clipboard takes of it.
 	const bool active = view.documents.active == document.path();
 	const std::vector<NodeAddress> none;
-	menu_canvas_select(
-			canvas, active ? view.documents.selection : NodeAddress(), active ? view.documents.selected : none);
+	menu_canvas_select(canvas, active ? view.documents.selection : NodeAddress(),
+			active ? view.documents.selected : none);
 	frame.clipboard = menu_canvas_clipboard(canvas, !view.documents.clipboard.empty());
 	follow_selection_(document, canvas.primary);
 	toolbar_(frame);

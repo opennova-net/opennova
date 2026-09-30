@@ -51,8 +51,8 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	popup.view = &view;
 	popup.key = key;
 	++lists_made_;
-	popup.choices =
-			view.findings.graph ? reference_choices(*view.findings.graph, field) : std::vector<ReferenceChoice>();
+	popup.choices = view.findings.graph ? reference_choices(*view.findings.graph, field)
+										: std::vector<ReferenceChoice>();
 	if (!others)
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
 		                                   [&](const ReferenceChoice &choice) { return choice.kind != field.reference; }),
@@ -61,8 +61,8 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	// The finding the graph makes of this value, as Problems shows it, for its fixes (a %NAME% the
 	// stylesheets do not define: the variable's).
 	Diagnostic finding;
-	popup.missing =
-			view.findings.graph && missing_finding(*view.findings.graph, document, record, field, value, finding);
+	popup.missing = view.findings.graph &&
+			missing_finding(*view.findings.graph, document, record, field, value, finding);
 	if (popup.missing) popup.fixes = fixes_for(finding, view);
 }
 

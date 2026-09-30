@@ -136,8 +136,9 @@ void test_hint_on_a_fallback() {
 	rename.edit.field = "name";
 	rename.edit.value = std::string("Y_COLOR");
 	session.handle(rename);
-	CHECK(v.findings.graph->resolve(ReferenceKind::StyleVar, "%X_COLOR%") == ReferenceStatus::Present,
-	      "the use now reaches menu_style.mns's X_COLOR");
+	CHECK(v.findings.graph->resolve(ReferenceKind::StyleVar, "%X_COLOR%") ==
+					ReferenceStatus::Present,
+			"the use now reaches menu_style.mns's X_COLOR");
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);

@@ -265,8 +265,11 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			return;
 		}
 		std::shared_ptr<Document> document = type->make(); Diagnostic error;
-		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(), asset.relative_path,
-			asset.kind, view_.project.document->target_game, error)) { core_.report(error); return; }
+		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(),
+					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
+			core_.report(error);
+			return;
+		}
 		for (auto it = documents_.begin(); it != documents_.end(); ++it)
 			if ((*it)->path() == asset.relative_path) { documents_.erase(it); break; }
 		remembered_.erase(asset.relative_path); // read again: its records have new identities
@@ -575,7 +578,8 @@ bool DocumentSet::apply_edits(Document &document, const std::vector<Edit> &edits
 	} else {
 		view_.documents.repair_selection(document, owner);
 	}
-	if (view_.documents.active != active || view_.documents.selection != primary || view_.documents.selected != selected)
+	if (view_.documents.active != active || view_.documents.selection != primary ||
+			view_.documents.selected != selected)
 		core_.touch(ViewConcern::Selection);
 	update_view();
 	// A Move that leaves a record where it is changes nothing to validate; a gesture's

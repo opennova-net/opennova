@@ -37,15 +37,17 @@ inline std::string revealed_field(const opennova::editor::SessionView &view) {
 	const auto &held = view.events.held();
 	for (auto event = held.rbegin(); event != held.rend(); ++event) {
 		if (event->kind != opennova::editor::ViewEventKind::RevealRecord) continue;
-		const bool selected = event->path == view.documents.active && event->address == view.documents.selection;
+		const bool selected =
+				event->path == view.documents.active && event->address == view.documents.selection;
 		return selected ? event->field : std::string();
 	}
 	return std::string();
 }
 
 // The events of `kind` a view posted after seq `after` (view_events.h), oldest first.
-inline std::vector<opennova::editor::ViewEvent> events_after(const opennova::editor::SessionView &view,
-		uint64_t after, opennova::editor::ViewEventKind kind) {
+inline std::vector<opennova::editor::ViewEvent> events_after(
+		const opennova::editor::SessionView &view, uint64_t after,
+		opennova::editor::ViewEventKind kind) {
 	std::vector<opennova::editor::ViewEvent> out;
 	for (const opennova::editor::ViewEvent &event : view.events.held())
 		if (event.seq > after && event.kind == kind) out.push_back(event);

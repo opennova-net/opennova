@@ -55,7 +55,8 @@ struct PickerProject {
 	// The Inspector's section holding a field of the item.
 	std::string section_of(const char *field) const {
 		const SessionView &v = session.view();
-		for (const InspectorSection &section : plan_inspector(*items, v.documents.selection, v.documents.selection, ""))
+		for (const InspectorSection &section :
+				plan_inspector(*items, v.documents.selection, v.documents.selection, ""))
 			for (const FieldUse &use : section.fields)
 				if (use.schema->id == field) return section.key;
 		return std::string();

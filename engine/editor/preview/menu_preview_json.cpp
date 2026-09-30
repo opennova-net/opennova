@@ -60,7 +60,8 @@ MenuPreviewSnapshot menu_preview_snapshot(const SessionView &view, const MenuPre
 	snapshot.shown_revision = model.shown_revision();
 	for (const auto &open : view.documents.open)
 		if (open && open->path() == view.documents.previews.menu.path) snapshot.document = dynamic_cast<const MnuDocument *>(open.get());
-	if (snapshot.document) snapshot.screen = snapshot.document->row(view.documents.previews.menu.screen);
+	if (snapshot.document)
+		snapshot.screen = snapshot.document->row(view.documents.previews.menu.screen);
 	if (snapshot.status == MenuPreviewStatus::Ready) {
 		snapshot.compiler = compiler;
 		snapshot.state = state;
@@ -239,10 +240,10 @@ bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snaps
 	const NodeAddress held = shown_window(snapshot, window);
 	if (!held.child) return false;
 	const SessionView &view = session.view();
-	const std::vector<NodeAddress> selected =
-	        view.documents.active == document.path()
-	                ? selected_windows(document, view.documents.selection, view.documents.selected, snapshot.screen->id)
-	                : std::vector<NodeAddress>();
+	const std::vector<NodeAddress> selected = view.documents.active == document.path()
+			? selected_windows(document, view.documents.selection, view.documents.selected,
+					  snapshot.screen->id)
+			: std::vector<NodeAddress>();
 	LayoutPress press;
 	std::vector<Edit> edits;
 	if (!layout_press(document, held, handle, selected, *snapshot.compiler, *snapshot.state, press) ||

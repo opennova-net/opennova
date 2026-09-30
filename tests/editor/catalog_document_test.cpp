@@ -241,7 +241,8 @@ static int go_to_record() {
 	if (!items || items->rows().empty()) return 1;
 	const int id = std::get<DefItemDef>(row_at(*items, 0).data).id;
 	session.handle(make_request(EditorRequestKind::CloseDocument, items->path()));
-	const GraphSymbol *item = view.findings.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
+	const GraphSymbol *item =
+			view.findings.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
 	TEST_EXPECT(item && item->field == "id" && !item->locator.empty());
 	if (!item) return 1;
 	EditorRequest open = make_request(EditorRequestKind::OpenDocument, item->file, item->locator);

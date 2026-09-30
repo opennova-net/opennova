@@ -30,7 +30,8 @@ inline std::vector<editor::ReferenceTarget> targets_of(const editor::Document &d
 		const editor::NodeAddress &record, const std::string &id, const editor::SessionView &view) {
 	editor::Value value;
 	if (!view.findings.graph || !document.get(record, id, value)) return {};
-	return editor::reference_targets(*view.findings.graph, *view.project.scan, field_on(document, record, id), value);
+	return editor::reference_targets(
+			*view.findings.graph, *view.project.scan, field_on(document, record, id), value);
 }
 
 // A Go to served as the Inspector raises it (window_requests::go_to): the file opened at the

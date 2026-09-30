@@ -90,9 +90,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_json", "json"), &EditorApp::request_json);
 	ClassDB::bind_method(D_METHOD("get_outcome_json"), &EditorApp::get_outcome_json);
 	ClassDB::bind_method(D_METHOD("get_operation_json"), &EditorApp::get_operation_json);
-	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset", "import_limit",
-			                     "event_cursor", "event_limit"),
-			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(64));
+	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset",
+								 "import_limit", "event_cursor", "event_limit"),
+			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200), DEFVAL(0),
+			DEFVAL(64));
 	ClassDB::bind_method(D_METHOD("get_document_json", "path", "with_rows"), &EditorApp::get_document_json);
 	ClassDB::bind_method(D_METHOD("get_record_json", "id"), &EditorApp::get_record_json);
 	ClassDB::bind_method(D_METHOD("get_reference_choices_json", "id", "field"), &EditorApp::get_reference_choices_json);
@@ -544,7 +545,8 @@ String EditorApp::get_last_build_dir() const {
 }
 
 bool EditorApp::is_last_build_ok() const {
-	return session_ && session_->view().activity.has_build && session_->view().activity.last_build->ok;
+	return session_ && session_->view().activity.has_build &&
+			session_->view().activity.last_build->ok;
 }
 
 String EditorApp::get_play_state() const {
@@ -751,7 +753,9 @@ void EditorApp::resolve_unsaved(int p_choice) {
 	request.unsaved_choice = static_cast<opennova::editor::UnsavedChoice>(p_choice);
 	session_->handle(request);
 }
-int EditorApp::get_play_mcp_port() const { return session_ ? session_->view().activity.play_mcp_port : 0; }
+int EditorApp::get_play_mcp_port() const {
+	return session_ ? session_->view().activity.play_mcp_port : 0;
+}
 bool EditorApp::duplicate_record(int64_t p_id) {
 	ensure_session();
 	auto *document = session_->document_for();
@@ -915,12 +919,13 @@ String EditorApp::get_operation_json() const {
 	const SessionView empty;
 	const SessionView &view = session_ ? session_->view() : empty;
 	answer.set("operation", opennova::editor::operation_status_to_json(view.activity.operation));
-	answer.set("last_operation", opennova::editor::operation_outcome_to_json(view.activity.last_operation));
+	answer.set("last_operation",
+			opennova::editor::operation_outcome_to_json(view.activity.last_operation));
 	return json_text(answer);
 }
 
-String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset, int p_import_limit,
-		int p_event_cursor, int p_event_limit) const {
+String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset,
+		int p_import_limit, int p_event_cursor, int p_event_limit) const {
 	if (!session_) return String("{}");
 	opennova::editor::SessionJsonOptions options;
 	options.output_cursor = size_t(std::max(p_output_cursor, 0));

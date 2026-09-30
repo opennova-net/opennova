@@ -33,10 +33,11 @@ constexpr const char *kNotUndoable = " It cannot be undone with Undo.";
 // normalized name), or "" when it has none of that name.
 std::string retail_name(const SessionView &view, const std::string &name) {
 	const std::string wanted = normalized_logical_name(name);
-	const auto found = std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(), wanted,
-	                                    [](const std::string &file, const std::string &key) {
-		                                    return normalized_logical_name(file) < key;
-	                                    });
+	const auto found =
+			std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(),
+					wanted, [](const std::string &file, const std::string &key) {
+						return normalized_logical_name(file) < key;
+					});
 	return found != view.project.retail_files.end() && normalized_logical_name(*found) == wanted ? *found : std::string();
 }
 
@@ -165,7 +166,8 @@ const AssetEntry *defining_file(const Diagnostic &d, const SessionView &view) {
 	if (view.findings.graph)
 		for (const GraphSymbol *symbol : view.findings.graph->symbols_of_kind(d.reference))
 			if (!symbol->inert)
-				if (const AssetEntry *entry = view.project.scan->at_path(symbol->file)) return entry;
+				if (const AssetEntry *entry = view.project.scan->at_path(symbol->file))
+					return entry;
 	return usual_table(d.reference, view);
 }
 

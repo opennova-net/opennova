@@ -147,12 +147,14 @@ void test_windows_show_the_gate() {
 	ImportedSource logo;
 	logo.source = "art/logo.png";
 	logo.outputs = {".opennova/imported/0a1b/logo.pcx"};
-	v.project.imports = std::make_shared<const std::vector<ImportedSource>>(std::vector<ImportedSource>{logo});
+	v.project.imports = std::make_shared<const std::vector<ImportedSource>>(
+			std::vector<ImportedSource>{ logo });
 	v.project.recent_projects = {"C:/mods/Gate", "C:/mods/Other"};
 	v.project.retail_directory = "C:/games/Joint Operations";
 	v.activity.has_build = true;
 	editor_test::own(v.activity.last_build).ok = true;
-	editor_test::own(v.activity.last_build).build_dir = "C:/mods/Gate/.opennova/build/play/0123456789abcdef";
+	editor_test::own(v.activity.last_build).build_dir =
+			"C:/mods/Gate/.opennova/build/play/0123456789abcdef";
 	RequirementRow gametext;
 	gametext.role = "gametext";
 	gametext.name = "gametext.bin";
@@ -395,10 +397,12 @@ void test_windows_show_the_gate() {
 	site.field = "name";
 	site.before = "OPTIONS";
 	site.after = "SETTINGS";
-	v.dialogs.rename_preview.sites = std::make_shared<const std::vector<RenameSite>>(std::vector<RenameSite>{site});
+	v.dialogs.rename_preview.sites =
+			std::make_shared<const std::vector<RenameSite>>(std::vector<RenameSite>{ site });
 	const ImGuiID rename = ImHashStr("Rename everywhere");
 	for (const OperationStatus &status : statuses) {
-		post_event(v, ViewEventKind::AskRename, a->path(), NodeAddress(), "name", false, v.dialogs.rename_preview.serial);
+		post_event(v, ViewEventKind::AskRename, a->path(), NodeAddress(), "name", false,
+				v.dialogs.rename_preview.serial);
 		ui.frames(3);
 		CHECK(modal_open("Rename everywhere"), "Rename everywhere opens");
 		check_probes(ui, v, status,

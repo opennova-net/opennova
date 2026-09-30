@@ -255,7 +255,8 @@ static int test_menu_text_scope() {
 	session.handle(write);
 	edit_window(session, *menu, main, "text_rsrc", std::string("menutxt.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "MENUTXT.BIN/menu");
-	TEST_EXPECT(!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(
+			!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/menu") == ReferenceStatus::Present);
 	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "MENUTXT.BIN/Menu").size() == 1);
 	TEST_EXPECT(view.findings.graph->referrers_of(ReferenceKind::TextId, "TITLE_ID", "GAMETEXT.BIN/menu").empty());
@@ -279,14 +280,16 @@ static int test_menu_text_scope() {
 	edit_window(session, *menu, title, "string.value", std::string("STATS_ONLY"));
 	TEST_EXPECT(missing_message("\"menu\" section of MENUTXT.BIN"));
 	edit_window(session, *menu, title, "string.value", std::string("GAME_TITLE"));
-	TEST_EXPECT(has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(
+			has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// TITLE's own TEXT_RSRC wins over its root's.
 	EditorRequest own = write;
 	own.edit.address = title;
 	session.handle(own);
 	edit_window(session, *menu, title, "text_rsrc", std::string("gametext.bin"));
 	TEST_EXPECT(title_edge() && title_edge()->scope == "GAMETEXT.BIN/menu");
-	TEST_EXPECT(!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(
+			!has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// A table the project does not have.
 	edit_window(session, *menu, title, "text_rsrc", std::string("nosuch.bin"));
 	TEST_EXPECT(missing_message("NOSUCH.BIN, a string table the project does not have"));
@@ -499,7 +502,8 @@ static int test_catalog_symbols() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_GRAPH", "GAMETEXT.BIN/WepDes") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.resolve(ReferenceKind::TextId, "WEP_GRAPH", "GAMETEXT.BIN/Overlays") == ReferenceStatus::Missing);
 	edit_window(session, *weapon, {weapon->rows()[0]->id, weapon->kind_from_name("weapon"), 0}, "loadout_menu_textid", std::string("WEP_GRAPH"));
-	TEST_EXPECT(!has_missing(view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
+	TEST_EXPECT(!has_missing(
+			view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
 	// A string's key is a symbol of its own (S12 D2): the record, the place and the field that
 	// define it, its table and section; its users are its own, not its section's.
 	const std::vector<const GraphSymbol *> key = graph.symbols_of(strings->path(), "WepDes/WEP_GRAPH");
@@ -555,10 +559,12 @@ static int test_catalog_symbols() {
 		}));
 		if (!targets.empty()) go_to(session, targets[0]);
 		TEST_EXPECT(view.documents.active == strings->path() && wepdes_key.size() == 1 &&
-		            view.documents.selection == wepdes_key[0]->address && editor_test::revealed_field(view) == "key");
+				view.documents.selection == wepdes_key[0]->address &&
+				editor_test::revealed_field(view) == "key");
 	}
 	edit_window(session, *weapon, {weapon->rows()[0]->id, weapon->kind_from_name("weapon"), 0}, "loadout_menu_textid", std::string("WEP_NOPE"));
-	TEST_EXPECT(has_missing(view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
+	TEST_EXPECT(has_missing(
+			view.findings.diagnostics, "loadout_menu_textid", DiagnosticSeverity::Warning));
 	// The items' identities.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
 	Document *items = session.document_for("items.def");
@@ -722,7 +728,8 @@ static int test_rename() {
 		session.handle(assign);
 	}
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
-	TEST_EXPECT(view.project.scan->find(missing_name) != nullptr && !fs::exists(root + "/spare.bin"));
+	TEST_EXPECT(
+			view.project.scan->find(missing_name) != nullptr && !fs::exists(root + "/spare.bin"));
 	// Assigning a requirement already met renames nothing: a refusal the outcome carries.
 	session.handle(make_request(EditorRequestKind::AssignRequirement, "spare.pcx", missing_role));
 	TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
@@ -1145,7 +1152,8 @@ static int test_menu_names_and_targets() {
 	const GraphEdge *other_home = edge_of(graph, path, ReferenceKind::MenuScreen, "HOME");
 	TEST_EXPECT(other_home && other_home->scope == "MAIN.MNU" &&
 	            graph.resolve(other_home->kind, other_home->target, other_home->scope) == ReferenceStatus::Unverified);
-	TEST_EXPECT(other_home && !finding(view.findings.diagnostics, "reference.missing", other_home->record));
+	TEST_EXPECT(other_home &&
+			!finding(view.findings.diagnostics, "reference.missing", other_home->record));
 	// The pickers offer what the lookup finds from the ACTION: a SCREEN target the screens of
 	// its FILE, a WINDOW target the windows of the acting window's screen it reaches, each name
 	// once, where it is defined; a window of the screen no lookup reaches is offered as
@@ -1208,7 +1216,8 @@ static int test_menu_names_and_targets() {
 	TEST_EXPECT(first_title && first_title->address == title);
 	TEST_EXPECT(graph.referrers_of(ReferenceKind::MenuWindow, "title", "GRAPH.MNU/HOME").size() == 3);
 	// The ACTIONs the game never runs or ignores.
-	TEST_EXPECT(finding(view.findings.diagnostics, "menu.action_inert", "HOME/PANEL/Window 4", "no NAME"));
+	TEST_EXPECT(finding(
+			view.findings.diagnostics, "menu.action_inert", "HOME/PANEL/Window 4", "no NAME"));
 	bool unknown_type = false, no_state = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code != "menu.action_inert") continue;
@@ -1393,7 +1402,8 @@ static int test_symbol_locators() {
 	const std::vector<const GraphSymbol *> twice = view.findings.graph->symbols_named(ReferenceKind::StyleVar, "twice");
 	TEST_EXPECT(twice.size() == 2 && twice[0]->inert && !twice[1]->inert && twice[1]->value == "2" &&
 	            twice[0]->inert_reason.find("defines it again below") != std::string::npos);
-	TEST_EXPECT(view.findings.graph->style_binding("TWICE") == (twice.size() == 2 ? twice[1] : nullptr));
+	TEST_EXPECT(view.findings.graph->style_binding("TWICE") ==
+			(twice.size() == 2 ? twice[1] : nullptr));
 	// A query names a variable as the graph keys it; find_definition takes a menu's %NAME% too.
 	TEST_EXPECT(view.findings.graph->symbols_named(ReferenceKind::StyleVar, "%twice%").empty());
 	session.handle(make_request(EditorRequestKind::OpenDocument, style_path));
@@ -1442,8 +1452,10 @@ static int test_symbol_locators() {
 	}));
 	go_to(session, font[0]);
 	const Document *sheet = session.document_for(style_path);
-	TEST_EXPECT(sheet && view.documents.active == sheet->path() && view.documents.selection.row != 0 &&
-	            sheet->record_name(view.documents.selection) == "DEF_FONTNAME_LG" && editor_test::revealed_field(view) == "name");
+	TEST_EXPECT(sheet && view.documents.active == sheet->path() &&
+			view.documents.selection.row != 0 &&
+			sheet->record_name(view.documents.selection) == "DEF_FONTNAME_LG" &&
+			editor_test::revealed_field(view) == "name");
 	return 0;
 }
 
@@ -1658,7 +1670,8 @@ static int test_model_texture_references() {
 	// A particle's texture, as the runtime's lookup reads it: its stem's .dds or its overlay
 	// twin serves it; an extension appended to the whole name does not.
 	textures({"puff.dds"});
-	const GraphEdge *puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
+	const GraphEdge *puff =
+			edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && puff->loader_arg == -1 && view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
 	            file == "textures/puff.dds" && !graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
 	textures({"puff_O.tga"});

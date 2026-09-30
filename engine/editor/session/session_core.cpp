@@ -394,9 +394,9 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	applied.flag = !failures.empty();
 	applied.tag = change.serial;
 	view_.events.post(std::move(applied));
-	view_.activity.status = !failures.empty()                                       ? "A setting could not be saved: see Problems."
-	                        : project_changed || install_changed || editor_changed ? "Saved the settings."
-	                                                                               : "No setting changed.";
+	view_.activity.status = !failures.empty() ? "A setting could not be saved: see Problems."
+			: project_changed || install_changed || editor_changed ? "Saved the settings."
+																   : "No setting changed.";
 	if (project_changed) touch(ViewConcern::Project);
 	if (install_changed || editor_changed) touch(ViewConcern::Preferences);
 	touch(ViewConcern::Dialogs);

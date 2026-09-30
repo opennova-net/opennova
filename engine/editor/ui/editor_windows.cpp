@@ -335,7 +335,8 @@ void EditorWindows::deliver_picks(PickPurpose purpose, const std::vector<std::st
 	if (paths.empty() || purpose != PickPurpose::ImportFiles) return; // cancelled, or not a file list
 	EditorRequest preview = make_request(EditorRequestKind::PreviewImport);
 	preview.paths = paths;
-	preview.flag = view().project.import_dependencies; // the editor's setting: with the files they need
+	preview.flag =
+			view().project.import_dependencies; // the editor's setting: with the files they need
 	request(std::move(preview));
 }
 
@@ -415,7 +416,8 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const Document *documen
 		request(make_request(EditorRequestKind::Redo));
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
-	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph)) find_.open();
+	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
+		find_.open();
 	ImGui::EndMenu();
 }
 
@@ -526,7 +528,9 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		state = "Stopping the game";
 	} else if (v.activity.has_build) {
 		state = v.activity.last_build->ok ? "Built" : "Build failed";
-		state_tip = v.activity.last_build->ok ? "The last build: " + v.activity.last_build->build_dir : "See Problems.";
+		state_tip = v.activity.last_build->ok
+				? "The last build: " + v.activity.last_build->build_dir
+				: "See Problems.";
 	}
 
 	// Each part's width, left to right: the unsaved files, the problem counts, the state and

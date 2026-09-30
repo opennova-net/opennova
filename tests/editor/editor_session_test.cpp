@@ -140,7 +140,8 @@ static int test_lifecycle() {
 
 	// Create all missing: the checklist clears.
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(v.project.requirements->required_missing == 0 && v.project.requirements->required_wrong_kind == 0);
+	TEST_EXPECT(v.project.requirements->required_missing == 0 &&
+			v.project.requirements->required_wrong_kind == 0);
 	TEST_EXPECT(!v.project.scan->entries.empty());
 	TEST_EXPECT(output_has(v, "Created menus/main.mnu"));
 
@@ -158,14 +159,18 @@ static int test_lifecycle() {
 		++polls;
 		TEST_EXPECT(polls < 200);
 		if (!v.activity.operation.running()) break;
-		TEST_EXPECT(v.activity.operation.done >= done && v.activity.operation.done <= v.activity.operation.total &&
-		            v.activity.operation.unit == OperationUnit::Bytes && !v.activity.operation.label.empty());
+		TEST_EXPECT(v.activity.operation.done >= done &&
+				v.activity.operation.done <= v.activity.operation.total &&
+				v.activity.operation.unit == OperationUnit::Bytes &&
+				!v.activity.operation.label.empty());
 		done = v.activity.operation.done;
 	}
 	TEST_EXPECT(polls > 2); // the gate, the hash, the staging, the archives, the loose file, the publish
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == build_id && v.activity.last_operation.kind == OperationKind::Build &&
-	            v.activity.last_operation.end == OperationEnd::Done);
+	TEST_EXPECT(
+			v.activity.has_build && v.activity.last_build->ok && !v.activity.operation.running());
+	TEST_EXPECT(v.activity.last_operation.id == build_id &&
+			v.activity.last_operation.kind == OperationKind::Build &&
+			v.activity.last_operation.end == OperationEnd::Done);
 	session.set_poll_budget(kDefaultPollBudget);
 	TEST_EXPECT(fs::is_regular_file(fs::path(v.activity.last_build->build_dir) / "localres.pff"));
 	// S11e: Output names the project by its name and its files (the build too) from its
@@ -173,7 +178,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(output_has(v, "Created My Game.") && output_has(v, "Opened My Game.") &&
 	            output_has(v, "Built .opennova/build/play/"));
 	TEST_EXPECT(!output_has(v, fs::path(root).generic_string()));
-	TEST_EXPECT(session.handle(make_request(EditorRequestKind::ClearOutput)) && v.activity.output.empty());
+	TEST_EXPECT(session.handle(make_request(EditorRequestKind::ClearOutput)) &&
+			v.activity.output.empty());
 	// A path inside the project from its folder; one outside it (a sibling folder whose name
 	// starts alike, another drive) as it is.
 	TEST_EXPECT(shown_path(root + "/.opennova/build/play", root) == ".opennova/build/play");
@@ -256,7 +262,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && v.activity.play_exited_on_its_own && v.activity.play_exit_code == 0);
 	TEST_EXPECT(v.activity.play_mcp_port == 0 && session_view_to_json(v).get("play")->get_int("mcp_port", -1) == 0);
 	TEST_EXPECT(session_view_to_json(v).get("play")->get_int("exit_code", -1) == 0);
-	TEST_EXPECT(output_has(v, "The game exited.") && !has_code(v.findings.diagnostics, "play.crashed"));
+	TEST_EXPECT(
+			output_has(v, "The game exited.") && !has_code(v.findings.diagnostics, "play.crashed"));
 	TEST_EXPECT(session.running_build_dir().empty());
 
 	// A new Play clears the previous boot report, its row with it. A game that ends with
@@ -266,7 +273,8 @@ static int test_lifecycle() {
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_exit_code == -1);
-	TEST_EXPECT(v.activity.boot_missing.empty() && !has_code(v.findings.diagnostics, "play.boot_missing"));
+	TEST_EXPECT(v.activity.boot_missing.empty() &&
+			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	platform.codes[501] = 0xC0000005u;
 	platform.exit_child(501);
 	session.poll();
@@ -282,12 +290,14 @@ static int test_lifecycle() {
 	// crash row goes with the new Play; a stopped game reports no code.
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
-	TEST_EXPECT(v.activity.play_state == PlayState::Running && !has_code(v.findings.diagnostics, "play.crashed"));
+	TEST_EXPECT(v.activity.play_state == PlayState::Running &&
+			!has_code(v.findings.diagnostics, "play.crashed"));
 	platform.codes[502] = 1;
 	session.handle(make_request(EditorRequestKind::StopPlay));
 	session.poll();
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && !v.activity.play_exited_on_its_own && v.activity.play_exit_code == -1);
-	TEST_EXPECT(output_has(v, "The game was stopped.") && !has_code(v.findings.diagnostics, "play.crashed"));
+	TEST_EXPECT(output_has(v, "The game was stopped.") &&
+			!has_code(v.findings.diagnostics, "play.crashed"));
 
 	// The mission feature widens the checklist and is saved to the project file.
 	const int before_rows = static_cast<int>(v.project.requirements->rows.size());
@@ -362,7 +372,8 @@ static int test_import() {
 	importing.imports = choose.imports;
 	session.handle(importing);
 	TEST_EXPECT(session.outcome().done() && !shown.open);
-	TEST_EXPECT(session.view().project.scan->find("loose.txt") && session.view().project.scan->find("note.txt"));
+	TEST_EXPECT(session.view().project.scan->find("loose.txt") &&
+			session.view().project.scan->find("note.txt"));
 	TEST_EXPECT(!session.view().project.scan->find("unused.txt"));
 	std::string text, error;
 	TEST_EXPECT(read_file_text(dir.file("project/note.txt"), text, error) && text == "packed");
@@ -443,7 +454,8 @@ static int test_import() {
 	TEST_EXPECT(long_names.imported.empty() && long_names.diagnostics.size() == 1);
 	TEST_EXPECT(!long_names.diagnostics.empty() && long_names.diagnostics[0].code == "import.name" &&
 	            long_names.diagnostics[0].asset == "a_long_texture_name.tga");
-	const auto video_alone = import_assets({{video, {}}}, paths, *session.view().project.document, false);
+	const auto video_alone =
+			import_assets({ { video, {} } }, paths, *session.view().project.document, false);
 	TEST_EXPECT(video_alone.imported.size() == 1 && fs::path(video_alone.imported[0]).filename() == "intro_cinematic.bik");
 	TEST_EXPECT(editor_test::write_text(dir.file("bad.pff"), "not an archive"));
 	preview.paths = {dir.file("bad.pff"), dir.file("missing.txt")};
@@ -457,7 +469,8 @@ static int test_retail_play() {
 	FakePlatform platform;
 	FilePreferencesStore preferences(dir.file("settings.json"));
 	ProjectSession session(platform, preferences);
-	TEST_EXPECT(!session.view().project.play_retail && session.view().project.retail_directory.empty());
+	TEST_EXPECT(
+			!session.view().project.play_retail && session.view().project.retail_directory.empty());
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail test"));
 	editor_test::create_missing_files(session);
 	ProjectSettingsChange retail;
@@ -474,7 +487,8 @@ static int test_retail_play() {
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0);
-	TEST_EXPECT(session.view().findings.diagnostics.back().message.find("game.cfg") != std::string::npos);
+	TEST_EXPECT(session.view().findings.diagnostics.back().message.find("game.cfg") !=
+			std::string::npos);
 	const std::string built = session.view().activity.last_build->build_dir;
 	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe")); // missing source: no partial stage
 	std::vector<uint8_t> archive_before, archive_after;
@@ -506,7 +520,8 @@ static int test_retail_play() {
 		FakePlatform other;
 		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
 		ProjectSession reopened(other, reopened_preferences);
-		TEST_EXPECT(reopened.view().project.play_retail && reopened.view().project.retail_directory == install);
+		TEST_EXPECT(reopened.view().project.play_retail &&
+				reopened.view().project.retail_directory == install);
 	}
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
@@ -577,10 +592,12 @@ static int test_import_dependencies_setting() {
 		const uint64_t before = v.events.next_seq() - 1;
 		EditorRequest off = make_request(EditorRequestKind::SetImportDependencies);
 		session.handle(off);
-		TEST_EXPECT(session.outcome().done() && !v.project.import_dependencies && !v.dialogs.import_preview.with_dependencies);
+		TEST_EXPECT(session.outcome().done() && !v.project.import_dependencies &&
+				!v.dialogs.import_preview.with_dependencies);
 		// Planned again: one ImportPlanned event, the dialog's cue to take the new plan's checks.
-		TEST_EXPECT(editor_test::events_after(v, before, ViewEventKind::ImportPlanned).size() == 1 &&
-		            v.dialogs.import_preview.plan->rows.size() == 1);
+		TEST_EXPECT(
+				editor_test::events_after(v, before, ViewEventKind::ImportPlanned).size() == 1 &&
+				v.dialogs.import_preview.plan->rows.size() == 1);
 		Preferences stored;
 		Diagnostic error;
 		TEST_EXPECT(FilePreferencesStore(settings).load(stored, error) && !stored.import_dependencies);
@@ -592,7 +609,8 @@ static int test_import_dependencies_setting() {
 	EditorRequest on = make_request(EditorRequestKind::SetImportDependencies);
 	on.flag = true;
 	later.handle(on);
-	TEST_EXPECT(later.view().project.import_dependencies && !later.view().dialogs.import_preview.open);
+	TEST_EXPECT(
+			later.view().project.import_dependencies && !later.view().dialogs.import_preview.open);
 	Preferences stored;
 	Diagnostic error;
 	TEST_EXPECT(FilePreferencesStore(settings).load(stored, error) && stored.import_dependencies);
@@ -668,7 +686,8 @@ static int test_outcomes_and_refusals() {
 	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
 	cancel.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(cancel);
-	TEST_EXPECT(!v.dialogs.unsaved_prompt.open && !has_code(v.findings.diagnostics, "rename.unsaved"));
+	TEST_EXPECT(
+			!v.dialogs.unsaved_prompt.open && !has_code(v.findings.diagnostics, "rename.unsaved"));
 	TEST_EXPECT(session.document_for("gametext.bin") == table && table->dirty());
 	TEST_EXPECT(read_file_bytes(table_path, after, error) && after == before);
 	TEST_EXPECT(!v.project.scan->find("gametxt2.bin") && !fs::exists(fs::path(table_path).parent_path() / "gametxt2.bin"));
@@ -821,7 +840,8 @@ static int test_requests_that_cannot_run() {
 	const size_t spawns = platform.spawns;
 	session.handle(make_request(EditorRequestKind::Play));
 	TEST_EXPECT(!session.view().activity.operation.running() && platform.spawns == spawns);
-	TEST_EXPECT(!session.outcome().done() && v.findings.diagnostics.back().code == "play.unsupported");
+	TEST_EXPECT(
+			!session.outcome().done() && v.findings.diagnostics.back().code == "play.unsupported");
 	TEST_EXPECT(v.findings.diagnostics.back().message.find("Windows-only") != std::string::npos);
 	return 0;
 }
@@ -923,14 +943,16 @@ static int test_preview_target() {
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, menu_path);
 	select.edit.address = exit;
 	session.handle(select);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == exit.row);
 	// The stylesheet active: the preview stays on the screen.
 	const AssetEntry *style = v.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	session.handle(make_request(EditorRequestKind::OpenDocument, style->relative_path));
 	TEST_EXPECT(v.documents.active == style->relative_path);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == exit.row);
 	// A second screen selected, then removed: the preview clears.
 	const NodeKind screen_kind = menu->kind_from_name("screen");
 	EditorRequest add = make_request(EditorRequestKind::EditRecord, menu_path);
@@ -938,7 +960,8 @@ static int test_preview_target() {
 	add.edit.address = {0, screen_kind, 0};
 	session.handle(add);
 	const NodeId added = menu->last_added();
-	TEST_EXPECT(added != 0 && v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == added);
+	TEST_EXPECT(added != 0 && v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == added);
 	EditorRequest remove = make_request(EditorRequestKind::EditRecord, menu_path);
 	remove.edit.operation = EditOperation::Remove;
 	remove.edit.address = {added, screen_kind, 0};
@@ -946,10 +969,12 @@ static int test_preview_target() {
 	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
 	// The first screen again, then the menu closed: the preview clears.
 	session.handle(select);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == exit.row);
 	session.handle(make_request(EditorRequestKind::OpenDocument, style->relative_path));
 	session.handle(make_request(EditorRequestKind::SaveAll)); // the screen added and removed: dirty
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == exit.row);
 	session.handle(make_request(EditorRequestKind::CloseDocument, menu_path));
 	TEST_EXPECT(session.document_for("main.mnu") == nullptr);
 	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
@@ -981,7 +1006,8 @@ static int test_validation_cost() {
 	const ValidationStats &stats = session.validation_stats();
 	const std::string root = v.project.root;
 	size_t editable = 0;
-	for (const AssetEntry &asset : v.project.scan->entries) editable += is_editable_kind(asset.kind) ? 1 : 0;
+	for (const AssetEntry &asset : v.project.scan->entries)
+		editable += is_editable_kind(asset.kind) ? 1 : 0;
 	TEST_EXPECT(editable >= 3); // the item and weapon tables, the string tables, the startup menu
 	// Create-missing's refresh read every new file once.
 	TEST_EXPECT(stats.files_loaded == editable && stats.files_reused == 0 && stats.files_failed == 0);
@@ -1028,11 +1054,13 @@ static int test_validation_cost() {
 	set("no_such_field", int64_t(1));
 	set("no_such_field", int64_t(1));
 	TEST_EXPECT(stats.passes == passes);
-	TEST_EXPECT(!v.findings.diagnostics.empty() && v.findings.diagnostics.back().code == "document.value");
+	TEST_EXPECT(!v.findings.diagnostics.empty() &&
+			v.findings.diagnostics.back().code == "document.value");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.value") == 2);
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1);
-	TEST_EXPECT(!v.findings.diagnostics.empty() && v.findings.diagnostics.back().code == "document.value");
+	TEST_EXPECT(!v.findings.diagnostics.empty() &&
+			v.findings.diagnostics.back().code == "document.value");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.value") == 2);
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
 	// A Move to where the record already is changes nothing: nothing to validate.
@@ -1061,13 +1089,15 @@ static int test_validation_cost() {
 	session.handle(make_request(EditorRequestKind::Build));
 	TEST_EXPECT(!session.view().activity.operation.running() && v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
 	session.poll();
-	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type") && v.dialogs.unsaved_prompt.open);
+	TEST_EXPECT(
+			has_code(v.findings.diagnostics, "catalog.item_type") && v.dialogs.unsaved_prompt.open);
 	// The finding reported in the earlier burst is gone: a validation for a later change drops it.
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "document.value"));
 	EditorRequest save_and_build = make_request(EditorRequestKind::ResolveUnsaved);
 	save_and_build.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save_and_build);
-	TEST_EXPECT(!items->dirty() && !v.dialogs.unsaved_prompt.open && session.view().activity.operation.running());
+	TEST_EXPECT(!items->dirty() && !v.dialogs.unsaved_prompt.open &&
+			session.view().activity.operation.running());
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
@@ -1136,7 +1166,8 @@ static int test_validation_cost() {
 	TEST_EXPECT(editor_test::write_bytes(items_file, items_bytes));
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !has_code(v.findings.diagnostics, "catalog.item_type"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok &&
+			!has_code(v.findings.diagnostics, "catalog.item_type"));
 	// An open document whose file no longer loads stays open as it was, and why is an error
 	// (document.stale) that blocks the build; once the file reads again it is gone.
 	session.handle(make_request(EditorRequestKind::OpenDocument, menu));
@@ -1318,15 +1349,18 @@ static int test_rewrite_closed_file() {
 	const std::string file = v.project.root + "/" + items;
 	TEST_EXPECT(editor_test::write_text(file, "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 10\nend\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input") && !session.document_for(items));
+	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input") &&
+			!session.document_for(items));
 	session.handle(make_request(EditorRequestKind::Save, items));
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + items) && v.activity.status == "Saved 1 file(s).");
 	std::string text, error;
 	TEST_EXPECT(read_file_text(file, text, error) && text.find("subtype") == std::string::npos &&
 	            text.find("hp 10") != std::string::npos);
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") && !session.document_for(items));
+	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") &&
+			!session.document_for(items));
 	session.handle(make_request(EditorRequestKind::Save, "items.def"));
-	TEST_EXPECT(session.outcome().done() && v.activity.status == items + " has no changes to save.");
+	TEST_EXPECT(
+			session.outcome().done() && v.activity.status == items + " has no changes to save.");
 	session.handle(make_request(EditorRequestKind::Save, "nowhere.def"));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.missing"));
 
@@ -1518,7 +1552,8 @@ static int test_prompt_belongs_to_its_project() {
 	project.set_hp(25);
 	session.handle(make_request(EditorRequestKind::Build));
 	session.handle(make_request(EditorRequestKind::SaveAll));
-	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
+	TEST_EXPECT(v.dialogs.unsaved_prompt.open &&
+			v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
 	const std::string other = project.dir.file("Other");
 	ProjectDocument created;
 	Diagnostic error;
@@ -1611,9 +1646,12 @@ static int test_boot_findings() {
 	std::string lines = boot_line("gametext.bin", "- retail: exits") + boot_line("mystery.dat", "- unknown");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
-	TEST_EXPECT(v.activity.boot_missing.size() == 2 && count_code(v.findings.diagnostics, "play.boot_missing") == 2);
-	const Diagnostic *table = finding_about(v.findings.diagnostics, "play.boot_missing", "gametext.bin");
-	const Diagnostic *mystery = finding_about(v.findings.diagnostics, "play.boot_missing", "mystery.dat");
+	TEST_EXPECT(v.activity.boot_missing.size() == 2 &&
+			count_code(v.findings.diagnostics, "play.boot_missing") == 2);
+	const Diagnostic *table =
+			finding_about(v.findings.diagnostics, "play.boot_missing", "gametext.bin");
+	const Diagnostic *mystery =
+			finding_about(v.findings.diagnostics, "play.boot_missing", "mystery.dat");
 	TEST_EXPECT(table && table->role == "gametext" && table->asset.empty());
 	TEST_EXPECT(mystery && mystery->role.empty() && mystery->message.find("Without it") == std::string::npos);
 	// An edit and its undo validate again, and so does a rescan: the rows stay, once each.
@@ -1633,7 +1671,8 @@ static int test_boot_findings() {
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 2);
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(v.activity.last_build->ok && count_code(v.findings.diagnostics, "play.boot_missing") == 2);
+	TEST_EXPECT(v.activity.last_build->ok &&
+			count_code(v.findings.diagnostics, "play.boot_missing") == 2);
 	// The project closes, its game still running: the rows go, and a later line of the game's
 	// log is ignored with no project open, in another project, and in this one opened again.
 	session.handle(make_request(EditorRequestKind::CloseProject));
@@ -1646,12 +1685,14 @@ static int test_boot_findings() {
 	lines += boot_line("vmacros.bin", "- late");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
-	TEST_EXPECT(v.activity.boot_missing.empty() && !has_code(v.findings.diagnostics, "play.boot_missing"));
+	TEST_EXPECT(v.activity.boot_missing.empty() &&
+			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	session.handle(make_request(EditorRequestKind::OpenProject, first));
 	lines += boot_line("gameerr.bin", "- late");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
-	TEST_EXPECT(v.activity.boot_missing.empty() && !has_code(v.findings.diagnostics, "play.boot_missing"));
+	TEST_EXPECT(v.activity.boot_missing.empty() &&
+			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	// That game ends; the next Play's game reports on this project, the Play after it clears it.
 	platform.exit_child(first_game);
 	session.poll();
@@ -1667,7 +1708,8 @@ static int test_boot_findings() {
 	session.poll();
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
-	TEST_EXPECT(v.activity.boot_missing.empty() && !has_code(v.findings.diagnostics, "play.boot_missing"));
+	TEST_EXPECT(v.activity.boot_missing.empty() &&
+			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	return 0;
 }
 
@@ -1681,7 +1723,8 @@ static int test_optional_rows() {
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Optional"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	TEST_EXPECT(v.project.requirements->required_missing == 0 && v.project.requirements->required_wrong_kind == 0);
+	TEST_EXPECT(v.project.requirements->required_missing == 0 &&
+			v.project.requirements->required_wrong_kind == 0);
 	size_t lacking = 0;
 	for (const RequirementRow &row : v.project.requirements->rows)
 		lacking += !row.required && row.state == RequirementState::Missing ? 1 : 0;
@@ -1697,7 +1740,7 @@ static int test_optional_rows() {
 	session.handle(brand);
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("brand.mns") != nullptr);
 	TEST_EXPECT(count_code(v.findings.diagnostics, "requirement.optional_missing") == lacking - 1 &&
-	            !finding_about(v.findings.diagnostics, "requirement.optional_missing", "brand.mns"));
+			!finding_about(v.findings.diagnostics, "requirement.optional_missing", "brand.mns"));
 	return 0;
 }
 
@@ -1729,7 +1772,8 @@ static int test_create_missing_roles() {
 	blank.role = "menutxt"; // another table than keyhelp's own blank, to tell them apart
 	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
 	TEST_EXPECT(editor_test::write_bytes(root + "/strings/keyhelp.bin", table));
-	TEST_EXPECT(finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin") != nullptr);
+	TEST_EXPECT(
+			finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin") != nullptr);
 	EditorRequest keyhelp = make_request(EditorRequestKind::CreateMissing);
 	keyhelp.names = {"keyhelp"};
 	session.handle(keyhelp);
@@ -1867,7 +1911,8 @@ static int test_fixes_apply() {
 	TEST_EXPECT(find_fix(v, "requirement.missing", "Import gametext.bin from the game data...", fix));
 	session.handle(fix.request);
 	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open && v.dialogs.import_preview.roots.size() == 1);
-	TEST_EXPECT(v.dialogs.import_preview.choices.empty() && v.dialogs.import_preview.plan->rows.size() == 1);
+	TEST_EXPECT(v.dialogs.import_preview.choices.empty() &&
+			v.dialogs.import_preview.plan->rows.size() == 1);
 	TEST_EXPECT(!v.dialogs.import_preview.roots.empty() && v.dialogs.import_preview.roots[0].entry == "gametext.bin" && v.dialogs.import_preview.roots[0].retail);
 	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
 	import.imports = v.dialogs.import_preview.roots;
@@ -1891,7 +1936,8 @@ static int test_fixes_apply() {
 	TEST_EXPECT(find_fix(v, "catalog.ignored_input", "Rewrite items.def", fix));
 	session.handle(fix.request);
 	std::string text, io_error;
-	TEST_EXPECT(session.outcome().done() && !has_code(v.findings.diagnostics, "catalog.ignored_input"));
+	TEST_EXPECT(
+			session.outcome().done() && !has_code(v.findings.diagnostics, "catalog.ignored_input"));
 	TEST_EXPECT(read_file_text(items_file, text, io_error) && text.find("subtype") == std::string::npos);
 	// A font no file of the project is: Create makes it, and the startup menu's name resolves.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -1927,7 +1973,8 @@ static int test_fixes_apply() {
 	const AssetEntry *copied = v.project.scan->find("splash.png");
 	TEST_EXPECT(session.outcome().done() && copied && copied->kind == AssetKind::Texture);
 	TEST_EXPECT(copied && !fs::exists(root + "/" + copied->relative_path + kImportSidecarSuffix));
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "reference.missing") && v.project.imports->empty());
+	TEST_EXPECT(
+			!has_code(v.findings.diagnostics, "reference.missing") && v.project.imports->empty());
 
 	// An author's PNG imported from the disk becomes an import source. With its output gone and
 	// the source no longer decoding, the pass cannot make it again and the scan says so; the
@@ -1971,10 +2018,12 @@ static int test_project_settings() {
 	// The one SettingsApplied event the last Apply posted: its serial, and its flag the failures.
 	uint64_t seen = 0;
 	const auto applied = [&](uint64_t serial) {
-		const std::vector<ViewEvent> events = editor_test::events_after(v, seen, ViewEventKind::SettingsApplied);
+		const std::vector<ViewEvent> events =
+				editor_test::events_after(v, seen, ViewEventKind::SettingsApplied);
 		seen = v.events.next_seq() - 1;
-		return events.size() == 1 && events[0].tag == serial && events[0].flag == !v.project.settings_result.failures.empty() &&
-		       events[0].path.empty() && !events[0].address.row && events[0].field.empty();
+		return events.size() == 1 && events[0].tag == serial &&
+				events[0].flag == !v.project.settings_result.failures.empty() &&
+				events[0].path.empty() && !events[0].address.row && events[0].field.empty();
 	};
 	const std::string install = dir.file("install");
 	// No project: the editor's settings apply, a project's is refused.
@@ -2062,7 +2111,8 @@ static int test_project_settings() {
 	change.serial = 10;
 	change.runtime_executable = "";
 	editor_test::apply_settings(session, change);
-	TEST_EXPECT(v.project.runtime_setting.empty() && v.activity.runtime_executable == PlayLauncher().executable);
+	TEST_EXPECT(v.project.runtime_setting.empty() &&
+			v.activity.runtime_executable == PlayLauncher().executable);
 	return 0;
 }
 
@@ -2083,7 +2133,8 @@ static int test_menu_first_screen() {
 	const std::string menu_path = menu->path();
 	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == first_row(menu) &&
 	            v.documents.selected == std::vector<NodeAddress>{first_row(menu)});
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path && v.documents.previews.menu.screen == first_row(menu).row);
+	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
+			v.documents.previews.menu.screen == first_row(menu).row);
 	const auto select = [&](const NodeAddress &address) {
 		EditorRequest request = make_request(EditorRequestKind::SelectRecord, menu_path);
 		request.edit.address = address;
@@ -2169,7 +2220,8 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->can_undo() && !items->dirty());
 	TEST_EXPECT(session.document_for(project.strings_path) == project.strings);
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == project.marker());
+	TEST_EXPECT(
+			v.documents.active == project.items_path && v.documents.selection == project.marker());
 	const Document *reread = session.document_for(menu_path);
 	TEST_EXPECT(reread != nullptr && reread != menu && reread->matches_file());
 	TEST_EXPECT(output_has(v, "Reloaded " + menu_path));
@@ -2200,7 +2252,8 @@ static int test_rescan_keeps_what_did_not_change() {
 	                                    "begin \"Marker\"\nid 100001\ntype marker\nsubtype Ruins\nhp 50\nend\n"));
 	session.handle(make_request(EditorRequestKind::Rescan));
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->dirty());
-	const Diagnostic *conflict = finding_in(v.findings.diagnostics, "document.conflict", project.items_path);
+	const Diagnostic *conflict =
+			finding_in(v.findings.diagnostics, "document.conflict", project.items_path);
 	TEST_EXPECT(conflict && conflict->severity == DiagnosticSeverity::Warning);
 	ProblemFix reload;
 	TEST_EXPECT(find_fix(v, "document.conflict", "Reload items.def", reload));
@@ -2209,7 +2262,8 @@ static int test_rescan_keeps_what_did_not_change() {
 	// Its Save is refused as a conflict, and the warning stays.
 	session.handle(make_request(EditorRequestKind::Save, project.items_path));
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.conflict"));
-	TEST_EXPECT(finding_in(v.findings.diagnostics, "document.conflict", project.items_path) != nullptr);
+	TEST_EXPECT(
+			finding_in(v.findings.diagnostics, "document.conflict", project.items_path) != nullptr);
 	// The fix asks about the edits first; Don't save reads the file.
 	session.handle(reload.request);
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::ReloadDocument &&
@@ -2243,7 +2297,8 @@ static int test_build_findings_stay() {
 	TEST_EXPECT(missing > 0);
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && count_code(v.findings.diagnostics, "build.blocked") == 1);
+	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok &&
+			count_code(v.findings.diagnostics, "build.blocked") == 1);
 	TEST_EXPECT(count_code(v.findings.diagnostics, "requirement.missing") == missing);
 	session.handle(make_request(EditorRequestKind::Rescan));
 	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && count_code(v.findings.diagnostics, "requirement.missing") == missing);
@@ -2251,7 +2306,8 @@ static int test_build_findings_stay() {
 	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && !has_code(v.findings.diagnostics, "requirement.missing"));
 	session.handle(make_request(EditorRequestKind::Build));
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !has_code(v.findings.diagnostics, "build.blocked"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok &&
+			!has_code(v.findings.diagnostics, "build.blocked"));
 
 	// The build's own findings are those its report adds to the rows it was gated on, not to
 	// the rows when it ends: an item type of zero, saved, blocks the build; corrected while it
@@ -2379,7 +2435,8 @@ static int test_view_revisions() {
 		const std::string boot = "Godot Engine v4.6.1\r\n" + boot_line("main.mnu", "- gone");
 		TEST_EXPECT(editor_test::write_text(log, boot));
 		session.poll();
-		TEST_EXPECT(v.activity.boot_missing.size() == 1 && has_code(v.findings.diagnostics, "play.boot_missing"));
+		TEST_EXPECT(v.activity.boot_missing.size() == 1 &&
+				has_code(v.findings.diagnostics, "play.boot_missing"));
 		TEST_EXPECT(moved_since(v, before) ==
 				Concerns({ViewConcern::Findings, ViewConcern::Output, ViewConcern::Run}));
 	}
@@ -2592,16 +2649,19 @@ static int test_play_then_close() {
 		session.poll();
 	session.set_poll_budget({0, 64});
 	for (size_t polls = 0; polls < 10000 && v.activity.operation.label.rfind("Packing", 0) != 0; ++polls) session.poll();
-	TEST_EXPECT(v.activity.operation.running() && v.activity.operation.label.rfind("Packing", 0) == 0);
+	TEST_EXPECT(
+			v.activity.operation.running() && v.activity.operation.label.rfind("Packing", 0) == 0);
 	TEST_EXPECT(staging_dirs(output_root) == 1 && platform.spawns == 0);
 
 	session.handle(make_request(EditorRequestKind::CloseProject));
 	TEST_EXPECT(!v.project.open && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == id && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == id &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 	TEST_EXPECT(staging_dirs(output_root) == 0 && last_good_build_dir(output_root).empty());
 	TEST_EXPECT(output_has(v, "Cancelled the build."));
 	for (int i = 0; i < 5; ++i) session.poll();
-	TEST_EXPECT(platform.spawns == 0 && v.activity.play_state == PlayState::Stopped && !v.activity.has_build);
+	TEST_EXPECT(platform.spawns == 0 && v.activity.play_state == PlayState::Stopped &&
+			!v.activity.has_build);
 
 	// CancelOperation stops a build the same way; with nothing running it is refused.
 	session.handle(make_request(EditorRequestKind::OpenProject, dir.file("project")));
@@ -2776,7 +2836,8 @@ static int test_output_cursor() {
 	TEST_EXPECT(game_says(0, 1500));
 	read_pages();
 	TEST_EXPECT(game_says(1500, 2100));
-	TEST_EXPECT(v.activity.output.size() == OutputLog::kMaxLines && v.activity.output.first_index() > 0);
+	TEST_EXPECT(v.activity.output.size() == OutputLog::kMaxLines &&
+			v.activity.output.first_index() > 0);
 	read_pages();
 	TEST_EXPECT(seen.size() == 2100);
 	bool in_order = seen.size() == 2100;
@@ -2787,10 +2848,12 @@ static int test_output_cursor() {
 	from_zero.output_cursor = 0;
 	from_zero.output_limit = 1;
 	const opennova::io::JsonValue json = session_view_to_json(v, from_zero);
-	TEST_EXPECT(json.get("output")->get_number("first", 0.0) == double(v.activity.output.first_index()) &&
-	            json.get("output")->get_number("cursor", 0.0) == double(v.activity.output.first_index()) &&
-	            json.get("output")->get_number("next", 0.0) == double(v.activity.output.next_index()) &&
-	            json.get("output")->get("lines")->array.front().string == v.activity.output[0]);
+	TEST_EXPECT(json.get("output")->get_number("first", 0.0) ==
+					double(v.activity.output.first_index()) &&
+			json.get("output")->get_number("cursor", 0.0) ==
+					double(v.activity.output.first_index()) &&
+			json.get("output")->get_number("next", 0.0) == double(v.activity.output.next_index()) &&
+			json.get("output")->get("lines")->array.front().string == v.activity.output[0]);
 	// Clear empties it; the indices go on, so a held cursor still reads what comes next.
 	const uint64_t next = v.activity.output.next_index();
 	session.handle(make_request(EditorRequestKind::ClearOutput));
@@ -2816,7 +2879,8 @@ static int test_save_picks_like_the_rest() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.duplicate"));
 	const uint64_t before = v.events.next_seq() - 1;
 	session.handle(make_request(EditorRequestKind::ShowInFiles, "items.def"));
-	const std::vector<ViewEvent> shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
+	const std::vector<ViewEvent> shown =
+			editor_test::events_after(v, before, ViewEventKind::RevealFile);
 	TEST_EXPECT(shown.size() == 1);
 	const std::string picked = shown.empty() ? std::string() : shown[0].path;
 	const std::string other = picked == "defs/items.def" ? "extra/items.def" : "defs/items.def";

@@ -90,7 +90,8 @@ static int test_menu_references() {
 			ReferenceStatus::Present);
 	TEST_EXPECT(reference_status(graph, font_use, std::string()) == ReferenceStatus::NotAReference);
 	// The finding says what it misses (S11b): the reference's kind and name, as written.
-	const Diagnostic *nope = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
+	const Diagnostic *nope =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
 	TEST_EXPECT(nope && nope->target == "%NOPE%");
 	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
 	// define it), never a font file named %NOPE%; a variable that resolves makes none.
@@ -111,11 +112,13 @@ static int test_menu_references() {
 	// that name (S12 B2).
 	edit_window(session, *document, exit, "font.name", std::string("%NO PE%"));
 	TEST_EXPECT(!missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar));
-	const Diagnostic *spaced = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
+	const Diagnostic *spaced =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(spaced && spaced->target == "%NO PE%");
 	edit_window(session, *document, exit, "font.name", std::string("nofont.fnt"));
 	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Error));
-	const Diagnostic *nofont = missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
+	const Diagnostic *nofont =
+			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
 	TEST_EXPECT(nofont && nofont->target == "nofont.fnt" && nofont->scope.empty() && nofont->role.empty());
 	TEST_EXPECT(
 			missing_finding(graph, *document, exit, font_use, std::string("nofont.fnt"), picked) &&
@@ -125,13 +128,16 @@ static int test_menu_references() {
 	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
 	TEST_EXPECT(reference_status(graph, document->field_on(row, *value),
 						std::string("missing.tga")) == ReferenceStatus::Missing);
-	const Diagnostic *texture = missing_of(view.findings.diagnostics, "value", ReferenceKind::MenuTexture);
+	const Diagnostic *texture =
+			missing_of(view.findings.diagnostics, "value", ReferenceKind::MenuTexture);
 	TEST_EXPECT(texture && texture->target == "missing.tga");
 	edit_window(session, *document, exit, "string.type", std::string("ID"));
 	edit_window(session, *document, exit, "string.value", std::string("NO_SUCH_ID"));
-	TEST_EXPECT(has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
+	TEST_EXPECT(
+			has_missing(view.findings.diagnostics, "string.value", DiagnosticSeverity::Warning));
 	// A string id's scope is where it was looked up: the "menu" section of its window's table.
-	const Diagnostic *text_id = missing_of(view.findings.diagnostics, "string.value", ReferenceKind::TextId);
+	const Diagnostic *text_id =
+			missing_of(view.findings.diagnostics, "string.value", ReferenceKind::TextId);
 	TEST_EXPECT(text_id && text_id->target == "NO_SUCH_ID" && text_id->scope.find("/menu") != std::string::npos);
 	// Every ACTION's file is an edge (a second action's too), every SOUND's file a sound
 	// bank the game opens by that name (a warning while the project lacks it).

@@ -32,8 +32,8 @@ void DocumentsView::select_only(const NodeAddress &address) {
 
 void DocumentsView::select(const std::string &path, const NodeAddress &address, SelectMode mode) {
 	// Joining a selection stays inside its document and row; anything else starts over.
-	const bool joins =
-			mode != SelectMode::Replace && path == active && address.row && selection.row == address.row;
+	const bool joins = mode != SelectMode::Replace && path == active && address.row &&
+			selection.row == address.row;
 	active = path;
 	if (!joins) return select_only(address);
 	const auto found = std::find(selected.begin(), selected.end(), address);
@@ -84,7 +84,8 @@ void DocumentsView::repair_selection(const Document &document, const NodeAddress
 	if (document.path() != active) return;
 	std::vector<NodeAddress> kept;
 	for (const NodeAddress &address : selected)
-		if (record_exists(document, address) && std::find(kept.begin(), kept.end(), address) == kept.end())
+		if (record_exists(document, address) &&
+				std::find(kept.begin(), kept.end(), address) == kept.end())
 			kept.push_back(address);
 	if (record_exists(document, selection)) {
 		selected = kept;

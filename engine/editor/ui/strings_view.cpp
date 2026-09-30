@@ -125,7 +125,9 @@ void StringsView::draw_strings(Workspace &workspace, const StringsDocument &docu
 		const std::vector<NodeId> &ids = section->collections.empty() ? std::vector<NodeId>() : section->collections[0];
 		size_t at = SIZE_MAX;
 		for (size_t i = 0; i < ids.size(); ++i)
-			if (view.documents.selection.row == section->id && view.documents.selection.child == ids[i]) at = i;
+			if (view.documents.selection.row == section->id &&
+					view.documents.selection.child == ids[i])
+				at = i;
 		ImGui::PushID("strings");
 		ui_kit::WrapRow row;
 		ui_kit::RowTools tools;
@@ -169,7 +171,8 @@ void StringsView::draw_strings(Workspace &workspace, const StringsDocument &docu
 	for (const NodeAddress &string : shown) {
 		ImGui::PushID(int(string.child));
 		ImGui::TableNextRow();
-		const bool on = view.documents.selection.row == string.row && view.documents.selection.child == string.child;
+		const bool on = view.documents.selection.row == string.row &&
+				view.documents.selection.child == string.child;
 		if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
 		ImGui::TableNextColumn();
 		const float x = ImGui::GetCursorScreenPos().x;

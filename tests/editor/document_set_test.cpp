@@ -86,8 +86,9 @@ static int test_paste_and_duplicate_agree() {
 		TEST_EXPECT(menus.act(EditorRequestKind::Paste));
 		const std::string pasted = menus.menu().serialize().text;
 		Document::Placement pasted_at;
-		TEST_EXPECT(pasted != original && menus.menu().placement(v.documents.selection, pasted_at) &&
-		            pasted_at.owner.child == parent && pasted_at.index == position);
+		TEST_EXPECT(pasted != original &&
+				menus.menu().placement(v.documents.selection, pasted_at) &&
+				pasted_at.owner.child == parent && pasted_at.index == position);
 		const std::string pasted_name = menus.menu().record_name(v.documents.selection);
 		menus.session.handle(make_request(EditorRequestKind::Undo, menus.menu().path()));
 		TEST_EXPECT(menus.menu().serialize().text == original);
@@ -150,7 +151,8 @@ static int test_remembered_selections() {
 	menus.select(extra_main, SelectMode::Replace, extra->path());
 	menus.session.handle(make_request(EditorRequestKind::OpenDocument, menu));
 	TEST_EXPECT(v.documents.active == menu && v.documents.selection == menus.at(kExit) &&
-	            v.documents.selected == std::vector<NodeAddress>({menus.at(kTitle), menus.at(kExit)}));
+			v.documents.selected ==
+					std::vector<NodeAddress>({ menus.at(kTitle), menus.at(kExit) }));
 	menus.session.handle(make_request(EditorRequestKind::OpenDocument, "extra.mnu"));
 	TEST_EXPECT(v.documents.active == extra->path() && v.documents.selection == extra_main && v.documents.selected.size() == 1);
 
@@ -174,7 +176,8 @@ static int test_remembered_selections() {
 	menus.session.handle(make_request(EditorRequestKind::CloseDocument, menu));
 	TEST_EXPECT(!menus.session.document_for(menu) && v.documents.active == extra->path());
 	menus.session.handle(make_request(EditorRequestKind::OpenDocument, menu));
-	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 && !v.documents.selection.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 &&
+			!v.documents.selection.child);
 	return 0;
 }
 

@@ -70,13 +70,15 @@ SessionView problems_view() {
 	SessionView v;
 	v.project.open = true;
 	v.project.root = "C:/mods/Problems";
-	editor_test::own(v.project.scan).entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
-	                  file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
-	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
-	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
+	editor_test::own(v.project.scan).entries = { file_entry("items.def", "defs/items.def",
+														 AssetKind::ItemDefs),
+		file_entry("a.mnu", "menus/a.mnu", AssetKind::Menu),
+		file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
+		file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings) };
 	editor_test::own(v.project.scan).index(); // a scan made by hand is indexed, as the session's is
-	editor_test::own(v.project.requirements).rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
-	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
+	editor_test::own(v.project.requirements).rows = { missing_row("gametext", "gametext.bin",
+															  AssetKind::Strings),
+		missing_row("main_menu", "main.mnu", AssetKind::Menu) };
 	editor_test::own(v.project.requirements).required_total = 2;
 	editor_test::own(v.project.requirements).required_missing = 2;
 	v.project.retail_files = {"gametext.bin"};
@@ -308,7 +310,8 @@ int test_proposals() {
 	TEST_EXPECT(list.group_fixes(1).requests.empty() && list.group_fixes(2).requests.empty());
 
 	// The summary's Fix alls: a Create and an import list, each confirmed by kind.
-	editor_test::own(v.project.requirements).rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
+	editor_test::own(v.project.requirements)
+			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
 	editor_test::own(v.project.requirements).required_missing = 3;
 	v.project.retail_files = {"cmap.mnu", "gametext.bin"};
 	v.findings.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
@@ -445,7 +448,8 @@ int test_fixes_lazy() {
 	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
 		const std::string name = "f" + std::to_string(file) + ".def";
-		editor_test::own(v.project.scan).entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+		editor_test::own(v.project.scan)
+				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		const std::string message = "Finding " + std::to_string(i) + ": a line the game ignores.";

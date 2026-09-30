@@ -351,8 +351,9 @@ static int test_busy_gate() {
 	EditorRequest answer = make_request(EditorRequestKind::ResolveUnsaved);
 	answer.unsaved_choice = UnsavedChoice::Save;
 	session.handle(answer);
-	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open && items->dirty() &&
-	            session.outcome().findings.size() == 1 && session.outcome().findings[0].code == "operation.busy");
+	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open &&
+			items->dirty() && session.outcome().findings.size() == 1 &&
+			session.outcome().findings[0].code == "operation.busy");
 	answer.unsaved_choice = UnsavedChoice::Discard;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.dialogs.unsaved_prompt.open && session.document_for("items.def") == nullptr &&
@@ -370,9 +371,11 @@ static int test_busy_gate() {
 	TEST_EXPECT(editor_test::write_text(dir.file("loose.txt"), "loose"));
 	preview.paths = {dir.file("loose.txt")};
 	session.handle(preview);
-	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open && v.activity.operation.id == build);
+	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open &&
+			v.activity.operation.id == build);
 	session.handle(make_request(EditorRequestKind::ImportFiles));
-	TEST_EXPECT(!session.outcome().done() && refused_busy(session) && v.activity.operation.id == build);
+	TEST_EXPECT(
+			!session.outcome().done() && refused_busy(session) && v.activity.operation.id == build);
 	session.handle(make_request(EditorRequestKind::CancelImport));
 	TEST_EXPECT(!v.dialogs.import_preview.open);
 
@@ -384,8 +387,9 @@ static int test_busy_gate() {
 	            v.activity.operation.id == build);
 	answer.unsaved_choice = UnsavedChoice::Save;
 	session.handle(answer);
-	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open && items->dirty() &&
-	            session.outcome().findings.size() == 1 && session.outcome().findings[0].code == "operation.busy");
+	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open &&
+			items->dirty() && session.outcome().findings.size() == 1 &&
+			session.outcome().findings[0].code == "operation.busy");
 	answer.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	TEST_EXPECT(!v.dialogs.unsaved_prompt.open && v.activity.operation.id == build);
@@ -424,13 +428,15 @@ static int test_busy_gate() {
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open && v.project.open && v.activity.operation.id == second);
 	answer.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(answer);
-	TEST_EXPECT(v.project.open && v.activity.operation.id == second && v.activity.last_operation.id == build);
+	TEST_EXPECT(v.project.open && v.activity.operation.id == second &&
+			v.activity.last_operation.id == build);
 	session.handle(make_request(EditorRequestKind::CloseProject));
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open);
 	answer.unsaved_choice = UnsavedChoice::Save;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.project.open && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == second && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == second &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 	TEST_EXPECT(read_file_text(root + "/defs/items.def", text, error) && text.find("hp 30") != std::string::npos);
 
 	// With nothing unsaved a close cancels the build at once: nothing of it is kept.
@@ -441,7 +447,8 @@ static int test_busy_gate() {
 	session.poll();
 	session.handle(make_request(EditorRequestKind::CloseProject));
 	TEST_EXPECT(session.outcome().done() && !v.project.open && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == third && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == third &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 
 	// A project switch cancels the build only once its own checks pass: a NewProject where a
 	// project is already, and an OpenProject of a folder that holds none, fail and keep it; one
@@ -458,7 +465,8 @@ static int test_busy_gate() {
 	TEST_EXPECT(!session.outcome().done() && v.project.open && v.project.document->title == "Gate" && v.activity.operation.id == fourth);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("second"), "Second"));
 	TEST_EXPECT(session.outcome().done() && v.project.open && v.project.document->title == "Second" && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == fourth && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == fourth &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 	return 0;
 }
 
@@ -576,7 +584,8 @@ static int test_uncancellable_operation() {
 	answer.unsaved_choice = UnsavedChoice::Discard;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.project.open && packed.cancelled && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == building && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == building &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 	TEST_EXPECT(read_file_text(dir.file("project") + "/defs/items.def", text, error) && text.find("hp 10") != std::string::npos);
 	return 0;
 }
@@ -602,7 +611,8 @@ static int test_import_plan_superseded() {
 	session.handle(preview);
 	TEST_EXPECT(session.outcome().done() && v.dialogs.import_preview.open);
 	TEST_EXPECT(first.cancelled && first.destroyed && first.finishes == 0 && !v.activity.operation.running());
-	TEST_EXPECT(v.activity.last_operation.id == id && v.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(v.activity.last_operation.id == id &&
+			v.activity.last_operation.end == OperationEnd::Cancelled);
 	session.handle(make_request(EditorRequestKind::CancelImport));
 	TEST_EXPECT(!v.dialogs.import_preview.open);
 
@@ -611,7 +621,8 @@ static int test_import_plan_superseded() {
 	const uint64_t kept = session.start_operation(std::move(stubborn));
 	TEST_EXPECT(kept > id && busy_refuses(EditorRequestKind::PreviewImport, v.activity.operation));
 	session.handle(preview);
-	TEST_EXPECT(!session.outcome().done() && refused_busy(session) && !v.dialogs.import_preview.open);
+	TEST_EXPECT(
+			!session.outcome().done() && refused_busy(session) && !v.dialogs.import_preview.open);
 	TEST_EXPECT(!second.cancelled && v.activity.operation.id == kept);
 	// No second operation starts beside it.
 	TEST_EXPECT(session.start_operation(std::make_unique<FakeOperation>(third, 10)) == 0);
@@ -637,7 +648,8 @@ static int test_settings_parts_weighed() {
 	const SessionView &v = session.view();
 	// The serial the last Apply's SettingsApplied event carried back.
 	const auto applied = [&v]() {
-		const std::vector<ViewEvent> events = editor_test::events_after(v, 0, ViewEventKind::SettingsApplied);
+		const std::vector<ViewEvent> events =
+				editor_test::events_after(v, 0, ViewEventKind::SettingsApplied);
 		return events.empty() ? uint64_t(0) : events.back().tag;
 	};
 	session.set_poll_budget({0, 256});
@@ -660,7 +672,8 @@ static int test_settings_parts_weighed() {
 	// An operation that writes the project: the name and the game install wait, the runtime (the
 	// editor's own setting) is written.
 	const uint64_t id = session.start_operation(std::make_unique<FakeOperation>(tally, 1000, OperationKind::Open));
-	TEST_EXPECT(id != 0 && !busy_refuses(EditorRequestKind::ApplyProjectSettings, v.activity.operation));
+	TEST_EXPECT(id != 0 &&
+			!busy_refuses(EditorRequestKind::ApplyProjectSettings, v.activity.operation));
 	const std::string install = v.project.retail_directory;
 	EditorRequest held = make_request(EditorRequestKind::ApplyProjectSettings);
 	held.settings.serial = 11;

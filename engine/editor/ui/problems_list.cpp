@@ -78,7 +78,9 @@ struct ProblemsList::Caches {
 	ProblemQuery refreshed;
 };
 
-ProblemsList::ProblemsList() : caches_(std::make_unique<Caches>()) { caches_->query.grouping = ProblemGrouping::Kind; }
+ProblemsList::ProblemsList() : caches_(std::make_unique<Caches>()) {
+	caches_->query.grouping = ProblemGrouping::Kind;
+}
 
 ProblemsList::~ProblemsList() = default;
 
@@ -116,8 +118,8 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	const uint64_t answered = caches.answers.generation();
 	const uint64_t fixed = caches.fixes.generation(view);
 	const RevisionKey key = cache_key(view, caches.query);
-	if (!stale_ && view_ == &view && key_ == key && caches.refreshed == caches.query && answered_ == answered &&
-	    fixed_ == fixed)
+	if (!stale_ && view_ == &view && key_ == key && caches.refreshed == caches.query &&
+			answered_ == answered && fixed_ == fixed)
 		return answer;
 	view_ = &view;
 	key_ = key;

@@ -783,10 +783,12 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	JsonValue prompt = JsonValue::make_object();
 	prompt.set("open", boolean(view.dialogs.unsaved_prompt.open));
 	if (view.dialogs.unsaved_prompt.open) {
-		prompt.set("action", json_string(editor_request_kind_token(view.dialogs.unsaved_prompt.action)));
+		prompt.set("action",
+				json_string(editor_request_kind_token(view.dialogs.unsaved_prompt.action)));
 		if (!view.dialogs.unsaved_prompt.target.empty()) prompt.set("target", json_string(view.dialogs.unsaved_prompt.target));
 		JsonValue files = JsonValue::make_array();
-		for (const std::string &file : view.dialogs.unsaved_prompt.files) files.push(json_string(file));
+		for (const std::string &file : view.dialogs.unsaved_prompt.files)
+			files.push(json_string(file));
 		prompt.set("files", std::move(files));
 		prompt.set("can_discard", boolean(view.dialogs.unsaved_prompt.can_discard));
 	}
@@ -857,7 +859,8 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	JsonValue requirements = JsonValue::make_object();
 	requirements.set("total", json_number(double(view.project.requirements->required_total)));
 	requirements.set("missing", json_number(double(view.project.requirements->required_missing)));
-	requirements.set("wrong_kind", json_number(double(view.project.requirements->required_wrong_kind)));
+	requirements.set(
+			"wrong_kind", json_number(double(view.project.requirements->required_wrong_kind)));
 	JsonValue rows = JsonValue::make_array();
 	for (const RequirementRow &row : view.project.requirements->rows) {
 		JsonValue entry = JsonValue::make_object();
@@ -884,7 +887,8 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	out.set("active_document", json_string(view.documents.active));
 	out.set("selection", address_to_json(view.documents.selection));
 	JsonValue selected = JsonValue::make_array();
-	for (const NodeAddress &address : view.documents.selected) selected.push(address_to_json(address));
+	for (const NodeAddress &address : view.documents.selected)
+		selected.push(address_to_json(address));
 	out.set("selected", std::move(selected));
 	out.set("clipboard_bytes", json_number(double(view.documents.clipboard.size())));
 
@@ -899,9 +903,12 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		build.set("id", json_string(view.activity.last_build->build_id));
 		build.set("dir", json_string(view.activity.last_build->build_dir));
 		build.set("reused_existing", boolean(view.activity.last_build->reused_existing));
-		build.set("archives_written", json_number(double(view.activity.last_build->archives_written.size())));
-		build.set("archives_reused", json_number(double(view.activity.last_build->archives_reused.size())));
-		build.set("loose_written", json_number(double(view.activity.last_build->loose_written.size())));
+		build.set("archives_written",
+				json_number(double(view.activity.last_build->archives_written.size())));
+		build.set("archives_reused",
+				json_number(double(view.activity.last_build->archives_reused.size())));
+		build.set("loose_written",
+				json_number(double(view.activity.last_build->loose_written.size())));
 		build.set("diagnostics", diagnostics_to_json(view.activity.last_build->diagnostics));
 	}
 	out.set("build", std::move(build));
@@ -1244,8 +1251,9 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 					: ReferenceStatus::Unverified;
 			entry.set("reference_status", json_string(reference_status_token(status)));
 			if (!symbol.empty()) entry.set("symbol", json_string(symbol));
-			const std::string target =
-					view.findings.graph ? reference_target_file(*view.findings.graph, field, value) : std::string();
+			const std::string target = view.findings.graph
+					? reference_target_file(*view.findings.graph, field, value)
+					: std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
@@ -1306,8 +1314,9 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices =
-	        view.findings.graph ? reference_choices(*view.findings.graph, field) : std::vector<ReferenceChoice>();
+	const std::vector<ReferenceChoice> choices = view.findings.graph
+			? reference_choices(*view.findings.graph, field)
+			: std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceChoice &choice : choices) {
 		JsonValue entry = JsonValue::make_object();

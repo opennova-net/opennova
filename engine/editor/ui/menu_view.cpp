@@ -217,8 +217,8 @@ void MenuView::draw_windows(Workspace &workspace, const MnuDocument &document, c
 	const std::vector<NodeAddress> none;
 	const NodeAddress primary = here ? selection : NodeAddress();
 	const std::vector<NodeAddress> &records = here ? view.documents.selected : none;
-	const MenuClipboard board =
-	        menu_clipboard(document, screen.id, primary, records, !view.documents.clipboard.empty());
+	const MenuClipboard board = menu_clipboard(
+			document, screen.id, primary, records, !view.documents.clipboard.empty());
 	const bool only_windows = board.copy;
 
 	{

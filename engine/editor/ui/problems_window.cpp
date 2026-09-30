@@ -191,7 +191,8 @@ void ProblemsWindow::draw_lines(const SessionView &view, const ProblemAnswer &an
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const Line &line = list_.lines()[first + size_t(i)];
 			if (line.header) draw_header(view, answer, line);
-			else if (line.finding < view.findings.diagnostics.size()) draw_finding(view, line, false);
+			else if (line.finding < view.findings.diagnostics.size())
+				draw_finding(view, line, false);
 		}
 }
 

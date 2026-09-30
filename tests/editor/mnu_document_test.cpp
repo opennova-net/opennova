@@ -217,7 +217,8 @@ int structure_and_save() {
 	TEST_EXPECT(!find_definition(AssetGraph(), *document, "EXIT", elsewhere,
 			menu_window_scope(document->path(), document->rows()[1]->name())));
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu", document->locator(exit)));
-	TEST_EXPECT(view.documents.selection == exit && window_of(*document, view.documents.selection)->name == "EXIT");
+	TEST_EXPECT(view.documents.selection == exit &&
+			window_of(*document, view.documents.selection)->name == "EXIT");
 	return 0;
 }
 
@@ -253,8 +254,8 @@ int validation() {
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	TEST_EXPECT(reference_status(*view.findings.graph, font_use, std::string("%NOPE%")) ==
 			ReferenceStatus::Missing);
-	TEST_EXPECT(reference_status(*view.findings.graph, font_use, std::string("%DEF_FONTNAME_LG%")) ==
-	            ReferenceStatus::Present);
+	TEST_EXPECT(reference_status(*view.findings.graph, font_use,
+						std::string("%DEF_FONTNAME_LG%")) == ReferenceStatus::Present);
 	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	// An APPEARANCE's value is a texture when its TYPE is IMAGE (field_on).
 	const NodeAddress row = child_of(*document, exit, "appearance");
@@ -437,15 +438,17 @@ int windows_at_depth() {
 	remove.edit = op(EditOperation::Remove, exit);
 	session.handle(remove);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.documents.selection == root && view.documents.selected == std::vector<NodeAddress>{root});
+	TEST_EXPECT(view.documents.selection == root &&
+			view.documents.selected == std::vector<NodeAddress>{ root });
 	session.handle(make_request(EditorRequestKind::Undo, document->path()));
 	TEST_EXPECT(view.documents.selection == root && window_of(*document, exit));
 	// A window added inside TITLE is selected.
 	EditorRequest add = make_request(EditorRequestKind::EditRecord, document->path());
 	add.edit = op(EditOperation::Add, {0, kWindow, 0}, title.child);
 	session.handle(add);
-	TEST_EXPECT(session.last_edit_ok() && view.documents.selection.child == document->last_added() &&
-	            document->ancestors(view.documents.selection).back() == title);
+	TEST_EXPECT(session.last_edit_ok() &&
+			view.documents.selection.child == document->last_added() &&
+			document->ancestors(view.documents.selection).back() == title);
 	session.handle(make_request(EditorRequestKind::Undo, document->path()));
 	// A drag: edits sharing a gesture are one undo step, and the session validates once,
 	// when the gesture ends, however many samples it took.
@@ -718,7 +721,8 @@ int copy_and_paste() {
 	select(exit, SelectMode::Replace);
 	select(title, SelectMode::Add);
 	session.handle(make_request(EditorRequestKind::Copy, document->path()));
-	TEST_EXPECT(session.last_edit_ok() && view.documents.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
+	TEST_EXPECT(
+			session.last_edit_ok() && view.documents.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
 	// Into a second screen's root: the names are free there.
 	Diagnostic error;
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
@@ -815,7 +819,8 @@ int duplicate_selection() {
 	screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) ==
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "MAIN2", "TITLE2", "EXIT2"}));
-	TEST_EXPECT(view.documents.selected.size() == 1 && depth_of(*document, view.documents.selection) == 0);
+	TEST_EXPECT(view.documents.selected.size() == 1 &&
+			depth_of(*document, view.documents.selection) == 0);
 	TEST_EXPECT(undo());
 	// Two of EXIT's four APPEARANCE rows (the first and the third): each copy after its own.
 	select(child_of(*document, exit, "appearance", 0), SelectMode::Replace);

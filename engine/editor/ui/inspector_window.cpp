@@ -198,7 +198,8 @@ void go_to_tool(Workspace &workspace, const FieldUse &field, const Value &value,
 			ui_kit::tooltip(targets.empty() ? tip : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets));
 	}
 	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target : reference_targets(*view.findings.graph, *view.project.scan, field, value))
+	for (const ReferenceTarget &target :
+			reference_targets(*view.findings.graph, *view.project.scan, field, value))
 		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
 	ImGui::EndPopup();
 }

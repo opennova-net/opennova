@@ -134,7 +134,8 @@ static int test_menu_tools() {
 	// path naming the stylesheet, and neither asks anything of it.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
-	TEST_EXPECT(style && view.documents.active == style->path() && view.documents.previews.menu.path.empty());
+	TEST_EXPECT(style && view.documents.active == style->path() &&
+			view.documents.previews.menu.path.empty());
 	if (!style) return 1;
 	const uint64_t style_revision = style->revision();
 	const std::string rename_first = R"({"edits": [{"op": "set", "id": 1, "field": "name", "value": "RENAMED"}]})";
@@ -333,7 +334,8 @@ static int test_menu_tools() {
 	// the one menu, so the edit of an id the tree gave lands on it, not on the stylesheet's
 	// record of that id.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
-	TEST_EXPECT(view.documents.active == style->path() && view.documents.previews.menu.path == menu->path());
+	TEST_EXPECT(view.documents.active == style->path() &&
+			view.documents.previews.menu.path == menu->path());
 	TEST_EXPECT(menu_tree_to_json(view, "").get_string("path", "") == menu->path() &&
 	            menu_findings_to_json(view, "").get_string("path", "") == menu->path());
 	const uint64_t style_before = style->revision();

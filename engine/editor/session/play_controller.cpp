@@ -40,7 +40,9 @@ void PlayController::follow_launcher(const PlayLauncher &launcher) {
 	launcher_ = launcher;
 	launcher_.mcp_port = 0;
 	const std::string runtime = resolve_runtime_executable();
-	if (view_.activity.source_run == launcher_.source_run && view_.activity.runtime_executable == runtime) return;
+	if (view_.activity.source_run == launcher_.source_run &&
+			view_.activity.runtime_executable == runtime)
+		return;
 	view_.activity.source_run = launcher_.source_run;
 	view_.activity.runtime_executable = runtime;
 	core_.touch(ViewConcern::Preferences);
@@ -81,11 +83,12 @@ void PlayController::start() {
 	view_.activity.boot_missing.clear();
 	core_.problems().set_play_findings({});
 	const size_t rows = view_.findings.diagnostics.size();
-	view_.findings.diagnostics.erase(std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
-	                                       [](const Diagnostic &d) {
-		                                       return d.code == "play.boot_missing" || d.code == "play.crashed";
-	                                       }),
-	                        view_.findings.diagnostics.end());
+	view_.findings.diagnostics.erase(
+			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
+					[](const Diagnostic &d) {
+						return d.code == "play.boot_missing" || d.code == "play.crashed";
+					}),
+			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
 	if (view_.findings.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
 	boot_project_ = view_.project.root;
@@ -115,11 +118,11 @@ void PlayController::start() {
 			return;
 		}
 		plan = launcher.source_run
-		               ? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
-		                                         view_.project.document->target_game, launcher.mcp_port, std::string(),
-		                                         launcher.engine_args)
-		               : make_play_launch_plan(executable, build_dir, view_.project.document->target_game,
-		                                       launcher.mcp_port, std::string(), launcher.engine_args);
+				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
+						  view_.project.document->target_game, launcher.mcp_port, std::string(),
+						  launcher.engine_args)
+				: make_play_launch_plan(executable, build_dir, view_.project.document->target_game,
+						  launcher.mcp_port, std::string(), launcher.engine_args);
 	}
 	// The game rewrites its log; drop the previous run's so the tail starts clean.
 	fs::remove(plan.log_file, ec);
@@ -261,7 +264,8 @@ void PlayController::absorb_exit() {
 	play_lease_ = PlayLease();
 	view_.activity.play_exited_on_its_own = play_.exited_on_its_own();
 	view_.activity.play_exit_code = play_.exit_code();
-	std::string line = view_.activity.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
+	std::string line =
+			view_.activity.play_exited_on_its_own ? "The game exited." : "The game was stopped.";
 	if (view_.activity.play_exited_on_its_own && view_.activity.play_exit_code > 0) {
 		std::string code = std::to_string(view_.activity.play_exit_code);
 		if (view_.activity.play_exit_code > 0xFFFF) {

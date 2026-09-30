@@ -214,7 +214,8 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 		const size_t uses = plan.sites.size() - 1;
 		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
 		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)");
-		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
+		view_.activity.status =
+				"Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
 	} else {
 		view_.activity.status = "The rename did not finish.";
 	}

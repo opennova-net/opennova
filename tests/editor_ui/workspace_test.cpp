@@ -149,7 +149,8 @@ SessionView seeded_view() {
 	v.project.open = true;
 	v.project.root = "C:/mods/My Game";
 	editor_test::own(v.project.document).title = "My Game";
-	editor_test::own(v.project.scan).entries.push_back(file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu));
+	editor_test::own(v.project.scan)
+			.entries.push_back(file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu));
 	editor_test::own(v.project.scan).index();
 	RequirementRow row;
 	row.role = "main_menu";
@@ -253,11 +254,13 @@ void test_workspace_layout() {
 	Diagnostic error;
 	CHECK(catalog->load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error), "catalog loads");
 	CHECK(!catalog->blocked() && catalog->ignored_lines() == 1, "an ignored line does not block");
-	editor_test::own(v.project.scan).entries.push_back(file_entry("items.def", "items.def", AssetKind::ItemDefs));
+	editor_test::own(v.project.scan)
+			.entries.push_back(file_entry("items.def", "items.def", AssetKind::ItemDefs));
 	editor_test::own(v.project.scan).index();
 	v.documents.open.push_back(catalog);
 	v.documents.active = catalog->path();
-	v.documents.selection = {catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item), 0};
+	v.documents.selection = { catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item),
+		0 };
 	windows.set_view(&v);
 	for (uint64_t i = 9; i < 15; ++i) frame(windows, i);
 	CHECK(ImGui::GetDrawData()->TotalVtxCount > 0, "the project layout draws");
@@ -521,7 +524,8 @@ void test_thirty_tabs() {
 		char file[16];
 		std::snprintf(file, sizeof(file), "m%02d.mnu", i);
 		menus.push_back(menu_at(dir, file, (std::string("menus/") + file).c_str()));
-		editor_test::own(v.project.scan).entries.push_back(file_entry(file, menus.back()->path(), AssetKind::Menu));
+		editor_test::own(v.project.scan)
+				.entries.push_back(file_entry(file, menus.back()->path(), AssetKind::Menu));
 		v.documents.open.push_back(menus.back());
 	}
 	editor_test::own(v.project.scan).index();
@@ -644,9 +648,11 @@ void test_project_settings() {
 		ui.activate(item_id(dialog, {"Apply"}));
 		requests = serve(ui, session);
 		CHECK(one(requests, EditorRequestKind::ApplyProjectSettings) &&
-		              newest_event(v, ViewEventKind::SettingsApplied).tag == requests[0].settings.serial &&
-		              v.project.settings_result.failures.size() == 1 && v.project.runtime_setting.empty(),
-		      "the runtime is not written");
+						newest_event(v, ViewEventKind::SettingsApplied).tag ==
+								requests[0].settings.serial &&
+						v.project.settings_result.failures.size() == 1 &&
+						v.project.runtime_setting.empty(),
+				"the runtime is not written");
 		CHECK(modal_open("Project settings") && logged_frame(ui).find("cannot create") != std::string::npos,
 		      "the dialog stays open, saying why, on every Apply that fails");
 	}
@@ -692,7 +698,8 @@ void test_project_settings() {
 	      "the folder in its field, nothing in the other");
 	ui.activate(item_id(dialog, {"Apply"}));
 	serve(ui, session);
-	CHECK(!modal_open("Project settings") && v.project.retail_directory == install, "the game install set");
+	CHECK(!modal_open("Project settings") && v.project.retail_directory == install,
+			"the game install set");
 
 	// Open in Armory with a new name typed and a Browse... pending, then the editor MCP opens
 	// another project: the dialog closes, raising nothing; the answer that comes after, in
@@ -823,7 +830,8 @@ void test_menu_bar_status() {
 	v.documents.open = {a, b, c};
 	for (int i = 0; i < 7; ++i) v.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "catalog.x", "An error."));
 	for (int i = 0; i < 5; ++i) v.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "catalog.y", "A warning."));
-	v.findings.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Info, "catalog.z", "A note."));
+	v.findings.diagnostics.push_back(
+			make_diagnostic(DiagnosticSeverity::Info, "catalog.z", "A note."));
 	v.activity.operation.id = 7;
 	v.activity.operation.kind = OperationKind::Build;
 	v.activity.operation.done = 3 * 1024 * 1024;
@@ -961,12 +969,13 @@ void test_files_window() {
 	v.project.open = true;
 	v.project.root = "C:/mods/Files";
 	editor_test::own(v.project.document).title = "Files";
-	editor_test::own(v.project.scan).entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
-	                  file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu),
-	                  file_entry("options.mnu", "menus/sub/options.mnu", AssetKind::Menu),
-	                  file_entry("logo.png", "art/logo.png", AssetKind::ImageSource),
-	                  file_entry("logo.pcx", ".opennova/imported/0a1b/logo.pcx", AssetKind::Texture),
-	                  file_entry("readme.txt", "readme.txt", AssetKind::Text)};
+	editor_test::own(v.project.scan).entries = { file_entry("items.def", "defs/items.def",
+														 AssetKind::ItemDefs),
+		file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu),
+		file_entry("options.mnu", "menus/sub/options.mnu", AssetKind::Menu),
+		file_entry("logo.png", "art/logo.png", AssetKind::ImageSource),
+		file_entry("logo.pcx", ".opennova/imported/0a1b/logo.pcx", AssetKind::Texture),
+		file_entry("readme.txt", "readme.txt", AssetKind::Text) };
 	editor_test::own(v.project.scan).entries[4].imported_from = "art/logo.png";
 	editor_test::own(v.project.scan).entries[0].size_bytes = 3 * 1024;
 	editor_test::own(v.project.scan).index();
@@ -1131,7 +1140,8 @@ void test_files_window() {
 	ui.frames(3);
 	CHECK(window->selected() == "menus/sub/options.mnu" && files_text().find("options.mnu") != std::string::npos,
 	      "the file asked for selected, the filter that hid it cleared");
-	post_event(v, ViewEventKind::RevealFile, "menus/sub/options.mnu", NodeAddress(), std::string(), true);
+	post_event(v, ViewEventKind::RevealFile, "menus/sub/options.mnu", NodeAddress(), std::string(),
+			true);
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Rename options.mnu to") != std::string::npos, "Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
@@ -1214,7 +1224,8 @@ void test_import_dialog() {
 	CHECK(one(requests, EditorRequestKind::SetImportDependencies) && !requests[0].flag, "the check box asks for the setting");
 
 	// An archive's members to choose from: a choice checked plans the chosen files again.
-	v.dialogs.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false}, {"C:/assets/data.pff", "stat.mnu", false, false}};
+	v.dialogs.import_preview.choices = { { "C:/assets/data.pff", "main.mnu", false, false },
+		{ "C:/assets/data.pff", "stat.mnu", false, false } };
 	post_event(v, ViewEventKind::ImportPlanned);
 	ui.frames(3);
 	ui.away();

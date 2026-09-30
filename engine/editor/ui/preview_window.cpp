@@ -75,7 +75,8 @@ void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
 	const Document *document = open_document(view, path);
 	std::string text = basename_of(path);
 	if (family == PreviewFamily::Menu) {
-		if (const Node *screen = document ? document->row(view.documents.previews.menu.screen) : nullptr)
+		if (const Node *screen =
+						document ? document->row(view.documents.previews.menu.screen) : nullptr)
 			text += " - " + screen->name();
 	} else if (ModelPreviewViewport *device = workspace_.devices().model) {
 		// The model pane's device: the line names the rig's model.

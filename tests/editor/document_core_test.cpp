@@ -1187,12 +1187,14 @@ static int test_selection() {
 	view.documents.select(document.path(), fake.y, SelectMode::Add);
 	TEST_EXPECT(view.documents.selection == fake.y && view.documents.selected == std::vector<NodeAddress>({fake.x, fake.y}));
 	view.documents.select(document.path(), fake.y, SelectMode::Toggle);
-	TEST_EXPECT(view.documents.selection == fake.x && view.documents.selected == std::vector<NodeAddress>({fake.x}));
+	TEST_EXPECT(view.documents.selection == fake.x &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
 	view.documents.select(document.path(), fake.a2, SelectMode::Toggle);
 	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected.size() == 2);
 	// Another row (or another document) starts over, whatever the mode.
 	view.documents.select(document.path(), fake.b1, SelectMode::Add);
-	TEST_EXPECT(view.documents.selection == fake.b1 && view.documents.selected == std::vector<NodeAddress>({fake.b1}));
+	TEST_EXPECT(view.documents.selection == fake.b1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.b1 }));
 	view.documents.select("other.txt", fake.x, SelectMode::Add);
 	TEST_EXPECT(view.documents.active == "other.txt" && view.documents.selected == std::vector<NodeAddress>({fake.x}));
 	view.documents.select(document.path(), NodeAddress(), SelectMode::Replace);
@@ -1204,7 +1206,8 @@ static int test_selection() {
 	view.documents.select(document.path(), fake.a1b, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a1b), error));
 	view.documents.repair_selection(document, fake.a1);
-	TEST_EXPECT(view.documents.selection == fake.a1 && view.documents.selected == std::vector<NodeAddress>({fake.a1}));
+	TEST_EXPECT(view.documents.selection == fake.a1 &&
+			view.documents.selected == std::vector<NodeAddress>({ fake.a1 }));
 	document.undo();
 	// A record removed that was selected but not the primary just drops out.
 	view.documents.select(document.path(), fake.x, SelectMode::Replace);

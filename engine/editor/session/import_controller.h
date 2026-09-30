@@ -46,7 +46,7 @@ public:
 
 private:
 	void preview(std::vector<ImportSource> choices, std::vector<ImportSource> roots, bool with_dependencies);
-	// The open preview planned again; `shown`, the plan an Import was shown, says whether it changed.
+	// The open preview planned again; `shown`, the plan an Import was shown, says if it changed.
 	void plan_preview(const ImportPlan *shown = nullptr);
 
 	SessionCore &core_;

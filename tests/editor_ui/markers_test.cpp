@@ -723,8 +723,9 @@ void test_shortcuts() {
 	v.project.open = true;
 	v.project.root = "C:/mods/Keys";
 	editor_test::own(v.project.document).title = "Keys";
-	editor_test::own(v.project.scan).entries = {file_entry("items.def", "defs/items.def", AssetKind::ItemDefs),
-	                  file_entry("readme.txt", "readme.txt", AssetKind::Text)};
+	editor_test::own(v.project.scan).entries = { file_entry("items.def", "defs/items.def",
+														 AssetKind::ItemDefs),
+		file_entry("readme.txt", "readme.txt", AssetKind::Text) };
 	editor_test::own(v.project.scan).index();
 	Ui ui;
 	ui.windows.set_view(&v);

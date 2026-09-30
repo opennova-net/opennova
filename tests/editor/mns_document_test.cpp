@@ -392,7 +392,8 @@ static int test_validation() {
 	TEST_EXPECT(session.outcome().done() && !line_ending_on(note_path));
 	TEST_EXPECT(read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
 	session.handle(make_request(EditorRequestKind::Save, note_path));
-	TEST_EXPECT(session.outcome().done() && view.activity.status == note_path + " has no changes to save.");
+	TEST_EXPECT(session.outcome().done() &&
+			view.activity.status == note_path + " has no changes to save.");
 	std::printf("test_validation passed\n");
 	return 0;
 }

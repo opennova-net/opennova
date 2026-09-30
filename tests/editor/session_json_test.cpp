@@ -372,12 +372,13 @@ static int test_settings_json() {
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":[]}", back).find("settings") != std::string::npos);
 
-	// Over a session: the result of the last one, its event with its serial, and the runtime setting.
+	// Over a session: the last one's result, its event with its serial, and the runtime setting.
 	const auto applied = [](const JsonValue &json) {
 		const JsonValue *items = json.get("events") ? json.get("events")->get("items") : nullptr;
-		return items && !items->array.empty() && items->array.back().get_string("kind", "") == "settings_applied"
-		               ? &items->array.back()
-		               : nullptr;
+		return items && !items->array.empty() &&
+						items->array.back().get_string("kind", "") == "settings_applied"
+				? &items->array.back()
+				: nullptr;
 	};
 	editor_test::TempProjectDir dir("opennova_session_json_settings_test");
 	NoProcess platform;
@@ -391,8 +392,10 @@ static int test_settings_json() {
 	session.handle(back);
 	JsonValue view = session_view_to_json(session.view());
 	const JsonValue *result = view.get("settings_result");
-	TEST_EXPECT(result && result->get("serial") == nullptr && result->get("failures") && result->get("failures")->array.empty());
-	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 4 && applied(view)->get("flag") == nullptr);
+	TEST_EXPECT(result && result->get("serial") == nullptr && result->get("failures") &&
+			result->get("failures")->array.empty());
+	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 4 &&
+			applied(view)->get("flag") == nullptr);
 	TEST_EXPECT(view.get("project") && view.get("project")->get_string("title", "") == "Harbor");
 	TEST_EXPECT(view.get("play") && view.get("play")->get_string("runtime_setting", "") == "C:/tools/opennova.exe");
 	// A name the project cannot take: the failure is the result's, its event the next serial's,
@@ -403,7 +406,8 @@ static int test_settings_json() {
 	result = view.get("settings_result");
 	TEST_EXPECT(result && result->get("failures") && result->get("failures")->array.size() == 1 &&
 	            result->get("failures")->array[0].get_string("code", "") == "project.title_empty");
-	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 5 && applied(view)->get_bool("flag", false));
+	TEST_EXPECT(applied(view) && applied(view)->get_int("tag", 0) == 5 &&
+			applied(view)->get_bool("flag", false));
 	return 0;
 }
 
@@ -517,7 +521,8 @@ static int test_over_a_session() {
 	TEST_EXPECT(json.get("play")->get_int("mcp_port", -1) == 0 && json.get("play")->get("exit_code")->is_null());
 	TEST_EXPECT(json.get("recent_projects")->array.size() == 1);
 	TEST_EXPECT(json.get("graph")->get_int("missing", -1) == 0);
-	TEST_EXPECT(diagnostics_to_json(view.findings.diagnostics).array.size() == view.findings.diagnostics.size());
+	TEST_EXPECT(diagnostics_to_json(view.findings.diagnostics).array.size() ==
+			view.findings.diagnostics.size());
 	// The first row, the manifest's first: an optional file the game does without, a note.
 	const JsonValue first_finding = diagnostics_to_json(view.findings.diagnostics).array.front();
 	TEST_EXPECT(first_finding.get_string("severity", "") == "info" &&
@@ -570,7 +575,8 @@ static int test_over_a_session() {
 	// Create all missing through the wire, the roles of the checklist's unmet rows named (none
 	// named makes nothing), then open the startup menu: the document and its records serialize.
 	TEST_EXPECT(request_error("{\"kind\":\"create_missing\"}", request).empty() && session.handle(request));
-	TEST_EXPECT(session.outcome().done() && view.project.requirements->required_missing == required - 1);
+	TEST_EXPECT(session.outcome().done() &&
+			view.project.requirements->required_missing == required - 1);
 	std::string roles;
 	json = session_view_to_json(view);
 	for (const JsonValue &row : json.get("requirements")->get("rows")->array)
@@ -582,7 +588,8 @@ static int test_over_a_session() {
 	// Every file the scan lists, each with its kind and whether the editor opens it.
 	json = session_view_to_json(view);
 	bool menu_editable = false, some_not_editable = false;
-	TEST_EXPECT(json.get("project")->get("files")->array.size() == view.project.scan->entries.size());
+	TEST_EXPECT(
+			json.get("project")->get("files")->array.size() == view.project.scan->entries.size());
 	for (const JsonValue &file : json.get("project")->get("files")->array) {
 		if (file.get_string("name", "") == "main.mnu" && file.get_string("kind", "") == "menu")
 			menu_editable = file.get_bool("editable", false);
@@ -668,10 +675,10 @@ static int test_over_a_session() {
 	const GraphStats &stats = view.findings.graph->stats();
 	const JsonValue graph_json = *session_view_to_json(view).get("graph");
 	TEST_EXPECT(graph_json.get_int("edges", 0) == int64_t(view.findings.graph->edge_count()) &&
-	            graph_json.get_int("missing", -1) == int64_t(view.findings.graph->missing_count()) &&
-	            graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
-	            graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
-	            graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
+			graph_json.get_int("missing", -1) == int64_t(view.findings.graph->missing_count()) &&
+			graph_json.get_int("files_patched", -1) == int64_t(stats.files_patched) &&
+			graph_json.get_int("edges_resolved", -1) == int64_t(stats.edges_resolved) &&
+			graph_json.get_int("findings_made", -1) == int64_t(stats.findings_made));
 	TEST_EXPECT(!graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.empty());
 	TEST_EXPECT(graph_edges_to_json(*view.findings.graph, view.findings.graph->references_of("main.mnu")).array.front().get_string("status", "") == "present");
 	TEST_EXPECT(record_to_json(*document, NodeAddress{}, view).is_null());
@@ -724,8 +731,9 @@ static int test_over_a_session() {
 	std::vector<JsonValue> asked = reveals();
 	const JsonValue *asked_at = asked.size() == 1 ? asked[0].get("address") : nullptr;
 	TEST_EXPECT(view.documents.selection == title_address && asked.size() == 1 &&
-	            asked[0].get_string("path", "") == document->path() && asked[0].get_string("field", "") == "string.value" &&
-	            asked[0].get("flag") == nullptr && asked[0].get("tag") == nullptr);
+			asked[0].get_string("path", "") == document->path() &&
+			asked[0].get_string("field", "") == "string.value" && asked[0].get("flag") == nullptr &&
+			asked[0].get("tag") == nullptr);
 	TEST_EXPECT(asked_at && asked_at->get_int("row", 0) == int64_t(title_address.row) &&
 	            asked_at->get_int("kind", 0) == int64_t(title_address.kind) &&
 	            asked_at->get_int("child", 0) == int64_t(title_address.child));
@@ -751,8 +759,9 @@ static int test_over_a_session() {
 	const JsonValue *items = shown.get("events") ? shown.get("events")->get("items") : nullptr;
 	const JsonValue *file_event = items && !items->array.empty() ? &items->array.back() : nullptr;
 	TEST_EXPECT(file_event && file_event->get_string("kind", "") == "reveal_file" &&
-	            file_event->get_string("path", "") == document->path() && file_event->get_bool("flag", false) &&
-	            file_event->get("address") == nullptr && shown.get("reveal_file") == nullptr);
+			file_event->get_string("path", "") == document->path() &&
+			file_event->get_bool("flag", false) && file_event->get("address") == nullptr &&
+			shown.get("reveal_file") == nullptr);
 	TEST_EXPECT(editor_request_to_json(request).get_string("kind", "") == "show_in_files" &&
 	            editor_request_to_json(request).get_bool("flag", false));
 
@@ -1178,7 +1187,8 @@ static int test_import_plan_json() {
 	planned.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
 	                        {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
 	planned.truncated = true;
-	planned.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable", "The file could not be read.", "b.mnu")};
+	planned.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+			"The file could not be read.", "b.mnu") };
 	preview.plan = std::make_shared<const ImportPlan>(std::move(planned));
 	const JsonValue json = session_view_to_json(view);
 	const JsonValue *import = json.get("import");

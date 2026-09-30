@@ -304,7 +304,8 @@ inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 	v.project.open = true;
 	v.project.root = "C:/mods/Menus";
 	editor_test::own(v.project.document).title = "Menus";
-	editor_test::own(v.project.scan).entries.push_back(file_entry("options.mnu", document->path(), AssetKind::Menu));
+	editor_test::own(v.project.scan)
+			.entries.push_back(file_entry("options.mnu", document->path(), AssetKind::Menu));
 	editor_test::own(v.project.scan).index();
 	v.documents.open.push_back(document);
 	v.documents.active = document->path();
@@ -489,13 +490,14 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	cut.selected = false;
 	cut.problem = "a_long_texture_name.tga is longer than the 16 characters the game's archives store.";
 	ImportPlan plan;
-	plan.rows = {row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip, font, gone, logo, cut};
+	plan.rows = { row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip,
+		font, gone, logo, cut };
 	plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
 	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
 	plan.truncated = true;
-	plan.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
-	                                    "The file could not be read" + stretch + ". The files it names are not looked for.",
-	                                    "broken.mnu")};
+	plan.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+			"The file could not be read" + stretch + ". The files it names are not looked for.",
+			"broken.mnu") };
 	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));
 	return preview;
 }

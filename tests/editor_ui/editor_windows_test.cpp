@@ -1423,8 +1423,9 @@ SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shar
 	                  file_entry("b.mnu", "menus/b.mnu", AssetKind::Menu),
 	                  file_entry("spare.bin", "strings/spare.bin", AssetKind::Strings)};
 	editor_test::own(v.project.scan).index();
-	editor_test::own(v.project.requirements).rows = {missing_row("gametext", "gametext.bin", AssetKind::Strings),
-	                       missing_row("main_menu", "main.mnu", AssetKind::Menu)};
+	editor_test::own(v.project.requirements).rows = { missing_row("gametext", "gametext.bin",
+															  AssetKind::Strings),
+		missing_row("main_menu", "main.mnu", AssetKind::Menu) };
 	editor_test::own(v.project.requirements).required_total = 2;
 	editor_test::own(v.project.requirements).required_missing = 2;
 	v.project.retail_files = {"gametext.bin"};
@@ -1624,7 +1625,8 @@ void test_problems_window_ui() {
 
 	// The summary's Fix alls: one Create for what factories make, one import list for what
 	// only the game data has (cmap.mnu), each asking first.
-	editor_test::own(v.project.requirements).rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
+	editor_test::own(v.project.requirements)
+			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
 	editor_test::own(v.project.requirements).required_missing = 3;
 	v.project.retail_files = {"cmap.mnu", "gametext.bin"};
 	v.findings.diagnostics.push_back(missing_finding("cmap_menu", "cmap.mnu"));
@@ -1844,7 +1846,8 @@ void test_problems_many() {
 	v.project.root = "C:/mods/Many";
 	for (int file = 0; file < 50; ++file) {
 		const std::string name = "f" + std::to_string(file) + ".def";
-		editor_test::own(v.project.scan).entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
+		editor_test::own(v.project.scan)
+				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
 		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
@@ -2143,7 +2146,8 @@ void test_go_to_ui() {
 		if (schema.id == "font.name") font = menu->field_on(main, schema);
 	Value value;
 	CHECK(menu->get(main, "font.name", value), "the font's value");
-	const std::vector<ReferenceTarget> targets = reference_targets(*v.findings.graph, *v.project.scan, font, value);
+	const std::vector<ReferenceTarget> targets =
+			reference_targets(*v.findings.graph, *v.project.scan, font, value);
 	CHECK(targets.size() == 2 && targets[0].editable && !targets[1].editable, "the variable, then the font file");
 	if (targets.size() != 2) return;
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));

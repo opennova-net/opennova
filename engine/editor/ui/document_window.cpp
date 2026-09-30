@@ -26,7 +26,9 @@ void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// The events of a document no longer open go with it.
 	for (auto held = events_.begin(); held != events_.end();) {
 		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
-				[&](const std::shared_ptr<const Document> &document) { return document->path() == held->first; });
+				[&](const std::shared_ptr<const Document> &document) {
+					return document->path() == held->first;
+				});
 		held = open ? std::next(held) : events_.erase(held);
 	}
 	if (!view.project.open || view.documents.open.empty()) {

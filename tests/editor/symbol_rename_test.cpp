@@ -243,10 +243,11 @@ static int test_string_key() {
 	// The table has unsaved edits: the rename waits on the prompt, whose Save writes them first.
 	const EditorRequest weapon_rename = project.request(EditorRequestKind::RenameSymbol, *weapon_key, "WEP_RENAMED");
 	project.session.handle(weapon_rename);
-	TEST_EXPECT(project.session.outcome().unsaved_prompt && project.view().dialogs.unsaved_prompt.open &&
-	            project.view().dialogs.unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
-	            !project.view().dialogs.unsaved_prompt.can_discard &&
-	            project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{table_path});
+	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
+			project.view().dialogs.unsaved_prompt.open &&
+			project.view().dialogs.unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
+			!project.view().dialogs.unsaved_prompt.can_discard &&
+			project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{ table_path });
 	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
 	save.unsaved_choice = UnsavedChoice::Save;
 	project.session.handle(save);

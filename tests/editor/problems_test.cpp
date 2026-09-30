@@ -383,7 +383,8 @@ static int test_fixes() {
 	Diagnostic table_ref = font;
 	table_ref.reference = ReferenceKind::TextTable;
 	table_ref.target = "foo.bin";
-	TEST_EXPECT(v.project.scan->find("foo.bin") && v.project.scan->find("foo.bin")->kind == AssetKind::RawBin);
+	TEST_EXPECT(v.project.scan->find("foo.bin") &&
+			v.project.scan->find("foo.bin")->kind == AssetKind::RawBin);
 	TEST_EXPECT(fixes_for(table_ref, v).empty() && !has_fixes(table_ref, v));
 	table_ref.target = "freshtable.bin";
 	TEST_EXPECT(labels_of(fixes_for(table_ref, v)) == std::vector<std::string>({"Create freshtable.bin"}));
@@ -965,13 +966,15 @@ static int test_locations_and_fixes() {
 	const uint64_t before = v.events.next_seq() - 1;
 	session.handle(fixes[0].request);
 	std::vector<ViewEvent> shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
-	TEST_EXPECT(session.outcome().done() && shown.size() == 1 && shown[0].path == long_path && shown[0].flag &&
-	            !shown[0].address.row && shown[0].field.empty() && shown[0].tag == 0);
+	TEST_EXPECT(session.outcome().done() && shown.size() == 1 && shown[0].path == long_path &&
+			shown[0].flag && !shown[0].address.row && shown[0].field.empty() && shown[0].tag == 0);
 	session.handle(make_request(EditorRequestKind::ShowInFiles, "a_name_too_long_for_archives.tga"));
 	shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
-	TEST_EXPECT(shown.size() == 2 && shown[1].path == long_path && !shown[1].flag && shown[1].seq == shown[0].seq + 1);
+	TEST_EXPECT(shown.size() == 2 && shown[1].path == long_path && !shown[1].flag &&
+			shown[1].seq == shown[0].seq + 1);
 	session.handle(make_request(EditorRequestKind::ShowInFiles, "nowhere.tga"));
-	TEST_EXPECT(!session.outcome().done() && editor_test::events_after(v, before, ViewEventKind::RevealFile).size() == 2);
+	TEST_EXPECT(!session.outcome().done() &&
+			editor_test::events_after(v, before, ViewEventKind::RevealFile).size() == 2);
 	const Diagnostic unstorable =
 	        make_diagnostic(DiagnosticSeverity::Error, "build.name_unstorable", "The name is too long.", long_path);
 	TEST_EXPECT(labels_of(fixes_for(unstorable, v)) == std::vector<std::string>({"Rename a_name_too_long_for_archives.tga..."}));
@@ -987,9 +990,11 @@ static int test_locations_and_fixes() {
 	fixes = fixes_for(duplicate, v);
 	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.path == twin);
 	const ProjectPaths paths = ProjectPaths::for_root(root);
-	const RenamePlan first_plan = plan_rename(paths, *v.project.scan, *v.findings.graph, "art/twin.tga", "twin3.tga");
+	const RenamePlan first_plan =
+			plan_rename(paths, *v.project.scan, *v.findings.graph, "art/twin.tga", "twin3.tga");
 	TEST_EXPECT(first_plan.ok() && first_plan.sites.size() == 1 && first_plan.sites[0].file == "menus/c.mnu");
-	const RenamePlan second_plan = plan_rename(paths, *v.project.scan, *v.findings.graph, twin, "twin2.tga");
+	const RenamePlan second_plan =
+			plan_rename(paths, *v.project.scan, *v.findings.graph, twin, "twin2.tga");
 	TEST_EXPECT(second_plan.ok() && second_plan.path == twin && second_plan.sites.empty());
 	session.handle(make_request(EditorRequestKind::RenameAsset, twin, "twin2.tga"));
 	const std::string moved = (fs::path(twin).parent_path() / "twin2.tga").generic_string();
@@ -1073,10 +1078,10 @@ static int test_findings_index() {
 		d.child_id = child;
 		return d;
 	};
-	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "project"),
-	                 on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"),
-	                 on("b.mnu", 5, 0, "other file"), on("a.mnu", 0, 0, "the file"),
-	                 on("a.mnu", 6, 7, "another row")};
+	v.findings.diagnostics = { make_diagnostic(
+									   DiagnosticSeverity::Error, "requirement.missing", "project"),
+		on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"), on("b.mnu", 5, 0, "other file"),
+		on("a.mnu", 0, 0, "the file"), on("a.mnu", 6, 7, "another row") };
 	FindingsIndex index;
 	index.follow(v);
 	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1, 2, 4, 5}));

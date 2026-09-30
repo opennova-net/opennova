@@ -202,7 +202,8 @@ int validation_and_session() {
 	add.edit.address = {0, kSection, 0};
 	session.handle(add);
 	const NodeId section = document->last_added();
-	TEST_EXPECT(view.documents.selection.row == section && view.documents.selection.kind == kSection);
+	TEST_EXPECT(
+			view.documents.selection.row == section && view.documents.selection.kind == kSection);
 	EditorRequest name = make_request(EditorRequestKind::EditRecord, document->path());
 	name.edit = set({section, kSection, 0}, "name", std::string("Custom"));
 	session.handle(name);
