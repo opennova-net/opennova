@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -40,7 +41,10 @@ public:
 	// A section, the file's row (Add section), and its strings.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// The ids of a section a first section of the same name shadows are inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
@@ -84,5 +88,22 @@ bool is_strings_kind(AssetKind kind);
 // empty name is an error, a name an earlier section has a warning (a section lookup never
 // reaches it).
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
+
+// The string table type's own finding codes (DocumentType::findings), each a row of its table
+// (strings_document.cpp, static_asserted into this order): input the typed model cannot carry
+// (the file does not serialize); a table whose sections the reader takes regrouped (a rewrite
+// writes them grouped, as the game reads them); a section with no name or with the name of an
+// earlier one; a key empty, or repeated within its section.
+enum class StringsFinding {
+	InvalidInput,
+	Regrouped,
+	SectionEmpty,
+	SectionDuplicate,
+	KeyEmpty,
+	KeyDuplicate,
+	kCount
+};
+const FindingCodeRow &finding_code(StringsFinding code);
+FindingTable strings_finding_codes();
 
 } // namespace opennova::editor

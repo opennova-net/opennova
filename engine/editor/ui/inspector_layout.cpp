@@ -20,15 +20,14 @@ std::string field_title(const Document &document, NodeKind kind, const std::stri
 }
 
 std::string edge_field_title(const SessionView &view, const GraphEdge &edge) {
+	// The kind of the file the edge comes from, by its path (the scan's path index), and the
+	// field's name from its type's schema: a type's fields never depend on a file's content.
 	const AssetEntry *source = view.project.scan->at_path(edge.source);
 	const DocumentType *type = source ? document_type_for(source->kind) : nullptr;
-	if (!type) return edge.field;
-	// A type's schema never depends on a file's content: a blank document of it, made once
-	// per kind, answers for every file of the kind.
-	static std::map<AssetKind, std::unique_ptr<Document>> blanks;
-	std::unique_ptr<Document> &blank = blanks[source->kind];
-	if (!blank) blank = records_of(type->make());
-	return blank ? field_title(*blank, edge.address.kind, edge.field) : edge.field;
+	if (!type || !type->fields) return edge.field;
+	for (const FieldSchema &field : type->fields(edge.address.kind))
+		if (field.id == edge.field) return field_title(field);
+	return edge.field;
 }
 
 namespace {

@@ -7,6 +7,7 @@
 #include <map>
 
 #include <base/gameprofile/required_resources.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -42,17 +43,6 @@ std::string size_text(uint64_t bytes) {
 
 // What a blank factory makes, as its menu entry's tooltip.
 std::string makes(const BlankFactory &factory) { return std::string("Makes ") + factory.summary + "."; }
-
-// The name a new file of a free-form kind is offered.
-const char *name_hint(AssetKind kind) {
-	switch (kind) {
-	case AssetKind::Strings: return "newtable.bin";
-	case AssetKind::Menu: return "newmenu.mnu";
-	case AssetKind::Font: return "newfont.fnt";
-	case AssetKind::Texture: return "newtexture.tga";
-	default: return "";
-	}
-}
 
 const AssetEntry *entry_at(const SessionView &view, const std::string &path) {
 	for (const AssetEntry &entry : view.project.scan->entries)
@@ -101,11 +91,13 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	ImGui::Text("New file: %s", asset_kind_label(kind_));
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
-	const bool enter = ImGui::InputTextWithHint("Name", name_hint(kind_), name_, sizeof(name_),
+	// The name a new file of the kind is offered: its row's (AssetKindRow::new_name).
+	const bool enter = ImGui::InputTextWithHint("Name", asset_kind_row(kind_).new_name, name_, sizeof(name_),
 	                                            ImGuiInputTextFlags_EnterReturnsTrue);
 	// The project's name rules, as the session checks them again when it creates the file; a
 	// texture is the texture factory's placeholder, made only for a name it takes.
-	std::string problem, message;
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
 	const bool named = name_[0] != '\0';
 	bool fits = named && check_file_name(name_, kind_, problem, message);
 	if (fits && kind_ == AssetKind::Texture) fits = can_make_blank_texture(name_, message);

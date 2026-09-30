@@ -76,6 +76,38 @@ struct Node {
 
 enum class Severity : uint8_t { Warning, Error };
 
+// What a Diagnostic says of a line, by a stable code whose token ("line-ending") the Godot
+// binding and the tests read: the codes the document's parse reports, then the reader's own stop
+// where no diagnostic covers it (Document::evaluate). The editor keys a finding's row by it.
+enum class DiagnosticCode : uint8_t {
+	LineEnding,            // line-ending
+	DirectiveForm,         // directive-form
+	IfWithoutArgument,     // if-without-argument
+	NoncanonicalIfArg,     // noncanonical-if-arg
+	UnbalancedElse,        // unbalanced-else
+	DuplicateElse,         // duplicate-else
+	UnbalancedEndif,       // unbalanced-endif
+	UnknownDirective,      // unknown-directive
+	DirectiveTail,         // directive-tail
+	LoneBackslash,         // lone-backslash
+	ValueIsDirective,      // value-is-directive
+	ValueStartsWithHash,   // value-starts-with-hash
+	ValueOnNextLine,       // value-on-next-line
+	DuplicateName,         // duplicate-name
+	ContinuedDuplicate,    // continued-duplicate
+	NulByte,               // nul-byte
+	InvalidNameChar,       // invalid-name-char
+	MissingValueDelimiter, // missing-value-delimiter
+	NoValue,               // no-value
+	ContinuationAtEof,     // continuation-at-eof
+	UnterminatedIf,        // unterminated-if
+	Hangs,                 // hangs
+	Stops,                 // stops
+};
+inline constexpr size_t kDiagnosticCodeCount = static_cast<size_t>(DiagnosticCode::Stops) + 1;
+// The code's token ("line-ending").
+const char *diagnostic_code_token(DiagnosticCode code);
+
 // An Error is a line the game stops reading at, would stop responding on, or that
 // the document cannot show the way the game reads it: the editor refuses to build
 // such a sheet. A Warning is a line the game reads in a way the author may not
@@ -83,7 +115,7 @@ enum class Severity : uint8_t { Warning, Error };
 struct Diagnostic {
 	int line = 0; // 1-based physical line
 	Severity severity = Severity::Error;
-	std::string code;    // stable id, e.g. "duplicate-name"
+	DiagnosticCode code = DiagnosticCode::LineEnding; // what it says (its token: "duplicate-name")
 	std::string message; // human-readable, cites names/lines
 };
 

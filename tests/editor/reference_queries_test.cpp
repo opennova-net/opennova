@@ -93,12 +93,12 @@ static int test_menu_references() {
 	// The finding says what it misses (S11b): the reference's kind and name, as written.
 	const Diagnostic *nope =
 			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar);
-	TEST_EXPECT(nope && nope->target == "%NOPE%");
+	TEST_EXPECT(nope && subject_target(*nope) == "%NOPE%");
 	// The picker's finding of the value is the same: the variable's (the stylesheet opened to
 	// define it), never a font file named %NOPE%; a variable that resolves makes none.
 	Diagnostic picked;
 	TEST_EXPECT(missing_finding(graph, *document, exit, font_use, std::string("%NOPE%"), picked) &&
-	            picked.reference == ReferenceKind::StyleVar && picked.target == "%NOPE%" && picked.field == "font.name");
+	            editor_test::reference_of(picked).kind == ReferenceKind::StyleVar && subject_target(picked) == "%NOPE%" && picked.field == "font.name");
 	const std::vector<ProblemFix> define = fixes_for(picked, view);
 	TEST_EXPECT(!define.empty() && define.front().request.kind == EditorRequestKind::OpenDocument &&
 	            define.front().request.path.find("menu_style.mns") != std::string::npos);
@@ -115,15 +115,15 @@ static int test_menu_references() {
 	TEST_EXPECT(!missing_of(view.findings.diagnostics, "font.name", ReferenceKind::StyleVar));
 	const Diagnostic *spaced =
 			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
-	TEST_EXPECT(spaced && spaced->target == "%NO PE%");
+	TEST_EXPECT(spaced && subject_target(*spaced) == "%NO PE%");
 	edit_window(session, *document, exit, "font.name", std::string("nofont.fnt"));
 	TEST_EXPECT(has_missing(view.findings.diagnostics, "font.name", DiagnosticSeverity::Error));
 	const Diagnostic *nofont =
 			missing_of(view.findings.diagnostics, "font.name", ReferenceKind::Font);
-	TEST_EXPECT(nofont && nofont->target == "nofont.fnt" && nofont->scope.empty() && nofont->role.empty());
+	TEST_EXPECT(nofont && subject_target(*nofont) == "nofont.fnt" && editor_test::reference_of(*nofont).scope.empty() && !requirement_subject(*nofont));
 	TEST_EXPECT(
 			missing_finding(graph, *document, exit, font_use, std::string("nofont.fnt"), picked) &&
-			picked.reference == ReferenceKind::Font && picked.target == "nofont.fnt");
+			editor_test::reference_of(picked).kind == ReferenceKind::Font && subject_target(picked) == "nofont.fnt");
 	// An APPEARANCE row's value is a texture for an IMAGE row, nothing for a typeless one.
 	set_image(session, *document, exit, "missing.tga");
 	TEST_EXPECT(has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
@@ -131,7 +131,7 @@ static int test_menu_references() {
 						std::string("missing.tga")) == ReferenceStatus::Missing);
 	const Diagnostic *texture =
 			missing_of(view.findings.diagnostics, "value", ReferenceKind::MenuTexture);
-	TEST_EXPECT(texture && texture->target == "missing.tga");
+	TEST_EXPECT(texture && subject_target(*texture) == "missing.tga");
 	edit_window(session, *document, exit, "string.type", std::string("ID"));
 	edit_window(session, *document, exit, "string.value", std::string("NO_SUCH_ID"));
 	TEST_EXPECT(
@@ -139,7 +139,7 @@ static int test_menu_references() {
 	// A string id's scope is where it was looked up: the "menu" section of its window's table.
 	const Diagnostic *text_id =
 			missing_of(view.findings.diagnostics, "string.value", ReferenceKind::TextId);
-	TEST_EXPECT(text_id && text_id->target == "NO_SUCH_ID" && text_id->scope.find("/menu") != std::string::npos);
+	TEST_EXPECT(text_id && subject_target(*text_id) == "NO_SUCH_ID" && editor_test::reference_of(*text_id).scope.find("/menu") != std::string::npos);
 	// Every ACTION's file is an edge (a second action's too), every SOUND's file a sound
 	// bank the game opens by that name (a warning while the project lacks it).
 	for (const char *file : {"other.mnu", "third.mnu"}) {
@@ -172,7 +172,7 @@ static int test_menu_references() {
 	const NodeAddress second_action = menu_test::child_of(*document, exit, "action", 1);
 	bool located = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
+		if (d.code() == "reference.missing" && d.field == "file" && d.row_id == second_action.row &&
 		    d.child_id == second_action.child && d.record == "STARTUP/MAIN/EXIT/Action 2")
 			located = true;
 	TEST_EXPECT(located);

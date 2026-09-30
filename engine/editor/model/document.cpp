@@ -23,9 +23,9 @@ Document::Document(const Document &other)
 
 namespace {
 
-bool fail(Diagnostic &error, const std::string &path, const char *code, const std::string &message,
+bool fail(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
           const std::string &field = {}) {
-	error = make_diagnostic(DiagnosticSeverity::Error, code, message, path, field);
+	error = make_finding(code, DiagnosticSeverity::Error, message, path, field);
 	return false;
 }
 
@@ -393,7 +393,7 @@ bool Document::paste_rows(const Edit &, const std::vector<std::shared_ptr<const 
 }
 
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	return fail(error, path(), "document.value", "This document has no file-wide values.");
+	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
 
 bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -451,7 +451,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	// The step is the type's to refuse before it commits.
 	std::string message;
 	if (!accept_step(step, staged, message)) {
-		fail(error, path(), "document.structure",
+		fail(error, path(), CoreFinding::DocumentStructure,
 		     message.empty() ? "This document refuses that change." : message);
 		return refused();
 	}
@@ -497,16 +497,17 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
                            std::vector<NodeId> &made_by_edit, std::vector<NodeId> &added,
                            Diagnostic &error) {
 	const IdAllocator allocate = [this] { return allocate_id(); };
+	using C = CoreFinding; // the refusals' rows
 	// A refusal: `code` in `words`, on `field` where it names one.
-	const auto refuse = [&](const char *code, const std::string &words,
+	const auto refuse = [&](C code, const std::string &words,
 	                        const std::string &field = std::string()) {
 		return fail(error, path(), code, words, field);
 	};
 	// A record of one kind where the address says another.
 	const auto wrong_kind = [&](NodeKind is, NodeKind says) {
-		return refuse("document.selection", std::string("Wrong kind: the record is ") +
-		                                            kind_label(is) + ", the address says " +
-		                                            kind_words(*this, says) + ".");
+		return refuse(C::DocumentSelection, std::string("Wrong kind: the record is ") +
+		                                    kind_label(is) + ", the address says " +
+		                                    kind_words(*this, says) + ".");
 	};
 	// What each edit made, which a later edit names by batch_made(its index): a row (row == id),
 	// or a record in the row `row`.
@@ -528,11 +529,11 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			return true;
 		};
 		const auto names_nothing_made = [&]() {
-			return refuse("document.batch",
+			return refuse(C::DocumentBatch,
 			              "An edit names a record that no earlier edit of its batch made.");
 		};
 		const auto made_elsewhere = [&]() {
-			return refuse("document.batch", "An edit names a record its batch made in another row "
+			return refuse(C::DocumentBatch, "An edit names a record its batch made in another row "
 			                                "than the edit names.");
 		};
 		// A row or a record an earlier edit made, named by batch_made: its identity, in its row (a
@@ -562,13 +563,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		}
 		if (edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child) {
 			if (!edit.payload)
-				return refuse("document.payload", "This change carries nothing to apply.");
+				return refuse(C::DocumentPayload, "This change carries nothing to apply.");
 			// The type's change to the state as the batch left it, kept only when it changes
 			// something: a copy handed back unchanged is no step.
 			std::shared_ptr<const FileState> state = staged.state();
 			bool changes = true;
 			if (!apply_file_payload(state, *edit.payload, changes, message))
-				return refuse("document.payload", said("This document does not take that change."));
+				return refuse(C::DocumentPayload, said("This document does not take that change."));
 			if (changes) staged.state() = std::move(state);
 			continue;
 		}
@@ -579,9 +580,9 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		if (into && edit.parent && !is_batch_made(edits[i].parent)) {
 			const NodeAddress owner = address_of(edit.parent);
 			if (!owner.row)
-				return refuse("document.selection", "The record to add into no longer exists.");
+				return refuse(C::DocumentSelection, "The record to add into no longer exists.");
 			if (edit.address.row && edit.address.row != owner.row)
-				return refuse("document.selection",
+				return refuse(C::DocumentSelection,
 				              "The record to add into is in another row than the edit names.");
 			edit.address.row = owner.row;
 		} else if (!edit.address.row && edit.address.child) {
@@ -595,13 +596,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				std::shared_ptr<Node> row =
 				        make_node(edit.address.kind, id, staged.rows(), message);
 				if (!row)
-					return refuse("document.kind", said("This document cannot add that record."));
+					return refuse(C::DocumentKind, said("This document cannot add that record."));
 				row->id = id;
 				assign_ids(*row);
 				// The new row's field, set in the same step (Edit::field on an Add).
 				if (!edit.field.empty() &&
 				    !set_field(*row, {id, edit.address.kind, 0}, edit.field, edit.value, message))
-					return refuse("document.value", said("Unknown field."), edit.field);
+					return refuse(C::DocumentValue, said("Unknown field."), edit.field);
 				staged.insert(std::move(row), edit.position);
 				made[i] = {id, id};
 				added.push_back(id);
@@ -609,7 +610,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			}
 			std::vector<std::shared_ptr<Node>> pasted;
 			if (!paste_rows(edit, staged.rows(), pasted, message))
-				return refuse("document.paste", said("These records cannot be pasted here."));
+				return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
 			size_t at = std::min(edit.position, staged.size());
 			for (auto &row : pasted) {
 				const NodeId id = allocate_id();
@@ -623,10 +624,10 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		}
 		const NodeId row_id = edit.address.row;
 		if (staged.removed(row_id))
-			return refuse("document.batch",
+			return refuse(C::DocumentBatch,
 			              "An edit names a row an earlier edit of its batch removed.");
 		const Node *current = staged.find(row_id);
-		if (!current) return refuse("document.selection", "The selected record no longer exists.");
+		if (!current) return refuse(C::DocumentSelection, "The selected record no longer exists.");
 		const std::string row_label = kind_label(current->kind);
 		const bool on_row = !into && !edit.address.child;
 		if (on_row && current->kind != edit.address.kind)
@@ -635,7 +636,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		               edit.operation == EditOperation::Remove ||
 		               edit.operation == EditOperation::Move)) {
 			if (edit.parent)
-				return refuse("document.collection", "A row moves among the rows only.");
+				return refuse(C::DocumentCollection, "A row moves among the rows only.");
 			if (edit.operation == EditOperation::Remove) {
 				staged.state() = state_after_remove(staged.state(), staged.size() - 1);
 				staged.remove(row_id);
@@ -687,13 +688,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		};
 		// An owner's collection of `kind` that is not there, or fixed.
 		const auto holds_none = [&](NodeKind owner, NodeKind kind) {
-			return refuse("document.collection", std::string(kind_label(owner)) +
-			                                             " records hold no " +
-			                                             kind_words(*this, kind) + " records.");
+			return refuse(C::DocumentCollection, std::string(kind_label(owner)) +
+			                                     " records hold no " +
+			                                     kind_words(*this, kind) + " records.");
 		};
 		const auto fixed = [&](const char *label, NodeKind owner, const char *what) {
-			return refuse("document.collection", std::string("The ") + label + " of this " +
-			                                             kind_label(owner) + " is fixed: " + what);
+			return refuse(C::DocumentCollection, std::string("The ") + label + " of this " +
+			                                     kind_label(owner) + " is fixed: " + what);
 		};
 		const NodeAddress &address = edit.address;
 		Edit hook = edit;
@@ -704,7 +705,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			if (!address.child) {
 				if (updated->kind != address.kind) return wrong_kind(updated->kind, address.kind);
 			} else if (!place(address.child, at)) {
-				return refuse("document.selection", "The selected record no longer exists.");
+				return refuse(C::DocumentSelection, "The selected record no longer exists.");
 			} else if (at.spec.kind != address.kind) {
 				return wrong_kind(at.spec.kind, address.kind);
 			}
@@ -717,7 +718,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			const bool read_before = read(*updated, address, edit.field, before);
 			const bool written_before = read_present(*updated, address, edit.field);
 			if (!set_field(*updated, address, edit.field, edit.value, message))
-				return refuse("document.value", said("Unknown field."), edit.field);
+				return refuse(C::DocumentValue, said("Unknown field."), edit.field);
 			if (read_before && read(*updated, address, edit.field, after) && after == before &&
 			    read_present(*updated, address, edit.field) == written_before)
 				continue;
@@ -727,11 +728,11 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			// A change the type made in C++, to the record and the file-wide state as the batch has
 			// left them; one that changes nothing is nothing, as a Set of the value held.
 			if (!edit.payload)
-				return refuse("document.payload", "This change carries nothing to apply.");
+				return refuse(C::DocumentPayload, "This change carries nothing to apply.");
 			std::shared_ptr<const FileState> state = staged.state();
 			bool changes = true;
 			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
-				return refuse("document.payload", said("This document does not take that change."));
+				return refuse(C::DocumentPayload, said("This document does not take that change."));
 			if (!changes) continue;
 			staged.state() = std::move(state);
 			break;
@@ -739,26 +740,26 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		case EditOperation::Clear:
 		case EditOperation::Write: {
 			const FieldSchema *schema = field_schema(address.kind, edit.field);
-			if (!schema) return refuse("document.value", "Unknown field.", edit.field);
+			if (!schema) return refuse(C::DocumentValue, "Unknown field.", edit.field);
 			if (!schema->optional || schema->read_only)
-				return refuse("document.value", "This field is always written.", edit.field);
+				return refuse(C::DocumentValue, "This field is always written.", edit.field);
 			const bool written = edit.operation == EditOperation::Write;
 			// A field already left out (Clear) or already written (Write) changes nothing.
 			if (read_present(*updated, address, edit.field) == written) continue;
 			if (!set_present(*updated, address, edit.field, written, message))
-				return refuse("document.value", said("This field is always written."), edit.field);
+				return refuse(C::DocumentValue, said("This field is always written."), edit.field);
 			break;
 		}
 		case EditOperation::Add:
 		case EditOperation::Paste: {
 			NodeAddress owner;
 			if (!owner_of(edit.parent, owner))
-				return refuse("document.selection", "The record to add into no longer exists.");
+				return refuse(C::DocumentSelection, "The record to add into no longer exists.");
 			hook.parent = owner.child;
 			if (edit.operation == EditOperation::Paste) {
 				std::vector<NodeId> pasted;
 				if (!paste_records(*updated, hook, allocate, pasted, message))
-					return refuse("document.paste", said("These records cannot be pasted here."));
+					return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
 				added.insert(added.end(), pasted.begin(), pasted.end());
 				if (!pasted.empty()) made[i] = {pasted.front(), row_id};
 				break;
@@ -770,7 +771,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				return fixed(collection.spec.label, owner.kind, "nothing is added to it.");
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
-				return refuse("document.collection",
+				return refuse(C::DocumentCollection,
 				              said("This collection cannot accept that edit."));
 			if (one) {
 				added.push_back(one);
@@ -780,7 +781,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			if (!edit.field.empty() &&
 			    (!one || !set_field(*updated, {row_id, address.kind, one}, edit.field, edit.value,
 			                        message)))
-				return refuse("document.value", said("Unknown field."), edit.field);
+				return refuse(C::DocumentValue, said("Unknown field."), edit.field);
 			break;
 		}
 		case EditOperation::Duplicate:
@@ -797,7 +798,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				NodeAddress destination = at.owner;
 				if (edit.parent && !owner_of(edit.parent, destination)) {
 					const NodeAddress elsewhere = address_of(edit.parent);
-					return refuse("document.collection",
+					return refuse(C::DocumentCollection,
 					              elsewhere.row && elsewhere.row != row_id
 					                      ? "A record moves within its own " + row_label + "."
 					                      : std::string("The destination no longer exists."));
@@ -810,7 +811,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				// Never into the record itself or anything it holds.
 				for (NodeAddress up = destination; up.child;) {
 					if (up.child == address.child)
-						return refuse("document.collection", "A record cannot move inside itself.");
+						return refuse(C::DocumentCollection, "A record cannot move inside itself.");
 					Placement above;
 					if (!place(up.child, above)) break;
 					up = above.owner;
@@ -823,7 +824,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			}
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
-				return refuse("document.collection",
+				return refuse(C::DocumentCollection,
 				              said("This collection cannot accept that edit."));
 			if (one) {
 				added.push_back(one);
@@ -832,7 +833,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			break;
 		}
 		default:
-			return refuse("document.batch", "This edit names no record.");
+			return refuse(C::DocumentBatch, "This edit names no record.");
 		}
 		staged.mark_changed(row_id);
 		if (structural(edit.operation)) staged.mark_reshaped(row_id);

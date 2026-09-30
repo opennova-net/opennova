@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/project_check.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/node.h>
@@ -17,19 +18,18 @@
 namespace opennova::editor {
 
 class MnuDocument;
+class ProjectChecks;
 
 // The sentence a compiler note shows (the engine keeps codes only): what the game does,
 // "The game ..." for a witnessed rule; "OpenNova ..." for the port's own choice or a
 // known gap in it (docs/mnu/menu-re.md "Compiler notes").
 std::string menu_note_message(const menu::MenuFrameNote &note);
-// Whether a note is a Problems row and at what severity; false for the notes only the
-// preview shows: a missing reference is the asset graph's finding (a %VAR%, a string id,
-// a font, a texture or a string table the project lacks), and a few notes only explain
-// the picture (a CUSTOM hook, a state held, a frame whose stencil did not load, a table
-// or marquee filled at run time).
+// Whether a note is a Problems row and at what severity, as its row says (the menu type's
+// finding codes, finding_code(note).problem); false for the notes only the preview shows: a
+// missing reference is the asset graph's finding (a %VAR%, a string id, a font, a texture or a
+// string table the project lacks), and a few notes only explain the picture (a CUSTOM hook, a
+// state held, a frame whose stencil did not load, a table or marquee filled at run time).
 bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severity);
-// "menu.render.<token>": a note's finding code.
-std::string menu_note_code(menu::MenuFrameNoteCode code);
 // Where a note sits in the document: the screen row, the window, or the record of the
 // window's list the note names (an empty field when that record is not there).
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
@@ -38,24 +38,27 @@ NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument
 Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
                                 DiagnosticSeverity severity);
 
-// The render check (ADR 0046 S9j2): every screen of every menu in the project compiled
-// headless the way the game draws it (MenuScreenRender), its notes that are a consequence
-// the author may not mean as Problems rows (menu_note_problem). The session owns it beside
-// the asset graph and runs it with every validation; its findings are never part of the
-// build's gate (a note never blocks a build). The graph reports what a menu names that the
-// project lacks; the check reports what the rest comes to, never the same finding twice.
-class MenuRenderCheck {
+// The render check (ADR 0046 S9j2), the menu type's project check (S13 V9: its registry row
+// makes it, make_menu_render_check, and whoever validates keeps it among the types' checks,
+// documents/project_checks.h): every screen of every menu in the project compiled headless the
+// way the game draws it (MenuScreenRender), its notes that are a consequence the author may not
+// mean as Problems rows (menu_note_problem). It runs with every validation; its findings are
+// never part of the build's gate (a note never blocks a build). The graph reports what a menu
+// names that the project lacks; the check reports what the rest comes to, never the same finding
+// twice.
+class MenuRenderCheck : public ProjectCheck {
 public:
 	// Every menu in the scan, the open documents standing in; a closed one the check reads
-	// itself and keeps while the scan lists its file as it was (its size, last write and kind,
+	// itself (one whose own checks read its records: the validation read it, and no source error
+	// blocks it) and keeps while the scan lists its file as it was (its size, last write and kind,
 	// and the project's game). A menu renders again only when its document state or a file one
 	// of its screens read moved, or when the shell's stylesheets moved and a variable the menu
 	// names (every %NAME% its saved text holds, as the game's expansion finds them) came, went or
 	// took another value: a stylesheet edit that changes no variable's value renders nothing.
 	// True when the notes may have moved: a menu rendered again, or one's notes went.
-	bool update(const ValidationInput &input, const FileSource &files);
-	void clear();
-	const std::vector<Diagnostic> &diagnostics() const { return diagnostics_; }
+	bool update(const ProjectCheckInput &input) override;
+	void clear() override;
+	const std::vector<Diagnostic> &findings() const override { return diagnostics_; }
 	// The render of a screen row of the menu at `path`, null when there is none.
 	const MenuScreenRender *render(const std::string &path, NodeId screen_row) const;
 	// The menu document the last update rendered for `path` (the open one, or the closed
@@ -97,5 +100,11 @@ private:
 	std::vector<Diagnostic> diagnostics_;
 	size_t rendered_ = 0;
 };
+
+// The render check among a validation's project checks (the menu type's; the registry's hook that
+// makes it is make_menu_render_check.h's): null when `checks` is null (a view no session made: a
+// session makes its checks when it is made) or the menu type's check is not the render check (a
+// test's stand-in in its place).
+const MenuRenderCheck *menu_render_check(const ProjectChecks *checks);
 
 } // namespace opennova::editor

@@ -4,14 +4,14 @@ namespace opennova::editor {
 
 bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {
 	if (state_ != PlayState::Stopped) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "play.already_running",
-		                        "The game is already running; stop it before starting it again.");
+		error = make_finding(CoreFinding::PlayAlreadyRunning, DiagnosticSeverity::Error,
+		                     "The game is already running; stop it before starting it again.");
 		return false;
 	}
 	const int64_t pid = platform_.spawn(plan);
 	if (pid < 0) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "play.spawn",
-		                        "The game could not be started: " + plan.executable);
+		error = make_finding(CoreFinding::PlaySpawn, DiagnosticSeverity::Error,
+		                     "The game could not be started: " + plan.executable);
 		return false;
 	}
 	pid_ = pid;

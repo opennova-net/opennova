@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <formats/bad/bad.h>
 #include <runtime/assets/asset_store.h>
 
@@ -44,7 +45,10 @@ public:
 	// The clip, its row (the file's one, never added), then its bones and frame events.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A bone's parent: none (a root), or one of the clip's bones by name.
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
@@ -85,5 +89,17 @@ bool is_animation_kind(AssetKind kind);
 // before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
 // warning on its parent.
 std::vector<Diagnostic> validate_animation_file(const DocumentBase &document);
+
+// The clip type's own finding codes (DocumentType::findings), each a row of its table
+// (animation_document.cpp, static_asserted into this order): a frame rate other than retail's, a
+// bone whose parent does not come before it, an event bit the engine does not read.
+enum class AnimationFinding {
+	Fps,
+	ParentOrder,
+	TriggerUnknown,
+	kCount
+};
+const FindingCodeRow &finding_code(AnimationFinding code);
+FindingTable animation_finding_codes();
 
 } // namespace opennova::editor

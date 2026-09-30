@@ -9,6 +9,7 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/import/importer.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -137,7 +138,7 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 			// No record: the file is not an import source (a PNG without one is a
 			// texture the game loads as it is); importing it writes the record
 			// (import_assets).
-			if (error.code.empty()) continue;
+			if (error.code().empty()) continue;
 			// A record that is there but does not read (a hand edit with a typo) is the
 			// author's: reported and left as it is, never replaced by the defaults, and its
 			// source is not imported until it reads again. What this machine knew of the
@@ -161,7 +162,7 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 		const auto read_source = [&]() {
 			std::string message;
 			if (!read_file_bytes(path.generic_string(), bytes, message)) {
-				result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.read", message, source.source));
+				result.diagnostics.push_back(make_finding(CoreFinding::ImportRead, DiagnosticSeverity::Error, message, source.source));
 				return false;
 			}
 			have_bytes = true;
@@ -200,7 +201,7 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 				const fs::path out_dir = root / source.output_dir;
 				std::string dir_error;
 				if (!ensure_project_cache_dir(paths, dir_error) || !ensure_directory(out_dir.generic_string(), dir_error)) {
-					result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.write", dir_error, source.source));
+					result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, dir_error, source.source));
 					source.ok = false;
 				} else {
 					// Outputs the last import wrote and this one did not are removed.
@@ -214,7 +215,7 @@ ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &pr
 						std::string write_error;
 						if (!write_file_atomic((out_dir / output.name).generic_string(), output.bytes.data(), output.bytes.size(),
 						                       write_error)) {
-							result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.write", write_error, source.source));
+							result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error, write_error, source.source));
 							source.ok = false;
 							break;
 						}

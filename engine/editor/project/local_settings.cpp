@@ -37,7 +37,7 @@ std::string held_member(const io::JsonMember &member) {
 } // namespace
 
 Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json,
-		int schema_version, const char *code, const char *afterwards) {
+		int schema_version, CoreFinding code, const char *afterwards) {
 	const io::JsonValue *version = json.get("schema_version");
 	const std::string reads = "this editor reads schema " + std::to_string(schema_version);
 	std::string origin = "it names no schema version (" + reads + ")";
@@ -50,7 +50,7 @@ Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json
 			continue;
 		held += (held.empty() ? "" : ", ") + held_member(member);
 	}
-	return make_diagnostic(DiagnosticSeverity::Warning, code,
+	return make_finding(code, DiagnosticSeverity::Warning,
 			path + " is set aside: " + origin +
 					", so nothing of it is read, and what it held is gone: " +
 					(held.empty() ? std::string("nothing") : held) + ". " + afterwards);
@@ -66,13 +66,13 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	std::string text;
 	std::string io_error;
 	if (!read_file_text(path, text, io_error)) {
-		finding = make_diagnostic(DiagnosticSeverity::Error, "local_settings.unreadable", io_error);
+		finding = make_finding(CoreFinding::LocalSettingsUnreadable, DiagnosticSeverity::Error, io_error);
 		return false;
 	}
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) {
-		finding = make_diagnostic(DiagnosticSeverity::Error, "local_settings.json",
+		finding = make_finding(CoreFinding::LocalSettingsJson, DiagnosticSeverity::Error,
 				path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
@@ -80,7 +80,7 @@ bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnost
 	// the file is set aside, read as absent, and the next write makes a new one.
 	if (json.get_int("schema_version", -1) != kLocalSettingsSchemaVersion) {
 		finding = settings_set_aside(path, json, kLocalSettingsSchemaVersion,
-				"local_settings.schema_version.unsupported",
+				CoreFinding::LocalSettingsSchemaVersionUnsupported,
 				"The project reads as having no local settings, as a project with "
 				"no local.json does, and the next write makes a new file.");
 		out = LocalSettings();
@@ -101,7 +101,7 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error) ||
 	    !write_file_atomic(paths.local_settings_file, io::json_write(json), io_error)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "local_settings.write", io_error);
+		error = make_finding(CoreFinding::LocalSettingsWrite, DiagnosticSeverity::Error, io_error);
 		return false;
 	}
 	return true;

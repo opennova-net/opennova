@@ -112,7 +112,7 @@ public:
 	// build finishing, the game's log) belongs to no request.
 	void record_outcome(const Diagnostic &d);
 	// A request that cannot run now: a warning, and the request did nothing.
-	void refuse_now(const char *code, const std::string &message, const std::string &asset = std::string());
+	void refuse_now(CoreFinding code, const std::string &message, const std::string &asset = std::string());
 
 	// --- the operation slot ----------------------------------------------------------------
 

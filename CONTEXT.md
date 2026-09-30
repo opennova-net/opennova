@@ -595,6 +595,17 @@ its type makes (an Apply edit's payload).
 _Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
 project file by its logical name)
 
+**Document view**:
+What a document's tab in the Document window shows of it: its type's row of the editor's view
+table, one view per open document, which keeps its filter, its order and what it has open for as
+long as the document is open. Most types show their records as an outline (a tree of the rows and
+what they hold, a list of the rows, or master and detail: the rows beside the selected row's
+records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
+menu's screens and windows), and the mission's will be a viewport filling the tab with the outline
+and the Inspector beside it. The selected record's fields are the Inspector's, whatever the type.
+_Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
+generic form beside it)
+
 **View event**:
 A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
 until the window it is for has had it: show a record's field (a Problems row, a Go to), show a
@@ -677,10 +688,10 @@ _Avoid_: warning (a Problems severity; a note is one only through the render che
 parse note (what the reader leaves out of a file)
 
 **Render check**:
-The editor's headless render of every menu screen of the project with each validation,
-the way the game draws it: its compiler notes that are a consequence the author may not
-mean become Problems rows on their records, never a build's gate and never a finding
-the asset graph already makes (a name the project lacks is the graph's).
+The menu type's project check: the editor's headless render of every menu screen of the
+project with each validation, the way the game draws it: its compiler notes that are a
+consequence the author may not mean become Problems rows on their records, never a build's gate
+and never a finding the asset graph already makes (a name the project lacks is the graph's).
 _Avoid_: preview (the one screen shown), validation (the document types' own checks)
 
 **Use check**:
@@ -690,6 +701,32 @@ makes it from the asset graph after every file's own findings, which its documen
 the file alone.
 _Avoid_: cross-file validation (the use checks are one table, by the kind of file), validation (a
 file's own findings)
+
+**Project check**:
+A document type's own check across the project's files, run with every validation after each
+file's own findings: it reads the files itself, keeps what it made from one validation to the
+next and makes again only what moved, and says whether its findings moved (the menu type's render
+check renders a menu again only when it, a file its screens read or a variable it names changed).
+Its findings are Problems rows after the build's gate, never in it, and never a finding a use check
+or the asset graph makes. A use check is the other cross-file finding, one whose rows are in the
+gate: a function of the asset graph, keeping nothing. Which one a finding is, is chosen by whether
+it may block a build.
+_Avoid_: use check (in the gate, stateless, one per kind of file), validation (a file's own
+findings)
+
+**Finding code**:
+A finding's stable dotted token (`reference.missing`, `style.line_ending`) and the row it is made
+from, which the finding keeps: what Problems offers for it (its fixes; a Rewrite, with what writing
+the file again does), whether it says the file does not serialize (its Save refused, no Rewrite
+offered), where Problems takes it (the record and field in the file's document, or the file itself
+in Files), the group it shows under (its family), where it comes from (its own part, the asset
+graph, the render check) and, for a compiler note, whether it is a Problems row at all. The
+editor's own codes are one table and each document type declares its own, a family of its name
+(`menu.`, `style.`); every finding is made from a row, so a code no table declares cannot be made.
+The wire's `code` is the token.
+_Avoid_: error code (a finding may be a warning or a note), message id, diagnostic code (Diagnostic
+is the record's type, the code its row's token; a format reader's own codes, the stylesheet
+reader's `mns::DiagnosticCode`, are what its type keys rows by)
 
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells

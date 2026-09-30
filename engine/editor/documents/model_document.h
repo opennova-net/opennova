@@ -8,6 +8,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_schema.h>
 #include <runtime/assets/asset_store.h>
@@ -124,7 +125,10 @@ public:
 	// kind they hold (model_document_detail::kKinds).
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// What an index field names on this record: the model's CTRL registers by name, LOD 0's
 	// parts, the MTRX rows (any other index typed too).
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
@@ -180,5 +184,27 @@ bool is_model_kind(AssetKind kind);
 // that do not descend are warnings; more than 16 user points and a material no strip
 // draws with are notes. Textures are the asset graph's.
 std::vector<Diagnostic> validate_model_file(const DocumentBase &document);
+
+// The model type's own finding codes (DocumentType::findings), each a row of its table
+// (model_document_edits.cpp, beside the validator, static_asserted into this order): more seats
+// than the game keeps, a user point name repeated, more user points than the game reads, a
+// register or a frame the model lacks, a shader or register name the engine does not know, a
+// material no strip draws with, a light on a part LOD 0 lacks, LOD thresholds that do not
+// descend.
+enum class ModelFinding {
+	Seats,
+	UserPointDuplicate,
+	UserPoints,
+	RegisterMissing,
+	ShaderUnknown,
+	MaterialUnused,
+	LightPart,
+	RegisterUnknown,
+	LodOrder,
+	FrameMissing,
+	kCount
+};
+const FindingCodeRow &finding_code(ModelFinding code);
+FindingTable model_finding_codes();
 
 } // namespace opennova::editor

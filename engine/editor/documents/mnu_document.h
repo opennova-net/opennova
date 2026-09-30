@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -11,9 +12,14 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_ids.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <editor/project/project_document.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_schema.h>
+
+namespace opennova::menu {
+enum class MenuFrameNoteCode : uint16_t;
+} // namespace opennova::menu
 
 namespace opennova::editor {
 
@@ -99,7 +105,10 @@ public:
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	void walk_records(const Node &row, const RecordVisitor &visit) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A screen or window no by-name lookup returns (lookup_names) is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they
@@ -228,5 +237,26 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 // through the stylesheet, textures, sound banks, other menus and their screens, windows,
 // string tables and string ids) are the asset graph's.
 std::vector<Diagnostic> validate_menu_file(const DocumentBase &document);
+
+// The menu type's own finding codes (DocumentType::findings), each a row of its table
+// (mnu_document.cpp, static_asserted into this order): input the reader leaves out, which the game
+// ignores and a rewrite drops, or which the typed model cannot carry; a menu the writer cannot
+// write; two screens, or two windows of a screen, of one NAME; an ACTION the game never runs; and
+// the render check's (preview/menu_render_check.h): a screen whose compiled windows are not the
+// document's, and after these one row per compiler note (finding_code(menu::MenuFrameNoteCode):
+// menu.render. and the note's token, in the note codes' order).
+enum class MenuFinding {
+	InvalidInput,
+	IgnoredInput,
+	Unserializable,
+	DuplicateScreen,
+	DuplicateWindow,
+	ActionInert,
+	RenderMapping,
+	kCount
+};
+const FindingCodeRow &finding_code(MenuFinding code);
+const FindingCodeRow &finding_code(menu::MenuFrameNoteCode code);
+FindingTable menu_finding_codes();
 
 } // namespace opennova::editor

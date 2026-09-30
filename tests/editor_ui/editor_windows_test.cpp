@@ -48,9 +48,12 @@
 #include "../editor/menu_test_support.h"
 #include "common/test_paths.h"
 #include "editor_ui_test_support.h"
+#include <editor/ui/document_window.h>
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/inspector_window.h>
 #include <editor/ui/preview_window.h>
+#include <editor/ui/styles_view.h>
 #include <editor/ui/problems_window.h>
 #include <editor/ui/record_tree.h>
 #include <editor/ui/ui_kit.h>
@@ -811,9 +814,8 @@ void test_actions_after_edits() {
 	editor_test::own(v.project.scan).index();
 	// A required file the project lacks names no file of it: its row (showing the file it is
 	// about) opens nothing.
-	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	lacking.role = "gametext";
-	lacking.target = "gametext.bin";
+	Diagnostic lacking = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
+	lacking.subject = RequirementSubject{"gametext", "gametext.bin"};
 	v.findings.diagnostics = {lacking};
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Files);
@@ -831,7 +833,7 @@ void test_actions_after_edits() {
 	font_entry.kind = AssetKind::Font;
 	editor_test::own(v.project.scan).entries.push_back(font_entry);
 	editor_test::own(v.project.scan).index();
-	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
+	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
 	                                 font_entry.relative_path)};
 	v.revisions.touch(ViewConcern::Files);
 	v.revisions.touch(ViewConcern::Findings);
@@ -843,7 +845,7 @@ void test_actions_after_edits() {
 	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::ShowInFiles &&
 	              requests[0].path == font_entry.relative_path && !requests[0].ask_name,
 	      "a font's row shows it in Files");
-	Diagnostic finding = make_diagnostic(DiagnosticSeverity::Error, "menu.test", "A finding in the other menu.", other->path());
+	Diagnostic finding = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_screen", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
 	v.findings.diagnostics = {finding};
@@ -1455,9 +1457,8 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind, b
 }
 
 Diagnostic missing_finding(const char *role, const char *name) {
-	Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", std::string("Missing required file ") + name + ".");
-	d.role = role;
-	d.target = name;
+	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", std::string("Missing required file ") + name + ".");
+	d.subject = RequirementSubject{role, name};
 	return d;
 }
 
@@ -1483,16 +1484,16 @@ SessionView problems_view(const std::shared_ptr<MnuDocument> &a, const std::shar
 	v.project.retail_files = {"gametext.bin"};
 	v.documents.open = {a, b};
 	v.documents.active = a->path();
-	Diagnostic type = make_diagnostic(DiagnosticSeverity::Error, "catalog.item_type", "Alpha: choose an item type.",
-	                                  "defs/items.def", "type");
+	Diagnostic type = editor_test::finding_of(DiagnosticSeverity::Error, "catalog.item_type", "Alpha: choose an item type.",
+	                                          "defs/items.def", "type");
 	type.record = "Marker";
 	type.line = 12;
 	type.row_id = 4;
 	type.record_kind = 2;
 	v.findings.diagnostics = {missing_finding("gametext", "gametext.bin"), missing_finding("main_menu", "main.mnu"), type,
-	                 make_diagnostic(DiagnosticSeverity::Warning, "menu.duplicate_window", "Bravo: two windows are named GO.",
-	                                 "menus/a.mnu"),
-	                 make_diagnostic(DiagnosticSeverity::Info, "style.unused", "Charlie: nothing uses it.", "menus/b.mnu")};
+	                 editor_test::finding_of(DiagnosticSeverity::Warning, "menu.duplicate_window", "Bravo: two windows are named GO.",
+	                                         "menus/a.mnu"),
+	                 editor_test::finding_of(DiagnosticSeverity::Info, "style.unused", "Charlie: nothing uses it.", "menus/b.mnu")};
 	return v;
 }
 
@@ -1705,10 +1706,9 @@ void test_problems_window_ui() {
 
 	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
 	editor_test::own(v.project.requirements).rows.push_back(missing_row("brand_style", "brand.mns", AssetKind::MenuStyle, false));
-	Diagnostic optional = make_diagnostic(DiagnosticSeverity::Info, "requirement.optional_missing",
-	                                      "Optional file brand.mns is not in the project.");
-	optional.role = "brand_style";
-	optional.target = "brand.mns";
+	Diagnostic optional = editor_test::finding_of(DiagnosticSeverity::Info, "requirement.optional_missing",
+	                                              "Optional file brand.mns is not in the project.");
+	optional.subject = RequirementSubject{"brand_style", "brand.mns"};
 	v.findings.diagnostics.push_back(optional);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
@@ -1864,12 +1864,12 @@ void test_problems_rewrite_hidden() {
 	SessionView v;
 	v.project.open = true;
 	v.project.root = "C:/mods/Rewrite";
-	v.findings.diagnostics = {make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
+	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input", "Delta: a key the game ignores.",
 	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
-	                                 "defs/weapon.def"),
-	                 make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input", "Foxtrot: a key the game ignores.",
-	                                 "defs/ammo.def")};
+	                 editor_test::finding_of(DiagnosticSeverity::Error, "catalog.unserializable", "Echo: this cannot be written.",
+	                                         "defs/weapon.def"),
+	                 editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input", "Foxtrot: a key the game ignores.",
+	                                         "defs/ammo.def")};
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -1902,9 +1902,9 @@ void test_problems_many() {
 				.entries.push_back(file_entry(name, "defs/" + name, AssetKind::ItemDefs));
 	}
 	for (size_t i = 0; i < 1000; ++i) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "catalog.ignored_input",
-		                               "Finding " + std::to_string(i) + ": a line the game ignores.",
-		                               v.project.scan->entries[i / 20].relative_path, "name");
+		Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.ignored_input",
+		                                       "Finding " + std::to_string(i) + ": a line the game ignores.",
+		                                       v.project.scan->entries[i / 20].relative_path, "name");
 		d.row_id = i + 1;
 		d.record_kind = 2;
 		d.line = i + 1;
@@ -2072,6 +2072,18 @@ void test_styles_lines_listed() {
 	const ImGuiID styles = document_tab_id(path);
 	const ImGuiTable *table = ImGui::TableFindByID(item_id(styles, {"lines"}));
 	CHECK(table && table->CurrentRow + 1 == 3, "the header and two lines: the variables, not the comments or the blank line");
+	// S13 V3: what each line's value is used as is made once for the document's revision and the
+	// graph, kept across frames and a line of Output, and made again for an edit.
+	const StylesView *view = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count() && !view; ++i)
+		if (auto *window = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
+			view = dynamic_cast<const StylesView *>(window->view_of(path));
+	CHECK(view != nullptr, "the stylesheet's view");
+	const size_t made = view ? view->uses_made() : 0;
+	ui.frames(3);
+	session.handle(request::clear_output());
+	ui.frames(2);
+	CHECK(view && made > 0 && view->uses_made() == made, "the value uses kept across frames and a line of Output");
 	const std::string frame = logged_frame(ui);
 	CHECK(frame.find("Add variable") != std::string::npos && frame.find("Add comment") == std::string::npos &&
 	              frame.find("Add blank line") == std::string::npos,
@@ -2106,6 +2118,7 @@ void test_styles_lines_listed() {
 	CHECK(moved_to(press("Up")) == 1 &&
 	              text() == "// Header\r\nB_FG FF000000\r\nA_FG FFFFFFFF\r\n// Colours below\r\n\r\n// Footer\r\n",
 	      "Up: B right above A, past the comment and the blank line, which stay after A");
+	CHECK(view && view->uses_made() > made, "an edit: the value uses made again");
 	undo();
 	CHECK(text() == original, "Up undone");
 	select_line(a);
@@ -2118,7 +2131,7 @@ void test_styles_lines_listed() {
 	// The comment selected as its Problems row selects it: the first line whose end is not CR LF.
 	ProblemLocation location;
 	for (const Diagnostic &d : v.findings.diagnostics)
-		if (d.code == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
+		if (d.code() == "style.line_ending" && d.asset == path && d.row_id == comment) location = problem_location(d, v);
 	CHECK(!location.empty() && location.record.row == comment, "the line ending's finding goes to the comment");
 	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);
@@ -2135,7 +2148,8 @@ void test_styles_lines_listed() {
 
 // Go to and the uses, through the Inspector (S12 D3), over a real session. A stylesheet
 // variable's "Referenced by" rows are each a click away: the first opens the menu that names it
-// at the record by its locator, the field shown. MAIN's font names a style variable: its Go to
+// at the record by its locator, the field shown; its lines are made once for the record and kept
+// across frames and a line of Output (S13 V3). MAIN's font names a style variable: its Go to
 // offers the variable where the game reads it and the .fnt its value names; the first opens the
 // stylesheet at the variable, the second shows the font in Files (the editor does not edit
 // fonts).
@@ -2165,6 +2179,18 @@ void test_go_to_ui() {
 	ui.away();
 	ui.drain();
 	const ImGuiID inspector = Ui::window_id("Inspector");
+	InspectorWindow *inspector_window = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count() && !inspector_window; ++i)
+		inspector_window = dynamic_cast<InspectorWindow *>(&ui.windows.pass().window(i));
+	CHECK(inspector_window != nullptr, "the Inspector");
+	if (inspector_window) {
+		const size_t made = inspector_window->users_made();
+		ui.frames(4);
+		session.handle(request::clear_output());
+		ui.frames(2);
+		CHECK(made > 0 && inspector_window->users_made() == made,
+		      "Referenced by: made for the record, kept across frames and a line of Output");
+	}
 	ui.activate(item_id(pushed(inspector, 0), {"###use"}));
 	std::vector<EditorRequest> requests = ui.drain();
 	const EditorRequest *use = one(requests, EditorRequestKind::OpenDocument);

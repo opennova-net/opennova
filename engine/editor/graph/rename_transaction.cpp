@@ -14,6 +14,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/material_texture.h>
 
@@ -78,30 +79,24 @@ bool loads_renamed(const AssetScan &scan, const GraphEdge &edge, const std::stri
 	return renderer::material_texture_transform(type, value, true) == renderer::material_texture_transform(type, edge.value, true);
 }
 
-Diagnostic refusal(const char *code, const std::string &message, const std::string &asset = std::string(),
+Diagnostic refusal(CoreFinding code, const std::string &message, const std::string &asset = std::string(),
                    const std::string &field = std::string()) {
-	return make_diagnostic(DiagnosticSeverity::Error, code, message, asset, field);
+	return make_finding(code, DiagnosticSeverity::Error, message, asset, field);
 }
 
 // Why a file's sites cannot be rewritten: its kind has no editor, or its editor's documents hold
 // no records a rename sets (a document of another kind, S13 D6).
 Diagnostic cannot_rewrite(const DocumentType *type, const std::string &file) {
-	if (!type) return refusal("rename.site", file + " has no editor to rewrite it.", file);
-	return refusal("rename.site", file + " holds no records for a rename to rewrite.", file);
+	if (!type) return refusal(CoreFinding::RenameSite, file + " has no editor to rewrite it.", file);
+	return refusal(CoreFinding::RenameSite, file + " holds no records for a rename to rewrite.", file);
 }
 
-// A field of a record kind of a document type, asked of a blank document of the type (a type's
-// schema never depends on a file's content), one made per kind of file.
-const FieldSchema *site_field(std::map<AssetKind, std::unique_ptr<Document>> &blanks, AssetKind file, NodeKind kind,
-                              const std::string &id) {
-	std::unique_ptr<Document> &blank = blanks[file];
-	if (!blank) {
-		const DocumentType *type = document_type_for(file);
-		if (!type) return nullptr;
-		blank = records_of(type->make());
-		if (!blank) return nullptr;
-	}
-	for (const FieldSchema &field : blank->fields(kind))
+// A field of a record kind of the document type a kind of file opens with, from the type's
+// schema (DocumentType::fields: a type's fields never depend on a file's content).
+const FieldSchema *site_field(AssetKind file, NodeKind kind, const std::string &id) {
+	const DocumentType *type = document_type_for(file);
+	if (!type || !type->fields) return nullptr;
+	for (const FieldSchema &field : type->fields(kind))
 		if (field.id == id) return &field;
 	return nullptr;
 }
@@ -140,32 +135,36 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	plan.new_name = new_name;
 	const AssetEntry *asset = find_asset(scan, file);
 	if (!asset) {
-		plan.refusals.push_back(refusal("rename.unknown_file", "The project has no file named '" + file + "'.", file));
+		plan.refusals.push_back(refusal(CoreFinding::RenameUnknownFile, "The project has no file named '" + file + "'.", file));
 		return plan;
 	}
 	plan.path = asset->relative_path;
 	plan.old_name = asset->logical_name;
 	const std::string dir = fs::path(asset->relative_path).parent_path().generic_string();
 	plan.new_path = (fs::path(dir) / new_name).generic_string();
-	std::string problem, message;
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
 	if (!asset->imported_from.empty()) {
-		plan.refusals.push_back(refusal("rename.imported", asset->logical_name + " is imported from " + asset->imported_from +
+		plan.refusals.push_back(refusal(CoreFinding::RenameImported, asset->logical_name + " is imported from " + asset->imported_from +
 		                                ": rename the source instead.", asset->relative_path));
 	} else if (!check_project_file_name(paths.root, dir, new_name, asset->kind, problem, message)) {
-		plan.refusals.push_back(refusal(("rename." + problem).c_str(), message, asset->relative_path));
+		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::RenameKind
+		                         : problem == FileNameProblem::Path ? CoreFinding::RenamePath
+		                                                            : CoreFinding::RenameName;
+		plan.refusals.push_back(refusal(code, message, asset->relative_path));
 	} else if (archive_name_limit_binds(asset->kind) &&
 			!logical_name_fits_archive(new_name)) {
 		// check_project_file_name takes Unknown for a kind not decided yet (an import before its
 		// bytes are read); this file's is decided, none the game knows, and the build packs it all
 		// the same (route_asset), so the archives' name limit binds it as any packed kind's.
-		plan.refusals.push_back(refusal("rename.name",
+		plan.refusals.push_back(refusal(CoreFinding::RenameName,
 				"'" + new_name +
 						"' does not fit the game's archives: names are up to 16 characters.",
 				asset->relative_path));
 	} else if (extension_of(new_name) != extension_of(asset->logical_name)) {
-		plan.refusals.push_back(refusal("rename.kind", "Keep the extension: a file's kind comes from it.", asset->relative_path));
+		plan.refusals.push_back(refusal(CoreFinding::RenameKind, "Keep the extension: a file's kind comes from it.", asset->relative_path));
 	} else if (const AssetEntry *taken = scan.find(new_name); taken && taken != asset) {
-		plan.refusals.push_back(refusal("rename.exists", "The project already has a file named '" + new_name + "'.",
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + new_name + "'.",
 		                                taken->relative_path));
 	}
 	// Every field naming `target` (the file, or an output renamed with it), planned as a
@@ -184,7 +183,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 				continue;
 			}
 			if (!edge->rewritable) {
-				plan.refusals.push_back(refusal("rename.site", where + " names " + target.logical_name +
+				plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + target.logical_name +
 				                                " and the editor cannot rewrite that file yet.", edge->source, edge->field));
 				continue;
 			}
@@ -200,7 +199,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			// renamed file the same way, or the rename is refused.
 			if (!loads_renamed(scan, *edge, site.after, target, renamed)) site.after = renamed;
 			if (!loads_renamed(scan, *edge, site.after, target, renamed)) {
-				plan.refusals.push_back(refusal("rename.site", where + " names " + target.logical_name + " as '" + edge->value +
+				plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + target.logical_name + " as '" + edge->value +
 				                                "', and no spelling of " + renamed + " there would load it the same way.",
 				                                edge->source, edge->field));
 				continue;
@@ -220,7 +219,7 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			if (planned) continue;
 			const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 			plan.refusals.push_back(refusal(
-			        "rename.style",
+			        CoreFinding::RenameStyle,
 			        where + " names " + target.logical_name + " through " + edge->value + ", whose value " +
 			                (binding ? "in " + binding->file + " " : std::string()) +
 			                "this rename cannot rewrite (a name without its extension): change the variable instead.",
@@ -249,11 +248,11 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			if (renamed.new_name != renamed.old_name) {
 				const AssetEntry *taken = scan.find(renamed.new_name);
 				if (!logical_name_fits_archive(renamed.new_name)) {
-					plan.refusals.push_back(refusal("rename.name", "The import output " + renamed.new_name +
+					plan.refusals.push_back(refusal(CoreFinding::RenameName, "The import output " + renamed.new_name +
 					                                " would not fit the game's archives: names are up to 16 characters.",
 					                                asset->relative_path));
 				} else if (taken && key(taken->logical_name) != key(renamed.old_name)) {
-					plan.refusals.push_back(refusal("rename.exists", "The project already has a file named '" + renamed.new_name +
+					plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + renamed.new_name +
 					                                "', the name the import output of " + new_name + " would take.",
 					                                taken->relative_path));
 				}
@@ -277,12 +276,12 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 	const bool same_file = key(plan.old_name) == key(plan.new_name);
 	if (!same_file) {
 		if (fs::exists(new_path, ec)) {
-			findings.push_back(refusal("rename.exists", "A file already sits at '" + plan.new_path + "'.", plan.new_path));
+			findings.push_back(refusal(CoreFinding::RenameExists, "A file already sits at '" + plan.new_path + "'.", plan.new_path));
 			return false;
 		}
 		fs::copy_file(old_path, new_path, ec);
 		if (ec) {
-			findings.push_back(refusal("rename.copy", "The file could not be copied to its new name: " + ec.message(), plan.path));
+			findings.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + ec.message(), plan.path));
 			return false;
 		}
 		// The import record travels with its source (a stray record already at the new
@@ -291,7 +290,7 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 			fs::copy_file(fs::path(paths.root) / plan.sidecar, fs::path(paths.root) / plan.new_sidecar,
 			              fs::copy_options::overwrite_existing, ec);
 			if (ec) {
-				findings.push_back(refusal("rename.copy", "The import record could not be copied to its new name: " +
+				findings.push_back(refusal(CoreFinding::RenameCopy, "The import record could not be copied to its new name: " +
 				                                   ec.message(), plan.sidecar));
 				std::error_code ignored;
 				fs::remove(new_path, ignored);
@@ -359,11 +358,11 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 				if (!done[i] && std::find(left.begin(), left.end(), sites[i]->before) == left.end()) left.push_back(sites[i]->before);
 			std::string names;
 			for (const std::string &name : left) names += (names.empty() ? "'" : ", '") + name + "'";
-			findings.push_back(make_diagnostic(DiagnosticSeverity::Error, "rename.partial",
-			                                   entry.first + " still names " + names + " in " +
-			                                           std::to_string(sites.size() - rewritten) + " of its " +
-			                                           std::to_string(sites.size()) + " planned place(s).",
-			                                   entry.first));
+			findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
+			                                entry.first + " still names " + names + " in " +
+			                                        std::to_string(sites.size() - rewritten) + " of its " +
+			                                        std::to_string(sites.size()) + " planned place(s).",
+			                                entry.first));
 			ok = false;
 		}
 		if (rewritten && !document->save(error)) {
@@ -372,23 +371,23 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 		}
 	}
 	if (!ok) {
-		findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "rename.partial",
-		                                   "Both '" + plan.old_name + "' and '" + plan.new_name +
-		                                           "' are in the project until every reference is rewritten.",
-		                                   plan.path));
+		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Warning,
+		                                "Both '" + plan.old_name + "' and '" + plan.new_name +
+		                                        "' are in the project until every reference is rewritten.",
+		                                plan.path));
 		return false;
 	}
 	if (!same_file) {
 		fs::remove(old_path, ec);
 		if (ec) {
-			findings.push_back(refusal("rename.remove", "The old file could not be removed: " + ec.message(), plan.path));
+			findings.push_back(refusal(CoreFinding::RenameRemove, "The old file could not be removed: " + ec.message(), plan.path));
 			return false;
 		}
 		if (!plan.sidecar.empty()) fs::remove(fs::path(paths.root) / plan.sidecar, ec);
 	} else {
 		fs::rename(old_path, new_path, ec);
 		if (ec) {
-			findings.push_back(refusal("rename.move", "The file could not be renamed: " + ec.message(), plan.path));
+			findings.push_back(refusal(CoreFinding::RenameMove, "The file could not be renamed: " + ec.message(), plan.path));
 			return false;
 		}
 		if (!plan.sidecar.empty()) fs::rename(fs::path(paths.root) / plan.sidecar, fs::path(paths.root) / plan.new_sidecar, ec);
@@ -409,10 +408,9 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	        row.spell == NameSpelling::StyleVariable && mns::is_variable_reference(typed) ? mns::variable_name(typed) : typed;
 	// A name its defining field holds as a number (an item's id) is that number as the field
 	// writes it ("0100301" is 100301), before it is compared with the others.
-	std::map<AssetKind, std::unique_ptr<Document>> blanks;
 	const AssetEntry *defining = find_asset(scan, symbol.file);
 	const FieldSchema *defining_field =
-	        defining && !symbol.field.empty() ? site_field(blanks, defining->kind, symbol.address.kind, symbol.field) : nullptr;
+	        defining && !symbol.field.empty() ? site_field(defining->kind, symbol.address.kind, symbol.field) : nullptr;
 	Value number;
 	const bool numeric = defining_field && defining_field->type != FieldType::Text;
 	const bool is_number = numeric && site_value(*defining_field, new_name, number);
@@ -426,20 +424,20 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	plan.new_name = new_name;
 	const std::string what = std::string(row.phrase) + " '" + symbol.display + "'";
 	if (new_name.empty()) {
-		plan.refusals.push_back(refusal("rename.name", "Give " + what + " a new name.", symbol.file, symbol.field));
+		plan.refusals.push_back(refusal(CoreFinding::RenameName, "Give " + what + " a new name.", symbol.file, symbol.field));
 		return plan;
 	}
 	if (numeric && !is_number) {
-		plan.refusals.push_back(refusal("rename.name", symbol.file + " holds " + what + " as a number: '" + new_name + "' is none.",
+		plan.refusals.push_back(refusal(CoreFinding::RenameName, symbol.file + " holds " + what + " as a number: '" + new_name + "' is none.",
 		                                symbol.file, symbol.field));
 		return plan;
 	}
 	if (new_name == symbol.display) {
-		plan.refusals.push_back(refusal("rename.unchanged", what + " already has that name.", symbol.file, symbol.field));
+		plan.refusals.push_back(refusal(CoreFinding::RenameUnchanged, what + " already has that name.", symbol.file, symbol.field));
 		return plan;
 	}
 	if (symbol.field.empty() || !defining || !document_type_for(defining->kind)) {
-		plan.refusals.push_back(refusal("rename.site", symbol.file + " defines " + what + " and the editor cannot rewrite that file yet.",
+		plan.refusals.push_back(refusal(CoreFinding::RenameSite, symbol.file + " defines " + what + " and the editor cannot rewrite that file yet.",
 		                                symbol.file));
 		return plan;
 	}
@@ -449,7 +447,7 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	if (wanted != symbol.name)
 		for (const GraphSymbol *other : graph.symbols_named(symbol.kind, new_name))
 			if (graph_names::upper(other->scope) == graph_names::upper(symbol.scope)) {
-				plan.refusals.push_back(refusal("rename.exists",
+				plan.refusals.push_back(refusal(CoreFinding::RenameExists,
 				                                other->file + " already defines " + row.phrase + " '" + other->display + "'" +
 				                                        (symbol.scope.empty() ? "" : " in " + symbol.scope) + ".",
 				                                other->file, other->field));
@@ -475,7 +473,7 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
 		if (!edge->rewritable || !source) {
-			plan.refusals.push_back(refusal("rename.site", where + " names " + what + " and the editor cannot rewrite that file yet.",
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + what + " and the editor cannot rewrite that file yet.",
 			                                edge->source, edge->field));
 			continue;
 		}
@@ -492,17 +490,17 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	}
 	// Every site's field can hold the new value: within its width, a number where it is one.
 	for (const auto &[site, kind] : sites) {
-		const FieldSchema *field = site_field(blanks, site.kind, kind, site.field);
+		const FieldSchema *field = site_field(site.kind, kind, site.field);
 		Value value;
 		if (!field) {
-			plan.refusals.push_back(refusal("rename.site", site_where(site) + " has no field " + site.field + " the editor writes.",
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite, site_where(site) + " has no field " + site.field + " the editor writes.",
 			                                site.file, site.field));
 		} else if (!site_value(*field, site.after, value)) {
-			plan.refusals.push_back(refusal("rename.name", site_where(site) + " holds " + what + " as a number: '" + site.after +
+			plan.refusals.push_back(refusal(CoreFinding::RenameName, site_where(site) + " holds " + what + " as a number: '" + site.after +
 			                                        "' is none.",
 			                                site.file, site.field));
 		} else if (field->type == FieldType::Text && field->width && site.after.size() >= field->width) {
-			plan.refusals.push_back(refusal("rename.too_long",
+			plan.refusals.push_back(refusal(CoreFinding::RenameTooLong,
 			                                site_where(site) + " holds at most " + std::to_string(field->width - 1) +
 			                                        " characters in its " + site.field + ": '" + site.after + "' has " +
 			                                        std::to_string(site.after.size()) + ".",
@@ -551,7 +549,7 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 		// unsaved edits must be saved first, and that Save would fail): never the older file
 		// on disk in its place.
 		if (as_open && !current.ok()) {
-			findings.push_back(refusal("rename.site",
+			findings.push_back(refusal(CoreFinding::RenameSite,
 			                           file + " as it stands in the editor would not write: " +
 			                                   current.issues.front().message,
 			                           file, current.issues.front().field));
@@ -604,7 +602,7 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 				if (schema.id == site.field) field = &schema;
 			error = Diagnostic();
 			if (!field || !site_value(*field, site.after, edit.value) || !document->apply(edit, error)) {
-				Diagnostic refused = refusal("rename.site",
+				Diagnostic refused = refusal(CoreFinding::RenameSite,
 				                             site_where(site) + " cannot take '" + site.after + "'" +
 				                                     (error.message.empty() ? std::string(".") : ": " + error.message),
 				                             file, site.field);
@@ -617,7 +615,7 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 			// other definitions were compared with is that one.
 			Value stored;
 			if (!document->get(found[i], site.field, stored) || stored != edit.value) {
-				findings.push_back(refusal("rename.name",
+				findings.push_back(refusal(CoreFinding::RenameName,
 				                           site_where(site) + " would hold '" + value_text(stored) + "', not '" +
 				                                   site.after + "': give the name as it is written there.",
 				                           file, site.field));
@@ -627,17 +625,17 @@ bool stage_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 			++rewritten;
 		}
 		if (rewritten < sites.size()) {
-			findings.push_back(make_diagnostic(DiagnosticSeverity::Error, "rename.partial",
-			                                   file + " would still name '" + plan.old_name + "' in " +
-			                                           std::to_string(sites.size() - rewritten) + " of its " +
-			                                           std::to_string(sites.size()) + " planned place(s).",
-			                                   file));
+			findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
+			                                file + " would still name '" + plan.old_name + "' in " +
+			                                        std::to_string(sites.size() - rewritten) + " of its " +
+			                                        std::to_string(sites.size()) + " planned place(s).",
+			                                file));
 			ok = false;
 		}
 		// What it would write: a text the format carries.
 		const SerializeResult written = document->serialize();
 		if (!written.ok()) {
-			findings.push_back(refusal("rename.site", file + " would not write with the new name: " +
+			findings.push_back(refusal(CoreFinding::RenameSite, file + " would not write with the new name: " +
 			                                                  written.issues.front().message,
 			                           file, written.issues.front().field));
 			ok = false;
@@ -673,7 +671,7 @@ bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 	std::vector<FileText> writes;
 	for (const auto &document : staged) {
 		if (!document->matches_file()) {
-			findings.push_back(refusal("rename.conflict", document->path() + " changed outside the editor. Nothing was renamed.",
+			findings.push_back(refusal(CoreFinding::RenameConflict, document->path() + " changed outside the editor. Nothing was renamed.",
 			                           document->path()));
 			return false;
 		}
@@ -681,8 +679,8 @@ bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 	}
 	std::vector<std::string> problems;
 	if (write_files_together(writes, problems, replace)) return true;
-	findings.push_back(refusal("rename.write", "Nothing was renamed: " + problems.front(), plan.file));
-	for (size_t i = 1; i < problems.size(); ++i) findings.push_back(refusal("rename.partial", problems[i], plan.file));
+	findings.push_back(refusal(CoreFinding::RenameWrite, "Nothing was renamed: " + problems.front(), plan.file));
+	for (size_t i = 1; i < problems.size(); ++i) findings.push_back(refusal(CoreFinding::RenamePartial, problems[i], plan.file));
 	return false;
 }
 

@@ -7,7 +7,6 @@
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
-#include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>
 
 #include <algorithm>
@@ -103,6 +102,47 @@ const std::vector<FieldSchema> &source_fields() {
 	return fields;
 }
 
+constexpr FindingCodeEntry<StyleFinding> kFindingEntries[] = {
+	{ StyleFinding::LineEnding, { "style.line_ending", FindingFix::Rewrite, "with every line ending CR LF" } },
+	{ StyleFinding::NotLoaded, { "style.not_loaded" } },
+	{ StyleFinding::XmlChar, { "style.xml_char" } },
+	{ StyleFinding::NestedVar, { "style.nested_var" } },
+	{ StyleFinding::Backslash, { "style.backslash" } },
+	{ StyleFinding::ReadDifferently, { "style.read_differently" } },
+	{ StyleFinding::DirectiveForm, { "style.directive_form" } },
+	{ StyleFinding::IfWithoutArgument, { "style.if_without_argument" } },
+	{ StyleFinding::NoncanonicalIfArg, { "style.noncanonical_if_arg" } },
+	{ StyleFinding::UnbalancedElse, { "style.unbalanced_else" } },
+	{ StyleFinding::DuplicateElse, { "style.duplicate_else" } },
+	{ StyleFinding::UnbalancedEndif, { "style.unbalanced_endif" } },
+	{ StyleFinding::UnknownDirective, { "style.unknown_directive" } },
+	{ StyleFinding::DirectiveTail, { "style.directive_tail" } },
+	{ StyleFinding::LoneBackslash, { "style.lone_backslash" } },
+	{ StyleFinding::ValueIsDirective, { "style.value_is_directive" } },
+	{ StyleFinding::ValueStartsWithHash, { "style.value_starts_with_hash" } },
+	{ StyleFinding::ValueOnNextLine, { "style.value_on_next_line" } },
+	{ StyleFinding::DuplicateName, { "style.duplicate_name" } },
+	{ StyleFinding::ContinuedDuplicate, { "style.continued_duplicate" } },
+	{ StyleFinding::NulByte, { "style.nul_byte" } },
+	{ StyleFinding::InvalidNameChar, { "style.invalid_name_char" } },
+	{ StyleFinding::MissingValueDelimiter, { "style.missing_value_delimiter" } },
+	{ StyleFinding::NoValue, { "style.no_value" } },
+	{ StyleFinding::ContinuationAtEof, { "style.continuation_at_eof" } },
+	{ StyleFinding::UnterminatedIf, { "style.unterminated_if" } },
+	{ StyleFinding::Hangs, { "style.hangs" } },
+	{ StyleFinding::Stops, { "style.stops" } },
+	{ StyleFinding::OverriddenByBrand, { "style.overridden_by_brand" } },
+	{ StyleFinding::Unused, { "style.unused" } },
+	{ StyleFinding::NotAColor, { "style.not_a_color" } },
+	{ StyleFinding::MixedUse, { "style.mixed_use" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(StyleFinding::kCount),
+		"every StyleFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the stylesheet's rows follow StyleFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Stylesheets);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
+
 const std::string *text_of(const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
 	if (!text) error = "This field takes text.";
@@ -116,12 +156,36 @@ std::string sentence(std::string message) {
 	return message;
 }
 
-// "lone-backslash" -> "style.lone_backslash".
-std::string style_code(const std::string &code) {
-	std::string out = "style.";
-	for (char c : code) out += c == '-' ? '_' : c;
-	return out;
-}
+// The stylesheet's row for each of what the reader says of a line, in mns::DiagnosticCode's order:
+// the row whose token is style. and the code's with '_' for '-' (the reader's line-ending is the
+// validator's LineEnding).
+constexpr StyleFinding kReaderRows[] = {
+	StyleFinding::LineEnding,
+	StyleFinding::DirectiveForm,
+	StyleFinding::IfWithoutArgument,
+	StyleFinding::NoncanonicalIfArg,
+	StyleFinding::UnbalancedElse,
+	StyleFinding::DuplicateElse,
+	StyleFinding::UnbalancedEndif,
+	StyleFinding::UnknownDirective,
+	StyleFinding::DirectiveTail,
+	StyleFinding::LoneBackslash,
+	StyleFinding::ValueIsDirective,
+	StyleFinding::ValueStartsWithHash,
+	StyleFinding::ValueOnNextLine,
+	StyleFinding::DuplicateName,
+	StyleFinding::ContinuedDuplicate,
+	StyleFinding::NulByte,
+	StyleFinding::InvalidNameChar,
+	StyleFinding::MissingValueDelimiter,
+	StyleFinding::NoValue,
+	StyleFinding::ContinuationAtEof,
+	StyleFinding::UnterminatedIf,
+	StyleFinding::Hangs,
+	StyleFinding::Stops,
+};
+static_assert(std::size(kReaderRows) == mns::kDiagnosticCodeCount,
+		"every stylesheet reader code has exactly one row");
 
 } // namespace
 
@@ -160,7 +224,7 @@ const std::vector<RecordKindRow> &MnsDocument::kinds() const {
 	return table;
 }
 
-const std::vector<FieldSchema> &MnsDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &MnsDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	switch (kind) {
 	case kVariable: return variable_fields();
@@ -218,57 +282,6 @@ void MnsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) 
 		return;
 	}
 	facts.value = sheet.get(node->name());
-}
-
-const StyleValueUse &MnsDocument::style_value_use(const NodeAddress &line, const AssetGraph *graph,
-                                                  uint64_t graph_key) const {
-	if (!value_uses_.made || value_uses_.load_generation != load_generation() ||
-	    value_uses_.revision != revision() || value_uses_.graph != graph ||
-	    value_uses_.graph_key != graph_key) {
-		value_uses_.made = true;
-		value_uses_.load_generation = load_generation();
-		value_uses_.revision = revision();
-		value_uses_.graph = graph;
-		value_uses_.graph_key = graph_key;
-		value_uses_.rows.clear();
-	}
-	const auto kept = value_uses_.rows.find(line.row);
-	if (kept != value_uses_.rows.end()) return kept->second;
-	StyleValueUse &out = value_uses_.rows[line.row];
-	const Node *row = this->row(line.row);
-	if (!row || row->kind != kVariable) return out;
-	// The uses of the definition the game reads, by what its value must be there.
-	out.winner = winning_row(row->name()) == row->id;
-	bool colour = false, font = false, image = false, other = false;
-	if (out.winner && read_by_game() && graph) {
-		const GraphSymbol *binding = graph->style_binding(row->name());
-		out.bound = binding && binding->file == path();
-	}
-	if (out.bound)
-		for (const GraphEdge *edge : graph->referrers_of(ReferenceKind::StyleVar, row->name())) {
-			const StyleVariableUse use = style_variable_use(edge->through);
-			colour = colour || use == StyleVariableUse::Colour;
-			font = font || use == StyleVariableUse::Font;
-			image = image || use == StyleVariableUse::Image;
-			other = other || use == StyleVariableUse::Other;
-		}
-	const NodeAddress address{row->id, row->kind, 0};
-	FieldUse value;
-	for (const FieldSchema &schema : fields(kVariable))
-		if (schema.id == "value") value = field_on(address, schema);
-	Value text;
-	const std::string shown = get(address, "value", text) ? std::get<std::string>(text) : "";
-	const bool fixed = frozen(*row);
-	// The guess from the value alone only where no use says what it is: a string id's, a name's
-	// or a shown text's value is none of a colour, a font and an image, hex digits or not.
-	out.colour = !fixed && (colour || (!font && !image && !other && mnu::color_reads_whole(shown)));
-	out.file = value;
-	if (font || value.reference == ReferenceKind::Font) out.file.reference = ReferenceKind::Font;
-	else if (image || value.reference == ReferenceKind::MenuTexture)
-		out.file.reference = ReferenceKind::MenuTexture;
-	else out.file.reference = ReferenceKind::None;
-	out.picks = !fixed && !out.colour && graph && out.file.reference != ReferenceKind::None;
-	return out;
 }
 
 const mns::StyleSheet &MnsDocument::game_sheet() const {
@@ -357,7 +370,7 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &,
                         Diagnostic &error) {
 	if (!is_style_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a menu stylesheet.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu stylesheet.", path());
 		return false;
 	}
 	// The loader hands a single NUL for an empty file: an empty stylesheet.
@@ -369,7 +382,7 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	// A line end the game does not read: remembered for Problems; the rows end CR LF, as
 	// Save writes them, so every check reads what the saved file will hold.
 	for (const mns::Diagnostic &d : doc.diagnostics())
-		if (d.code == "line-ending" && !file->line_end_line) {
+		if (d.code == mns::DiagnosticCode::LineEnding && !file->line_end_line) {
 			file->line_end_line = d.line;
 			file->line_end_message = d.message;
 		}
@@ -489,6 +502,16 @@ bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged,
 	return false;
 }
 
+const FindingCodeRow &finding_code(StyleFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+const FindingCodeRow &finding_code(mns::DiagnosticCode code) {
+	return finding_code(kReaderRows[static_cast<size_t>(code)]);
+}
+
+FindingTable style_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *styles = dynamic_cast<const MnsDocument *>(&document);
@@ -514,10 +537,10 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		return last != last_of.end() && last->second == row.id;
 	};
 	// A finding on the row a line is in (row_at_line's).
-	auto on_line = [&](DiagnosticSeverity severity, const std::string &code,
+	auto on_line = [&](DiagnosticSeverity severity, StyleFinding code,
 						   const std::string &message, int line,
 						   const std::string &field = std::string()) {
-		Diagnostic d = make_diagnostic(severity, code, message, path, field);
+		Diagnostic d = make_finding(code, severity, message, path, field);
 		d.line = size_t(line > 0 ? line : 0);
 		const size_t at = size_t(std::upper_bound(first_lines.begin(), first_lines.end(), line) -
 				first_lines.begin());
@@ -534,18 +557,18 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 	for (const mns::Diagnostic &d : evaluated.diagnostics)
 		on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error
 												   : DiagnosticSeverity::Warning,
-				style_code(d.code), sentence(d.message), d.line);
+				kReaderRows[static_cast<size_t>(d.code)], sentence(d.message), d.line);
 	// The rows end CR LF; the file keeps the line ends it was read with until Save
 	// writes it (the build packs the file).
 	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
 	if (file && file->line_end_line && !styles->wrote_file())
-		on_line(DiagnosticSeverity::Error, "style.line_ending",
+		on_line(DiagnosticSeverity::Error, StyleFinding::LineEnding,
 				sentence(file->line_end_message) +
 						" The editor ends every line CR LF when it saves the file.",
 				file->line_end_line);
 	// The game reads only the shell's two [orig: Menu_InitShellResources @ 0x552604, @ 0x552616].
 	if (!styles->read_by_game()) {
-		findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.not_loaded",
+		findings.push_back(make_finding(StyleFinding::NotLoaded, DiagnosticSeverity::Warning,
 				"The game reads only menu_style.mns and brand.mns: nothing reads " +
 						basename_of(path) + ".",
 				path));
@@ -563,7 +586,7 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		if (value.empty())
 			continue; // a name the game ignores (no-value)
 		if (value.find_first_of("<>&\"") != std::string::npos)
-			on_line(DiagnosticSeverity::Warning, "style.xml_char",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::XmlChar,
 					"The game pastes " + name +
 							"'s value into each menu before reading the menu, so its < > & or \" "
 							"can break the menus that use it.",
@@ -571,22 +594,22 @@ std::vector<Diagnostic> validate_styles_file(const DocumentBase &document) {
 		// The game pastes a value and scans on after it, so a reference in it stays as
 		// written [orig: NapiXML_ExpandVariablesInText @ 0x63a000, the copy @ 0x63a450..0x63a4d1].
 		if (mns::holds_variable_reference(value))
-			on_line(DiagnosticSeverity::Warning, "style.nested_var",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::NestedVar,
 					"The game does not expand a %NAME% inside a value: the menus get " + name +
 							"'s value as written.",
 					line, "value");
 		if (value.find("\\\\") != std::string::npos)
-			on_line(DiagnosticSeverity::Info, "style.backslash",
+			on_line(DiagnosticSeverity::Info, StyleFinding::Backslash,
 					"The game keeps both backslashes of each '\\\\' in " + name + "'s value.", line,
 					"value");
 		// The document's reading against the game's own, where the game reads this far.
 		if (evaluated.stopped_line && line >= evaluated.stopped_line)
 			continue;
 		if (!evaluated.sheet.has(name))
-			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::ReadDifferently,
 					"The game does not read " + name + " as it stands here.", line, "value");
 		else if (evaluated.sheet.get(name) != value)
-			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+			on_line(DiagnosticSeverity::Warning, StyleFinding::ReadDifferently,
 					"The game reads " + name + " as '" + evaluated.sheet.get(name) +
 							"', not as shown.",
 					line, "value");

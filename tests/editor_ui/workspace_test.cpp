@@ -169,9 +169,8 @@ SessionView seeded_view() {
 	editor_test::own(v.project.requirements).rows.push_back(missing);
 	editor_test::own(v.project.requirements).required_total = 2;
 	editor_test::own(v.project.requirements).required_missing = 1;
-	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	lacking.role = missing.role;
-	lacking.target = missing.name;
+	Diagnostic lacking = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
+	lacking.subject = RequirementSubject{missing.role, missing.name};
 	v.findings.diagnostics.push_back(lacking);
 	v.activity.output.append("Opened My Game");
 	v.activity.output.append("Build started.");
@@ -908,12 +907,12 @@ void test_menu_bar_status() {
 	v.documents.open = {a, b, c};
 	for (int i = 0; i < 7; ++i)
 		v.findings.diagnostics.push_back(
-				make_diagnostic(DiagnosticSeverity::Error, "catalog.x", "An error."));
+				editor_test::finding_of(DiagnosticSeverity::Error, "catalog.name_empty", "An error."));
 	for (int i = 0; i < 5; ++i)
 		v.findings.diagnostics.push_back(
-				make_diagnostic(DiagnosticSeverity::Warning, "catalog.y", "A warning."));
+				editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "A warning."));
 	v.findings.diagnostics.push_back(
-			make_diagnostic(DiagnosticSeverity::Info, "catalog.z", "A note."));
+			editor_test::finding_of(DiagnosticSeverity::Info, "catalog.item_identity", "A note."));
 	v.activity.operation.id = 7;
 	v.activity.operation.kind = OperationKind::Build;
 	v.activity.operation.done = 3 * 1024 * 1024;
@@ -1063,10 +1062,10 @@ void test_files_window() {
 	editor_test::own(v.project.scan).index();
 	v.documents.open = {main_menu};
 	v.documents.active = main_menu->path();
-	v.findings.diagnostics = { make_diagnostic(DiagnosticSeverity::Error, "catalog.a", "One.",
+	v.findings.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Error, "catalog.name_empty", "One.",
 									   "defs/items.def"),
-		make_diagnostic(DiagnosticSeverity::Error, "catalog.b", "Two.", "defs/items.def"),
-		make_diagnostic(DiagnosticSeverity::Warning, "catalog.c", "Three.", "defs/items.def") };
+		editor_test::finding_of(DiagnosticSeverity::Error, "catalog.item_type", "Two.", "defs/items.def"),
+		editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "Three.", "defs/items.def") };
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);

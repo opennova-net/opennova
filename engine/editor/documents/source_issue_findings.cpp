@@ -4,13 +4,13 @@
 
 namespace opennova::editor {
 
-void source_issue_findings(const Document &document, const char *invalid_code,
-		const char *ignored_code, std::vector<Diagnostic> &findings,
+void source_issue_findings(const Document &document, const FindingCodeRow &invalid,
+		const FindingCodeRow &ignored, std::vector<Diagnostic> &findings,
 		const std::function<void(Diagnostic &)> &place) {
 	for (const SourceIssue &issue : document.issues()) {
-		Diagnostic finding = make_diagnostic(
-				issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-				issue.blocks ? invalid_code : ignored_code, issue.message, document.path(),
+		Diagnostic finding = make_finding(
+				issue.blocks ? invalid : ignored,
+				issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning, issue.message, document.path(),
 				issue.field);
 		finding.line = issue.line;
 		finding.record = issue.record;

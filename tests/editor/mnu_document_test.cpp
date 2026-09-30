@@ -112,7 +112,7 @@ std::pair<size_t, size_t> sibling_place(const Document &document, const NodeAddr
 }
 
 bool has_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
-	for (const Diagnostic &d : diagnostics) if (d.code == code) return true;
+	for (const Diagnostic &d : diagnostics) if (d.code() == code) return true;
 	return false;
 }
 
@@ -281,7 +281,7 @@ int validation() {
 	TEST_EXPECT(edit({set(action, "file", std::string())}));
 	bool on_the_field = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		on_the_field = on_the_field || (d.code == "menu.unserializable" && d.field == "file" && d.child_id == action.child &&
+		on_the_field = on_the_field || (d.code() == "menu.unserializable" && d.field == "file" && d.child_id == action.child &&
 		                                d.row_id == action.row && d.record_kind == action.kind);
 	TEST_EXPECT(on_the_field);
 	TEST_EXPECT(edit({set(action, "file", std::string("other.mnu"))}));
@@ -373,7 +373,7 @@ int windows_at_depth() {
 	// screen, a wrong kind, a stale identity.
 	move.parent = exit.child;
 	move.position = 0;
-	TEST_EXPECT(!document->apply(move, error) && error.code == "document.collection");
+	TEST_EXPECT(!document->apply(move, error) && error.code() == "document.collection");
 	TEST_EXPECT(!document->apply(op(EditOperation::Move, root, title.child, 0), error));
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
 	const NodeId other_root = document->window_at(*document->rows()[1], 0);
@@ -383,9 +383,9 @@ int windows_at_depth() {
 	document->undo(); // the second screen
 	move.parent = 0;
 	move.address = {screen().id, kScreen, exit.child};
-	TEST_EXPECT(!document->apply(move, error) && error.code == "document.selection");
+	TEST_EXPECT(!document->apply(move, error) && error.code() == "document.selection");
 	move.address = {screen().id, kWindow, 99999};
-	TEST_EXPECT(!document->apply(move, error) && error.code == "document.selection");
+	TEST_EXPECT(!document->apply(move, error) && error.code() == "document.selection");
 	document->undo(); // the outdent
 	document->undo(); // the indent
 	TEST_EXPECT(document->serialize().text == original && !document->dirty());
@@ -995,7 +995,7 @@ int screens_stay_found() {
 	const NodeAddress only{document.rows()[0]->id, kScreen, 0};
 	const uint64_t revision = document.revision();
 	Diagnostic error;
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, only), error) && error.code == "document.structure" &&
+	TEST_EXPECT(!document.apply(op(EditOperation::Remove, only), error) && error.code() == "document.structure" &&
 	            error.message.find("at least one screen") != std::string::npos);
 	TEST_EXPECT(document.rows().size() == 1 && document.revision() == revision && !document.can_undo() && !document.dirty());
 	// A second screen: the name its identity gives it while free, and then the first may go.
@@ -1259,7 +1259,7 @@ int parse_notes() {
 	const SessionView &view = session.view();
 	auto finding = [&](const char *asset, const char *code) -> const Diagnostic * {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == code && d.asset.find(asset) != std::string::npos) return &d;
+			if (d.code() == code && d.asset.find(asset) != std::string::npos) return &d;
 		return nullptr;
 	};
 	const Diagnostic *ignored = finding("ignored.mnu", "menu.ignored_input");
@@ -1429,7 +1429,7 @@ int name_is_its_own_edit() {
 	};
 	const auto missing = [&](const char *record) {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == "reference.missing" && d.record == record) return true;
+			if (d.code() == "reference.missing" && d.record == record) return true;
 		return false;
 	};
 	TEST_EXPECT(!missing("HOME/PANEL/GO/Action 2") && !missing("AWAY/BACK/Action 1"));

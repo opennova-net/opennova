@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/preview/texture_header.h>
 #include <formats/dds/dds.h>
@@ -116,9 +117,20 @@ static int test_registry_shape() {
 	std::vector<uint8_t> out;
 	Diagnostic error;
 	TEST_EXPECT(!make_blank(request, AssetKind::Animation, out, error));
-	TEST_EXPECT(error.code == "blank.unavailable");
-	TEST_EXPECT(std::string(blank_placement_dir(AssetKind::Menu)) == "menus");
-	TEST_EXPECT(std::string(blank_placement_dir(AssetKind::Texture)).empty());
+	TEST_EXPECT(error.code() == "blank.unavailable");
+	// Where a made file goes and the name New offers are the kind's row's (S13 V3): a kind Files'
+	// New lists (its free-form factory has no role) offers a new file's name, and no other kind
+	// does.
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Menu).folder) == "menus");
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Texture).folder).empty());
+	for (size_t k = 0; k < kAssetKindCount; ++k) {
+		const AssetKind kind = static_cast<AssetKind>(k);
+		const BlankFactory *f = find_blank_factory_for_kind(kind);
+		const bool listed = f && f->role[0] == '\0';
+		TEST_EXPECT(listed == (asset_kind_row(kind).new_name[0] != '\0'));
+	}
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Menu).new_name) == "newmenu.mnu" &&
+	            std::string(asset_kind_row(AssetKind::Strings).new_name) == "newtable.bin");
 	return 0;
 }
 
@@ -380,7 +392,7 @@ static int test_placeholder_texture() {
 	for (const char *name : {"skin.png", "skin", "chunk.aoc"}) {
 		request.logical_name = name;
 		TEST_EXPECT(!can_make_blank_texture(name, reason) && !reason.empty());
-		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code == "blank.texture" &&
+		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code() == "blank.texture" &&
 		            error.message == reason && error.asset == name);
 	}
 	return 0;

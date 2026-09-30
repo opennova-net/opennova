@@ -43,7 +43,7 @@ static int test_create_then_open() {
 	// A second create in the same place is refused; the project is untouched.
 	ProjectDocument again;
 	TEST_EXPECT(!create_project(root, "Other", "jo", again, error));
-	TEST_EXPECT(error.code == "project.exists");
+	TEST_EXPECT(error.code() == "project.exists");
 	TEST_EXPECT(open_project(root, opened, error) && opened.title == "My Game");
 
 	// A title defaults to the directory name.
@@ -85,7 +85,7 @@ static int test_refusals() {
 	ProjectDocument doc;
 
 	TEST_EXPECT(!open_project(dir.file("nowhere"), doc, error));
-	TEST_EXPECT(error.code == "project.file.missing");
+	TEST_EXPECT(error.code() == "project.file.missing");
 
 	const std::string root = dir.file("bad");
 	const ProjectPaths paths = ProjectPaths::for_root(root);
@@ -94,20 +94,20 @@ static int test_refusals() {
 	TEST_EXPECT(editor_test::write_text(paths.project_file,
 	                                    "{\"schema_version\": 2, \"project_id\": \"x\", \"title\": \"t\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
-	TEST_EXPECT(error.code == "project.schema_version.unsupported");
+	TEST_EXPECT(error.code() == "project.schema_version.unsupported");
 
 	TEST_EXPECT(editor_test::write_text(
 	        paths.project_file,
 	        "{\"schema_version\": 1, \"project_id\": \"x\", \"title\": \"t\", \"target_game\": \"quake\"}\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
-	TEST_EXPECT(error.code == "project.target_game.unknown");
+	TEST_EXPECT(error.code() == "project.target_game.unknown");
 
 	TEST_EXPECT(editor_test::write_text(paths.project_file, "{\"schema_version\": 1,\n"));
 	TEST_EXPECT(!open_project(root, doc, error));
-	TEST_EXPECT(error.code == "project.json");
+	TEST_EXPECT(error.code() == "project.json");
 
 	TEST_EXPECT(!create_project(dir.file("wrong-game"), "t", "quake", doc, error));
-	TEST_EXPECT(error.code == "project.target_game.unknown");
+	TEST_EXPECT(error.code() == "project.target_game.unknown");
 	return 0;
 }
 
@@ -160,13 +160,13 @@ static int test_export_dir_and_local_settings() {
 	TEST_EXPECT(load_local_settings(paths, back, finding) && back.game_install.empty() &&
 			back.runtime_executable.empty());
 	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
-			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.code() == "local_settings.schema_version.unsupported" &&
 			finding.message.find(paths.local_settings_file + " is set aside") == 0 &&
 			finding.message.find("(schema 9; this editor reads schema 2)") != std::string::npos);
 	finding = Diagnostic();
 	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
 			back.game_install == install &&
-			finding.code == "local_settings.schema_version.unsupported");
+			finding.code() == "local_settings.schema_version.unsupported");
 	std::string text;
 	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
 			text.find("\"schema_version\": 2") != std::string::npos &&
@@ -187,7 +187,7 @@ static int test_export_dir_and_local_settings() {
 	TEST_EXPECT(open_local_settings(paths, std::string(), back, finding) &&
 			back.game_install.empty() && back.runtime_executable.empty());
 	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
-			finding.code == "local_settings.schema_version.unsupported" &&
+			finding.code() == "local_settings.schema_version.unsupported" &&
 			finding.message.find("retail_root \"" + install + "\"") != std::string::npos &&
 			finding.message.find("runtime_executable \"C:/games/opennova.exe\"") !=
 					std::string::npos);
@@ -195,7 +195,7 @@ static int test_export_dir_and_local_settings() {
 	finding = Diagnostic();
 	TEST_EXPECT(open_local_settings(paths, install, back, finding) &&
 			back.game_install == install && back.runtime_executable.empty() &&
-			finding.code == "local_settings.schema_version.unsupported");
+			finding.code() == "local_settings.schema_version.unsupported");
 	TEST_EXPECT(read_file_text(paths.local_settings_file, text, io_error) &&
 			text.find("\"schema_version\": 2") != std::string::npos &&
 			text.find("retail") == std::string::npos);

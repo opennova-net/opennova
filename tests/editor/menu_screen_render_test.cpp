@@ -1,5 +1,6 @@
-// The menu render check (editor/preview, ADR 0046 S9j2): every menu screen of the project
-// compiled headless the way the game draws it, its compiler notes as Problems rows on the
+// The menu render check (editor/preview, ADR 0046 S9j2; the menu type's project check since
+// S13 V9, reached among the session's checks by menu_render_check): every menu screen of the
+// project compiled headless the way the game draws it, its compiler notes as Problems rows on the
 // record and the field they name, never a build's gate, and never a finding the asset
 // graph already makes. A new project's STARTUP screen renders clean: TITLE text sized in
 // its font from fonts/, the document's windows in the compiler's order. An edit that cuts
@@ -76,7 +77,7 @@ size_t list_index(const char *path) {
 std::vector<const Diagnostic *> render_findings(const SessionView &view, const std::string &code = std::string()) {
 	std::vector<const Diagnostic *> out;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code.rfind("menu.render.", 0) == 0 && (code.empty() || d.code == code)) out.push_back(&d);
+		if (d.code().rfind("menu.render.", 0) == 0 && (code.empty() || d.code() == code)) out.push_back(&d);
 	return out;
 }
 
@@ -110,10 +111,12 @@ static int test_blank_startup() {
 	session.handle(request::new_project(dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.findings.render_check);
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	// A new project renders clean.
-	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code.c_str(), d->message.c_str());
+	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code().c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
 
 	session.handle(request::open_document("main.mnu"));
@@ -177,7 +180,7 @@ static int test_blank_startup() {
 	session.handle(request::build());
 	session.run_operations();
 	for (const Diagnostic &d : view.activity.last_build->diagnostics)
-		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code.c_str(), d.message.c_str());
+		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(view.activity.has_build && view.activity.last_build->ok);
 	return 0;
 }
@@ -193,7 +196,10 @@ static int test_render_again_only_when_moved() {
 	session.handle(request::new_project(dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	// The files just made: every menu renders.
 	const size_t menus = check.rendered();
 	TEST_EXPECT(menus >= 1);
@@ -221,7 +227,7 @@ static int test_render_again_only_when_moved() {
 	// were renders nothing, a validation having run.
 	const auto unused = [&view](const char *name) {
 		return std::any_of(view.findings.diagnostics.begin(), view.findings.diagnostics.end(),
-				[&](const Diagnostic &d) { return d.code == "style.unused" && d.record == name; });
+				[&](const Diagnostic &d) { return d.code() == "style.unused" && d.record == name; });
 	};
 	TEST_EXPECT(unused("SEMIOPAQUE_BLACK"));
 	const ValidationStats &stats = session.validation_stats();
@@ -492,7 +498,10 @@ static int test_notes_alone_recompose() {
 	session.handle(request::new_project(dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	const MenuRenderCheck &check = *view.findings.render_check;
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(render_check);
+	if (!render_check) return 1;
+	const MenuRenderCheck &check = *render_check;
 	const std::string root = view.project.root;
 	std::string font;
 	for (const AssetEntry &asset : view.project.scan->entries)
@@ -518,7 +527,7 @@ static int test_notes_alone_recompose() {
 	const auto unreadable = [&view] {
 		size_t found = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
-			found += d.code == "menu.render.font_unreadable" && d.asset == "menus/letters.mnu" ? 1
+			found += d.code() == "menu.render.font_unreadable" && d.asset == "menus/letters.mnu" ? 1
 																							   : 0;
 		return found;
 	};

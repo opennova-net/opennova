@@ -15,7 +15,7 @@
 
 namespace opennova::editor {
 
-class MenuRenderCheck;
+class ProjectChecks;
 
 // What a project's findings are made of beside its files (ADR 0046 S12): the project as the
 // one refresh read it (project_state.h: the scan, carrying the import pass's findings, and the
@@ -40,9 +40,10 @@ struct ProjectFindingsInput {
 // `rows`: every finding, the Problems rows the editor shows and `opennova-project validate`
 // prints, in order: the scan's, the requirements', the boot report's, the last Play's, the
 // documents' (each file's own, the use checks', the asset graph's: graph/project_validation.h)
-// and the open documents' own, the menu render check's notes and the last build's. The rows
+// and the open documents' own, the document types' project checks' (documents/project_check.h,
+// in the registry's order: the menu type's render check's notes) and the last build's. The rows
 // from `gate_begin` to `gate_end` are the documents' and the open documents' own: what a build
-// gates on beside the scan and the requirements (the render check's notes never are). Each
+// gates on beside the scan and the requirements (a project check's findings never are). Each
 // finding is copied into the rows once; the session moves them into its view.
 struct ProjectFindings {
 	std::vector<Diagnostic> rows;
@@ -51,20 +52,21 @@ struct ProjectFindings {
 };
 
 // The project's findings, composed one way for the editor and the command line: the graph
-// updated and each file's own findings kept in `cache` (the session keeps both from one
-// validation to the next; the command line makes them for its one call), and every menu screen
-// compiled headless by `render_check` over `files` (the project's files as the game looks them
-// up, the open documents standing in).
+// updated and each file's own findings kept in `cache`, then the document types' project checks
+// (`checks`, one per type that has one) brought to the project over `files` (the project's files
+// as the game looks them up, the open documents standing in). The session keeps the graph, the
+// cache and the checks from one validation to the next; the command line makes them for its one
+// call.
 ProjectFindings compose_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
-                                         MenuRenderCheck &render_check, const FileSource &files);
+                                         ProjectChecks &checks, const FileSource &files);
 
 // compose_project_findings in two halves, for a caller that keeps the rows it made (the session):
-// the graph, each file's own findings and the render check brought to the project, true when a
-// row they give may have moved (graph/project_validation.h's refresh_project, or the render
-// check's notes); then the rows, from what the first half left.
+// the graph, each file's own findings and the project checks brought to the project, each once,
+// true when a row they give may have moved (graph/project_validation.h's refresh_project, or a
+// check that says its findings moved); then the rows, from what the first half left.
 bool refresh_project_findings(const ProjectFindingsInput &input, AssetGraph &graph, ValidationCache &cache,
-                              MenuRenderCheck &render_check, const FileSource &files);
+                              ProjectChecks &checks, const FileSource &files);
 ProjectFindings collect_project_findings(const ProjectFindingsInput &input, const AssetGraph &graph,
-                                         const ValidationCache &cache, const MenuRenderCheck &render_check);
+                                         const ValidationCache &cache, const ProjectChecks &checks);
 
 } // namespace opennova::editor

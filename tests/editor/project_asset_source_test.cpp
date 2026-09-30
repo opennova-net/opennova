@@ -3,7 +3,8 @@
 // subfolders and the import outputs under .opennova/ included (an import source is not);
 // payloads decoded like a document's (an SCR file reads decrypted); an open document
 // stands in for its file with the bytes its Save would write, its stamp following its
-// revision; a file added outside the editor resolves after a rescan.
+// revision and its load (a load in place moves both); a file added outside the editor resolves
+// after a rescan.
 
 #include <algorithm>
 #include <cstdint>
@@ -12,10 +13,13 @@
 #include <string>
 #include <vector>
 
+#include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/mnu_document.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/model/document.h>
+#include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -177,9 +181,55 @@ static int test_open_document_stands_in() {
 	return 0;
 }
 
+// A load in place (the open document read again: its identity kept, its revision back at 0, S13
+// D6) moves the name's stamp and the source's generation, and the name reads the bytes the
+// document holds now: the stamp and the serialized bytes follow the load too, not the identity and
+// revision alone, which repeat (S13 V9's review).
+static int test_load_in_place() {
+	editor_test::TempProjectDir dir("opennova_editor_asset_source_reload");
+	const std::string root = dir.file("project");
+	ProjectDocument project;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Reload", "jo", project, error));
+	const std::string relative = "menus/reload.mnu";
+	const std::string file = root + "/" + relative;
+	const auto menu_text = [](const char *window) {
+		return std::string("<SCREEN>\r\n<NAME>RELOAD</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"") + window +
+		       "\">\r\n<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
+		       "</WINDOW>\r\n</SCREEN>\r\n";
+	};
+	TEST_EXPECT(editor_test::write_text(file, menu_text("FIRST")));
+	const AssetScan scan = scan_project_assets(ProjectPaths::for_root(root), project);
+	const AssetEntry *entry = scan.at_path(relative);
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	ProjectAssetSource assets;
+	assets.set_scan(root, scan, project.target_game);
+	auto menu = std::make_shared<MnuDocument>();
+	TEST_EXPECT(menu->load(file, relative, entry->kind, project.target_game, error));
+	assets.set_open({menu});
+	std::vector<uint8_t> bytes;
+	const auto reads = [&bytes](const char *window) {
+		return std::string(bytes.begin(), bytes.end()).find(window) != std::string::npos;
+	};
+	TEST_EXPECT(assets.read("reload.mnu", bytes) && reads("FIRST"));
+	const uint64_t stamp = assets.stamp("reload.mnu"), generation = assets.generation();
+	const uint64_t identity = menu->identity(), revision = menu->revision();
+	// The file changed on disk and read again into the same document.
+	TEST_EXPECT(editor_test::write_text(file, menu_text("SECOND")));
+	TEST_EXPECT(menu->load(file, relative, entry->kind, project.target_game, error));
+	TEST_EXPECT(menu->identity() == identity && menu->revision() == revision);
+	assets.set_open({menu});
+	TEST_EXPECT(assets.generation() != generation && assets.stamp("reload.mnu") != stamp);
+	TEST_EXPECT(assets.read("reload.mnu", bytes) && reads("SECOND") && !reads("FIRST"));
+	std::printf("test_load_in_place passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_names_decode_and_rescan();
 	failures += test_open_document_stands_in();
+	failures += test_load_in_place();
 	return failures == 0 ? 0 : 1;
 }

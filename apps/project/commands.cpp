@@ -16,7 +16,7 @@
 #include <editor/project/project_findings.h>
 #include <editor/project/project_state.h>
 #include <editor/assets/project_asset_source.h>
-#include <editor/preview/menu_render_check.h>
+#include <editor/documents/project_checks.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_lease.h>
 
@@ -68,7 +68,7 @@ int usage(std::FILE *err, const char *why) {
 }
 
 void print_diagnostic(std::FILE *out, const Diagnostic &d) {
-	std::fprintf(out, "%s %s: %s", diagnostic_severity_label(d.severity), d.code.c_str(),
+	std::fprintf(out, "%s %s: %s", diagnostic_severity_label(d.severity), d.code().c_str(),
 	             d.message.c_str());
 	if (!d.asset.empty()) std::fprintf(out, " [%s]", d.asset.c_str());
 	if (d.line) std::fprintf(out, " line %zu", d.line);
@@ -138,7 +138,7 @@ bool open_settings(const std::string &dir, OpenedProject &project, std::FILE *er
 		report_error(err, finding);
 		return false;
 	}
-	if (!finding.code.empty())
+	if (!finding.code().empty())
 		print_diagnostic(err, finding);
 	return true;
 }
@@ -204,8 +204,9 @@ int command_status(int argc, const char *const *argv, std::FILE *out, std::FILE 
 
 // Every finding the editor's Problems lists for the project as it is on disk, composed the
 // one way the editor composes them (project/project_findings): the scan's (with the import
-// pass's), the requirements', the documents' and the graph's, the menu render check's notes.
-// A project read here has no boot report, no Play, no open document and no last build.
+// pass's), the requirements', the documents' and the graph's, the document types' project
+// checks' (the menu render check's notes). A project read here has no boot report, no Play, no
+// open document and no last build.
 int command_validate(int argc, const char *const *argv, std::FILE *out, std::FILE *err) {
 	if (argc != 2) return usage(err, "validate needs a directory");
 	OpenedProject project;
@@ -213,7 +214,7 @@ int command_validate(int argc, const char *const *argv, std::FILE *out, std::FIL
 	print_summary(out, project);
 	AssetGraph graph;
 	ValidationCache cache;
-	MenuRenderCheck render_check;
+	ProjectChecks checks;
 	ProjectAssetSource files;
 	files.set_scan(project.paths.root, project.state.scan, project.doc.target_game);
 	const std::vector<std::shared_ptr<const DocumentBase>> open;
@@ -222,7 +223,7 @@ int command_validate(int argc, const char *const *argv, std::FILE *out, std::FIL
 	const ProjectFindings findings =
 	        compose_project_findings({project.paths, project.doc, project.state.scan, project.state.requirements, open,
 	                                  boot_missing, none, none, none},
-	                                 graph, cache, render_check, files);
+	                                 graph, cache, checks, files);
 	int errors = 0;
 	for (const Diagnostic &d : findings.rows) {
 		print_diagnostic(out, d);

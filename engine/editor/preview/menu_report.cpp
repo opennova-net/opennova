@@ -12,6 +12,7 @@
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/project/project_files.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
@@ -63,9 +64,10 @@ const MnuDocument *open_menu(const SessionView &view, const std::string &relativ
 // The render check's render of a screen, and whether it shows the document as it is now.
 const MenuScreenRender *render_of(const SessionView &view, const MnuDocument &document, NodeId row, bool &current) {
 	current = false;
-	if (!view.findings.render_check) return nullptr;
-	const MenuScreenRender *render = view.findings.render_check->render(document.path(), row);
-	current = render && view.findings.render_check->document(document.path()) == &document &&
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	if (!check) return nullptr;
+	const MenuScreenRender *render = check->render(document.path(), row);
+	current = render && check->document(document.path()) == &document &&
 	          render->status() == MenuPreviewStatus::Ready && render->revision() == document.revision();
 	return render;
 }
@@ -74,12 +76,10 @@ const char *render_status(const MenuScreenRender *render) {
 	return render ? menu_preview_status_token(render->status()) : "none";
 }
 
-// Where a finding comes from, by its code's family.
-std::string finding_source(const std::string &code) {
-	if (code.rfind("reference.", 0) == 0 || code.rfind("graph.", 0) == 0) return "graph";
-	if (code.rfind("menu.render.", 0) == 0) return "render";
-	const size_t dot = code.find('.');
-	return dot == std::string::npos ? code : code.substr(0, dot);
+// Where a finding comes from: its row's source (the asset graph's, the render check's, else its
+// group's key); "" for a Diagnostic no finding was made into.
+std::string finding_source(const Diagnostic &d) {
+	return d.row() ? finding_source_token(*d.row()) : std::string();
 }
 
 JsonValue window_to_json(const MnuDocument &document, const NodeAddress &window, const Document::Placement &at,
@@ -131,7 +131,8 @@ const MnuDocument *menu_for(const SessionView &view, const std::string &path) {
 	const std::string relative = menu_path(view, path);
 	if (relative.empty()) return nullptr;
 	if (const MnuDocument *open = open_menu(view, relative)) return open;
-	return view.findings.render_check ? view.findings.render_check->document(relative) : nullptr;
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	return check ? check->document(relative) : nullptr;
 }
 
 io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path) {
@@ -176,7 +177,7 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 	JsonValue problems = JsonValue::make_array();
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.asset != document->path()) continue;
-		const std::string source = finding_source(d.code);
+		const std::string source = finding_source(d);
 		++counts[diagnostic_severity_label(d.severity)];
 		++sources[source];
 		JsonValue row = diagnostic_to_json(d);
@@ -216,13 +217,14 @@ io::JsonValue menu_render_to_json(
 	MenuPreviewSnapshot none;
 	none.status = MenuPreviewStatus::NoScreen;
 	JsonValue out;
-	if (!view.findings.render_check) {
+	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
+	if (!render_check) {
 		none.status = MenuPreviewStatus::NoProject;
 		out = menu_preview_to_json(none);
 	} else {
 		const std::string relative = menu_path(view, path);
 		if (relative.empty()) return JsonValue::make_null();
-		const MenuRenderCheck &check = *view.findings.render_check;
+		const MenuRenderCheck &check = *render_check;
 		// The open document when the menu is open (its current state), else the file as the check
 		// read it.
 		const MnuDocument *document = check.document(relative);

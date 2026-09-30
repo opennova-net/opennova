@@ -462,15 +462,17 @@ bool drew_selected(const char *prefix) {
 	return false;
 }
 
-// How far the window whose name starts with `prefix` (and none of its children) is scrolled
-// down; -1 when there is none.
-float scrolled(const char *prefix) {
-	for (ImGuiWindow *window : GImGui->Windows)
-		if (window->Active && std::strncmp(window->Name, prefix, std::strlen(prefix)) == 0 &&
-		    !std::strchr(window->Name + std::strlen(prefix), '/'))
-			return window->Scroll.y;
-	return -1.0f;
+// Whether `window`, drawn this frame, drew the selected colour.
+bool drew_selected_in(const ImGuiWindow *window) {
+	if (!window || !window->Active) return false;
+	const ImU32 color = ImGui::GetColorU32(ImGuiCol_Header);
+	for (const ImDrawVert &vertex : window->DrawList->VtxBuffer)
+		if (vertex.col == color) return true;
+	return false;
 }
+
+// How far `window`, drawn this frame, is scrolled down; -1 when it did not draw.
+float scrolled_in(const ImGuiWindow *window) { return window && window->Active ? window->Scroll.y : -1.0f; }
 
 // A Go to reveals its record in the Document tab's view (S12 Z2): into a long string table the
 // strings list scrolls to the key (and back up to the first one; a key in view moves nothing),
@@ -514,28 +516,33 @@ void test_reveal_in_views() {
 	const auto go_to = [&](const std::string &path, const std::string &locator, const char *field) {
 		session.handle(request::open_document(path, locator, field));
 	};
-	const char *const list = "Document/strings_";
+	// The string table's view is master and detail (S13 V3's outline): its strings are the detail
+	// table, which scrolls in its own window, the table known by its id in the tab.
+	const auto list = [&]() -> const ImGuiWindow * {
+		const ImGuiTable *table = ImGui::TableFindByID(item_id(document_tab_id(strings_path), {"master", "records"}));
+		return table ? table->InnerWindow : nullptr;
+	};
 	go_to(strings_path, strings->locator(first), "key");
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.away();
-	CHECK(drew_selected(list) && scrolled(list) == 0.0f, "the first key: the list at its top");
+	CHECK(drew_selected_in(list()) && scrolled_in(list()) == 0.0f, "the first key: the list at its top");
 	// From another file, a Go to a late key: its tab shown, the list scrolled to it.
 	session.handle(request::open_document("main.mnu"));
 	ui.frames(3);
 	go_to(strings_path, strings->locator(late), "key");
 	ui.frames(4);
-	CHECK(drew_selected(list) && scrolled(list) > 0.0f, "scrolled to the late key");
+	CHECK(drew_selected_in(list()) && scrolled_in(list()) > 0.0f, "scrolled to the late key");
 	go_to(strings_path, strings->locator(middle), "key");
 	ui.frames(4);
-	CHECK(drew_selected(list) && scrolled(list) > 0.0f, "to a middle one");
+	CHECK(drew_selected_in(list()) && scrolled_in(list()) > 0.0f, "to a middle one");
 	go_to(strings_path, strings->locator(first), "key");
 	ui.frames(4);
-	CHECK(drew_selected(list) && scrolled(list) == 0.0f, "back up to the first");
+	CHECK(drew_selected_in(list()) && scrolled_in(list()) == 0.0f, "back up to the first");
 	go_to(strings_path, strings->locator(near), "key");
 	ui.frames(4);
-	CHECK(drew_selected(list) && scrolled(list) == 0.0f, "a key in view: nothing moves");
+	CHECK(drew_selected_in(list()) && scrolled_in(list()) == 0.0f, "a key in view: nothing moves");
 
 	// A model's user point: the outline, collapsed, opens to it.
 	session.handle(request::open_document("models/armory.3di"));

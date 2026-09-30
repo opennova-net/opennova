@@ -78,37 +78,13 @@ bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t
 	const BlankFactory *factory = find_blank_factory_for_role(request.role);
 	if (factory == nullptr) factory = find_blank_factory_for_kind(kind);
 	if (factory == nullptr) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.unavailable",
-		                        "The editor cannot create " + request.logical_name +
-		                                " yet: no writer exists for this kind of file.",
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankUnavailable, DiagnosticSeverity::Error,
+		                     "The editor cannot create " + request.logical_name +
+		                             " yet: no writer exists for this kind of file.",
+		                     request.logical_name);
 		return false;
 	}
 	return factory->make(request, out, error);
-}
-
-const char *blank_placement_dir(AssetKind kind) {
-	switch (kind) {
-	case AssetKind::Menu:
-	case AssetKind::MenuStyle: return "menus";
-	case AssetKind::Strings:
-	case AssetKind::StringTableCoo: return "strings";
-	case AssetKind::Font: return "fonts";
-	case AssetKind::Model: return "models";
-	case AssetKind::Animation:
-	case AssetKind::AnimationMap: return "anims";
-	case AssetKind::ItemDefs:
-	case AssetKind::WeaponDefs:
-	case AssetKind::AmmoDefs:
-	case AssetKind::HudPosDefs:
-	case AssetKind::HudFxDefs:
-	case AssetKind::AvatarDefs:
-	case AssetKind::SoundProfileDefs:
-	case AssetKind::CharAttrDefs:
-	case AssetKind::PowerupDefs:
-	case AssetKind::OtherDefs: return "defs";
-	default: return "";
-	}
 }
 
 std::string blank_crlf(const std::string &text) {

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/preferences_store.h>
@@ -73,7 +74,8 @@ struct FakeOperation : SessionOperation {
 	OperationOutcome finish(SessionCore &) override {
 		++tally.finishes;
 		OperationOutcome outcome;
-		outcome.findings.push_back(make_diagnostic(DiagnosticSeverity::Info, "fake.done", "Faked."));
+		// The fake's note, under a code of the editor's own table (every finding is a row's).
+		outcome.findings.push_back(make_finding(CoreFinding::BuildChanged, DiagnosticSeverity::Info, "Faked."));
 		return outcome;
 	}
 };
@@ -81,7 +83,7 @@ struct FakeOperation : SessionOperation {
 // True when the last request was refused because an operation runs (an operation.busy warning).
 bool refused_busy(const ProjectSession &session) {
 	const std::vector<Diagnostic> &findings = session.outcome().findings;
-	return std::any_of(findings.begin(), findings.end(), [](const Diagnostic &d) { return d.code == "operation.busy"; });
+	return std::any_of(findings.begin(), findings.end(), [](const Diagnostic &d) { return d.code() == "operation.busy"; });
 }
 
 // An operation of `kind` as the slot shows it: what its row says it reads and writes.
@@ -340,7 +342,7 @@ static int test_busy_gate() {
 		save.path = kind == EditorRequestKind::Save ? items->path() : std::string();
 		session.handle(save);
 		TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
-		            session.outcome().findings[0].code == "operation.busy" &&
+		            session.outcome().findings[0].code() == "operation.busy" &&
 		            session.outcome().findings[0].severity == DiagnosticSeverity::Warning);
 		TEST_EXPECT(session.outcome().findings[0].message == "Wait for the build to finish, or cancel it, first.");
 		TEST_EXPECT(items->dirty() && v.activity.operation.id == build);
@@ -355,7 +357,7 @@ static int test_busy_gate() {
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open &&
 			items->dirty() && session.outcome().findings.size() == 1 &&
-			session.outcome().findings[0].code == "operation.busy");
+			session.outcome().findings[0].code() == "operation.busy");
 	answer.choice = UnsavedChoice::Discard;
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().done() && !v.dialogs.unsaved_prompt.open && session.document_for("items.def") == nullptr &&
@@ -391,7 +393,7 @@ static int test_busy_gate() {
 	session.handle(answer);
 	TEST_EXPECT(session.outcome().unsaved_prompt && v.dialogs.unsaved_prompt.open &&
 			items->dirty() && session.outcome().findings.size() == 1 &&
-			session.outcome().findings[0].code == "operation.busy");
+			session.outcome().findings[0].code() == "operation.busy");
 	answer.choice = UnsavedChoice::Cancel;
 	session.handle(answer);
 	TEST_EXPECT(!v.dialogs.unsaved_prompt.open && v.activity.operation.id == build);
@@ -516,7 +518,7 @@ static int test_uncancellable_operation() {
 	TEST_EXPECT(!fs::exists(dir.file("third")));
 	session.handle(request::cancel_operation());
 	TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
-	            session.outcome().findings[0].code == "operation.not_cancellable" && v.activity.operation.id == id);
+	            session.outcome().findings[0].code() == "operation.not_cancellable" && v.activity.operation.id == id);
 
 	// Cancellable when the gate asks, not when the request commits: refused there, nothing closed
 	// and no folder made (a new project's is made only once the open one has closed).
@@ -664,7 +666,7 @@ static int test_settings_parts_weighed() {
 	apply.settings.mission = true;
 	session.handle(apply);
 	TEST_EXPECT(applied() == 9 && v.project.settings_result.failures.size() == 1 &&
-	            v.project.settings_result.failures[0].code == "operation.busy");
+	            v.project.settings_result.failures[0].code() == "operation.busy");
 	TEST_EXPECT(v.project.settings_result.failures[0].message ==
 	            "Wait for the build to finish, or cancel it, before changing the project's features.");
 	TEST_EXPECT(v.project.document->title == "Renamed" && !v.project.document->features.mission && v.activity.operation.running());
@@ -685,7 +687,7 @@ static int test_settings_parts_weighed() {
 	held.settings.runtime_executable = dir.file("runtime/opennova.exe");
 	session.handle(held);
 	TEST_EXPECT(applied() == 11 && v.project.settings_result.failures.size() == 2);
-	for (const Diagnostic &failure : v.project.settings_result.failures) TEST_EXPECT(failure.code == "operation.busy");
+	for (const Diagnostic &failure : v.project.settings_result.failures) TEST_EXPECT(failure.code() == "operation.busy");
 	TEST_EXPECT(v.project.document->title == "Renamed" && v.project.retail_directory == install &&
 	            v.project.runtime_setting == dir.file("runtime/opennova.exe"));
 	TEST_EXPECT(v.activity.operation.id == id && !tally.cancelled);

@@ -27,7 +27,10 @@
 // undo still finds every record where it was and answers what changed in it as it did. S13 D5
 // adds the type's record kinds (kinds()): each named back by its token, no two sharing a kind or
 // a token, a kind the outline adds a row of being a row of the file; every row of the file of a
-// kind that is a row, and every record a collection holds of a kind the table has. S13 D4 adds the
+// kind that is a row, and every record a collection holds of a kind the table has. S13 V3 adds that
+// a kind is one record kind across every asset kind the type opens (the same token in each: the
+// type's schema without a document, DocumentType::fields, answers by the kind alone), whose fields
+// are the type's fields(kind), the very table its documents answer. S13 D4 adds the
 // type's validate_file: the file's own findings from its document alone, each on the file and on
 // a record the document holds, the same findings from a second load of the file, and a finding
 // over each type's files (a flawed file of its own where its fixture has no flaw). S13 D6: the
@@ -47,7 +50,10 @@
 // bytes it made, and the same two Sets as a gesture's two batches one step; and a batch mixing a
 // record's Set with the rows' own edits (a row of each kind the outline adds, the last row
 // duplicated, the last row moved to the top) one step, undone and redone byte for byte with
-// everything it made listed, or refused by a rule of the type's own with nothing committed.
+// everything it made listed, or refused by a rule of the type's own with nothing committed. S13
+// V9: where the type has a project check, over its file in a project of its own, a second update
+// with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
+// the same findings again.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -63,6 +69,8 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
@@ -70,11 +78,15 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/project_check.h>
 #include <editor/documents/strings_document.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
+#include <editor/project/project_document.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_write.h>
 #include <formats/def/def_schema.h>
@@ -82,6 +94,7 @@
 
 #include "common/file_io.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova::editor;
 
@@ -101,7 +114,10 @@ size_t g_findings = 0;
 // S13 D7: files whose two rows took one batch and one gesture, and mixed batches taken and refused;
 // text fields whose longer text grew their row's footprint.
 size_t g_multi_rows = 0, g_mixed = 0, g_mixed_waiting = 0, g_mixed_refused = 0, g_grown = 0;
+size_t g_checked_again = 0; // files a type's project check was brought to twice, and after a clear
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
+// Each type's record kinds over the files of every asset kind it opens: a kind's token by the kind.
+std::map<std::string, std::map<NodeKind, std::string>> g_type_kinds;
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
 // it did.
@@ -110,6 +126,7 @@ struct TypeCounts {
 	size_t findings = 0; // what validate_file made over the type's files
 	size_t multi_rows = 0, mixed = 0, mixed_refused = 0; // S13 D7's batches over several rows
 	size_t grown = 0; // text fields whose longer text grew their row's footprint
+	size_t check_findings = 0; // what the type's project check made over them
 };
 
 // Each row type and the size of its own object (S13 D7): a row's footprint is at least that. A row
@@ -465,7 +482,7 @@ Edit edit_of(EditOperation operation, const NodeAddress &address, const std::str
 // sharing a kind or a token, a kind the outline adds a row of being a row of the file; every row
 // of the file of a kind that is a row, and every record a collection holds of a kind the table
 // has (its token the one its locator and a batch's add name it by).
-void check_kinds(const Fixture &fixture, const Document &document,
+void check_kinds(const DocumentType &type, const Fixture &fixture, const Document &document,
                  const std::vector<NodeAddress> &records) {
 	const std::vector<RecordKindRow> &kinds = document.kinds();
 	check(!kinds.empty(), fixture.name, "the type declares its record kinds");
@@ -480,6 +497,11 @@ void check_kinds(const Fixture &fixture, const Document &document,
 			check(kinds[j].kind != row.kind && std::string(kinds[j].token) != row.token, where,
 			      "no two kinds share a kind or a token");
 		g_kinds.insert(std::string(typeid(document).name()) + "/" + row.token);
+		const auto known = g_type_kinds[type.name].emplace(row.kind, row.token).first;
+		check(known->second == row.token, where,
+		      "a kind is one record kind across every asset kind the type opens (the same token)");
+		check(type.fields && &type.fields(row.kind) == &document.fields(row.kind), where,
+		      "the type's fields(kind) is the table its documents answer");
 	}
 	for (const NodeAddress &address : records) {
 		const std::string where = where_of(fixture, document, address, "");
@@ -506,7 +528,7 @@ void check_places(const DocumentType &type, const Fixture &fixture, const Docume
 // The one refusal a type gives a Clear or a Write of an optional field it keeps as its record
 // writes it (a def line no tick of its own marks, a menu field no bit marks): always written.
 bool always_written(const Diagnostic &error) {
-	return error.code == "document.value" &&
+	return error.code() == "document.value" &&
 	       (error.message == "This field is always written." || error.message == "This line is always written.");
 }
 
@@ -531,7 +553,7 @@ void check_presence(const Fixture &fixture, Document &document, const std::vecto
 			++counts.optional;
 			error = Diagnostic();
 			if (!document.apply(edit_of(written ? EditOperation::Clear : EditOperation::Write, address, schema.id), error)) {
-				check(always_written(error), where + " (" + error.code + ": " + error.message + ")",
+				check(always_written(error), where + " (" + error.code() + ": " + error.message + ")",
 				      "a type keeps an optional field as it is only as always written");
 				++g_kept;
 				continue;
@@ -779,16 +801,16 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 			check(document.saved_value(address, schema.id, saved), where, "the changed field has its saved value");
 			Diagnostic refused;
 			check(!snapshot->apply(edit_of(EditOperation::Set, address, schema.id, saved), refused) &&
-			              refused.code == "document.snapshot",
+			              refused.code() == "document.snapshot",
 			      where, "a snapshot refuses an edit (document.snapshot)");
 			snapshot->undo();
 			snapshot->redo();
 			refused = Diagnostic();
-			check(!snapshot->save(refused) && refused.code == "document.snapshot", where,
+			check(!snapshot->save(refused) && refused.code() == "document.snapshot", where,
 			      "a snapshot refuses a save (document.snapshot)");
 			refused = Diagnostic();
 			check(!snapshot->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", refused) &&
-			              refused.code == "document.snapshot",
+			              refused.code() == "document.snapshot",
 			      where, "a snapshot refuses a load (document.snapshot)");
 			check(snapshot->revision() == document.revision() && snapshot->serialize().text == after.text &&
 			              document.serialize().text == after.text,
@@ -826,7 +848,7 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 		const Document &document, TypeCounts &counts) {
 	const std::vector<Diagnostic> findings = type.validate_file(document);
 	for (const Diagnostic &d : findings) {
-		const std::string where = fixture.name + " " + d.code;
+		const std::string where = fixture.name + " " + d.code();
 		check(d.asset == document.path(), where,
 				"validate_file's findings are on the document's file");
 		if (d.row_id)
@@ -840,6 +862,45 @@ void check_validate_file(const DocumentType &type, const Fixture &fixture,
 			fixture.name, "a second load of the file validates to the same findings");
 	g_findings += findings.size();
 	counts.findings += findings.size();
+}
+
+// The type's project check (S13 V9), where it has one, over the file in a project of its own,
+// validated first (a check reads which files' own checks read their records): a second update
+// with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
+// the same findings again.
+void check_project_check(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
+	if (!type.project_check) return;
+	editor_test::TempProjectDir dir("opennova_editor_contract_project_check");
+	const std::string root = dir.file("project");
+	ProjectDocument project;
+	Diagnostic error;
+	const bool made = create_project(root, "Contract", "jo", project, error) &&
+	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes);
+	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");
+	if (!made) return;
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const AssetScan scan = scan_project_assets(paths, project);
+	ProjectAssetSource files;
+	files.set_scan(root, scan, project.target_game);
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput validation{paths, project, scan, open};
+	refresh_project(validation, graph, cache);
+	const ProjectCheckInput input{validation, cache, files};
+	const std::unique_ptr<ProjectCheck> check_made = type.project_check();
+	check(check_made != nullptr, fixture.name, "the type's hook makes its project check");
+	if (!check_made) return;
+	check_made->update(input);
+	const std::vector<Diagnostic> first = check_made->findings();
+	check(!check_made->update(input) && check_made->findings() == first, fixture.name,
+	      "a second update of the project check with nothing changed says nothing moved and keeps its findings");
+	check_made->clear();
+	check_made->update(input);
+	check(check_made->findings() == first, fixture.name,
+	      "the project check cleared, then updated, makes the same findings again");
+	++g_checked_again;
+	counts.check_findings += first.size();
 }
 
 // A change of a kind no type makes (an Apply of another's payload): refused (document.payload),
@@ -857,7 +918,7 @@ void check_foreign_payload(const Fixture &fixture, Document &document,
 	Diagnostic refused;
 	const uint64_t revision = document.revision();
 	++g_foreign;
-	check(!document.apply(apply, refused) && refused.code == "document.payload" &&
+	check(!document.apply(apply, refused) && refused.code() == "document.payload" &&
 	              document.revision() == revision && !document.dirty() &&
 	              document.serialize().text == serialized,
 	      fixture.name,
@@ -1061,10 +1122,10 @@ void check_multi_row(const DocumentType &type, const Fixture &fixture, Document 
 	if (!document.apply(mixed, error)) {
 		check(document.revision() == revision && document.serialize().text == serialized && !document.dirty(), where,
 		      "a refused batch commits nothing");
-		check((error.code == "document.structure" || error.code == "document.kind" || error.code == "document.collection") &&
+		check((error.code() == "document.structure" || error.code() == "document.kind" || error.code() == "document.collection") &&
 		              error.message != "This document refuses that change." &&
 		              error.message != "This document cannot add that record.",
-		      where + " (" + error.code + ": " + error.message + ")", "a batch of rows is refused only by a rule of the type's own");
+		      where + " (" + error.code() + ": " + error.message + ")", "a batch of rows is refused only by a rule of the type's own");
 		++g_mixed_refused;
 		++counts.mixed_refused;
 		return;
@@ -1115,7 +1176,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 		      "parse, serialize, parse again serializes the same bytes and records");
 	}
 
-	check_kinds(fixture, *document, records);
+	check_kinds(type, fixture, *document, records);
 	check_validate_file(type, fixture, *document, counts);
 	check_foreign_payload(fixture, *document, records, first.text);
 	check_adds(type, fixture, *document, records, first.text);
@@ -1147,6 +1208,7 @@ int main() {
 			check(!fixture.bytes.empty(), fixture.name, "the fixture is present");
 			if (fixture.bytes.empty()) continue;
 			check_fixture(*type, fixture, counts);
+			check_project_check(*type, fixture, counts);
 			++checked;
 		}
 		check(checked > 0, type->name, "the document type has a file here to check");
@@ -1162,6 +1224,10 @@ int main() {
 		// Per type: a validate_file that never took its own documents (its cast to another type)
 		// would make nothing over its files.
 		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
+		// Likewise a project check that never read its type's files would keep the clause above
+		// over no findings.
+		check(!type->project_check || counts.check_findings > 0, type->name,
+		      "the project check makes a finding over the type's files");
 		PinnedPresence pinned{type->name, 0, 0};
 		for (const PinnedPresence &pin : kPinnedPresence)
 			if (std::string(pin.type) == type->name) pinned = pin;
@@ -1170,9 +1236,11 @@ int main() {
 		check(fixed_text(*type) || counts.grown > 0, type->name, "a longer text grows a row of the type");
 		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings; %zu files' two "
 		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule; %zu text fields' "
-		            "longer text grew their row\n",
+		            "longer text grew their row",
 		            type->name, counts.optional, counts.presences, counts.findings, counts.multi_rows, counts.mixed,
 		            counts.mixed_refused, counts.grown);
+		if (type->project_check) std::printf(", %zu project check findings", counts.check_findings);
+		std::printf("\n");
 	}
 	for (const Fixture &fixture : files)
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
@@ -1189,10 +1257,11 @@ int main() {
 		            "changes refused, %zu rows and %zu records added (%zu waiting for values, "
 		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, %zu files' "
 		            "two rows in one batch and one gesture, %zu batches of rows and records taken (%zu waiting for "
-		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row)\n",
+		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row, "
+		            "%zu files a project check was brought to again)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
 		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
 		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_multi_rows, g_mixed,
-		            g_mixed_waiting, g_mixed_refused, g_grown);
+		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again);
 	return g_failures == 0 ? 0 : 1;
 }

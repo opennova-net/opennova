@@ -13,6 +13,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 
@@ -121,9 +122,9 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 	std::error_code ec;
 	fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
 	if (ec) {
-		scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "project.root.unreadable",
-		                                           "Cannot read the project directory " + paths.root +
-		                                                   ": " + ec.message()));
+		scan.diagnostics.push_back(make_finding(CoreFinding::ProjectRootUnreadable, DiagnosticSeverity::Error,
+		                                        "Cannot read the project directory " + paths.root +
+		                                                ": " + ec.message()));
 		return scan;
 	}
 	const fs::recursive_directory_iterator end;
@@ -146,8 +147,8 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 			// A record whose source is gone lists nothing: its outputs would otherwise
 			// outlive the source and still pack.
 			if (!fs::is_regular_file(root / source_relative, ec)) {
-				scan.diagnostics.push_back(make_diagnostic(
-				        DiagnosticSeverity::Warning, "import.orphan_record",
+				scan.diagnostics.push_back(make_finding(
+				        CoreFinding::ImportOrphanRecord, DiagnosticSeverity::Warning,
 				        "The import record names " + source_relative + ", which is not in the project: delete the record.",
 				        sidecar_relative));
 				continue;
@@ -155,7 +156,7 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 			ImportSidecar sidecar;
 			Diagnostic error;
 			if (!load_import_sidecar(path.generic_string(), sidecar, error)) {
-				if (!error.code.empty()) {
+				if (!error.code().empty()) {
 					error.asset = sidecar_relative;
 					scan.diagnostics.push_back(error);
 				}
@@ -167,8 +168,8 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 				if (!fs::is_regular_file(output_path, ec)) {
 					// Only the import pass makes outputs: one missing after it ran means the
 					// last import did not finish (its finding says why).
-					scan.diagnostics.push_back(make_diagnostic(
-					        DiagnosticSeverity::Warning, "import.output_missing",
+					scan.diagnostics.push_back(make_finding(
+					        CoreFinding::ImportOutputMissing, DiagnosticSeverity::Warning,
 					        output + " (imported from " + source_relative + ") has not been made: the game will not see it.",
 					        source_relative));
 					continue;
@@ -204,9 +205,9 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 				asset.kind = classify_asset(filename, &bytes);
 			} else {
 				asset.kind = classify_asset(filename, nullptr);
-				scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning,
-				                                           "asset.unreadable", io_error,
-				                                           asset.relative_path));
+				scan.diagnostics.push_back(make_finding(CoreFinding::AssetUnreadable,
+				                                        DiagnosticSeverity::Warning, io_error,
+				                                        asset.relative_path));
 			}
 		} else {
 			asset.kind = classify_asset(filename, nullptr);
@@ -230,29 +231,29 @@ AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &
 		// name.
 		const bool packed = archive_name_limit_binds(asset.kind);
 		if (packed && asset.logical_name.size() > static_cast<size_t>(pff::PFF_NAME_SIZE)) {
-			scan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.too_long",
+			scan.diagnostics.push_back(make_finding(
+			        CoreFinding::AssetNameTooLong, DiagnosticSeverity::Error,
 			        "The file name " + asset.logical_name + " is longer than " +
 			                std::to_string(pff::PFF_NAME_SIZE) +
 			                " characters; the game cannot store it in an archive.",
 			        asset.relative_path));
 		} else if (packed && asset.key.empty()) {
-			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "asset.name.empty",
-			                                           "The file name is blank once normalized.",
-			                                           asset.relative_path));
+			scan.diagnostics.push_back(make_finding(CoreFinding::AssetNameEmpty, DiagnosticSeverity::Error,
+			                                        "The file name is blank once normalized.",
+			                                        asset.relative_path));
 		}
 		if (i > 0 && scan.entries[i - 1].key == asset.key) {
-			scan.diagnostics.push_back(make_diagnostic(
-			        DiagnosticSeverity::Error, "asset.name.duplicate",
+			scan.diagnostics.push_back(make_finding(
+			        CoreFinding::AssetNameDuplicate, DiagnosticSeverity::Error,
 			        "Two files share the name " + asset.logical_name + " (" +
 			                scan.entries[i - 1].relative_path + " and " + asset.relative_path +
 			                "); the game resolves names without folders, so only one can exist.",
 			        asset.relative_path));
 		}
 		if (asset.kind == AssetKind::Unknown) {
-			scan.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "asset.kind.unknown",
-			                                           "The game does not use files of this type.",
-			                                           asset.relative_path));
+			scan.diagnostics.push_back(make_finding(CoreFinding::AssetKindUnknown, DiagnosticSeverity::Warning,
+			                                        "The game does not use files of this type.",
+			                                        asset.relative_path));
 		}
 	}
 	return scan;

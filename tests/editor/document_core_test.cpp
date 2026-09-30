@@ -321,7 +321,7 @@ protected:
 			}
 		}
 		if (!flush()) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "Malformed fake document.", path());
+			error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Malformed fake document.", path());
 			return false;
 		}
 		return true;
@@ -477,7 +477,7 @@ protected:
 	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override {
 		const auto *text = std::get_if<std::string>(&edit.value);
 		if (!text) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "The note is text.", path());
+			error = editor_test::finding_of(DiagnosticSeverity::Error, "document.value", "The note is text.", path());
 			return false;
 		}
 		auto note = std::make_shared<FakeState>();
@@ -726,7 +726,7 @@ protected:
 		while (in >> tag) {
 			auto line = std::make_shared<FlatLine>();
 			if (tag != "L" || !(in >> line->title >> line->weight >> line->tag)) {
-				error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "Not a line.", path());
+				error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Not a line.", path());
 				return false;
 			}
 			rows.push_back(line);
@@ -808,7 +808,7 @@ static int test_structure() {
 	                             opennova::editor::AssetKind::Unknown, "jo", error));
 	TEST_EXPECT(bytes.path() == "fake.txt" && bytes.rows().size() == 2 && bytes.serialize().text == fake.original);
 	TEST_EXPECT(bytes.address_at(document.locator(fake.a1b)).child == fake.a1b.child && !bytes.dirty());
-	TEST_EXPECT(!bytes.matches_file() && !bytes.save(error) && error.code == "document.no_file");
+	TEST_EXPECT(!bytes.matches_file() && !bytes.save(error) && error.code() == "document.no_file");
 	return 0;
 }
 
@@ -842,7 +842,7 @@ static int test_structural_edits() {
 	// Refused: out of its row (a Move and an Add), into itself or anything inside it, a
 	// fixed collection, a kind the owner does not hold, a wrong kind, a stale identity.
 	auto refused = [&](const Edit &edit, const char *code) {
-		const bool as_expected = !document.apply(edit, error) && error.code == code;
+		const bool as_expected = !document.apply(edit, error) && error.code() == code;
 		if (!as_expected) std::printf("  not refused as %s: %s\n", code, error.message.c_str());
 		return as_expected;
 	};
@@ -967,7 +967,7 @@ static int test_add_with_a_value() {
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	add.value = std::string("heavy"); // the weight takes a number
-	TEST_EXPECT(!document.apply(add, error) && error.code == "document.value" && error.field == "weight");
+	TEST_EXPECT(!document.apply(add, error) && error.code() == "document.value" && error.field == "weight");
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo() && !document.dirty());
 	Edit row = make(EditOperation::Add, {0, kGroup, 0});
 	row.field = "name";
@@ -976,7 +976,7 @@ static int test_add_with_a_value() {
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	row.value = int64_t(3);
-	TEST_EXPECT(!document.apply(row, error) && error.code == "document.value");
+	TEST_EXPECT(!document.apply(row, error) && error.code() == "document.value");
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	return 0;
 }
@@ -1000,17 +1000,17 @@ static int test_veto() {
 		seen.push_back(step);
 		return false;
 	};
-	TEST_EXPECT(!document.apply(make(EditOperation::Add, {0, kGroup, 0}), error) && error.code == "document.structure" &&
+	TEST_EXPECT(!document.apply(make(EditOperation::Add, {0, kGroup, 0}), error) && error.code() == "document.structure" &&
 	            error.message == "Vetoed.");
 	TEST_EXPECT(!document.apply(make(EditOperation::Remove, fake.beta), error));
 	TEST_EXPECT(!document.apply(make(EditOperation::Move, fake.beta, 0, 0), error));
 	TEST_EXPECT(!document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error));
 	TEST_EXPECT(!document.apply(make(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child), error));
-	TEST_EXPECT(!document.apply(set(fake.y, "name", std::string("z")), error) && error.code == "document.structure");
+	TEST_EXPECT(!document.apply(set(fake.y, "name", std::string("z")), error) && error.code() == "document.structure");
 	TEST_EXPECT(!document.apply({set(fake.y, "name", std::string("z")), set(fake.b1, "name", std::string("c")),
 	                             make(EditOperation::Add, {0, kGroup, 0}, 0, 0)},
 	                            error) &&
-	            error.code == "document.structure");
+	            error.code() == "document.structure");
 	TEST_EXPECT(document.revision() == revision && document.last_added() == added && document.serialize().text == text &&
 	            document.rows().size() == 2);
 	TEST_EXPECT(seen.size() == 7);
@@ -1067,7 +1067,7 @@ static int test_batches_and_gestures() {
 	// A batch resolves each edit against the row as the edits before it left it: an item
 	// removed, then its leaf, is refused, and nothing is committed.
 	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.a1), make(EditOperation::Remove, fake.x)}, error) &&
-	            error.code == "document.selection");
+	            error.code() == "document.selection");
 	TEST_EXPECT(document.rows()[0].get() == before && !document.can_undo());
 	// Two rows, and a row's own edit with a record's, in one batch: one step (S13 D7).
 	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), set(fake.b1, "name", std::string("B"))}, error));
@@ -1151,7 +1151,7 @@ static int test_typing_burst() {
 	TEST_EXPECT(type("ne") && type("new") && name(fake.a1) == "new");
 	TEST_EXPECT(name(fake.x) == "x" && name(fake.b1) == "b1");
 	document.veto = [](const EditStep &) { return false; };
-	TEST_EXPECT(!type("newer") && error.code == "document.structure");
+	TEST_EXPECT(!type("newer") && error.code() == "document.structure");
 	document.veto = nullptr;
 	TEST_EXPECT(name(fake.a1) == "new" && document.can_undo());
 	TEST_EXPECT(type("news") && name(fake.a1) == "news");
@@ -1315,21 +1315,21 @@ static int test_batch_made() {
 	TEST_EXPECT(!document.apply(std::vector<Edit>{set({fake.alpha.row, kItem, batch_made(1)}, "name", std::string("early")),
 	                                              make(EditOperation::Add, {0, kItem, 0}, fake.a1.child)},
 	                            error) &&
-	            error.code == "document.batch");
+	            error.code() == "document.batch");
 	TEST_EXPECT(!document.apply(set({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("self")), error) &&
-	            error.code == "document.batch");
+	            error.code() == "document.batch");
 	TEST_EXPECT(!document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")),
 	                                              set({fake.alpha.row, kItem, batch_made(0)}, "name", std::string("B"))},
 	                            error) &&
-	            error.code == "document.batch");
+	            error.code() == "document.batch");
 	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Add, {0, kItem, 0}, fake.a1.child),
 	                                              set({fake.beta.row, kItem, batch_made(0)}, "name", std::string("elsewhere"))},
 	                            error) &&
-	            error.code == "document.batch");
+	            error.code() == "document.batch");
 	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.beta),
 	                                              set(fake.b1, "name", std::string("gone"))},
 	                            error) &&
-	            error.code == "document.batch" && error.message.find("removed") != std::string::npos);
+	            error.code() == "document.batch" && error.message.find("removed") != std::string::npos);
 	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo());
 
 	// A row the batch makes: named as a row (its own field), as an owner (an item put in it) and
@@ -1386,10 +1386,10 @@ static int test_clipboard() {
 	TEST_EXPECT(inside.size() == 6); // header, b1, a1, x, y, a1b
 	paste = make(EditOperation::Paste, {fake.alpha.row, 0, 0});
 	paste.value = leaves;
-	TEST_EXPECT(!document.apply(paste, error) && error.code == "document.paste");
+	TEST_EXPECT(!document.apply(paste, error) && error.code() == "document.paste");
 	paste = make(EditOperation::Paste, {0, 0, 0});
 	paste.value = items;
-	TEST_EXPECT(!document.apply(paste, error) && error.code == "document.paste"); // at the top: rows paste later
+	TEST_EXPECT(!document.apply(paste, error) && error.code() == "document.paste"); // at the top: rows paste later
 	return 0;
 }
 
@@ -1853,12 +1853,12 @@ static int test_snapshot() {
 	            snapshot->dirty() && snapshot->can_undo() && snapshot->rows() == document.rows());
 	TEST_EXPECT(snapshot->serialize().text == edited && snapshot->record_change(fake.x) == Change::Changed &&
 	            snapshot->field_changed(fake.x, "name") && snapshot->record_change(fake.y) == Change::Unchanged);
-	TEST_EXPECT(!snapshot->apply(set(fake.x, "name", std::string("z")), error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->apply(set(fake.x, "name", std::string("z")), error) && error.code() == "document.snapshot");
 	snapshot->undo();
 	TEST_EXPECT(snapshot->revision() == document.revision() && snapshot->serialize().text == edited);
-	TEST_EXPECT(!snapshot->save(error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->save(error) && error.code() == "document.snapshot");
 	TEST_EXPECT(!snapshot->load_bytes(bytes_of(kFile), "fake.txt", AssetKind::Unknown, "jo", error) &&
-	            error.code == "document.snapshot");
+	            error.code() == "document.snapshot");
 
 	std::string read_there, locator_there;
 	size_t records_there = 0;
@@ -1987,12 +1987,12 @@ static int test_apply_payload() {
 	};
 	const uint64_t revision = document.revision();
 	const Edit other = apply(fake.a1, std::make_shared<Other>());
-	TEST_EXPECT(!document.apply(other, error) && error.code == "document.payload" &&
+	TEST_EXPECT(!document.apply(other, error) && error.code() == "document.payload" &&
 	            error.message == "Not a fake change.");
 	TEST_EXPECT(!document.apply(make(EditOperation::Apply, fake.a1), error) &&
-	            error.code == "document.payload");
+	            error.code() == "document.payload");
 	TEST_EXPECT(!document.apply({set(fake.x, "name", std::string("zz")), other}, error) &&
-	            error.code == "document.payload");
+	            error.code() == "document.payload");
 	// A change handed back as a copy that changes nothing, naming no row or a record: no step (the
 	// state is kept only when the change changes something, S13 D7's second review).
 	auto unchanged = fake_change("");
@@ -2000,7 +2000,7 @@ static int test_apply_payload() {
 	TEST_EXPECT(document.apply(apply({}, unchanged), error) && document.revision() == revision);
 	TEST_EXPECT(document.apply(apply(fake.a1, unchanged), error) && document.revision() == revision);
 	TEST_EXPECT(!document.apply(apply({}, fake_change("name")), error) &&
-	            error.code == "document.payload" &&
+	            error.code() == "document.payload" &&
 	            error.message == "A name or a leaf needs its item.");
 	TEST_EXPECT(document.revision() == revision && text() == renamed);
 	// One naming no row among other edits: one step with them (S13 D7).
@@ -2016,9 +2016,9 @@ static int test_apply_payload() {
 	                            error));
 	const std::string refused = "This document does not take that change.";
 	TEST_EXPECT(!flat.apply(apply({flat.rows()[0]->id, kLine, 0}, fake_change("b")), error) &&
-	            error.code == "document.payload" && error.message == refused);
+	            error.code() == "document.payload" && error.message == refused);
 	TEST_EXPECT(!flat.apply(apply({}, fake_change("", "", "n")), error) &&
-	            error.code == "document.payload" && error.message == refused);
+	            error.code() == "document.payload" && error.message == refused);
 	TEST_EXPECT(flat.revision() == 0);
 	return 0;
 }
@@ -2034,7 +2034,7 @@ static int test_failed_load() {
 	const std::vector<std::shared_ptr<const Node>> rows = document.rows();
 	TEST_EXPECT(!document.load_bytes(bytes_of("G broken\nI 3 too_deep\n"), "other.txt",
 	                                 AssetKind::Menu, "dfx", error));
-	TEST_EXPECT(error.code == "document.parse" && error.asset == "other.txt");
+	TEST_EXPECT(error.code() == "document.parse" && error.asset == "other.txt");
 	TEST_EXPECT(document.path() == "fake.txt" && document.kind() == AssetKind::Unknown &&
 	            document.game_name() == "jo");
 	TEST_EXPECT(document.load_generation() == generation && document.rows() == rows);
@@ -2043,7 +2043,7 @@ static int test_failed_load() {
 	// A file that does not read leaves it so too.
 	TEST_EXPECT(!document.load(fake.dir.file("missing.txt"), "missing.txt", AssetKind::Menu, "dfx",
 	                           error) &&
-	            error.code == "document.read");
+	            error.code() == "document.read");
 	TEST_EXPECT(document.path() == "fake.txt" && document.load_generation() == generation);
 	return 0;
 }
@@ -2091,7 +2091,7 @@ static int test_document_base() {
 	TEST_EXPECT(blob.apply(replace, error) && blob.blob() == edited && blob.revision() == 1);
 	TEST_EXPECT(blob.dirty() && blob.can_undo() && blob.history_bytes() == original.size());
 	TEST_EXPECT(!blob.apply(set({1, 0, 0}, "name", std::string("x")), error) &&
-	            error.code == "document.payload");
+	            error.code() == "document.payload");
 	TEST_EXPECT(blob.revision() == 1 && blob.blob() == edited);
 	// Its own history: undone to the file as loaded (clean again), redone.
 	blob.undo();
@@ -2111,7 +2111,7 @@ static int test_document_base() {
 	TEST_EXPECT(editor_test::write_text(file, "changed\n") && !blob.matches_file());
 	replace.payload = std::make_shared<BlobReplace>("four\n");
 	TEST_EXPECT(blob.apply(replace, error) && !blob.save(error) &&
-	            error.code == "document.conflict");
+	            error.code() == "document.conflict");
 	TEST_EXPECT(file_text() == "changed\n" && blob.dirty());
 	// A snapshot shares it and takes nothing: the base refuses for the type.
 	const std::unique_ptr<DocumentBase> snapshot = blob.snapshot();
@@ -2119,14 +2119,14 @@ static int test_document_base() {
 	TEST_EXPECT(!snapshot->as_records() && snapshot->identity() == blob.identity());
 	TEST_EXPECT(snapshot->load_generation() == blob.load_generation() &&
 	            snapshot->revision() == blob.revision() && snapshot->serialize().text == "four\n");
-	TEST_EXPECT(!snapshot->apply(replace, error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->apply(replace, error) && error.code() == "document.snapshot");
 	snapshot->undo();
 	TEST_EXPECT(snapshot->revision() == blob.revision() &&
 	            snapshot->serialize().text == "four\n");
-	TEST_EXPECT(!snapshot->save(error) && error.code == "document.snapshot");
+	TEST_EXPECT(!snapshot->save(error) && error.code() == "document.snapshot");
 	TEST_EXPECT(!snapshot->load_bytes(bytes_of("x\n"), "blob.txt", AssetKind::Unknown, "jo",
 	                                  error) &&
-	            error.code == "document.snapshot");
+	            error.code() == "document.snapshot");
 	// Loaded again in place: a new load generation, the revisions from 0, the file matching.
 	TEST_EXPECT(blob.load(file, "blob.txt", AssetKind::Unknown, "jo", error));
 	TEST_EXPECT(blob.load_generation() > first_load && blob.revision() == 0);
@@ -2135,7 +2135,7 @@ static int test_document_base() {
 	// A load that does not read leaves it as it was: path, kind, game, generation, the file.
 	const uint64_t loaded = blob.load_generation();
 	TEST_EXPECT(!blob.load_bytes(bytes_of("FAIL\n"), "other.txt", AssetKind::Menu, "dfx", error) &&
-	            error.code == "document.parse");
+	            error.code() == "document.parse");
 	TEST_EXPECT(blob.path() == "blob.txt" && blob.kind() == AssetKind::Unknown &&
 	            blob.game_name() == "jo");
 	TEST_EXPECT(blob.load_generation() == loaded && blob.blob() == "changed\n");
@@ -2147,9 +2147,9 @@ static int test_document_base() {
 	TEST_EXPECT(blob.blocked() && blob.can_undo());
 	const uint64_t blocked_at = blob.revision();
 	replace.payload = std::make_shared<BlobReplace>("five\n");
-	TEST_EXPECT(!blob.apply(replace, error) && error.code == "document.parse" &&
+	TEST_EXPECT(!blob.apply(replace, error) && error.code() == "document.parse" &&
 	            blob.revision() == blocked_at);
-	TEST_EXPECT(!blob.save(error) && error.code == "document.unserializable" &&
+	TEST_EXPECT(!blob.save(error) && error.code() == "document.unserializable" &&
 	            error.message == "The blob cannot carry this line.");
 	TEST_EXPECT(blob.rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
 	blob.undo();
@@ -2160,7 +2160,7 @@ static int test_document_base() {
 	BlobDocument bytes;
 	TEST_EXPECT(bytes.load_bytes(bytes_of("b\n"), "b.txt", AssetKind::Unknown, "jo", error));
 	TEST_EXPECT(bytes.load_generation() > blob.load_generation());
-	TEST_EXPECT(!bytes.save(error) && error.code == "document.no_file");
+	TEST_EXPECT(!bytes.save(error) && error.code() == "document.no_file");
 	return 0;
 }
 
@@ -2208,7 +2208,7 @@ static int test_follow_in_one_step() {
 		return true;
 	};
 	document.veto = refuse_beta;
-	TEST_EXPECT(!type("newer") && error.code == "document.structure");
+	TEST_EXPECT(!type("newer") && error.code() == "document.structure");
 	document.veto = nullptr;
 	TEST_EXPECT(name(fake.a1) == "new" && name(fake.b1) == "new!" && document.can_undo());
 	TEST_EXPECT(type("news") && name(fake.a1) == "news" && name(fake.b1) == "news!");
@@ -2219,12 +2219,12 @@ static int test_follow_in_one_step() {
 	const uint64_t revision = document.revision();
 	TEST_EXPECT(!document.apply({set(fake.a1, "name", std::string("A")), set({fake.beta.row, kItem, 99999}, "name", std::string("gone"))},
 	                            error) &&
-	            error.code == "document.selection");
+	            error.code() == "document.selection");
 	TEST_EXPECT(!document.apply({set({fake.alpha.row, kItem, 99999}, "name", std::string("gone")), set(fake.b1, "name", std::string("B"))},
 	                            error) &&
-	            error.code == "document.selection");
+	            error.code() == "document.selection");
 	document.veto = refuse_beta;
-	TEST_EXPECT(!document.apply(rename, error) && error.code == "document.structure");
+	TEST_EXPECT(!document.apply(rename, error) && error.code() == "document.structure");
 	document.veto = nullptr;
 	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo() &&
 	            document.can_redo());
@@ -2332,7 +2332,7 @@ static int test_mixed_batch() {
 	// The same batch with an edit naming the row it removed: refused, nothing committed.
 	std::vector<Edit> late = batch;
 	late.push_back(set(delta, "name", std::string("late")));
-	TEST_EXPECT(!document.apply(late, error) && error.code == "document.batch");
+	TEST_EXPECT(!document.apply(late, error) && error.code() == "document.batch");
 	TEST_EXPECT(document.serialize().text == saved && document.revision() == before && document.can_redo());
 	return 0;
 }
@@ -2569,7 +2569,7 @@ static int test_made_then_removed() {
 	const NodeAddress first_made{batch_made(0), kGroup, 0};
 	TEST_EXPECT(!document.apply({group("s"), make(EditOperation::Remove, first_made), set(first_made, "name", std::string("late"))},
 	                            error) &&
-	            error.code == "document.batch");
+	            error.code() == "document.batch");
 	TEST_EXPECT(document.rows().size() == 2 && !document.can_undo() && document.serialize().text == fake.original);
 	TEST_EXPECT(document.apply({group("s"), group("t"), make(EditOperation::Remove, first_made), set(fake.a1, "name", std::string("A1"))},
 	                           error));

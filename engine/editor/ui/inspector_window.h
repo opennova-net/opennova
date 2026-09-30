@@ -1,9 +1,12 @@
 #pragma once
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include <editor/model/document.h>
 #include <editor/session/view/findings_index.h>
+#include <editor/session/view/view_revisions.h>
 #include <editor/ui/workspace.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/view_event_mailbox.h>
@@ -61,11 +64,38 @@ public:
 	// The events it holds until it draws.
 	const ViewEventMailbox<HeldReveal> &events() const { return events_; }
 
+	// How many times "Referenced by" made its lines: once per change of what it reads, never for
+	// a frame, a line of Output or a build's step.
+	size_t users_made() const { return users_made_; }
+
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
+	void referenced_by(const Document &document, const NodeAddress &record);
 
 	Workspace &workspace_;
 	ReferencePicker picker_;
+	std::string typed_; // what an open list of choices' box holds (field_widgets: one open at a time)
+	// "Referenced by": each use of what the selected record defines, its edge and its line, and
+	// what they were made from.
+	struct Use {
+		const GraphEdge *edge = nullptr;
+		std::string line;
+	};
+	struct UsersKey {
+		uint64_t document = 0, load = 0, revision = 0;
+		NodeAddress record;
+		const AssetGraph *graph = nullptr;
+		uint64_t generation = 0;
+		RevisionKey files;
+		bool operator==(const UsersKey &other) const {
+			return document == other.document && load == other.load && revision == other.revision &&
+			       record == other.record && graph == other.graph && generation == other.generation &&
+			       files == other.files;
+		}
+	};
+	std::vector<Use> users_;
+	UsersKey users_key_;
+	size_t users_made_ = 0;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	char filter_[128]{};
 	// The RevealRecord events held until it draws, then the field the last one asked to show, on
