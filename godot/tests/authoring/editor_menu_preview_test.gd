@@ -11,9 +11,12 @@ extends GutTest
 ## each (S9k2).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
+const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 
 var _dirs: Array[String] = []
 var _app: Node = null
+## The typed seam the tests knew, over the app's request_json and query_json (S13 A5).
+var _seam: RefCounted = null
 
 
 func before_each() -> void:
@@ -22,6 +25,7 @@ func before_each() -> void:
 	if packed == null:
 		return
 	_app = packed.instantiate()
+	_seam = EditorSeam.new(_app)
 	var settings_dir := OS.get_cache_dir().path_join("opennova editor preview %d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
 	_dirs.append(settings_dir)
@@ -49,11 +53,11 @@ func _widget(preview: Dictionary, name: String) -> Dictionary:
 
 
 func _string_record(table: String, key: String) -> int:
-	assert_true(_app.open_document(table))
-	for i in _app.get_row_count():
-		var row: int = _app.get_row_id(i)
-		for id: int in _app.get_child_records(row, "string"):
-			if String(_app.get_field(id, "key")) == key:
+	assert_true(_seam.open_document(table))
+	for i in _seam.get_row_count():
+		var row: int = _seam.get_row_id(i)
+		for id: int in _seam.get_child_records(row, "string"):
+			if String(_seam.get_field(id, "key")) == key:
 				return id
 	return 0
 
@@ -68,18 +72,18 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 
 	var dir := OS.get_cache_dir().path_join("opennova editor preview project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(_app.new_project(dir, "Preview Game"))
-	assert_eq(_app.create_missing_files(), 0)
+	assert_true(_seam.new_project(dir, "Preview Game"))
+	assert_eq(_seam.create_missing_files(), 0)
 	assert_eq(String(_preview().get("status", "")), "no_menu")
-	assert_true(_app.open_document("main.mnu"))
+	assert_true(_seam.open_document("main.mnu"))
 	var opened := _preview()
 	assert_eq(String(opened.get("status", "")), "ready", "opened, a menu shows its first screen: %s" % str(opened))
 	assert_eq(String(opened.get("screen", {}).get("name", "")), "STARTUP")
-	var title: int = _app.find_record("TITLE")
-	var main: int = _app.find_record("MAIN")
-	var exit: int = _app.find_record("EXIT")
+	var title: int = _seam.find_record("TITLE")
+	var main: int = _seam.find_record("MAIN")
+	var exit: int = _seam.find_record("EXIT")
 	assert_gt(title, 0)
-	assert_true(_app.select_record(title))
+	assert_true(_seam.select_record(title))
 
 	# STARTUP as the game draws it.
 	var preview := _preview()
@@ -103,7 +107,7 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	# The render check compiled the same screen headless (texture sizes from their headers):
 	# every window where the preview (Godot's decoders) placed it, the same notes.
 	var screen_id := int(preview.get("screen", {}).get("id", 0))
-	var rendered: Variant = JSON.parse_string(String(_app.get_menu_render_json(String(preview.get("path", "")), screen_id)))
+	var rendered: Variant = JSON.parse_string(String(_seam.get_menu_render_json(String(preview.get("path", "")), screen_id)))
 	assert_true(rendered is Dictionary, str(rendered))
 	if rendered is Dictionary:
 		var render := rendered as Dictionary
@@ -126,7 +130,7 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 		assert_eq(their_notes, our_notes)
 		# MAIN's CUSTOM appearance: the shell's hook, a note the preview alone shows.
 		assert_true(our_notes.has("MAIN appearance_custom"), str(our_notes))
-	var missing_render: Variant = JSON.parse_string(String(_app.get_menu_render_json("nope.mnu", screen_id)))
+	var missing_render: Variant = JSON.parse_string(String(_seam.get_menu_render_json("nope.mnu", screen_id)))
 	assert_eq(String((missing_render as Dictionary).get("status", "")), "no_screen")
 
 	# The game's hit test at its centre finds it; above MAIN there is nothing.
@@ -145,24 +149,24 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	assert_true(created is Dictionary and bool((created as Dictionary).get("ok", false)), str(created))
 	var exit_string := _string_record("menutxt.bin", "MM_Exit")
 	assert_gt(exit_string, 0)
-	assert_true(_app.open_document("main.mnu"))
-	assert_true(_app.write_field(main, "text_rsrc"))
-	assert_true(_app.set_field(main, "text_rsrc", "menutxt.bin"))
-	assert_true(_app.set_field(title, "string.type", "ID"))
-	assert_true(_app.set_field(title, "string.value", "MM_Exit"))
+	assert_true(_seam.open_document("main.mnu"))
+	assert_true(_seam.write_field(main, "text_rsrc"))
+	assert_true(_seam.set_field(main, "text_rsrc", "menutxt.bin"))
+	assert_true(_seam.set_field(title, "string.type", "ID"))
+	assert_true(_seam.set_field(title, "string.value", "MM_Exit"))
 	assert_eq(String(_widget(_preview(), "TITLE").get("text", "")), "Exit")
-	assert_true(_app.open_document("menutxt.bin"))
-	assert_true(_app.set_field(exit_string, "text", "Leave"))
-	assert_true(_app.is_document_dirty(), "the table edit is not saved")
+	assert_true(_seam.open_document("menutxt.bin"))
+	assert_true(_seam.set_field(exit_string, "text", "Leave"))
+	assert_true(_seam.is_document_dirty(), "the table edit is not saved")
 	preview = _preview()
 	assert_eq(String(preview.get("screen", {}).get("name", "")), "STARTUP", "the preview stays on the menu screen")
 	assert_eq(String(_widget(preview, "TITLE").get("text", "")), "Leave", str(preview))
 
 	# An unsaved stylesheet colour shows.
-	assert_true(_app.open_document("menu_style.mns"))
-	var fg: int = _app.find_record("DEF_TEXT_FG")
+	assert_true(_seam.open_document("menu_style.mns"))
+	var fg: int = _seam.find_record("DEF_TEXT_FG")
 	assert_gt(fg, 0)
-	assert_true(_app.set_field(fg, "value", "FFFF0000"))
+	assert_true(_seam.set_field(fg, "value", "FFFF0000"))
 	assert_eq(String(_widget(_preview(), "TITLE").get("text_color", "")), "FFFF0000")
 
 	# Options: EXIT held under the mouse, every window shown; an unknown option refused.
@@ -173,8 +177,8 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	assert_false(_app.set_menu_preview_options({"force_state": "sideways"}))
 	assert_false(_app.set_menu_preview_options({"bogus": 1}))
 
-	_app.close_project()
-	_app.resolve_unsaved(1) # Discard
+	_seam.close_project()
+	_seam.resolve_unsaved(1) # Discard
 	assert_eq(String(_preview().get("status", "")), "no_project")
 
 
@@ -188,12 +192,12 @@ func test_a_drag_moves_a_window_on_the_grid() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova editor preview drag %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(_app.new_project(dir, "Drag Game"))
-	assert_eq(_app.create_missing_files(), 0)
-	assert_true(_app.open_document("main.mnu"))
-	var title: int = _app.find_record("TITLE")
+	assert_true(_seam.new_project(dir, "Drag Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	assert_true(_seam.open_document("main.mnu"))
+	var title: int = _seam.find_record("TITLE")
 	assert_gt(title, 0)
-	assert_true(_app.select_record(title))
+	assert_true(_seam.select_record(title))
 	var start: Array = _widget(_preview(), "TITLE").get("rect", [])
 	assert_eq(start.size(), 4, str(start))
 	if start.size() != 4:
@@ -209,17 +213,17 @@ func test_a_drag_moves_a_window_on_the_grid() -> void:
 	assert_eq(int(moved[1]) % 8, 0, "top on the grid: %s" % str(moved))
 	assert_eq(int(moved[0]), 16)
 	assert_eq(int(moved[1]), 200)
-	assert_eq(int(_app.get_field(title, "position.left")), 16)
-	assert_eq(int(_app.get_field(title, "position.top")), 125)
-	assert_null(_app.get_field(title, "position.bottom"), "its text still sizes its height")
-	assert_true(_app.is_document_dirty())
-	_app.undo()
+	assert_eq(int(_seam.get_field(title, "position.left")), 16)
+	assert_eq(int(_seam.get_field(title, "position.top")), 125)
+	assert_null(_seam.get_field(title, "position.bottom"), "its text still sizes its height")
+	assert_true(_seam.is_document_dirty())
+	_seam.undo()
 	assert_eq(str(_widget(_preview(), "TITLE").get("rect", [])), str(start), "one undo puts it back")
-	assert_false(_app.is_document_dirty())
+	assert_false(_seam.is_document_dirty())
 
 	assert_true(_app.menu_preview_drag(title, "right", -100, 3, false))
-	assert_eq(int(_app.get_field(title, "position.right")), 700)
-	assert_eq(int(_app.get_field(title, "position.left")), 0)
+	assert_eq(int(_seam.get_field(title, "position.right")), 700)
+	assert_eq(int(_seam.get_field(title, "position.left")), 0)
 	assert_false(_app.menu_preview_drag(title, "middle", 1, 1, true))
 	assert_false(_app.menu_preview_drag(999999, "move", 1, 1, true))
 
@@ -232,8 +236,8 @@ func test_a_drag_moves_a_window_on_the_grid() -> void:
 	assert_true(bool(options.get("focus", false)))
 	assert_false(_app.set_menu_preview_options({"focus": 1}), "a flag takes true or false")
 
-	_app.close_project()
-	_app.resolve_unsaved(1) # Discard
+	_seam.close_project()
+	_seam.resolve_unsaved(1) # Discard
 	assert_eq(String(_preview().get("status", "")), "no_project")
 
 
@@ -246,16 +250,16 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova editor preview arrange %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
-	assert_true(_app.new_project(dir, "Arrange Game"))
-	assert_eq(_app.create_missing_files(), 0)
-	assert_true(_app.open_document("main.mnu"))
-	var main: int = _app.find_record("MAIN")
-	var title: int = _app.find_record("TITLE")
-	var exit: int = _app.find_record("EXIT")
+	assert_true(_seam.new_project(dir, "Arrange Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	assert_true(_seam.open_document("main.mnu"))
+	var main: int = _seam.find_record("MAIN")
+	var title: int = _seam.find_record("TITLE")
+	var exit: int = _seam.find_record("EXIT")
 	assert_gt(exit, 0)
-	assert_true(_app.select_record(title))
-	assert_true(_app.select_record(exit, "add"))
-	assert_eq(_app.get_selected_records().size(), 2)
+	assert_true(_seam.select_record(title))
+	assert_true(_seam.select_record(exit, "add"))
+	assert_eq(_seam.get_selected_records().size(), 2)
 	var preview := _preview()
 	var title_start: Array = _widget(preview, "TITLE").get("rect", [])
 	var exit_start: Array = _widget(preview, "EXIT").get("rect", [])
@@ -277,25 +281,25 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 	assert_eq(int(title_moved[1]), int(title_start[1]) + 16, str(title_moved))
 	assert_eq(int(exit_moved[0]), int(exit_start[0]) + 8, str(exit_moved))
 	assert_eq(int(exit_moved[1]), int(exit_start[1]) + 16, str(exit_moved))
-	_app.undo()
+	_seam.undo()
 	preview = _preview()
 	assert_eq(str(_widget(preview, "TITLE").get("rect", [])), str(title_start), "one undo puts both back")
 	assert_eq(str(_widget(preview, "EXIT").get("rect", [])), str(exit_start))
-	assert_false(_app.is_document_dirty())
+	assert_false(_seam.is_document_dirty())
 
 	# EXIT's left edge to TITLE's, its width kept; then EXIT first among MAIN's windows.
 	assert_true(_app.menu_preview_arrange(PackedInt64Array([title, exit]), "align_left"))
-	assert_eq(int(_app.get_field(exit, "position.left")), int(_app.get_field(title, "position.left")))
-	assert_eq(int(_app.get_field(exit, "position.right")), 120)
+	assert_eq(int(_seam.get_field(exit, "position.left")), int(_seam.get_field(title, "position.left")))
+	assert_eq(int(_seam.get_field(exit, "position.right")), 120)
 	assert_true(_app.menu_preview_arrange(PackedInt64Array([exit]), "send_to_back"))
-	var order: PackedInt64Array = _app.get_child_records(main, "window")
+	var order: PackedInt64Array = _seam.get_child_records(main, "window")
 	assert_eq(order.size(), 2, str(order))
 	if order.size() == 2:
 		assert_eq(order[0], exit, "sent to the back: drawn first")
-	_app.undo()
-	_app.undo()
-	assert_false(_app.is_document_dirty(), "one undo step each")
-	assert_eq(int(_app.get_field(exit, "position.left")), 340)
+	_seam.undo()
+	_seam.undo()
+	assert_false(_seam.is_document_dirty(), "one undo step each")
+	assert_eq(int(_seam.get_field(exit, "position.left")), 340)
 
 	# Refusals: two windows cannot be distributed, an unknown op, one window cannot be
 	# aligned, a record the preview does not show.
@@ -303,8 +307,8 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 	assert_false(_app.menu_preview_arrange(PackedInt64Array([title, exit]), "align_middle"))
 	assert_false(_app.menu_preview_arrange(PackedInt64Array([title]), "align_left"))
 	assert_false(_app.menu_preview_arrange(PackedInt64Array([999999, exit]), "align_left"))
-	assert_false(_app.is_document_dirty())
+	assert_false(_seam.is_document_dirty())
 
-	_app.close_project()
-	_app.resolve_unsaved(1) # Discard
+	_seam.close_project()
+	_seam.resolve_unsaved(1) # Discard
 	assert_eq(String(_preview().get("status", "")), "no_project")

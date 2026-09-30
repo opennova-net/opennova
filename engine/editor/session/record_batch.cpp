@@ -75,7 +75,8 @@ bool record_of(const JsonValue &json, const char *what, Reader &reader, NodeAddr
 	uint64_t id = 0;
 	if (!whole(json, id) || id == 0)
 		return reader.refuse(std::string("\"") + what + "\" must be a record identity or a label.");
-	if (!reader.names)
+	// No document, or a blank of the type (whose kinds alone name something): no record to find.
+	if (!reader.names || reader.names->path().empty())
 		return reader.refuse("record " + std::to_string(id) +
 				" is named in the document the request acts on, and none is open.");
 	out = reader.names->address_of(NodeId(id));

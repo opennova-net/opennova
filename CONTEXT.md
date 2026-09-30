@@ -220,11 +220,11 @@ _Avoid_: editor MCP (the editor's own server, below)
 **Editor MCP**:
 The `opennova-editor` Model Context Protocol server the OpenNova Editor embeds
 (`--mcp-port`, 8977 in `.mcp.json`; `scripts/mcp/editor_mcp.py`), through which an
-agent drives the editor's typed request seam: the state, requests, documents,
-problems, the asset graph, the menu preview, the menu tools (`editor_menu`: a menu's
-tree, a batch by label, a list replaced, a menu's findings), Build and Play (ADR 0046
-S6d, S9m, `docs/mcp.md`). The game a Play starts is then driven through its own runtime
-MCP.
+agent drives the editor's session by its two seams: the state by section, a request by
+kind (`editor_request`), a query by name (`editor_query`), Build and Play, and the two
+preview devices (ADR 0046 S6d, S13 A5, `docs/mcp.md`). Its tools and their schemas are
+made from the `catalog` query when it starts. The game a Play starts is then driven
+through its own runtime MCP.
 _Avoid_: runtime MCP (the game's), game MCP (when the editor is meant)
 
 **In-match / Matchmaking**:
@@ -564,9 +564,18 @@ _Avoid_: command (the command line's verbs), message, action (a menu's ACTION is
 
 **Request outcome**:
 What one editor request came to: done, or not (refused, did not finish, or waiting on
-the unsaved-changes prompt), with the findings it reported. The editor MCP reads it;
-the request's `ok` only says it parsed.
+the unsaved-changes prompt), with the findings it reported and the records its edits made.
+The editor MCP reads it; the request's `ok` only says it parsed.
 _Avoid_: status (the one-line text the editor shows), result
+
+**Query**:
+What the editor MCP, the Shell or a test asks of the editor's session without changing it: a
+name, one row of the query table (`session/editor_queries`: the params it takes, the list it
+pages, the view concern whose revision its answer carries), and those params. The state is one,
+by section and since a revision; every list a query serves comes a page at a time (an offset, or
+a cursor for the output lines and the events, a limit, and the whole count); the `catalog` query
+lists every request kind, query, section and concern from the tables themselves.
+_Avoid_: request (a request changes the session), view (what the windows draw from), getter
 
 **Workspace**:
 The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar

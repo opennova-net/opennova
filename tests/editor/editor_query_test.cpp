@@ -241,7 +241,7 @@ static int test_paging() {
 	TEST_EXPECT(pages_concatenate(session, "missing", "{}", "edges", 2, 3));
 	TEST_EXPECT(ask(session, "missing").get_number("count", -1.0) ==
 			double(session.view().findings.graph->missing_count()));
-	TEST_EXPECT(pages_concatenate(session, "referrers", R"({"kind": "style_var", "name": "DEF_TEXT_FG"})", "edges", 1, 2));
+	TEST_EXPECT(pages_concatenate(session, "referrers", R"({"kind": "style_var", "name": "DEF_TEXT_FG"})", "edges", 1, 1));
 
 	// The events by seq: seven asks of Files, three at a time by next_cursor, each once, in order.
 	const uint64_t from = session.view().events.next_seq();
@@ -661,7 +661,8 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(refused(R"([{"op": "set", "id": )" + h + R"(, "field": "name", "value": "Y", "colour": 1}])",
 			"Unknown edits[0] member \"colour\""));
 	TEST_EXPECT(refused("[]", "edits"));
-	TEST_EXPECT(refused(R"([{"op": "set", "id": 1}, 3])", "\"edits[1]\" must be an object."));
+	TEST_EXPECT(refused(R"([{"op": "set", "id": )" + h + R"(, "field": "name", "value": "Z"}, 3])",
+			"\"edits[1]\" must be an object."));
 	TEST_EXPECT(refused(R"([{"op": "replace_list", "id": )" + h + R"(, "list": "gizmos", "records": []}])", "gizmos"));
 	TEST_EXPECT(refused(R"([{"op": "replace_list", "id": )" + h + R"(, "list": "action"}])", "records"));
 	TEST_EXPECT(refused(R"([{"op": "paste", "id": )" + h + "}]", "unknown edit op \"paste\""));
@@ -779,7 +780,7 @@ static int test_wire_edits() {
 	editor_test::create_missing_files(session);
 	// An edit naming a record of a document that is not open: refused as it is read.
 	TEST_EXPECT(refused_with(send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": [{"op": "set", "id": 2, "field": "name", "value": "X"}]})"),
-			"which is not open"));
+			"record 2 is named in the document the request acts on, and none is open"));
 	// With open_first the document opens first, and the records are named in it.
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
