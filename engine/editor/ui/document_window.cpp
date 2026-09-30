@@ -85,7 +85,11 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 					held->second.take();
 					reveal_again(*records);
 				}
+				// Its record tools and cells are edits: the view held back while an operation
+				// holds the documents (S13 A3), as the session would refuse them.
+				ImGui::BeginDisabled(!view.allows(EditorRequestKind::EditRecord));
 				draw_view(*records);
+				ImGui::EndDisabled();
 			}
 		}
 		ImGui::EndTabItem();

@@ -994,8 +994,13 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		if (address != selection) together.push_back(address);
 	const bool one_kind = std::all_of(together.begin(), together.end(),
 	                                  [&](const NodeAddress &address) { return address.kind == selection.kind; });
+	// The form is its edits: held back while an operation holds the documents (a refresh, an
+	// import's write, a rename's commit: S13 A3), as the session would refuse them.
+	const bool editable = view.allows(EditorRequestKind::EditRecord);
 	if (together.size() > 1 && one_kind) {
+		ImGui::BeginDisabled(!editable);
 		draw_together(*document, together);
+		ImGui::EndDisabled();
 		return;
 	}
 	if (together.size() > 1) {
@@ -1011,7 +1016,9 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
 	const std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
+	ImGui::BeginDisabled(!editable);
 	for (const InspectorSection &section : plan) draw_section(workspace_, picker_, *document, selection, owner, section, &reveal);
+	ImGui::EndDisabled();
 	reveal_scroll_ = reveal.scroll;
 	// F2: Rename everywhere on the record's first field that defines a name.
 	if (ImGui::Shortcut(ImGuiKey_F2))

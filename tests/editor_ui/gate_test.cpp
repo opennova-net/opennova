@@ -1,8 +1,9 @@
 // S13 A1: the windows show the session's busy gate. Every menu item and button that raises a
 // request (the File, Edit and Build menus, the menu bar's buttons and its list of unsaved files,
 // the document toolbar, Files' tools and a file's menu, the Problems summary's fixes and their
-// confirmation, the import dialog, Rename everywhere, the welcome view) is enabled exactly when
-// the gate takes that request (SessionView::allows: busy_refuses over the running operation).
+// confirmation, the import dialog, Rename everywhere, the welcome view; since S13 A3 the document
+// view's record tools and the Inspector's form) is enabled exactly when the gate takes that
+// request (SessionView::allows: busy_refuses over the running operation).
 // Drawn on the null backend over a view where only the gate can hold a control back, under no
 // operation and under the status of every operation kind, cancellable and not: each control
 // pressed, and whether its request came (or, for one that opens a dialog first, the dialog
@@ -328,7 +329,17 @@ void test_windows_show_the_gate() {
 		         return opens("Apply fixes");
 	         },
 	         nullptr},
+	        // The document view's record tools and the Inspector's form are edits (S13 A3): held back
+	        // while an operation holds the documents.
+	        {"the menu view's Add window", K::EditRecord, pressed(item_id(tab, {"Add window"}), K::EditRecord), nullptr},
+	        {"the Inspector's Add action", K::EditRecord,
+	         pressed(item_id(Ui::window_id("Inspector"), {"action", "action", "Add"}), K::EditRecord), nullptr},
 	};
+	select_in(v, named(*a, "BACK")); // a button: its actions a list the Inspector shows
+	ui.focus("Inspector");
+	ui.frames(2);
+	ui.away();
+	ui.drain();
 	std::vector<OperationStatus> statuses = {OperationStatus()};
 	for (size_t k = 0; k < kOperationKindCount; ++k)
 		for (const bool cancellable : {true, false}) statuses.push_back(status_of(static_cast<OperationKind>(k), cancellable));
