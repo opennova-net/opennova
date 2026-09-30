@@ -1,8 +1,10 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "common/test_expect.h"
@@ -127,7 +129,8 @@ static int collections() {
 static int session_gate() {
 	editor_test::TempProjectDir dir("opennova_catalog_session_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
     session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def"));
@@ -227,7 +230,8 @@ static int replaced_action_block() {
 static int go_to_record() {
 	editor_test::TempProjectDir dir("opennova_catalog_goto_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

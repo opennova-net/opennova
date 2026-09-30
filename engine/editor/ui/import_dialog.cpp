@@ -10,6 +10,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -90,8 +91,8 @@ void not_followed_line(const ImportPlan &plan) {
 
 } // namespace
 
-void ImportDialog::draw(EditorHost &host) {
-	const SessionView &v = host.view();
+void ImportDialog::draw(Workspace &workspace) {
+	const SessionView &v = workspace.view();
 	const SessionView::ImportPreview &preview = v.import_preview;
 	// A new preview starts clean; one an Import found changed keeps what was asked of it. A
 	// preview that stays open (an Import the session refused, or that waits on the unsaved
@@ -131,8 +132,8 @@ void ImportDialog::draw(EditorHost &host) {
 	// The lists scroll; Replace existing files, Import and Cancel stay under them, on two lines
 	// in a narrow dialog.
 	ImGui::BeginChild("import_body", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 3));
-	if (!preview.choices.empty()) draw_choices(host, preview);
-	draw_plan(host, preview);
+	if (!preview.choices.empty()) draw_choices(workspace, preview);
+	draw_plan(workspace, preview);
 	draw_notes(preview);
 	ImGui::EndChild();
 
@@ -156,7 +157,7 @@ void ImportDialog::draw(EditorHost &host) {
 	const std::string label = "Import " + counted(count, "file") + "###import";
 	// An import writes the project's files: while an operation holds them (a build packing
 	// them), the busy gate refuses it, and Import waits with it (SessionView::allows).
-	const bool allowed = host.view().allows(EditorRequestKind::ImportFiles);
+	const bool allowed = workspace.view().allows(EditorRequestKind::ImportFiles);
 	const std::string why = count == 0        ? "Check the files to import first."
 	                        : !blocked.empty() ? blocked
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
@@ -169,11 +170,11 @@ void ImportDialog::draw(EditorHost &host) {
 			if (checked_[i] && std::find(request.imports.begin(), request.imports.end(), source) == request.imports.end())
 				request.imports.push_back(source);
 		}
-		host.request(std::move(request));
+		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
-	if (ui_kit::tool(actions, "Cancel", host.view().allows(EditorRequestKind::CancelImport), "Import nothing.")) {
-		host.request(make_request(EditorRequestKind::CancelImport));
+	if (ui_kit::tool(actions, "Cancel", workspace.view().allows(EditorRequestKind::CancelImport), "Import nothing.")) {
+		workspace.request(make_request(EditorRequestKind::CancelImport));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::EndPopup();
@@ -197,7 +198,7 @@ void ImportDialog::take(const SessionView::ImportPreview &preview) {
 
 // The files chosen, planned again: the chosen ones that are not in the list, then those
 // checked in it.
-void ImportDialog::choose(EditorHost &host, const SessionView::ImportPreview &preview) {
+void ImportDialog::choose(Workspace &workspace, const SessionView::ImportPreview &preview) {
 	EditorRequest request = make_request(EditorRequestKind::PlanImport);
 	request.flag = preview.with_dependencies;
 	for (const ImportSource &root : preview.roots)
@@ -205,11 +206,11 @@ void ImportDialog::choose(EditorHost &host, const SessionView::ImportPreview &pr
 			request.imports.push_back(root);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
 		if (chosen_[i]) request.imports.push_back(preview.choices[i]);
-	host.request(std::move(request));
+	workspace.request(std::move(request));
 }
 
 // A listing's files to choose from, with a filter: each change plans the import again.
-void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPreview &preview) {
+void ImportDialog::draw_choices(Workspace &workspace, const SessionView::ImportPreview &preview) {
 	const ImportSource &first = preview.choices.front();
 	const std::string from =
 	        first.retail ? std::string("the game data") : "the archive " + basename_of(first.path);
@@ -225,11 +226,11 @@ void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPrevi
 		if (normalized_logical_name(preview.choices[i].name()).find(filter) != std::string::npos) visible.push_back(i);
 	if (ui_kit::tool(controls, "Select shown", !visible.empty(), "Choose every file the list shows.")) {
 		for (size_t i : visible) chosen_[i] = true;
-		choose(host, preview);
+		choose(workspace, preview);
 	}
 	if (ui_kit::tool(controls, "Clear selection", true, "Choose none of the listed files.")) {
 		std::fill(chosen_.begin(), chosen_.end(), false);
-		choose(host, preview);
+		choose(workspace, preview);
 	}
 	if (visible.empty()) {
 		ui_kit::empty_state("No file matches the filter.");
@@ -258,7 +259,7 @@ void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPrevi
 		bool chosen = chosen_[index];
 		if (ImGui::Checkbox((shown + "###pick").c_str(), &chosen)) {
 			chosen_[index] = chosen;
-			choose(host, preview);
+			choose(workspace, preview);
 		}
 		ui_kit::tooltip(shown != name ? name : std::string());
 		ImGui::TableNextColumn();
@@ -269,7 +270,7 @@ void ImportDialog::draw_choices(EditorHost &host, const SessionView::ImportPrevi
 }
 
 // "Include the files these need", then the rows: the chosen files first, then what they need.
-void ImportDialog::draw_plan(EditorHost &host, const SessionView::ImportPreview &preview) {
+void ImportDialog::draw_plan(Workspace &workspace, const SessionView::ImportPreview &preview) {
 	const ImportPlan &plan = preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
@@ -283,12 +284,12 @@ void ImportDialog::draw_plan(EditorHost &host, const SessionView::ImportPreview 
 	const std::string include = "Include the files these need" + (with ? " (" + std::to_string(found) + " found)" : std::string());
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
-	const bool plans = host.view().allows(EditorRequestKind::SetImportDependencies);
+	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies);
 	ImGui::BeginDisabled(!plans);
 	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans) {
 		EditorRequest request = make_request(EditorRequestKind::SetImportDependencies);
 		request.flag = with;
-		host.request(std::move(request));
+		workspace.request(std::move(request));
 	}
 	ImGui::EndDisabled();
 	ui_kit::tooltip((shown != include ? include + ".\n" : std::string()) +

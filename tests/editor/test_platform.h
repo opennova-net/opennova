@@ -5,7 +5,8 @@
 // `next_pid`, a clock only a wait moves, the code each child a test ends exited with, each
 // child's identity (the plan's executable, "created <pid>"), how process_liveness answers for a
 // game it does not hold (a Play lease's) and the creation time each such ask named, and a log of
-// every call ("spawn 500", "terminate 500", "kill 500", "release 500").
+// every call ("spawn 500", "terminate 500", "kill 500", "release 500"); fixed_launcher is the
+// launcher source a test's Play spawns through.
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -15,6 +16,12 @@
 #include <editor/run/process_platform.h>
 
 namespace editor_test {
+
+// A launcher source (the session's set_launcher_source) that gives `launcher` whenever the session
+// asks, its port the one the test fixed: the shell's allocates a fresh one when asked at spawn time.
+inline opennova::editor::PlayLauncherSource fixed_launcher(opennova::editor::PlayLauncher launcher) {
+	return [launcher](bool) { return launcher; };
+}
 
 struct NoProcess : opennova::editor::ProcessPlatform {
 	int spawns = 0; // the children Play tried to start

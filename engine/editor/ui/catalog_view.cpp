@@ -1,6 +1,7 @@
 #include "catalog_view.h"
 
 #include <editor/documents/def_catalog_document.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
@@ -16,20 +17,20 @@ using window_requests::matches;
 using window_requests::select;
 
 // A file-wide value of items.def's spawn registry (a slot's item id, or a new slot).
-void set_spawn(EditorHost &host, const DefCatalogDocument &document, size_t slot, int64_t id) {
+void set_spawn(Workspace &workspace, const DefCatalogDocument &document, size_t slot, int64_t id) {
 	auto request = make_request(EditorRequestKind::EditRecord, document.path());
 	request.edit.operation = EditOperation::SetFileValue;
 	request.edit.position = slot;
 	request.edit.value = id;
-	host.request(std::move(request));
+	workspace.request(std::move(request));
 }
 
 } // namespace
 
-void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
-	const SessionView &view = host.view();
+void CatalogView::draw(Workspace &workspace, const DefCatalogDocument &document) {
+	const SessionView &view = workspace.view();
 	reveal_.follow(view, document);
-	draw_document_toolbar(host, document);
+	draw_document_toolbar(workspace, document);
 	{
 		ui_kit::WrapRow row;
 		const float filter = ImGui::GetFontSize() * 14.0f;
@@ -50,17 +51,17 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 		for (const RecordKindRow &kind : document.kinds())
 			if (*kind.add_label &&
 			    ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file."))
-				edit(host, document, EditOperation::Add, {0, kind.kind, 0});
+				edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 		ui_kit::RowTools tools;
 		tools.add = nullptr;
 		tools.count = rows.size();
 		tools.selected = index;
 		const NodeAddress address = index < rows.size() ? NodeAddress{rows[index]->id, rows[index]->kind, 0} : NodeAddress();
 		switch (ui_kit::row_tools(row, tools)) {
-		case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, index + 1); break;
-		case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, address); break;
-		case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, index - 1); break;
-		case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, index + 1); break;
+		case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, index + 1); break;
+		case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, address); break;
+		case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, index - 1); break;
+		case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, index + 1); break;
 		case ui_kit::RowTool::Add:
 		case ui_kit::RowTool::None: break;
 		}
@@ -82,7 +83,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 		const NodeAddress address{row->id, row->kind, 0};
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string shown = ui_kit::fit(ui_kit::kChangeRoom + name, ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((shown + "###record").c_str(), view.selection.row == row->id)) select(host, document, address);
+		if (ImGui::Selectable((shown + "###record").c_str(), view.selection.row == row->id)) select(workspace, document, address);
 		reveal_.scroll_to(address, true);
 		const Document::RecordChange change = document.record_change(address);
 		ui_kit::change_dot(change, x);
@@ -108,7 +109,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 		const std::string label = "Slot " + std::to_string(i + 1);
 		const float room = ImGui::GetContentRegionAvail().x - ui_kit::field_width(0.0f, label.c_str());
 		ImGui::SetNextItemWidth(std::clamp(room, ImGui::GetFontSize() * 4.0f, ImGui::GetFontSize() * 10.0f));
-		if (ImGui::InputInt(label.c_str(), &id)) set_spawn(host, document, i, id);
+		if (ImGui::InputInt(label.c_str(), &id)) set_spawn(workspace, document, i, id);
 		ui_kit::tooltip("The item id the game spawns in this vehicle slot.");
 		ImGui::PopID();
 	}
@@ -117,7 +118,7 @@ void CatalogView::draw(EditorHost &host, const DefCatalogDocument &document) {
 	if (ui_kit::tool(row, "Add spawn slot", room,
 	                 room ? std::string("Adds a slot at the end (item id 0).")
 	                      : "The registry holds " + std::to_string(def::DEF_VEHICLE_SPAWN_SLOTS) + " slots at most."))
-		set_spawn(host, document, spawn.size(), 0);
+		set_spawn(workspace, document, spawn.size(), 0);
 	ImGui::EndDisabled();
 	ImGui::TreePop();
 }

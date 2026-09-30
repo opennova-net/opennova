@@ -1,6 +1,7 @@
 #include "strings_view.h"
 
 #include <editor/documents/strings_document.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/table_cells.h>
@@ -27,8 +28,8 @@ std::string text_of(const Document &document, const NodeAddress &address, const 
 
 // The sections: their tools (plain words: the column is narrow, its header names the list),
 // then each section, marked when it was added or changed since the last save.
-void draw_sections(EditorHost &host, const StringsDocument &document, const RecordReveal &reveal, size_t index) {
-	const SessionView &view = host.view();
+void draw_sections(Workspace &workspace, const StringsDocument &document, const RecordReveal &reveal, size_t index) {
+	const SessionView &view = workspace.view();
 	const auto &rows = document.rows();
 	ImGui::PushID("sections");
 	ui_kit::WrapRow row;
@@ -41,11 +42,11 @@ void draw_sections(EditorHost &host, const StringsDocument &document, const Reco
 	tools.remove_tip = "Removes the selected section with its strings.";
 	const NodeAddress address = index < rows.size() ? NodeAddress{rows[index]->id, kSection, 0} : NodeAddress();
 	switch (ui_kit::row_tools(row, tools)) {
-	case ui_kit::RowTool::Add: edit(host, document, EditOperation::Add, {0, kSection, 0}); break;
-	case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, index + 1); break;
-	case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, address); break;
-	case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, index - 1); break;
-	case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, index + 1); break;
+	case ui_kit::RowTool::Add: edit(workspace, document, EditOperation::Add, {0, kSection, 0}); break;
+	case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, index + 1); break;
+	case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, address); break;
+	case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, index - 1); break;
+	case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, index + 1); break;
 	case ui_kit::RowTool::None: break;
 	}
 	if (rows.empty()) ui_kit::empty_state("The table has no sections yet.");
@@ -55,7 +56,7 @@ void draw_sections(EditorHost &host, const StringsDocument &document, const Reco
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name = ui_kit::kChangeRoom + section->name();
 		const std::string shown = ui_kit::fit(name, ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((shown + "###section").c_str(), view.selection.row == section->id)) select(host, document, at);
+		if (ImGui::Selectable((shown + "###section").c_str(), view.selection.row == section->id)) select(workspace, document, at);
 		reveal.scroll_to(at, true);
 		const Document::RecordChange change = document.record_change(at);
 		ui_kit::change_dot(change, x);
@@ -69,10 +70,10 @@ void draw_sections(EditorHost &host, const StringsDocument &document, const Reco
 
 } // namespace
 
-void StringsView::draw(EditorHost &host, const StringsDocument &document) {
-	const SessionView &view = host.view();
+void StringsView::draw(Workspace &workspace, const StringsDocument &document) {
+	const SessionView &view = workspace.view();
 	reveal_.follow(view, document);
-	draw_document_toolbar(host, document);
+	draw_document_toolbar(workspace, document);
 	// The filter, Every section beside it where both fit, else under it.
 	const float room = ImGui::GetContentRegionAvail().x - ui_kit::checkbox_width("Every section") - ImGui::GetStyle().ItemSpacing.x;
 	const bool beside = room >= ImGui::GetFontSize() * 8.0f;
@@ -100,12 +101,12 @@ void StringsView::draw(EditorHost &host, const StringsDocument &document) {
 		ImGui::TableHeadersRow();
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();
-		draw_sections(host, document, reveal_, index);
+		draw_sections(workspace, document, reveal_, index);
 		ImGui::TableNextColumn();
 		if (!selected && !(every_section_ && filter_[0])) {
 			ui_kit::empty_state("Select a section to list its strings.");
 		} else {
-			draw_strings(host, document, selected);
+			draw_strings(workspace, document, selected);
 		}
 		ImGui::EndTable();
 	}
@@ -117,8 +118,8 @@ void StringsView::draw(EditorHost &host, const StringsDocument &document) {
 // selects it, as a click into its key or text does). Filtered over every section, the table
 // lists each section's matching strings under a Section column; the tools stay the selected
 // section's.
-void StringsView::draw_strings(EditorHost &host, const StringsDocument &document, const Node *section) {
-	const SessionView &view = host.view();
+void StringsView::draw_strings(Workspace &workspace, const StringsDocument &document, const Node *section) {
+	const SessionView &view = workspace.view();
 	const bool every = every_section_ && filter_[0];
 	if (section) {
 		const std::vector<NodeId> &ids = section->collections.empty() ? std::vector<NodeId>() : section->collections[0];
@@ -134,11 +135,11 @@ void StringsView::draw_strings(EditorHost &host, const StringsDocument &document
 		tools.add_tip = "Adds a string at the end of the section.";
 		const NodeAddress address = at < ids.size() ? NodeAddress{section->id, kString, ids[at]} : NodeAddress();
 		switch (ui_kit::row_tools(row, tools)) {
-		case ui_kit::RowTool::Add: edit(host, document, EditOperation::Add, {section->id, kString, 0}); break;
-		case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, at + 1); break;
-		case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, address); break;
-		case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, at - 1); break;
-		case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, at + 1); break;
+		case ui_kit::RowTool::Add: edit(workspace, document, EditOperation::Add, {section->id, kString, 0}); break;
+		case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, at + 1); break;
+		case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, address); break;
+		case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, at - 1); break;
+		case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, at + 1); break;
 		case ui_kit::RowTool::None: break;
 		}
 		ImGui::PopID();
@@ -173,7 +174,7 @@ void StringsView::draw_strings(EditorHost &host, const StringsDocument &document
 		ImGui::TableNextColumn();
 		const float x = ImGui::GetCursorScreenPos().x;
 		if (ImGui::Selectable("##pick", on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
-			select(host, document, string);
+			select(workspace, document, string);
 		reveal_.scroll_to(string);
 		const Document::RecordChange change = document.record_change(string);
 		ui_kit::change_dot(change, x);
@@ -186,11 +187,11 @@ void StringsView::draw_strings(EditorHost &host, const StringsDocument &document
 			ui_kit::tooltip(name);
 		}
 		ImGui::TableNextColumn();
-		text_cell(host, document, string, "key");
-		if (ImGui::IsItemActivated()) select(host, document, string);
+		text_cell(workspace, document, string, "key");
+		if (ImGui::IsItemActivated()) select(workspace, document, string);
 		ImGui::TableNextColumn();
-		text_cell(host, document, string, "text");
-		if (ImGui::IsItemActivated()) select(host, document, string);
+		text_cell(workspace, document, string, "text");
+		if (ImGui::IsItemActivated()) select(workspace, document, string);
 		ImGui::PopID();
 	}
 	ImGui::EndTable();

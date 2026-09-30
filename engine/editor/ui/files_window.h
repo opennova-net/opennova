@@ -7,7 +7,8 @@
 #include <vector>
 
 #include <editor/assets/asset_kind.h>
-#include <editor/ui/editor_host.h>
+#include <editor/session/session_view.h>
+#include <editor/ui/workspace.h>
 #include <runtime/devtools/imgui_pass.h>
 
 namespace opennova::editor {
@@ -19,7 +20,7 @@ class NewFilePrompt {
 public:
 	// Asks on the next draw for a new file of `kind`.
 	void ask(AssetKind kind);
-	void draw(EditorHost &host);
+	void draw(Workspace &workspace);
 
 private:
 	bool ask_ = false;
@@ -44,7 +45,7 @@ private:
 // about a file's name) shows it here (ShowInFiles).
 class FilesWindow : public devtools::Window {
 public:
-	FilesWindow(EditorHost &host, NewFilePrompt &new_file) : host_(host), new_file_(new_file) { open = true; }
+	FilesWindow(Workspace &workspace, NewFilePrompt &new_file) : workspace_(workspace), new_file_(new_file) { open = true; }
 
 	const char *title() const override { return "Files"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override {
@@ -94,7 +95,7 @@ private:
 	void draw_rename(const SessionView &view);
 	void draw_references(const SessionView &view);
 
-	EditorHost &host_;
+	Workspace &workspace_;
 	NewFilePrompt &new_file_;
 	char filter_[128]{};
 	std::string selected_;

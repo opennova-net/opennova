@@ -1,5 +1,6 @@
 #include "table_cells.h"
 
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 
 #include <algorithm>
@@ -11,7 +12,7 @@
 
 namespace opennova::editor {
 
-void text_cell(EditorHost &host, const Document &document, NodeAddress address, const char *field) {
+void text_cell(Workspace &workspace, const Document &document, NodeAddress address, const char *field) {
 	Value value;
 	if (!document.get(address, field, value)) return;
 	const auto *current = std::get_if<std::string>(&value);
@@ -34,8 +35,8 @@ void text_cell(EditorHost &host, const Document &document, NodeAddress address, 
 	} else {
 		changed = ImGui::InputText(id.c_str(), text.data(), text.size());
 	}
-	if (changed) window_requests::set(host, document, address, field, std::string(text.data()));
-	if (ImGui::IsItemDeactivatedAfterEdit()) host.request(make_request(EditorRequestKind::EndEdit, document.path()));
+	if (changed) window_requests::set(workspace, document, address, field, std::string(text.data()));
+	if (ImGui::IsItemDeactivatedAfterEdit()) workspace.request(make_request(EditorRequestKind::EndEdit, document.path()));
 }
 
 } // namespace opennova::editor

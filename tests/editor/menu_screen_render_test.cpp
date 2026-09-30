@@ -30,7 +30,9 @@
 #include <editor/preview/menu_preview_json.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/mnu/mnu_schema.h>
 #include <runtime/menu/menu_screen_inputs.h>
 
@@ -98,7 +100,8 @@ bool same_order(const MnuDocument &document, const Node &screen, const opennova:
 static int test_blank_startup() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_render");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -177,7 +180,8 @@ static int test_blank_startup() {
 static int test_render_again_only_when_moved() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_render_again");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

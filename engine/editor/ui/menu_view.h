@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/record_tree.h>
 
 namespace opennova::editor {
@@ -22,16 +22,16 @@ class MnuDocument;
 // it. A window's fields and lists are the inspector's; the picture is the preview window's.
 class MenuView {
 public:
-	void draw(EditorHost &host, const MnuDocument &document);
+	void draw(Workspace &workspace, const MnuDocument &document);
 	// The prompt Remove screen... asks, drawn by the workspace every frame (a tab not shown
 	// draws nothing, and a modal no frame draws would hold the input).
-	void draw_remove_prompt(EditorHost &host);
+	void draw_remove_prompt(Workspace &workspace);
 
 private:
-	const Node *draw_screens(EditorHost &host, const MnuDocument &document);
-	void draw_windows(EditorHost &host, const MnuDocument &document, const Node &screen);
-	void draw_window_node(EditorHost &host, const MnuDocument &document, size_t index);
-	void click_window(EditorHost &host, const MnuDocument &document, size_t index);
+	const Node *draw_screens(Workspace &workspace, const MnuDocument &document);
+	void draw_windows(Workspace &workspace, const MnuDocument &document, const Node &screen);
+	void draw_window_node(Workspace &workspace, const MnuDocument &document, size_t index);
+	void click_window(Workspace &workspace, const MnuDocument &document, size_t index);
 	// The tree and each window's line, rebuilt only when the document or the screen changes.
 	void refresh_tree(const MnuDocument &document, const Node &screen);
 

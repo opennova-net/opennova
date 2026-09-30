@@ -19,16 +19,27 @@ enum class OnBusy : uint8_t {
 	               // Quit), and is refused when the operation cannot be cancelled
 };
 
+// What the unsaved-changes prompt guards of a request (UnsavedGuard, S13 A2): nothing; the
+// document it names, when that has unsaved edits (a Close, a Reload); every document with unsaved
+// edits (a project switch, Quit, and Build and Play, which pack the files on disk); or those among
+// the files its plan writes over or rewrites (an import that replaces files, a rename, an
+// assignment, a rename everywhere), its planner asked.
+enum class GuardScope : uint8_t { None, Document, AllDirty, PlannedWrites };
+
 // One row per request kind, in the enum's order: what the request reads and writes of the
-// session's resources (Holds), and what it asks of the gate. A request conflicts with the running
-// operation when it writes what the operation reads or writes, or reads what the operation writes.
-// The table grows a column per piece of request policy (S13 A4); every row is static_asserted into
-// place (request_kinds.cpp).
+// session's resources (Holds), what it asks of the gate, what the unsaved-changes prompt guards of
+// it and whether the prompt offers Discard for it (never for what packs the files on disk or writes
+// over them: Build, Play, the imports and the renames, whose Save writes the edits first). A
+// request conflicts with the running operation when it writes what the operation reads or writes,
+// or reads what the operation writes. The table grows a column per piece of request policy (S13
+// A4); every row is static_asserted into place (request_kinds.cpp).
 struct RequestKindRow {
 	EditorRequestKind kind;
 	Holds reads;
 	Holds writes;
 	OnBusy on_busy;
+	GuardScope guard;
+	bool can_discard;
 };
 
 const RequestKindRow &request_kind_row(EditorRequestKind kind);

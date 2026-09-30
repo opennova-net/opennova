@@ -39,6 +39,7 @@
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
 #include <editor/preview/viewport_overlay.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_view.h>
 
@@ -921,7 +922,8 @@ ModelCanvasFrame model_frame(
 int test_model_canvas() {
 	editor_test::TempProjectDir dir("opennova_editor_canvas_model");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Canvas Test"));
 	TEST_EXPECT(editor_test::write_bytes(

@@ -34,8 +34,10 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_json.h>
+#include <editor/session/session_view.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
@@ -147,7 +149,8 @@ NodeAddress add_record(ProjectSession &session, const Document &document, const 
 static int test_blank_project() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_blank");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Graph"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -205,7 +208,8 @@ static int test_blank_project() {
 static int test_menu_references() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_menu");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Menus"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -314,7 +318,8 @@ static int test_menu_references() {
 static int test_menu_text_scope() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_text_scope");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Scope"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -422,7 +427,8 @@ static int test_menu_text_scope() {
 static int test_native_extractors() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_native");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Native"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -539,7 +545,8 @@ static int test_native_extractors() {
 static int test_catalog_symbols() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_catalog");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Catalog"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::CreateFile, "ammo.def")); // not a menu project's requirement
@@ -686,7 +693,8 @@ static int test_catalog_symbols() {
 static int test_rename() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_rename");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -849,7 +857,8 @@ static int test_rename() {
 static int test_rename_rewrites_planned_sites_only() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_rename_sites");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Sites"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -923,7 +932,8 @@ static int test_rename_rewrites_planned_sites_only() {
 static int test_rename_by_locator() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_locator");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locator"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -975,7 +985,8 @@ static int test_rename_by_locator() {
 static int test_stylesheet_bindings() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_styles");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -1141,7 +1152,8 @@ const Diagnostic *finding(const std::vector<Diagnostic> &diagnostics, const char
 static int test_menu_names_and_targets() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_names");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Names"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -1361,7 +1373,8 @@ static int test_retail_menu_graph() {
 	}
 	editor_test::TempProjectDir dir("opennova_asset_graph_retail");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail"));
 	const std::string root = session.view().project_root;
 	for (const fs::path &menu : menus) fs::copy_file(menu, fs::path(root) / menu.filename(), ec);
@@ -1422,7 +1435,8 @@ static int test_retail_menu_graph() {
 static int test_user_point_references() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_user_points");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Points"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -1480,7 +1494,8 @@ static int test_user_point_references() {
 static int test_symbol_locators() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_locators");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Locators"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -1566,7 +1581,8 @@ static int test_symbol_locators() {
 static int test_go_to_targets() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -1740,7 +1756,8 @@ static int test_reference_file_candidates() {
 static int test_model_texture_references() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_model_textures");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Textures"));
 	const SessionView &view = session.view();
 	const std::string root = view.project_root;
@@ -1858,7 +1875,8 @@ static int test_model_texture_references() {
 static int test_rename_keeps_loader_spelling() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_rename_spelling");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Spelling"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();

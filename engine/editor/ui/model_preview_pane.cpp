@@ -36,11 +36,11 @@ const ModelDocument *previewed(const SessionView &view, const std::string &path)
 } // namespace
 
 void ModelPreviewPane::draw() {
-	if (!viewport_) {
+	if (!viewport()) {
 		ui_kit::empty_state(model_preview_status_message(ModelPreviewStatus::NoDevice, std::string()).c_str());
 		return;
 	}
-	ModelPreviewModel &model = viewport_->model();
+	ModelPreviewModel &model = viewport()->model();
 	if (model.status() != ModelPreviewStatus::Ready || !model.model()) {
 		ui_kit::empty_state(model_preview_status_message(model.status(), model.detail()).c_str());
 		// An animation no item pairs: the author picks the model it plays on.
@@ -75,7 +75,7 @@ void ModelPreviewPane::draw() {
 	}
 	// What the canvas maps: the model document shown (an animation's rig model has none), and the
 	// selected record's marker while the picture is the document's and it is the active one.
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	ModelCanvasFrame frame;
 	frame.document = previewed(view, model.shown_path());
 	frame.model = &model;
@@ -93,7 +93,7 @@ void ModelPreviewPane::draw() {
 // The model an animation plays on: Auto (the one an item pairs with the table) or a model
 // of the project's.
 void ModelPreviewPane::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model) {
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	ModelPreviewOptions options = model.options();
 	const float width = ImGui::GetFontSize() * 10.0f;
 	row.next(ui_kit::field_width(width, "Plays on"));
@@ -188,13 +188,13 @@ void ModelPreviewPane::timeline_(ModelPreviewModel &model) {
 	held.playing = false;
 	model.set_options(held);
 	// In the clip's own document the event is a record: select it.
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	for (const auto &open : view.documents) {
 		const auto *clip = dynamic_cast<const AnimationDocument *>(open.get());
 		if (!clip || clip->path() != model.shown_path() || clip->rows().empty()) continue;
 		const Node &row = *clip->rows().front();
 		if (size_t(under->frame) < row.collections[1].size())
-			window_requests::select(host_, *clip,
+			window_requests::select(workspace_, *clip,
 			                        {row.id, node_kind(AnimationKind::Event), row.collections[1][size_t(under->frame)]});
 	}
 }
@@ -298,7 +298,7 @@ void ModelPreviewPane::draw_canvas_(const ModelCanvasFrame &frame, float availab
 	if (canvas_.begin(available_height, 0, 0)) {
 		const CanvasInput &in = canvas_.input();
 		const int under = model_canvas_under(frame, in);
-		canvas_.picture([this](int width, int height) { viewport_->draw(width, height); },
+		canvas_.picture([this](int width, int height) { viewport()->draw(width, height); },
 				[&] { return model_canvas_.hover_tip(frame, under); });
 		const OverlayList shapes = model_canvas_.shapes(frame, in, under);
 		model_canvas_.input(frame, in, under, requests_);

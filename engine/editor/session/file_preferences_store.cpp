@@ -1,8 +1,8 @@
-#include <editor/session/editor_settings.h>
+#include <editor/session/file_preferences_store.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <system_error>
+#include <utility>
 
 #include <base/io/json.h>
 #include <editor/project/project_files.h>
@@ -11,10 +11,11 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-bool load_editor_settings(const std::string &path, EditorSettings &out, Diagnostic &error) {
+bool FilePreferencesStore::load(Preferences &out, Diagnostic &error) {
+	const std::string &path = path_;
 	std::error_code ec;
 	if (!fs::exists(path, ec)) {
-		out = EditorSettings();
+		out = Preferences();
 		return true;
 	}
 	std::string text;
@@ -30,12 +31,12 @@ bool load_editor_settings(const std::string &path, EditorSettings &out, Diagnost
 		                        path + ": " + (parse_error.empty() ? "not an object" : parse_error));
 		return false;
 	}
-	if (json.get_int("schema_version", -1) != kEditorSettingsSchemaVersion) {
+	if (json.get_int("schema_version", -1) != kPreferencesSchemaVersion) {
 		error = make_diagnostic(DiagnosticSeverity::Error, "editor_settings.schema_version.unsupported",
 		                        path + ": unsupported schema version");
 		return false;
 	}
-	EditorSettings settings;
+	Preferences settings;
 	settings.runtime_executable = json.get_string("runtime_executable", "");
 	settings.retail_directory = json.get_string("retail_directory", "");
 	settings.play_retail = json.get_bool("play_retail", false);
@@ -49,9 +50,10 @@ bool load_editor_settings(const std::string &path, EditorSettings &out, Diagnost
 	return true;
 }
 
-bool save_editor_settings(const std::string &path, const EditorSettings &settings, Diagnostic &error) {
+bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) {
+	const std::string &path = path_;
 	io::JsonValue json = io::JsonValue::make_object();
-	json.set("schema_version", io::JsonValue::make_number(kEditorSettingsSchemaVersion));
+	json.set("schema_version", io::JsonValue::make_number(kPreferencesSchemaVersion));
 	json.set("runtime_executable", io::JsonValue::make_string(settings.runtime_executable));
 	json.set("retail_directory", io::JsonValue::make_string(settings.retail_directory));
 	json.set("play_retail", io::JsonValue::make_bool(settings.play_retail));
@@ -66,20 +68,6 @@ bool save_editor_settings(const std::string &path, const EditorSettings &setting
 		return false;
 	}
 	return true;
-}
-
-void remember_recent_project(EditorSettings &settings, const std::string &root) {
-	forget_recent_project(settings, root);
-	settings.recent_projects.insert(settings.recent_projects.begin(), root);
-	if (settings.recent_projects.size() > kRecentProjectsMax) {
-		settings.recent_projects.resize(kRecentProjectsMax);
-	}
-}
-
-void forget_recent_project(EditorSettings &settings, const std::string &root) {
-	settings.recent_projects.erase(
-	        std::remove(settings.recent_projects.begin(), settings.recent_projects.end(), root),
-	        settings.recent_projects.end());
 }
 
 } // namespace opennova::editor

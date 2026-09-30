@@ -2,6 +2,7 @@
 
 #include <editor/documents/mnu_clipboard.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
@@ -36,18 +37,18 @@ std::string written_type(const std::string &token) { return "The file writes it 
 
 } // namespace
 
-void MenuView::draw(EditorHost &host, const MnuDocument &document) {
-	draw_document_toolbar(host, document);
+void MenuView::draw(Workspace &workspace, const MnuDocument &document) {
+	draw_document_toolbar(workspace, document);
 	ImGui::BeginDisabled(document.blocked());
-	if (const Node *screen = draw_screens(host, document)) draw_windows(host, document, *screen);
+	if (const Node *screen = draw_screens(workspace, document)) draw_windows(workspace, document, *screen);
 	else ui_kit::empty_state("Select a screen to see its windows.");
 	ImGui::EndDisabled();
 }
 
 // The screens in file order with their tools (Add / Duplicate / Remove / Up / Down for the
 // selected one), each marked when it was added or changed since the last save.
-const Node *MenuView::draw_screens(EditorHost &host, const MnuDocument &document) {
-	const SessionView &view = host.view();
+const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &document) {
+	const SessionView &view = workspace.view();
 	const auto &rows = document.rows();
 	const Node *current = document.row(view.selection.row);
 	size_t index = 0;
@@ -69,15 +70,15 @@ const Node *MenuView::draw_screens(EditorHost &host, const MnuDocument &document
 	tools.pick = "Select a screen first.";
 	if (rows.size() < 2) tools.keeps = "A menu keeps at least one screen.";
 	switch (ui_kit::row_tools(row, tools)) {
-	case ui_kit::RowTool::Add: edit(host, document, EditOperation::Add, {0, kScreen, 0}, current ? index + 1 : SIZE_MAX); break;
-	case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, index + 1); break;
+	case ui_kit::RowTool::Add: edit(workspace, document, EditOperation::Add, {0, kScreen, 0}, current ? index + 1 : SIZE_MAX); break;
+	case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, index + 1); break;
 	case ui_kit::RowTool::Remove:
 		removing_document_ = document.identity();
 		removing_screen_ = address.row;
 		ask_remove_ = true;
 		break;
-	case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, index - 1); break;
-	case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, index + 1); break;
+	case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, index - 1); break;
+	case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, index + 1); break;
 	case ui_kit::RowTool::None: break;
 	}
 	for (const auto &screen : rows) {
@@ -86,7 +87,7 @@ const Node *MenuView::draw_screens(EditorHost &host, const MnuDocument &document
 		const std::string name = ui_kit::kChangeRoom + (screen->name().empty() ? std::string("(no name)") : screen->name());
 		const std::string shown = ui_kit::fit(name, ImGui::GetContentRegionAvail().x);
 		const float x = ImGui::GetCursorScreenPos().x;
-		if (ImGui::Selectable((shown + "###screen").c_str(), current == screen.get() && !view.selection.child)) select(host, document, at);
+		if (ImGui::Selectable((shown + "###screen").c_str(), current == screen.get() && !view.selection.child)) select(workspace, document, at);
 		const Document::RecordChange change = document.record_change(at);
 		ui_kit::change_dot(change, x);
 		const std::string words = ui_kit::change_words(change);
@@ -100,14 +101,14 @@ const Node *MenuView::draw_screens(EditorHost &host, const MnuDocument &document
 // Removing a screen asks first: it takes every window on it (Undo brings it back). The prompt
 // is about the menu it was asked in, that very document (one read again, or closed, closes
 // it), and a screen of it while the menu keeps a second one.
-void MenuView::draw_remove_prompt(EditorHost &host) {
+void MenuView::draw_remove_prompt(Workspace &workspace) {
 	if (ask_remove_) {
 		ask_remove_ = false;
 		ImGui::OpenPopup(kRemovePrompt);
 	}
 	if (!ImGui::BeginPopupModal(kRemovePrompt, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	const MnuDocument *document = nullptr;
-	for (const auto &open : host.view().documents)
+	for (const auto &open : workspace.view().documents)
 		if (open->identity() == removing_document_) document = dynamic_cast<const MnuDocument *>(open.get());
 	const Node *screen = document ? document->row(removing_screen_) : nullptr;
 	if (!screen || document->rows().size() < 2) {
@@ -118,7 +119,7 @@ void MenuView::draw_remove_prompt(EditorHost &host) {
 	ImGui::Text("Remove the screen %s and every window on it?", screen->name().c_str());
 	ImGui::TextDisabled("Undo brings it back.");
 	if (ImGui::Button("Remove")) {
-		edit(host, *document, EditOperation::Remove, {screen->id, kScreen, 0});
+		edit(workspace, *document, EditOperation::Remove, {screen->id, kScreen, 0});
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();
@@ -155,8 +156,8 @@ void MenuView::refresh_tree(const MnuDocument &document, const Node &screen) {
 }
 
 // The selected screen's windows: the toolbars, then the tree.
-void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const Node &screen) {
-	const SessionView &view = host.view();
+void MenuView::draw_windows(Workspace &workspace, const MnuDocument &document, const Node &screen) {
+	const SessionView &view = workspace.view();
 	refresh_tree(document, screen);
 	const NodeAddress &selection = view.selection;
 	const bool here = selection.row == screen.id;
@@ -197,7 +198,7 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 		}
 		const NodeId parent = holder ? holder : tree_.roots.empty() ? 0 : tree_.entries[tree_.roots.front()].address.child;
 		if (ui_kit::tool(row, "Add window", true, "A window of this type inside the selected window (else inside the first root window)."))
-			window_requests::add_with(host, document, {screen.id, kWindow, 0}, parent, "type", add_type_);
+			window_requests::add_with(workspace, document, {screen.id, kWindow, 0}, parent, "type", add_type_);
 	}
 
 	// The selected windows of this screen (the tree's), those no other of them holds (a
@@ -231,7 +232,7 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 		if (ui_kit::tool(row, "Duplicate", only_windows,
 		                 only_windows ? "A copy of each selected window right after it, every name in it made unique (Ctrl+D)."
 		                              : "Select windows only to duplicate them."))
-			clipboard(host, document, EditorRequestKind::Duplicate);
+			clipboard(workspace, document, EditorRequestKind::Duplicate);
 		const bool last_root = outer_roots > 0 && outer_roots >= tree_.roots.size();
 		if (ui_kit::tool(row, "Remove", selected && !last_root && !outer.empty(),
 		                 !selected || outer.empty() ? pick
@@ -244,38 +245,38 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 				remove.address = window;
 				removes.push_back(remove);
 			}
-			window_requests::edits(host, document, std::move(removes));
+			window_requests::edits(workspace, document, std::move(removes));
 		}
 		if (ui_kit::tool(row, "Up", selected && at > 0,
 		                 !selected ? pick : at == 0 ? "It is the first of its siblings." : "Moves it up among its siblings."))
-			edit(host, document, EditOperation::Move, target, at - 1);
+			edit(workspace, document, EditOperation::Move, target, at - 1);
 		if (ui_kit::tool(row, "Down", selected && at + 1 < siblings,
 		                 !selected ? pick
 		                 : at + 1 >= siblings ? "It is the last of its siblings." : "Moves it down among its siblings."))
-			edit(host, document, EditOperation::Move, target, at + 1);
+			edit(workspace, document, EditOperation::Move, target, at + 1);
 		Edit indent, outdent;
 		const bool can_indent = selected && indent_edit(tree_, target.child, indent);
 		const bool can_outdent = selected && outdent_edit(tree_, target.child, outdent);
 		if (ui_kit::tool(row, "Indent", can_indent, !selected ? pick : "Into the window above it, at its end."))
-			edit(host, document, indent);
+			edit(workspace, document, indent);
 		if (ui_kit::tool(row, "Outdent", can_outdent, !selected ? pick : "Out of the window that holds it, right after that window."))
-			edit(host, document, outdent);
+			edit(workspace, document, outdent);
 	}
 
 	// The clipboard: the selected windows (Ctrl+C / X), pasted (Ctrl+V) where the rule says.
 	const bool can_copy = board.copy;
 	const bool can_paste = board.paste;
 	const auto paste = [&] {
-		window_requests::paste(host, document, board.paste_row, board.paste_parent,
+		window_requests::paste(workspace, document, board.paste_row, board.paste_parent,
 		                       board.paste_position);
 	};
 	{
 		ui_kit::WrapRow row;
 		const char *windows_only = "Select windows only to copy them.";
 		if (ui_kit::tool(row, "Copy", can_copy, can_copy ? "Copies the selected windows (Ctrl+C)." : windows_only))
-			clipboard(host, document, EditorRequestKind::Copy);
+			clipboard(workspace, document, EditorRequestKind::Copy);
 		if (ui_kit::tool(row, "Cut", can_copy, can_copy ? "Copies the selected windows and removes them (Ctrl+X)." : windows_only))
-			clipboard(host, document, EditorRequestKind::Cut);
+			clipboard(workspace, document, EditorRequestKind::Cut);
 		if (ui_kit::tool(row, "Paste", can_paste,
 		                 can_paste ? "Pastes the copied windows after the selected window, or after the window holding the "
 		                             "selected record (Ctrl+V); they work across screens and menus."
@@ -283,17 +284,17 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 			paste();
 	}
 	if (!document.blocked() && !ImGui::GetIO().WantTextInput) {
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C) && can_copy) clipboard(host, document, EditorRequestKind::Copy);
-		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X) && can_copy) clipboard(host, document, EditorRequestKind::Cut);
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C) && can_copy) clipboard(workspace, document, EditorRequestKind::Copy);
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X) && can_copy) clipboard(workspace, document, EditorRequestKind::Cut);
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V) && can_paste) paste();
 		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D) && can_copy)
-			clipboard(host, document, EditorRequestKind::Duplicate);
+			clipboard(workspace, document, EditorRequestKind::Duplicate);
 	}
 
 	// A deep tree scrolls sideways rather than run past the window.
 	ImGui::BeginChild("windows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
 	if (tree_.roots.empty()) ui_kit::empty_state("The screen has no windows yet.");
-	for (const size_t root : tree_.roots) draw_window_node(host, document, root);
+	for (const size_t root : tree_.roots) draw_window_node(workspace, document, root);
 	ImGui::EndChild();
 	reveal_.clear();
 }
@@ -301,13 +302,13 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 // A click on a window's row: it alone is selected; Ctrl adds or drops it; Shift selects
 // every window from the last one clicked to it in the tree's order (Ctrl+Shift adds them),
 // the clicked one the primary.
-void MenuView::click_window(EditorHost &host, const MnuDocument &document, size_t index) {
+void MenuView::click_window(Workspace &workspace, const MnuDocument &document, size_t index) {
 	const ImGuiIO &io = ImGui::GetIO();
 	const RecordTree::Entry &entry = tree_.entries[index];
 	const RecordTree::Entry *anchor = io.KeyShift ? tree_.find(anchor_) : nullptr;
 	if (!anchor) {
 		anchor_ = entry.address.child;
-		select(host, document, entry.address, io.KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
+		select(workspace, document, entry.address, io.KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
 		return;
 	}
 	const size_t from = size_t(anchor - tree_.entries.data());
@@ -315,17 +316,17 @@ void MenuView::click_window(EditorHost &host, const MnuDocument &document, size_
 	bool first = !io.KeyCtrl;
 	for (size_t i = low; i <= high; ++i) {
 		if (i == index) continue;
-		select(host, document, tree_.entries[i].address, first ? SelectMode::Replace : SelectMode::Add);
+		select(workspace, document, tree_.entries[i].address, first ? SelectMode::Replace : SelectMode::Add);
 		first = false;
 	}
-	select(host, document, entry.address, first ? SelectMode::Replace : SelectMode::Add);
+	select(workspace, document, entry.address, first ? SelectMode::Replace : SelectMode::Add);
 }
 
 // One window, marked when it was added or changed since the last save, and when open the
 // windows it holds. A drag drops it on another window: the upper quarter before it, the
 // lower quarter after it, the middle inside it.
-void MenuView::draw_window_node(EditorHost &host, const MnuDocument &document, size_t index) {
-	const SessionView &view = host.view();
+void MenuView::draw_window_node(Workspace &workspace, const MnuDocument &document, size_t index) {
+	const SessionView &view = workspace.view();
 	const RecordTree::Entry &entry = tree_.entries[index];
 	const NodeId id = entry.address.child;
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
@@ -342,7 +343,7 @@ void MenuView::draw_window_node(EditorHost &host, const MnuDocument &document, s
 		if (!ImGui::IsItemVisible()) ImGui::SetScrollHereY(0.5f);
 		scroll_to_ = 0;
 	}
-	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) click_window(host, document, index);
+	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) click_window(workspace, document, index);
 	// Made only while it shows, after a moment: the tree is swept by the mouse.
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
 		const char *words = ui_kit::change_words(change);
@@ -375,13 +376,13 @@ void MenuView::draw_window_node(EditorHost &host, const MnuDocument &document, s
 					const float line = place == DropPlace::Before ? min.y : max.y;
 					draw->AddLine(ImVec2(min.x, line), ImVec2(max.x, line), colour, 2.0f);
 				}
-				if (payload->IsDelivery()) edit(host, document, move);
+				if (payload->IsDelivery()) edit(workspace, document, move);
 			}
 		}
 		ImGui::EndDragDropTarget();
 	}
 	if (open) {
-		for (const size_t child : entry.children) draw_window_node(host, document, child);
+		for (const size_t child : entry.children) draw_window_node(workspace, document, child);
 		ImGui::TreePop();
 	}
 	ImGui::PopID();

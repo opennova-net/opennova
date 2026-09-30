@@ -4,7 +4,7 @@
 
 #include <editor/model/document.h>
 #include <editor/session/findings_index.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/reference_picker.h>
 #include <runtime/devtools/imgui_pass.h>
 
@@ -39,7 +39,7 @@ namespace opennova::editor {
 // every one of them in one undo step.
 class InspectorWindow : public devtools::Window {
 public:
-	explicit InspectorWindow(EditorHost &host) : host_(host) { open = true; }
+	explicit InspectorWindow(Workspace &workspace) : workspace_(workspace) { open = true; }
 	const char *title() const override { return "Inspector"; }
 	devtools::InitialDockPlacement initial_dock_placement() const override { return devtools::InitialDockPlacement::Right; }
 	devtools::MenuGroup menu_group() const override { return devtools::MenuGroup::Workspace; }
@@ -48,7 +48,7 @@ public:
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
 
-	EditorHost &host_;
+	Workspace &workspace_;
 	ReferencePicker picker_;
 	FindingsIndex findings_; // the record's Problems rows, found without a scan of every finding
 	char filter_[128]{};

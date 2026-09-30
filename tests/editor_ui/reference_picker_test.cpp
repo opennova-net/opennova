@@ -24,7 +24,8 @@ namespace {
 struct PickerProject {
 	editor_test::TempProjectDir dir{"opennova_editor_ui_reference_picker"};
 	NoProcess platform;
-	ProjectSession session{platform, dir.file("settings.json")};
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
 	const Document *items = nullptr;
 	NodeAddress item;
 

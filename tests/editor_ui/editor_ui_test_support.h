@@ -20,6 +20,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_preview_state.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>

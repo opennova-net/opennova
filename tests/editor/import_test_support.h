@@ -14,7 +14,9 @@
 
 #include <editor/assets/asset_import.h>
 #include <editor/import/import_plan.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/pff/pff.h>
 
 #include "editor/editor_test_support.h"
@@ -106,8 +108,9 @@ inline std::vector<ImportSource> selected_sources(const ImportPlan &plan) {
 struct Project {
 	editor_test::TempProjectDir dir;
 	NoProcess platform;
+	MemoryPreferencesStore preferences;
 	ProjectSession session;
-	explicit Project(const char *name) : dir(name), session(platform, dir.file("settings.json")) {
+	explicit Project(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Plan"));
 	}
 	const SessionView &view() const { return session.view(); }

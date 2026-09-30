@@ -8,6 +8,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/document_outline.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
@@ -19,12 +20,12 @@
 namespace opennova::editor {
 
 void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	if (!view.project_open || view.documents.empty()) {
 		// No tab bar: the next one follows the active document from its first frame.
 		followed_.clear();
 		raised_.clear();
-		if (!view.project_open) draw_welcome(host_, form_);
+		if (!view.project_open) draw_welcome(workspace_, form_);
 		else ui_kit::empty_state("Double-click a file in Files to open it, or make one with New.");
 		return;
 	}
@@ -57,7 +58,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		bool open = true;
 		const bool visible = ImGui::BeginTabItem(label.c_str(), &open, flags);
 		ui_kit::tooltip(path);
-		if (!open) host_.request(make_request(EditorRequestKind::CloseDocument, path));
+		if (!open) workspace_.request(make_request(EditorRequestKind::CloseDocument, path));
 		if (!visible) continue;
 		shown = path;
 		// Its view once it is the active document: the selection and the inspector are the
@@ -76,11 +77,11 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// A tab the user chose (a click, the tab list) shows another document: it becomes the
 		// active one, once.
 		raised_ = shown;
-		host_.request(make_request(EditorRequestKind::OpenDocument, shown));
+		workspace_.request(make_request(EditorRequestKind::OpenDocument, shown));
 	}
 }
 
-void DocumentWindow::draw_modals() { menu_.draw_remove_prompt(host_); }
+void DocumentWindow::draw_modals() { menu_.draw_remove_prompt(workspace_); }
 
 void DocumentWindow::open_find() {
 	find_.open = true;
@@ -97,7 +98,7 @@ void DocumentWindow::show_hit(const Document &document, size_t index) {
 	target.locator = hit->locator;
 	target.field = hit->field;
 	target.editable = true;
-	window_requests::go_to(host_, target);
+	window_requests::go_to(workspace_, target);
 }
 
 // The find bar over the active tab's view (open_find): the text, Aa (case), previous and next, the
@@ -192,16 +193,16 @@ void DocumentWindow::draw_find(const Document &document) {
 // outline (which adds, duplicates, removes and moves the rows a file adds).
 void DocumentWindow::draw_view(const Document &document) {
 	if (const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document)) {
-		catalog_.draw(host_, *catalog);
+		catalog_.draw(workspace_, *catalog);
 	} else if (const auto *strings = dynamic_cast<const StringsDocument *>(&document)) {
-		strings_.draw(host_, *strings);
+		strings_.draw(workspace_, *strings);
 	} else if (const auto *styles = dynamic_cast<const MnsDocument *>(&document)) {
-		styles_.draw(host_, *styles);
+		styles_.draw(workspace_, *styles);
 	} else if (const auto *menu = dynamic_cast<const MnuDocument *>(&document)) {
-		menu_.draw(host_, *menu);
+		menu_.draw(workspace_, *menu);
 	} else {
-		draw_document_toolbar(host_, document);
-		draw_document_outline(host_, document, outline_);
+		draw_document_toolbar(workspace_, document);
+		draw_document_outline(workspace_, document, outline_);
 	}
 }
 

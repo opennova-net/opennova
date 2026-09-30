@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include <editor/session/findings_index.h>
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/record_reveal.h>
 #include <editor/ui/reference_picker.h>
 
@@ -26,7 +26,7 @@ class MnsDocument;
 // document's (MnsDocument::style_value_use).
 class StylesView {
 public:
-	void draw(EditorHost &host, const MnsDocument &document);
+	void draw(Workspace &workspace, const MnsDocument &document);
 
 private:
 	// What the view keeps the document's answers by (style_value_use's graph key): the graph's

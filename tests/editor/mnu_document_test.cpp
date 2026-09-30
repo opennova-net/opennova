@@ -16,7 +16,9 @@
 // Rename everywhere rewrites its uses.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <editor/project/project_files.h>
 #include <base/vfs/vfs.h>
 #include <base/io/strutil.h>
@@ -118,7 +120,8 @@ bool load(MnuDocument &document, const std::string &path) {
 int structure_and_save() {
 	editor_test::TempProjectDir dir("opennova_menu_document_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "John Smith"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -215,7 +218,8 @@ int structure_and_save() {
 int validation() {
 	editor_test::TempProjectDir dir("opennova_menu_validation_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Menus"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -294,7 +298,8 @@ int validation() {
 int windows_at_depth() {
 	editor_test::TempProjectDir dir("opennova_menu_depth_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Depth"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -669,7 +674,8 @@ int window_index_matches_the_compiler() {
 int copy_and_paste() {
 	editor_test::TempProjectDir dir("opennova_menu_clipboard_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Clip"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -750,7 +756,8 @@ int copy_and_paste() {
 int duplicate_selection() {
 	editor_test::TempProjectDir dir("opennova_menu_duplicate_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Dup"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -1201,7 +1208,8 @@ int typed_clear_and_retype() {
 int parse_notes() {
 	editor_test::TempProjectDir dir("opennova_menu_parse_notes_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const std::string window = "<WINDOW type=\"button\" name=\"B\" SCREENX=\"1\"><POSITION><LEFT>0</LEFT></POSITION>";
@@ -1281,7 +1289,8 @@ int parse_notes() {
 int blank_menu_edits() {
 	editor_test::TempProjectDir dir("opennova_menu_blank_edits_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Edits"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -1352,7 +1361,8 @@ int blank_menu_edits() {
 int name_is_its_own_edit() {
 	editor_test::TempProjectDir dir("opennova_menu_name_edit_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Names"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -1868,7 +1878,8 @@ int retail_sweep() {
 int changes_since_save() {
 	editor_test::TempProjectDir dir("opennova_menu_changes_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Changes"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
@@ -1927,7 +1938,8 @@ int changes_since_save() {
 int colours_and_flags() {
 	editor_test::TempProjectDir dir("opennova_menu_colours_test");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Colours"));
 	editor_test::create_missing_files(session);
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));

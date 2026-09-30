@@ -2,6 +2,7 @@
 
 #include <editor/graph/asset_graph.h>
 #include <editor/session/findings_index.h>
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/model/field_text.h>
@@ -57,9 +58,9 @@ const Document *active(const SessionView &view) {
 }
 
 // A Set on every target (`coalesce` folds a typing burst into one undo step).
-void set(EditorHost &host, const Document &document, const Targets &targets, const std::string &field, Value value,
+void set(Workspace &workspace, const Document &document, const Targets &targets, const std::string &field, Value value,
          bool coalesce = true) {
-	if (targets.size() == 1) return window_requests::set(host, document, targets.front(), field, std::move(value), coalesce);
+	if (targets.size() == 1) return window_requests::set(workspace, document, targets.front(), field, std::move(value), coalesce);
 	std::vector<Edit> batch;
 	for (const NodeAddress &address : targets) {
 		Edit change;
@@ -69,13 +70,13 @@ void set(EditorHost &host, const Document &document, const Targets &targets, con
 		change.coalesce = coalesce;
 		batch.push_back(change);
 	}
-	window_requests::edits(host, document, std::move(batch));
+	window_requests::edits(workspace, document, std::move(batch));
 }
 
 // An optional field written or left out on every target that is not so already.
-void set_written(EditorHost &host, const Document &document, const Targets &targets, const std::string &field,
+void set_written(Workspace &workspace, const Document &document, const Targets &targets, const std::string &field,
                  bool written) {
-	if (targets.size() == 1) return window_requests::set_written(host, document, targets.front(), field, written);
+	if (targets.size() == 1) return window_requests::set_written(workspace, document, targets.front(), field, written);
 	std::vector<Edit> batch;
 	for (const NodeAddress &address : targets) {
 		if (document.present(address, field) == written) continue;
@@ -85,7 +86,7 @@ void set_written(EditorHost &host, const Document &document, const Targets &targ
 		change.field = field;
 		batch.push_back(change);
 	}
-	if (!batch.empty()) window_requests::edits(host, document, std::move(batch));
+	if (!batch.empty()) window_requests::edits(workspace, document, std::move(batch));
 }
 
 // The fields one row of the form edits: a field alone, or a group's members side by side.
@@ -147,7 +148,7 @@ std::string saved_words(const Document &document, const Targets &targets, const 
 // A changed row's menu (a right click on its name): Revert to saved (the RevertToSaved
 // request, as the editor MCP raises it), one batch that gives each target its saved value and
 // presence back in each of the row's fields, one undo step.
-void revert_menu(EditorHost &host, const Document &document, const Targets &targets, const RowFields &fields) {
+void revert_menu(Workspace &workspace, const Document &document, const Targets &targets, const RowFields &fields) {
 	if (!ImGui::BeginPopupContextItem("revert")) return;
 	std::vector<std::string> revertible;
 	for (const FieldUse *field : fields)
@@ -157,7 +158,7 @@ void revert_menu(EditorHost &host, const Document &document, const Targets &targ
 			revertible.push_back(field->schema->id);
 	const bool any = !revertible.empty();
 	if (ImGui::MenuItem("Revert to saved", nullptr, false, any) && any)
-		window_requests::revert(host, document, targets, revertible);
+		window_requests::revert(workspace, document, targets, revertible);
 	if (!any) ui_kit::tooltip("The saved file does not have it to go back to.");
 	ImGui::EndPopup();
 }
@@ -182,19 +183,19 @@ std::string go_to_words(const std::vector<ReferenceTarget> &targets) {
 // offered in a menu (a font through a style variable: the variable where the game reads it,
 // or the file its value names). `pressed` is the tool's press; its tooltip is `tip`, then
 // where it leads after `lead`.
-void go_to_tool(EditorHost &host, const Document &document, const FieldUse &field, const Value &value, bool pressed,
+void go_to_tool(Workspace &workspace, const Document &document, const FieldUse &field, const Value &value, bool pressed,
                 const std::string &tip, const char *lead) {
 	const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
 	if (pressed || hovered) {
-		const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, host.view());
-		if (pressed && targets.size() == 1) go_to(host, targets.front());
+		const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, workspace.view());
+		if (pressed && targets.size() == 1) go_to(workspace, targets.front());
 		else if (pressed && !targets.empty()) ImGui::OpenPopup("go to");
 		if (hovered)
 			ui_kit::tooltip(targets.empty() ? tip : tip + (tip.empty() ? "" : "\n") + lead + go_to_words(targets));
 	}
 	if (!ImGui::BeginPopup("go to")) return;
-	for (const ReferenceTarget &target : document.reference_targets(field, value, host.view()))
-		if (ImGui::MenuItem(target.label.c_str())) go_to(host, target);
+	for (const ReferenceTarget &target : document.reference_targets(field, value, workspace.view()))
+		if (ImGui::MenuItem(target.label.c_str())) go_to(workspace, target);
 	ImGui::EndPopup();
 }
 
@@ -202,10 +203,10 @@ void go_to_tool(EditorHost &host, const Document &document, const FieldUse &fiel
 // uses (compact: a coloured dot, the words in its tooltip, a click on it the Go to); a
 // reference that resolves gets a "Go to" (go_to_tool) to the record that defines it, this
 // document's own included, or the file it loads.
-void reference_status(EditorHost &host, const Document &document, const FieldUse &field, const Value &value,
+void reference_status(Workspace &workspace, const Document &document, const FieldUse &field, const Value &value,
                       bool compact, ui_kit::WrapRow *row) {
 	std::string symbol;
-	const ReferenceStatus status = document.reference_status(field, value, host.view(), &symbol);
+	const ReferenceStatus status = document.reference_status(field, value, workspace.view(), &symbol);
 	if (status == ReferenceStatus::NotAReference) return;
 	const ImVec4 colour = ui_kit::reference_color(status);
 	const char *word = ui_kit::reference_word(status);
@@ -221,7 +222,7 @@ void reference_status(EditorHost &host, const Document &document, const FieldUse
 		ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + frame * 0.25f, at.y + frame * 0.5f), frame * 0.2f,
 		                                            ImGui::GetColorU32(colour));
 		tip = std::string(word) + ": " + tip;
-		if (present) go_to_tool(host, document, field, value, pressed, tip, "A click: ");
+		if (present) go_to_tool(workspace, document, field, value, pressed, tip, "A click: ");
 		else ui_kit::tooltip(tip);
 		return;
 	}
@@ -230,7 +231,7 @@ void reference_status(EditorHost &host, const Document &document, const FieldUse
 	ui_kit::tooltip(tip);
 	if (!present) return;
 	place(row, ui_kit::button_width("Go to"));
-	go_to_tool(host, document, field, value, ImGui::SmallButton("Go to"), std::string(), "");
+	go_to_tool(workspace, document, field, value, ImGui::SmallButton("Go to"), std::string(), "");
 }
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
@@ -249,7 +250,7 @@ float reference_tools_width(const FieldUse &field) {
 // The picker's button (a text reference's, ReferencePicker: a pick set on every target) and the
 // badge after a reference's value: on its line (`beside`), or wrapping under it (a multi-line
 // box, a value column too narrow to share).
-void reference_tools(EditorHost &host, ReferencePicker &picker, const Document &document, const Targets &targets,
+void reference_tools(Workspace &workspace, ReferencePicker &picker, const Document &document, const Targets &targets,
                      const FieldUse &field, const Value &value, bool compact, bool beside) {
 	ui_kit::WrapRow under;
 	ui_kit::WrapRow *row = beside || compact ? nullptr : &under;
@@ -257,19 +258,19 @@ void reference_tools(EditorHost &host, ReferencePicker &picker, const Document &
 		if (row) row->next(ui_kit::button_width("Pick"));
 		else ImGui::SameLine();
 		std::string picked;
-		if (picker.draw(host, document, targets.front(), field, value, compact, picked))
-			set(host, document, targets, field.schema->id, picked, false);
+		if (picker.draw(workspace, document, targets.front(), field, value, compact, picked))
+			set(workspace, document, targets, field.schema->id, picked, false);
 	}
-	reference_status(host, document, field, value, compact, row);
+	reference_status(workspace, document, field, value, compact, row);
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
 // the field's kind loads.
-void drop_target(EditorHost &host, const Document &document, const Targets &targets, const FieldUse &field) {
+void drop_target(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field) {
 	std::string dropped;
 	if (picks_reference(field) && !field.read_only && !document.blocked() &&
-	    ReferencePicker::accept_file(host.view(), field, dropped))
-		set(host, document, targets, field.schema->id, dropped, false);
+	    ReferencePicker::accept_file(workspace.view(), field, dropped))
+		set(workspace, document, targets, field.schema->id, dropped, false);
 }
 
 // A name a field holds, as a rename takes it: a text, or a number (an item's id); "" for none.
@@ -286,9 +287,9 @@ bool renames_name(const Document &document, const Targets &targets, const FieldU
 }
 
 // Rename everywhere on a record's name (the Inspector's Rename..., F2): the dialog opened on it.
-void rename_everywhere(EditorHost &host, const Document &document, const NodeAddress &address, const FieldUse &field,
+void rename_everywhere(Workspace &workspace, const Document &document, const NodeAddress &address, const FieldUse &field,
                        const Value &value) {
-	host.request(RenameDialog::preview(document.path(), document.locator(address), field.schema->id, name_of(value), true));
+	workspace.request(RenameDialog::preview(document.path(), document.locator(address), field.schema->id, name_of(value), true));
 }
 
 // A name typed over (changed since the save) that other files still use by its saved name: they
@@ -296,9 +297,9 @@ void rename_everywhere(EditorHost &host, const Document &document, const NodeAdd
 // name (a stylesheet's fallback once brand.mns renames its own): how many, and Rename everywhere,
 // which puts the saved name back and renames it with every use (the dialog opened on the name
 // typed).
-void rename_hint(EditorHost &host, const Document &document, const NodeAddress &address, const FieldUse &field,
+void rename_hint(Workspace &workspace, const Document &document, const NodeAddress &address, const FieldUse &field,
                  const Value &value) {
-	const SessionView &view = host.view();
+	const SessionView &view = workspace.view();
 	Value saved;
 	if (!view.graph || !document.field_changed(address, field.schema->id) ||
 	    !document.saved_value(address, field.schema->id, saved))
@@ -314,8 +315,8 @@ void rename_hint(EditorHost &host, const Document &document, const NodeAddress &
 	                   old.c_str());
 	ImGui::PopStyleColor();
 	if (ImGui::SmallButton("Rename everywhere...")) {
-		window_requests::revert(host, document, {address}, {field.schema->id});
-		host.request(RenameDialog::preview(document.path(), document.locator(address), field.schema->id, now, true));
+		window_requests::revert(workspace, document, {address}, {field.schema->id});
+		workspace.request(RenameDialog::preview(document.path(), document.locator(address), field.schema->id, now, true));
 	}
 	ui_kit::tooltip("Puts '" + old + "' back, then renames it to '" + now + "' with every use of it, in every file (F2).");
 }
@@ -324,7 +325,7 @@ void rename_hint(EditorHost &host, const Document &document, const NodeAddress &
 // (field_widgets::value), each change a Set on every target. compact: a table cell (one line
 // for text, the bits of a flags field in a popup). mixed: the targets differ, so a text shows
 // empty with a hint and a list names no choice; a flag bit changes on each target's own bits.
-void value_control(EditorHost &host, const Document &document, const Targets &targets, const FieldUse &field,
+void value_control(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
                    const Value &value, bool compact, bool mixed = false) {
 	// The choices it offers: the schema's, or the primary target's own (Document::choices_on).
 	std::vector<FieldChoice> offered;
@@ -343,8 +344,8 @@ void value_control(EditorHost &host, const Document &document, const Targets &ta
 					// Each target keeps its other bits.
 					std::vector<Edit> batch =
 					        flag_bit_edits(document, targets, schema, choice.value, checked);
-					if (batch.size() == 1) window_requests::set(host, document, targets.front(), schema.id, batch.front().value, false);
-					else window_requests::edits(host, document, std::move(batch));
+					if (batch.size() == 1) window_requests::set(workspace, document, targets.front(), schema.id, batch.front().value, false);
+					else window_requests::edits(workspace, document, std::move(batch));
 				}
 				if (!choice.label.empty() || shown != title) ui_kit::tooltip(shown != title ? title + "\n" + choice.name : choice.name);
 			}
@@ -359,15 +360,15 @@ void value_control(EditorHost &host, const Document &document, const Targets &ta
 	}
 	Value edited = value;
 	const field_widgets::Edited change = field_widgets::value(field, choices, edited, compact, mixed);
-	if (change.changed) set(host, document, targets, schema.id, std::move(edited), change.coalesce);
-	if (change.finished) window_requests::end_edit(host, document.path());
+	if (change.changed) set(workspace, document, targets, schema.id, std::move(edited), change.coalesce);
+	if (change.finished) window_requests::end_edit(workspace, document.path());
 }
 
 // The optional field's written / left-out tick.
-void written_tick(EditorHost &host, const Document &document, const Targets &targets, const FieldUse &field,
+void written_tick(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
                   bool present) {
 	bool on = present;
-	if (ImGui::Checkbox("##written", &on)) set_written(host, document, targets, field.schema->id, on);
+	if (ImGui::Checkbox("##written", &on)) set_written(workspace, document, targets, field.schema->id, on);
 	ui_kit::tooltip(present ? "Written to the file. Untick to leave it out." : "Left out of the file. Tick to write it.");
 }
 
@@ -389,7 +390,7 @@ std::string row_tip(const RowFields &fields) {
 // whose fields changed since the last save is marked: a thin bar at the row's left edge, the
 // name in the change's colour, what the saved file holds in the tooltip (made only while it
 // shows), and Revert to saved on a right click.
-void field_name(EditorHost &host, const Document &document, const Targets &targets, const RowFields &fields,
+void field_name(Workspace &workspace, const Document &document, const Targets &targets, const RowFields &fields,
                 const std::string &title, const char *about, bool mixed, const FieldChange &change, float left) {
 	struct Tag {
 		const char *text;
@@ -425,7 +426,7 @@ void field_name(EditorHost &host, const Document &document, const Targets &targe
 		const float bar = std::max(2.0f, ImGui::GetStyle().CellPadding.x - 1.0f);
 		ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(left, top), ImVec2(left + bar, top + ImGui::GetFrameHeight()),
 		                                          ImGui::GetColorU32(change.color));
-		revert_menu(host, document, targets, fields);
+		revert_menu(workspace, document, targets, fields);
 	}
 	if (!tagged) return;
 	for (const Tag &tag : tags) {
@@ -456,7 +457,7 @@ float begin_row(Reveal *reveal, const NodeAddress &address, const RowFields &fie
 // `block_switch`: a block's own yes / no field (plan_inspector's toggle), the first row of its
 // section, named "In the file" (short enough for a narrow column) and saying what its tick
 // does.
-void field_row(EditorHost &host, ReferencePicker &picker, const Document &document, const Targets &targets,
+void field_row(Workspace &workspace, ReferencePicker &picker, const Document &document, const Targets &targets,
                const FieldUse &field, Reveal *reveal, bool block_switch = false) {
 	const FieldSchema &schema = *field.schema;
 	const NodeAddress &address = targets.front();
@@ -469,7 +470,7 @@ void field_row(EditorHost &host, ReferencePicker &picker, const Document &docume
 	ImGui::PushID(schema.id.c_str());
 	ImGui::BeginDisabled(field.read_only || document.blocked());
 	if (schema.optional) {
-		written_tick(host, document, targets, field, present);
+		written_tick(workspace, document, targets, field, present);
 		ImGui::SameLine();
 	}
 	const char *about = nullptr; // what a block's switch does, for its tooltips
@@ -479,7 +480,7 @@ void field_row(EditorHost &host, ReferencePicker &picker, const Document &docume
 		                       : "Left out of the file. Tick to write the block again.";
 	}
 	ImGui::AlignTextToFramePadding();
-	field_name(host, document, targets, fields, block_switch ? std::string("In the file") : field_title(schema), about,
+	field_name(workspace, document, targets, fields, block_switch ? std::string("In the file") : field_title(schema), about,
 	           mixed, field_change(document, targets, fields), left);
 	ImGui::TableNextColumn();
 	// A reference's tools, and a name's Rename..., share the value's line while it keeps a few
@@ -491,16 +492,16 @@ void field_row(EditorHost &host, ReferencePicker &picker, const Document &docume
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
-	value_control(host, document, targets, field, value, false, mixed);
+	value_control(workspace, document, targets, field, value, false, mixed);
 	if (about) ui_kit::tooltip(about);
-	if (present) drop_target(host, document, targets, field);
+	if (present) drop_target(workspace, document, targets, field);
 	ImGui::EndDisabled();
-	if (is_reference(field) && present) reference_tools(host, picker, document, targets, field, value, false, beside);
+	if (is_reference(field) && present) reference_tools(workspace, picker, document, targets, field, value, false, beside);
 	if (renames) {
 		if (beside) ImGui::SameLine();
-		if (ImGui::SmallButton("Rename...")) rename_everywhere(host, document, address, field, value);
+		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
 		ui_kit::tooltip("Rename everywhere (F2): this name and every use of it, in every file.");
-		rename_hint(host, document, address, field, value);
+		rename_hint(workspace, document, address, field, value);
 	}
 	ImGui::EndDisabled();
 	ImGui::PopID();
@@ -509,7 +510,7 @@ void field_row(EditorHost &host, ReferencePicker &picker, const Document &docume
 // A group's fields on one row (field_widgets::group): its name the group's, marked, reverted
 // and revealed as one field's is (any member), then the members side by side, each change a
 // Set on every target; a swatch's pick of every channel one batch, one undo step.
-void group_row(EditorHost &host, const Document &document, const Targets &targets, const RowFields &fields,
+void group_row(Workspace &workspace, const Document &document, const Targets &targets, const RowFields &fields,
                Reveal *reveal) {
 	const NodeAddress &address = targets.front();
 	std::vector<FieldUse> members;
@@ -529,7 +530,7 @@ void group_row(EditorHost &host, const Document &document, const Targets &target
 	ImGui::PushID(title.c_str());
 	ImGui::BeginDisabled(document.blocked());
 	ImGui::AlignTextToFramePadding();
-	field_name(host, document, targets, fields, title, nullptr, std::find(mixed.begin(), mixed.end(), true) != mixed.end(),
+	field_name(workspace, document, targets, fields, title, nullptr, std::find(mixed.begin(), mixed.end(), true) != mixed.end(),
 	           field_change(document, targets, fields), left);
 	ImGui::TableNextColumn();
 	ImGui::SetNextItemWidth(-FLT_MIN);
@@ -547,9 +548,9 @@ void group_row(EditorHost &host, const Document &document, const Targets &target
 			edit.coalesce = change.coalesce;
 			batch.push_back(std::move(edit));
 		}
-	if (batch.size() == 1) window_requests::set(host, document, targets.front(), batch.front().field, batch.front().value, change.coalesce);
-	else if (!batch.empty()) window_requests::edits(host, document, std::move(batch));
-	if (change.finished) window_requests::end_edit(host, document.path());
+	if (batch.size() == 1) window_requests::set(workspace, document, targets.front(), batch.front().field, batch.front().value, change.coalesce);
+	else if (!batch.empty()) window_requests::edits(workspace, document, std::move(batch));
+	if (change.finished) window_requests::end_edit(workspace, document.path());
 	ImGui::EndDisabled();
 	ImGui::PopID();
 }
@@ -557,7 +558,7 @@ void group_row(EditorHost &host, const Document &document, const Targets &target
 // A section's fields, row by row: a group's neighbours (none left out of the file: each keeps
 // its own written tick) on one row, the others alone; the field `block_switch` names drawn as
 // its block's switch.
-void field_rows(EditorHost &host, ReferencePicker &picker, const Document &document, const Targets &targets,
+void field_rows(Workspace &workspace, ReferencePicker &picker, const Document &document, const Targets &targets,
                 const std::vector<FieldUse> &fields, Reveal *reveal, const std::string &block_switch = std::string()) {
 	auto grouped = [](const FieldUse &field) { return !field.schema->group.empty() && !field.schema->optional; };
 	for (size_t i = 0; i < fields.size();) {
@@ -567,9 +568,9 @@ void field_rows(EditorHost &host, ReferencePicker &picker, const Document &docum
 		if (end - i > 1) {
 			RowFields row;
 			for (size_t j = i; j < end; ++j) row.push_back(&fields[j]);
-			group_row(host, document, targets, row, reveal);
+			group_row(workspace, document, targets, row, reveal);
 		} else {
-			field_row(host, picker, document, targets, fields[i], reveal,
+			field_row(workspace, picker, document, targets, fields[i], reveal,
 			          !block_switch.empty() && fields[i].schema->id == block_switch);
 		}
 		i = end;
@@ -578,7 +579,7 @@ void field_rows(EditorHost &host, ReferencePicker &picker, const Document &docum
 
 // One cell of a collection's table: the field as it applies to that record, "-" where the
 // game does not read it and the file leaves it out.
-void field_cell(EditorHost &host, ReferencePicker &picker, const Document &document, const NodeAddress &address,
+void field_cell(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &address,
                 const FieldSchema &schema) {
 	Value value;
 	if (!document.get(address, schema.id, value)) {
@@ -596,7 +597,7 @@ void field_cell(EditorHost &host, ReferencePicker &picker, const Document &docum
 	ImGui::PushID(schema.id.c_str());
 	ImGui::BeginDisabled(field.read_only || document.blocked());
 	if (schema.optional) {
-		written_tick(host, document, {address}, field, present);
+		written_tick(workspace, document, {address}, field, present);
 		ImGui::SameLine(0.0f, 2.0f);
 	}
 	const ImGuiStyle &style = ImGui::GetStyle();
@@ -607,10 +608,10 @@ void field_cell(EditorHost &host, ReferencePicker &picker, const Document &docum
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);
-	value_control(host, document, {address}, field, value, true);
-	if (present) drop_target(host, document, {address}, field);
+	value_control(workspace, document, {address}, field, value, true);
+	if (present) drop_target(workspace, document, {address}, field);
 	ImGui::EndDisabled();
-	if (is_reference(field) && present) reference_tools(host, picker, document, {address}, field, value, true, true);
+	if (is_reference(field) && present) reference_tools(workspace, picker, document, {address}, field, value, true, true);
 	if (ignored) {
 		ImGui::SameLine();
 		ImGui::TextColored(kIgnored, "!");
@@ -634,20 +635,20 @@ float column_width(const FieldSchema &field) {
 }
 
 // A row's context menu: the collection's structural edits without selecting the row.
-void row_menu(EditorHost &host, const Document &document, const Document::CollectionSpec &spec,
+void row_menu(Workspace &workspace, const Document &document, const Document::CollectionSpec &spec,
               const NodeAddress &address, size_t index, size_t count) {
 	if (spec.fixed || document.blocked() || !ImGui::BeginPopupContextItem("row")) return;
 	if (ImGui::MenuItem("Duplicate", nullptr, false, !spec.max || count < spec.max))
-		edit(host, document, EditOperation::Duplicate, address, index + 1);
-	if (ImGui::MenuItem("Remove")) edit(host, document, EditOperation::Remove, address);
-	if (ImGui::MenuItem("Move up", nullptr, false, index > 0)) edit(host, document, EditOperation::Move, address, index - 1);
+		edit(workspace, document, EditOperation::Duplicate, address, index + 1);
+	if (ImGui::MenuItem("Remove")) edit(workspace, document, EditOperation::Remove, address);
+	if (ImGui::MenuItem("Move up", nullptr, false, index > 0)) edit(workspace, document, EditOperation::Move, address, index - 1);
 	if (ImGui::MenuItem("Move down", nullptr, false, index + 1 < count))
-		edit(host, document, EditOperation::Move, address, index + 1);
+		edit(workspace, document, EditOperation::Move, address, index + 1);
 	ImGui::EndPopup();
 }
 
-void select_row(EditorHost &host, const Document &document, const NodeAddress &address) {
-	select(host, document, address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
+void select_row(Workspace &workspace, const Document &document, const NodeAddress &address) {
+	select(workspace, document, address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
 }
 
 // A record's tooltip in a collection: its name (and the token its type words, when it does),
@@ -661,7 +662,7 @@ std::string record_tip(const Document &document, const NodeAddress &address) {
 // The records as a table: a numbered row each (a click selects it; marked when it changed
 // since the last save), a column per field, every cell edited in place. The columns size
 // to the font, resize, and scroll sideways past the table's width.
-void records_table(EditorHost &host, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
+void records_table(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
                    const Document::Collection &records, const std::vector<FieldSchema> &fields) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float row = ImGui::GetFrameHeight() + style.CellPadding.y * 2.0f;
@@ -695,18 +696,18 @@ void records_table(EditorHost &host, ReferencePicker &picker, const Document &do
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, row);
 			ImGui::PushID(static_cast<int>(address.child));
 			ImGui::TableNextColumn();
-			const bool on = holds(host.view().selected, address);
+			const bool on = holds(workspace.view().selected, address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
 			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
 			if (ImGui::Selectable(number.c_str(), on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
-				select_row(host, document, address);
+				select_row(workspace, document, address);
 			ui_kit::change_dot(document.record_change(address), x);
 			ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
-			row_menu(host, document, records.spec, address, size_t(i), records.ids.size());
+			row_menu(workspace, document, records.spec, address, size_t(i), records.ids.size());
 			for (const FieldSchema &field : fields) {
 				ImGui::TableNextColumn();
-				field_cell(host, picker, document, address, field);
+				field_cell(workspace, picker, document, address, field);
 			}
 			ImGui::PopID();
 		}
@@ -716,7 +717,7 @@ void records_table(EditorHost &host, ReferencePicker &picker, const Document &do
 
 // The records by name (a window, a part, a table row), each marked when it changed since the
 // last save: a click selects one, whose own fields and lists the inspector then shows.
-void records_list(EditorHost &host, const Document &document, const NodeAddress &owner,
+void records_list(Workspace &workspace, const Document &document, const NodeAddress &owner,
                   const Document::Collection &records) {
 	for (size_t i = 0; i < records.ids.size(); ++i) {
 		const NodeAddress address{owner.row, records.spec.kind, records.ids[i]};
@@ -725,17 +726,17 @@ void records_list(EditorHost &host, const Document &document, const NodeAddress 
 		const std::string name =
 		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
 		                    ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((name + "###record").c_str(), holds(host.view().selected, address))) select_row(host, document, address);
+		if (ImGui::Selectable((name + "###record").c_str(), holds(workspace.view().selected, address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
 		ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
-		row_menu(host, document, records.spec, address, i, records.ids.size());
+		row_menu(workspace, document, records.spec, address, i, records.ids.size());
 		ImGui::PopID();
 	}
 }
 
 // One collection of `owner`: its tools (Add, and Duplicate / Remove / Up / Down for its
 // selected record), then its records. `titled`: under a heading of its own inside a group.
-void collection_block(EditorHost &host, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
+void collection_block(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
                       const Document::Collection &records, bool titled) {
 	const Document::CollectionSpec &spec = records.spec;
 	const std::vector<NodeId> &ids = records.ids;
@@ -754,7 +755,7 @@ void collection_block(EditorHost &host, ReferencePicker &picker, const Document 
 	}
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
-		if (host.view().selection.kind == spec.kind && host.view().selection.child == ids[i]) selected = i;
+		if (workspace.view().selection.kind == spec.kind && workspace.view().selection.child == ids[i]) selected = i;
 	if (!spec.fixed) {
 		ImGui::BeginDisabled(document.blocked());
 		ui_kit::WrapRow row;
@@ -766,11 +767,11 @@ void collection_block(EditorHost &host, ReferencePicker &picker, const Document 
 		tools.small = true;
 		const NodeAddress address = selected == SIZE_MAX ? NodeAddress() : NodeAddress{owner.row, spec.kind, ids[selected]};
 		switch (ui_kit::row_tools(row, tools)) {
-		case ui_kit::RowTool::Add: edit(host, document, EditOperation::Add, {owner.row, spec.kind, 0}, SIZE_MAX, owner.child); break;
-		case ui_kit::RowTool::Duplicate: edit(host, document, EditOperation::Duplicate, address, selected + 1); break;
-		case ui_kit::RowTool::Remove: edit(host, document, EditOperation::Remove, address); break;
-		case ui_kit::RowTool::Up: edit(host, document, EditOperation::Move, address, selected - 1); break;
-		case ui_kit::RowTool::Down: edit(host, document, EditOperation::Move, address, selected + 1); break;
+		case ui_kit::RowTool::Add: edit(workspace, document, EditOperation::Add, {owner.row, spec.kind, 0}, SIZE_MAX, owner.child); break;
+		case ui_kit::RowTool::Duplicate: edit(workspace, document, EditOperation::Duplicate, address, selected + 1); break;
+		case ui_kit::RowTool::Remove: edit(workspace, document, EditOperation::Remove, address); break;
+		case ui_kit::RowTool::Up: edit(workspace, document, EditOperation::Move, address, selected - 1); break;
+		case ui_kit::RowTool::Down: edit(workspace, document, EditOperation::Move, address, selected + 1); break;
 		case ui_kit::RowTool::None: break;
 		}
 		ImGui::EndDisabled();
@@ -779,8 +780,8 @@ void collection_block(EditorHost &host, ReferencePicker &picker, const Document 
 		ui_kit::empty_state("None yet.");
 	} else {
 		const std::vector<FieldSchema> &fields = document.fields(spec.kind);
-		if (!fields.empty() && fields.size() <= kTableFields) records_table(host, picker, document, owner, records, fields);
-		else records_list(host, document, owner, records);
+		if (!fields.empty() && fields.size() <= kTableFields) records_table(workspace, picker, document, owner, records, fields);
+		else records_list(workspace, document, owner, records);
 	}
 	ImGui::PopID();
 }
@@ -806,7 +807,7 @@ bool section_changed(const Document &document, const Targets &targets, const Ins
 // block's own switch first, its fields after; then the collections it claims. A section
 // that holds something written, or a field changed since the last save, starts open; one
 // holding the field a request asks to show opens.
-void draw_section(EditorHost &host, ReferencePicker &picker, const Document &document, const NodeAddress &record,
+void draw_section(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &record,
                   const NodeAddress &owner, const InspectorSection &section, Reveal *reveal) {
 	if (!section.key.empty()) {
 		std::string heading = section.title;
@@ -831,12 +832,12 @@ void draw_section(EditorHost &host, ReferencePicker &picker, const Document &doc
 		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
 		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
 		// The switch is a field like the others: marked, reverted and shown as they are.
-		if (block_switch) field_row(host, picker, document, {record}, section.toggle, reveal, true);
-		field_rows(host, picker, document, {record}, section.fields, reveal);
+		if (block_switch) field_row(workspace, picker, document, {record}, section.toggle, reveal, true);
+		field_rows(workspace, picker, document, {record}, section.fields, reveal);
 		ImGui::EndTable();
 	}
 	for (const Document::Collection &collection : section.collections)
-		collection_block(host, picker, document, owner, collection,
+		collection_block(workspace, picker, document, owner, collection,
 		                 section.key != document.kind_token(collection.spec.kind));
 	ImGui::PopID();
 }
@@ -845,8 +846,8 @@ void draw_section(EditorHost &host, ReferencePicker &picker, const Document &doc
 // nested record's, a menu window's NAME), a line each cut to the window: the file, the
 // record and the field's name (the whole of it, and the field's id, in its tooltip); a click
 // goes to the use (graph/usage_target).
-void referenced_by(EditorHost &host, const Document &document, const NodeAddress &record) {
-	const SessionView &view = host.view();
+void referenced_by(Workspace &workspace, const Document &document, const NodeAddress &record) {
+	const SessionView &view = workspace.view();
 	if (!view.graph) return;
 	std::vector<const GraphEdge *> users;
 	for (const GraphSymbol *symbol : view.graph->symbols_of(document.path(), document.record_path(record))) {
@@ -866,7 +867,7 @@ void referenced_by(EditorHost &host, const Document &document, const NodeAddress
 		const bool pressed = ImGui::Selectable((shown + "###use").c_str());
 		if (pressed || ImGui::IsItemHovered()) {
 			const ReferenceTarget target = usage_target(edge, view);
-			if (pressed) go_to(host, target);
+			if (pressed) go_to(workspace, target);
 			ui_kit::tooltip(line + "\n" + edge.field + "\n" + go_to_words({target}));
 		}
 		ImGui::PopID();
@@ -875,7 +876,7 @@ void referenced_by(EditorHost &host, const Document &document, const NodeAddress
 
 // The row and every record that holds the selection, each one click away, on a row that
 // wraps; a long name cut to the window (whole in its tooltip, with the token its type words).
-void breadcrumb(EditorHost &host, const Document &document, const NodeAddress &selection) {
+void breadcrumb(Workspace &workspace, const Document &document, const NodeAddress &selection) {
 	std::vector<NodeAddress> chain = document.ancestors(selection);
 	chain.push_back(selection);
 	const float room = ImGui::GetContentRegionAvail().x;
@@ -891,7 +892,7 @@ void breadcrumb(EditorHost &host, const Document &document, const NodeAddress &s
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
 		if (last) ImGui::TextUnformatted(shown.c_str());
-		else if (ImGui::SmallButton((shown + "###crumb").c_str())) select(host, document, chain[i]);
+		else if (ImGui::SmallButton((shown + "###crumb").c_str())) select(workspace, document, chain[i]);
 		std::string tip = document.kind_label(chain[i].kind);
 		if (shown != title) tip += "\n" + title;
 		if (name != title) tip += "\n" + name;
@@ -919,7 +920,7 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 } // namespace
 
 void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	const SessionView &view = host_.view();
+	const SessionView &view = workspace_.view();
 	const Document *document = active(view);
 	if (!document || !view.selection.row) {
 		ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
@@ -951,7 +952,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	reveal.scroll = reveal_scroll_;
 	const double since = ImGui::GetTime() - reveal_time_;
 	reveal.light = reveal_field_.empty() || since >= kFlashSeconds ? 0.0f : float(1.0 - since / kFlashSeconds) * 0.8f;
-	breadcrumb(host_, *document, selection);
+	breadcrumb(workspace_, *document, selection);
 	// Several records of one kind: the fields they share, each change set on every one.
 	Targets together{selection};
 	for (const NodeAddress &address : view.selected)
@@ -975,7 +976,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
 	const std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
-	for (const InspectorSection &section : plan) draw_section(host_, picker_, *document, selection, owner, section, &reveal);
+	for (const InspectorSection &section : plan) draw_section(workspace_, picker_, *document, selection, owner, section, &reveal);
 	reveal_scroll_ = reveal.scroll;
 	// F2: Rename everywhere on the record's first field that defines a name.
 	if (ImGui::Shortcut(ImGuiKey_F2))
@@ -983,10 +984,10 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			const FieldUse field = document->field_on(selection, schema);
 			Value value;
 			if (!document->get(selection, schema.id, value) || !renames_name(*document, {selection}, field, value)) continue;
-			rename_everywhere(host_, *document, selection, field, value);
+			rename_everywhere(workspace_, *document, selection, field, value);
 			break;
 		}
-	referenced_by(host_, *document, selection);
+	referenced_by(workspace_, *document, selection);
 	findings_.follow(view);
 	findings(view, findings_, *document, *row, selection);
 }
@@ -1011,7 +1012,7 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			const std::string path = document.record_path(record);
 			const float x = ImGui::GetCursorScreenPos().x;
 			const std::string shown = ui_kit::fit(ui_kit::kChangeRoom + titles, ImGui::GetContentRegionAvail().x);
-			if (ImGui::Selectable((shown + "###record").c_str(), record == records.front())) select(host_, document, record);
+			if (ImGui::Selectable((shown + "###record").c_str(), record == records.front())) select(workspace_, document, record);
 			ui_kit::change_dot(document.record_change(record), x);
 			ui_kit::tooltip_lazy([&] {
 				const std::string above = titles != path ? titles + "\n" : std::string();
@@ -1041,7 +1042,7 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			        !section.key.empty() && std::any_of(section.fields.begin(), section.fields.end(), [&](const FieldUse &field) {
 				        return field.schema->id == section.key && is_yes_no(*field.schema);
 			        });
-			field_rows(host_, picker_, document, records, section.fields, nullptr, has_switch ? section.key : std::string());
+			field_rows(workspace_, picker_, document, records, section.fields, nullptr, has_switch ? section.key : std::string());
 			ImGui::EndTable();
 		}
 		ImGui::PopID();

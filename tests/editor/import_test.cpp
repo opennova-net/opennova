@@ -34,7 +34,9 @@
 #include <editor/import/sidecar.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_view.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/pff/pff.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -208,7 +210,8 @@ static int test_quantize() {
 static int test_import_pass() {
 	editor_test::TempProjectDir dir("opennova_editor_import_pass");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Imports"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project_root;
@@ -351,7 +354,8 @@ static int test_import_pass() {
 static int test_import_lifetime() {
 	editor_test::TempProjectDir dir("opennova_editor_import_lifetime");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Lifetime"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
@@ -499,7 +503,8 @@ static int test_retail_source() {
 	// @ 0x75b1e5], and so does the import.
 	TEST_EXPECT(editor_test::write_text(retail + "/note.txt", "loose"));
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail"));
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.retail_files.empty());
@@ -577,7 +582,8 @@ static int test_retail_source() {
 static int test_scene_imports() {
 	editor_test::TempProjectDir dir("opennova_editor_scene_imports");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Scenes"));
 	const std::string root = session.view().project_root;
 	const ProjectPaths paths = ProjectPaths::for_root(root);

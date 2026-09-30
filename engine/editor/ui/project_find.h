@@ -7,7 +7,8 @@
 #include <vector>
 
 #include <editor/graph/asset_graph.h>
-#include <editor/ui/editor_host.h>
+#include <editor/session/session_revisions.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -22,7 +23,7 @@ class ProjectFind {
 public:
 	// Asks on the next draw, the keyboard in the text.
 	void open();
-	void draw(EditorHost &host);
+	void draw(Workspace &workspace);
 
 private:
 	// A use of a result as its line shows it, and where it leads.

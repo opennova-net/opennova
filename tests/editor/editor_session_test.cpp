@@ -18,9 +18,12 @@
 #include <editor/documents/document_types.h>
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
+#include <editor/session/file_preferences_store.h>
+#include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/session_json.h>
+#include <editor/session/session_view.h>
 #include <editor/project/project_files.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pff/pff.h>
@@ -96,7 +99,8 @@ static bool find_fix(const SessionView &v, const char *code, const std::string &
 static int test_lifecycle() {
 	editor_test::TempProjectDir dir("opennova_editor_session_test");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings/editor.json"));
+	FilePreferencesStore preferences(dir.file("settings/editor.json"));
+	ProjectSession session(platform, preferences);
 	TEST_EXPECT(!session.project_open());
 	TEST_EXPECT(session.view().recent_projects.empty());
 
@@ -186,7 +190,7 @@ static int test_lifecycle() {
 	launcher.executable = runtime;
 	launcher.mcp_port = 8999;
 	launcher.engine_args = {"--headless"};
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	TEST_EXPECT(v.runtime_executable == runtime);
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
@@ -299,7 +303,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(!session.project_open() && v.requirements.rows.empty());
 	{
 		FakePlatform other;
-		ProjectSession again(other, dir.file("settings/editor.json"));
+		FilePreferencesStore again_preferences(dir.file("settings/editor.json"));
+		ProjectSession again(other, again_preferences);
 		TEST_EXPECT(again.view().recent_projects.size() == 1);
 		TEST_EXPECT(again.handle(make_request(EditorRequestKind::OpenProject, root)));
 		TEST_EXPECT(again.view().document.title == "Renamed");
@@ -310,7 +315,8 @@ static int test_lifecycle() {
 	// A vanished recent project is dropped from the list when opening it fails.
 	{
 		FakePlatform other;
-		ProjectSession again(other, dir.file("settings/editor.json"));
+		FilePreferencesStore again_preferences(dir.file("settings/editor.json"));
+		ProjectSession again(other, again_preferences);
 		TEST_EXPECT(!again.handle(make_request(EditorRequestKind::OpenProject, dir.file("nowhere"))) ||
 		            !again.project_open());
 	}
@@ -320,7 +326,8 @@ static int test_lifecycle() {
 static int test_import() {
 	editor_test::TempProjectDir dir("opennova_editor_import_test");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Imports"));
 	const std::string loose = dir.file("loose.txt");
 	const std::string packed = dir.file("source.pff");
@@ -444,7 +451,8 @@ static int test_import() {
 static int test_retail_play() {
 	editor_test::TempProjectDir dir("opennova_editor_retail_play_test");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	FilePreferencesStore preferences(dir.file("settings.json"));
+	ProjectSession session(platform, preferences);
 	TEST_EXPECT(!session.view().play_retail && session.view().retail_directory.empty());
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Retail test"));
 	editor_test::create_missing_files(session);
@@ -479,7 +487,7 @@ static int test_retail_play() {
 	launcher.godot_project_dir = dir.file("godot");
 	launcher.engine_args = {"--headless"};
 	launcher.mcp_port = 8999;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1 && session.view().play_state == PlayState::Running);
@@ -492,7 +500,8 @@ static int test_retail_play() {
 	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "video settings");
 	{
 		FakePlatform other;
-		ProjectSession reopened(other, dir.file("settings.json"));
+		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
+		ProjectSession reopened(other, reopened_preferences);
 		TEST_EXPECT(reopened.view().play_retail && reopened.view().retail_directory == install);
 	}
 	session.handle(make_request(EditorRequestKind::Build));
@@ -537,33 +546,6 @@ static int test_retail_play() {
 	return 0;
 }
 
-static int test_editor_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_settings_test");
-	EditorSettings settings;
-	for (int i = 0; i < 12; ++i) remember_recent_project(settings, "p" + std::to_string(i));
-	TEST_EXPECT(settings.recent_projects.size() == kRecentProjectsMax);
-	TEST_EXPECT(settings.recent_projects.front() == "p11");
-	remember_recent_project(settings, "p5"); // moves to the front, no duplicate
-	TEST_EXPECT(settings.recent_projects.front() == "p5" && settings.recent_projects.size() == kRecentProjectsMax);
-	settings.runtime_executable = "C:/tools/opennova.exe";
-	TEST_EXPECT(settings.import_dependencies); // an import brings the files it needs unless told otherwise
-	settings.import_dependencies = false;
-	Diagnostic error;
-	TEST_EXPECT(save_editor_settings(dir.file("a/b/editor.json"), settings, error));
-	EditorSettings loaded;
-	TEST_EXPECT(load_editor_settings(dir.file("a/b/editor.json"), loaded, error));
-	TEST_EXPECT(loaded.recent_projects == settings.recent_projects);
-	TEST_EXPECT(loaded.runtime_executable == settings.runtime_executable && !loaded.import_dependencies);
-	TEST_EXPECT(load_editor_settings(dir.file("missing.json"), loaded, error) && loaded.recent_projects.empty() &&
-	            loaded.import_dependencies);
-	// A file that does not say reads as on.
-	TEST_EXPECT(editor_test::write_text(dir.file("older.json"), "{\"schema_version\": 1}"));
-	TEST_EXPECT(load_editor_settings(dir.file("older.json"), loaded, error) && loaded.import_dependencies);
-	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "{\"schema_version\": 99}"));
-	TEST_EXPECT(!load_editor_settings(dir.file("bad.json"), loaded, error));
-	return 0;
-}
-
 // The import dialog's "Include the files these need" (S11g): SetImportDependencies writes
 // the editor's setting, which a session started later reads, and plans an open preview
 // again with it (its serial moving, the files the chosen one needs gone or back).
@@ -578,7 +560,8 @@ static int test_import_dependencies_setting() {
 	            editor_test::write_text(art + "/arial99.fnt", "fnt"));
 	{
 		FakePlatform platform;
-		ProjectSession session(platform, settings);
+		FilePreferencesStore preferences(settings);
+		ProjectSession session(platform, preferences);
 		const SessionView &v = session.view();
 		TEST_EXPECT(v.import_dependencies);
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Setting"));
@@ -592,20 +575,21 @@ static int test_import_dependencies_setting() {
 		session.handle(off);
 		TEST_EXPECT(session.outcome().done() && !v.import_dependencies && !v.import_preview.with_dependencies);
 		TEST_EXPECT(v.import_preview.serial != serial && v.import_preview.plan.rows.size() == 1);
-		EditorSettings stored;
+		Preferences stored;
 		Diagnostic error;
-		TEST_EXPECT(load_editor_settings(settings, stored, error) && !stored.import_dependencies);
+		TEST_EXPECT(FilePreferencesStore(settings).load(stored, error) && !stored.import_dependencies);
 	}
 	FakePlatform platform;
-	ProjectSession later(platform, settings);
+	FilePreferencesStore later_preferences(settings);
+	ProjectSession later(platform, later_preferences);
 	TEST_EXPECT(!later.view().import_dependencies);
 	EditorRequest on = make_request(EditorRequestKind::SetImportDependencies);
 	on.flag = true;
 	later.handle(on);
 	TEST_EXPECT(later.view().import_dependencies && !later.view().import_preview.open);
-	EditorSettings stored;
+	Preferences stored;
 	Diagnostic error;
-	TEST_EXPECT(load_editor_settings(settings, stored, error) && stored.import_dependencies);
+	TEST_EXPECT(FilePreferencesStore(settings).load(stored, error) && stored.import_dependencies);
 	return 0;
 }
 
@@ -617,7 +601,8 @@ static int test_import_dependencies_setting() {
 static int test_outcomes_and_refusals() {
 	editor_test::TempProjectDir dir("opennova_editor_session_outcomes");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Outcomes"));
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(session.outcome().done() && session.outcome().findings.empty());
@@ -751,7 +736,8 @@ static int test_outcomes_and_refusals() {
 static int test_requests_that_cannot_run() {
 	editor_test::TempProjectDir dir("opennova_editor_session_cannot_run");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Cannot run"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -838,7 +824,8 @@ static int test_requests_that_cannot_run() {
 static int test_rename_keeps_the_active_document() {
 	editor_test::TempProjectDir dir("opennova_editor_session_rename_active");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rename active"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -913,7 +900,8 @@ static int test_rename_keeps_the_active_document() {
 static int test_preview_target() {
 	editor_test::TempProjectDir dir("opennova_editor_session_preview");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Preview"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -977,7 +965,8 @@ static const Diagnostic *finding_on(const std::vector<Diagnostic> &diagnostics, 
 static int test_validation_cost() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validation");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Validation"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -1022,16 +1011,21 @@ static int test_validation_cost() {
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1 && stats.files_loaded == 0);
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type"));
-	// A finding reported inside the burst lands after the validation the burst left due,
-	// which the poll does not run again.
+	// A finding reported inside the burst lands after the validation the burst left due: reporting
+	// it validates nothing (S13 A2), the poll runs that validation once and keeps the finding after
+	// the rows it composes, as often as it was reported (the same edit refused twice, two rows).
 	passes = stats.passes;
 	session.hold_validation();
 	set("type", int64_t(4));
 	set("no_such_field", int64_t(1));
-	TEST_EXPECT(stats.passes == passes + 1);
+	set("no_such_field", int64_t(1));
+	TEST_EXPECT(stats.passes == passes);
+	TEST_EXPECT(!v.diagnostics.empty() && v.diagnostics.back().code == "document.value");
+	TEST_EXPECT(count_code(v.diagnostics, "document.value") == 2);
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1);
 	TEST_EXPECT(!v.diagnostics.empty() && v.diagnostics.back().code == "document.value");
+	TEST_EXPECT(count_code(v.diagnostics, "document.value") == 2);
 	TEST_EXPECT(!has_code(v.diagnostics, "catalog.item_type"));
 	// A Move to where the record already is changes nothing: nothing to validate.
 	passes = stats.passes;
@@ -1060,6 +1054,8 @@ static int test_validation_cost() {
 	TEST_EXPECT(!session.view().operation.running() && v.unsaved_prompt.open && v.unsaved_prompt.action == EditorRequestKind::Build);
 	session.poll();
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type") && v.unsaved_prompt.open);
+	// The finding reported in the earlier burst is gone: a validation for a later change drops it.
+	TEST_EXPECT(!has_code(v.diagnostics, "document.value"));
 	EditorRequest save_and_build = make_request(EditorRequestKind::ResolveUnsaved);
 	save_and_build.unsaved_choice = UnsavedChoice::Save;
 	session.handle(save_and_build);
@@ -1185,12 +1181,13 @@ static int test_validation_cost() {
 struct SaveProject {
 	editor_test::TempProjectDir dir;
 	FakePlatform platform;
+	MemoryPreferencesStore preferences;
 	ProjectSession session;
 	std::string root, items_path, strings_path;
 	Document *items = nullptr;
 	Document *strings = nullptr;
 
-	explicit SaveProject(const char *name) : dir(name), session(platform, dir.file("settings.json")) {}
+	explicit SaveProject(const char *name) : dir(name), session(platform, preferences) {}
 	bool open() {
 		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Saves"));
 		editor_test::create_missing_files(session);
@@ -1300,7 +1297,8 @@ static int test_save_contract() {
 static int test_rewrite_closed_file() {
 	editor_test::TempProjectDir dir("opennova_editor_session_rewrite");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Rewrite"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -1585,7 +1583,8 @@ static int test_selection_memory() {
 static int test_boot_findings() {
 	editor_test::TempProjectDir dir("opennova_editor_session_boot");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	const std::string first = dir.file("first");
 	session.handle(make_request(EditorRequestKind::NewProject, first, "First"));
@@ -1594,7 +1593,7 @@ static int test_boot_findings() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
@@ -1668,7 +1667,8 @@ static int test_boot_findings() {
 static int test_optional_rows() {
 	editor_test::TempProjectDir dir("opennova_editor_session_optional");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Optional"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -1699,7 +1699,8 @@ static int test_optional_rows() {
 static int test_create_missing_roles() {
 	editor_test::TempProjectDir dir("opennova_editor_session_create_roles");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Roles"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -1766,7 +1767,8 @@ static int test_import_fix_plans_dependencies() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 3) ==
 	            opennova::pff::PFF_WRITE_OK);
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Import fix"));
 	editor_test::set_retail_directory(session, install);
 	const SessionView &v = session.view();
@@ -1841,7 +1843,8 @@ static int test_fixes_apply() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 2) ==
 	            opennova::pff::PFF_WRITE_OK);
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Fixes"));
 	editor_test::set_retail_directory(session, install);
 	const SessionView &v = session.view();
@@ -1953,7 +1956,8 @@ static int test_project_settings() {
 	editor_test::TempProjectDir dir("opennova_editor_session_settings");
 	FakePlatform platform;
 	const std::string settings_file = dir.file("settings/editor.json");
-	ProjectSession session(platform, settings_file);
+	FilePreferencesStore preferences(settings_file);
+	ProjectSession session(platform, preferences);
 	const SessionView &v = session.view();
 	const std::string install = dir.file("install");
 	// No project: the editor's settings apply, a project's is refused.
@@ -2033,15 +2037,15 @@ static int test_project_settings() {
 	TEST_EXPECT(v.settings_result.serial == 9 && v.settings_result.failures.empty() && v.document.title == "Armory" &&
 	            v.runtime_setting == "C:/tools/opennova.exe" && v.runtime_executable == "C:/tools/opennova.exe" &&
 	            v.status == "Saved the settings.");
-	EditorSettings saved;
-	TEST_EXPECT(load_editor_settings(settings_file, saved, error) && saved.runtime_executable == "C:/tools/opennova.exe" &&
+	Preferences saved;
+	TEST_EXPECT(FilePreferencesStore(settings_file).load(saved, error) && saved.runtime_executable == "C:/tools/opennova.exe" &&
 	            saved.retail_directory == install);
 	// "" names the runtime packaged beside the editor.
 	change = ProjectSettingsChange();
 	change.serial = 10;
 	change.runtime_executable = "";
 	editor_test::apply_settings(session, change);
-	TEST_EXPECT(v.runtime_setting.empty() && v.runtime_executable == session.launcher().executable);
+	TEST_EXPECT(v.runtime_setting.empty() && v.runtime_executable == PlayLauncher().executable);
 	return 0;
 }
 
@@ -2214,7 +2218,8 @@ static int test_rescan_keeps_what_did_not_change() {
 static int test_build_findings_stay() {
 	editor_test::TempProjectDir dir("opennova_editor_session_build_rows");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Build rows"));
 	const SessionView &v = session.view();
 	const size_t missing = count_code(v.diagnostics, "requirement.missing");
@@ -2308,7 +2313,8 @@ static int test_view_revisions() {
 	};
 	editor_test::TempProjectDir dir("opennova_editor_session_revisions");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Revisions"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2335,7 +2341,7 @@ static int test_view_revisions() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
@@ -2483,7 +2489,8 @@ static int test_view_revisions() {
 static int test_import_guard_past_the_cap() {
 	editor_test::TempProjectDir dir("opennova_editor_session_import_cap");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Cap"));
 	const SessionView &v = session.view();
 	const std::string root = v.project_root;
@@ -2547,7 +2554,8 @@ static size_t staging_dirs(const std::string &output_root) {
 static int test_play_then_close() {
 	editor_test::TempProjectDir dir("opennova_editor_session_play_close");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Play close"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2555,7 +2563,7 @@ static int test_play_then_close() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	const std::string output_root = v.project_root + "/.opennova/build/play";
 
 	// The hash pass in 1 MiB steps, then 64 bytes a poll until an archive packs.
@@ -2613,10 +2621,11 @@ static int test_play_leases() {
 	std::string played, output_root, executable;
 	{
 		FakePlatform platform;
-		ProjectSession session(platform, dir.file("settings.json"));
+		MemoryPreferencesStore preferences;
+		ProjectSession session(platform, preferences);
 		session.handle(make_request(EditorRequestKind::NewProject, project, "Leases"));
 		editor_test::create_missing_files(session);
-		session.set_launcher(launcher);
+		session.set_launcher_source(editor_test::fixed_launcher(launcher));
 		session.handle(make_request(EditorRequestKind::Play));
 		session.run_operations();
 		const SessionView &v = session.view();
@@ -2654,9 +2663,10 @@ static int test_play_leases() {
 	FakePlatform platform;
 	platform.next_pid = 900;
 	platform.elsewhere = {{500, ProcessLiveness::Alive}, {600, ProcessLiveness::Unknown}};
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::OpenProject, project));
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	const SessionView &v = session.view();
 	TEST_EXPECT(v.project_open && v.play_state == PlayState::Stopped);
 	const auto rebuild = [&](const char *text) {
@@ -2709,7 +2719,8 @@ static int test_play_leases() {
 static int test_output_cursor() {
 	editor_test::TempProjectDir dir("opennova_editor_session_output");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Output"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2717,7 +2728,7 @@ static int test_output_cursor() {
 	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
 	PlayLauncher launcher;
 	launcher.executable = runtime;
-	session.set_launcher(launcher);
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
 	session.handle(make_request(EditorRequestKind::Play));
 	session.run_operations();
 	TEST_EXPECT(v.play_state == PlayState::Running);
@@ -2776,7 +2787,8 @@ static int test_output_cursor() {
 static int test_save_picks_like_the_rest() {
 	editor_test::TempProjectDir dir("opennova_editor_session_duplicate_save");
 	FakePlatform platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Duplicates"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2800,8 +2812,225 @@ static int test_save_picks_like_the_rest() {
 	return 0;
 }
 
+// A request from outside enters handle() once (S13 A2): the session's parts compose by calling one
+// another, so a rename everywhere that reads its open documents again, a file's rename that closes
+// the renamed document and opens it under its new name, a create that opens its file, a fix's edit
+// that opens its document first, an import that rescans and the unsaved prompt's answer that runs
+// what waited on it are each one entry, and one outcome.
+static int test_handle_entered_once() {
+	editor_test::TempProjectDir dir("opennova_editor_session_entries");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Entries"));
+	editor_test::create_missing_files(session);
+	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
+	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	TEST_EXPECT(session.document_for("menu_style.mns") && session.document_for("main.mnu"));
+	uint64_t before = session.handle_entries();
+
+	// A style variable menu_style.mns defines and main.mnu uses, renamed everywhere: both open
+	// documents are read again, in the one request.
+	const GraphSymbol *variable = nullptr;
+	const std::string menu_text = session.document_for("main.mnu")->serialize().text;
+	for (const GraphSymbol *symbol : v.graph->symbols_of_kind(ReferenceKind::StyleVar))
+		if (!variable && !symbol->inert && symbol->file == session.document_for("menu_style.mns")->path() &&
+		    menu_text.find("%" + symbol->display + "%") != std::string::npos)
+			variable = symbol;
+	TEST_EXPECT(variable);
+	EditorRequest rename = make_request(EditorRequestKind::RenameSymbol, variable->file);
+	rename.text = variable->locator;
+	rename.edit.field = variable->field;
+	rename.edit.value = std::string("ENTRIES_RENAMED");
+	session.handle(rename);
+	TEST_EXPECT(session.handle_entries() == before + 1 && session.outcome().done());
+	TEST_EXPECT(session.document_for("main.mnu")->serialize().text.find("%ENTRIES_RENAMED%") != std::string::npos);
+	before = session.handle_entries();
+
+	// A create that opens its file; then its file renamed while it is the active document: closed
+	// and opened again under the new name, still active.
+	session.handle(make_request(EditorRequestKind::CreateFile, "extra.mnu", asset_kind_token(AssetKind::Menu)));
+	TEST_EXPECT(session.handle_entries() == before + 1 && session.document_for("extra.mnu"));
+	session.handle(make_request(EditorRequestKind::RenameAsset, session.document_for("extra.mnu")->path(), "renamed.mnu"));
+	TEST_EXPECT(session.handle_entries() == before + 2 && session.outcome().done());
+	TEST_EXPECT(!session.document_for("extra.mnu") && session.document_for("renamed.mnu") &&
+	            v.active_document == session.document_for("renamed.mnu")->path());
+
+	// A fix's edit on a document that is not open opens it first.
+	const std::string main = session.document_for("main.mnu")->path();
+	session.handle(make_request(EditorRequestKind::CloseDocument, main));
+	TEST_EXPECT(!session.document_for(main));
+	before = session.handle_entries();
+	EditorRequest fix = make_request(EditorRequestKind::EditRecord, main);
+	fix.flag = true;
+	fix.edit.field = "position.left";
+	fix.edit.value = int64_t(8);
+	{
+		// The record the fix names, as a load of the file gives it (two loads give a record the
+		// same identity: the contract's).
+		Diagnostic error;
+		const std::shared_ptr<Document> probe = document_type_for(AssetKind::Menu)->make();
+		TEST_EXPECT(probe->load(v.project_root + "/" + main, main, AssetKind::Menu, v.document.target_game, error));
+		fix.edit.address = probe->address_at("0/window:0");
+	}
+	session.handle(fix);
+	TEST_EXPECT(session.handle_entries() == before + 1 && session.document_for(main));
+
+	// The unsaved prompt's answer: the Close it held runs inside the one answer.
+	EditorRequest edit = make_request(EditorRequestKind::EditRecord, main);
+	edit.edit.address = session.document_for(main)->address_at("0/window:0");
+	edit.edit.field = "position.left";
+	edit.edit.value = int64_t(16);
+	session.handle(edit);
+	TEST_EXPECT(session.document_for(main)->dirty());
+	session.handle(make_request(EditorRequestKind::CloseDocument, main));
+	TEST_EXPECT(v.unsaved_prompt.open);
+	before = session.handle_entries();
+	EditorRequest save = make_request(EditorRequestKind::ResolveUnsaved);
+	save.unsaved_choice = UnsavedChoice::Save;
+	session.handle(save);
+	TEST_EXPECT(session.handle_entries() == before + 1 && session.outcome().done() && !v.unsaved_prompt.open &&
+	            !session.document_for(main));
+
+	// An import that rescans after it writes.
+	const std::string loose = dir.file("loose/notes.txt");
+	TEST_EXPECT(editor_test::write_text(loose, "notes"));
+	std::vector<Diagnostic> diagnostics;
+	EditorRequest import = make_request(EditorRequestKind::ImportFiles);
+	import.imports = list_import_sources({loose}, diagnostics);
+	before = session.handle_entries();
+	session.handle(import);
+	TEST_EXPECT(session.handle_entries() == before + 1 && session.outcome().done() && v.scan.find("notes.txt"));
+	return 0;
+}
+
+// The port of the game's MCP endpoint is asked of the launcher source when the game is spawned,
+// its build landed (S13 A2), never when Play is asked for: a Play whose build a Cancel stops asks
+// for none, and each game started gets a port asked then.
+static int test_mcp_port_allocated_at_spawn() {
+	editor_test::TempProjectDir dir("opennova_editor_session_mcp_port");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Ports"));
+	editor_test::create_missing_files(session);
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	int asked = 0, ports = 0;
+	session.set_launcher_source([&](bool with_mcp_port) {
+		++asked;
+		PlayLauncher launcher;
+		launcher.executable = runtime;
+		if (with_mcp_port) launcher.mcp_port = 9100 + ++ports;
+		return launcher;
+	});
+	// Asked once, without a port, for what the view shows.
+	TEST_EXPECT(asked == 1 && ports == 0 && v.runtime_executable == runtime);
+	session.set_poll_budget({0, 256});
+
+	// Play: the build starts and steps; no port while it packs.
+	session.handle(make_request(EditorRequestKind::Play));
+	TEST_EXPECT(session.outcome().done() && session.outcome().operation != 0 && v.operation.running());
+	TEST_EXPECT(ports == 0);
+	session.poll();
+	TEST_EXPECT(v.operation.running() && ports == 0 && platform.spawns == 0);
+	// It lands: the port is asked for now, and the game started on it.
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && ports == 1 && platform.last_plan.mcp_port == 9101 && v.play_mcp_port == 9101);
+	session.handle(make_request(EditorRequestKind::StopPlay));
+	session.poll();
+	TEST_EXPECT(v.play_state == PlayState::Stopped && v.play_mcp_port == 0);
+
+	// A Play whose build is cancelled asks for no port.
+	TEST_EXPECT(editor_test::write_text(v.project_root + "/notes.txt", "a new file: the next build packs again"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(make_request(EditorRequestKind::Play));
+	TEST_EXPECT(v.operation.running());
+	session.handle(make_request(EditorRequestKind::CancelOperation));
+	TEST_EXPECT(!v.operation.running());
+	session.run_operations();
+	TEST_EXPECT(ports == 1 && platform.spawns == 1);
+
+	// The next Play: a port of its own, asked when its game starts.
+	session.handle(make_request(EditorRequestKind::Play));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 2 && ports == 2 && platform.last_plan.mcp_port == 9102 && v.play_mcp_port == 9102);
+	return 0;
+}
+
+// Play launches from one answer of the launcher source, asked when the game is spawned (S13 A2):
+// the executable, whether the run drives the source checkout, its Godot options and the port all
+// come from it, and the view's runtime follows it, whatever the source answered when it was set.
+static int test_play_launches_one_answer() {
+	editor_test::TempProjectDir dir("opennova_editor_session_one_launcher");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Launcher"));
+	editor_test::create_missing_files(session);
+	const std::string first = dir.file("runtime/first.exe"), second = dir.file("runtime/second.exe");
+	TEST_EXPECT(editor_test::write_text(first, "MZ") && editor_test::write_text(second, "MZ"));
+	std::string executable = first;
+	std::vector<std::string> args = {"--first"};
+	session.set_launcher_source([&](bool with_mcp_port) {
+		PlayLauncher launcher;
+		launcher.executable = executable;
+		launcher.engine_args = args;
+		if (with_mcp_port) launcher.mcp_port = 9200;
+		return launcher;
+	});
+	TEST_EXPECT(v.runtime_executable == first);
+	// What the source answers changes before the game starts: the game is launched from the
+	// answer it gives then, all of it, and the view shows that runtime.
+	executable = second;
+	args = {"--second"};
+	const uint64_t preferences_before = v.revisions.of(ViewConcern::Preferences);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && platform.last_plan.executable == second && !platform.last_plan.args.empty() &&
+	            platform.last_plan.args[0] == "--second" && platform.last_plan.mcp_port == 9200);
+	TEST_EXPECT(v.runtime_executable == second && v.revisions.of(ViewConcern::Preferences) > preferences_before);
+	return 0;
+}
+
+#ifdef NDEBUG
+// A request that reaches the session while another is served (a device's callback: here the process
+// seam's can_spawn, asked by a Play) is served inside it (S13 A2; a debug build asserts instead): it
+// neither empties nor ends the outer request's outcome, whose later findings are still its own.
+static int test_reentry_keeps_the_outer_outcome() {
+	struct Reentrant : editor_test::NoProcess {
+		ProjectSession *session = nullptr;
+		bool can_spawn() const override {
+			if (session) session->handle(make_request(EditorRequestKind::ClearOutput));
+			return false;
+		}
+	};
+	editor_test::TempProjectDir dir("opennova_editor_session_reentry");
+	Reentrant platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Reentry"));
+	platform.session = &session;
+	const uint64_t before = session.handle_entries();
+	session.handle(make_request(EditorRequestKind::Play));
+	platform.session = nullptr;
+	TEST_EXPECT(session.handle_entries() == before + 2);
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.unsupported"));
+	return 0;
+}
+#endif
+
 int main() {
 	int failures = 0;
+	failures += test_play_launches_one_answer();
+#ifdef NDEBUG
+	failures += test_reentry_keeps_the_outer_outcome();
+#endif
+	failures += test_handle_entered_once();
+	failures += test_mcp_port_allocated_at_spawn();
 	failures += test_play_then_close();
 	failures += test_play_leases();
 	failures += test_output_cursor();
@@ -2821,7 +3050,6 @@ int main() {
 	failures += test_prompt_renews();
 	failures += test_prompt_belongs_to_its_project();
 	failures += test_selection_memory();
-	failures += test_editor_settings();
 	failures += test_import_dependencies_setting();
 	failures += test_retail_play();
 	failures += test_import();

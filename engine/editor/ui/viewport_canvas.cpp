@@ -7,7 +7,8 @@
 #include <utility>
 
 #include <editor/session/editor_request.h>
-#include <editor/ui/editor_host.h>
+#include <editor/session/session_view.h>
+#include <editor/ui/workspace.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -152,17 +153,17 @@ void CanvasWindowRequests::select(
 	EditorRequest request = make_request(EditorRequestKind::SelectRecord, path);
 	request.edit.address = record;
 	request.select_mode = select_mode(join);
-	host_.request(std::move(request));
+	workspace_.request(std::move(request));
 }
 
 void CanvasWindowRequests::edits(const std::string &path, std::vector<Edit> batch) {
 	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
 	request.edits = std::move(batch);
-	host_.request(std::move(request));
+	workspace_.request(std::move(request));
 }
 
 void CanvasWindowRequests::end_edit(const std::string &path) {
-	host_.request(make_request(EditorRequestKind::EndEdit, path));
+	workspace_.request(make_request(EditorRequestKind::EndEdit, path));
 }
 
 ViewportCanvas::ViewportCanvas(int design_width, int design_height) :

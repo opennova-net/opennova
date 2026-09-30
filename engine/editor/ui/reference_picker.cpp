@@ -1,5 +1,6 @@
 #include "reference_picker.h"
 
+#include <editor/session/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -69,7 +70,7 @@ void ReferencePicker::prune(const SessionView &view) {
 		it = open.count(it->first.document) ? std::next(it) : popups_.erase(it);
 }
 
-bool ReferencePicker::draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldUse &field,
+bool ReferencePicker::draw(Workspace &workspace, const Document &document, const NodeAddress &record, const FieldUse &field,
                            const Value &value, bool compact, std::string &picked, bool others) {
 	if (ImGui::SmallButton(compact ? "..." : "Pick")) ImGui::OpenPopup("references");
 	ui_kit::tooltip(reference_row(field.reference).also_offers == ReferenceKind::StyleVar
@@ -79,15 +80,15 @@ bool ReferencePicker::draw(EditorHost &host, const Document &document, const Nod
 	// the same place in the window has its own.
 	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("references")};
 	if (!ImGui::BeginPopup("references")) return false;
-	prune(host.view());
+	prune(workspace.view());
 	Popup &popup = popups_[key];
-	refresh(popup, host.view(), document, record, field, value, others);
-	const bool done = draw_popup(host, popup, picked);
+	refresh(popup, workspace.view(), document, record, field, value, others);
+	const bool done = draw_popup(workspace, popup, picked);
 	ImGui::EndPopup();
 	return done;
 }
 
-bool ReferencePicker::draw_popup(EditorHost &host, Popup &popup, std::string &picked) {
+bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string &picked) {
 	const float width = ImGui::GetFontSize() * 26.0f;
 	if (ImGui::IsWindowAppearing()) {
 		popup.cursor = 0;
@@ -172,7 +173,7 @@ bool ReferencePicker::draw_popup(EditorHost &host, Popup &popup, std::string &pi
 		for (const ProblemFix &fix : popup.fixes) {
 			ImGui::PushID(fix.label.c_str());
 			if (ui_kit::fitted_button(fix.label, "fix", width)) {
-				host.request(fix.request);
+				workspace.request(fix.request);
 				ImGui::CloseCurrentPopup();
 			}
 			ui_kit::tooltip(fix.detail);

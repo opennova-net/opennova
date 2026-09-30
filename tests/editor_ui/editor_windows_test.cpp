@@ -1989,7 +1989,8 @@ void test_styles_window_ui() {
 void test_styles_lines_listed() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_styles_lines");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
 	const SessionView &v = session.view();
 	CHECK(editor_test::write_text(v.project_root + "/menu_style.mns",
@@ -2089,7 +2090,8 @@ void test_styles_lines_listed() {
 void test_go_to_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
@@ -2167,7 +2169,8 @@ void test_go_to_ui() {
 void test_numeric_go_to_ui() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_numeric_go_to");
 	NoProcess platform;
-	ProjectSession session(platform, dir.file("settings.json"));
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
 	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Numbers"));
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();

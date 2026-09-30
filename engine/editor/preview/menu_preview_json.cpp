@@ -254,7 +254,7 @@ bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snaps
 	EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
 	request.edits = std::move(edits);
 	session.handle(request);
-	const bool ok = session.last_edit_ok();
+	const bool ok = session.outcome().done();
 	session.handle(make_request(EditorRequestKind::EndEdit, path));
 	return ok;
 }
@@ -276,7 +276,7 @@ bool menu_preview_arrange(ProjectSession &session, const MenuPreviewSnapshot &sn
 	EditorRequest request = make_request(EditorRequestKind::EditRecord, document.path());
 	request.edits = std::move(edits);
 	session.handle(request);
-	return session.last_edit_ok();
+	return session.outcome().done();
 }
 
 } // namespace opennova::editor

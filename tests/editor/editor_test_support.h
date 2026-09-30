@@ -2,7 +2,8 @@
 // Shared plumbing for the editor core tests: a throwaway project directory under the
 // system temp directory (std::filesystem::temp_directory_path, so no env read of our
 // own) that is wiped on construction and destruction, a file writer, every missing
-// required file of a session's project created, and the project settings applied.
+// required file of a session's project created, the project settings applied, and an operation
+// that holds the documents.
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,8 @@
 
 #include <editor/requirements/requirements.h>
 #include <editor/session/project_session.h>
+#include <editor/session/session_operation.h>
+#include <editor/session/session_view.h>
 
 namespace editor_test {
 
@@ -41,6 +44,22 @@ inline void set_missions(opennova::editor::ProjectSession &session, bool on) {
 	change.mission = on;
 	apply_settings(session, change);
 }
+
+// An operation that writes the project's files and open documents and cannot be cancelled (a
+// test's: what S13 A3's rename and import operations will be), done on its first step: while it
+// runs the busy gate refuses every edit, and ProjectSession::run_operations() ends it.
+struct HoldingOperation : opennova::editor::SessionOperation {
+	opennova::editor::OperationKind kind() const override {
+		return opennova::editor::OperationKind::RenameApply;
+	}
+	bool step(const opennova::editor::StepBudget &) override { return true; }
+	opennova::editor::OperationProgress progress() const override {
+		return {0, 1, opennova::editor::OperationUnit::Steps, "Holding the documents"};
+	}
+	bool cancellable() const override { return false; }
+	void cancel() override {}
+	opennova::editor::OperationOutcome finish(opennova::editor::SessionCore &) override { return {}; }
+};
 
 struct TempProjectDir {
 	std::filesystem::path path;

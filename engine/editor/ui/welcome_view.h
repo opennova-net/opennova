@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include <editor/ui/editor_host.h>
+#include <editor/ui/workspace.h>
 
 namespace opennova::editor {
 
@@ -12,7 +12,7 @@ namespace opennova::editor {
 class NewProjectForm {
 public:
 	// True when Create raised the request.
-	bool draw(EditorHost &host);
+	bool draw(Workspace &workspace);
 	void set_folder(const std::string &path);
 	const char *title() const { return title_; }
 	const char *folder() const { return folder_; }
@@ -24,6 +24,6 @@ private:
 
 // The Document window with no project open: the new-project form, Open... and the recent
 // projects (a click opens one, Forget drops it from the list), then what last happened.
-void draw_welcome(EditorHost &host, NewProjectForm &form);
+void draw_welcome(Workspace &workspace, NewProjectForm &form);
 
 } // namespace opennova::editor
