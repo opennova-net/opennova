@@ -34,8 +34,6 @@ inline const KindRow kKinds[] = {
 	{ModelKind::Occlusion, "occlusion", "Occlusion record", threedi::ThreediSchemaShape::Occlusion},
 };
 
-const KindRow *kind_row(NodeKind kind);
-
 // The model row's collection slots past its own six: a LOD's part animations and a
 // material's texture rows (ModelPlace::owner names the LOD or the material).
 constexpr uint8_t kPanmSlot = 6;

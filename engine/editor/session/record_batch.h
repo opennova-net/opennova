@@ -46,11 +46,11 @@ bool list_batch_from_json(const Document &document, NodeId owner, const std::str
 // `path` ("" = the active one; opened first when it is not open); the editor MCP's
 // editor_menu edit and list reach it through menu_edit_request (preview/menu_report.h),
 // which names the menu the way its tree and analyze do. The batch goes to the
-// session as one EditRecord request: one undo step, and a name set follows into the
-// references of its file as any Set does. Answers {ok, error?, outcome (the request's
-// outcome), made {label: identity}, added [the identities of the records it made, in
-// order], revision}; ok says the batch parsed (nothing is asked of the session when it did
-// not), the outcome's done whether it went through.
+// session as one EditRecord request: one undo step; a name set is its record's edit alone,
+// as any Set is (Rename everywhere, RenameSymbol, renames a name with its uses). Answers
+// {ok, error?, outcome (the request's outcome), made {label: identity}, added [the
+// identities of the records it made, in order], revision}; ok says the batch parsed (nothing
+// is asked of the session when it did not), the outcome's done whether it went through.
 io::JsonValue record_batch_request(ProjectSession &session, const std::string &path, const io::JsonValue &request);
 
 } // namespace opennova::editor

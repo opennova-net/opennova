@@ -4,9 +4,9 @@
 #include <filesystem>
 #include <system_error>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
-#include <editor/project_build/archive_routing.h>
 
 namespace fs = std::filesystem;
 
@@ -170,7 +170,8 @@ bool check_file_name(const std::string &name, AssetKind kind, std::string &probl
 	}
 	// The archive's name limit binds only a file the build packs: a loose kind (a video,
 	// a music bank, a config) is copied beside the archives under any name.
-	if (kind != AssetKind::Unknown && route_asset(kind) != ArchiveSlot::Loose && !logical_name_fits_archive(name)) {
+	if (kind != AssetKind::Unknown && archive_name_limit_binds(kind) &&
+	    !logical_name_fits_archive(name)) {
 		problem = "name";
 		message = "'" + name + "' does not fit the game's archives: names are up to 16 characters.";
 		return false;

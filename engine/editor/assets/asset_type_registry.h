@@ -9,11 +9,13 @@
 namespace opennova::editor {
 
 // The editor's file classifier (ADR 0046 d7/d9). It asks the runtime catalog's shared
-// classifier first (engine/base/resource_index/resource_kind.h) and only then applies
-// the editor-only rules: the name-keyed .def family, scripts, textures (a model's .mdt
-// normal map among them), banks, videos, plain text. `bytes` is the file's content when
-// the caller has it (null otherwise): it decides a `.bin` name (RTXT vs SCR0 vs raw), and a
-// name no extension types is a texture when it holds a material chunk container.
+// classifier first (engine/base/resource_index/resource_kind.h), a kind it gives being the
+// row of asset_kinds that names its catalog token, and only then the rows' own names: the
+// name-keyed .def family and score.ini by their whole names, then the extensions (scripts,
+// textures with a model's .mdt normal map, waves, banks, videos, plain text). `bytes` is
+// the file's content when the caller has it (null otherwise): it decides a `.bin` name (RTXT
+// vs SCR0 vs raw), and a name no extension types is a texture when it holds a material chunk
+// container.
 AssetKind classify_asset(const std::string &logical_name, const std::vector<uint8_t> *bytes);
 
 // True when classify_asset needs the content to decide (a `.bin` name). A name no extension

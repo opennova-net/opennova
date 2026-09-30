@@ -100,7 +100,8 @@ JsonValue window_to_json(const MnuDocument &document, const NodeAddress &window,
 	JsonValue lists = JsonValue::make_object();
 	for (const Document::Collection &collection : document.collections_of(window))
 		if (!collection.ids.empty() && collection.spec.kind != node_kind(MenuKind::Window))
-			lists.set(collection.spec.kind_name, json_number(double(collection.ids.size())));
+			lists.set(document.kind_token(collection.spec.kind),
+			          json_number(double(collection.ids.size())));
 	out.set("lists", std::move(lists));
 	if (current && index >= 0 && render) {
 		const menu::MenuFrameCompiler &compiler = render->compiler();

@@ -95,10 +95,8 @@ struct MenuFileState : FileState {
 
 class MnuDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override;
-	NodeKind kind_from_name(const std::string &name) const override;
-	bool is_top_kind(NodeKind kind) const override { return kind == node_kind(MenuKind::Screen); }
-	std::vector<KindSpec> top_kinds() const override;
+	// A screen, the file's row (Add screen), a window, then one kind per list by its element path.
+	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	void walk_records(const Node &row, const RecordVisitor &visit) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
@@ -169,7 +167,6 @@ protected:
 	// position, fresh identities, names made unique within the screen.
 	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                   std::string &error) override;
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) override;
 	// A duplicated screen takes a name no other screen has (OPTIONS then OPTIONS2).
 	void prepare_duplicate(Node &copy) const override;
 	// A menu keeps at least one screen: removing its last one is refused.

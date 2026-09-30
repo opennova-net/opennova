@@ -56,7 +56,7 @@ bool refused_with(const JsonValue &answer, const char *says) {
 // The draw kind and the custom-draw flag of the one column body `owner` holds.
 bool body_draw(const MnuDocument &menu, const NodeAddress &owner, std::string &display, int64_t &custom) {
 	for (const Document::Collection &collection : menu.collections_of(owner)) {
-		if (std::string(collection.spec.kind_name) != "column.body" || collection.ids.size() != 1) continue;
+		if (std::string(menu.kind_token(collection.spec.kind)) != "column.body" || collection.ids.size() != 1) continue;
 		const NodeAddress body = menu.address_of(collection.ids.front());
 		Value value;
 		if (!menu.get(body, "display", value) || !std::holds_alternative<std::string>(value)) return false;
@@ -258,7 +258,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(done(answer) && answer.get("added") && answer.get("added")->array.size() == 1);
 	std::vector<NodeId> actions;
 	for (const Document::Collection &collection : menu->collections_of(hello))
-		if (std::string(collection.spec.kind_name) == "action") actions = collection.ids;
+		if (std::string(menu->kind_token(collection.spec.kind)) == "action") actions = collection.ids;
 	TEST_EXPECT(actions.size() == 1);
 	if (actions.size() == 1) {
 		const NodeAddress action = menu->address_of(actions.front());
@@ -266,7 +266,7 @@ static int test_menu_tools() {
 	}
 	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
 	for (const Document::Collection &collection : menu->collections_of(hello))
-		if (std::string(collection.spec.kind_name) == "action") actions = collection.ids;
+		if (std::string(menu->kind_token(collection.spec.kind)) == "action") actions = collection.ids;
 	TEST_EXPECT(actions.size() == 2);
 	const uint64_t unchanged = menu->revision();
 	TEST_EXPECT(done(request(session, "", R"({"id": )" + h + R"(, "list": "hotkey", "records": []})")) &&

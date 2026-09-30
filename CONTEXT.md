@@ -511,6 +511,32 @@ in Files): it comes from that kind's one free-form blank factory, never from a
 requirement's (a new menu is one screen named after the file, not a copy of STARTUP).
 _Avoid_: template (the blanks are authored from scratch, not copied)
 
+**Sound bank / music bank**:
+A sound bank is a `.lwf`: the sound sets the game plays by name, each naming the waves it picks
+from (the game's `.lwf` reader is its sound bank's). A music bank is a `.sbf`: the music a music
+script streams by path, copied loose beside the archives.
+_Avoid_: wave bank (a `.lwf` holds no waves, it names them), sound bank for a `.sbf`
+
+**Wave**:
+A `.wav` the game loads from its archives by name, as a sound bank's sets name it (retail packs
+thousands, its localized voice lines in language.pff): a native file the build packs as it is.
+_Avoid_: wave source (it is no import source), sample, sound (a sound is a bank's set)
+
+**Face animation**:
+A character's facial animation file (`.grm`): the texture meshes the face deforms, its gestures'
+offsets and its eyes, which the game loads beside an item's model by the model's name.
+_Avoid_: face (a model's bullet face is a record kind of that name), grm (the format's name), face
+mesh (the meshes are one part of it)
+
+**Score table**:
+`score.ini`: the scoring values per game type, which retail reads from the install folder.
+_Avoid_: configuration (its kind before it had its own), score config
+
+**Map project**:
+A `.npj` or `.npz`: the mission editor's project for a mission, which the game's mission list
+scans for beside the `.bms` files.
+_Avoid_: mission (the `.bms` the game loads), map pack
+
 **Request outcome**:
 What one editor request came to: done, or not (refused, did not finish, or waiting on
 the unsaved-changes prompt), with the findings it reported. The editor MCP reads it;
@@ -609,8 +635,10 @@ _Avoid_: transaction (the rename's), group (a coalesced typing burst of one fiel
 Several edits on one row applied as one undo step, each against the row as the ones before
 it left it, nothing committed when any is refused; a later edit may name a record an
 earlier one made (in the editor MCP, by the label its edit gave it), so one step adds a
-window and fills it in.
-_Avoid_: transaction (the rename's), gesture (edits folding one after another until an end)
+window and fills it in. A new name is its record's edit alone: what names the record keeps
+the old name until Rename everywhere rewrites it.
+_Avoid_: transaction (the rename's), gesture (edits folding one after another until an end),
+follow (the same-file rename S13 D5 removed)
 
 **Build**:
 The one operation behind Play and Export: validate the project, route every asset into

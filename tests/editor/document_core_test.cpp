@@ -9,12 +9,12 @@
 // back; coalesced batches and gestures fold (never across rows, never over the saved
 // checkpoint); the clipboard round trip through copy() and a Paste; the selection model
 // the session keeps (SessionView) repaired after edits and undo; the type's veto on a
-// change (accept_change) refusing any edit before it commits; a batch and what follows
-// from it over several rows (apply's follow) undone and redone as one, a typing burst
-// planning its follow from what its group found; a batch filling in the records it makes
-// (batch_made). S11a: the saved baseline and what changed since it (a field, a record, the
-// file-wide state, the edits that give a field back), and the canonical rewrite. S11f: a
-// document read from bytes alone has the rows a file's load gives and no file to save to.
+// change (accept_change) refusing any edit before it commits; a typing burst one step, a new
+// name its record's edit alone; one step over several changes undone and redone as one; a
+// batch filling in the records it makes (batch_made). S11a: the saved baseline and what
+// changed since it (a field, a record, the file-wide state, the edits that give a field
+// back), and the canonical rewrite. S11f: a document read from bytes alone has the rows a
+// file's load gives and no file to save to.
 #include <algorithm>
 #include <cstdio>
 #include <functional>
@@ -145,20 +145,22 @@ bool read_records(std::istream &in, int base, std::vector<FakeItem> &items, std:
 
 class FakeDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override {
-		return kind == kGroup ? "Group" : kind == kItem ? "Item" : kind == kLeaf ? "Leaf" : kind == kHeader ? "Header" : "";
+	const std::vector<RecordKindRow> &kinds() const override {
+		static const std::vector<RecordKindRow> table = {
+		        {kGroup, "group", "Group", "Add group", true},
+		        {kItem, "item", "Item"},
+		        {kLeaf, "leaf", "Leaf"},
+		        {kHeader, "header", "Header"},
+		};
+		return table;
 	}
-	NodeKind kind_from_name(const std::string &name) const override {
-		return name == "group" ? kGroup : name == "item" ? kItem : name == "leaf" ? kLeaf : name == "header" ? kHeader : -1;
-	}
-	bool is_top_kind(NodeKind kind) const override { return kind == kGroup; }
-	std::vector<KindSpec> top_kinds() const override { return {{kGroup, "Add group"}}; }
 	std::vector<Collection> collections(const Node &node, const NodeAddress &owner) const override {
 		auto &group = const_cast<FakeGroup &>(static_cast<const FakeGroup &>(node));
 		std::vector<NodeId> ids;
 		if (!owner.child) {
 			for (const FakeItem &item : group.items) ids.push_back(item.id);
-			return {{{kHeader, "Header", "", "header", true}, {group.header_id}}, {{kItem, "Items", "name", "item"}, ids}};
+			return {{{kHeader, "Header", "", true}, {group.header_id}},
+			        {{kItem, "Items", "name"}, ids}};
 		}
 		if (owner.kind != kItem) return {};
 		const FakeItem *item = find_item(group.items, owner.child);
@@ -166,7 +168,7 @@ public:
 		std::vector<NodeId> leaves;
 		for (const FakeLeaf &leaf : item->leaves) leaves.push_back(leaf.id);
 		for (const FakeItem &child : item->items) ids.push_back(child.id);
-		return {{{kLeaf, "Leaves", "name", "leaf"}, leaves}, {{kItem, "Items", "name", "item"}, ids}};
+		return {{{kLeaf, "Leaves", "name"}, leaves}, {{kItem, "Items", "name"}, ids}};
 	}
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
 		static const std::vector<FieldSchema> group = {{"name", FieldType::Text, 32}};
@@ -514,10 +516,10 @@ struct FlatLine : Node {
 // One line per row, "L <title> <weight> <tag>"; each read of a field counted.
 class FlatDocument : public Document {
 public:
-	const char *kind_label(NodeKind kind) const override { return kind == kLine ? "Line" : ""; }
-	NodeKind kind_from_name(const std::string &name) const override { return name == "line" ? kLine : -1; }
-	bool is_top_kind(NodeKind kind) const override { return kind == kLine; }
-	std::vector<KindSpec> top_kinds() const override { return {{kLine, "Add line"}}; }
+	const std::vector<RecordKindRow> &kinds() const override {
+		static const std::vector<RecordKindRow> table = {{kLine, "line", "Line", "Add line", true}};
+		return table;
+	}
 	std::vector<Collection> collections(const Node &, const NodeAddress &) const override { return {}; }
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
 		static const std::vector<FieldSchema> line = [] {
@@ -602,7 +604,6 @@ protected:
 		error = "A line holds nothing.";
 		return false;
 	}
-	bool set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &) override { return false; }
 };
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
@@ -956,12 +957,14 @@ static int test_batches_and_gestures() {
 	return 0;
 }
 
-// A batch and what follows from it (Document::apply's follow, S9l: a name followed into
-// the references of its file): what follows on the batch's row joins its batch, the rest go
-// one batch per row, one undo step undone and redone together; a coalesced burst plans
-// each keystroke from what its group found and stays one step; nothing is committed when a
-// batch is refused or the type vetoes a change (a reopened group keeps its step).
-static int test_follow_in_one_step() {
+// A typing burst on one row: one coalesced Set per key of a1's name is one undo step, a value
+// typed on the way (the name cleared) leaving nothing behind; a new name is its record's edit
+// alone (Rename everywhere rewrites what names it: S13 D5 cut the same-file follow, which planned
+// each keystroke's sites in the same step); a keystroke the type vetoes keeps the step as the one
+// before left it, the group still open; the saved checkpoint ends the group. S13 D7's batch over
+// several rows lands here as its multi-row case; the step over several changes it commits
+// through is EditHistory's (test_joined_step).
+static int test_typing_burst() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
@@ -970,71 +973,100 @@ static int test_follow_in_one_step() {
 		Value value;
 		return document.get(address, "name", value) ? std::get<std::string>(value) : std::string("?");
 	};
-	const auto follows = [](std::vector<Edit> sites) -> Document::FollowEdits {
-		return [sites](const Document &, const std::vector<Edit> &) { return sites; };
-	};
-	// a1's name followed into x (its own row) and b1 (beta); the batch's own field is its own.
-	const Document::FollowEdits to_both = follows({set(fake.x, "name", std::string("X")), set(fake.b1, "name", std::string("B")),
-	                                                 set(fake.a1, "name", std::string("not this"))});
-	const std::vector<Edit> rename_a1{set(fake.a1, "name", std::string("A"))};
-	// Typing on a2 first: the step over both rows does not fold into its group.
-	Edit typed = set(fake.a2, "name", std::string("typed"));
-	typed.coalesce = true;
-	TEST_EXPECT(document.apply(typed, error));
-	TEST_EXPECT(document.apply(rename_a1, to_both, error));
-	TEST_EXPECT(name(fake.a1) == "A" && name(fake.x) == "X" && name(fake.b1) == "B");
-	document.undo();
-	TEST_EXPECT(name(fake.a1) == "a1" && name(fake.x) == "x" && name(fake.b1) == "b1" && name(fake.a2) == "typed");
-	document.redo();
-	TEST_EXPECT(name(fake.a1) == "A" && name(fake.x) == "X" && name(fake.b1) == "B");
-	document.undo();
-	document.undo();
-	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
-
-	// Typing a1's name one key at a time: every keystroke's follow sees a1 as the group
-	// found it, b1 follows the latest value (nothing for an empty one), and the burst is one
-	// step. A keystroke refused keeps the step as the one before left it, the group open.
-	std::vector<std::string> seen;
-	const Document::FollowEdits echo = [&](const Document &at, const std::vector<Edit> &edits) {
-		Value before;
-		seen.push_back(at.get(edits.front().address, "name", before) ? std::get<std::string>(before) : std::string("?"));
-		const std::string &now = std::get<std::string>(edits.front().value);
-		return now.empty() ? std::vector<Edit>() : std::vector<Edit>{set(fake.b1, "name", now + "!")};
-	};
-	const auto type = [&](const char *text, const Document::FollowEdits &follow) {
+	const auto type = [&](const char *text) {
 		Edit key = set(fake.a1, "name", std::string(text));
 		key.coalesce = true;
-		return document.apply(std::vector<Edit>{key}, follow, error);
+		return document.apply(std::vector<Edit>{key}, error);
 	};
-	TEST_EXPECT(type("n", echo) && name(fake.b1) == "n!");
-	TEST_EXPECT(type("", echo) && name(fake.a1).empty() && name(fake.b1) == "b1");
-	TEST_EXPECT(type("ne", echo) && type("new", echo));
-	TEST_EXPECT(name(fake.a1) == "new" && name(fake.b1) == "new!");
-	TEST_EXPECT(seen.size() == 4 && std::all_of(seen.begin(), seen.end(), [](const std::string &s) { return s == "a1"; }));
-	TEST_EXPECT(!type("newer", follows({set({fake.beta.row, kItem, 99999}, "name", std::string("gone"))})) &&
-	            error.code == "document.selection");
-	TEST_EXPECT(name(fake.a1) == "new" && name(fake.b1) == "new!");
-	TEST_EXPECT(type("news", echo) && name(fake.a1) == "news" && name(fake.b1) == "news!" && seen.back() == "a1");
+	TEST_EXPECT(type("n") && type("") && name(fake.a1).empty());
+	TEST_EXPECT(type("ne") && type("new") && name(fake.a1) == "new");
+	TEST_EXPECT(name(fake.x) == "x" && name(fake.b1) == "b1");
+	document.veto = [](const Change &) { return false; };
+	TEST_EXPECT(!type("newer") && error.code == "document.structure");
+	document.veto = nullptr;
+	TEST_EXPECT(name(fake.a1) == "new" && document.can_undo());
+	TEST_EXPECT(type("news") && name(fake.a1) == "news");
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	// The saved checkpoint ends the group: the keystroke after a save is a step of its own.
-	TEST_EXPECT(type("s", echo) && document.save(error) && type("sa", echo) && seen.back() == "s");
+	TEST_EXPECT(type("s") && document.save(error) && type("sa"));
 	document.undo();
-	TEST_EXPECT(name(fake.a1) == "s" && name(fake.b1) == "s!" && !document.dirty());
+	TEST_EXPECT(name(fake.a1) == "s" && !document.dirty());
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
+	return 0;
+}
 
-	// Refused, nothing committed: a batch that fails, an edit that follows adding, removing
-	// or moving, the type's veto on any row.
-	const uint64_t revision = document.revision();
-	TEST_EXPECT(!document.apply(rename_a1, follows({set({fake.beta.row, kItem, 99999}, "name", std::string("B"))}), error) &&
-	            error.code == "document.selection");
-	TEST_EXPECT(!document.apply(rename_a1, follows({make(EditOperation::Remove, fake.b1)}), error) && error.code == "document.batch");
-	document.veto = [&](const Change &change) { return change.before->id != fake.beta.row; };
-	TEST_EXPECT(!document.apply(rename_a1, to_both, error) && error.code == "document.structure");
-	document.veto = nullptr;
-	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo() &&
-	            document.can_redo());
+// One step over several changes (EditHistory::commit of several, each joined to the one before
+// it), which a batch over several rows commits through: undone and redone whole, and nothing
+// folds into it, a change under its key after it being a step of its own. With no production
+// caller since S13 D5 (S13 D7's multi-row step is the next), its group rules are held here: its
+// key's reopen() undoes the whole step, back to the revision before it, and resume() redoes it;
+// drop() forgets it and ends the group; the saved checkpoint is never reopened.
+static int test_joined_step() {
+	std::vector<std::shared_ptr<const Node>> rows;
+	std::shared_ptr<const FileState> state;
+	EditHistory history(rows, state);
+	const auto group = [](NodeId id, const char *title) {
+		auto node = std::make_shared<FakeGroup>();
+		node->id = id;
+		node->title = title;
+		return std::shared_ptr<const Node>(node);
+	};
+	using Row = std::shared_ptr<const Node>;
+	const auto change = [](const Row &before, Row after, size_t at) {
+		Change out;
+		out.before = before;
+		out.after = std::move(after);
+		out.before_position = out.after_position = at;
+		return out;
+	};
+	const auto titles = [&] {
+		std::string out;
+		for (const auto &row : rows) out += row->name();
+		return out;
+	};
+	rows = {group(1, "a"), group(2, "b")};
+	const std::vector<Change> both{change(rows[0], group(1, "A"), 0),
+	                               change(rows[1], group(2, "B"), 1)};
+	history.commit(both, "k");
+	TEST_EXPECT(titles() == "AB" && history.can_undo() && history.dirty());
+	history.commit(change(rows[0], group(1, "Z"), 0), "k");
+	TEST_EXPECT(titles() == "ZB");
+	history.undo();
+	TEST_EXPECT(titles() == "AB" && history.can_undo());
+	history.undo();
+	TEST_EXPECT(titles() == "ab" && !history.can_undo() && !history.dirty());
+	history.redo();
+	TEST_EXPECT(titles() == "AB" && history.can_redo());
+	history.redo();
+	TEST_EXPECT(titles() == "ZB" && !history.can_redo());
+
+	std::vector<std::shared_ptr<const Node>> rows2 = {group(1, "a"), group(2, "b")};
+	std::shared_ptr<const FileState> state2;
+	EditHistory group_history(rows2, state2);
+	const auto titles2 = [&] {
+		std::string out;
+		for (const auto &row : rows2) out += row->name();
+		return out;
+	};
+	const auto commit_both = [&] {
+		group_history.commit(std::vector<Change>{change(rows2[0], group(1, "A"), 0),
+		                                         change(rows2[1], group(2, "B"), 1)},
+		                     "k");
+	};
+	commit_both();
+	TEST_EXPECT(titles2() == "AB" && group_history.revision() != 0);
+	TEST_EXPECT(group_history.reopen("k") && titles2() == "ab" && group_history.revision() == 0);
+	group_history.resume();
+	TEST_EXPECT(titles2() == "AB" && group_history.can_undo() && !group_history.can_redo());
+	TEST_EXPECT(group_history.reopen("k") && titles2() == "ab");
+	group_history.drop();
+	TEST_EXPECT(titles2() == "ab" && !group_history.can_undo() && !group_history.can_redo() &&
+	            !group_history.dirty() && !group_history.reopen("k"));
+	commit_both();
+	group_history.mark_saved();
+	TEST_EXPECT(!group_history.reopen("k") && titles2() == "AB" && !group_history.dirty());
 	return 0;
 }
 
@@ -1589,7 +1621,8 @@ int main() {
 	failures += test_set_same_value();
 	failures += test_veto();
 	failures += test_batches_and_gestures();
-	failures += test_follow_in_one_step();
+	failures += test_typing_burst();
+	failures += test_joined_step();
 	failures += test_batch_made();
 	failures += test_clipboard();
 	failures += test_selection();

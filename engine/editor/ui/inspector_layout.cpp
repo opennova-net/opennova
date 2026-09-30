@@ -52,7 +52,8 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 	for (const FieldSchema &field : fields)
 		if (field.id.find('.') != std::string::npos) groups.insert(first_step(field.id));
 	if (own)
-		for (const Document::Collection &collection : collections) groups.insert(first_step(collection.spec.kind_name));
+		for (const Document::Collection &collection : collections)
+			groups.insert(first_step(document.kind_token(collection.spec.kind)));
 
 	std::vector<InspectorSection> out(1); // the general fields first
 	std::map<std::string, size_t> at;     // a group's section
@@ -90,15 +91,16 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 	for (const Document::Collection &collection : collections) {
 		const Document::CollectionSpec &spec = collection.spec;
 		if (spec.applies == Applicability::Ignored && collection.ids.empty()) continue;
-		if (!matches(spec.label, filter) && !matches(spec.kind_name, filter)) continue;
-		const auto claimed = own ? at.find(first_step(spec.kind_name)) : at.end();
+		const std::string token = document.kind_token(spec.kind);
+		if (!matches(spec.label, filter) && !matches(token, filter)) continue;
+		const auto claimed = own ? at.find(first_step(token)) : at.end();
 		InspectorSection *section = nullptr;
 		if (claimed != at.end()) {
 			section = &out[claimed->second];
 		} else {
 			out.emplace_back();
 			section = &out.back();
-			section->key = spec.kind_name;
+			section->key = token;
 			section->title = spec.label;
 		}
 		section->collections.push_back(collection);

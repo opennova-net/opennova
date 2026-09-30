@@ -4,6 +4,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
@@ -42,7 +43,7 @@ struct KindEntry {
 	const char *label;
 	SchemaShape shape;
 };
-const std::vector<KindEntry> &kinds() {
+const std::vector<KindEntry> &kind_entries() {
 	static const std::vector<KindEntry> table = [] {
 		std::vector<KindEntry> out = {{"screen", "Screen", SchemaShape::Screen}, {"window", "Window", SchemaShape::Window}};
 		for (const SchemaShape owner : {SchemaShape::Window, SchemaShape::Row, SchemaShape::Element})
@@ -57,7 +58,7 @@ const std::vector<KindEntry> &kinds() {
 }
 
 NodeKind kind_of(const char *token) {
-	const std::vector<KindEntry> &table = kinds();
+	const std::vector<KindEntry> &table = kind_entries();
 	for (size_t i = 0; i < table.size(); ++i)
 		if (std::strcmp(table[i].token, token) == 0) return NodeKind(i);
 	return -1;
@@ -91,7 +92,7 @@ ReferenceKind reference_of(mnu::SchemaReference reference) {
 	case mnu::SchemaReference::TextTable: return ReferenceKind::TextTable;
 	case mnu::SchemaReference::TextId: return ReferenceKind::TextId;
 	case mnu::SchemaReference::Menu: return ReferenceKind::Menu;
-	case mnu::SchemaReference::Sound: return ReferenceKind::WaveBank;
+	case mnu::SchemaReference::Sound: return ReferenceKind::SoundBank;
 	case mnu::SchemaReference::Credits: return ReferenceKind::Credits;
 	case mnu::SchemaReference::Screen: return ReferenceKind::MenuScreen;
 	case mnu::SchemaReference::Window: return ReferenceKind::MenuWindow;
@@ -374,11 +375,13 @@ SchemaApplies list_applies(const Context &owner, const mnu::SchemaList &list) {
 }
 
 Document::CollectionSpec list_spec(const Context &owner, const mnu::SchemaList &list) {
-	return {kind_of(list.path), list.label, list.name_field, list.path, false, applicability(list_applies(owner, list)),
-	        list.max};
+	return {kind_of(list.path), list.label, list.name_field, false,
+	        applicability(list_applies(owner, list)), list.max};
 }
 
-Document::CollectionSpec roots_spec() { return {kWindow, "Windows", "name", "window", false, Applicability::Reads}; }
+Document::CollectionSpec roots_spec() {
+	return {kWindow, "Windows", "name", false, Applicability::Reads};
+}
 
 // The context of the record at `index` of the owner's list.
 Context step_into(const Context &owner, const SchemaRecord &owner_record, size_t list, const SchemaRecord &record) {
@@ -618,17 +621,25 @@ void MenuScreen::index_places() {
 	places_ = built;
 }
 
-bool is_menu_kind(AssetKind kind) { return kind == AssetKind::Menu; }
+bool is_menu_kind(AssetKind kind) {
+	return asset_kind_row(kind).document == DocumentTypeId::Menu;
+}
 
 // --- the declarations ------------------------------------------------------------------
 
-const char *MnuDocument::kind_label(NodeKind kind) const {
-	return kind >= 0 && size_t(kind) < kinds().size() ? kinds()[size_t(kind)].label : "";
+const std::vector<RecordKindRow> &MnuDocument::kinds() const {
+	static const std::vector<RecordKindRow> table = [] {
+		std::vector<RecordKindRow> out;
+		const std::vector<KindEntry> &entries = kind_entries();
+		for (size_t i = 0; i < entries.size(); ++i) {
+			const bool screen = i == size_t(kScreen);
+			const char *add = screen ? "Add screen" : "";
+			out.push_back({NodeKind(i), entries[i].token, entries[i].label, add, screen});
+		}
+		return out;
+	}();
+	return table;
 }
-
-NodeKind MnuDocument::kind_from_name(const std::string &name) const { return kind_of(name.c_str()); }
-
-std::vector<Document::KindSpec> MnuDocument::top_kinds() const { return {{kScreen, "Add screen"}}; }
 
 std::vector<Document::Collection> MnuDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kScreen) return {};
@@ -681,8 +692,8 @@ void MnuDocument::walk_records(const Node &row, const RecordVisitor &visit) cons
 
 const std::vector<FieldSchema> &MnuDocument::fields(NodeKind kind) const {
 	static const std::vector<FieldSchema> none;
-	if (kind < 0 || size_t(kind) >= kinds().size()) return none;
-	return fields_of(kinds()[size_t(kind)].shape);
+	if (kind < 0 || size_t(kind) >= kind_entries().size()) return none;
+	return fields_of(kind_entries()[size_t(kind)].shape);
 }
 
 void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const {
@@ -1228,11 +1239,6 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 	}
 	screen.index_places();
 	return true;
-}
-
-bool MnuDocument::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "A menu has no file-wide values.", path());
-	return false;
 }
 
 // Retail's by-name lookups find the last of two screens of one name (docs/mnu/menu-re.md,

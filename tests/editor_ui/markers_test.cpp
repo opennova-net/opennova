@@ -400,7 +400,7 @@ void test_reveal_in_views() {
 	const NodeAddress row{model->rows()[0]->id, model->rows()[0]->kind, 0};
 	NodeAddress point;
 	for (const Document::Collection &collection : model->collections_of(row))
-		if (std::string(collection.spec.kind_name) == "user_point" && !collection.ids.empty())
+		if (std::string(model->kind_token(collection.spec.kind)) == "user_point" && !collection.ids.empty())
 			point = {row.row, collection.spec.kind, collection.ids.back()};
 	CHECK(point.child != 0, "a user point");
 	if (!point.child) return;

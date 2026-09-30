@@ -1856,10 +1856,9 @@ bool ProjectSession::apply_edits(Document &document, const std::vector<Edit> &ed
 	const std::string active = view_.active_document;
 	const NodeAddress primary = view_.selection;
 	const std::vector<NodeAddress> selected = view_.selected;
-	// A screen's or a window's new name follows into the references of its file that find it
-	// by the name it had when the edit's group began (graph/rename_transaction's
-	// plan_symbol_rename), in the same step.
-	if (!document.apply(edits, plan_symbol_rename, error)) {
+	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
+	// (RenameSymbol) rewrites them.
+	if (!document.apply(edits, error)) {
 		report(error);
 		return false;
 	}
