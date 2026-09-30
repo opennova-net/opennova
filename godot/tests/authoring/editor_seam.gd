@@ -426,7 +426,7 @@ func select_record(id: int, mode := "replace") -> bool:
 ## The selected records' identities (the primary among them).
 func get_selected_records() -> PackedInt64Array:
 	var ids := PackedInt64Array()
-	for address: Variant in state(["selection"]).get("selection", {}).get("selected", []):
+	for address: Variant in state(["selection"]).get("selection", {}).get("records", []):
 		ids.append(int(address["child"]) if int(address.get("child", 0)) != 0 else int(address.get("row", 0)))
 	return ids
 

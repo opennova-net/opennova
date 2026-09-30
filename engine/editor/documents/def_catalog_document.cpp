@@ -243,6 +243,17 @@ CatalogRow::CatalogRow(const CatalogRow &other) : Node(other), data(other.data) 
 	if (auto *p = std::get_if<DefAmmoDef>(&data)) p->effects_table = copy(p->effects_table, p->effects_table_count);
 }
 
+size_t CatalogRow::footprint() const {
+	size_t bytes = sizeof(CatalogRow) + collections_footprint();
+	if (const auto *p = std::get_if<DefItemDef>(&data))
+		bytes += p->emplacement_attachments_count * sizeof(*p->emplacement_attachments);
+	if (const auto *p = std::get_if<DefWeaponDef>(&data))
+		bytes += p->actions_count * sizeof(*p->actions) + p->sights_count * sizeof(*p->sights);
+	if (const auto *p = std::get_if<DefAmmoDef>(&data))
+		bytes += p->effects_table_count * sizeof(*p->effects_table);
+	return bytes;
+}
+
 CatalogRow::~CatalogRow() {
 	if (auto *p = std::get_if<DefItemDef>(&data)) std::free(p->emplacement_attachments);
 	if (auto *p = std::get_if<DefWeaponDef>(&data)) { std::free(p->actions); std::free(p->sights); }
@@ -353,7 +364,9 @@ SerializeResult DefCatalogDocument::serialize() const {
 	return result;
 }
 
-std::shared_ptr<Node> DefCatalogDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
+std::shared_ptr<Node> DefCatalogDocument::make_node(
+		NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
+		std::string &error) {
 	const RecordKindRow *top = kind_row(kind);
 	if (!top || !top->top) {
 		error = "This catalog cannot add that kind of record.";
@@ -367,7 +380,7 @@ std::shared_ptr<Node> DefCatalogDocument::make_node(NodeKind kind, NodeId id, st
 		p->id = 100000;
 		for (;;) {
 			bool used = false;
-			for (const auto &other : rows())
+			for (const auto &other : rows)
 				if (std::get<DefItemDef>(static_cast<const CatalogRow &>(*other).data).id == p->id) { used = true; break; }
 			if (!used) break;
 			++p->id;

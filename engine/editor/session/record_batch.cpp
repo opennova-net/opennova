@@ -64,7 +64,8 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 }
 
 // A record named by an identity or a label: its address now (a label's: batch_made of the edit
-// that makes it, in the batch's row). False with the reason when it names nothing.
+// that makes it, a row or a record, in the row the edit named). False with the reason when it
+// names nothing.
 bool record_of(const JsonValue &json, const char *what, Reader &reader, NodeAddress &out) {
 	if (json.is_string()) {
 		const auto found = reader.labels.find(json.string);
@@ -155,7 +156,6 @@ bool read_list(const JsonValue &json, const NodeAddress &holder, Reader &reader,
 		add.parent = owner_identity(holder);
 		const size_t made = out.edits.size();
 		out.edits.push_back(add);
-		out.made_labels.emplace_back();
 		for (const io::JsonMember &member : record.object) {
 			Edit set;
 			set.address = { holder.row, collection->spec.kind, batch_made(made) };
@@ -291,27 +291,18 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		edit.position = size_t(at);
 	} else if (edit.operation == EditOperation::Move) {
 		return reader.refuse("a move names its \"position\".");
-	} else if (edit.operation == EditOperation::Duplicate && reader.resolve &&
-			!is_batch_made(edit.address.child)) {
-		// Right after the record, as the document stands before the batch.
-		Document::Placement at;
-		if (reader.names->placement(edit.address, at))
-			edit.position = at.index + 1;
-		for (size_t i = 0; !edit.address.child && i < reader.names->rows().size(); ++i)
-			if (reader.names->rows()[i]->id == edit.address.row)
-				edit.position = i + 1;
-	}
-	std::string label;
+	} // a duplicate naming none: right after its record as the edits before it left it (the core's)
 	if (const JsonValue *as = json.get("as")) {
 		if (!makes || !as->is_string() || as->string.empty())
 			return reader.refuse("only an add or a duplicate takes \"as\", a label.");
 		if (reader.labels.count(as->string))
 			return reader.refuse("the label \"" + as->string + "\" is given twice.");
-		label = as->string;
-		reader.labels[label] = Made{ out.edits.size(), edit.address.row, edit.address.kind };
+		// What the edit makes, in its row: a row's copy is a row of its own (named as a row), as a
+		// new row is; a record's copy or a record added into a row is in that row.
+		const bool row_copy = edit.operation == EditOperation::Duplicate && !edit.address.child;
+		reader.labels[as->string] =
+				Made{ out.edits.size(), row_copy ? 0 : edit.address.row, edit.address.kind };
 	}
-	if (makes)
-		out.made_labels.push_back(label);
 	out.edits.push_back(std::move(edit));
 	return true;
 }
@@ -362,6 +353,9 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 			return false;
 		}
 	}
+	batch.labels.assign(batch.edits.size(), std::string());
+	for (const auto &[label, made] : reader.labels)
+		batch.labels[made.edit] = label;
 	out = std::move(batch);
 	return true;
 }
@@ -372,7 +366,7 @@ io::JsonValue record_batch_to_json(
 	// The edits whose records later edits name: each gives its record a label.
 	std::set<size_t> named;
 	for (const Edit &edit : edits)
-		for (const NodeId id : { edit.address.child, edit.parent })
+		for (const NodeId id : { edit.address.row, edit.address.child, edit.parent })
 			if (is_batch_made(id))
 				named.insert(size_t(id - kBatchMadeBase));
 	const auto label = [](size_t index) { return "edit" + std::to_string(index); };

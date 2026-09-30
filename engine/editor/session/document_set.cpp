@@ -85,17 +85,17 @@ const DocumentBase *DocumentSet::open_at(const std::string &path) const {
 // records as they are now. A caller with a record to show selects it after.
 void DocumentSet::activate(const std::string &path) {
 	if (path == view_.documents.active) return;
-	if (open_at(view_.documents.active)) remembered_[view_.documents.active] = {view_.documents.selection, view_.documents.selected};
+	Selection &selection = view_.documents.selection;
+	if (open_at(view_.documents.active)) remembered_[view_.documents.active] = selection;
 	view_.documents.active = path;
-	view_.documents.select_only({});
+	selection.select_only(path, NodeAddress());
 	const auto kept = remembered_.find(path);
 	if (kept != remembered_.end()) {
-		view_.documents.selection = kept->second.primary;
-		view_.documents.selected = kept->second.selected;
+		selection.restore(kept->second);
 		remembered_.erase(kept);
 		if (const DocumentBase *document = open_at(path))
 			if (const Document *records = records_of(*document))
-				view_.documents.repair_selection(*records, NodeAddress());
+				selection.repair(*records, nullptr, NodeAddress());
 	}
 	select_first_screen();
 	core_.touch(ViewConcern::ActiveDocument); // the caller touches Selection
@@ -104,11 +104,11 @@ void DocumentSet::activate(const std::string &path) {
 // A menu made the active document, or read again, with nothing selected shows its first
 // screen: the menu view lists the selected screen's windows and the preview draws it.
 void DocumentSet::select_first_screen() {
-	if (view_.documents.selection.row) return;
+	if (view_.documents.selection.primary.row) return;
 	const Document *document = records_for();
 	if (!document || document->kind() != AssetKind::Menu || document->rows().empty()) return;
 	const Node &screen = *document->rows().front();
-	view_.documents.select_only({screen.id, screen.kind, 0});
+	view_.documents.selection.select_only(view_.documents.active, {screen.id, screen.kind, 0});
 }
 
 // --- the files -------------------------------------------------------------------------------
@@ -159,7 +159,8 @@ void DocumentSet::reload_changed() {
 		}
 		forget_file_state(path);
 		remembered_.erase(path); // read again: its records' identities are gone
-		if (path == view_.documents.active) view_.documents.select_only({});
+		if (path == view_.documents.active)
+			view_.documents.selection.select_only(path, NodeAddress());
 		document = loaded;
 		changed = true;
 		core_.note("Reloaded " + path + ": it changed outside the editor.");
@@ -266,7 +267,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		if (!records) return; // a document of another kind holds no records to select
 		const NodeAddress record =
 		        request.locator.empty() ? request.address : records->address_at(request.locator);
-		view_.documents.select_only(record);
+		view_.documents.selection.select_only(document.path(), record);
 		if (!record.row || request.field.empty()) return;
 		ViewEvent reveal;
 		reveal.kind = ViewEventKind::RevealRecord;
@@ -342,17 +343,24 @@ void DocumentSet::close_document(const std::string &requested) {
 }
 
 // The document's own path, however the request named it (a logical name included), so a
-// selection joined by path stays in one document; a record of another document makes it
-// the active one, the record alone selected.
+// selection joined by path stays in one document; records of another document make it the
+// active one, the records named its selection. Only the records the document has are selected:
+// one it does not hold, or of another kind than named, is left out (a repair after an edit asks
+// only about the rows the edit changed).
 void DocumentSet::select_record(const EditorRequest &request) {
 	const DocumentBase *document = document_for(request.path);
 	const std::string path = document ? document->path() : request.path.empty() ? view_.documents.active : request.path;
-	if (path != view_.documents.active) {
-		activate(path);
-		view_.documents.select_only(request.address);
-	} else {
-		view_.documents.select(path, request.address, request.mode);
-	}
+	const bool elsewhere = path != view_.documents.active;
+	if (elsewhere) activate(path);
+	const Document *records = document ? records_of(*document) : nullptr;
+	const auto held = [records](const NodeAddress &address) {
+		return records && has_record(*records, address);
+	};
+	std::vector<NodeAddress> others;
+	for (const NodeAddress &address : request.records)
+		if (held(address)) others.push_back(address);
+	view_.documents.selection.select(path, held(request.address) ? request.address : NodeAddress(),
+	                                 others, elsewhere ? SelectMode::Replace : request.mode);
 	core_.touch(ViewConcern::Selection);
 }
 
@@ -424,13 +432,12 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 		if (view_.project.open) core_.refuse_now(CoreFinding::DocumentNotOpen, "Open the file before undoing or redoing in it.", request.path);
 		return;
 	}
-	const uint64_t before = document->revision();
-	const NodeAddress primary = view_.documents.selection;
-	const std::vector<NodeAddress> selected = view_.documents.selected;
+	const uint64_t before = document->revision(), generation = document->load_generation();
+	const uint64_t serial = view_.documents.selection.serial;
 	if (request.kind == EditorRequestKind::Undo) document->undo(); else document->redo();
-	if (const Document *records = records_of(*document))
-		view_.documents.repair_selection(*records, NodeAddress());
-	if (view_.documents.selection != primary || view_.documents.selected != selected) core_.touch(ViewConcern::Selection);
+	if (document->revision() != before)
+		repair_selection(*document, generation, before, NodeAddress());
+	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);
 	update_view();
 	// An undo or a redo ends a gesture: the validation its edits left waiting runs now.
 	if (document->revision() != before || gesture_validation_due_) core_.problems().validate_later();
@@ -578,8 +585,17 @@ bool DocumentSet::position_after(const Document &document, const NodeAddress &re
 
 // --- the edits, the clipboard ------------------------------------------------------------------
 
-// One EditRecord: a single edit or a batch on one row, then the selection follows (a
-// new record selected, a removed one's owner) and the validation is left due (or, for a
+void DocumentSet::repair_selection(const DocumentBase &document, uint64_t load_generation,
+                                   uint64_t revision, const NodeAddress &owner) {
+	const Document *records = records_of(document);
+	if (!records) return; // a document of another kind holds no records to select
+	ChangeSet changes;
+	const bool known = document.changes_since(load_generation, revision, changes);
+	view_.documents.selection.repair(*records, known ? &changes : nullptr, owner);
+}
+
+// One EditRecord: a single edit or a batch over any rows, then the selection follows (what
+// the edit made selected, a removed primary's owner) and the validation is left due (or, for a
 // gesture, until it ends).
 bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &edits) {
 	last_edit_ok_ = false;
@@ -588,13 +604,12 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 	NodeAddress owner;
 	Document::Placement at;
 	if (records && document.path() == view_.documents.active &&
-	    records->placement(view_.documents.selection, at))
+	    records->placement(view_.documents.selection.primary, at))
 		owner = at.owner;
 	Diagnostic error;
-	const uint64_t before = document.revision();
+	const uint64_t before = document.revision(), generation = document.load_generation();
 	const std::string active = view_.documents.active;
-	const NodeAddress primary = view_.documents.selection;
-	const std::vector<NodeAddress> selected = view_.documents.selected;
+	const uint64_t serial = view_.documents.selection.serial;
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
 	if (!document.apply(edits, error)) {
@@ -608,15 +623,18 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 		       edit.operation == EditOperation::Paste;
 		gesture = gesture || edit.gesture != 0;
 	}
-	if (adds && document.revision() != before) {
-		if (records) core_.outcome().added = records->last_added_records();
-		activate(document.path()); // what an edit adds is selected, in its own document
-		if (records) view_.documents.select_added(*records);
-	} else if (records) {
-		view_.documents.repair_selection(*records, owner);
+	// What the batch made and kept is selected, in its own document; a batch that kept nothing it
+	// made repairs the selection as any other edit does.
+	const bool made = adds && records && document.revision() != before;
+	if (made) core_.outcome().made = records->last_made();
+	if (made && !records->last_added_records().empty()) {
+		core_.outcome().added = records->last_added_records();
+		activate(document.path());
+		view_.documents.selection.select_added(*records);
+	} else if (document.revision() != before) {
+		repair_selection(document, generation, before, owner);
 	}
-	if (view_.documents.active != active || view_.documents.selection != primary ||
-			view_.documents.selected != selected)
+	if (view_.documents.active != active || view_.documents.selection.serial != serial)
 		core_.touch(ViewConcern::Selection);
 	update_view();
 	// A Move that leaves a record where it is changes nothing to validate; a gesture's
@@ -633,7 +651,9 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 void DocumentSet::copy_records(Document &document, bool cut) {
 	last_edit_ok_ = false;
 	const std::vector<NodeAddress> records =
-	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
+	        document.path() == view_.documents.active
+	                ? document.outermost(view_.documents.selection.records)
+	                : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now(CoreFinding::DocumentCopy, "Select the records to copy first.", document.path());
 	std::string payload = document.copy(records);
@@ -668,12 +688,13 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 	edit.position = target.position;
 	edit.value = view_.documents.clipboard;
 	if (!target.named()) {
-		// No target named: beside the selected record (the one position rule, position_after), or
-		// into the selected row, at its end.
-		if (document.path() != view_.documents.active || !view_.documents.selection.row)
+		// No target named: beside the primary record (the one position rule, position_after), or
+		// into the primary row, at its end.
+		const NodeAddress &primary = view_.documents.selection.primary;
+		if (document.path() != view_.documents.active || !primary.row)
 			return core_.refuse_now(CoreFinding::DocumentPaste, "Select where to paste.", document.path());
-		edit.address.row = view_.documents.selection.row;
-		if (!view_.documents.selection.child || !position_after(document, view_.documents.selection, edit.parent, edit.position)) {
+		edit.address.row = primary.row;
+		if (!primary.child || !position_after(document, primary, edit.parent, edit.position)) {
 			edit.parent = 0;
 			edit.position = SIZE_MAX;
 		}
@@ -682,56 +703,40 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 }
 
 // Each selected record (a record inside another selected one goes with it) copied right
-// after itself (the one position rule, position_after), one step: a row on its own, nested
-// records as one batch.
+// after itself as the copies before it left its list (Edit::position's default for a Duplicate),
+// rows and nested records of any rows in one batch, one step; the copies are selected, the copy
+// of the primary (or of the record holding it) the primary, so the preview stays where it was.
 void DocumentSet::duplicate_records(Document &document) {
 	last_edit_ok_ = false;
 	const std::vector<NodeAddress> records =
-	        document.path() == view_.documents.active ? document.outermost(view_.documents.selected) : std::vector<NodeAddress>();
+	        document.path() == view_.documents.active
+	                ? document.outermost(view_.documents.selection.records)
+	                : std::vector<NodeAddress>();
 	if (records.empty())
 		return core_.refuse_now(CoreFinding::DocumentDuplicate, "Select the records to duplicate first.", document.path());
-	if (!records.front().child) {
-		// A row: after itself among the rows (the selection stays inside one row, so it is alone).
-		Edit edit;
-		edit.operation = EditOperation::Duplicate;
-		edit.address = records.front();
-		NodeId rows = 0;
-		position_after(document, edit.address, rows, edit.position);
-		if (apply_edits(document, {edit})) view_.activity.status = "Duplicated a record.";
-		return;
-	}
-	// In document order; a copy lands after its original, so the originals after it in the
-	// same collection shift by the copies made before them.
-	struct Item {
-		NodeAddress record;
-		Document::Placement at;
-	};
-	std::vector<Item> items;
-	for (const NodeAddress &record : records) {
-		Item item{record, {}};
-		if (!document.placement(record, item.at))
-			return core_.refuse_now(CoreFinding::DocumentSelection, "The selected record no longer exists.", document.path());
-		items.push_back(item);
-	}
-	std::stable_sort(items.begin(), items.end(), [](const Item &a, const Item &b) {
-		if (a.at.owner != b.at.owner) return a.at.owner.child < b.at.owner.child;
-		if (a.at.spec.kind != b.at.spec.kind) return a.at.spec.kind < b.at.spec.kind;
-		return a.at.index < b.at.index;
-	});
+	std::vector<NodeAddress> around = document.ancestors(view_.documents.selection.primary);
+	around.push_back(view_.documents.selection.primary);
+	size_t primary_edit = SIZE_MAX;
 	std::vector<Edit> edits;
-	for (size_t i = 0; i < items.size(); ++i) {
-		size_t before = 0; // copies already made in this record's collection, ahead of it
-		for (size_t j = 0; j < i; ++j)
-			before += items[j].at.owner == items[i].at.owner && items[j].at.spec.kind == items[i].at.spec.kind;
+	for (const NodeAddress &record : records) {
+		if (!has_record(document, record))
+			return core_.refuse_now(CoreFinding::DocumentSelection, "The selected record no longer exists.", document.path());
+		if (std::find(around.begin(), around.end(), record) != around.end())
+			primary_edit = edits.size();
 		Edit edit;
 		edit.operation = EditOperation::Duplicate;
-		edit.address = items[i].record;
-		NodeId owner = 0;
-		position_after(document, items[i].record, owner, edit.position);
-		edit.position += before;
+		edit.address = record;
 		edits.push_back(edit);
 	}
-	if (apply_edits(document, edits)) view_.activity.status = "Duplicated " + std::to_string(edits.size()) + " record(s).";
+	if (!apply_edits(document, edits)) return;
+	const std::vector<NodeId> &made = document.last_made();
+	if (primary_edit < made.size() && made[primary_edit]) {
+		view_.documents.selection.make_primary(document.address_of(made[primary_edit]));
+		core_.touch(ViewConcern::Selection);
+	}
+	view_.activity.status = edits.size() == 1
+	                                ? std::string("Duplicated a record.")
+	                                : "Duplicated " + std::to_string(edits.size()) + " record(s).";
 }
 
 } // namespace opennova::editor

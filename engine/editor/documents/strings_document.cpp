@@ -134,6 +134,14 @@ StringsSection::StringsSection() {
 	collections.resize(1);
 }
 
+size_t StringsSection::footprint() const {
+	size_t bytes = sizeof(StringsSection) + collections_footprint() + footprint_of(section_name) +
+	               footprint_of(entries);
+	for (const rtxt::Entry &entry : entries)
+		bytes += footprint_of(entry.key) + footprint_of(entry.text);
+	return bytes;
+}
+
 bool is_strings_kind(AssetKind kind) {
 	return asset_kind_row(kind).document == DocumentTypeId::Strings;
 }
@@ -296,9 +304,10 @@ bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 // name [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250, @0x75D2B0]. The copy takes the
 // name's stem (its trailing digits dropped), cut where the number would not fit the field (the
 // bytes are cp1252, one per character), and the first number whose name no section has.
-void StringsDocument::prepare_duplicate(Node &copy) const {
+void StringsDocument::prepare_duplicate(
+		Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
 	std::set<std::string> taken;
-	for (const auto &row : rows()) taken.insert(strutil::to_upper(row->name()));
+	for (const auto &row : rows) taken.insert(strutil::to_upper(row->name()));
 	std::string &name = section_of(copy).section_name;
 	std::string stem = name;
 	while (!stem.empty() && std::isdigit(static_cast<unsigned char>(stem.back()))) stem.pop_back();
@@ -313,7 +322,9 @@ void StringsDocument::prepare_duplicate(Node &copy) const {
 	}
 }
 
-std::shared_ptr<Node> StringsDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
+std::shared_ptr<Node> StringsDocument::make_node(NodeKind kind, NodeId id,
+                                                 const std::vector<std::shared_ptr<const Node>> &,
+                                                 std::string &error) {
 	if (kind != kSection) { error = "A string table adds sections at the top level."; return nullptr; }
 	auto row = std::make_shared<StringsSection>();
 	row->section_name = "Section" + std::to_string(id);

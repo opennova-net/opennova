@@ -25,6 +25,7 @@ enum class RequestFieldId : uint8_t {
 	Imports,
 	Edits,
 	Address,
+	Records,
 	PasteAt,
 	Mode,
 	Choice,
@@ -46,7 +47,7 @@ enum class RequestJson : uint8_t {
 	Boolean, // true or false
 	Strings, // an array of strings
 	Object, // an object (address, paste_at, settings)
-	Objects, // an array of objects (imports, edits)
+	Objects, // an array of objects (imports, edits, records)
 };
 
 // One row per field (request_fields.cpp, static_asserted into place as the reference-kind table

@@ -167,7 +167,7 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 	const auto &rows = document->rows();
 	size_t index = SIZE_MAX;
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.documents.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.primary.row) index = i;
 	const auto place = std::find(listed.begin(), listed.end(), index);
 	const size_t at = place == listed.end() ? SIZE_MAX : size_t(place - listed.begin());
 	const Node *selected = at != SIZE_MAX ? rows[index].get() : nullptr;
@@ -242,13 +242,13 @@ void StylesView::draw(Workspace &workspace, const DocumentBase &base) {
 			const std::string value = document->get(line, "value", value_text) ? std::get<std::string>(value_text) : std::string();
 			ImGui::PushID(int(row->id));
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
-			if (view.documents.selection.row == row->id)
+			if (view.documents.selection.primary.row == row->id)
 				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
 			ImGui::TableNextColumn();
 			// The line's number, marked when it was added or changed since the last save.
 			const int64_t at_line = document->get(line, "line", number) ? std::get<int64_t>(number) : 0;
 			const float x = ImGui::GetCursorScreenPos().x;
-			if (ImGui::Selectable((ui_kit::kChangeRoom + std::to_string(at_line)).c_str(), view.documents.selection.row == row->id))
+			if (ImGui::Selectable((ui_kit::kChangeRoom + std::to_string(at_line)).c_str(), view.documents.selection.primary.row == row->id))
 				select(workspace, *document, line);
 			reveal_.scroll_to(line, true);
 			const Document::RecordChange change = document->record_change(line);

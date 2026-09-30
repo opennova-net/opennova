@@ -266,7 +266,7 @@ static int test_go_to_targets() {
 			file_target(*view.project.scan, "other.mnu").locator.empty());
 	// The same file: the Go to selects the record there, its NAME shown.
 	if (to_away_title.size() == 1) go_to(session, to_away_title[0]);
-	TEST_EXPECT(view.documents.active == menu->path() && view.documents.selection == away_title && editor_test::revealed_field(view) == "name");
+	TEST_EXPECT(view.documents.active == menu->path() && view.documents.selection.primary == away_title && editor_test::revealed_field(view) == "name");
 	const std::vector<const GraphEdge *> uses = graph.usages_of(menu->path());
 	const auto used_by = [&uses](const char *source, const char *record) {
 		return std::any_of(uses.begin(), uses.end(), [&](const GraphEdge *edge) {

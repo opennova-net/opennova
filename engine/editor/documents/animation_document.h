@@ -36,6 +36,8 @@ struct ClipRow : Node {
 	ClipRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<ClipRow>(*this); }
 	std::string name() const override { return clip_name; }
+	// The clip's own name, bones and events (its base is shared by every version).
+	size_t footprint() const override;
 };
 
 class AnimationDocument : public Document {
@@ -65,14 +67,18 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	// The translation flag is refused (the rows it promises are the motion's); version 0
 	// is refused while an event fires a trigger, and a trigger on a version 0 clip.
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool accept_change(const Change &change, std::string &error) const override;
+	// A clip is one record: a step adding or removing a row is refused.
+	bool accept_step(const EditStep &step, const StagedRows &rows,
+	                 std::string &error) const override;
 };
 
 bool is_animation_kind(AssetKind kind);

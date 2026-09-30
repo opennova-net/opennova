@@ -916,7 +916,7 @@ ModelCanvasFrame model_frame(
 	frame.model = &model;
 	frame.current = model.shown_revision() == document.revision();
 	if (frame.current && view.documents.active == document.path())
-		model_overlay_of(document, view.documents.selection, frame.selected_kind, frame.selected);
+		model_overlay_of(document, view.documents.selection.primary, frame.selected_kind, frame.selected);
 	frame.overlays = model.overlays();
 	return frame;
 }

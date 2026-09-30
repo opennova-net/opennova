@@ -182,15 +182,18 @@ inline EditorRequest reveal_path(std::string path) {
 
 // --- records -----------------------------------------------------------------------------------
 
-inline EditorRequest select_record(
-		std::string path, NodeAddress address, SelectMode mode = SelectMode::Replace) {
+// The record at `address` (the primary) and the `records` named with it (a marquee's, of any rows)
+// selected in the document at `path` as `mode` says.
+inline EditorRequest select_record(std::string path, NodeAddress address,
+		SelectMode mode = SelectMode::Replace, std::vector<NodeAddress> records = {}) {
 	EditorRequest request = of(EditorRequestKind::SelectRecord);
 	request.path = std::move(path);
 	request.address = address;
+	request.records = std::move(records);
 	request.mode = mode;
 	return request;
 }
-// A batch on one row of the document at `path`, one undo step; opened first when it is not and
+// A batch over any rows of the document at `path`, one undo step; opened first when it is not and
 // `open_first` (a fix's edit).
 inline EditorRequest edit_record(
 		std::string path, std::vector<Edit> edits, bool open_first = false) {

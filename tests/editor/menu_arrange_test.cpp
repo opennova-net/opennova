@@ -390,6 +390,9 @@ static int test_on_a_menu() {
 	const std::vector<NodeAddress> chosen = selected_windows(document, c, {a, d}, screen);
 	TEST_EXPECT(chosen == std::vector<NodeAddress>({a, d, c}));
 	TEST_EXPECT(selected_windows(document, a, {a, d}, screen) == std::vector<NodeAddress>({a, d}));
+	// A selection over rows (S13 D7): a record of another screen stays out of the screen's drag.
+	const NodeAddress elsewhere{screen + 1000, node_kind(MenuKind::Window), 5};
+	TEST_EXPECT(selected_windows(document, c, {a, elsewhere, d}, screen) == std::vector<NodeAddress>({a, d, c}));
 
 	// A drag as the preview pane and the editor MCP start one (layout_press): a move of a
 	// selected window takes the selection, A's snap stepping every one (D inside PANEL too);

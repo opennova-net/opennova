@@ -127,8 +127,8 @@ void ModelPreviewPane::Impl::draw() {
 	frame.model = &model;
 	frame.current = frame.document && model.shown_revision() == frame.document->revision();
 	if (frame.current && view.documents.active == frame.document->path())
-		model_overlay_of(
-				*frame.document, view.documents.selection, frame.selected_kind, frame.selected);
+		model_overlay_of(*frame.document, view.documents.selection.primary, frame.selected_kind,
+				frame.selected);
 	toolbar_(model, frame);
 	frame.overlays = model.overlays();
 	frame.snap = kModelHandleSnaps[std::clamp(snap_, 0, 4)];

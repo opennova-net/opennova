@@ -398,18 +398,17 @@ constexpr RequestKindRow kRows[] = {
 			.names_active()
 			.row,
 	Request(K::SelectRecord, "select_record", serve_select_record,
-			"The record at address selected in the document at path, joining the selection as mode "
-			"says (the selection stays inside one row).")
-			.takes(request_params({ F::Address }, { F::Path, F::Mode }))
+			"The record at address, the primary, and the records named with it selected in the "
+			"document at path, over any of its rows, joining the selection as mode says.")
+			.takes(request_params({ F::Address }, { F::Path, F::Records, F::Mode }))
 			.names_active()
 			.row,
 	// A fix's edit opens its document first.
 	Request(K::EditRecord, "edit_record", serve_edit_record,
-			"The edits, a batch on one row, applied to the document at path as one undo step "
-			"(edits "
-			"sharing a nonzero gesture fold into one until end_edit); open_first: the document "
-			"opened "
-			"first when it is not (a fix's edit).")
+			"The edits, a batch over any rows (records, rows and file-wide values), applied to the "
+			"document at path as one undo step (batches sharing a nonzero gesture fold into one "
+			"until end_edit); open_first: the document opened first when it is not (a fix's "
+			"edit).")
 			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst }))
 			.holds(kFiles, kDocuments)
 			.names_active()
