@@ -25,6 +25,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/record_batch.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/session_view.h>
 
@@ -67,7 +68,7 @@ static int test_non_record_type() {
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Blobs"));
+	session.handle(request::new_project(dir.file("project"), "Blobs"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.scan.find("menu_style.mns");
@@ -135,33 +136,35 @@ static int test_non_record_type() {
 
 		// Through a session: the lifecycle's callers find it, the rows' do not.
 		const uint64_t entries = session.handle_entries();
-		session.handle(make_request(EditorRequestKind::OpenDocument, path));
+		session.handle(request::open_document(path));
 		TEST_EXPECT(session.outcome().done());
 		DocumentBase *opened = session.document_base_for(path);
 		TEST_EXPECT(opened && !opened->as_records() && !session.document_for(path));
 		TEST_EXPECT(view.active_document == path && !view.selection.row);
 		TEST_EXPECT(!view.documents.empty() && !records_of(*view.documents.back()));
 		// An Apply of its type's payload is taken, undone and redone; a Set is not.
-		EditorRequest replace = make_request(EditorRequestKind::EditRecord, path);
-		replace.edit.operation = EditOperation::Apply;
-		replace.edit.payload = std::make_shared<BlobReplace>("BLOB FFFFFFFF\r\n");
-		session.handle(replace);
+		Edit replace;
+		replace.operation = EditOperation::Apply;
+		replace.payload = std::make_shared<BlobReplace>("BLOB FFFFFFFF\r\n");
+		session.handle(request::edit_record(path, replace));
 		TEST_EXPECT(session.outcome().done() && opened->dirty() && session.documents_dirty());
-		EditorRequest set = make_request(EditorRequestKind::EditRecord, path);
-		set.edit.field = "name";
-		set.edit.value = std::string("X");
-		session.handle(set);
+		Edit set;
+		set.field = "name";
+		set.value = std::string("X");
+		session.handle(request::edit_record(path, set));
 		TEST_EXPECT(!session.outcome().done());
 		TEST_EXPECT(has_finding(session.outcome(), "document.payload"));
-		session.handle(make_request(EditorRequestKind::Undo, path));
+		session.handle(request::undo(path));
 		TEST_EXPECT(!opened->dirty());
-		session.handle(make_request(EditorRequestKind::Redo, path));
+		session.handle(request::redo(path));
 		TEST_EXPECT(opened->dirty());
 		// What acts on records refuses it: it holds none.
-		for (const EditorRequestKind refused :
-		     {EditorRequestKind::Copy, EditorRequestKind::Cut, EditorRequestKind::Paste,
-		      EditorRequestKind::Duplicate, EditorRequestKind::RevertToSaved}) {
-			session.handle(make_request(refused, path));
+		Edit field;
+		field.field = "name";
+		for (const EditorRequest &refused :
+		     {request::copy(path), request::cut(path), request::paste(path),
+		      request::duplicate(path), request::revert_to_saved(path, {field})}) {
+			session.handle(refused);
 			TEST_EXPECT(!session.outcome().done());
 			TEST_EXPECT(has_finding(session.outcome(), "document.no_records"));
 		}
@@ -177,10 +180,10 @@ static int test_non_record_type() {
 		TEST_EXPECT(json.get("revision") && json.get("issues"));
 		TEST_EXPECT(!json.get("row_count") && !json.get("rows"));
 		// Saved: the file holds the blob.
-		session.handle(make_request(EditorRequestKind::Save, path));
+		session.handle(request::save(path));
 		TEST_EXPECT(session.outcome().done() && !opened->dirty());
 		TEST_EXPECT(file_text(file) == "BLOB FFFFFFFF\r\n");
-		session.handle(make_request(EditorRequestKind::CloseDocument, path));
+		session.handle(request::close_document(path));
 		TEST_EXPECT(!session.document_base_for(path) && session.handle_entries() > entries);
 	}
 	// The stand-in gone, the stylesheet's own type answers, its records read again.

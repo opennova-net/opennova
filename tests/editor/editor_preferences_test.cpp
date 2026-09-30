@@ -1,8 +1,11 @@
 // Pins the editor's preferences over their store (ADR 0046 S13 A2): the memory store gives back
-// every preference it was given; the file store writes the settings file the editor has always
-// written, byte for byte, and reads one a user already has; EditorPreferences reads a store once,
-// writes a change from a copy (a change the store refuses leaves the values in effect), and keeps
-// the recent-projects list capped, most recent first; and a session over each store shows them.
+// every preference it was given; the file store writes the settings file, byte for byte, with the
+// game install's keys S13 A4 renamed under schema 2, and sets aside a file of another schema, an
+// older editor's among them (no reader for it: pre-1.0), read as the defaults with a warning
+// naming everything it held and written again by the next save; EditorPreferences reads a store
+// once, writes a change from a copy (a change the store refuses leaves the values in effect), and
+// keeps the recent-projects list capped, most recent first; and a session over each store shows
+// them.
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -14,6 +17,7 @@
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 #include "common/file_io.h"
@@ -31,31 +35,45 @@ Preferences every_preference() {
 	Preferences preferences;
 	preferences.recent_projects = {"C:/games/Armory", "D:/mods/Harbor"};
 	preferences.runtime_executable = "C:/tools/opennova.exe";
-	preferences.retail_directory = "D:/Joint Operations";
-	preferences.play_retail = true;
+	preferences.game_install = "D:/Joint Operations";
+	preferences.play_in_install = true;
 	preferences.import_dependencies = false;
 	return preferences;
 }
 
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
-	       a.retail_directory == b.retail_directory && a.play_retail == b.play_retail &&
+	       a.game_install == b.game_install && a.play_in_install == b.play_in_install &&
 	       a.import_dependencies == b.import_dependencies;
 }
 
-// The settings file every_preference() is, as the editor's settings had always written it
-// (session/editor_settings before S13 A2): the keys sorted, two spaces an indent, a newline last.
+// The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
+// the game install's keys as S13 A4 named them, schema 2.
 const char *const kSettingsFile = "{\n"
+                                  "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
-                                  "  \"play_retail\": true,\n"
+                                  "  \"play_in_install\": true,\n"
                                   "  \"recent_projects\": [\n"
                                   "    \"C:/games/Armory\",\n"
                                   "    \"D:/mods/Harbor\"\n"
                                   "  ],\n"
-                                  "  \"retail_directory\": \"D:/Joint Operations\",\n"
                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
-                                  "  \"schema_version\": 1\n"
+                                  "  \"schema_version\": 2\n"
                                   "}\n";
+
+// The same preferences as an editor before S13 A4 wrote them: schema 1, the game install under
+// retail_directory and Play in it under play_retail.
+const char *const kSchemaOneFile = "{\n"
+                                   "  \"import_dependencies\": false,\n"
+                                   "  \"play_retail\": true,\n"
+                                   "  \"recent_projects\": [\n"
+                                   "    \"C:/games/Armory\",\n"
+                                   "    \"D:/mods/Harbor\"\n"
+                                   "  ],\n"
+                                   "  \"retail_directory\": \"D:/Joint Operations\",\n"
+                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
+                                   "  \"schema_version\": 1\n"
+                                   "}\n";
 
 // A store whose saves fail, as a settings file that cannot be written does.
 struct RefusingStore : PreferencesStore {
@@ -90,10 +108,10 @@ static int test_memory_store_round_trips() {
 	one.runtime_executable = "F:/runtime.exe";
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
-	one.retail_directory = "G:/JO";
+	one.game_install = "G:/JO";
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
-	one.play_retail = true;
+	one.play_in_install = true;
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
 	one.import_dependencies = false;
@@ -101,8 +119,10 @@ static int test_memory_store_round_trips() {
 	return 0;
 }
 
-// The file store writes the file the editor always wrote, byte for byte, reads it back, and reads
-// a file a user already has (written before the store existed) as it was.
+// The file store writes the settings file byte for byte and reads it back; a file an older editor
+// wrote (schema 1, the game install under its old keys) is set aside (S13 A4: no compat reader):
+// read as the defaults, the warning naming the file and everything it held, now gone, and written
+// again as a new file by the next save.
 static int test_file_store_writes_the_settings_file() {
 	editor_test::TempProjectDir dir("opennova_editor_preferences_file");
 	const std::string path = dir.file("a/b/editor_settings.json");
@@ -115,20 +135,43 @@ static int test_file_store_writes_the_settings_file() {
 	Preferences loaded;
 	TEST_EXPECT(store.load(loaded, error) && same(loaded, every_preference()));
 
-	// A user's file, as the editor wrote it before: read as it was.
+	// A user's file as this editor writes it: read as it is. One an editor before S13 A4 wrote: set
+	// aside, read as the defaults, the warning naming the file and each thing it held.
 	const std::string users = dir.file("user/editor_settings.json");
 	TEST_EXPECT(editor_test::write_text(users, kSettingsFile));
 	TEST_EXPECT(FilePreferencesStore(users).load(loaded, error) && same(loaded, every_preference()));
+	const std::string older_editor = dir.file("user/older_editor_settings.json");
+	TEST_EXPECT(editor_test::write_text(older_editor, kSchemaOneFile));
+	loaded = every_preference();
+	Diagnostic finding;
+	TEST_EXPECT(FilePreferencesStore(older_editor).load(loaded, finding) &&
+			same(loaded, Preferences()));
+	TEST_EXPECT(finding.severity == DiagnosticSeverity::Warning &&
+			finding.code == "editor_settings.schema_version.unsupported" &&
+			finding.message.find(older_editor + " is set aside") == 0);
+	for (const char *held : { "(schema 1; this editor reads schema 2)", "import_dependencies false",
+				 "play_retail true", "recent_projects (2 entries)",
+				 "retail_directory \"D:/Joint Operations\"",
+				 "runtime_executable \"C:/tools/opennova.exe\"" })
+		TEST_EXPECT(finding.message.find(held) != std::string::npos);
+	// Written over by the next save: the file the store writes.
+	TEST_EXPECT(FilePreferencesStore(older_editor).save(every_preference(), error));
+	TEST_EXPECT(test_io::read_file_text(older_editor, written) && written == kSettingsFile);
 
 	// A file that is not there reads as the defaults; one that does not say whether an import
-	// brings the files it needs reads as on; another schema version, and a file that is not
-	// JSON, are errors.
+	// brings the files it needs reads as on; a newer schema is set aside too (it held nothing);
+	// a file that is not JSON is an error.
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
-	TEST_EXPECT(editor_test::write_text(dir.file("older.json"), "{\"schema_version\": 1}"));
-	TEST_EXPECT(FilePreferencesStore(dir.file("older.json")).load(loaded, error) && loaded.import_dependencies);
-	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "{\"schema_version\": 99}"));
-	TEST_EXPECT(!FilePreferencesStore(dir.file("bad.json")).load(loaded, error) &&
-	            error.code == "editor_settings.schema_version.unsupported");
+	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
+	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
+	            loaded.game_install.empty() && !loaded.play_in_install);
+	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
+	Diagnostic newer;
+	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
+			same(loaded, Preferences()) &&
+			newer.code == "editor_settings.schema_version.unsupported" &&
+			newer.message.find("(schema 99; this editor reads schema 2)") != std::string::npos &&
+			newer.message.find("what it held is gone: nothing.") != std::string::npos);
 	TEST_EXPECT(editor_test::write_text(dir.file("broken.json"), "not json"));
 	TEST_EXPECT(!FilePreferencesStore(dir.file("broken.json")).load(loaded, error) && error.code == "editor_settings.json");
 
@@ -170,19 +213,28 @@ static int test_editor_preferences() {
 	TEST_EXPECT(!held.write(Preferences(), error) && error.code == "editor_settings.write" &&
 	            same(held.values(), every_preference()));
 
-	// A store that cannot be read: the defaults, and why.
+	// A store that cannot be read: the defaults, and why. One that set aside what it kept: the
+	// defaults, and the warning. A load with nothing to say clears what an earlier one said.
 	editor_test::TempProjectDir dir("opennova_editor_preferences_unreadable");
-	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "{\"schema_version\": 99}"));
+	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "not json"));
 	FilePreferencesStore bad(dir.file("bad.json"));
 	EditorPreferences unread(bad);
-	TEST_EXPECT(!unread.load(error) && same(unread.values(), Preferences()));
+	TEST_EXPECT(!unread.load(error) && error.code == "editor_settings.json" &&
+			same(unread.values(), Preferences()));
+	TEST_EXPECT(editor_test::write_text(dir.file("aside.json"), "{\"schema_version\": 1}"));
+	FilePreferencesStore aside(dir.file("aside.json"));
+	EditorPreferences set_aside(aside);
+	TEST_EXPECT(set_aside.load(error) && error.severity == DiagnosticSeverity::Warning &&
+			error.code == "editor_settings.schema_version.unsupported" &&
+			same(set_aside.values(), Preferences()));
+	TEST_EXPECT(preferences.load(error) && error.code.empty());
 	return 0;
 }
 
 // A session reads its preferences from the store its embedder hands it and writes them back
 // there: a memory store's session starts from what the store holds and keeps what it changes; a
 // file store's session writes the settings file; one that cannot be read is a finding, the
-// defaults in effect.
+// defaults in effect, and one set aside a warning, the next save writing a new file.
 static int test_session_over_a_store() {
 	editor_test::TempProjectDir dir("opennova_editor_preferences_session");
 	editor_test::NoProcess platform;
@@ -192,11 +244,9 @@ static int test_session_over_a_store() {
 		const SessionView &v = session.view();
 		TEST_EXPECT(v.recent_projects == every_preference().recent_projects && v.retail_directory == "D:/Joint Operations" &&
 		            v.play_retail && v.runtime_setting == "C:/tools/opennova.exe" && !v.import_dependencies);
-		EditorRequest on = make_request(EditorRequestKind::SetImportDependencies);
-		on.flag = true;
-		session.handle(on);
+		session.handle(request::set_import_dependencies(true));
 		TEST_EXPECT(v.import_dependencies && store.preferences().import_dependencies);
-		session.handle(make_request(EditorRequestKind::ForgetRecent, "C:/games/Armory"));
+		session.handle(request::forget_recent("C:/games/Armory"));
 		TEST_EXPECT(v.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
 		            store.preferences().recent_projects == v.recent_projects);
 	}
@@ -204,7 +254,7 @@ static int test_session_over_a_store() {
 		const std::string path = dir.file("settings/editor_settings.json");
 		FilePreferencesStore store(path);
 		ProjectSession session(platform, store);
-		session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Stored"));
+		session.handle(request::new_project(dir.file("project"), "Stored"));
 		TEST_EXPECT(session.project_open());
 		Preferences stored;
 		Diagnostic error;
@@ -212,13 +262,37 @@ static int test_session_over_a_store() {
 		            stored.recent_projects.front() == session.view().project_root);
 	}
 	{
-		TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "{\"schema_version\": 99}"));
+		TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "not json"));
 		FilePreferencesStore store(dir.file("bad.json"));
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
 		bool said = false;
-		for (const Diagnostic &d : v.diagnostics) said = said || d.code == "editor_settings.schema_version.unsupported";
+		for (const Diagnostic &d : v.diagnostics)
+			said = said || d.code == "editor_settings.json";
 		TEST_EXPECT(said && v.recent_projects.empty() && v.import_dependencies);
+	}
+	{
+		// An older editor's settings file (S13 A4): set aside, one warning naming what it held,
+		// nothing of it in effect (no game install, no recent project); a project then opens, done,
+		// and its save of the recent projects writes this editor's schema over it.
+		const std::string path = dir.file("older/editor_settings.json");
+		TEST_EXPECT(editor_test::write_text(path, kSchemaOneFile));
+		FilePreferencesStore store(path);
+		ProjectSession session(platform, store);
+		const SessionView &v = session.view();
+		size_t said = 0;
+		for (const Diagnostic &d : v.diagnostics)
+			said += d.code == "editor_settings.schema_version.unsupported" &&
+					d.severity == DiagnosticSeverity::Warning &&
+					d.message.find("retail_directory \"D:/Joint Operations\"") != std::string::npos;
+		TEST_EXPECT(said == 1 && v.recent_projects.empty() && v.retail_directory.empty() &&
+				!v.play_retail);
+		session.handle(request::new_project(dir.file("after"), "After"));
+		TEST_EXPECT(session.outcome().done());
+		std::string written;
+		TEST_EXPECT(session.project_open() && test_io::read_file_text(path, written) &&
+		            written.find("\"schema_version\": 2") != std::string::npos &&
+		            written.find("retail") == std::string::npos && written.find("\"game_install\": \"\"") != std::string::npos);
 	}
 	return 0;
 }

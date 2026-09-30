@@ -42,7 +42,10 @@
     validation and the Problems rows; `PlayController`, `ImportController`,
     `RenameController`; `UnsavedGuard` the unsaved-changes prompt; `EditorPreferences` over
     the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
-    its wire form, and the record batch the editor MCP names records by), `model` (the
+    the request table (S13 A4, `request_kinds`: one row per request kind, its token, who
+    serves it, the typed fields it takes (`request_fields`), its policy; a request of each
+    kind from `request_factories.h`); its wire form, and the record batch the editor MCP names
+    records by), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
     over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format

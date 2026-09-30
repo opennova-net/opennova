@@ -1,9 +1,11 @@
 #include <editor/session/problem_fixes.h>
+#include <editor/session/request_factories.h>
 
 #include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <set>
+#include <utility>
 
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
@@ -42,12 +44,11 @@ std::string retail_name(const SessionView &view, const std::string &name) {
 // The import dialog on a file of the game install, planned with the files it needs when the
 // editor's setting says so (SessionView::import_dependencies).
 ProblemFix import_fix(const SessionView &view, const std::string &retail) {
-	EditorRequest request = make_request(EditorRequestKind::PreviewRetailImport);
-	request.names = {retail};
-	request.flag = view.import_dependencies;
+	const EditorRequest request =
+	        request::preview_install_import({retail}, view.import_dependencies);
 	return {"Import " + retail + " from the game data...",
 	        "Opens the import dialog on " + retail + " from the game install" +
-	                (request.flag ? ", with the files it needs," : "") +
+	                (request.with_dependencies ? ", with the files it needs," : "") +
 	                " to copy into the project. The copy cannot be undone with Undo.",
 	        request, true};
 }
@@ -77,9 +78,8 @@ void requirement_fixes(const Diagnostic &d, const SessionView &view, bool plan, 
 		if (candidate.role == d.role) row = &candidate;
 	if (!row || row->state != RequirementState::Missing) return;
 	if (const BlankFactory *factory = find_blank_factory_for_role(row->role)) {
-		EditorRequest create = make_request(EditorRequestKind::CreateMissing);
-		create.names = {row->role};
-		out.push_back({"Create " + row->name, placeholder(*factory), create, true});
+		out.push_back(
+		        {"Create " + row->name, placeholder(*factory), request::create_missing({row->role}), true});
 	}
 	const std::string retail = retail_name(view, row->name);
 	if (!retail.empty()) out.push_back(import_fix(view, retail));
@@ -103,18 +103,17 @@ void requirement_fixes(const Diagnostic &d, const SessionView &view, bool plan, 
 		if (required) continue;
 		if (offered++ == kUseFilesMax) break;
 		out.push_back({"Use " + file.logical_name + " as " + row->name, plan ? use_detail(view, file, row->name) : std::string(),
-		               make_request(EditorRequestKind::AssignRequirement, file.relative_path, row->role), false});
+		               request::assign_requirement(row->role, file.relative_path), false});
 	}
 }
 
 // Files' Rename... on a project file: Files selects it and asks its new name, and the rename
 // rewrites every file naming it.
 ProblemFix rename_fix(const std::string &path) {
-	EditorRequest request = make_request(EditorRequestKind::ShowInFiles, path);
-	request.flag = true;
 	return {"Rename " + basename_of(path) + "...",
-	        "Shows " + path + " in Files and asks its new name; the rename rewrites every file that names it.", request,
-	        false};
+	        "Shows " + path +
+	                " in Files and asks its new name; the rename rewrites every file that names it.",
+	        request::show_in_files(path, true), false};
 }
 
 // A file the game reads by name whose file there is of another kind: the game's own from the
@@ -177,28 +176,27 @@ void symbol_fixes(const Diagnostic &d, const SessionView &view, std::vector<Prob
 	if (is_editable_kind(file->kind))
 		out.push_back({"Open " + file->logical_name,
 		               "Opens " + file->relative_path + ", where " + what + " belongs: add it there, or correct the name.",
-		               make_request(EditorRequestKind::OpenDocument, file->relative_path), false});
+		               request::open_document(file->relative_path), false});
 	else
 		out.push_back({"Show " + file->logical_name + " in Files",
 		               "Shows " + file->relative_path + " in Files, the file where " + what +
 		                       " belongs (the editor does not edit its kind).",
-		               make_request(EditorRequestKind::ShowInFiles, file->relative_path), false});
+		               request::show_in_files(file->relative_path), false});
 }
 
 // An animation map with no anim_reset row: the row added, keyed anim_reset (the key a new
 // row of a table without one takes), in its document, opened first when it is not: one step
 // Undo takes back, saved with the table.
 ProblemFix reset_row_fix(const std::string &path) {
-	EditorRequest add = make_request(EditorRequestKind::EditRecord, path);
-	add.flag = true;
-	add.edit.operation = EditOperation::Add;
-	add.edit.address.kind = node_kind(AnimationMapKind::Row);
-	add.edit.field = "key";
-	add.edit.value = std::string("anim_reset");
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = node_kind(AnimationMapKind::Row);
+	add.field = "key";
+	add.value = std::string("anim_reset");
 	return {"Add anim_reset row",
 	        "Adds a row keyed anim_reset to " + path + ", the row the game needs to load the table; give it its clip. "
 	        "Undo takes it back, and Save writes it.",
-	        add, false};
+	        request::edit_record(path, std::move(add), true), false};
 }
 
 bool same_file(const std::string &a, const std::string &b) { return normalized_logical_name(a) == normalized_logical_name(b); }
@@ -262,7 +260,7 @@ void placeholder_fix(const Diagnostic &d, const SessionView &view, std::vector<P
 	                       ": the checkerboard the game draws for a missing texture, 128 by 128 gray squares, to replace "
 	                       "with your own art." +
 	                       kNotUndoable,
-	               make_request(EditorRequestKind::CreateFile, name, asset_kind_token(AssetKind::Texture)), true});
+	               request::create_file(name, asset_kind_token(AssetKind::Texture)), true});
 }
 
 // A reference to a file the project lacks: the names its loader reads that make a file of
@@ -299,7 +297,7 @@ void reference_fixes(const Diagnostic &d, const SessionView &view, std::vector<P
 	if (!factory) factory = find_blank_factory_for_kind(kind);
 	if (factory)
 		out.push_back({"Create " + name, placeholder(*factory),
-		               make_request(EditorRequestKind::CreateFile, name, asset_kind_token(kind)), false});
+		               request::create_file(name, asset_kind_token(kind)), false});
 }
 
 // What the rewrite of a file drops or normalizes, for a finding it fixes; null for another.
@@ -347,19 +345,18 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 			out.push_back({"Reload " + basename_of(d.asset),
 			               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
 			               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
-			               make_request(EditorRequestKind::ReloadDocument, d.asset), false});
+			               request::reload_document(d.asset), false});
 	} else if (d.code == "import.output_missing" && !d.asset.empty()) {
-		EditorRequest again = make_request(EditorRequestKind::Reimport, d.asset);
-		again.flag = true;
 		out.push_back({"Import " + basename_of(d.asset) + " again",
-		               "Runs the importer on " + d.asset + " again, which makes the files it lists." + kNotUndoable, again,
-		               true});
+		               "Runs the importer on " + d.asset + " again, which makes the files it lists." +
+		                       kNotUndoable,
+		               request::reimport(d.asset, true), true});
 	} else if (const char *does = rewrite_does(d.code); does && !d.asset.empty() && !index.unserializable.count(d.asset)) {
 		std::string detail = "Writes " + d.asset + " again " + does + ".";
 		for (const auto &document : view.documents)
 			if (document && document->path() == d.asset && document->dirty()) detail += " Its unsaved edits are saved with it.";
 		detail += kNotUndoable;
-		out.push_back({"Rewrite " + basename_of(d.asset), detail, make_request(EditorRequestKind::Save, d.asset), true});
+		out.push_back({"Rewrite " + basename_of(d.asset), detail, request::save(d.asset), true});
 	}
 }
 
@@ -399,21 +396,22 @@ std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes) {
 	for (const ProblemFix &fix : fixes) {
 		if (!fix.bulk) continue;
 		const EditorRequest &request = fix.request;
-		// The files to create and the files to list join one request each; any other
-		// request is raised once.
-		const bool joins =
-		        request.kind == EditorRequestKind::CreateMissing || request.kind == EditorRequestKind::PreviewRetailImport;
+		// The files to create and the files to list join one request each (their roles, their
+		// names); any other request is raised once.
+		const bool creates = request.kind == EditorRequestKind::CreateMissing;
+		const bool joins = creates || request.kind == EditorRequestKind::PreviewInstallImport;
 		const auto made = std::find_if(requests.begin(), requests.end(), [&](const EditorRequest &earlier) {
-			return earlier.kind == request.kind &&
-			       (joins || (earlier.path == request.path && earlier.text == request.text && earlier.flag == request.flag));
+			return joins ? earlier.kind == request.kind : earlier == request;
 		});
 		if (made == requests.end()) {
 			requests.push_back(request);
 			continue;
 		}
 		if (!joins) continue;
-		for (const std::string &name : request.names)
-			if (std::find(made->names.begin(), made->names.end(), name) == made->names.end()) made->names.push_back(name);
+		std::vector<std::string> &joined = creates ? made->roles : made->names;
+		for (const std::string &name : creates ? request.roles : request.names)
+			if (std::find(joined.begin(), joined.end(), name) == joined.end())
+				joined.push_back(name);
 	}
 	return requests;
 }

@@ -61,13 +61,13 @@ std::vector<ImportSource> list_retail_import_sources(const std::string &retail_r
                                                     std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportSource> sources;
 	if (retail_root.empty()) {
-		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.retail",
+		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.install",
 		                                     "Choose the game install folder in File > Project settings... first."));
 		return sources;
 	}
 	Vfs game;
 	if (!mount_retail(game, retail_root, document)) {
-		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.retail",
+		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.install",
 		                                     "No game archives found under " + retail_root + "."));
 		return sources;
 	}
@@ -76,7 +76,7 @@ std::vector<ImportSource> list_retail_import_sources(const std::string &retail_r
 		ImportSource source;
 		source.path = retail_root;
 		source.entry = file.logical_name;
-		source.retail = true;
+		source.install = true;
 		sources.push_back(std::move(source));
 	}
 	return sources;
@@ -223,11 +223,11 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		}
 		std::vector<uint8_t> bytes;
 		std::string io_error;
-		if (source.retail) {
+		if (source.install) {
 			if (retail_root != source.path) {
 				retail_root.clear();
 				if (!mount_retail(retail, source.path, document)) {
-					refuse("import.retail", "No game archives found under " + source.path + ".", name);
+					refuse("import.install", "No game archives found under " + source.path + ".", name);
 					continue;
 				}
 				retail_root = source.path;
@@ -278,7 +278,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		}
 		// A loose file from the disk is an author's source; a file of the game install or an
 		// archive, or one a source marks native, is the game's own, copied as the game reads it.
-		const bool authored = !source.retail && source.entry.empty() && !source.native;
+		const bool authored = !source.install && source.entry.empty() && !source.native;
 		for (ImportOutput &output : made) {
 			if (output.name != name) {
 				if (!check_project_file_name(paths.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {

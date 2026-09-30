@@ -12,6 +12,8 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_session.h>
+#include <editor/session/request_fields.h>
+#include <editor/session/request_kinds.h>
 
 namespace opennova::editor {
 
@@ -25,56 +27,6 @@ template <typename Enum>
 struct Token {
 	Enum value;
 	const char *token;
-};
-
-// One row per enumerator, in enumerator order: the ctest walks the enum and expects a
-// token for each, so a kind added without a row fails there, not on the wire.
-constexpr Token<EditorRequestKind> kKindTokens[] = {
-	{EditorRequestKind::NewProject, "new_project"},
-	{EditorRequestKind::OpenProject, "open_project"},
-	{EditorRequestKind::CloseProject, "close_project"},
-	{EditorRequestKind::ForgetRecent, "forget_recent"},
-	{EditorRequestKind::Rescan, "rescan"},
-	{EditorRequestKind::ApplyProjectSettings, "apply_project_settings"},
-	{EditorRequestKind::PreviewImport, "preview_import"},
-	{EditorRequestKind::PlanImport, "plan_import"},
-	{EditorRequestKind::SetImportDependencies, "set_import_dependencies"},
-	{EditorRequestKind::ImportFiles, "import_files"},
-	{EditorRequestKind::CancelImport, "cancel_import"},
-	{EditorRequestKind::CreateMissing, "create_missing"},
-	{EditorRequestKind::Build, "build"},
-	{EditorRequestKind::Play, "play"},
-	{EditorRequestKind::StopPlay, "stop_play"},
-	{EditorRequestKind::CancelOperation, "cancel_operation"},
-	{EditorRequestKind::CreateFile, "create_file"},
-	{EditorRequestKind::OpenDocument, "open_document"},
-	{EditorRequestKind::ShowInFiles, "show_in_files"},
-	{EditorRequestKind::ReloadDocument, "reload_document"},
-	{EditorRequestKind::CloseDocument, "close_document"},
-	{EditorRequestKind::SelectRecord, "select_record"},
-	{EditorRequestKind::EditRecord, "edit_record"},
-	{EditorRequestKind::RevertToSaved, "revert_to_saved"},
-	{EditorRequestKind::EndEdit, "end_edit"},
-	{EditorRequestKind::Copy, "copy"},
-	{EditorRequestKind::Cut, "cut"},
-	{EditorRequestKind::Paste, "paste"},
-	{EditorRequestKind::Duplicate, "duplicate"},
-	{EditorRequestKind::Save, "save"},
-	{EditorRequestKind::SaveAll, "save_all"},
-	{EditorRequestKind::Undo, "undo"},
-	{EditorRequestKind::Redo, "redo"},
-	{EditorRequestKind::ResolveUnsaved, "resolve_unsaved"},
-	{EditorRequestKind::RenameAsset, "rename_asset"},
-	{EditorRequestKind::AssignRequirement, "assign_requirement"},
-	{EditorRequestKind::PreviewRename, "preview_rename"},
-	{EditorRequestKind::RenameSymbol, "rename_symbol"},
-	{EditorRequestKind::Reimport, "reimport"},
-	{EditorRequestKind::PreviewRetailImport, "preview_retail_import"},
-	{EditorRequestKind::ClearOutput, "clear_output"},
-	{EditorRequestKind::Quit, "quit"},
-	{EditorRequestKind::PickDirectory, "pick_directory"},
-	{EditorRequestKind::PickFile, "pick_file"},
-	{EditorRequestKind::RevealPath, "reveal_path"},
 };
 
 constexpr Token<EditOperation> kOperationTokens[] = {
@@ -101,7 +53,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::NewProjectLocation, "new_project_location"},
 	{PickPurpose::OpenProject, "open_project"},
 	{PickPurpose::RuntimeExecutable, "runtime_executable"},
-	{PickPurpose::RetailDirectory, "retail_directory"},
+	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
 };
 
@@ -220,6 +172,14 @@ bool read_id(const JsonValue &json, uint64_t &out) {
 	return true;
 }
 
+// A record kind: a whole JSON number that fits a NodeKind; false for anything else.
+bool read_kind(const JsonValue &json, NodeKind &out) {
+	if (!json.is_number() || json.number != std::floor(json.number) ||
+	    json.number < -2147483648.0 || json.number > 2147483647.0) return false;
+	out = static_cast<NodeKind>(json.number);
+	return true;
+}
+
 bool read_string(const JsonValue &object, const char *key, std::string &out, std::string &error) {
 	const JsonValue *member = object.get(key);
 	if (!member) return true;
@@ -233,21 +193,6 @@ bool read_bool(const JsonValue &object, const char *key, bool &out, std::string 
 	if (!member) return true;
 	if (!member->is_bool()) { error = std::string("\"") + key + "\" must be true or false."; return false; }
 	out = member->boolean;
-	return true;
-}
-
-bool read_strings(const JsonValue &object, const char *key, std::vector<std::string> &out, std::string &error) {
-	const JsonValue *member = object.get(key);
-	if (!member) return true;
-	const auto refuse = [&]() {
-		error = std::string("\"") + key + "\" must be an array of strings.";
-		return false;
-	};
-	if (!member->is_array()) return refuse();
-	for (const JsonValue &item : member->array) {
-		if (!item.is_string()) return refuse();
-		out.push_back(item.string);
-	}
 	return true;
 }
 
@@ -275,8 +220,8 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "retail_directory", "runtime_executable",
-	                          "play_retail"},
+	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "game_install", "runtime_executable",
+	                          "play_in_install"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -298,8 +243,8 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 		return true;
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
-	    !text("retail_directory", change.retail_directory) || !text("runtime_executable", change.runtime_executable) ||
-	    !flag("play_retail", change.play_retail))
+	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
+	    !flag("play_in_install", change.play_in_install))
 		return false;
 	out = std::move(change);
 	return true;
@@ -311,61 +256,70 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.title) out.set("title", json_string(*change.title));
 	if (change.mission) out.set("mission", boolean(*change.mission));
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
-	if (change.retail_directory) out.set("retail_directory", json_string(*change.retail_directory));
+	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
-	if (change.play_retail) out.set("play_retail", boolean(*change.play_retail));
+	if (change.play_in_install) out.set("play_in_install", boolean(*change.play_in_install));
 	return out;
 }
 
-bool edit_from_json(const JsonValue &json, Edit &out, std::string &error) {
-	if (!json.is_object()) { error = "\"edit\" must be an object."; return false; }
-	if (!members_known(json, {"operation", "row", "kind", "child", "parent", "field", "value", "position", "coalesce", "gesture",
-	                          "payload"},
-	                   "edit", error)) return false;
+// One edit of a request's `edits`, `what` naming it in a refusal ("edits[2]").
+bool edit_from_json(const JsonValue &json, const std::string &what, Edit &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"" + what + "\" must be an object.";
+		return false;
+	}
+	if (!members_known(json,
+				{ "operation", "row", "kind", "child", "parent", "field", "value", "position",
+						"coalesce", "gesture", "payload" },
+				what.c_str(), error))
+		return false;
+	// A member's refusal names the edit it is in.
+	const auto refuse = [&error, &what](const std::string &why) {
+		error = what + ": " + why;
+		return false;
+	};
 	Edit edit;
 	std::string operation;
-	if (!read_string(json, "operation", operation, error)) return false;
-	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation)) {
-		error = "Unknown edit operation \"" + operation + "\".";
-		return false;
-	}
+	if (!read_string(json, "operation", operation, error))
+		return refuse(error);
+	if (!operation.empty() && !edit_operation_from_token(operation, edit.operation))
+		return refuse("unknown edit operation \"" + operation + "\".");
 	// An Apply's change is made in C++ by its document type (Edit::payload), which JSON names by
-	// its token alone: no request carries one yet.
-	if (edit.operation == EditOperation::Apply) {
-		error = "An apply edit carries a change its document type makes in C++; the editor's JSON "
-		        "cannot send one.";
-		return false;
-	}
-	if (json.get("payload")) {
-		error = "\"payload\" names a change a document type makes in C++; the editor's JSON cannot "
-		        "carry one.";
-		return false;
-	}
+	// its token alone: no request carries one yet (S13 D6).
+	if (edit.operation == EditOperation::Apply)
+		return refuse("an apply edit carries a change its document type makes in C++; the "
+		              "editor's JSON cannot send one.");
+	if (json.get("payload"))
+		return refuse("\"payload\" names a change a document type makes in C++; the editor's "
+		              "JSON cannot carry one.");
 	for (const char *key : {"row", "child", "parent"}) {
 		if (const JsonValue *member = json.get(key)) {
 			uint64_t id = 0;
-			if (!read_id(*member, id)) { error = std::string("\"") + key + "\" must be a record identity."; return false; }
+			if (!read_id(*member, id))
+				return refuse(std::string("\"") + key + "\" must be a record identity.");
 			(key[0] == 'r' ? edit.address.row : key[0] == 'c' ? edit.address.child : edit.parent) = id;
 		}
 	}
-	if (const JsonValue *kind = json.get("kind")) {
-		if (!kind->is_number() || kind->number != std::floor(kind->number) || kind->number < -2147483648.0 ||
-		    kind->number > 2147483647.0) { error = "\"kind\" must be a whole number."; return false; }
-		edit.address.kind = static_cast<NodeKind>(kind->number);
-	}
-	if (!read_string(json, "field", edit.field, error)) return false;
+	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, edit.address.kind))
+		return refuse("\"kind\" must be a whole number.");
+	if (!read_string(json, "field", edit.field, error))
+		return refuse(error);
 	if (const JsonValue *value = json.get("value")) {
-		if (!value_from_json(*value, edit.value)) { error = "\"value\" must be a number, a string or a bool."; return false; }
+		if (!value_from_json(*value, edit.value))
+			return refuse("\"value\" must be a number, a string or a bool.");
 	}
 	if (const JsonValue *position = json.get("position")) {
 		uint64_t index = 0;
-		if (!read_id(*position, index)) { error = "\"position\" must be a whole number."; return false; }
+		if (!read_id(*position, index))
+			return refuse("\"position\" must be a whole number.");
 		edit.position = static_cast<size_t>(index);
 	}
-	if (!read_bool(json, "coalesce", edit.coalesce, error)) return false;
+	if (!read_bool(json, "coalesce", edit.coalesce, error))
+		return refuse(error);
 	if (const JsonValue *gesture = json.get("gesture")) {
-		if (!read_id(*gesture, edit.gesture)) { error = "\"gesture\" must be a whole number."; return false; }
+		if (!read_id(*gesture, edit.gesture))
+			return refuse("\"gesture\" must be a whole number.");
 	}
 	out = edit;
 	return true;
@@ -416,13 +370,13 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 	return collections;
 }
 
-// An import source as a request's `imports` takes it: {path, entry, retail, native}, the
+// An import source as a request's `imports` takes it: {path, entry, install, native}, the
 // defaults left out, so the view's sources pass back as they are.
 JsonValue import_source_to_json(const ImportSource &source) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(source.path));
 	if (!source.entry.empty()) out.set("entry", json_string(source.entry));
-	if (source.retail) out.set("retail", boolean(true));
+	if (source.install) out.set("install", boolean(true));
 	if (source.native) out.set("native", boolean(true));
 	return out;
 }
@@ -447,11 +401,284 @@ bool field_of(const Document &document, const NodeAddress &address, const std::s
 	return false;
 }
 
+// --- a request's fields (request_fields.h): each read and written by its row's JSON type ---------
+
+bool text_of(const JsonValue &json, const char *token, std::string &out, std::string &error) {
+	if (!json.is_string()) {
+		error = std::string("\"") + token + "\" must be a string.";
+		return false;
+	}
+	out = json.string;
+	return true;
+}
+
+// A name a rename gives: a string, or a whole number (an item id sent as one) as its digits.
+bool name_of(const JsonValue &json, const char *token, std::string &out, std::string &error) {
+	if (json.is_string()) {
+		out = json.string;
+		return true;
+	}
+	if (json.is_number() && json.number == std::floor(json.number) &&
+			std::fabs(json.number) < 9007199254740992.0) {
+		out = std::to_string(static_cast<int64_t>(json.number));
+		return true;
+	}
+	error = std::string("\"") + token + "\" must be a string or a whole number.";
+	return false;
+}
+
+bool flag_of(const JsonValue &json, const char *token, bool &out, std::string &error) {
+	if (!json.is_bool()) {
+		error = std::string("\"") + token + "\" must be true or false.";
+		return false;
+	}
+	out = json.boolean;
+	return true;
+}
+
+bool texts_of(const JsonValue &json, const char *token, std::vector<std::string> &out,
+              std::string &error) {
+	const auto refuse = [&]() {
+		error = std::string("\"") + token + "\" must be an array of strings.";
+		return false;
+	};
+	if (!json.is_array()) return refuse();
+	std::vector<std::string> texts;
+	for (const JsonValue &item : json.array) {
+		if (!item.is_string()) return refuse();
+		texts.push_back(item.string);
+	}
+	out = std::move(texts);
+	return true;
+}
+
+// A record's address: {row, kind, child}, each left out 0.
+bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"address\" must be an object {row, kind, child}.";
+		return false;
+	}
+	if (!members_known(json, {"row", "kind", "child"}, "address", error)) return false;
+	NodeAddress address;
+	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row)) {
+		error = "\"row\" must be a record identity.";
+		return false;
+	}
+	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind)) {
+		error = "\"kind\" must be a whole number.";
+		return false;
+	}
+	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child)) {
+		error = "\"child\" must be a record identity.";
+		return false;
+	}
+	out = address;
+	return true;
+}
+
+// Where a paste goes: {row, parent, position}, each left out at its default.
+JsonValue paste_at_to_json(const PasteAt &at) {
+	JsonValue out = JsonValue::make_object();
+	if (at.row) out.set("row", json_number(double(at.row)));
+	if (at.parent) out.set("parent", json_number(double(at.parent)));
+	if (at.position != SIZE_MAX) out.set("position", json_number(double(at.position)));
+	return out;
+}
+
+bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"paste_at\" must be an object {row, parent, position}.";
+		return false;
+	}
+	if (!members_known(json, {"row", "parent", "position"}, "paste_at", error)) return false;
+	PasteAt at;
+	if (const JsonValue *row = json.get("row"); row && !read_id(*row, at.row)) {
+		error = "\"row\" must be a record identity.";
+		return false;
+	}
+	if (const JsonValue *parent = json.get("parent"); parent && !read_id(*parent, at.parent)) {
+		error = "\"parent\" must be a record identity.";
+		return false;
+	}
+	if (const JsonValue *position = json.get("position")) {
+		uint64_t index = 0;
+		if (!read_id(*position, index)) {
+			error = "\"position\" must be a whole number.";
+			return false;
+		}
+		at.position = static_cast<size_t>(index);
+	}
+	out = at;
+	return true;
+}
+
+// An import source: {path, entry?, install?, native?}.
+constexpr const char *kImportsShape =
+        "\"imports\" must be an array of {path, entry, install, native}.";
+
+bool import_source_from_json(const JsonValue &json, ImportSource &out, std::string &error) {
+	if (!json.is_object()) {
+		error = kImportsShape;
+		return false;
+	}
+	if (!members_known(json, {"path", "entry", "install", "native"}, "import", error)) return false;
+	ImportSource import;
+	if (!read_string(json, "path", import.path, error) ||
+	    !read_string(json, "entry", import.entry, error) ||
+	    !read_bool(json, "install", import.install, error) ||
+	    !read_bool(json, "native", import.native, error))
+		return false;
+	if (import.path.empty()) { error = "An import names its path."; return false; }
+	out = std::move(import);
+	return true;
+}
+
+// A request's field `id` from its wire form into `request`; false with `error` for a value of
+// another type, an unknown token or a malformed object.
+bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &request,
+                     std::string &error) {
+	using F = RequestFieldId;
+	const char *token = request_field(id).token;
+	const std::string shown = json.is_string() ? json.string : std::string("?");
+	switch (id) {
+	case F::Dir: return text_of(json, token, request.dir, error);
+	case F::Title: return text_of(json, token, request.title, error);
+	case F::Path: return text_of(json, token, request.path, error);
+	case F::Locator: return text_of(json, token, request.locator, error);
+	case F::Field: return text_of(json, token, request.field, error);
+	case F::NewName: return name_of(json, token, request.new_name, error);
+	case F::Role: return text_of(json, token, request.role, error);
+	case F::FileKind: return text_of(json, token, request.file_kind, error);
+	case F::Roles: return texts_of(json, token, request.roles, error);
+	case F::Names: return texts_of(json, token, request.names, error);
+	case F::Paths: return texts_of(json, token, request.paths, error);
+	case F::Imports: {
+		if (!json.is_array()) {
+			error = kImportsShape;
+			return false;
+		}
+		std::vector<ImportSource> imports;
+		for (const JsonValue &source : json.array) {
+			ImportSource import;
+			if (!import_source_from_json(source, import, error)) return false;
+			imports.push_back(std::move(import));
+		}
+		request.imports = std::move(imports);
+		return true;
+	}
+	case F::Edits: {
+		if (!json.is_array()) {
+			error = "\"edits\" must be an array of edits.";
+			return false;
+		}
+		std::vector<Edit> edits;
+		for (size_t i = 0; i < json.array.size(); ++i) {
+			Edit edit;
+			if (!edit_from_json(json.array[i], "edits[" + std::to_string(i) + "]", edit, error))
+				return false;
+			edits.push_back(std::move(edit));
+		}
+		request.edits = std::move(edits);
+		return true;
+	}
+	case F::Address: return address_from_json(json, request.address, error);
+	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
+	case F::Mode:
+		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
+		error = "Unknown selection mode \"" + shown + "\".";
+		return false;
+	case F::Choice:
+		if (json.is_string() && unsaved_choice_from_token(json.string, request.choice)) return true;
+		error = "Unknown unsaved choice \"" + shown + "\".";
+		return false;
+	case F::Settings: return settings_from_json(json, request.settings, error);
+	case F::Purpose:
+		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
+		error = "Unknown pick purpose \"" + shown + "\".";
+		return false;
+	case F::WithDependencies: return flag_of(json, token, request.with_dependencies, error);
+	case F::Replace: return flag_of(json, token, request.replace, error);
+	case F::Force: return flag_of(json, token, request.force, error);
+	case F::AskName: return flag_of(json, token, request.ask_name, error);
+	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
+	case F::kCount: break;
+	}
+	error = std::string("Unknown request member \"") + token + "\".";
+	return false;
+}
+
+// A request's field `id` as it goes on the wire into `out`; false when it holds its default, which
+// the writer leaves out unless the kind must carry the field.
+bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &out) {
+	using F = RequestFieldId;
+	switch (id) {
+	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
+	case F::Title: out = json_string(request.title); return !request.title.empty();
+	case F::Path: out = json_string(request.path); return !request.path.empty();
+	case F::Locator: out = json_string(request.locator); return !request.locator.empty();
+	case F::Field: out = json_string(request.field); return !request.field.empty();
+	case F::NewName: out = json_string(request.new_name); return !request.new_name.empty();
+	case F::Role: out = json_string(request.role); return !request.role.empty();
+	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
+	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
+	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
+	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
+	case F::Imports:
+		out = JsonValue::make_array();
+		for (const ImportSource &source : request.imports) out.push(import_source_to_json(source));
+		return !request.imports.empty();
+	case F::Edits:
+		out = JsonValue::make_array();
+		for (const Edit &edit : request.edits) out.push(edit_to_json(edit));
+		return !request.edits.empty();
+	case F::Address:
+		out = address_to_json(request.address);
+		return request.address != NodeAddress();
+	case F::PasteAt:
+		out = paste_at_to_json(request.paste_at);
+		return !(request.paste_at == PasteAt());
+	case F::Mode:
+		out = json_string(select_mode_token(request.mode));
+		return request.mode != SelectMode::Replace;
+	case F::Choice:
+		out = json_string(unsaved_choice_token(request.choice));
+		return request.choice != UnsavedChoice::Cancel;
+	case F::Settings:
+		out = settings_to_json(request.settings);
+		return !(request.settings == ProjectSettingsChange());
+	case F::Purpose:
+		out = json_string(pick_purpose_token(request.purpose));
+		return request.purpose != PickPurpose::None;
+	case F::WithDependencies:
+		out = boolean(request.with_dependencies);
+		return request.with_dependencies;
+	case F::Replace: out = boolean(request.replace); return request.replace;
+	case F::Force: out = boolean(request.force); return request.force;
+	case F::AskName: out = boolean(request.ask_name); return request.ask_name;
+	case F::OpenFirst: out = boolean(request.open_first); return request.open_first;
+	case F::kCount: break;
+	}
+	out = JsonValue::make_null();
+	return false;
+}
+
+// The fields a kind takes, as a refusal names them: "path, locator", or "nothing".
+std::string fields_taken(const RequestParams &params) {
+	std::string out;
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<RequestFieldId>(i);
+		if (params.has(id)) out += (out.empty() ? "" : ", ") + std::string(request_field(id).token);
+	}
+	return out.empty() ? std::string("nothing") : out;
+}
+
 } // namespace
 
-const char *editor_request_kind_token(EditorRequestKind kind) { return token_of(kKindTokens, kind); }
+const char *editor_request_kind_token(EditorRequestKind kind) {
+	return request_kind_row(kind).token;
+}
 bool editor_request_kind_from_token(const std::string &token, EditorRequestKind &out) {
-	return value_of(kKindTokens, token, out);
+	return request_kind_from_token(token, out);
 }
 const char *edit_operation_token(EditOperation operation) { return token_of(kOperationTokens, operation); }
 bool edit_operation_from_token(const std::string &token, EditOperation &out) {
@@ -484,7 +711,8 @@ bool problem_grouping_from_token(const std::string &token, ProblemGrouping &out)
 
 std::vector<std::string> editor_request_kind_tokens() {
 	std::vector<std::string> tokens;
-	for (const Token<EditorRequestKind> &row : kKindTokens) tokens.emplace_back(row.token);
+	for (size_t i = 0; i < kEditorRequestKindCount; ++i)
+		tokens.emplace_back(request_kind_row(static_cast<EditorRequestKind>(i)).token);
 	return tokens;
 }
 
@@ -510,9 +738,6 @@ bool value_from_json(const JsonValue &json, Value &out) {
 
 bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::string &error) {
 	if (!json.is_object()) { error = "A request is a JSON object."; return false; }
-	if (!members_known(json, {"kind", "path", "text", "flag", "purpose", "paths", "names", "imports", "edit", "edits",
-	                          "mode", "unsaved_choice", "settings"},
-	                   "request", error)) return false;
 	const JsonValue *kind = json.get("kind");
 	if (!kind || !kind->is_string()) { error = "\"kind\" names the request (a string)."; return false; }
 	EditorRequest request;
@@ -520,54 +745,33 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 		error = "Unknown request kind \"" + kind->string + "\".";
 		return false;
 	}
-	if (!read_string(json, "path", request.path, error)) return false;
-	if (!read_string(json, "text", request.text, error)) return false;
-	if (!read_bool(json, "flag", request.flag, error)) return false;
-	std::string purpose;
-	if (!read_string(json, "purpose", purpose, error)) return false;
-	if (!purpose.empty() && !pick_purpose_from_token(purpose, request.purpose)) {
-		error = "Unknown pick purpose \"" + purpose + "\".";
-		return false;
+	// Each member a field the kind's row takes (request_kinds.cpp), each field it must carry there.
+	const RequestParams &params = request_kind_row(request.kind).params;
+	RequestFieldSet carried = 0;
+	for (const io::JsonMember &member : json.object) {
+		if (member.key == "kind") continue;
+		RequestFieldId id = RequestFieldId::Dir;
+		if (!request_field_from_token(member.key, id)) {
+			error = "Unknown request member \"" + member.key + "\" (" + kind->string + " takes " +
+					fields_taken(params) + ").";
+			return false;
+		}
+		if (!params.has(id)) {
+			error = kind->string + " takes no \"" + member.key + "\" (it takes " +
+					fields_taken(params) + ").";
+			return false;
+		}
+		if (!field_from_json(id, member.value, request, error)) return false;
+		carried |= field_bit(id);
 	}
-	if (!read_strings(json, "paths", request.paths, error) || !read_strings(json, "names", request.names, error)) return false;
-	if (const JsonValue *imports = json.get("imports")) {
-		if (!imports->is_array()) { error = "\"imports\" must be an array of {path, entry}."; return false; }
-		for (const JsonValue &source : imports->array) {
-			if (!source.is_object()) { error = "\"imports\" must be an array of {path, entry}."; return false; }
-			if (!members_known(source, {"path", "entry", "retail", "native"}, "import", error)) return false;
-			ImportSource import;
-			if (!read_string(source, "path", import.path, error) || !read_string(source, "entry", import.entry, error) ||
-			    !read_bool(source, "retail", import.retail, error) || !read_bool(source, "native", import.native, error))
-				return false;
-			if (import.path.empty()) { error = "An import names its path."; return false; }
-			request.imports.push_back(import);
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<RequestFieldId>(i);
+		if (params.needs(id) && !(carried & field_bit(id))) {
+			error = kind->string + " needs \"" + request_field(id).token + "\" (it takes " +
+					fields_taken(params) + ").";
+			return false;
 		}
 	}
-	if (const JsonValue *edit = json.get("edit")) {
-		if (!edit_from_json(*edit, request.edit, error)) return false;
-	}
-	if (const JsonValue *edits = json.get("edits")) {
-		if (!edits->is_array()) { error = "\"edits\" must be an array of edits."; return false; }
-		for (const JsonValue &member : edits->array) {
-			Edit edit;
-			if (!edit_from_json(member, edit, error)) return false;
-			request.edits.push_back(std::move(edit));
-		}
-	}
-	std::string mode;
-	if (!read_string(json, "mode", mode, error)) return false;
-	if (!mode.empty() && !select_mode_from_token(mode, request.select_mode)) {
-		error = "Unknown selection mode \"" + mode + "\".";
-		return false;
-	}
-	std::string choice;
-	if (!read_string(json, "unsaved_choice", choice, error)) return false;
-	if (!choice.empty() && !unsaved_choice_from_token(choice, request.unsaved_choice)) {
-		error = "Unknown unsaved choice \"" + choice + "\".";
-		return false;
-	}
-	if (const JsonValue *settings = json.get("settings"); settings && !settings_from_json(*settings, request.settings, error))
-		return false;
 	out = std::move(request);
 	return true;
 }
@@ -575,31 +779,15 @@ bool editor_request_from_json(const JsonValue &json, EditorRequest &out, std::st
 JsonValue editor_request_to_json(const EditorRequest &request) {
 	JsonValue out = JsonValue::make_object();
 	out.set("kind", json_string(editor_request_kind_token(request.kind)));
-	if (!request.path.empty()) out.set("path", json_string(request.path));
-	if (!request.text.empty()) out.set("text", json_string(request.text));
-	if (request.flag) out.set("flag", boolean(true));
-	if (request.purpose != PickPurpose::None) out.set("purpose", json_string(pick_purpose_token(request.purpose)));
-	if (!request.paths.empty()) out.set("paths", strings_to_json(request.paths));
-	if (!request.names.empty()) out.set("names", strings_to_json(request.names));
-	if (!request.imports.empty()) {
-		JsonValue imports = JsonValue::make_array();
-		for (const ImportSource &source : request.imports) imports.push(import_source_to_json(source));
-		out.set("imports", std::move(imports));
+	// The fields its row takes: each it must carry, and any other it carries (not its default).
+	const RequestParams &params = request_kind_row(request.kind).params;
+	for (size_t i = 0; i < kRequestFieldCount; ++i) {
+		const auto id = static_cast<RequestFieldId>(i);
+		if (!params.has(id)) continue;
+		JsonValue value;
+		if (field_to_json(id, request, value) || params.needs(id))
+			out.set(request_field(id).token, std::move(value));
 	}
-	const bool carries_edit = request.kind == EditorRequestKind::EditRecord ||
-	                          request.kind == EditorRequestKind::SelectRecord ||
-	                          (request.kind == EditorRequestKind::RevertToSaved && request.edits.empty()) ||
-	                          request.edit.address != NodeAddress{} || !request.edit.field.empty();
-	if (carries_edit) out.set("edit", edit_to_json(request.edit));
-	if (!request.edits.empty()) {
-		JsonValue edits = JsonValue::make_array();
-		for (const Edit &edit : request.edits) edits.push(edit_to_json(edit));
-		out.set("edits", std::move(edits));
-	}
-	if (request.select_mode != SelectMode::Replace) out.set("mode", json_string(select_mode_token(request.select_mode)));
-	if (request.kind == EditorRequestKind::ResolveUnsaved)
-		out.set("unsaved_choice", json_string(unsaved_choice_token(request.unsaved_choice)));
-	if (request.kind == EditorRequestKind::ApplyProjectSettings) out.set("settings", settings_to_json(request.settings));
 	return out;
 }
 
@@ -934,8 +1122,8 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	play.set("command_line", json_string(view.play_command_line));
 	play.set("exited_on_its_own", boolean(view.play_exited_on_its_own));
 	play.set("exit_code", view.play_exit_code >= 0 ? json_number(double(view.play_exit_code)) : JsonValue::make_null());
-	play.set("retail", boolean(view.play_retail));
-	play.set("retail_directory", json_string(view.retail_directory));
+	play.set("in_install", boolean(view.play_retail));
+	play.set("game_install", json_string(view.retail_directory));
 	play.set("source_run", boolean(view.source_run));
 	play.set("runtime_executable", json_string(view.runtime_executable));
 	play.set("runtime_setting", json_string(view.runtime_setting));
@@ -1038,7 +1226,7 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 		imported.push(std::move(entry));
 	}
 	import.set("imported", std::move(imported));
-	import.set("retail_files", json_number(double(view.retail_files.size())));
+	import.set("install_files", json_number(double(view.retail_files.size())));
 	out.set("import", std::move(import));
 
 	size_t errors = 0, warnings = 0, infos = 0;

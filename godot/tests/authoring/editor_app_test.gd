@@ -352,7 +352,7 @@ func test_create_file_names_and_a_menu_of_its_own() -> void:
 	assert_false(_app.create_file("../x.mnu"))
 	assert_false(_app.create_file("abcdefghijklm.mnu"), "17 bytes: past the archive's 16")
 	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify(
-			{"kind": "create_file", "path": "foo.mnu", "text": "strings"})))
+			{"kind": "create_file", "path": "foo.mnu", "file_kind": "strings"})))
 	assert_true(answer is Dictionary and bool(answer.get("ok", false)), str(answer))
 	if answer is Dictionary:
 		var outcome: Dictionary = answer.get("outcome", {})

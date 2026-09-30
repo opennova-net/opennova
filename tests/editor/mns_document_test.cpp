@@ -13,6 +13,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <formats/mns/mns_document.h>
 
@@ -291,7 +292,7 @@ static int test_validation() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Styles"));
+	session.handle(request::new_project(dir.file("project"), "Styles"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const auto unused = [&view]() {
@@ -310,25 +311,25 @@ static int test_validation() {
 	// The blank menus name the large font and the four text colours.
 	TEST_EXPECT(unused() == std::vector<std::string>({"COLOR_BLACK", "DEF_FONTNAME", "IMPACT_FONTNAME", "ITEM_SELECTED_BG",
 	                                                  "SEMIOPAQUE_BLACK", "TRIM_COLOR"}));
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress title;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "TITLE", title));
 	if (!menu) return 1;
-	EditorRequest name_it = make_request(EditorRequestKind::EditRecord, menu->path());
-	name_it.edit = set(title, "font.default_bg", std::string("%TRIM_COLOR%"));
+	EditorRequest name_it = request::edit_record(
+			menu->path(), set(title, "font.default_bg", std::string("%TRIM_COLOR%")));
 	session.handle(name_it);
 	const std::vector<std::string> left = unused();
 	TEST_EXPECT(left.size() == 5 && std::find(left.begin(), left.end(), "TRIM_COLOR") == left.end());
-	session.handle(make_request(EditorRequestKind::Undo, menu->path()));
-	session.handle(make_request(EditorRequestKind::CloseDocument, menu->path()));
+	session.handle(request::undo(menu->path()));
+	session.handle(request::close_document(menu->path()));
 	const AssetEntry *style = view.scan.find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
 	// LF line ends, a lone backslash, a stray #else, and a stylesheet by another name.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A x\\ y\nB 2\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	bool line_ending = false;
 	for (const Diagnostic &d : view.diagnostics) {
 		if (d.code == "style.line_ending") {
@@ -346,18 +347,17 @@ static int test_validation() {
 	TEST_EXPECT(brand != nullptr);
 	if (!brand) return 1;
 	const std::string brand_path = brand->relative_path;
-	session.handle(make_request(EditorRequestKind::OpenDocument, brand_path));
+	session.handle(request::open_document(brand_path));
 	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(brand_path));
 	TEST_EXPECT(styles != nullptr);
 	if (!styles) return 1;
 	TEST_EXPECT(styles->native().evaluate().success && styles->native().evaluate().sheet.get("B") == "2");
 	NodeAddress b;
 	TEST_EXPECT(find_definition(AssetGraph(), *styles, "B", b));
-	EditorRequest edit = make_request(EditorRequestKind::EditRecord, brand_path);
-	edit.edit = set(b, "value", std::string("3"));
+	EditorRequest edit = request::edit_record(brand_path, set(b, "value", std::string("3")));
 	session.handle(edit);
 	TEST_EXPECT(styles->dirty() && has_code(view.diagnostics, "style.line_ending"));
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	TEST_EXPECT(!styles->dirty() && styles->wrote_file());
 	TEST_EXPECT(!has_code(view.diagnostics, "style.line_ending"));
 	std::string written, message;
@@ -365,7 +365,7 @@ static int test_validation() {
 	const opennova::mns::EvaluationResult evaluated = styles->native().evaluate();
 	TEST_EXPECT(evaluated.success && !evaluated.hangs && evaluated.sheet.get("B") == "3");
 	TEST_EXPECT(opennova::mns::Document::parse(written).evaluate().sheet.variables == evaluated.sheet.variables);
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	session.run_operations();
 	for (const Diagnostic &d : view.last_build.diagnostics)
 		if (d.severity == DiagnosticSeverity::Error)
@@ -374,7 +374,7 @@ static int test_validation() {
 	// A clean sheet with LF line ends: an explicit Save of it (no edit) rewrites it CR LF,
 	// and its finding is gone.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/note.mns", "N 1\nM 2\n"));
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	const AssetEntry *note = view.scan.find("note.mns");
 	TEST_EXPECT(note != nullptr);
 	if (!note) return 1;
@@ -385,12 +385,12 @@ static int test_validation() {
 		return false;
 	};
 	TEST_EXPECT(line_ending_on(note_path));
-	session.handle(make_request(EditorRequestKind::OpenDocument, note_path));
+	session.handle(request::open_document(note_path));
 	TEST_EXPECT(session.document_for(note_path) && !session.document_for(note_path)->dirty());
-	session.handle(make_request(EditorRequestKind::Save, note_path));
+	session.handle(request::save(note_path));
 	TEST_EXPECT(session.outcome().done() && !line_ending_on(note_path));
 	TEST_EXPECT(read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
-	session.handle(make_request(EditorRequestKind::Save, note_path));
+	session.handle(request::save(note_path));
 	TEST_EXPECT(session.outcome().done() && view.status == note_path + " has no changes to save.");
 	std::printf("test_validation passed\n");
 	return 0;

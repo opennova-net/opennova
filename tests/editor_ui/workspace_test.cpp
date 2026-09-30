@@ -38,6 +38,7 @@
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/editor_windows.h>
@@ -480,8 +481,8 @@ void test_view_prompt_outlives_its_tab() {
 	      "its tab hidden, it still asks");
 	ui.activate(item_id(ImHashStr("Remove screen?"), {"Remove"}));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::EditRecord) && requests[0].path == a->path() &&
-	              requests[0].edit.operation == EditOperation::Remove && requests[0].edit.address.row == second,
+	CHECK(one(requests, EditorRequestKind::EditRecord) && requests[0].path == a->path() && requests[0].edits.size() == 1 &&
+	              requests[0].edits[0].operation == EditOperation::Remove && requests[0].edits[0].address.row == second,
 	      "and removes the screen of the menu it asked about");
 
 	// Asked again; a.mnu read again meanwhile (a new instance, two screens again): the prompt
@@ -574,7 +575,7 @@ void test_welcome_view() {
 	ui.frames(2);
 	ui.activate(item_id(document, {"Create project"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].path == "C:/mods/New" && requests[0].text == "My Game",
+	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && requests[0].title == "My Game",
 	      "Create: the folder picked, the name typed");
 	ui.activate(item_id(document, {"Open a project folder..."}));
 	requests = ui.drain();
@@ -585,10 +586,10 @@ void test_welcome_view() {
 	ui.activate(item_id(ImHashStr("New project"), {"Create project"}));
 	requests = ui.drain();
 	ui.frames(2);
-	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].path == "C:/mods/New" && !modal_open("New project"),
+	CHECK(one(requests, EditorRequestKind::NewProject) && requests[0].dir == "C:/mods/New" && !modal_open("New project"),
 	      "its Create, and the modal closes");
 	requests = choose(ui, "File", {"Open recent", "C:/mods/Other"});
-	CHECK(one(requests, EditorRequestKind::OpenProject) && requests[0].path == "C:/mods/Other", "File > Open recent");
+	CHECK(one(requests, EditorRequestKind::OpenProject) && requests[0].dir == "C:/mods/Other", "File > Open recent");
 }
 
 // File > Project settings... over a real session: the fields are the dialog's until Apply,
@@ -606,7 +607,7 @@ void test_project_settings() {
 	const std::string settings_file = dir.file("settings/editor.json");
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
-	CHECK(session.handle(make_request(EditorRequestKind::NewProject, dir.file("Armory"), "Armory")), "a project");
+	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
 	const SessionView &v = session.view();
 	const std::string armory = v.project_root;
 	Ui ui;
@@ -625,9 +626,9 @@ void test_project_settings() {
 	CHECK(apply && apply->settings.title == std::optional<std::string>("Armory") &&
 	              apply->settings.mission == std::optional<bool>(false) &&
 	              apply->settings.multiplayer == std::optional<bool>(false) &&
-	              apply->settings.retail_directory == std::optional<std::string>("") &&
+	              apply->settings.game_install == std::optional<std::string>("") &&
 	              apply->settings.runtime_executable == std::optional<std::string>("") &&
-	              apply->settings.play_retail == std::optional<bool>(false),
+	              apply->settings.play_in_install == std::optional<bool>(false),
 	      "Apply: one request naming every setting as the dialog holds it");
 	CHECK(!modal_open("Project settings") && v.status == "No setting changed.", "nothing changed: written nothing, closed");
 
@@ -674,15 +675,15 @@ void test_project_settings() {
 	// Browse...: the shell's answer fills the field it asked for (an answer for another field
 	// is dropped).
 	choose(ui, "File", {"Project settings..."});
-	ui.activate(item_id(dialog, {"Browse...##retail"}));
+	ui.activate(item_id(dialog, {"Browse...##install"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::RetailDirectory,
+	CHECK(one(requests, EditorRequestKind::PickDirectory) && requests[0].purpose == PickPurpose::GameInstall,
 	      "Browse... asks the shell for a folder");
 	// The install picked is a path this platform calls absolute ("C:/..." is relative on
 	// Linux), so the session keeps it as it is.
 	const std::string install = dir.file("Joint Operations");
 	ui.windows.deliver_pick(PickPurpose::RuntimeExecutable, "C:/elsewhere/other.exe");
-	ui.windows.deliver_pick(PickPurpose::RetailDirectory, install);
+	ui.windows.deliver_pick(PickPurpose::GameInstall, install);
 	ui.frames(2);
 	std::string text = logged_frame(ui);
 	CHECK(text.find(install) != std::string::npos && text.find("C:/elsewhere") == std::string::npos,
@@ -698,7 +699,7 @@ void test_project_settings() {
 	type_into(ui, item_id(dialog, {"Name"}), "Renamed");
 	ui.activate(item_id(dialog, {"Browse...##runtime"}));
 	CHECK(one(ui.drain(), EditorRequestKind::PickFile) != nullptr, "a Browse... pending");
-	CHECK(session.handle(make_request(EditorRequestKind::NewProject, dir.file("Harbor"), "Harbor")) && v.project_root != armory,
+	CHECK(session.handle(request::new_project(dir.file("Harbor"), "Harbor")) && v.project_root != armory,
 	      "the editor MCP opens another project");
 	ui.frames(3);
 	CHECK(!modal_open("Project settings") && ui.drain().empty(), "the dialog closes with its project, raising nothing");
@@ -757,8 +758,8 @@ void test_menus() {
 	CHECK(r.kind == EditorRequestKind::CloseDocument && r.path == document->path(), "File > Close file");
 	r = raised("File", {"Import files..."}, EditorRequestKind::PickFile);
 	CHECK(r.kind == EditorRequestKind::PickFile && r.purpose == PickPurpose::ImportFiles, "File > Import files...");
-	r = raised("File", {"Import from the game data..."}, EditorRequestKind::PreviewRetailImport);
-	CHECK(r.kind == EditorRequestKind::PreviewRetailImport && r.names.empty() && r.flag == v.import_dependencies,
+	r = raised("File", {"Import from the game data..."}, EditorRequestKind::PreviewInstallImport);
+	CHECK(r.kind == EditorRequestKind::PreviewInstallImport && r.names.empty() && r.with_dependencies == v.import_dependencies,
 	      "File > Import from the game data...: every file to choose from, planned as the setting says");
 	r = raised("File", {"Show project folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.project_root, "File > Show project folder");
@@ -774,8 +775,8 @@ void test_menus() {
 	CHECK(r.kind == EditorRequestKind::Play, "Build > Play");
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
 	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
-	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_retail == std::optional<bool>(true) &&
-	              !r.settings.title && !r.settings.mission && !r.settings.retail_directory && !r.settings.runtime_executable,
+	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install == std::optional<bool>(true) &&
+	              !r.settings.title && !r.settings.mission && !r.settings.game_install && !r.settings.runtime_executable,
 	      "Build > Play in the game install: that setting alone");
 	r = raised("Build", {"Show build folder"}, EditorRequestKind::RevealPath);
 	CHECK(r.kind == EditorRequestKind::RevealPath && r.path == v.last_build.build_dir, "Build > Show build folder");
@@ -1061,7 +1062,7 @@ void test_files_window() {
 	ui.activate(item_id(files, {"##new"}));
 	ui.activate(item_id(pushed(combo, factory_index("weapon_def", AssetKind::WeaponDefs)), {"weapon.def"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "weapon.def" && requests[0].text == "weapon_defs",
+	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "weapon.def" && requests[0].file_kind == "weapon_defs",
 	      "weapon.def made at once from its factory");
 	ui.activate(item_id(files, {"##new"}));
 	ui.activate(item_id(pushed(combo, factory_index("", AssetKind::Menu)), {"Menu..."}));
@@ -1076,7 +1077,7 @@ void test_files_window() {
 	ui.activate(item_id(prompt, {"Create"}));
 	requests = ui.drain();
 	ui.frames(2);
-	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "extra.mnu" && requests[0].text == "menu" &&
+	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "extra.mnu" && requests[0].file_kind == "menu" &&
 	              !modal_open("New file"),
 	      "Create: the name and the kind, the prompt closed");
 	// S11h: a texture is the placeholder the texture factory makes, for a name it takes only.
@@ -1093,7 +1094,7 @@ void test_files_window() {
 	ui.activate(item_id(prompt, {"Create"}));
 	requests = ui.drain();
 	ui.frames(2);
-	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "skin.tga" && requests[0].text == "texture" &&
+	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "skin.tga" && requests[0].file_kind == "texture" &&
 	              !modal_open("New file"),
 	      "Create: the placeholder texture");
 
@@ -1109,13 +1110,13 @@ void test_files_window() {
 	ui.activate(popup_item(rename, "Rename"));
 	requests = ui.drain();
 	const EditorRequest *renamed = only(requests, EditorRequestKind::RenameAsset);
-	CHECK(renamed && renamed->path == "defs/items.def" && renamed->text == "things.def",
+	CHECK(renamed && renamed->path == "defs/items.def" && renamed->new_name == "things.def",
 	      "Rename...: every file naming it rewritten, or refused");
 	// S12 D9: what it would rewrite asked of the session as the name is typed (PreviewRename).
 	CHECK(std::any_of(requests.begin(), requests.end(),
 	                  [](const EditorRequest &request) {
 		                  return request.kind == EditorRequestKind::PreviewRename && request.path == "defs/items.def" &&
-		                         request.edit.field.empty() && std::get<std::string>(request.edit.value) == "things.def";
+		                         request.field.empty() && request.new_name == "things.def";
 	                  }),
 	      "Rename... previews the rename as the name is typed");
 
@@ -1189,7 +1190,7 @@ void test_import_dialog() {
 	using Paths = std::vector<std::string>;
 	ui.activate(item_id(dialog, {"###import"}));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::ImportFiles) && !requests[0].flag &&
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && !requests[0].replace &&
 	              sources(requests[0]) == Paths({"C:/assets/menu.mnu", "C:/assets/walk.o3a", "C:/assets/arial99.fnt",
 	                                              "C:/assets/logo.tga"}) &&
 	              requests[0].imports[2].native && !requests[0].imports[0].native,
@@ -1212,7 +1213,8 @@ void test_import_dialog() {
 	ui.frames(3);
 	ui.activate(item_id(import_body_id(), {"###needs"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::SetImportDependencies) && !requests[0].flag, "the check box asks for the setting");
+	CHECK(one(requests, EditorRequestKind::SetImportDependencies) && !requests[0].with_dependencies,
+	      "the check box asks for the setting");
 
 	// An archive's members to choose from: a choice checked plans the chosen files again.
 	v.import_preview.choices = {{"C:/assets/data.pff", "main.mnu", false, false}, {"C:/assets/data.pff", "stat.mnu", false, false}};
@@ -1226,7 +1228,7 @@ void test_import_dialog() {
 	      "the list to choose from above the plan");
 	ui.activate(import_table_item("import_choices", 1, "###pick"));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PlanImport) && requests[0].flag &&
+	CHECK(one(requests, EditorRequestKind::PlanImport) && requests[0].with_dependencies &&
 	              sources(requests[0]) == Paths({"C:/assets/menu.mnu", "C:/assets/walk.o3a", "C:/assets/data.pff"}) &&
 	              requests[0].imports[2].entry == "stat.mnu",
 	      "a choice checked: the files chosen planned again");
@@ -1253,7 +1255,7 @@ void test_import_dialog() {
 	ui.activate(item_id(dialog, {"Replace existing files"}));
 	ui.activate(item_id(dialog, {"###import"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].flag,
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].replace,
 	      "unsaved edits: Import goes to the session, with Replace existing files");
 	v.unsaved_prompt.open = true;
 	v.unsaved_prompt.action = EditorRequestKind::ImportFiles;
@@ -1271,7 +1273,7 @@ void test_import_dialog() {
 	CHECK(modal_open("Import files") && !modal_open("Unsaved changes"), "the dialog back once the prompt is answered");
 	ui.activate(item_id(dialog, {"###import"}));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].flag, "Replace existing files kept");
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].replace, "Replace existing files kept");
 	// The session closed the preview: the dialog closes.
 	v.import_preview = SessionView::ImportPreview();
 	v.revisions.touch(ViewConcern::Dialogs);
@@ -1368,7 +1370,7 @@ struct PreviewRun {
 	}
 	// A document made the active one (as the editor MCP makes it), and the frame after, lower case.
 	std::string open(const char *path) {
-		session.handle(make_request(EditorRequestKind::OpenDocument, path));
+		session.handle(request::open_document(path));
 		settle();
 		return lowered(logged_frame(ui));
 	}
@@ -1397,10 +1399,10 @@ size_t count_of_kind(const std::vector<EditorRequest> &requests, EditorRequestKi
 
 // One field of a document set through the session, as the Inspector sets it.
 void set_field(ProjectSession &session, const Document &document, const NodeAddress &address, const char *field, Value value) {
-	EditorRequest set = make_request(EditorRequestKind::EditRecord, document.path());
-	set.edit.address = address;
-	set.edit.field = field;
-	set.edit.value = std::move(value);
+	EditorRequest set = request::edit_record(document.path(), Edit());
+	set.edits[0].address = address;
+	set.edits[0].field = field;
+	set.edits[0].value = std::move(value);
 	session.handle(set);
 }
 
@@ -1446,7 +1448,7 @@ void test_preview_follows() {
 	CHECK(preview_family(v, PreviewFamily::None) == PreviewFamily::Menu, "before it showed anything, with both: the menu's");
 
 	// A family with nothing to show gives way to the other.
-	session.handle(make_request(EditorRequestKind::CloseDocument, "anims/SKIN.adm"));
+	session.handle(request::close_document("anims/SKIN.adm"));
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find("main.mnu - startup") != std::string::npos, "the table closed: the menu's pane");
 	run.open("anims/walk.bad");
@@ -1455,12 +1457,12 @@ void test_preview_follows() {
 	const Document *main_menu = session.document_for("main.mnu");
 	CHECK(main_menu != nullptr, "the menu open");
 	if (!main_menu) return;
-	session.handle(make_request(EditorRequestKind::CloseDocument, main_menu->path()));
+	session.handle(request::close_document(main_menu->path()));
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find("walk.bad on skinned.3di") != std::string::npos, "the menu closed: the clip's pane");
 	text = run.open("gametext.bin");
 	CHECK(text.find("walk.bad on skinned.3di") != std::string::npos, "a string table with no menu open: the clip's pane");
-	session.handle(make_request(EditorRequestKind::CloseDocument, "anims/walk.bad"));
+	session.handle(request::close_document("anims/walk.bad"));
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "neither: what to open");
 
@@ -1519,8 +1521,8 @@ void test_preview_model_gestures() {
 	if (!armory || !armory->model_row())
 		return;
 	const ModelRow &row = *armory->model_row();
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, armory->path());
-	select.edit.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	EditorRequest select = request::select_record(
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();
@@ -1570,7 +1572,7 @@ void test_preview_model_gestures() {
 	CHECK(step && step->path == armory->path() &&
 					count_of_kind(requests, EditorRequestKind::EndEdit) == 0,
 			"the drag's first step");
-	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
+	session.handle(request::open_document("main.mnu"));
 	run.settle();
 	requests = run.take();
 	const EditorRequest *end = only(requests, EditorRequestKind::EndEdit);
@@ -1607,8 +1609,8 @@ void test_preview_model_pane_input() {
 	if (!armory || !armory->model_row())
 		return;
 	const ModelRow &row = *armory->model_row();
-	EditorRequest select = make_request(EditorRequestKind::SelectRecord, armory->path());
-	select.edit.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	EditorRequest select = request::select_record(
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();
@@ -1676,7 +1678,7 @@ void test_files_tree_kept() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Kept"));
+	session.handle(request::new_project(dir.file("project"), "Kept"));
 	editor_test::create_missing_files(session);
 	Ui ui;
 	ui.windows.set_view(&session.view());
@@ -1686,9 +1688,9 @@ void test_files_tree_kept() {
 	if (!window) return;
 	const size_t made = window->rebuilds();
 	CHECK(made >= 1, "the tree made");
-	session.handle(make_request(EditorRequestKind::ClearOutput));
+	session.handle(request::clear_output());
 	// Nothing to save: the status line alone.
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	ui.frames(3);
 	CHECK(window->rebuilds() == made, "Output and the status line: the tree kept");
 	// An Undo in a file that is not open is refused with a warning on the file: Findings moves
@@ -1697,12 +1699,12 @@ void test_files_tree_kept() {
 	CHECK(items != nullptr, "the item table");
 	if (!items) return;
 	const uint64_t files = session.view().revisions.of(ViewConcern::Files);
-	session.handle(make_request(EditorRequestKind::Undo, items->relative_path));
+	session.handle(request::undo(items->relative_path));
 	ui.frames(2);
 	CHECK(session.view().revisions.of(ViewConcern::Files) == files, "the files as they were");
 	CHECK(window->rebuilds() == made + 1, "a finding alone: the tree and its counts made again");
 	session.set_poll_budget({0, 64 * 1024}); // one step per poll
-	session.handle(make_request(EditorRequestKind::Build)); // its refresh reads the files again
+	session.handle(request::build()); // its refresh reads the files again
 	ui.frames(2);
 	const size_t building = window->rebuilds();
 	size_t steps = 0;
@@ -1716,7 +1718,7 @@ void test_files_tree_kept() {
 	CHECK(steps > 1 && session.view().has_build, "the build stepped");
 	const std::string readme = session.view().project_root + "/notes/readme.txt";
 	CHECK(editor_test::write_text(readme, "x"), "a file written");
-	session.handle(make_request(EditorRequestKind::Rescan));
+	session.handle(request::rescan());
 	ui.frames(2);
 	CHECK(window->rebuilds() > building && logged_frame(ui).find("readme.txt") != std::string::npos,
 	      "a file found anew: the tree made again");

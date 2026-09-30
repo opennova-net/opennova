@@ -60,6 +60,14 @@ struct Edit {
 	std::shared_ptr<const EditPayload> payload;
 };
 
+// Two edits that ask the same (a request read back from its wire form, S13 A4).
+inline bool operator==(const Edit &a, const Edit &b) {
+	return a.operation == b.operation && a.address == b.address && a.parent == b.parent &&
+	       a.field == b.field && a.value == b.value && a.position == b.position &&
+	       a.coalesce == b.coalesce && a.gesture == b.gesture && a.payload == b.payload;
+}
+inline bool operator!=(const Edit &a, const Edit &b) { return !(a == b); }
+
 // A gesture token no edit has carried yet in this process.
 uint64_t next_edit_gesture();
 

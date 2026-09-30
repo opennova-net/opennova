@@ -15,99 +15,71 @@ namespace opennova::editor {
 // What the editor's windows and menus ask for (ADR 0046 d10): typed requests out of the
 // UI, drained by the project session (the portable kinds) or by the shell (the kinds
 // only an OS can serve: a native dialog, a file manager). A request carries plain
-// fields, never a callback, so a test can enqueue and inspect it.
+// fields, never a callback, so a test can enqueue and inspect it. Each kind is one row of
+// the request table (request_kinds.cpp, S13 A4): its token, who serves it, the fields it
+// takes, what it reads and writes, what the unsaved-changes prompt guards of it and what
+// it does; request_factories.h makes a request of each kind.
 enum class EditorRequestKind {
-	NewProject,           // path = the project directory, text = the title
-	OpenProject,          // path
+	NewProject,
+	OpenProject,
 	CloseProject,
-	ForgetRecent,         // path
-	Rescan,               // re-read the project's files
-	ApplyProjectSettings, // settings = the settings to set, each left out as it is; the view's
-	                      // settings_result says what came of it
-	// The import dialog (the view's import_preview): a preview plans importing the files chosen
-	// (editor/import/import_plan), with the files they need when its flag says so.
-	PreviewImport,        // paths = the files picked: the loose ones are chosen, an archive's members are
-	                      // listed to choose from; flag = with the files they need
-	PlanImport,           // imports = the files chosen (the loose ones and those chosen from the list),
-	                      // flag = with the files they need: planned again (a preview opens when none is)
-	SetImportDependencies, // flag = whether an import brings the files the chosen ones need: the editor's
-	                      // setting, remembered; an open preview is planned again with it
-	ImportFiles,          // imports = the rows kept (their sources), flag = replace existing files; with a
-	                      // preview open, planned again first, and nothing written when the plan changed;
-	                      // replacing a file with unsaved edits asks to save them first
+	ForgetRecent,
+	Rescan,
+	ApplyProjectSettings,
+	PreviewImport,
+	PlanImport,
+	SetImportDependencies,
+	ImportFiles,
 	CancelImport,
-	CreateMissing,        // names = the roles of the required files to create from scratch (none: nothing);
-	                      // a file there since the last refresh is refused, never overwritten
-	Build,                // packs the files on disk: asks to save unsaved edits first; returns once the
-	                      // build operation starts (ActionOutcome::operation), a build running already
-	                      // serving it
-	Play,                 // build, then run the game on the build; a build running already serves it and
-	                      // starts the game when it lands
+	CreateMissing,
+	Build,
+	Play,
 	StopPlay,
-	CancelOperation,      // the running operation (the view's operation) stops between two steps, its
-	                      // work discarded
-	CreateFile,           // path = the file to create blank, from the name's requirement factory, else its
-	                      // kind's free-form one; opened when the editor edits its kind (a font, a .coo,
-	                      // character attributes are made and listed, not opened); text = its kind token
-	                      // when the name alone cannot say
-	OpenDocument,         // path; edit.address = the record to select once open, or text = its locator
-	                      // (Document::locator: a record the graph read, found again once open; Go to),
-	                      // edit.field = its field to show (the view's reveal_field)
-	ShowInFiles,          // path = a project file (project-relative or logical): Files selects it and scrolls
-	                      // to it (the view's reveal_file); flag = and asks its new name (Files' Rename...)
-	ReloadDocument, CloseDocument,
-	SelectRecord,         // path = the document, edit.address = the record, select_mode = how it
-	                      // joins the selection (the selected records stay inside one row)
-	EditRecord,           // path = the document, edit = the change, or edits = a batch on one row; flag =
-	                      // open the document first when it is not (a fix's edit)
-	RevertToSaved,        // path = the document, edit = a record's field (address, field), or edits = a
-	                      // row's fields (a group's) of several records of one row: each given back the value and
-	                      // presence the saved file holds (Document::revert_edits), one batch, one undo
-	                      // step; refused when none has anything to go back to (the Inspector's Revert to
-	                      // saved)
-	EndEdit,              // path = the document: the coalesced edit group (or the gesture) ends
-	Copy,                 // path = the document: its selected records onto the session's clipboard
-	Cut,                  // Copy, then the selected records removed in one step
-	Paste,                // path = the document: the clipboard into edit.parent (0 with edit.address.row
-	                      // = the row) at edit.position; with no target, after the selection
-	Duplicate,            // path = the document: each selected record (those no other selected one holds)
-	                      // copied right after itself, one step; the copies become the selection
-	Save,                 // path = the document ("" = the active one): written, with no unsaved edits too
-	                      // when its file holds other bytes than it would write (a canonical rewrite); a
-	                      // file that is not open is read, rewritten that way when it must be, and left closed
-	SaveAll,              // every document with unsaved edits
-	Undo, Redo,
-	ResolveUnsaved,       // unsaved_choice answers the unsaved-changes prompt
-	RenameAsset,          // path = the file (project-relative or logical), text = the new logical name; a
-	                      // file it rewrites, or the file itself, with unsaved edits: asks to save them first
-	AssignRequirement,    // text = a requirement's role, path = the project file to rename to its name (as
-	                      // RenameAsset asks)
-	PreviewRename,        // what a rename would do, planned into the view's rename_preview, nothing written:
-	                      // path = the file defining a name, text = its record's locator, edit.field = the
-	                      // field defining it, edit.value = the new name (Rename everywhere); edit.field "" =
-	                      // the file at path renamed to edit.value (Files' Rename...); flag = and ask the new
-	                      // name (the Rename everywhere dialog opens)
-	RenameSymbol,         // path, text, edit.field and edit.value as PreviewRename's: the name and every use
-	                      // that reaches it rewritten on disk (graph/rename_transaction), not undoable, or
-	                      // refused with the reasons; a file it rewrites with unsaved edits: asks to save
-	                      // them first
-	Reimport,             // a refresh, so every stale source imports as on any; path = the source `flag` imports
-	                      // again even when unchanged and whose findings are the outcome ("" = every source)
-	PreviewRetailImport,  // the game install's files: names = those alone, chosen (an Import fix); none = every
-	                      // file listed to choose from; flag = with the files they need
-	ClearOutput,          // empty the view's output lines (Output's Clear)
-	Quit,                 // asks about unsaved edits first, then sets the view's quit_requested,
-	                      // which the shell acts on
-	// Shell-only: the portable session cannot serve these.
-	PickDirectory,        // purpose says what the picked directory is for
-	PickFile,             // purpose = RuntimeExecutable; ImportFiles picks multiple files
-	RevealPath,           // path: show it in the OS file manager
+	CancelOperation,
+	CreateFile,
+	OpenDocument,
+	ShowInFiles,
+	ReloadDocument,
+	CloseDocument,
+	SelectRecord,
+	EditRecord,
+	RevertToSaved,
+	EndEdit,
+	Copy,
+	Cut,
+	Paste,
+	Duplicate,
+	Save,
+	SaveAll,
+	Undo,
+	Redo,
+	ResolveUnsaved,
+	RenameAsset,
+	AssignRequirement,
+	PreviewRename,
+	RenameSymbol,
+	Reimport,
+	PreviewInstallImport,
+	ClearOutput,
+	Quit,
+	// The shell's: the portable session cannot serve these.
+	PickDirectory,
+	PickFile,
+	RevealPath,
 	kCount,
 };
 
 inline constexpr size_t kEditorRequestKindCount = static_cast<size_t>(EditorRequestKind::kCount);
 
-enum class PickPurpose { None, NewProjectLocation, OpenProject, RuntimeExecutable, RetailDirectory, ImportFiles };
+// What a picked directory or file is for (PickDirectory, PickFile).
+enum class PickPurpose {
+	None,
+	NewProjectLocation,
+	OpenProject,
+	RuntimeExecutable,
+	GameInstall,
+	ImportFiles
+};
 
 // The unsaved-changes prompt's answer: Save writes the files it lists, then what waited
 // runs; Discard drops their unsaved edits, then it runs (never offered for Build and Play,
@@ -130,26 +102,90 @@ struct ProjectSettingsChange {
 	std::optional<std::string> title;
 	std::optional<bool> mission;
 	std::optional<bool> multiplayer;
-	std::optional<std::string> retail_directory;
+	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
-	std::optional<bool> play_retail;
+	std::optional<bool> play_in_install;
 };
 
+inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
+	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
+			a.multiplayer == b.multiplayer && a.game_install == b.game_install &&
+			a.runtime_executable == b.runtime_executable && a.play_in_install == b.play_in_install;
+}
+
+// Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at
+// `position` in its collection (SIZE_MAX = the end). None named (row and parent 0): after
+// the selection, the session's own rule (DocumentSet::position_after).
+struct PasteAt {
+	NodeId row = 0;
+	NodeId parent = 0;
+	size_t position = SIZE_MAX;
+	bool named() const { return row != 0 || parent != 0; }
+};
+
+inline bool operator==(const PasteAt &a, const PasteAt &b) {
+	return a.row == b.row && a.parent == b.parent && a.position == b.position;
+}
+
+// One request: its kind and the fields that kind takes, each field meaning one thing
+// whatever the kind (request_fields.cpp has a row per field: its token on the wire, its
+// JSON type and what it means; the kind's row lists the fields it takes and those it must
+// carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
+	// A project's directory; a new project's title.
+	std::string dir;
+	std::string title;
+	// A file: a project file or open document ("" the active one where the kind names it), a
+	// source to import again, a path to reveal.
 	std::string path;
-	std::string text;
-	bool flag = false;
+	// A record by its locator (Document::locator), and a field of it.
+	std::string locator;
+	std::string field;
+	// The name a rename gives; a requirement's role; an asset kind's token, where a file's name
+	// cannot say its kind.
+	std::string new_name;
+	std::string role;
+	std::string file_kind;
+	// Requirements' roles; the game install's files by logical name; files on disk to import.
+	std::vector<std::string> roles;
+	std::vector<std::string> names;
+	std::vector<std::string> paths;
+	// Import sources, as the view's import rows carry them.
+	std::vector<ImportSource> imports;
+	// A batch on one row, one undo step.
+	std::vector<Edit> edits;
+	// A record by its address; where a Paste goes.
+	NodeAddress address;
+	PasteAt paste_at;
+	SelectMode mode = SelectMode::Replace;
+	UnsavedChoice choice = UnsavedChoice::Cancel;
+	ProjectSettingsChange settings;
 	PickPurpose purpose = PickPurpose::None;
-	std::vector<std::string> paths; // files chosen for PreviewImport
-	std::vector<std::string> names; // CreateMissing's roles; PreviewRetailImport's files
-	std::vector<ImportSource> imports; // PlanImport's files chosen; ImportFiles' rows kept (flag = replace)
-	Edit edit;
-	std::vector<Edit> edits; // EditRecord: a batch on one row, one undo step (edit is then unused)
-	SelectMode select_mode = SelectMode::Replace;
-	UnsavedChoice unsaved_choice = UnsavedChoice::Cancel;
-	ProjectSettingsChange settings; // ApplyProjectSettings
+	// An import brings the files the chosen ones need; it replaces the project's files of the
+	// names; a source imports again even when unchanged; and asks the new name (Files'
+	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit).
+	bool with_dependencies = false;
+	bool replace = false;
+	bool force = false;
+	bool ask_name = false;
+	bool open_first = false;
 };
+
+inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
+	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.path == b.path &&
+			a.locator == b.locator && a.field == b.field && a.new_name == b.new_name &&
+			a.role == b.role && a.file_kind == b.file_kind && a.roles == b.roles &&
+			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
+			a.edits == b.edits && a.address == b.address && a.paste_at == b.paste_at &&
+			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
+			a.purpose == b.purpose && a.with_dependencies == b.with_dependencies &&
+			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
+			a.open_first == b.open_first;
+}
+inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
+	return !(a == b);
+}
 
 // What one request came to, for whoever raised it and must know whether it happened
 // (the editor MCP): the findings it reported, whether it was refused or failed (an
@@ -167,14 +203,5 @@ struct ActionOutcome {
 	std::vector<Diagnostic> findings;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
-
-inline EditorRequest make_request(EditorRequestKind kind, std::string path = std::string(),
-                                  std::string text = std::string()) {
-	EditorRequest request;
-	request.kind = kind;
-	request.path = std::move(path);
-	request.text = std::move(text);
-	return request;
-}
 
 } // namespace opennova::editor

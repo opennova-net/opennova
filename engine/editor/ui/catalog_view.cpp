@@ -1,6 +1,7 @@
 #include "catalog_view.h"
 
 #include <editor/documents/def_catalog_document.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
@@ -18,11 +19,11 @@ using window_requests::select;
 
 // A file-wide value of items.def's spawn registry (a slot's item id, or a new slot).
 void set_spawn(Workspace &workspace, const DefCatalogDocument &document, size_t slot, int64_t id) {
-	auto request = make_request(EditorRequestKind::EditRecord, document.path());
-	request.edit.operation = EditOperation::SetFileValue;
-	request.edit.position = slot;
-	request.edit.value = id;
-	workspace.request(std::move(request));
+	Edit set;
+	set.operation = EditOperation::SetFileValue;
+	set.position = slot;
+	set.value = id;
+	workspace.request(request::edit_record(document.path(), std::move(set)));
 }
 
 } // namespace

@@ -5,9 +5,10 @@
 
 namespace opennova::editor {
 
-bool EditorPreferences::load(Diagnostic &error) {
+bool EditorPreferences::load(Diagnostic &finding) {
+	finding = Diagnostic();
 	Preferences loaded;
-	if (!store_.load(loaded, error)) {
+	if (!store_.load(loaded, finding)) {
 		values_ = Preferences();
 		return false;
 	}

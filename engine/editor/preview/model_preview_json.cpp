@@ -9,6 +9,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/model/edit.h>
 #include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 
 namespace opennova::editor {
@@ -308,11 +309,9 @@ bool model_preview_drag(ProjectSession &session, const ModelPreviewSnapshot &sna
 		std::vector<Edit> edits;
 		if (!model.handle_edits(document, overlay, handle, x, y, snap, next_edit_gesture(), edits)) return false;
 		const std::string path = document.path();
-		EditorRequest request = make_request(EditorRequestKind::EditRecord, path);
-		request.edits = std::move(edits);
-		session.handle(request);
+		session.handle(request::edit_record(path, std::move(edits)));
 		const bool ok = session.outcome().done();
-		session.handle(make_request(EditorRequestKind::EndEdit, path));
+		session.handle(request::end_edit(path));
 		return ok;
 	}
 	return false;

@@ -131,7 +131,7 @@ private:
 	// records (document.no_records, S13 D6); nothing when no project is open.
 	void refuse_records(const std::string &path, const char *not_open);
 	void copy_records(Document &document, bool cut);
-	void paste_records(Document &document, const Edit &target);
+	void paste_records(Document &document, const PasteAt &target);
 	void duplicate_records(Document &document);
 	void rewrite_file(const std::string &path);
 	// The open document at exactly `path` (activate's), or null.

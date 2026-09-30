@@ -33,9 +33,9 @@ private:
 		char title[128] = "";
 		bool mission = false;
 		bool multiplayer = false;
-		char retail[512] = "";
+		char game_install[512] = "";
 		char runtime[512] = "";
-		bool play_retail = false;
+		bool play_in_install = false;
 	};
 	void apply(Workspace &workspace);
 	void close();

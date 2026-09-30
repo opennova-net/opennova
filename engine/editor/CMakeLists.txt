@@ -130,6 +130,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp

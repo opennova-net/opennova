@@ -27,7 +27,7 @@ public:
 	void rename_asset(const std::string &file, const std::string &new_name);
 	void assign_requirement(const std::string &role, const std::string &file);
 	// PreviewRename: what a rename would do, planned into the view (nothing written, nothing
-	// reported): a name's rename everywhere, or a file's (edit.field "").
+	// reported): a name's rename everywhere, or a file's (no field).
 	void preview(const EditorRequest &request);
 	void rename_symbol(const EditorRequest &request);
 

@@ -12,6 +12,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
@@ -187,42 +188,42 @@ int validation_and_session() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Strings"));
+	session.handle(request::new_project(dir.file("project"), "Strings"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.requirements.required_missing == 0);
 	// The requirement tables open as documents; a new section and string reach the file.
-	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	session.handle(request::open_document("gametext.bin"));
 	auto *document = session.document_for("gametext.bin");
 	TEST_EXPECT(document && dynamic_cast<StringsDocument *>(document));
 	TEST_EXPECT(is_editable_kind(AssetKind::Strings) && document_type_for(AssetKind::Strings)->name == std::string("strings"));
-	EditorRequest add = make_request(EditorRequestKind::EditRecord, document->path());
-	add.edit.operation = EditOperation::Add;
-	add.edit.address = {0, kSection, 0};
+	EditorRequest add = request::edit_record(document->path(), Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address = {0, kSection, 0};
 	session.handle(add);
 	const NodeId section = document->last_added();
 	TEST_EXPECT(view.selection.row == section && view.selection.kind == kSection);
-	EditorRequest name = make_request(EditorRequestKind::EditRecord, document->path());
-	name.edit = set({section, kSection, 0}, "name", std::string("Custom"));
+	EditorRequest name = request::edit_record(
+			document->path(), set({ section, kSection, 0 }, "name", std::string("Custom")));
 	session.handle(name);
-	add.edit.address = {section, kString, 0};
+	add.edits[0].address = {section, kString, 0};
 	session.handle(add);
 	const NodeId string = document->last_added();
 	TEST_EXPECT(view.selection.row == section && view.selection.child == string && view.selection.kind == kString);
-	EditorRequest key = make_request(EditorRequestKind::EditRecord, document->path());
-	key.edit = set({section, kString, string}, "key", std::string("HELLO"));
+	EditorRequest key = request::edit_record(
+			document->path(), set({ section, kString, string }, "key", std::string("HELLO")));
 	session.handle(key);
 	// An empty key is an error, a duplicate a warning; Build refuses the dirty document.
-	add.edit.address = {section, kString, 0};
+	add.edits[0].address = {section, kString, 0};
 	session.handle(add);
 	const NodeId blank = document->last_added();
-	EditorRequest empty = make_request(EditorRequestKind::EditRecord, document->path());
-	empty.edit = set({section, kString, blank}, "key", std::string(""));
+	EditorRequest empty = request::edit_record(
+			document->path(), set({ section, kString, blank }, "key", std::string("")));
 	session.handle(empty);
 	bool empty_error = false;
 	for (const Diagnostic &d : view.diagnostics) empty_error |= d.code == "strings.key_empty" && d.child_id == blank;
 	TEST_EXPECT(empty_error);
-	empty.edit = set({section, kString, blank}, "key", std::string("hello"));
+	empty.edits = {set({section, kString, blank}, "key", std::string("hello"))};
 	session.handle(empty);
 	bool duplicate = false, still_empty = false;
 	for (const Diagnostic &d : view.diagnostics) {
@@ -231,39 +232,36 @@ int validation_and_session() {
 	}
 	TEST_EXPECT(duplicate && !still_empty);
 	// Build waits on the unsaved prompt over the edited table; cancelled, nothing is built.
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	TEST_EXPECT(view.unsaved_prompt.open && view.unsaved_prompt.action == EditorRequestKind::Build &&
 	            view.unsaved_prompt.files == std::vector<std::string>{document->path()} && !session.view().operation.running());
-	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
-	cancel.unsaved_choice = UnsavedChoice::Cancel;
+	EditorRequest cancel = request::resolve_unsaved(UnsavedChoice::Cancel);
 	session.handle(cancel);
 	TEST_EXPECT(!view.unsaved_prompt.open && !view.has_build && document->dirty());
-	EditorRequest remove = make_request(EditorRequestKind::EditRecord, document->path());
-	remove.edit.operation = EditOperation::Remove;
-	remove.edit.address = {section, kString, blank};
+	EditorRequest remove = request::edit_record(document->path(), Edit());
+	remove.edits[0].operation = EditOperation::Remove;
+	remove.edits[0].address = {section, kString, blank};
 	session.handle(remove);
-	session.handle(make_request(EditorRequestKind::SaveAll));
+	session.handle(request::save_all());
 	TEST_EXPECT(!document->dirty());
-	session.handle(make_request(EditorRequestKind::Build));
+	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(view.last_build.ok);
 	// Reopen from disk: the section and the key survive; Go to finds the key by the locator of
 	// the symbol the key defines.
-	session.handle(make_request(EditorRequestKind::CloseDocument, document->path()));
+	session.handle(request::close_document(document->path()));
 	const std::vector<const GraphSymbol *> hello = view.graph->symbols_named(ReferenceKind::TextId, "HELLO");
 	TEST_EXPECT(hello.size() == 1 && hello[0]->field == "key");
 	if (hello.size() != 1) return 1;
-	EditorRequest go_to = make_request(EditorRequestKind::OpenDocument, hello[0]->file, hello[0]->locator);
-	go_to.edit.field = hello[0]->field;
-	session.handle(go_to);
+	session.handle(request::open_document(hello[0]->file, hello[0]->locator, hello[0]->field));
 	document = session.document_for("gametext.bin");
 	TEST_EXPECT(document && view.selection.kind == kString && view.selection.row != 0 && view.reveal_field == "key");
 	TEST_EXPECT(document && text_of(*document, view.selection, "key") == "HELLO");
 	// A new table is created blank and opened when the request names the kind (a
 	// bare `.bin` name cannot say what it is); an unnamed kind is refused.
-	session.handle(make_request(EditorRequestKind::CreateFile, "extra.bin"));
+	session.handle(request::create_file("extra.bin"));
 	TEST_EXPECT(session.document_for("extra.bin") == nullptr && view.diagnostics.back().code == "document.kind");
-	session.handle(make_request(EditorRequestKind::CreateFile, "extra.bin", asset_kind_token(AssetKind::Strings)));
+	session.handle(request::create_file("extra.bin", asset_kind_token(AssetKind::Strings)));
 	auto *extra = session.document_for("extra.bin");
 	TEST_EXPECT(extra && extra->rows().empty() && !extra->blocked());
 	if (!extra) return 1;
@@ -275,18 +273,18 @@ int validation_and_session() {
 		return static_cast<const Diagnostic *>(nullptr);
 	};
 	add.path = extra->path();
-	add.edit.address = {0, kSection, 0};
+	add.edits[0].address = {0, kSection, 0};
 	session.handle(add);
 	const NodeId twice = extra->last_added();
-	EditorRequest rename = make_request(EditorRequestKind::EditRecord, extra->path());
-	rename.edit = set({twice, kSection, 0}, "name", std::string(""));
+	EditorRequest rename = request::edit_record(
+			extra->path(), set({ twice, kSection, 0 }, "name", std::string("")));
 	session.handle(rename);
 	TEST_EXPECT(finding("strings.section_empty", twice) && finding("strings.section_empty", twice)->field == "name");
-	rename.edit = set({twice, kSection, 0}, "name", std::string("Twice"));
+	rename.edits = {set({twice, kSection, 0}, "name", std::string("Twice"))};
 	session.handle(rename);
 	session.handle(add);
 	const NodeId again = extra->last_added();
-	rename.edit = set({again, kSection, 0}, "name", std::string("TWICE"));
+	rename.edits = {set({again, kSection, 0}, "name", std::string("TWICE"))};
 	session.handle(rename);
 	const Diagnostic *shadowed = finding("strings.section_duplicate", again);
 	TEST_EXPECT(!finding("strings.section_empty", twice) && !finding("strings.section_duplicate", twice));
