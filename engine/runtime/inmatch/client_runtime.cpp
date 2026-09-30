@@ -583,6 +583,21 @@ hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::stri
 	return Result::Sent;
 }
 
+bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
+	if (tag != c2s::EMOTE_REQUEST && tag != c2s::RADIO_CALL_REQUEST) return false;
+	std::vector<uint8_t> body;
+	io::append_i16_le(body, value); // [orig: @0x42c137 / @0x42c167]
+	if (role_ == Role::HostClient && loopback_ != nullptr) {
+		loopback_->client_send(tag, std::move(body));
+		return true;
+	}
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	ProtocolMessage pick = make_protocol_message(tag, std::move(body));
+	pick.retention_flushes = 1; // the user param [orig: `push 1` @0x42c12c / @0x42c15c]
+	pre_send_queue_.push_back(std::move(pick));
+	return true;
+}
+
 // [orig: Game_ProcessMainFrame — `if (--dword_24D1DDC <= 0) { dword_24D1DDC =
 //  62; if (is_in_session) { CNetQuality_UpdateMetrics(); CNetQuality_SetLevel
 //  (&g_NetQuality, level); } }`, ahead of the client net frame]. The peer

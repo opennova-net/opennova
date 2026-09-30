@@ -320,6 +320,14 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	return kEscapeOpenMenu | respawn_init(s, in.in_session);
 }
 
+void hud_toggles_close_voice_menu(HudToggleState &s, bool radio) {
+	if (radio) {
+		s.radio_menu_open = false; // [orig: @0x49c7a8]
+	} else {
+		s.emotes_menu_open = false; // [orig: @0x49c75c]
+	}
+}
+
 const char *verbose_toast_key(bool verbose) {
 	return verbose ? "STRMISC_VERBOSE_ON" : "STRMISC_VERBOSE_OFF";
 }

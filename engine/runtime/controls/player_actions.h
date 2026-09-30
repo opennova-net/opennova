@@ -39,6 +39,11 @@ enum class PlayerAction {
 	// The death screen's spectator rows (value = the dispatch code 500 / 501
 	// / 502; replication::ClientReplicaPipeline::spectate_action).
 	Spectate,
+	// A digit while the Emotes / Radio menu is open: value 1..10 (the 0 key
+	// is 10). The embedder sends it (C2S 0x14 / C2S 0x13) and closes that
+	// menu (hud::hud_toggles_close_voice_menu).
+	EmotePick,
+	RadioPick,
 };
 
 struct PlayerActionRequest {
@@ -53,6 +58,10 @@ struct PlayerActionPoll {
 	// An open text line owns the keyboard (BindingSet::set_keyboard_captured):
 	// the held-USE digits go to the line, not the seats.
 	bool keyboard_captured = false;
+	// The F9 Emotes / F10 Radio menus' open words as the HUD toggles hold them
+	// this frame (hud::HudToggleState): a digit goes to the open menu.
+	bool emotes_menu_open = false;
+	bool radio_menu_open = false;
 };
 
 struct PlayerActionFrame {
@@ -115,6 +124,8 @@ private:
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
 	bool use_digit_was_down_[10] = {};
+	// This frame's menu digit arm: a menu was open while gameplay input ran.
+	bool menu_digits_ = false;
 	bool spectator_was_down_[3] = {};
 
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,

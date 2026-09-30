@@ -29,6 +29,8 @@
 #include <runtime/inmatch/server_tick.h>
 
 #include "host_test_setup.h"
+#include "conn_fixture.h"
+#include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -5807,7 +5809,7 @@ bool run_medic_reviving_plays_both_receive_cues() {
 	world.cached.local_player = world.registry.spawn(0, person);
 	world.rules.mp_session = true;
 	std::vector<std::string> voices;
-	world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+	world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
 			-> std::optional<w::ScriptVoiceChannel::SetSelection> {
 		voices.push_back(name); return std::nullopt;
 	});
@@ -5851,7 +5853,7 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
     world.tables.voice_macros.sections.push_back({"macrotext", 1});
     world.tables.voice_macros.entries.push_back({"RAD_6", "Need a lift", {}, 0});
     std::vector<std::string> voices;
-    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
             -> std::optional<w::ScriptVoiceChannel::SetSelection> {
         voices.push_back(name); return std::nullopt;
     });
@@ -5952,6 +5954,176 @@ bool run_emote_and_local_chat_track_the_speaker(bool replica_only) {
 // in the table, and the 1 Hz revive countdown walks the table only.
 // [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab; NapiNPClientMsg_HandleSpawnSlot
 //  @0x4317B0; Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+// The Emotes / Radio menu picks leave the listen client over its loopback as
+// C2S 0x14 / 0x13 [i16 value]; a joiner with no session queues nothing.
+// [orig: NetPacket_SendEmoteRequest @0x42C120; NetPacket_SendRadioCallRequest
+//  @0x42C150]
+bool run_voice_menu_picks_ride_the_session() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    if (!expect(host_view.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3) &&
+            host_view.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 10),
+            "the listen client queues both picks")) return false;
+    std::vector<ns::Datagram> out;
+    ns::Datagram dg;
+    while (host_loop.host_recv(dg)) out.push_back(dg);
+    if (!expect(out.size() == 2 && out[0].tag == c2s::EMOTE_REQUEST &&
+            out[0].body == std::vector<uint8_t>({3, 0}) &&
+            out[1].tag == c2s::RADIO_CALL_REQUEST &&
+            out[1].body == std::vector<uint8_t>({10, 0}),
+            "the picks ride the loopback as [i16 value]")) return false;
+    if (!expect(!host_view.queue_voice_menu_pick(c2s::CHAT_MESSAGE, 1),
+            "only the two menu tags are picks")) return false;
+    inmatch::ClientRuntime unjoined("Unjoined");
+    if (!expect(!unjoined.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3),
+            "a joiner outside a session queues nothing")) return false;
+    // A joiner in session frames the pick on its one-send held queue.
+    const std::string client_scrk = "CLIENT-PICK-SCRK";
+    inmatch::ClientRuntime joiner("Picker", [] { return uint64_t{0x10203040}; });
+    joiner.seed_session(0x55667799u, 1u, client_scrk, "SERVER-PICK-SCRK", 1, 0, 0x0007,
+            w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+    if (!expect(joiner.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 6),
+            "a joiner in session queues the pick")) return false;
+    std::vector<uint8_t> radio_body;
+    for (const std::vector<uint8_t> &datagram : joiner.Client_ProcessNetworkFrame(1)) {
+        ProtocolPacketHeader header;
+        std::vector<ProtocolMessage> messages;
+        if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+        for (const ProtocolMessage &m : messages)
+            if (m.tag == c2s::RADIO_CALL_REQUEST) radio_body = m.payload;
+    }
+    return expect(radio_body == std::vector<uint8_t>({6, 0}),
+            "the joiner's radio pick is C2S 0x13 [i16 6] on its session");
+}
+
+// The emote clip source: emote_1..emote_10 are 20-tick one-shots, emote_4 is
+// unauthored (its slot backfilled with RESET); every other state a 62-tick loop.
+struct EmoteSource final : w::IRootMotionSource {
+    bool has_clip(int, int state) const override { return state != 118; }
+    bool advance(int, int, int32_t &phase, w::RootMotionFrame &out) override {
+        ++phase;
+        out = {};
+        return true;
+    }
+    int32_t clip_length_ticks(int, int state, int) const override {
+        return state >= 115 && state <= 124 ? 20 : 62;
+    }
+    bool clip_loops(int, int state, int) const override { return state < 115 || state > 124; }
+};
+
+// S2C 0x2D on the listen host: the speaker's world body takes emote_N on its
+// secondary channel when its map authors it, and the EMO_ voice (flags 9, the
+// body prefix) asks the bank for its member at the speaker.
+// [orig: NapiNPClientMsg_HandleEmote @0x427efb..0x427f55]
+bool run_emote_stamps_the_speaker_body_and_voices_it() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    host_view.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    world.rules.mp_session = true;
+    EmoteSource source;
+    world.ai.root_motion = &source;
+    w::PlayerSpawn spawn;
+    spawn.team = 1;
+    world.cached.local_player = w::spawn_remote_player(world, spawn);
+    spawn.position = {5.0f, 0.0f, 0.0f};
+    const w::EntityHandle remote = w::spawn_remote_player(world, spawn);
+    w::AiEntity *body = world.ai.for_handle(remote);
+    if (!expect(body != nullptr, "the remote player has a world body")) return false;
+    std::vector<std::pair<std::string, bool>> voices;
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool bank)
+            -> std::optional<w::ScriptVoiceChannel::SetSelection> {
+        voices.emplace_back(name, bank);
+        return std::nullopt;
+    });
+    host_view.view().apply(s2c::EMOTE_BROADCAST, {3, uint8_t(remote.slot()), 0, 0});
+    host_view.apply_received_effects(world);
+    if (!expect(body->inf.wpn_state == 117 && body->inf.wpn_deferred == 0,
+            "emote 3 stamps emote_3 (state 117) with no deferred")) return false;
+    if (!expect(voices.size() == 1 && voices[0].first == "BM1_EMO_3" && voices[0].second,
+            "the voice asks the bank member of the body's EMO_ set")) return false;
+    body->inf.wpn_state = 43;
+    host_view.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    host_view.apply_received_effects(world);
+    return expect(body->inf.wpn_state == 43 && voices.size() == 2,
+            "an unauthored emote leaves the channel and still voices");
+}
+
+// opennova <-> opennova: a joiner's Emotes / Radio picks leave framed on its
+// session as [i16 value], the host's handlers answer them (the sender hears
+// its own), and the joiner's fold plays the answer: the emote on its own
+// body, the radio line in its chat ring.
+// [orig: NetPacket_SendEmoteRequest @0x42C120 -> NapiNPServerMsg_HandleEmoteRequest
+//  @0x501E00 -> NapiNPClientMsg_HandleEmote @0x427E90; NetPacket_SendRadioCallRequest
+//  @0x42C150 -> NapiNPServerMsg_HandleRadioCall @0x514330 ->
+//  NapiNPClientMsg_HandleEntityDeath @0x430C50]
+bool run_voice_menu_picks_round_trip_through_a_host() {
+    inmatch::NapiNPServerCtx ctx;
+    inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+    ctx.is_in_session = 1;
+    w::World host_world;
+    host_world.registry.configure_pool(0, 8);
+    host_world.rules.mp_session = true;
+    ctx.world = &host_world;
+    w::PlayerSpawn spawn;
+    spawn.team = 1;
+    const w::EntityHandle joined = w::spawn_remote_player(host_world, spawn);
+    ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+    ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+            inmatch::kFirstJoinerDcb, 1, &transport, ns::TransportMode::Client, joined, true));
+
+    const std::string client_scrk = "CLIENT-VOICE-SCRK";
+    const std::string server_scrk = "SERVER-VOICE-SCRK";
+    inmatch::ClientRuntime joiner("Voice", [] { return uint64_t{0x10203040}; });
+    joiner.seed_session(0x55667799u, 1u, client_scrk, server_scrk, 1, 0, joined.packed,
+            w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+    joiner.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 8);
+    world.rules.mp_session = true;
+    EmoteSource source;
+    world.ai.root_motion = &source;
+    world.cached.local_player = w::spawn_remote_player(world, spawn);
+    auto &slot = joiner.view().state().roster[1];
+    slot.bound = true;
+    slot.entity_slot = int16_t(joined.slot());
+    slot.name = "Voice";
+
+    uint32_t frame = 1;
+    const auto round_trip = [&](uint8_t tag, int16_t value) {
+        std::vector<ProtocolMessage> sent;
+        if (!joiner.queue_voice_menu_pick(tag, value)) return sent;
+        for (const std::vector<uint8_t> &datagram : joiner.Client_ProcessNetworkFrame(frame++)) {
+            ProtocolPacketHeader header;
+            std::vector<ProtocolMessage> messages;
+            if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+            for (ProtocolMessage &m : messages)
+                if (m.tag == tag) sent.push_back(m);
+        }
+        inmatch::ServerDispatchInputs inputs;
+        inputs.server_ctx = &ctx;
+        for (const ProtocolMessage &reply : inmatch::dispatch_session_replies(ctx.config,
+                     ctx.np_protocol.connection_list[0], sent, 100,
+                     ctx.np_protocol.connection_list, &host_world, inputs))
+            joiner.view().apply(reply.tag, reply.payload);
+        joiner.apply_received_effects(world);
+        return sent;
+    };
+    std::vector<ProtocolMessage> sent = round_trip(c2s::EMOTE_REQUEST, 3);
+    if (!expect(sent.size() == 1 && sent[0].payload == std::vector<uint8_t>({3, 0}),
+            "the emote pick leaves as C2S 0x14 [i16 3]")) return false;
+    const w::AiEntity *own = world.ai.for_handle(world.cached.local_player);
+    if (!expect(own != nullptr && own->inf.wpn_state == 117,
+            "the host's own-copy 0x2D plays emote_3 on the joiner's body")) return false;
+    sent = round_trip(c2s::RADIO_CALL_REQUEST, 7);
+    if (!expect(sent.size() == 1 && sent[0].payload == std::vector<uint8_t>({7, 0}),
+            "the radio pick leaves as C2S 0x13 [i16 7]")) return false;
+    const std::vector<ns::ClientChatLine> lines = joiner.view().drain_chat_lines();
+    return expect(lines.size() == 1 && lines[0].channel == 2 && lines[0].text == "Voice: RAD_7",
+            "the host's own-copy 0x6D posts the joiner's radio line");
+}
+
 bool run_host_client_refreshes_visible_players() {
     ns::LoopbackChannel host_loop;
     inmatch::ClientRuntime host_view(host_loop);
@@ -6167,7 +6339,7 @@ bool run_radio_zone_context_uses_the_nearest_entry_coverage() {
     }
     runtime.Client_ProcessNetworkFrame();
     std::vector<std::string> voices;
-    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
             -> std::optional<w::ScriptVoiceChannel::SetSelection> {
         voices.push_back(name); return std::nullopt;
     });
@@ -6251,6 +6423,9 @@ int main() {
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
                     run_emote_and_local_chat_track_the_speaker(false) &&
                     run_emote_and_local_chat_track_the_speaker(true) &&
+                    run_voice_menu_picks_ride_the_session() &&
+                    run_emote_stamps_the_speaker_body_and_voices_it() &&
+                    run_voice_menu_picks_round_trip_through_a_host() &&
                     run_host_client_refreshes_visible_players() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&

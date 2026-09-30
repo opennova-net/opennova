@@ -47,10 +47,25 @@ std::vector<uint8_t> chat_body(uint8_t sender_slot, int8_t channel,
 	return encode_chat_broadcast(chat);
 }
 
-// The nearest type-2044 location marker whose radius contains the sender
-// (2-D distance), by the marker's spawn-order index [orig: @0x51394C..0x5139D9:
-// pool 3, def type 2044, sqrt(dx^2 + dy^2) < entity+0 (the marker bound),
-// nearest wins; the label is g_LocationNames[64 * entity+640]].
+const std::string *location_label(const NapiNPServerCtx &ctx, const world::World &world,
+		int index) {
+	if (index < 0) return nullptr;
+	if (static_cast<size_t>(index) < ctx.mission_location_names.size())
+		return &ctx.mission_location_names[static_cast<size_t>(index)];
+	// Without the MissionText table the marker's own name stands in (the same
+	// fallback the 0x0F writer takes).
+	static std::string fallback;
+	fallback.clear();
+	int walk = 0;
+	world.registry.for_each([&](const world::Entity &e) {
+		if (e.handle.pool() != 3 || e.item_id != 2044) return;
+		if (walk++ == index) fallback = e.name;
+	});
+	return fallback.empty() ? nullptr : &fallback;
+}
+
+} // namespace
+
 int nearest_location_index(const world::World &world, const world::Entity &sender) {
 	int best = -1;
 	int index = 0;
@@ -69,26 +84,6 @@ int nearest_location_index(const world::World &world, const world::Entity &sende
 	return best;
 }
 
-const std::string *location_label(const NapiNPServerCtx &ctx, const world::World &world,
-		int index) {
-	if (index < 0) return nullptr;
-	if (static_cast<size_t>(index) < ctx.mission_location_names.size())
-		return &ctx.mission_location_names[static_cast<size_t>(index)];
-	// Without the MissionText table the marker's own name stands in (the same
-	// fallback the 0x0F writer takes).
-	static std::string fallback;
-	fallback.clear();
-	int walk = 0;
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3 || e.item_id != 2044) return;
-		if (walk++ == index) fallback = e.name;
-	});
-	return fallback.empty() ? nullptr : &fallback;
-}
-
-// Entity_FindChildByDefType(entity, 1, 0) walks the groundEntity chain (at most
-// 20 links) for the LAST link whose def type is 1 (a vehicle) — the carrier
-// the sender rides or stands on. [orig: @0x43BEA0]
 world::EntityHandle carrier_vehicle(const world::World &world, const world::Entity &e) {
 	world::EntityHandle matched;
 	world::EntityHandle link = e.ground_target;
@@ -100,8 +95,6 @@ world::EntityHandle carrier_vehicle(const world::World &world, const world::Enti
 	}
 	return matched;
 }
-
-} // namespace
 
 std::string chat_strip_angle_tags(const std::string &text) {
 	std::string out;

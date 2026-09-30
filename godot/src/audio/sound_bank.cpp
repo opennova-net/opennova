@@ -388,11 +388,14 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 }
 
 std::optional<opennova::world::ScriptVoiceChannel::SetSelection>
-SoundBank::select_radio_set(const std::string &name, uint8_t listener_view_flags) {
+SoundBank::select_radio_set(const std::string &name, uint8_t listener_view_flags,
+		bool p_bank_member) {
 	const auto loc = index_.find(name);
 	if (!loc.valid()) return std::nullopt;
 	const auto &bank = _bank_at(loc);
-	return opennova::audio::select_radio_voice(bank, loc, selector_, listener_view_flags);
+	return p_bank_member
+			? opennova::audio::select_entity_voice(bank, loc, selector_, listener_view_flags)
+			: opennova::audio::select_radio_voice(bank, loc, selector_, listener_view_flags);
 }
 
 // --- Internals ---

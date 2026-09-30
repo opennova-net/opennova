@@ -1691,13 +1691,12 @@ public:
 			std::vector<opennova::hud::HudLfpZone> &r_zones);
 	// The in-match game type for every role (joiner header / HostClient view).
 	int64_t get_session_game_type() const;
-	// NOT ClassDB-bound: the talk keys' facts (inmatch::chat_entry_facts),
-	// C2S 0x0D send (ClientRuntime::queue_chat_message) and the crew key's
-	// denied tone.
+	// NOT ClassDB-bound: the talk keys' facts (inmatch::chat_entry_facts), C2S 0x0D send
+	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
-	// The round-over latch every role's world holds (world::MatchOutcome::ended).
-	bool is_round_over() const;
+	bool is_round_over() const; // the world's round-over latch (MatchOutcome::ended)
 	opennova::hud::ChatSendResult send_chat_line(int p_dispatch, std::string &r_text, uint32_t p_frame);
+	bool send_voice_menu_pick(bool p_radio, int p_value);
 	void raise_chat_denied_sound();
 	// Substitute actor names into a canned template (engine: runtime/replication/client_replica_feed.cpp): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so

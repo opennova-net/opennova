@@ -245,6 +245,16 @@ public:
 	//  (11), Chat_SendAllMessage @0x49AC70 (4), sub_49ABA0 @0x49ABA0 (5) ->
 	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
 	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
+	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
+	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
+	// queues on any live connection. A joiner queues it with the one-send
+	// lifetime (user param 1) on the held one-shot queue (the pick runs
+	// outside the client net frame); the listen host's own client sends it
+	// over its loopback to its own server. False when no connection carries it.
+	// [orig: NetPacket_SendEmoteRequest @0x42C120 /
+	//  NetPacket_SendRadioCallRequest @0x42C150 ->
+	//  CNapiNetwork_QueueReliableMessage(tag, 0, 1, payload, 2) @0x4c4fa0]
+	bool queue_voice_menu_pick(uint8_t tag, int16_t value);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its

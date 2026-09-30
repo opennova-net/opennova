@@ -112,6 +112,9 @@ public:
 	bool is_mp_verbose() const;
 	bool is_emotes_menu_open() const;
 	bool is_radio_menu_open() const;
+	// A menu pick's close (engine hud_toggles_close_voice_menu): the player
+	// input router applies it with the pick it sends.
+	void close_voice_menu(bool p_radio);
 	// The single-player pause word (engine HudToggleState::paused): the shell's
 	// in-game menu sets it on open and clears it on resume out of a session.
 	bool is_paused() const;

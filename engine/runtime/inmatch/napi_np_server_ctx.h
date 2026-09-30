@@ -12,6 +12,7 @@
 
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 
@@ -28,6 +29,8 @@ struct File;
 }
 
 namespace opennova::inmatch {
+
+class ClientRuntime;
 
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
 // @0x4c49f0] (§5.0 / §6.3). It decomposes into the two booleans is_authority (is_host) and
@@ -213,6 +216,12 @@ struct NapiNPServerCtx {
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
 
+	// The designation table the radio calls fill and the per-player S2C 0x6B
+	// batch reads, cleared at the new-round init
+	// (inmatch/server_designations.h). [orig: g_ServerDesignations @0xC84810;
+	//  the memset in Server_InitNewRoundState @0x51cb9b]
+	ServerDesignationTable designations{};
+
 	// The authoritative end-round transaction. The domain Match freezes the
 	// result; these are only the once-only wire announcement and retail MP linger
 	// clock. [orig: Server_ProcessRoundEnd @0x5164F0; 2790 store @0x5166C4]
@@ -238,6 +247,12 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in runtime/replication/connection_fan.h.
 	world::World *world = nullptr;
+	// The host process's own client half (the listen host's loopback
+	// ClientRuntime; null on a dedicated host): the client-side state a host
+	// handler reads through the process globals retail shares, here the
+	// active-zone overlay the radio key builder tests (the A&S context).
+	// Non-owning; the role re-points it whenever it rebuilds that runtime.
+	const ClientRuntime *host_client = nullptr;
 
 	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
 	// per-second stream (268 across a whole session): unchanged bodies are withheld and

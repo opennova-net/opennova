@@ -267,6 +267,9 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			--reply.minimap_overlay_cooldown;
 			continue;
 		}
+		// Each visit opens with the recipient team's designations (S2C 0x6B)
+		// [orig: Server_BuildOverlayStateForPlayer @0x518002].
+		Server_SendDesignationsToPlayer(conn, ctx.designations, world);
 
 		std::vector<world::MinimapOverlayClassification> entries;
 		auto append = [&](const world::Entity &e, bool persistent) {
@@ -900,11 +903,11 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 			--conn.link.spawn_target_hold_seconds;
 		if (conn.link.downed_revive_seconds != 0)
 			--conn.link.downed_revive_seconds;
-		// The +376 emote cooldown [orig: @0x51e028..0x51e03f].
-		if (conn.link.emote_cooldown_seconds > 0)
-			--conn.link.emote_cooldown_seconds;
-		else if (conn.link.emote_cooldown_seconds < 0)
-			conn.link.emote_cooldown_seconds = 0;
+		// The +376 emote and +380 radio-call cooldowns: a positive value counts
+		// down, a negative one clamps to zero [orig: @0x51e028..0x51e05c].
+		for (int32_t *cooldown : {&conn.link.emote_cooldown_seconds,
+				&conn.link.radio_call_cooldown_seconds})
+			*cooldown = *cooldown > 0 ? *cooldown - 1 : 0;
 	}
 }
 
@@ -2463,6 +2466,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	Server_RouteGuidance(ctx, world);
 
 	emit_periodic_rtt(ctx, world);
+	// The tail ages the designation table [orig: Server_TickUpdate @0x51e496].
+	Server_TickDesignations(ctx.designations);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 
 	// (4) The entity pass: Game_ProcessMainFrame runs the gated entity update

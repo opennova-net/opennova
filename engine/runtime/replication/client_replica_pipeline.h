@@ -18,6 +18,7 @@
 
 namespace opennova::world {
 class IRootMotionSource;
+struct WeaponTable;
 struct LiveRound;
 } // namespace opennova::world
 
@@ -211,6 +212,9 @@ public:
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
+	// Every armed player row's secondary channel for one tick (the advance,
+	// then the 16-tick selection keyed on `tick`), the own row excepted.
+	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
 	// ordinary library-only tick_remote_motion path calls this as its final
@@ -318,6 +322,13 @@ public:
 	void set_root_motion_source(world::IRootMotionSource *source) {
 		root_motion_ = source;
 	}
+	// The joiner's weapon table: the held record's special_hold the player
+	// rows' secondary selection reads by the wire ADM index. Null = kind 0.
+	void set_weapon_table(const world::WeaponTable *weapons) { weapon_table_ = weapons; }
+	// The S2C 0x2D emote stamp on a decoded player row (a speaker with no
+	// world twin): an armed row whose map authors emote_N takes it as its
+	// secondary target (client_replica_weapon_channel.cpp). False = no stamp.
+	bool stamp_row_emote(uint16_t handle, uint8_t emote);
 
 	// Install the joiner's terrain column for the bounded remote-person
 	// post-motion probe. The pipeline owns neither field nor backing buffers.
@@ -469,6 +480,7 @@ private:
 
 	ClientState state_;
 	world::IRootMotionSource *root_motion_ = nullptr;
+	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;

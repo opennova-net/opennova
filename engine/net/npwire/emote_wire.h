@@ -1,7 +1,9 @@
 #pragma once
 
-// The emote wire: the C2S 0x14 request a client sends from its Emotes menu,
-// and the S2C 0x2D broadcast the host fans to the players near the sender.
+// The voice-menu wire: the C2S 0x14 request a client sends from its Emotes
+// menu and the S2C 0x2D broadcast the host fans to the players near the
+// sender; the C2S 0x13 request its Radio menu sends (the host answers with the
+// S2C 0x6D radio call, ingame_encode.h encode_tracked_player_voice).
 // See docs/net/novaworld-net-re.md and docs/interface/hud-re.md "The MP legs".
 
 #include <cstddef>
@@ -34,5 +36,16 @@ struct EmoteBroadcast {
 };
 void decode_emote_broadcast(const uint8_t *body, size_t len, EmoteBroadcast &out);
 std::vector<uint8_t> encode_emote_broadcast(const EmoteBroadcast &broadcast);
+
+// C2S 0x13: [i16 value], the Radio-menu digit (1..9, and 10 for the 0 key).
+// The host reads only the low byte; a zero-length body reads 0.
+// [orig: NetPacket_SendRadioCallRequest @0x42C150 (ex NetPacket_SendInt16Type13;
+//  the i16 store @0x42c167, length 2 @0x42c16d) from Input_HandleSpecialKeys
+//  @0x49c79e; the host read NapiNPServerMsg_HandleRadioCall @0x5143aa..0x5143b0]
+struct RadioCallRequest {
+	int16_t value = 0;
+};
+void decode_radio_call_request(const uint8_t *body, size_t len, RadioCallRequest &out);
+std::vector<uint8_t> encode_radio_call_request(const RadioCallRequest &request);
 
 } // namespace opennova

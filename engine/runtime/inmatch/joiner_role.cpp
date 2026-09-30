@@ -386,6 +386,8 @@ void JoinerRole::resolve_row_adm_ids() {
 			es.rm_adm_id = -2;
 			es.rm_state = -1;
 			es.rm_leg_seeded = false;
+			es.wpn_state = es.wpn_playing = -1;
+			es.wpn_deferred = 0;
 		}
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
@@ -397,6 +399,8 @@ void JoinerRole::resolve_row_adm_ids() {
 	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
+	// The rows' secondary selection reads the held record's hold kind.
+	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
 }
 
 // A streamed topology/world change landed in the registry: retire the

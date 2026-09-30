@@ -431,6 +431,10 @@ void LocalPlayerPresenter::consume_use_hold() {
 	input_router_.consume_use_hold();
 }
 
+void LocalPlayerPresenter::set_hud_toggles(const Ref<HudToggles> &p_toggles) {
+	input_router_.set_hud_toggles(p_toggles);
+}
+
 bool LocalPlayerPresenter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	return input_router_.handle_input(p_event, p_active);
 }
@@ -1168,6 +1172,7 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("refresh_viewmodel"), &LocalPlayerPresenter::refresh_viewmodel);
 	ClassDB::bind_method(D_METHOD("viewmodel_generation"), &LocalPlayerPresenter::viewmodel_generation);
 	ClassDB::bind_method(D_METHOD("set_input_override", "intent"), &LocalPlayerPresenter::set_input_override);
+	ClassDB::bind_method(D_METHOD("set_hud_toggles", "toggles"), &LocalPlayerPresenter::set_hud_toggles);
 	ClassDB::bind_method(D_METHOD("apply_view_action", "action"),
 			&LocalPlayerPresenter::apply_view_action);
 	ClassDB::bind_method(D_METHOD("set_debug_third_person", "enabled"),

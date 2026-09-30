@@ -728,6 +728,52 @@ func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
 	_frame(world, presenter, camera, 2)
 
 
+# The router's menu arms: while the HUD's F9 Emotes menu is open a digit is its
+# pick, closing the menu and reaching no row (radarout rebound to 7 stays put);
+# once the menu is closed the same 7 fires the row again.
+# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; the consumed key skips
+#  the binding scan, Input_ProcessKeyboardEvents @0x49d2fb]
+func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var radar_out := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Radar Zoom Out":
+			radar_out = model.action_index_for_row(i)
+	assert_gte(radar_out, 0, "the radarout row is in the table")
+	assert_true(model.assign_godot_key(radar_out, KEY_7, false), "radarout takes 7 as its second key")
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	var toggles := HudToggles.new()
+	presenter.set_hud_toggles(toggles)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var zoom := sim.get_hud_radar_zoom_q16()
+	# F9's row opens the menu (the HUD presenter's poll, here by hand).
+	toggles.poll(1 << HudToggles.ROW_AUDIO_EMOTE, false, false, true, false, false)
+	toggles.poll(0, false, false, true, false, false)
+	assert_true(toggles.is_emotes_menu_open(), "the emotes menu is open")
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_false(toggles.is_emotes_menu_open(), "the digit picks and closes the menu")
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "the picked digit reaches no row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "with the menu closed the 7 fires the row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+
+
 # --- the camera cluster -------------------------------------------------------
 
 

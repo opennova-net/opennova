@@ -210,6 +210,9 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The team-change list starts every round empty
 	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
+	// The designation table clears on every round init, authority or not
+	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
+	ctx.designations.fill(ServerDesignation{});
 	if (!ctx.is_authority) return;
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority

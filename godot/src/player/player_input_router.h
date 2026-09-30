@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <runtime/controls/player_actions.h>
 
+#include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
 #include "player/player_move_intent.h"
 #include "simulation/inmatch_session_values.h"
@@ -56,6 +57,10 @@ public:
 	// release edge then runs no mount toggle. Applied after this frame's
 	// fresh-press reset so a same-frame chord sticks.
 	void consume_use_hold();
+	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit
+	// before the weapon rows do (controls::PlayerActions' menu arms); the HUD
+	// presenter hands its process-lifetime instance over. Null = no menus.
+	void set_hud_toggles(const Ref<HudToggles> &p_toggles) { hud_toggles_ = p_toggles; }
 
 private:
 	Ref<Simulation> sim() const;
@@ -69,6 +74,7 @@ private:
 	ObjectID presenter_id_;
 	Ref<ControlsModel> controls_;
 	Ref<PlayerMoveIntent> input_override_;
+	Ref<HudToggles> hud_toggles_;
 	opennova::controls::PlayerActions actions_;
 	// The wheel notch remainder. Retail clears it only at process start, so it
 	// survives the reset-state path like the switch latches.

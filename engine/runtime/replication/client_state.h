@@ -691,6 +691,25 @@ struct ClientEntityState {
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
 	bool rm_leg_seeded = false;
+	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
+	// for every armed player row, as retail's client runs it for every player
+	// body: the wire carries no secondary state. The 16-tick selection with
+	// its locked / emote commit (the hold ladder off the wire ADM index and
+	// Flags byte), the clip-end deferred promotion, the playhead and the blend,
+	// on the replica's variant-0 track (D-NET-196). The S2C 0x2D emote stamps
+	// the target. wpn_state < 0 = unarmed (no root-motion source).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b5d71..0x4b5ea3 (selection +
+	//  commit); AnimMap_UpdateDualChannels @0x40b8c0 (advance);
+	//  NapiNPClientMsg_HandleEmote @0x427f12..0x427f18 (the stamp)]
+	int16_t wpn_state = -1;      // entity+0x2C8, the target
+	int16_t wpn_deferred = 0;    // entity+0x2C4
+	int16_t wpn_playing = -1;    // the channel's playing state
+	int16_t wpn_prev = -1;       // the blend source
+	int32_t wpn_phase = 0;
+	int32_t wpn_prev_phase = 0;
+	int32_t wpn_deferred_boundary = -1;
+	float wpn_blend_weight = 1.0f;
+	float wpn_blend_step = 0.0f;
 	int32_t net_seat_local[3] = {};
 	// The record's carrier-LOCAL heading (BAM32): the player/infantry yaw byte
 	// widened (<< 24), the vehicle euler_z high half (<< 16). Every carried class

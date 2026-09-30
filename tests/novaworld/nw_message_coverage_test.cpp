@@ -945,6 +945,10 @@ int check_S_6B_minimap() {
 	EXPECT(out.entries[0].lifetime_s == 30);
 	EXPECT(out.entries[0].type == 3);
 	EXPECT(out.entries[0].height == 12);
+	// The host's designation batch writes the same record back byte-exactly
+	// [orig: NetPacket_SerializeDesignations @0x5116A0].
+	EXPECT(encode_minimap_overlay_batch(out) == w.b);
+	EXPECT(encode_minimap_overlay_batch(MinimapOverlayBatch{}).empty());
 	cover('S', 0x6B);
 	return 0;
 }
@@ -1837,6 +1841,16 @@ int check_S_6D_tracked_player_voice() {
     EXPECT(out.event == 6 && out.player_index == 31 && out.location == 0);
     EXPECT(decode_tracked_player_voice(nullptr, 0, out));
     EXPECT(out.event == 0 && out.player_index == 0 && out.location == 0);
+    // The host's radio-call dword [orig: NapiNPServerMsg_HandleRadioCall
+    // @0x5143a2..0x51448f]: the call, the pool-0 index, the location word.
+    TrackedPlayerVoice call;
+    call.event = 6;
+    call.player_index = 31;
+    call.location = -1;
+    EXPECT(encode_tracked_player_voice(call) == std::vector<uint8_t>(bytes, bytes + sizeof(bytes)));
+    call.location = 0x0102;
+    const std::vector<uint8_t> located = {6, 31, 0x02, 0x01};
+    EXPECT(encode_tracked_player_voice(call) == located);
     cover('S', 0x6D);
     return 0;
 }
@@ -2062,6 +2076,27 @@ int check_emote_pair() {
 	return 0;
 }
 
+// The radio-call request: C2S 0x13 [i16 digit], the host reading its low
+// byte. [orig: NetPacket_SendRadioCallRequest @0x42C150;
+// NapiNPServerMsg_HandleRadioCall @0x5143aa..0x5143b0]
+int check_radio_call_request() {
+	RadioCallRequest req;
+	req.value = 10;
+	const std::vector<uint8_t> up = encode_radio_call_request(req);
+	const std::vector<uint8_t> up_bytes = {0x0A, 0x00};
+	EXPECT(up == up_bytes);
+	RadioCallRequest out;
+	decode_radio_call_request(up.data(), up.size(), out);
+	EXPECT(out.value == 10);
+	const uint8_t one[] = {0x06};
+	decode_radio_call_request(one, sizeof(one), out);
+	EXPECT(out.value == 6);
+	decode_radio_call_request(nullptr, 0, out);
+	EXPECT(out.value == 0);
+	cover('C', 0x13);
+	return 0;
+}
+
 int main() {
 	if (test_retail_dispatch_membership()) return 1;
 	if (test_catalog_consistency()) return 1;
@@ -2147,6 +2182,7 @@ int main() {
 	if (check_S_4D_spawn_slot_notice()) return 1;
 	if (check_emote_pair()) return 1;
 	if (check_squad_and_waypoint_legs()) return 1;
+	if (check_radio_call_request()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

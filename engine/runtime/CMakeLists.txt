@@ -348,6 +348,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_script_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_spectate.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_weapon_channel.cpp # the player rows' secondary channel and the 0x2D emote stamp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_roster_tags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_scoreboard_view.cpp
@@ -401,6 +402,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_vehicle_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_visible_players.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_emote.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp

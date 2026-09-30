@@ -3,6 +3,8 @@
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/infantry.h>
 #include <runtime/hud/hud_minimap.h>
 #include <algorithm>
 #include <cstring>
@@ -252,22 +254,37 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 }
             }
         } else if (const auto *emote = std::get_if<EmoteBroadcast>(&request)) {
-            // A nearby player's emote. Its person's emote state (entity+0x2C8 =
-            // 114 + emote, +0x2C4 = 0, when its anim set carries that state)
-            // and the EMO_ voice through Audio_StartEntityPlayback are the
-            // unported emote presentation (docs/interface/hud-re.md "The MP
-            // legs"); unless its slot's voice-mute bit is set it becomes the
-            // map's tracked target.
-            // [orig: NapiNPClientMsg_HandleEmote @0x427E90 — Pool_GetEntryUnchecked
+            // A nearby player's emote: its person's emote state, then, unless
+            // its slot's voice-mute bit is set, the EMO_ voice at the speaker
+            // and the map's tracked target.
+            // [orig: NapiNPClientMsg_HandleEmote @0x427E90 -- Pool_GetEntryUnchecked
             //  @0x427eeb, the ItemTypeIndex gate @0x427ef5, the state write
-            //  @0x427efa..0x427f18, PlayerSlot_FindByEntityPtr @0x427f29, the
+            //  @0x427efb..0x427f18, PlayerSlot_FindByEntityPtr @0x427f29, the
             //  slot+50 bit 0 gate @0x427f39, sub_5BFB00(.., 9, ..) +
             //  Audio_StartEntityPlayback @0x427f44..0x427f55,
             //  HUD_SetTrackedEntityTarget @0x427f5b]
             world::Entity speaker;
             if (!sound_actor(*this, world, emote->player_index, speaker) || !speaker.item_id) continue;
+            // The state lands on the speaker's secondary channel: a world body
+            // (the listen host's players, a joiner's own) through the AI
+            // system, a joiner's decoded peer on its row
+            // (world::infantry_weapon_emote_stamp / stamp_row_emote).
+            const bool row_speaker = role_ == Role::Joiner &&
+                    speaker.handle != world.cached.local_player;
+            if (row_speaker) {
+                view_.stamp_row_emote(emote->player_index, emote->emote);
+            } else if (world::AiEntity *body = world.ai.for_handle(speaker.handle)) {
+                world::infantry_weapon_emote_stamp(body->inf, world.ai.root_motion, emote->emote);
+            }
             const replication::ClientRosterSlot *roster = slot_for_pool0(state(), emote->player_index);
             if (roster != nullptr && (roster->radio_mute_flags & 1u) != 0) continue;
+            // The EMO_ key with the body prefix (flags 9), then the voice
+            // anchored at the speaker [orig: @0x427f3b..0x427f55].
+            const bool in_zone = game_type() == 0x10010 &&
+                    in_active_radio_zone(world, speaker, *this);
+            world.script.voice.entity_set(world,
+                    world::radio_call_key(world, speaker, emote->emote, 9, game_type(), in_zone),
+                    speaker.handle, speaker.position, row_speaker);
             set_tracked_entity_target(view_.state(), world, speaker);
         } else if (const auto *tip = std::get_if<replication::TipEventCommand>(&request)) {
             // The receive legs' tip events join the world's in arrival order
@@ -303,6 +320,19 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 world.out.slot_sounds.push_back(event);
             }
         }
+    }
+    // An entity voice anchored on a decoded row follows that row, and stops
+    // once the row is gone or dead, as a freed or dead anchor stops it.
+    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A]
+    const world::EntityHandle anchor = world.script.voice.speaker();
+    if (anchor.valid() && role_ == Role::Joiner) {
+        const replication::ClientEntityState *row = state().find(anchor.packed);
+        const bool present = row != nullptr && row->type_id != 0 &&
+                (row->state_flags & world::kEntityFlagDead) == 0;
+        world.script.voice.track_row_anchor(anchor, present, present
+                ? world::Vec3{float(row->x) / 65536.0f, float(row->y) / 65536.0f,
+                        float(row->z) / 65536.0f}
+                : world::Vec3{});
     }
 }
 } // namespace opennova::inmatch

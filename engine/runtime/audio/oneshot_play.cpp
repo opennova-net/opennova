@@ -134,6 +134,32 @@ std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
 	return std::nullopt;
 }
 
+std::optional<RadioVoice> select_entity_voice(const lwf::File &bank,
+        const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags) {
+    if (!loc.valid() || loc.set < 0 || static_cast<size_t>(loc.set) >= bank.multis.size())
+        return std::nullopt;
+    const auto &set = bank.multis[static_cast<size_t>(loc.set)];
+    const auto layers = set_layers(bank, set);
+    for (size_t li = 0; li < layers.size(); ++li) {
+        if (!layer_matches_listener_view(set, bank.playlists[layers[li]], listener_view_flags)) continue;
+        const int ordinal = pick_layer_member(bank, loc,
+                static_cast<int32_t>(li), layers[li], selector);
+        if (ordinal < 0) continue;
+        const auto members = layer_members(bank, bank.playlists[layers[li]]);
+        const auto &member = bank.sndparms[members[static_cast<size_t>(ordinal)]];
+        if (member.single_index >= bank.singles.size()) continue;
+        RadioVoice result;
+        result.filename = bank.singles[member.single_index].path;
+        // [orig: @0x75c089..0x75c109]
+        result.pitch_q16 = selector.compose_pitch(set.pitch_base, set.pitch_random_range,
+                member.pitch_scaled, member.random_pitch_scaled);
+        result.volume = static_cast<int32_t>(member.volume);
+        result.max_distance = static_cast<int32_t>(bank.playlists[layers[li]].falloff_radius << 16);
+        return result;
+    }
+    return std::nullopt;
+}
+
 int64_t listener_distance_q16(const float world_pos[3], const float listener_pos[3]) {
 	const float dx = world_pos[0] - listener_pos[0];
 	const float dy = world_pos[1] - listener_pos[1];

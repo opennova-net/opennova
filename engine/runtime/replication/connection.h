@@ -167,6 +167,12 @@ struct Connection {
 	// [orig: playerSlot+376 — the gate and the store NapiNPServerMsg_HandleEmoteRequest
 	//  @0x501e55 / @0x501f53; the decrement Server_TickUpdate @0x51e028..0x51e03f]
 	int32_t emote_cooldown_seconds = 0;
+	// The radio-call cooldown (whole seconds), the same shape: a C2S 0x13 call
+	// is handled only while it is zero and re-arms it to 4.
+	// [orig: playerSlot+380 — the gate NapiNPServerMsg_HandleRadioCall @0x514386,
+	//  the stores @0x5144d0 / @0x514716; the decrement Server_TickUpdate
+	//  @0x51e045..0x51e05c]
+	int32_t radio_call_cooldown_seconds = 0;
 
 	// Consecutive periodic seconds this player has carried a 4091/4093/4095 flag
 	// in CTF / FlagBall / Flag Me; at the host's `flag_reset_seconds` the carry is

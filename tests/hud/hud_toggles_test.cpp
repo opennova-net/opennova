@@ -465,6 +465,13 @@ void test_voice_macro_menus() {
 	k.audio_emote = true;
 	CHECK(hud_toggles_poll(s, k) == 0);
 	CHECK(!s.emotes_menu_open);
+	// A pick closes its own menu with a plain store [orig: @0x49c75c / @0x49c7a8].
+	s.emotes_menu_open = true;
+	s.radio_menu_open = true;
+	hud_toggles_close_voice_menu(s, false);
+	CHECK(!s.emotes_menu_open && s.radio_menu_open);
+	hud_toggles_close_voice_menu(s, true);
+	CHECK(!s.radio_menu_open);
 	s.emotes_menu_open = true;
 	s.radio_menu_open = true;
 	s.paused = true;

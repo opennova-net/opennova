@@ -225,7 +225,7 @@ inline constexpr uint8_t GAME_START_ACK = 0x4E;             // clan-roster walk 
 // Remaining retail dispatch rows; meanings and witnesses live in the catalog.
 inline constexpr uint8_t ADMIN_NETLOG_COMMAND = 0x04;
 inline constexpr uint8_t RESERVED_NOOP_07 = 0x07;
-inline constexpr uint8_t SECTOR_ACTION = 0x13;
+inline constexpr uint8_t RADIO_CALL_REQUEST = 0x13;        // i16 Radio-menu digit -> s2c::TRACKED_PLAYER_VOICE by the radio-call rule table (retired misnomer: "sector action")
 inline constexpr uint8_t EMOTE_REQUEST = 0x14;              // i16 Emotes-menu digit -> s2c::EMOTE_BROADCAST (retired misnomer: "object sound")
 // A user waypoint shared to the sender's subordinates (target 0xFF) or one
 // squad joiner (squad_messages.h WaypointShare).

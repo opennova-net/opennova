@@ -2,6 +2,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_emote.h>
+#include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
 
 
@@ -1194,6 +1195,15 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				EmoteRequest request;
 				decode_emote_request(msg.payload.data(), msg.payload.size(), request);
 				for (ProtocolMessage &m : Server_HandleEmoteRequest(conn, request, roster, *world))
+					replies.push_back(std::move(m));
+				break;
+			}
+			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
+				if (world == nullptr) break;
+				RadioCallRequest request;
+				decode_radio_call_request(msg.payload.data(), msg.payload.size(), request);
+				for (ProtocolMessage &m : Server_HandleRadioCall(inputs.server_ctx, conn, request,
+						roster, *world))
 					replies.push_back(std::move(m));
 				break;
 			}

@@ -60,6 +60,9 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
 		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
 		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
+		// Sent over the session; the router closes the menu beside it.
+		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
+		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
 	}
 }
 
@@ -161,13 +164,25 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
 	const Ref<Simulation> action_sim = sim();
-	const auto actions = actions_.poll(GodotActionSource(controls_),
-			{p_gameplay_input_active, input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED,
-					action_sim.is_valid(),
-					controls_.is_valid() && controls_->is_keyboard_captured()});
+	opennova::controls::PlayerActionPoll gate;
+	gate.active = p_gameplay_input_active;
+	gate.captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
+	gate.simulation_available = action_sim.is_valid();
+	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
+	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
+	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
+	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
-	for (const auto &request : actions.requests) apply_player_action(*action_sim.ptr(), request);
+	for (const auto &request : actions.requests) {
+		// A menu pick closes its menu whether or not a session carries it
+		// (engine hud_toggles_close_voice_menu carries the witness).
+		const bool radio = request.action == opennova::controls::PlayerAction::RadioPick;
+		if ((request.action == opennova::controls::PlayerAction::EmotePick || radio) &&
+				hud_toggles_.is_valid())
+			hud_toggles_->close_voice_menu(radio);
+		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
+	}
 	return frame_input;
 }
 

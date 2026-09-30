@@ -12,6 +12,7 @@
 #include <formats/mission/mission.h> // runtime type -> authored item ID
 #include <runtime/hud/score_fanfare.h> // the 0x81 tone ladder
 #include <runtime/hud/feed_format.h> // formatted_game_text_line (the 0x32 lines)
+#include <net/npwire/ingame_message_id.h> // the C2S 0x14 / 0x13 menu-pick tags
 #include <runtime/inmatch/client_runtime.h> // queue_chat_message (the talk keys' send)
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType (the NovaWorld talk gate)
 #include <runtime/world/player_present.h> // kWeaponSwitchDenySoundset (the crew key's tone)
@@ -147,6 +148,13 @@ opennova::hud::ChatSendResult Simulation::send_chat_line(int p_dispatch, std::st
 void Simulation::send_go_code(int p_code) {
 	if (runtime_ == nullptr || !kernel_ || p_code < 0 || p_code > 0xFF) return;
 	runtime_->send_go_code(kernel_->world, static_cast<uint8_t>(p_code));
+}
+
+bool Simulation::send_voice_menu_pick(bool p_radio, int p_value) {
+	return runtime_ != nullptr &&
+			runtime_->queue_voice_menu_pick(p_radio ? opennova::c2s::RADIO_CALL_REQUEST
+													: opennova::c2s::EMOTE_REQUEST,
+					static_cast<int16_t>(p_value));
 }
 
 void Simulation::raise_chat_denied_sound() {

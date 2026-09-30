@@ -1384,6 +1384,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         --tick_entity->spawn_phase;
     }
+    // The radio-request latch (0x6D call 6) ages on the body's raw 64-tick
+    // window: the seconds count down, and a spent count clears the latch.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b467a..0x4b469d]
+    if (tick_entity != nullptr && !npc_body && (logic_tick & 0x3Fu) == 0u) {
+        if (tick_entity->radio_request_seconds != 0) --tick_entity->radio_request_seconds;
+        else tick_entity->radio_request = 0;
+    }
 
     // A remote player's locomotion source is its C2S pose snapshot, so do not
     // run the NPC/local-input movement core over it. The authority still runs

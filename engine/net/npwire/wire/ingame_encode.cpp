@@ -1140,6 +1140,37 @@ std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd) {
 	return out;
 }
 
+std::vector<uint8_t> encode_tracked_player_voice(const TrackedPlayerVoice &voice) {
+	// [orig: NapiNPServerMsg_HandleRadioCall — the dword payload
+	//  @0x5143a2..0x51448f]
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(voice.event);
+	w.u8(voice.player_index);
+	w.u16(static_cast<uint16_t>(voice.location));
+	return out;
+}
+
+std::vector<uint8_t> encode_minimap_overlay_batch(const MinimapOverlayBatch &batch) {
+	// [orig: NetPacket_SerializeDesignations @0x5116A0 — handle @0x51171b, x/y/z
+	//  @0x51175a / @0x51176d / @0x511786, seconds @0x511732, type @0x51178a,
+	//  height @0x511744, the count @0x5117cf]
+	std::vector<uint8_t> out;
+	if (batch.entries.empty()) return out;
+	Writer w{out};
+	w.u8(static_cast<uint8_t>(batch.entries.size()));
+	for (const MinimapOverlayBatch::Entry &e : batch.entries) {
+		w.u16(e.handle);
+		w.u16(static_cast<uint16_t>(e.x));
+		w.u16(static_cast<uint16_t>(e.y));
+		w.u16(static_cast<uint16_t>(e.z));
+		w.u16(e.lifetime_s);
+		w.u8(e.type);
+		w.u8(e.height);
+	}
+	return out;
+}
+
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	std::vector<uint8_t> out;
 	Writer w{out};

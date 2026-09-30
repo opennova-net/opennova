@@ -92,6 +92,7 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
+	state.host_owner.ctx.host_client = state.client_runtime.get();
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
@@ -187,18 +188,20 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// ride the same queue [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab;
 		//  NapiNPClientMsg_HandleSpawnSlot @0x43181d / @0x43183e;
 		//  NapiNPClientMsg_TeamAssign @0x431ae4 / @0x431b05;
-		//  NetPacket_SendEmoteRequest @0x42c14c].
+		//  NetPacket_SendEmoteRequest @0x42c14c]; its radio call too
+		// [orig: NetPacket_SendRadioCallRequest @0x42c17c].
 		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
-				dg.tag != c2s::EMOTE_REQUEST) {
+				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
-		// The chat handler and the snapshot builder read the host context.
+		// The chat handler, the snapshot builder and the radio call (its
+		// designation table and zone test) read the host context.
 		const bool reads_ctx = dg.tag == c2s::CHAT_MESSAGE ||
-				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST;
+				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

@@ -113,6 +113,10 @@ public:
 	int viewmodel_generation() const;
 	// Scripted movement (probes, automation, tests): null = poll the bindings.
 	void set_input_override(const Ref<PlayerMoveIntent> &p_intent);
+	// The HUD's key toggles (the F9 Emotes / F10 Radio menus the input
+	// router's digit arms read and close); the HUD presenter hands its
+	// process-lifetime instance over at setup.
+	void set_hud_toggles(const Ref<HudToggles> &p_toggles);
 
 	// A view action (Simulation::VIEW_ACTION_*: view1st F2, viewwithgun F3,
 	// viewchase F4): view1st/viewwithgun select first person, viewchase the

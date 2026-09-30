@@ -381,6 +381,61 @@ bool test_spectator_rows_edge_to_their_codes() {
 	return true;
 }
 
+// While the Emotes or Radio menu is open a digit is the menu's pick (keys
+// 1..9, and 0 as 10) and never reaches a digit-bound row, the Emotes menu
+// first; the held-USE seat arm precedes both; inactive gameplay input and an
+// open text line pick nothing.
+// [orig: Input_HandleSpecialKeys @0x49c6d8 (seat), @0x49c731..0x49c77c
+//  (emotes), @0x49c783..0x49c7c8 (radio); the consumed key skips the binding
+//  scan, Input_ProcessKeyboardEvents @0x49d2fb]
+bool test_voice_menu_digits_pick_and_swallow_the_rows() {
+	PlayerActionPoll emotes = kLive;
+	emotes.emotes_menu_open = true;
+	PlayerActionPoll radio = kLive;
+	radio.radio_menu_open = true;
+	PlayerActionPoll both = emotes;
+	both.radio_menu_open = true;
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("Knife", '1');
+	keys.digits[1] = true;
+	CHECK(requests_are(actions.poll(keys, emotes), {{Action::EmotePick, 1}}));
+	// The embedder closed the menu; the held digit fires no row afterwards.
+	CHECK(actions.poll(keys, kLive).requests.empty());
+	keys.release("Knife");
+	keys.digits[1] = false;
+	actions.poll(keys, kLive);
+	keys.digits[0] = true;
+	CHECK(requests_are(actions.poll(keys, radio), {{Action::RadioPick, 10}}));
+	keys.digits[0] = false;
+	actions.poll(keys, kLive);
+	keys.digits[5] = true;
+	CHECK(requests_are(actions.poll(keys, both), {{Action::EmotePick, 5}}));
+	keys.digits[5] = false;
+	actions.poll(keys, kLive);
+	// Inactive gameplay input: no pick, and the latched key cannot fire later.
+	PlayerActionPoll idle = emotes;
+	idle.active = false;
+	keys.digits[2] = true;
+	CHECK(actions.poll(keys, idle).requests.empty());
+	CHECK(actions.poll(keys, emotes).requests.empty());
+	keys.digits[2] = false;
+	actions.poll(keys, kLive);
+	// An open text line owns the digits.
+	PlayerActionPoll typing = emotes;
+	typing.keyboard_captured = true;
+	keys.digits[4] = true;
+	CHECK(actions.poll(keys, typing).requests.empty());
+	keys.digits[4] = false;
+	actions.poll(keys, kLive);
+	// The held-USE seat arm comes first.
+	keys.hold("useitem");
+	actions.poll(keys, emotes);
+	keys.digits[3] = true;
+	CHECK(requests_are(actions.poll(keys, emotes), {{Action::SelectSeat, 2}}));
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -391,7 +446,8 @@ int main() {
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
 			test_wheel_remainder_dispatches_whole_notches,
-			test_spectator_rows_edge_to_their_codes})
+			test_spectator_rows_edge_to_their_codes,
+			test_voice_menu_digits_pick_and_swallow_the_rows})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

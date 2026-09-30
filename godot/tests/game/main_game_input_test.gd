@@ -225,6 +225,25 @@ func test_escape_fades_the_nvg_tip() -> void:
 	assert_false(toggles.is_tip_showing(), "the NVG tip shows once per process")
 
 
+# A digit while a menu is open is the menu's pick: it closes that menu (the
+# pick itself leaves as C2S 0x14 / 0x13) [orig: Input_HandleSpecialKeys
+# @0x49c731..0x49c75c (emotes), @0x49c783..0x49c7a8 (radio)].
+func test_a_digit_picks_from_the_open_voice_menu_and_closes_it() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F9)
+	assert_true(toggles.is_emotes_menu_open(), "F9 opens the emotes menu")
+	await _tap(KEY_3)
+	assert_false(toggles.is_emotes_menu_open(), "a digit picks and closes the emotes menu")
+	await _tap(KEY_F10)
+	assert_true(toggles.is_radio_menu_open(), "F10 opens the radio menu")
+	await _tap(KEY_0)
+	assert_false(toggles.is_radio_menu_open(), "the 0 key picks 10 and closes the radio menu")
+	assert_true(shell.is_gameplay_input_active(), "a pick leaves gameplay input live")
+
+
 func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> void:
 	var shell := await _booted_in_world()
 	if shell == null:

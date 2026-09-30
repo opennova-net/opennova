@@ -105,11 +105,15 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 // including a digit arriving on the release frame. A fresh press clears the
 // consumed flag; a shell chord applies after that clear. An inactive gameplay
 // frame cancels the chain, so closing an overlay cannot toggle a mount.
+// The special-key chain's digit arms, first open wins: the held-USE seat pick,
+// then the Emotes menu, then the Radio menu; a digit an arm takes never
+// reaches the binding rows (the swallow in poll()).
 // [orig: Input_ProcessFrame @0x49d520 -- the latch aging @0x49d57f..0x49d585,
 //  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
 //  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
 //  @0x4e0b65..0x4e0b71; Input_HandleSpecialKeys @0x49c5c0, the held-USE digit
-//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790]
+//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790, the Emotes
+//  arm @0x49c731..0x49c77c, the Radio arm @0x49c783..0x49c7c8]
 void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 		PlayerActionFrame &frame) {
 	use_held_prev_ = use_latched_;
@@ -123,13 +127,24 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 		use_hold_consumed_ = true;
 		use_consume_pending_ = false;
 	}
+	menu_digits_ = gate.active && (gate.emotes_menu_open || gate.radio_menu_open);
 	for (int digit = 0; digit < 10; ++digit) {
 		// The digit arm is a key-press path, so an open text line takes the
 		// digits [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with
 		// g_InputCaptureMode clear, Input_ProcessKeyboardEvents @0x49d2e3].
 		const bool digit_down = !gate.keyboard_captured && source.digit_down(digit);
-		if (!world::latched_key_edge(digit_down, use_held_prev_,
+		if (!world::latched_key_edge(digit_down, use_held_prev_ || menu_digits_,
 				use_digit_was_down_[digit])) continue;
+		if (!use_held_prev_) {
+			// The menu arms: keys 1..9 pick 1..9 and key 0 picks 10, sent and
+			// the menu closed; the Emotes menu wins when both are open.
+			// [orig: @0x49c745..0x49c75c (emotes, C2S 0x14) and
+			//  @0x49c791..0x49c7a8 (radio, C2S 0x13)]
+			const int pick = digit == 0 ? 10 : digit;
+			frame.requests.push_back(
+					{gate.emotes_menu_open ? Action::EmotePick : Action::RadioPick, pick});
+			continue;
+		}
 		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
 		const int seat = digit == 0 ? 9 : digit - 1;
 		if (!use_hold_consumed_ && gate.simulation_available)
@@ -165,9 +180,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		const bool capture_latch = (row.flags & CaptureLatch) != 0;
 		const bool down = (!capture_latch || active) && source.pressed(row.token);
 		bool swallowed = false;
-		if (!capture_latch && down && use_held_prev_) {
+		if (!capture_latch && down && (use_held_prev_ || menu_digits_)) {
 			// VK digits only: a rebound digit is swallowed, a mouse/joystick
-			// match (VK 0) is not [orig: the (key - 48) <= 9 test @0x49c6e0].
+			// match (VK 0) is not [orig: the (key - 48) <= 9 tests @0x49c6e0 /
+			// @0x49c73f / @0x49c78b].
 			const int vk = source.pressed_key(row.token);
 			swallowed = vk >= 0x30 && vk <= 0x39;
 		}

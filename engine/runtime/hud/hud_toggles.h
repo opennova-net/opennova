@@ -271,6 +271,12 @@ void hud_toggles_tip_frames(HudToggleState &state, int frames);
 // @0x525df2 with the flag].
 void hud_toggles_restart_round(HudToggleState &state);
 
+// A menu pick closes its menu with a plain store, no respawn init (the
+// special-key handler's digit arms; the pick itself is the controls poll's).
+// [orig: Input_HandleSpecialKeys — `dword_24C18D4 = 0` @0x49c75c (emotes),
+//  `dword_24C18D8 = 0` @0x49c7a8 (radio)]
+void hud_toggles_close_voice_menu(HudToggleState &state, bool radio);
+
 // The verbose toggle's toast key [orig: STRMISC_VERBOSE_ON / _OFF @0x49b78f].
 const char *verbose_toast_key(bool verbose);
 

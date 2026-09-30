@@ -167,6 +167,11 @@ func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_paren
 	_world = world
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
+	# The F9 Emotes / F10 Radio menus take a digit ahead of the weapon rows:
+	# the player input router reads and closes them (engine controls
+	# PlayerActions' menu arms carry the witness).
+	if _player_presenter != null:
+		_player_presenter.set_hud_toggles(_toggles)
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
