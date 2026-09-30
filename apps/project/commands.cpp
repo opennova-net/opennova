@@ -68,7 +68,7 @@ int usage(std::FILE *err, const char *why) {
 }
 
 void print_diagnostic(std::FILE *out, const Diagnostic &d) {
-	std::fprintf(out, "%s %s: %s", diagnostic_severity_label(d.severity), d.code.c_str(),
+	std::fprintf(out, "%s %s: %s", diagnostic_severity_label(d.severity), d.code().c_str(),
 	             d.message.c_str());
 	if (!d.asset.empty()) std::fprintf(out, " [%s]", d.asset.c_str());
 	if (d.line) std::fprintf(out, " line %zu", d.line);
@@ -138,7 +138,7 @@ bool open_settings(const std::string &dir, OpenedProject &project, std::FILE *er
 		report_error(err, finding);
 		return false;
 	}
-	if (!finding.code.empty())
+	if (!finding.code().empty())
 		print_diagnostic(err, finding);
 	return true;
 }

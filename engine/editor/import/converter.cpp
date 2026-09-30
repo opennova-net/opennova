@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include <base/io/strutil.h>
+#include <editor/model/diagnostic.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_o3a_read.h>
 #include <formats/threedi/threedi_o3d_read.h>
@@ -20,10 +21,10 @@ namespace {
 void add_findings(const std::string &source_name, const std::vector<threedi::SceneFinding> &findings,
                   ImportProduct &out) {
 	for (const threedi::SceneFinding &f : findings) {
-		Diagnostic d = make_diagnostic(f.error ? DiagnosticSeverity::Error : DiagnosticSeverity::Info,
-		                               f.error ? "import.scene" : "import.scene_note",
-		                               f.line > 0 ? "Line " + std::to_string(f.line) + ": " + f.message : f.message,
-		                               source_name);
+		Diagnostic d = make_finding(f.error ? CoreFinding::ImportScene : CoreFinding::ImportSceneNote,
+		                            f.error ? DiagnosticSeverity::Error : DiagnosticSeverity::Info,
+		                            f.line > 0 ? "Line " + std::to_string(f.line) + ": " + f.message : f.message,
+		                            source_name);
 		d.line = static_cast<size_t>(f.line);
 		out.diagnostics.push_back(std::move(d));
 	}
@@ -71,9 +72,9 @@ bool run_o3a(const std::string &source_name, const std::vector<uint8_t> &bytes, 
 	std::string error;
 	int failed_clip = -1;
 	if (!bad::bad_build_mint_set(set, name, files, &error, &failed_clip)) {
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "import.scene",
-		                               failed_clip >= 0 ? "Line " + std::to_string(clip_lines[failed_clip]) + ": " + error : error,
-		                               source_name);
+		Diagnostic d = make_finding(CoreFinding::ImportScene, DiagnosticSeverity::Error,
+		                            failed_clip >= 0 ? "Line " + std::to_string(clip_lines[failed_clip]) + ": " + error : error,
+		                            source_name);
 		if (failed_clip >= 0) d.line = static_cast<size_t>(clip_lines[failed_clip]);
 		out.diagnostics.push_back(std::move(d));
 		return false;

@@ -18,6 +18,7 @@
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -30,13 +31,13 @@ std::vector<ImportSource> list_import_sources(const std::vector<std::string> &pa
 	for (const std::string &path : paths) {
 		std::error_code ec;
 		if (!fs::is_regular_file(path, ec)) {
-			diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.source",
-			                                     "File not found: " + path));
+			diagnostics.push_back(make_finding(CoreFinding::ImportSource, DiagnosticSeverity::Error,
+			                                  "File not found: " + path));
 		} else if (strutil::ends_with_icase(path, ".pff")) {
 			Vfs archive;
 			if (!archive.set_primary_archive(path)) {
-				diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.archive",
-				                                     "Could not open archive: " + path));
+				diagnostics.push_back(make_finding(CoreFinding::ImportArchive, DiagnosticSeverity::Error,
+				                                  "Could not open archive: " + path));
 				continue;
 			}
 			for (const auto &file : archive.list_files()) sources.push_back({path, file.logical_name});
@@ -57,14 +58,14 @@ std::vector<ImportSource> list_retail_import_sources(const std::string &retail_r
                                                     std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportSource> sources;
 	if (retail_root.empty()) {
-		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.install",
-		                                     "Choose the game install folder in File > Project settings... first."));
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
+		                                  "Choose the game install folder in File > Project settings... first."));
 		return sources;
 	}
 	Vfs game;
 	if (!mount_retail(game, retail_root, document)) {
-		diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.install",
-		                                     "No game archives found under " + retail_root + "."));
+		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
+		                                  "No game archives found under " + retail_root + "."));
 		return sources;
 	}
 	for (const VfsFileLocation &file : game.list_files()) {
@@ -161,17 +162,15 @@ void report_textures_left(const std::vector<Output> &outputs, const AssetScan &e
 			const std::vector<std::string> candidates = reference_file_candidates(edge.kind, edge.value, edge.loader_arg, exists);
 			if (candidates.empty() || std::any_of(candidates.begin(), candidates.end(), exists)) continue;
 			if (!told.insert(normalized_logical_name(edge.value)).second) continue;
-			Diagnostic d = make_diagnostic(
-			        DiagnosticSeverity::Warning, "import.texture_not_imported",
+			Diagnostic d = make_finding(
+			        CoreFinding::ImportTextureNotImported, DiagnosticSeverity::Warning,
 			        output.name + " names the texture " + edge.value +
 			                ", which the import does not bring and the project does not have: import " + output.made_from +
 			                " with the files it needs (the import dialog's \"Include the files these need\", or "
 			                "--with-dependencies on the command line) to bring the textures found beside it.",
 			        output.name);
 			// What it is about, as the graph's missing reference says it: its fixes read it.
-			d.reference = edge.kind;
-			d.target = edge.value;
-			d.loader_arg = edge.loader_arg;
+			d.subject = ReferenceSubject{ edge.kind, edge.value, std::string(), edge.loader_arg };
 			out.push_back(std::move(d));
 		}
 	}
@@ -195,26 +194,35 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 	std::string retail_root;
 	std::vector<Output> outputs;
 	bool refused = false;
-	const auto refuse = [&](const std::string &code, const std::string &message, const std::string &name) {
-		result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, code, message, name));
+	const auto refuse = [&](CoreFinding code, const std::string &message, const std::string &name) {
+		result.diagnostics.push_back(make_finding(code, DiagnosticSeverity::Error, message, name));
 		refused = true;
+	};
+	// A name the project cannot take, as the import says it.
+	const auto name_refused = [](FileNameProblem problem) {
+		switch (problem) {
+		case FileNameProblem::Kind: return CoreFinding::ImportKind;
+		case FileNameProblem::Path: return CoreFinding::ImportPath;
+		default: return CoreFinding::ImportName;
+		}
 	};
 	// Every source read, and every file it makes checked, before anything is written.
 	for (const ImportSource &source : sources) {
 		const std::string name = source.name();
-		std::string problem, message;
+		FileNameProblem problem = FileNameProblem::None;
+		std::string message;
 		if (!check_project_file_name(paths.root, std::string(), name, AssetKind::Unknown, problem, message)) {
-			refuse("import." + problem, message, name);
+			refuse(name_refused(problem), message, name);
 			continue;
 		}
 		const std::string key = normalized_logical_name(name);
 		if (!selected_names.insert(key).second) {
-			refuse("import.duplicate", "More than one selected file has the name " + name + ".", name);
+			refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
 			continue;
 		}
 		const AssetEntry *old = existing.find(name);
 		if (old && !replace_existing) {
-			refuse("import.exists", name + " already exists; select Replace existing files to replace it.", name);
+			refuse(CoreFinding::ImportExists, name + " already exists; select Replace existing files to replace it.", name);
 			continue;
 		}
 		std::vector<uint8_t> bytes;
@@ -223,18 +231,18 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 			if (retail_root != source.path) {
 				retail_root.clear();
 				if (!mount_retail(retail, source.path, document)) {
-					refuse("import.install", "No game archives found under " + source.path + ".", name);
+					refuse(CoreFinding::ImportInstall, "No game archives found under " + source.path + ".", name);
 					continue;
 				}
 				retail_root = source.path;
 			}
 			if (!retail.read_file(source.entry, bytes)) {
-				refuse("import.read", "The game data has no file named " + name + ".", name);
+				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				continue;
 			}
 		} else if (source.entry.empty()) {
 			if (!read_file_bytes(source.path, bytes, io_error)) {
-				refuse("import.read", io_error, name);
+				refuse(CoreFinding::ImportRead, io_error, name);
 				continue;
 			}
 		} else {
@@ -242,13 +250,13 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 				archive.clear();
 				archive_path.clear();
 				if (!archive.set_primary_archive(source.path)) {
-					refuse("import.archive", "Could not open archive: " + source.path, name);
+					refuse(CoreFinding::ImportArchive, "Could not open archive: " + source.path, name);
 					continue;
 				}
 				archive_path = source.path;
 			}
 			if (!archive.read_file(source.entry, bytes)) {
-				refuse("import.read", "Could not read " + name + " from " + source.path, name);
+				refuse(CoreFinding::ImportRead, "Could not read " + name + " from " + source.path, name);
 				continue;
 			}
 		}
@@ -278,17 +286,17 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		for (ImportOutput &output : made) {
 			if (output.name != name) {
 				if (!check_project_file_name(paths.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {
-					refuse("import." + problem, message, output.name);
+					refuse(name_refused(problem), message, output.name);
 					continue;
 				}
 				if (!selected_names.insert(normalized_logical_name(output.name)).second) {
-					refuse("import.duplicate", "More than one selected file makes " + output.name + ".", output.name);
+					refuse(CoreFinding::ImportDuplicate, "More than one selected file makes " + output.name + ".", output.name);
 					continue;
 				}
 			}
 			const AssetKind kind = classify_asset(output.name, &output.bytes);
 			if (kind == AssetKind::Unknown || kind == AssetKind::Archive) {
-				refuse("import.kind", "Unsupported asset type: " + output.name, output.name);
+				refuse(CoreFinding::ImportKind, "Unsupported asset type: " + output.name, output.name);
 				continue;
 			}
 			// A file the project holds with the same bytes is left as it is unless the
@@ -299,14 +307,14 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 				if (read_file_bytes((fs::path(paths.root) / prior->relative_path).generic_string(), held, io_error) &&
 				    held == output.bytes)
 					continue;
-				refuse("import.exists", output.name + " already exists; select Replace existing files to replace it.",
+				refuse(CoreFinding::ImportExists, output.name + " already exists; select Replace existing files to replace it.",
 				       output.name);
 				continue;
 			}
 			const std::string relative = import_destination(existing, output.name, kind);
 			if (!check_project_file_name(paths.root, fs::path(relative).parent_path().generic_string(), output.name, kind,
 			                             problem, message)) {
-				refuse("import." + problem, message, output.name);
+				refuse(name_refused(problem), message, output.name);
 				continue;
 			}
 			Output planned;
@@ -323,7 +331,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 				const fs::path record = fs::path(paths.root) / (relative + kImportSidecarSuffix);
 				std::error_code ec;
 				if (fs::exists(record, ec) && !fs::is_regular_file(record, ec)) {
-					refuse("import.record",
+					refuse(CoreFinding::ImportRecord,
 					       relative + kImportSidecarSuffix + " is not a file: the import record of " + output.name +
 					               " cannot be written there.",
 					       output.name);
@@ -342,8 +350,8 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 	// takes every staged file and made folder back.
 	std::string io_error;
 	if (!ensure_project_cache_dir(paths, io_error)) {
-		result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.write",
-		                                             io_error + ". Nothing was imported."));
+		result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
+		                                          io_error + ". Nothing was imported."));
 		return result;
 	}
 	const fs::path stage = fs::path(paths.staging_dir) /
@@ -353,9 +361,9 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 	std::vector<std::string> records; // each output's staged record ("" for none)
 	const auto stage_failed = [&](const std::string &what, const std::string &error, const std::string &name) {
 		remove_stage(stage, folders);
-		result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Error, "import.write",
-		                                             "Could not write " + what + ": " + error + ". Nothing was imported.",
-		                                             name));
+		result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
+		                                          "Could not write " + what + ": " + error + ". Nothing was imported.",
+		                                          name));
 	};
 	if (!ensure_directory(stage.generic_string(), io_error)) {
 		stage_failed(stage.generic_string(), io_error, std::string());
@@ -414,18 +422,18 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 			continue;
 		}
 		remove_stage(stage, folders);
-		result.diagnostics.push_back(make_diagnostic(
-		        DiagnosticSeverity::Error, "import.publish",
+		result.diagnostics.push_back(make_finding(
+		        CoreFinding::ImportPublish, DiagnosticSeverity::Error,
 		        "Could not write " + failed + ": " + ec.message() + ". The import stopped there: " + std::to_string(i) +
 		                " of " + std::to_string(outputs.size()) + " files were imported.",
 		        output.name));
 		for (size_t rest = i; rest < outputs.size(); ++rest) {
 			result.not_imported.push_back(outputs[rest].relative);
 			if (rest > i)
-				result.diagnostics.push_back(make_diagnostic(DiagnosticSeverity::Warning, "import.not_published",
-				                                             outputs[rest].relative + " was not imported: the import stopped at " +
-				                                                     output.relative + ".",
-				                                             outputs[rest].name));
+				result.diagnostics.push_back(make_finding(CoreFinding::ImportNotPublished, DiagnosticSeverity::Warning,
+				                                          outputs[rest].relative + " was not imported: the import stopped at " +
+				                                                  output.relative + ".",
+				                                          outputs[rest].name));
 		}
 		return result;
 	}

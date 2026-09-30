@@ -84,7 +84,7 @@ const uint8_t *pixel(const RgbaImage &image, int x, int y) { return &image.pixel
 
 size_t count_code(const std::vector<Diagnostic> &diagnostics, const std::string &code) {
 	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) n += d.code == code ? 1 : 0;
+	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
 	return n;
 }
 
@@ -290,14 +290,14 @@ static int test_import_pass() {
 	sidecar.options["format"] = "tga";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	run = run_imports(paths, *view.project.document, true);
-	TEST_EXPECT(run.reimported == 0 && !run.sources[0].ok && !run.diagnostics.empty() && run.diagnostics[0].code == "import.option");
+	TEST_EXPECT(run.reimported == 0 && !run.sources[0].ok && !run.diagnostics.empty() && run.diagnostics[0].code() == "import.option");
 	sidecar.options["format"] = "pcx";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	// An imported output is never renamed: its source is.
 	session.handle(request::rescan());
 	const RenamePlan rename =
 			plan_rename(paths, *view.project.scan, *view.findings.graph, "logo.pcx", "logo2.pcx");
-	TEST_EXPECT(!rename.ok() && rename.refusals.front().code == "rename.imported");
+	TEST_EXPECT(!rename.ok() && rename.refusals.front().code() == "rename.imported");
 	// The session's Reimport request and the JSON view.
 	EditorRequest reimport = request::reimport();
 	reimport.force = true;
@@ -329,7 +329,7 @@ static int test_import_pass() {
 	session.handle(request::rescan());
 	bool broken_reported = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
-		if (d.code == "import.decode" && d.asset == "art/broken.png") broken_reported = true;
+		if (d.code() == "import.decode" && d.asset == "art/broken.png") broken_reported = true;
 	TEST_EXPECT(broken_reported && view.project.imports->size() == 2);
 	// A Reimport of one source: another source's failure stays a Problems row but is not
 	// this request's outcome.
@@ -463,7 +463,7 @@ static int test_import_lifetime() {
 		TEST_EXPECT(editor_test::write_text(root + "/taken.pcx", "x"));
 		session.handle(request::rescan());
 		const RenamePlan taken = plan_rename(paths, *view.project.scan, *view.findings.graph, "art/logo.png", "taken.png");
-		TEST_EXPECT(!taken.ok() && taken.refusals.front().code == "rename.exists");
+		TEST_EXPECT(!taken.ok() && taken.refusals.front().code() == "rename.exists");
 		fs::remove(root + "/taken.pcx", ec);
 		session.handle(request::rescan());
 	}
@@ -527,7 +527,7 @@ static int test_retail_source() {
 	TEST_EXPECT(view.project.retail_files.empty());
 	session.handle(request::preview_install_import());
 	TEST_EXPECT(!view.dialogs.import_preview.open &&
-			view.findings.diagnostics.back().code == "import.install");
+			view.findings.diagnostics.back().code() == "import.install");
 	editor_test::set_game_install(session, retail);
 	TEST_EXPECT(
 			view.project.retail_files.size() == 4); // the archive itself is not an importable file
@@ -570,7 +570,7 @@ static int test_retail_source() {
 	source.entry = "absent.txt";
 	import.imports.push_back(source);
 	session.handle(import);
-	TEST_EXPECT(view.findings.diagnostics.back().code == "import.read");
+	TEST_EXPECT(view.findings.diagnostics.back().code() == "import.read");
 	// A PNG of the game install, and one of an archive, is the game's own file: copied as it is,
 	// with no import record, so it is a texture (a loose PNG from the disk becomes an import
 	// source with its record: test_import_pass, the command line's import).
@@ -646,7 +646,7 @@ static int test_scene_imports() {
 	TEST_EXPECT(editor_test::write_text(source + "/broken.o3d", "o3d 1\nmodel broken\nlod 0\nbogus 1\n"));
 	r = import_assets({{source + "/broken.o3d", {}}}, paths, document, false);
 	bool line = false;
-	for (const Diagnostic &d : r.diagnostics) line = line || (d.code == "import.scene" && d.line == 4);
+	for (const Diagnostic &d : r.diagnostics) line = line || (d.code() == "import.scene" && d.line == 4);
 	TEST_EXPECT(line && r.imported.empty() && !fs::exists(root + "/models/broken.3di"));
 
 	// A clip set: the table its adm record names and its clip.
@@ -665,7 +665,7 @@ static int test_scene_imports() {
 		const ImportResult result = import_assets({{source + "/" + name, {}}}, paths, document, false);
 		bool said = false;
 		for (const Diagnostic &d : result.diagnostics)
-			said = said || (d.code == "import.scene" && d.message.find(words) != std::string::npos);
+			said = said || (d.code() == "import.scene" && d.message.find(words) != std::string::npos);
 		return said && result.imported.empty();
 	};
 	std::string no_slot = set;

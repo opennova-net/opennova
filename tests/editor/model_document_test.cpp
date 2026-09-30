@@ -267,7 +267,7 @@ int validation() {
 			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto has = [&](const char *code, DiagnosticSeverity severity) {
 		for (const Diagnostic &d : findings)
-			if (d.code == code && d.severity == severity) return true;
+			if (d.code() == code && d.severity == severity) return true;
 		return false;
 	};
 	// S11h: a ninth seat takes the control seat and ends the scan; the model still loads.
@@ -303,7 +303,7 @@ int frames_and_registers() {
 	const auto on_row = [&](const char *code) {
 		std::vector<Diagnostic> out;
 		for (const Diagnostic &d : validated(document))
-			if (d.code == code && d.child_id == panm.child) out.push_back(d);
+			if (d.code() == code && d.child_id == panm.child) out.push_back(d);
 		return out;
 	};
 	for (const int64_t rotation : {0, 1, 2, 3, 4}) {
@@ -354,7 +354,7 @@ int frames_and_registers() {
 	const auto registers_found = [&](const std::shared_ptr<const ModelDocument> &of) {
 		Found out;
 		for (const Diagnostic &d : validated(of)) {
-			if (d.code != "model.register_missing") continue;
+			if (d.code() != "model.register_missing") continue;
 			const char *record = d.child_id == material.child ? "material"
 			                     : d.child_id == panm.child   ? "panm"
 			                     : d.child_id == light.child  ? "light"
@@ -417,7 +417,7 @@ int frames_and_registers() {
 	TEST_EXPECT(second->load_bytes(bytes, "house.3di", AssetKind::Model, "jo", error));
 	size_t seconds = 0;
 	for (const Diagnostic &d : validated(second)) {
-		if (d.code != "model.register_missing") continue;
+		if (d.code() != "model.register_missing") continue;
 		TEST_EXPECT(d.severity == warning && d.record_kind == kMaterial && d.field.empty() &&
 		            d.message == no_table + "the second RGB generator's register 3 as the global register FLICKER.");
 		++seconds;
@@ -485,11 +485,11 @@ int retail_validation() {
 			}
 			for (const Diagnostic &d : validated(document)) {
 				if (d.severity != DiagnosticSeverity::Error) {
-					++notes[d.code];
+					++notes[d.code()];
 					continue;
 				}
 				std::printf("retail validation: %s (%s) %s: %s: %s\n", file.logical_name.c_str(), file.source_path.c_str(),
-				            d.record.c_str(), d.code.c_str(), d.message.c_str());
+				            d.record.c_str(), d.code().c_str(), d.message.c_str());
 				++errors;
 			}
 			for (const ModelLod &lod : document->model_row()->lods)

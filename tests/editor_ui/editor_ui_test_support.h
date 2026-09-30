@@ -546,7 +546,7 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
 	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
 	plan.truncated = true;
-	plan.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+	plan.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read" + stretch + ". The files it names are not looked for.",
 			"broken.mnu") };
 	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));

@@ -42,10 +42,11 @@ io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path
 // they come from}, screens: [{id, name, status, current, notes (every compiler note the
 // render check's render of it made, those only the preview shows included), problems (the
 // rows on the screen or a record of it)}], problems: [the
-// rows as the problems query gives them, each with its `source`]}. A row's source is its
-// code's family: graph (reference.*, graph.*: the asset graph), render (menu.render.*: the
-// render check's compiler notes), menu (the menu validator and the reader), document, and
-// so on. Null when menu_for finds no menu.
+// rows as the problems query gives them, each with its `source`]}. A row's source is its finding
+// code row's (session/finding_codes.h: finding_source_token): graph (the asset graph's
+// reference.missing and graph.unreadable), render (the render check's menu.render.*), else its
+// group's key, its code's family (menu: the menu validator and the reader; document; and so on).
+// Null when menu_for finds no menu.
 io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &path);
 
 // A screen (its row identity) of a menu (as menu_for finds it) as the render check compiled it

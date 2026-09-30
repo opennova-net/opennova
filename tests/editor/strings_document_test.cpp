@@ -223,14 +223,14 @@ int validation_and_session() {
 			document->path(), set({ section, kString, blank }, "key", std::string("")));
 	session.handle(empty);
 	bool empty_error = false;
-	for (const Diagnostic &d : view.findings.diagnostics) empty_error |= d.code == "strings.key_empty" && d.child_id == blank;
+	for (const Diagnostic &d : view.findings.diagnostics) empty_error |= d.code() == "strings.key_empty" && d.child_id == blank;
 	TEST_EXPECT(empty_error);
 	empty.edits = {set({section, kString, blank}, "key", std::string("hello"))};
 	session.handle(empty);
 	bool duplicate = false, still_empty = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
-		duplicate |= d.code == "strings.key_duplicate" && d.severity == DiagnosticSeverity::Warning;
-		still_empty |= d.code == "strings.key_empty";
+		duplicate |= d.code() == "strings.key_duplicate" && d.severity == DiagnosticSeverity::Warning;
+		still_empty |= d.code() == "strings.key_empty";
 	}
 	TEST_EXPECT(duplicate && !still_empty);
 	// Build waits on the unsaved prompt over the edited table; cancelled, nothing is built.
@@ -262,7 +262,7 @@ int validation_and_session() {
 	// A new table is created blank and opened when the request names the kind (a
 	// bare `.bin` name cannot say what it is); an unnamed kind is refused.
 	session.handle(request::create_file("extra.bin"));
-	TEST_EXPECT(session.document_for("extra.bin") == nullptr && view.findings.diagnostics.back().code == "document.kind");
+	TEST_EXPECT(session.document_for("extra.bin") == nullptr && view.findings.diagnostics.back().code() == "document.kind");
 	session.handle(request::create_file("extra.bin", asset_kind_token(AssetKind::Strings)));
 	auto *extra = session.document_for("extra.bin");
 	TEST_EXPECT(extra && extra->rows().empty() && !extra->blocked());
@@ -271,7 +271,7 @@ int validation_and_session() {
 	// has, in any case, is a warning on the later one (a lookup by section reads the first).
 	const auto finding = [&](const char *code, NodeId row) {
 		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.code == code && d.asset == extra->path() && d.row_id == row) return &d;
+			if (d.code() == code && d.asset == extra->path() && d.row_id == row) return &d;
 		return static_cast<const Diagnostic *>(nullptr);
 	};
 	add.path = extra->path();

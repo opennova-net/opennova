@@ -20,7 +20,9 @@ namespace opennova::editor {
 // never overwritten). `label` is the offer in plain words, `detail` its tooltip and what a
 // confirmation says it will do (a fix that acts on the files, which Undo cannot take back,
 // says so; one that only shows a place, or edits a document, does not); a `bulk` fix is one
-// a Fix all may apply with the others.
+// a Fix all may apply with the others. Which of the fixes below a finding gets is its code's
+// row's (session/finding_codes.h: FindingCodeRow::fixes), and what it is about is the finding's
+// subject.
 //
 // A file the project lacks that the game reads by name (requirement.missing,
 // requirement.optional_missing, play.boot_missing), while its row is missing: Create it
@@ -49,10 +51,10 @@ namespace opennova::editor {
 // lacks it. An import whose output is missing: import its source again. An open document
 // whose file changed outside the editor (document.conflict: its Save is refused): Reload
 // it, which asks about its unsaved edits first (not in bulk). Input a
-// rewrite drops or normalizes (style.line_ending, catalog.ignored_input,
-// menu.ignored_input, animation_map.ignored_input, strings.regrouped): Rewrite the file,
-// unless the file's own finding says it does not serialize (*.unserializable,
-// *.invalid_input: its Save is refused).
+// rewrite drops or normalizes (a Rewrite row: style.line_ending, catalog.ignored_input,
+// menu.ignored_input, animation_map.ignored_input, strings.regrouped): Rewrite the file, the
+// row's rewrite_does saying what that does, unless a finding of the file says it does not
+// serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused).
 // Every other finding has none: Problems goes to its place.
 struct ProblemFix {
 	std::string label;
@@ -62,7 +64,7 @@ struct ProblemFix {
 };
 
 // What the fixes read of a view's findings as a whole, found in one pass: the files whose
-// own finding says they do not serialize (no Rewrite for them). A caller asking about many
+// own finding says they do not serialize (a blocks_save row's: no Rewrite for them). A caller asking about many
 // findings of one view finds it once and hands it to each ask (answer_problems, the fix
 // cache); an ask without one finds it for itself.
 struct ProblemFixIndex {

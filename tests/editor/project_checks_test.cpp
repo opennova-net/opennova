@@ -87,12 +87,19 @@ std::unique_ptr<ProjectCheck> make_probe() {
 	return std::make_unique<ProbeCheck>();
 }
 
+// The probe's own finding code, its type's table (DocumentType::findings: S13 A6, every finding
+// is made from a table's row). The registry's tables are read as registered, so none lists it.
+constexpr FindingCodeRow kProbeRows[] = { { "probe.found" } };
+FindingTable probe_findings() { return { kProbeRows, std::size(kProbeRows) }; }
+
 // The item catalogs' type with the probe as its project check: its documents and its files' own
-// findings are the catalogs'. Copied from the registry before any stand-in is in place.
+// findings are the catalogs', and its table the probe's. Copied from the registry before any
+// stand-in is in place.
 const DocumentType &probe_type() {
 	static const DocumentType type = [] {
 		DocumentType row = *document_type(DocumentTypeId::Catalog);
 		row.name = "catalog_probed";
+		row.findings = probe_findings;
 		row.project_check = make_probe;
 		return row;
 	}();
@@ -100,7 +107,7 @@ const DocumentType &probe_type() {
 }
 
 Diagnostic probe_finding() {
-	return make_diagnostic(DiagnosticSeverity::Error, "probe.found", "The probe found this.",
+	return make_finding(kProbeRows[0], DiagnosticSeverity::Error, "The probe found this.",
 			"defs/items.def");
 }
 
@@ -179,20 +186,20 @@ struct Project {
 // The index of the first (or the last) row whose code starts with `prefix`, or SIZE_MAX.
 size_t first_of(const std::vector<Diagnostic> &rows, const std::string &prefix) {
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i].code.rfind(prefix, 0) == 0)
+		if (rows[i].code().rfind(prefix, 0) == 0)
 			return i;
 	return SIZE_MAX;
 }
 size_t last_of(const std::vector<Diagnostic> &rows, const std::string &prefix) {
 	for (size_t i = rows.size(); i-- > 0;)
-		if (rows[i].code.rfind(prefix, 0) == 0)
+		if (rows[i].code().rfind(prefix, 0) == 0)
 			return i;
 	return SIZE_MAX;
 }
 
 void print_rows(const std::vector<Diagnostic> &rows) {
 	for (size_t i = 0; i < rows.size(); ++i)
-		std::printf("  %zu %s %s\n", i, rows[i].code.c_str(), rows[i].asset.c_str());
+		std::printf("  %zu %s %s\n", i, rows[i].code().c_str(), rows[i].asset.c_str());
 }
 
 } // namespace
@@ -282,7 +289,7 @@ static int test_records_checked_gate() {
 		refresh_project(validation, graph, cache);
 		const std::vector<Diagnostic> *own = cache.kept_findings("menus/main.mnu");
 		TEST_EXPECT(!cache.records_checked("menus/main.mnu") && own && own->size() == 1 &&
-				own->front().code == "document.no_records");
+				own->front().code() == "document.no_records");
 		checks.update({ validation, cache, project.files });
 		const MenuRenderCheck *check = menu_render_check(&checks);
 		TEST_EXPECT(check != nullptr && check->document("menus/main.mnu") == nullptr && !notes(checks));
@@ -313,12 +320,12 @@ static int test_composition_order() {
 	const RequirementReport requirements;
 	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const std::vector<std::string> boot_missing{ "missing.bin" };
-	const std::vector<Diagnostic> play{ make_diagnostic(
-			DiagnosticSeverity::Warning, "play.exit", "The game ended with an error.") };
-	const std::vector<Diagnostic> open_own{ make_diagnostic(DiagnosticSeverity::Warning,
-			"document.outside", "The file changed outside the editor.", "defs/items.def") };
-	const std::vector<Diagnostic> build{ make_diagnostic(
-			DiagnosticSeverity::Error, "build.step", "A step of the build failed.") };
+	const std::vector<Diagnostic> play{ make_finding(
+			CoreFinding::PlayCrashed, DiagnosticSeverity::Warning, "The game ended with an error.") };
+	const std::vector<Diagnostic> open_own{ make_finding(CoreFinding::DocumentConflict,
+			DiagnosticSeverity::Warning, "The file changed outside the editor.", "defs/items.def") };
+	const std::vector<Diagnostic> build{ make_finding(
+			CoreFinding::BuildWrite, DiagnosticSeverity::Error, "A step of the build failed.") };
 	const ProjectFindingsInput input{ project.paths, project.document, project.scan, requirements,
 		open, boot_missing, play, open_own, build };
 	const ProjectFindings findings =
@@ -331,17 +338,17 @@ static int test_composition_order() {
 	bool all = true;
 	for (const char *source : sources)
 		all = all && first_of(rows, source) != SIZE_MAX;
-	const bool ordered = first_of(rows, "play.boot_missing") < first_of(rows, "play.exit") &&
-			last_of(rows, "play.exit") < findings.gate_begin &&
+	const bool ordered = first_of(rows, "play.boot_missing") < first_of(rows, "play.crashed") &&
+			last_of(rows, "play.crashed") < findings.gate_begin &&
 			findings.gate_begin <= first_of(rows, "catalog.item_identity") &&
 			last_of(rows, "catalog.item_identity") < first_of(rows, "style.unused") &&
 			last_of(rows, "style.unused") < first_of(rows, "reference.missing") &&
-			last_of(rows, "reference.missing") < first_of(rows, "document.outside") &&
-			last_of(rows, "document.outside") < findings.gate_end &&
+			last_of(rows, "reference.missing") < first_of(rows, "document.conflict") &&
+			last_of(rows, "document.conflict") < findings.gate_end &&
 			findings.gate_end <= first_of(rows, "probe.found") &&
 			last_of(rows, "probe.found") < first_of(rows, "menu.render.") &&
-			last_of(rows, "menu.render.") < first_of(rows, "build.step") &&
-			last_of(rows, "build.step") == rows.size() - 1;
+			last_of(rows, "menu.render.") < first_of(rows, "build.write") &&
+			last_of(rows, "build.write") == rows.size() - 1;
 	if (!all || !ordered)
 		print_rows(rows);
 	TEST_EXPECT(all && ordered);
@@ -399,7 +406,7 @@ static int test_session() {
 	const auto probe_rows = [&view] {
 		size_t found = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
-			found += d.code == "probe.found" ? 1 : 0;
+			found += d.row() == &kProbeRows[0] ? 1 : 0;
 		return found;
 	};
 	// Its findings changed but it says they did not, nothing else moving: no composition, the rows

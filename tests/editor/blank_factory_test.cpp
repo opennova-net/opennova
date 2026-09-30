@@ -117,7 +117,7 @@ static int test_registry_shape() {
 	std::vector<uint8_t> out;
 	Diagnostic error;
 	TEST_EXPECT(!make_blank(request, AssetKind::Animation, out, error));
-	TEST_EXPECT(error.code == "blank.unavailable");
+	TEST_EXPECT(error.code() == "blank.unavailable");
 	// Where a made file goes and the name New offers are the kind's row's (S13 V3): a kind Files'
 	// New lists (its free-form factory has no role) offers a new file's name, and no other kind
 	// does.
@@ -392,7 +392,7 @@ static int test_placeholder_texture() {
 	for (const char *name : {"skin.png", "skin", "chunk.aoc"}) {
 		request.logical_name = name;
 		TEST_EXPECT(!can_make_blank_texture(name, reason) && !reason.empty());
-		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code == "blank.texture" &&
+		TEST_EXPECT(!make_blank(request, AssetKind::Texture, bytes, error) && error.code() == "blank.texture" &&
 		            error.message == reason && error.asset == name);
 	}
 	return 0;

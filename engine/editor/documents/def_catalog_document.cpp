@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -274,7 +275,7 @@ bool DefCatalogDocument::parse(const std::vector<uint8_t> &bytes, std::vector<st
                                std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
                                Diagnostic &error) {
 	if (!is_catalog_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file has no catalog editor.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file has no catalog editor.", path());
 		return false;
 	}
 	DefParseReport report;
@@ -444,7 +445,7 @@ bool DefCatalogDocument::set_file_value(std::shared_ptr<const FileState> &state,
 	const size_t count = current ? current->spawn_ids.size() : 0;
 	if (kind() != AssetKind::ItemDefs || !value || edit.position > count ||
 	    edit.position >= size_t(DEF_VEHICLE_SPAWN_SLOTS) || *value < INT32_MIN || *value > INT32_MAX) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.value", "Invalid vehicle spawn slot.", path());
+		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error, "Invalid vehicle spawn slot.", path());
 		return false;
 	}
 	auto updated = current ? std::static_pointer_cast<ItemsFileState>(current->clone()) : std::make_shared<ItemsFileState>();

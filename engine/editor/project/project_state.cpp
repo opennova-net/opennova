@@ -11,7 +11,7 @@ ProjectState refresh_project_state(const ProjectPaths &paths, const ProjectDocum
 	for (const Diagnostic &d : state.imports.diagnostics) {
 		bool listed = false;
 		for (const Diagnostic &row : state.scan.diagnostics)
-			listed = listed || (row.severity == d.severity && row.code == d.code && row.asset == d.asset && row.message == d.message);
+			listed = listed || (row.severity == d.severity && row.row() == d.row() && row.asset == d.asset && row.message == d.message);
 		if (!listed) state.scan.diagnostics.push_back(d);
 	}
 	state.requirements = evaluate_requirements(doc, state.scan);

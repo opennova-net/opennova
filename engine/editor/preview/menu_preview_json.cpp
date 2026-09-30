@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
@@ -101,7 +102,7 @@ io::JsonValue menu_notes_to_json(const MnuDocument &document, const Node &screen
 		row.set("id", json_number(double(address.child)));
 		row.set("name", json_string(note.widget >= 0 ? compiler.widget_name(note.widget) : ""));
 		row.set("code", json_string(menu::menu_frame_note_token(note.code)));
-		row.set("finding", json_string(menu_note_code(note.code)));
+		row.set("finding", json_string(finding_code(note.code).token));
 		row.set("basis", json_string(menu::menu_frame_note_basis_token(menu::menu_frame_note_basis(note.code))));
 		row.set("severity", json_string(problem ? diagnostic_severity_label(severity) : "preview"));
 		row.set("subject", json_string(note.subject));

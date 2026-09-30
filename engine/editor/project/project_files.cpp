@@ -162,9 +162,9 @@ std::string basename_of(const std::string &path) {
 	return fs::path(path).filename().generic_string();
 }
 
-bool check_file_name(const std::string &name, AssetKind kind, std::string &problem, std::string &message) {
+bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &problem, std::string &message) {
 	if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\:") != std::string::npos) {
-		problem = "name";
+		problem = FileNameProblem::Name;
 		message = "'" + name + "' is not a plain file name: give a name with no folders.";
 		return false;
 	}
@@ -172,13 +172,13 @@ bool check_file_name(const std::string &name, AssetKind kind, std::string &probl
 	// a music bank, a config) is copied beside the archives under any name.
 	if (kind != AssetKind::Unknown && archive_name_limit_binds(kind) &&
 	    !logical_name_fits_archive(name)) {
-		problem = "name";
+		problem = FileNameProblem::Name;
 		message = "'" + name + "' does not fit the game's archives: names are up to 16 characters.";
 		return false;
 	}
 	if (kind != AssetKind::Unknown) {
 		if (!asset_name_fits_kind(name, kind)) {
-			problem = "kind";
+			problem = FileNameProblem::Kind;
 			message = "The game reads '" + name + "' as " + asset_kind_label(classify_asset(name, nullptr)) + ", not " +
 			          asset_kind_label(kind) + ": a file's name decides its kind.";
 			return false;
@@ -188,7 +188,7 @@ bool check_file_name(const std::string &name, AssetKind kind, std::string &probl
 }
 
 bool check_project_file_name(const std::string &root, const std::string &dir, const std::string &name, AssetKind kind,
-                             std::string &problem, std::string &message) {
+                             FileNameProblem &problem, std::string &message) {
 	if (!check_file_name(name, kind, problem, message)) return false;
 	// Where it lands, symbolic links resolved, must stay under the project.
 	std::error_code ec;
@@ -201,7 +201,7 @@ bool check_project_file_name(const std::string &root, const std::string &dir, co
 		}
 	}
 	if (within.empty() || within.is_absolute() || *within.begin() == "..") {
-		problem = "path";
+		problem = FileNameProblem::Path;
 		message = "'" + (fs::path(dir) / name).generic_string() + "' would land outside the project.";
 		return false;
 	}

@@ -35,11 +35,12 @@ struct ProjectCheckInput {
 // takes the asset graph and the validation cache, keeps nothing and is made again with every
 // composition, one per asset kind (kUseChecks); a project check takes the files and no graph,
 // keeps its state, one per document type. A project check never repeats a use check's finding or
-// the graph's: menu_note_problem's list of the notes the render check leaves out (a name the
-// project lacks is the graph's reference.missing, and so on) is the instance. One fact is read both
-// ways today: which variables a menu uses, as the graph's StyleVar edges and as the render check's
-// variables_named (the %NAME%s of the menu's saved text). The graph owns it: style.unused and
-// Rename read the edges; variables_named only decides which menus to render again.
+// the graph's: the notes the render check leaves out, its rows whose problem is None (the menu
+// type's finding codes, which menu_note_problem reads: a name the project lacks is the graph's
+// reference.missing, and so on), are the instance. One fact is read both ways today: which
+// variables a menu uses, as the graph's StyleVar edges and as the render check's variables_named
+// (the %NAME%s of the menu's saved text). The graph owns it: style.unused and Rename read the
+// edges; variables_named only decides which menus to render again.
 //
 // A type's registry row makes its check (DocumentType::project_check). The row is constexpr, so the
 // instance lives with whoever validates, one per type by its DocumentTypeId (ProjectChecks: the
