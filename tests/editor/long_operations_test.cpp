@@ -41,6 +41,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/preview/menu_render_check.h>
+#include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/editor_preferences.h>
@@ -751,11 +752,13 @@ static int test_stepped_equals_whole() {
 	return 0;
 }
 
-// Retail leg (OPENNOVA_JO_DIR): the JO install's files a document type opens, and the textures,
-// fonts and sounds they name, exported into a project, opened a poll at a time at the editor's own
-// budget (kDefaultPollBudget: 10 ms of 1 MiB steps): the polls the Open takes and its wall time,
-// then the validation's, and the longest poll of each (the frame the editor would stall for); and
-// the base layer a read-only dependency mount of the install builds (GraphLayer::build), timed.
+// Retail leg (OPENNOVA_JO_DIR): the JO install's files a document type opens, and the textures and
+// fonts they name, exported into a project whose game install is the JO one (its local.json, as a
+// modder's project names it), opened a poll at a time at the editor's own budget
+// (kDefaultPollBudget: 10 ms of 1 MiB steps): the polls the Open takes and its wall time, its first
+// poll (the install's names listed, one step), then the validation's, and the longest poll of each
+// (the frame the editor would stall for); and the base layer a read-only dependency mount of the
+// install builds (GraphLayer::build), timed.
 static int test_retail_open() {
 	const std::string install = retail::install();
 	if (install.empty()) {
@@ -793,6 +796,10 @@ static int test_retail_open() {
 		bytes_exported += file.size();
 	}
 	TEST_EXPECT(exported > 1000);
+	LocalSettings local;
+	local.game_install = install;
+	Diagnostic unsaved;
+	TEST_EXPECT(save_local_settings(ProjectPaths::for_root(root), local, unsaved));
 	using clock = std::chrono::steady_clock;
 	const auto ms_since = [](clock::time_point start) {
 		return std::chrono::duration<double, std::milli>(clock::now() - start).count();
@@ -804,12 +811,12 @@ static int test_retail_open() {
 	s.session.handle(request::open_project(root));
 	const double request_ms = ms_since(started);
 	size_t open_polls = 0, validation_polls = 0;
-	double longest_open = 0, longest_validation = 0;
+	double longest_open = 0, longest_validation = 0, first_open = 0;
 	while (v.activity.operation.running()) {
 		const auto poll = clock::now();
 		s.session.poll();
 		longest_open = std::max(longest_open, ms_since(poll));
-		++open_polls;
+		if (open_polls++ == 0) first_open = ms_since(poll);
 	}
 	const double open_ms = ms_since(started);
 	const auto validating = clock::now();
@@ -821,12 +828,13 @@ static int test_retail_open() {
 	}
 	const double validation_ms = ms_since(validating);
 	TEST_EXPECT(v.project.open && v.activity.last_operation.end == OperationEnd::Done && !v.findings.diagnostics.empty());
-	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the longest "
-	            "poll %.1f ms); validated in %zu polls, %.0f ms (the longest poll %.1f ms); %zu files scanned, %zu "
-	            "Problems rows, %zu edges\n",
-	            exported, double(bytes_exported) / (1024.0 * 1024.0), open_polls, open_ms, request_ms, longest_open,
-	            validation_polls, validation_ms, longest_validation, s.session.files_scanned(),
-	            v.findings.diagnostics.size(), v.findings.graph->edge_count());
+	TEST_EXPECT(v.project.retail_files.size() > 1000);
+	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
+	            "poll %.1f ms listing the install's %zu names, the longest poll %.1f ms); validated in %zu polls, %.0f "
+	            "ms (the longest poll %.1f ms); %zu files scanned, %zu Problems rows, %zu edges\n",
+	            exported, double(bytes_exported) / (1024.0 * 1024.0), open_polls, open_ms, request_ms, first_open,
+	            v.project.retail_files.size(), longest_open, validation_polls, validation_ms, longest_validation,
+	            s.session.files_scanned(), v.findings.diagnostics.size(), v.findings.graph->edge_count());
 	TEST_EXPECT(open_polls > 1 && validation_polls > 1);
 	// The validation's parts, each timed over the same files afresh: the graph's update (its first
 	// step, one whatever it reads), the files' own findings (a file a step), the render check (the
