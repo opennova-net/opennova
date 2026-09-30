@@ -3,30 +3,26 @@
 #include <string>
 
 #include <base/io/json.h>
+#include <editor/model/value.h>
+#include <editor/session/session_json.h>
 
 namespace opennova::editor {
 
 class MnuDocument;
-class ProjectSession;
 struct SessionView;
 
-// What the editor MCP's editor_menu reads of one menu and how it edits it (ADR 0046 S9m):
-// its screens and windows in one answer, with where the render check placed each window,
-// the Problems rows that concern it, and a batch on it. Every op finds the menu one way
-// (menu_for's), so an identity a pathless tree answered names a record of the menu a
-// pathless edit changes. Portable, so the ctest and the MCP read one schema.
+// What the query seam reads of one menu (ADR 0046 S9m, S13 A5: the menu_tree, menu_findings and
+// menu_render queries, which editor_menu's reads became): its screens and windows in one answer,
+// with where the render check placed each window, the Problems rows that concern it, and a screen
+// as the render check compiled it. Every read finds the menu one way (menu_for's), so an identity
+// a pathless tree answered names a record of the menu a pathless findings read reports on.
+// Portable, so the ctest and the MCP read one schema.
 
 // The menu `path` names (a project-relative path or a logical name; "" is the previewed
 // menu, else the active document when it is a menu): the open document, else the file as
 // the last validation read it (the render check's copy). Null when the project has no such
 // menu, or its file does not load.
 const MnuDocument *menu_for(const SessionView &view, const std::string &path);
-
-// editor_menu's edit and list: record_batch_request (session/record_batch.h) on the menu
-// `path` names, found as menu_for finds it (opened first when it is not open). Refused
-// ({ok: false, error}, nothing asked of the session) when it names no menu of the project:
-// with no path, when no menu is previewed and the active document is not one.
-io::JsonValue menu_edit_request(ProjectSession &session, const std::string &path, const io::JsonValue &request);
 
 // {path, open, dirty, revision, screens: [{id, name, index, status (the render check's
 // menu_preview_status_token: ready, unserializable, screen_missing; "none" when it has no render
@@ -50,5 +46,14 @@ io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path
 // render check's compiler notes), menu (the menu validator and the reader), document, and
 // so on. Null when menu_for finds no menu.
 io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &path);
+
+// A screen (its row identity) of a menu (a project-relative path) as the render check compiled it
+// headless with the last validation (S9j2), in the menu preview's schema (menu_preview_json.h), a
+// page of its widgets (`count` their whole number, set_page's) and by the same page its compiler
+// notes (`note_count` theirs): the parity read of the preview. The open document when the menu is
+// open (its current state), else the file as the check read it; status no_project without a
+// project, no_screen when the check has no such screen.
+io::JsonValue menu_render_to_json(
+		const SessionView &view, const std::string &path, NodeId screen, const JsonPage &page);
 
 } // namespace opennova::editor

@@ -112,7 +112,8 @@ using QueryHandler = io::JsonValue (*)(const QueryContext &context, const QueryA
 // request table is): its token on the wire, its handler, the params it takes, the key of the list
 // it pages (null for none: its offset or cursor and its limit checked once, the answer's `count`
 // the list's whole length), the concern whose revision the answer carries (ViewConcern::kCount:
-// every concern, the state's `revision` and `revisions`), and what it answers.
+// `any`, the state's, beside its `revisions`, and the events', which several concerns post), and
+// what it answers.
 struct EditorQueryRow {
 	EditorQueryKind kind = EditorQueryKind::kCount;
 	const char *token = "";
@@ -133,7 +134,7 @@ const char *query_json_token(QueryJson type);
 
 // The query `name` answered over the session's core: its row found, its args checked (an object
 // of its params, or null for none), its handler run, the answer stamped with `revision`, the
-// counter of the concern the row reads (the state: every concern's, and `any`). Null with `error`
+// counter of the concern the row reads (`any` for the state and the events). Null with `error`
 // naming the query for a name no row has, args it refuses, or a question it cannot answer.
 io::JsonValue run_query(SessionCore &core, std::string_view name, const io::JsonValue &args,
 		std::string &error);

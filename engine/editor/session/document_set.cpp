@@ -341,6 +341,8 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 		if (view_.project.open) core_.refuse_now("document.not_open", "Open the file before editing it.", request.path);
 		return;
 	}
+	// A batch that asks nothing (a replace_list of an empty list by none, S13 A5) is done.
+	if (request.edits.empty()) return;
 	apply_edits(*document, request.edits);
 }
 

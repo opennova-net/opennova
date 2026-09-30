@@ -130,7 +130,7 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 		}
 		answer.set("outcome", std::move(came));
 	}
-	answer.set("status", io::json_string(view().status));
+	answer.set("status", io::json_string(view().activity.status));
 	answer.set("revision", io::json_number(double(view().revisions.any())));
 	return answer;
 }

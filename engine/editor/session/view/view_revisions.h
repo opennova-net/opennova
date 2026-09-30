@@ -106,14 +106,19 @@ inline const char *view_concern_token(ViewConcern concern) {
 struct ViewRevisions {
 	uint64_t of(ViewConcern concern) const { return counters_[static_cast<size_t>(concern)]; }
 	uint64_t any() const { return any_; }
+	// The value `any` took when `concern` last moved (0: never): a client that read the view at
+	// revision `r` finds a concern moved since when its stamp is past `r` (S13 A5's `since`).
+	uint64_t stamp(ViewConcern concern) const { return stamps_[static_cast<size_t>(concern)]; }
 	// A change of `concern`: its counter and `any` move together.
 	void touch(ViewConcern concern) {
 		++counters_[static_cast<size_t>(concern)];
 		++any_;
+		stamps_[static_cast<size_t>(concern)] = any_;
 	}
 
 private:
 	std::array<uint64_t, kViewConcernCount> counters_{};
+	std::array<uint64_t, kViewConcernCount> stamps_{};
 	uint64_t any_ = 0;
 };
 

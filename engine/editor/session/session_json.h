@@ -98,49 +98,6 @@ io::JsonValue import_source_to_json(const ImportSource &source);
 io::JsonValue value_to_json(const Value &value);
 bool value_from_json(const io::JsonValue &json, Value &out);
 
-struct SessionJsonOptions {
-	// The first output line to include, by its absolute index (OutputLog): a cursor kept from the
-	// last page's next_cursor neither skips nor repeats a line.
-	uint64_t output_cursor = 0;
-	size_t output_limit = 200;
-	// The page of the import block's lists (its choices, roots, rows and not_found): each
-	// from `import_offset`, `import_limit` entries at most; their counts say how many there are.
-	size_t import_offset = 0;
-	size_t import_limit = 200;
-	// The first event to include, by its seq (ViewEvents; 0: from the oldest held), and how many:
-	// a cursor kept from the last page's next_cursor neither skips nor repeats one.
-	uint64_t event_cursor = 0;
-	size_t event_limit = ViewEvents::kKept;
-};
-
-// The view: revision (moves with any change: ViewRevisions::any), revisions (each concern's
-// counter by its token, view_revisions.h: a client waits on the concern it reads), status,
-// the unsaved-changes prompt ({open}, and while it is open the
-// waiting request's kind token as `action`, its `target`, the `files` it lists and
-// `can_discard`), project (its `files`: every file the scan lists, with its kind and whether
-// the editor opens it), requirements (rows included), documents (their paths, kinds,
-// dirtiness), the selection (the primary and every selected record), the clipboard's size, the
-// operation (operation_status_to_json) and the last one's outcome (`last_operation`), the build
-// and play blocks, what the last settings' Apply could not write (`settings_result`),
-// the import state (the dialog: its `choices` and `roots` as a request's imports take them,
-// the plan's importable `rows` with their source, destination, needed_by, found_in,
-// selected, problem and rivals, the `not_found` rows, each of the four lists a page from
-// `offset` with its count, then `not_followed`, `truncated` and the plan's findings; the
-// editor's `import_dependencies` setting; the project's imported sources), the problem
-// counts, the recent projects, a page of the output lines by absolute index ({first, next,
-// cursor, next_cursor, lines}) and a page of the events by seq ({first, next, cursor,
-// next_cursor, items}, each view_event_to_json's).
-io::JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions &options = {});
-// A view event (view_events.h): {seq, kind (its token: reveal_record, reveal_file, ask_rename,
-// settings_applied, import_planned)} and, as the kind sets them, `path`, `address` (the record's
-// {row, kind, child}), `field`, `flag` (only when true) and `tag` (only when not 0).
-io::JsonValue view_event_to_json(const ViewEvent &event);
-// The operation that runs: {running}, and while one does its id, kind token, label, done, total,
-// unit token (bytes, files, steps), cancellable and holds (tokens: files, documents, project).
-io::JsonValue operation_status_to_json(const OperationStatus &status);
-// What an operation came to: {id, kind, end (done, failed, cancelled), findings}; null before the
-// first ends.
-io::JsonValue operation_outcome_to_json(const OperationOutcome &outcome);
 // A finding: severity, code, message, and as it has them asset, field, record, line, the
 // record's identities, and what it is about (role, target, reference as a kind token, scope).
 io::JsonValue diagnostic_to_json(const Diagnostic &diagnostic);

@@ -514,8 +514,9 @@ JsonValue answer_menu_tree(const QueryContext &context, const QueryArgs &args, s
 	const uint64_t only = one ? uint64_t(args.integer("screen")) : 0;
 	const JsonPage page = page_of(args);
 	JsonValue *screens = tree.get("screens");
+	if (!screens || !screens->is_array()) return tree;
 	std::vector<JsonValue> kept;
-	for (JsonValue &screen : screens ? screens->array : kept) {
+	for (JsonValue &screen : screens->array) {
 		const JsonValue *id = screen.get("id");
 		if (one && !(id && id->is_number() && uint64_t(id->number) == only)) continue;
 		page_list(screen, "windows", page);
@@ -525,7 +526,7 @@ JsonValue answer_menu_tree(const QueryContext &context, const QueryArgs &args, s
 		error = tree.get_string("path", path) + " has no screen " + std::to_string(only) + ".";
 		return JsonValue::make_null();
 	}
-	if (screens) screens->array = std::move(kept);
+	screens->array = std::move(kept);
 	return tree;
 }
 
@@ -747,7 +748,8 @@ constexpr EditorQueryRow kRows[] = {
 			"total in its unit, cancellable, and what it reads and writes), what the last one "
 			"came to (last_operation: id, kind, end, findings) and the last build.")
 			.row,
-	Query(K::Events, "events", answer_events, kCursorParams, C::Selection,
+	// Events are posted beside a Selection or a Dialogs change; the page is stamped with `any`.
+	Query(K::Events, "events", answer_events, kCursorParams, C::kCount,
 			"A page of the view events by seq (the one-shot asks a request makes of a window, the "
 			"last 64 held): first, next, cursor, next_cursor and the items, each its seq, kind "
 			"(reveal_record, reveal_file, ask_rename, settings_applied, import_planned) and the "
