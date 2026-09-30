@@ -1444,6 +1444,7 @@ public:
 	// on_respawn_init; ordered by HudToggles' EVENT_OVERLAY_WINDOWS_CLEARED).
 	void request_hud_map_close();
 	void request_waypoint_cycle(int p_direction); // NextWaypoint: WaypointTrack::manual_cycle
+	void request_spectate_action(int p_code); // rows 110..112: ClientReplicaPipeline::spectate_action
 	int get_hud_map_mode() const;
 	int get_hud_big_zoom_q16() const;
 	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay
@@ -1612,9 +1613,8 @@ public:
 	// map legs' feed (inmatch/minimap_overlays.h); LOCAL-entity policy tails.
 	PackedInt32Array get_hud_minimap_snapshot() const;
 	Ref<HudMapOverlays> get_hud_minimap_overlays(const Ref<RtxtStringFile> &p_gametext) const;
-	// One HUD frame of the radar legs (world::radar_hud_frame) behind the
-	// overlay's gate bits, packed as hud::radar_feed_encode.
-	PackedInt32Array step_hud_radar(int p_hud_tick, int p_gates);
+	// One HUD frame of the radar legs and the bank aging (inmatch::step_hud_radar).
+	PackedInt32Array step_hud_radar(int p_gates);
 	// Static footprint polygons for footprint-class markers (buildings/zones
 	// with marker models): {version=1, count} then per row {handle,
 	// fill_argb, fill_value_count, xy_q16..., edge_value_count, xy_q16...}.

@@ -184,6 +184,11 @@ void Simulation::request_waypoint_cycle(int p_direction) {
 	kernel_->world.script.waypoints.manual_cycle(p_direction < 0, is_mp_session());
 }
 
+void Simulation::request_spectate_action(int p_code) {
+	// The role's own client replica holds the death screen's spectate state.
+	if (runtime_ != nullptr) runtime_->view().spectate_action(p_code);
+}
+
 int Simulation::get_hud_map_mode() const {
 	return kernel_->local.hud_map_control.mode;
 }

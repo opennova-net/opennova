@@ -57,6 +57,27 @@ using opennova::hud::HudRectRecord;
 
 constexpr int kMinimapFootprintFeedVersion = 1;
 
+// The map sprites' MODULATE2X(TEXTURE, DIFFUSE) colour stage, saturated per
+// channel, with the MODULATE(TEXTURE, DIFFUSE) alpha stage and the
+// SRCALPHA/INVSRCALPHA blend: the radar marks' material word 0x651 (blend 1,
+// alpha 0x50, colour 0x600; the witness rides HudMapSprite::modulate2x in
+// engine/runtime/hud/hud_minimap.h).
+constexpr const char *kMapModulate2xShader = R"(
+shader_type canvas_item;
+render_mode unshaded, blend_mix;
+
+varying vec4 diffuse;
+
+void vertex() {
+	diffuse = COLOR;
+}
+
+void fragment() {
+	vec4 texel = texture(TEXTURE, UV);
+	COLOR = vec4(min(texel.rgb * diffuse.rgb * 2.0, vec3(1.0)), texel.a * diffuse.a);
+}
+)";
+
 constexpr const char *kMinimapWaterShader = R"(
 shader_type canvas_item;
 render_mode unshaded, blend_mix;
@@ -684,7 +705,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	textures_[opennova::hud::kHudTexMapCompass] =
 			double_saturate_texture_(load_hud_texture_("compring.tga"));
 	// The radar sector-slice marks load like the compass ring; their
-	// MODULATE2X stage folds into the coloured diffuse at compile, so the
+	// MODULATE2X stage runs on the device (map_modulate2x_material), so the
 	// textures stay raw. The marks draw only while both loaded
 	// (HudMinimapInput::radar_slices_loaded carries the witness).
 	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga");
@@ -1782,6 +1803,12 @@ void HudOverlay::ensure_map_materials_() {
 		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
 	}
 	ensure_minimap_water_material_();
+	if (map_modulate2x_material_.is_null()) {
+		map_modulate2x_shader_.instantiate();
+		map_modulate2x_shader_->set_code(kMapModulate2xShader);
+		map_modulate2x_material_.instantiate();
+		map_modulate2x_material_->set_shader(map_modulate2x_shader_);
+	}
 }
 
 RID HudOverlay::map_additive_material() {
@@ -1792,6 +1819,11 @@ RID HudOverlay::map_additive_material() {
 RID HudOverlay::map_water_material() {
 	ensure_map_materials_();
 	return minimap_water_material_->get_rid();
+}
+
+RID HudOverlay::map_modulate2x_material() {
+	ensure_map_materials_();
+	return map_modulate2x_material_->get_rid();
 }
 
 HudMapPassTextures HudOverlay::map_pass_textures() const {
@@ -2143,13 +2175,14 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	ensure_map_materials_();
 	const RID additive = additive_material_->get_rid();
 	const RID water = minimap_water_material_->get_rid();
+	const RID modulate2x = map_modulate2x_material_->get_rid();
 	if (p_big) {
 		// The whole big-map sandwich sits ABOVE the flat HUD and the corner
 		// map: retail draws the M map after the full overlay pass, so bars,
 		// chat, and the corner spinmap all disappear under it (only the
 		// objectives-family legs draw later — that residual is ledgered on
 		// D-HUD-21; witness at hud_frame.h HudDrawList::big_map).
-		big_map_.ensure(get_canvas_item(), 5, false, additive, water);
+		big_map_.ensure(get_canvas_item(), 5, false, additive, water, modulate2x);
 		big_map_.render(p_map, p_map_glyphs, map_pass_textures());
 		return;
 	}
@@ -2157,6 +2190,6 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 	// retail pushes the map before the friendly-tag and console-message
 	// passes, so those overlays paint OVER the corner map (witness at
 	// hud_frame.cpp element ordering).
-	corner_map_.ensure(get_canvas_item(), 0, true, additive, water);
+	corner_map_.ensure(get_canvas_item(), 0, true, additive, water, modulate2x);
 	corner_map_.render(p_map, p_map_glyphs, map_pass_textures());
 }

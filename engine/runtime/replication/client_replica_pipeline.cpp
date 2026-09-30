@@ -1754,7 +1754,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		const bool bit = (fu.flags1 & 0x01u) != 0;
 		if (bit && !state_.death_screen_active) {
 			state_.death_screen_active = true;
-			state_.death_screen_submode = 0;
+			state_.death_screen_submode = 0;  // [orig: @0x42ffa6]
+			state_.spectate_target = 0xFFFF;  // [orig: @0x42ffac]
 			state_.enemy_tags_visible = true;
 		} else if (!bit && state_.death_screen_active) {
 			state_.death_screen_active = false;

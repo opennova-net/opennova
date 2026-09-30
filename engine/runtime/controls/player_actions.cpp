@@ -183,6 +183,27 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	return frame;
 }
 
+std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActionSource &source,
+		bool active) {
+	// [orig: rows 110 / 111 / 112 -> Input_HandleActionBinding cases 500
+	//  @0x49bd58, 501 @0x49bd67, 502 @0x49bd89]
+	static constexpr struct {
+		const char *token;
+		int code;
+	} kSpectatorRows[3] = {
+		{"CycleSpectatorMode", 500},
+		{"IncSpectatorTarget", 501},
+		{"DecSpectatorTarget", 502},
+	};
+	std::vector<PlayerActionRequest> out;
+	for (std::size_t i = 0; i < std::size(kSpectatorRows); ++i) {
+		const bool down = source.pressed(kSpectatorRows[i].token);
+		if (world::latched_key_edge(down, active, spectator_was_down_[i]))
+			out.push_back({Action::Spectate, kSpectatorRows[i].code});
+	}
+	return out;
+}
+
 void PlayerActions::reset() {
 	fire_was_held_ = false;
 	reload_was_down_ = false;

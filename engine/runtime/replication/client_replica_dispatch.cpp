@@ -264,6 +264,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::DEPLOYED_ITEM: // live pool-1 placed-device spawn/update (§5.36)
 		apply_deployed_item(body);
 		break;
+	case s2c::SPECTATOR_FLAGS: // the spectator-mode record (0x75)
+		apply_spectator_mode(body);
+		break;
 	case s2c::ENTITY_REMOVE: // live packed-handle retirement (0x12)
 		apply_entity_remove(body);
 		break;

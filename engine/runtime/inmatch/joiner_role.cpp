@@ -873,6 +873,29 @@ void JoinerRole::wire_frame_providers() {
             in.target_origin[0] = target->x; in.target_origin[1] = target->y; in.target_origin[2] = target->z;
         }
     };
+    // The rounds' wire actors: a remote player is a decoded replica row here,
+    // where retail's client resolves the wire handle to its own pool slot,
+    // whose team (the 0x0C spawn @0x42e979), playerClass (the spawn
+    // @0x42e9d5, then the player compact's difficulty byte & 0xF @0x4ad5a2),
+    // equipped adm (+0x2B0, the compact @0x4c11f2) and chased Position the
+    // whiz blip reads; the local player's own wire handle is the missile
+    // note's target-is-local arm. [orig: NetPacket_DeserializeRoundEvent
+    //  @0x42f491; Entity_SerializeGuidedMissileState @0x447ece]
+    world.round_sim.wire_actor_provider = [this](uint16_t handle, world::RoundSim::WireActor &out) {
+        out = world::RoundSim::WireActor{};
+        out.is_local = runtime->has_self_handle() && handle == runtime->self_handle();
+        const auto *row = runtime->state().find(handle);
+        if (row == nullptr) return out.is_local;
+        out.team = row->team_known ? row->team : 0;
+        out.player_class = row->net_has_compact
+                ? static_cast<int32_t>(row->health_class_byte & 0x0Fu)
+                : static_cast<int32_t>(row->spawn_player_class);
+        out.equipped_adm_index = row->equipped_adm_index;
+        out.pos[0] = row->x;
+        out.pos[1] = row->y;
+        out.pos[2] = row->z;
+        return true;
+    };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
 	// [orig: g_EnvWaterHeightFixed @ 0x26C6454] (EnvState convention: 0 = no
@@ -2205,7 +2228,10 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 
 // Leaving: the disconnect datagrams ride the shell's send leg.
 void JoinerRole::close() {
-	if (kernel_) kernel_->world.round_sim.guided_inputs_provider = {};
+	if (kernel_) {
+		kernel_->world.round_sim.guided_inputs_provider = {};
+		kernel_->world.round_sim.wire_actor_provider = {};
+	}
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
 }

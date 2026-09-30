@@ -24,6 +24,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/strutil.h>
 #include <base/io/byte_reader.h>
@@ -52,6 +53,15 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
         state_.scoreboard_status_suffix =
                 static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
         state_.mark_changed();
+    } else if (strutil::iequals(command, "SPECTATORTARGET")) {
+        // atol(n) as a packed handle, bounded to pools 0..4 and the pool's
+        // capacity, then the track [orig: @0x429fe8..0x42a04e ->
+        // Entity_TrySetMinimapTrackTarget @0x52abc0].
+        const long handle = std::strtol(value.c_str(), nullptr, 10);
+        const uint16_t packed = static_cast<uint16_t>(handle);
+        if ((packed & 0xF000u) < 0x5000u &&
+                static_cast<std::size_t>(packed & 0xFFFu) < world::retail_pool_capacity(packed >> 12))
+            spectate_track(packed);
     }
 }
 

@@ -208,6 +208,36 @@ int main() {
 		CHECK(menus.radio_menu.texts[8].rfind("RAD_", 0) == 0 && menus.radio_menu.texts[8] != "RAD_9");
 		const HudRoleFacts none = hud_role_facts(RoleView{});
 		CHECK(!none.session.in_session && none.session.round_time_remaining == -1);
+		// The death screen's spectate arm: with a target and a sub-mode the
+		// info is rebuilt for the target (its team byte, name and health
+		// ratio, a negative Health reading back as full); a missing sub-mode
+		// or a missing row keeps the local build [orig: HUD_RenderOverlays
+		// @0x5a7bdb..0x5a7c25; HUD_BuildEntityInfo @0x4b87c7..0x4b87d3].
+		CHECK(!f.session.spectating);
+		kernel.world.tables.player.item_hp = 200;
+		replication::ClientEntityState &target = st.upsert(0x0005);
+		target.team = 1;
+		target.team_known = true;
+		target.display_name = "Bravo";
+		target.health_word = 50;
+		target.health_known = true;
+		st.death_screen_active = true;
+		st.spectate_target = 0x0005;
+		st.death_screen_submode = 0;
+		CHECK(!hud_role_facts(view).session.spectating); // the gate needs a sub-mode
+		st.death_screen_submode = 1;
+		const HudRoleFacts spec = hud_role_facts(view);
+		CHECK(spec.session.spectating && spec.session.team == 1 &&
+				spec.session.spectated_name == "Bravo" &&
+				spec.session.spectated_health_fraction == 0.25f);
+		target.health_word = static_cast<uint16_t>(-5);
+		CHECK(hud_role_facts(view).session.spectated_health_fraction == 1.0f);
+		st.spectate_target = 0x0009;
+		const HudRoleFacts gone = hud_role_facts(view);
+		CHECK(!gone.session.spectating && gone.session.team == 2);
+		st.death_screen_active = false;
+		st.spectate_target = 0xFFFF;
+		st.death_screen_submode = 0;
 		// The A&D side latch: the first TARGET-attrib def in pool 2 (then 1)
 		// against the local team — another team's target attacks (2), our own
 		// defends (1); any other game type clears it [orig: sub_524110 @0x524110].

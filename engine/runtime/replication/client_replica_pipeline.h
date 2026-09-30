@@ -73,15 +73,19 @@ public:
 	// embedding runtime drains and sends them once per frame.
 	std::vector<uint16_t> drain_carrier_repair_requests();
 	void tick_recoil();
-	// Advance the retained 0x40/0x6B banks once per client tick. Persistent
-	// 0x10 slots do not age; the transient bank clears on expiry while the
-	// special bank floors its lifetime at zero keeping the handle; live links
-	// keep their slot's lifetime refreshed and clear it when they lapse.
-	// Regular (non-special) markers refresh pose/known from the decoded
-	// entity, mirroring retail's draw-time pool read.
-	// [orig: MapOverlay_UpdateTimers @0x5BFCE0;
-	//  Render_MinimapSlotBlip @0x5be4ac]
-	void tick_minimap_overlays();
+	// Age the retained 0x40/0x6B banks by `elapsed` ticks. Persistent 0x10
+	// slots do not age; the transient bank clears on expiry while the special
+	// bank floors its lifetime at zero keeping the handle; live links re-arm
+	// their slot's lifetime and handle and clear it when they lapse. Retail
+	// runs it from the HUD's radar update with that update's elapsed tick
+	// count, so the embedder calls it from its HUD frame (inmatch
+	// step_hud_radar) [orig: MapOverlay_UpdateTimers @0x5BFCE0, called by
+	// Radar_UpdateContacts @0x59a9ce].
+	void age_minimap_overlays(uint32_t elapsed);
+	// Once per client tick: regular (non-special) markers refresh pose and
+	// known from the decoded entity, mirroring retail's draw-time pool read.
+	// [orig: Render_MinimapSlotBlip @0x5be4ac]
+	void refresh_minimap_live_markers();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.
@@ -331,7 +335,30 @@ public:
 	void set_mp_attributes(uint32_t attributes) { mp_attributes_ = attributes; }
 	uint32_t mp_attributes() const { return mp_attributes_; }
 
+	// The death screen's spectate writers over the replica rows
+	// (client_replica_spectate.cpp): the local player's own wire handle the
+	// walk starts from and excludes (the embedder stamps it each frame), the
+	// target walk (direction 0 clears target and sub-mode), the sub-mode cycle
+	// and the SPECTATORTARGET track.
+	// [orig: Spectator_CycleTarget_0 @0x52ac20; sub_52AFF0 @0x52aff0;
+	//  Entity_TrySetMinimapTrackTarget @0x52abc0]
+	void set_spectate_local_handle(uint16_t handle) { spectate_local_handle_ = handle; }
+	void spectate_cycle_target(int direction);
+	void spectate_cycle_mode(int direction);
+	void spectate_track(uint16_t handle);
+	// The death screen's three spectator actions by their dispatch codes: 500
+	// cycles the sub-mode, 501 / 502 step the target +1 / -1 in a chase or
+	// first-person sub-mode [orig: Input_HandleActionBinding cases 500
+	// @0x49bd58, 501 @0x49bd67, 502 @0x49bd89; catalog rows 110..112].
+	static constexpr int kSpectateActionCycleMode = 500;
+	static constexpr int kSpectateActionNextTarget = 501;
+	static constexpr int kSpectateActionPrevTarget = 502;
+	void spectate_action(int code);
+
 private:
+	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].
+	void spectate_on_entity_removed(uint16_t handle);
+	void apply_spectator_mode(const std::vector<uint8_t> &body); // 0x75
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
@@ -435,6 +462,7 @@ private:
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;
 	uint16_t viewer_handle_ = 0xFFFF;
+	uint16_t spectate_local_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is

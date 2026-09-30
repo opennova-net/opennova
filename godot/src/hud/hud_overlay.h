@@ -358,6 +358,10 @@ public:
 	HudMapPassTextures map_pass_textures() const;
 	RID map_additive_material();
 	RID map_water_material();
+	// The fixed-function MODULATE2X(TEXTURE, DIFFUSE) colour stage with the
+	// MODULATE alpha stage under SRCALPHA/INVSRCALPHA, for the map sprites
+	// flagged HudMapSprite::modulate2x (the bit-10 radar marks).
+	RID map_modulate2x_material();
 
 protected:
 public:
@@ -449,6 +453,8 @@ private:
 	Ref<Shader> flat_shader_;
 	Ref<ShaderMaterial> flat_material_;
 	bool flat_material_bound_ = false;
+	Ref<Shader> map_modulate2x_shader_;
+	Ref<ShaderMaterial> map_modulate2x_material_;
 	// The spinmap sandwich: the retail terrain draws twice (base + additive
 	// x4-stage resubmission), so the second pass and everything the map
 	// layers above it ride pinned-order child items (hud_map_pass_renderer.h).

@@ -28,8 +28,13 @@ struct HudMapPassTextures {
 // the base (a pass's rect clear + terrain), the additive terrain resubmission (the
 // retail decal stage's x4 output split across two 1x items), the depthspin
 // water cutout, and the top item (grid rules, footprints, sprites, lines,
-// glyphs, then any over-lines). The corner spinmap, the M-cycle big map and
-// the DEATH MAP window each own one; the materials stay their owner's.
+// glyphs, then any over-lines). A pass carrying MODULATE2X sprites (the bit-10
+// radar marks) splits the top item's content across two ordered children of
+// it: the MODULATE2X item (those sprites, under the owner's modulate-2x
+// material) and the post item (everything after them: the threat ring, the
+// compass, the lines, the glyphs), so the retail draw order holds while the
+// marks run their own colour stage. The corner spinmap, the M-cycle big map
+// and the DEATH MAP window each own one; the materials stay their owner's.
 class HudMapPassRenderer {
 public:
 	HudMapPassRenderer() = default;
@@ -38,9 +43,11 @@ public:
 	HudMapPassRenderer &operator=(const HudMapPassRenderer &) = delete;
 
 	// Create the four items under `parent` (idempotent) at draw indices
-	// first_draw_index..+3, optionally behind the parent's own commands.
+	// first_draw_index..+3, optionally behind the parent's own commands, plus
+	// the top item's two ordered children.
 	void ensure(const RID &parent, int first_draw_index, bool behind_parent,
-			const RID &additive_material, const RID &water_material);
+			const RID &additive_material, const RID &water_material,
+			const RID &modulate2x_material);
 	bool is_ready() const;
 	// Clear every item's commands (the owner's per-draw reset).
 	void clear();
@@ -62,6 +69,8 @@ private:
 	RID add_item_;
 	RID water_item_;
 	RID top_item_;
+	RID modulate2x_item_; // child of top_item_, first
+	RID post_item_;       // child of top_item_, after the MODULATE2X item
 	bool water_sampling_configured_ = false;
 	bool top_sampling_configured_ = false;
 };

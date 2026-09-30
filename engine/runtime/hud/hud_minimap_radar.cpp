@@ -93,10 +93,12 @@ void emit_marks(const HudMinimapInput &input, const uint8_t *red, const uint8_t 
 		mark.v0 = 0.5f - kMarkUvHalf;
 		mark.u1 = 0.5f + kMarkUvHalf;
 		mark.v1 = 0.5f + kMarkUvHalf;
-		// The pass's MODULATE2X stage folds into the diffuse, as for the
-		// map's TSDicon blips [orig: GfxShader_ApplyPassChecked(tex, 0x1300000)
-		// @0x59c484 / @0x59c634].
-		mark.color = hud_icon_strip_modulate2x_color(red[k] != 0 ? kMarkHit : kMarkMiss);
+		// The raw diffuse: the device runs the material's MODULATE2X(TEXTURE,
+		// DIFFUSE) colour stage (mode word 0x651, loaded with flags 1617) under
+		// the pass [orig: HUD_LoadAllTextures @0x59de25..0x59de42;
+		// GfxShader_ApplyPassChecked(tex, 0x1300000) @0x59c484 / @0x59c634].
+		mark.color = red[k] != 0 ? kMarkHit : kMarkMiss;
+		mark.modulate2x = true;
 		mark.texture = texture;
 		mark.layer = 5;
 		out.sprites.push_back(mark);

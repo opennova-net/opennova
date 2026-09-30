@@ -114,6 +114,9 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 }
 
 void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
+	// Entity_Destroy's first leg, ahead of its teardown: a destroyed spectate
+	// target re-picks while its row still stands [orig: @0x43e820..0x43e838].
+	spectate_on_entity_removed(root_handle);
 	discard_entity_notifications(root_handle);
 	// The client runs the shared Entity_Destroy, refNum walk included. The row
 	// leaves its refNum group first (the streamed refNum byte stands in for the

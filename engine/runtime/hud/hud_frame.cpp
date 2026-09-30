@@ -922,7 +922,14 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 	const float y0 = sy(r.y, h);
 	const float x1 = sx(r.x + r.w, w);
 	const float y1 = sy(r.y + r.h, h);
-	const float fraction = std::clamp(state.health_fraction, 0.0f, 1.0f);
+	// On the death screen the bar draws only inside the spectate arm, off the
+	// info rebuilt for the target [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c04;
+	// the living arm @0x5a7ca0].
+	if (state.combat.death_screen && !state.session.spectating) return;
+	const float fraction = std::clamp(state.combat.death_screen
+					? state.session.spectated_health_fraction
+					: state.health_fraction,
+			0.0f, 1.0f);
 	const int32_t ratio_fp16 =
 			static_cast<int32_t>(fraction * 65536.0f);
 	const int band = health_color_band_fp16(ratio_fp16);

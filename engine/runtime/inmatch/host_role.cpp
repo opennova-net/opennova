@@ -243,7 +243,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call
 	//  @0x526697 precedes the Server_TickUpdate call @0x5266B6 (its receive
 	//  pump @0x51D895)]
-	kernel.world.out.fire_sounds.tick();
+	kernel.world.tick_pending_sound_slots();
 	// The entity-update gate's exemption for a host that also plays: its own
 	// client's death-screen latch, folded at the end of the previous frame as
 	// retail's client receive sets it at the head of this one.
@@ -251,6 +251,10 @@ void HostRole::run_tick(const TickInput &input) {
 	//  `cmp g_DeathScreenActive,0` @0x526713]
 	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
+	// The own client's spectate walk starts from and skips the host's player
+	// [orig: Spectator_CycleTarget_0 @0x52ac56 / @0x52ad09].
+	if (state.client_runtime != nullptr)
+		state.client_runtime->view().set_spectate_local_handle(kernel.world.cached.local_player.packed);
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
 	// The frame tail after the server tick laps onto the stats board's

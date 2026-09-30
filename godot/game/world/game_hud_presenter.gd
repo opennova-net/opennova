@@ -534,6 +534,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
 	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
 	_game_hud.set_player_context(lv)
+	# The radar-contact legs (spinmap content-mask bit 10): the engine steps the
+	# contact table once per HUD frame behind the overlay pass's gates, ages the
+	# retained map banks by the ticks that update consumed, and hands the
+	# overlay its snapshot — ahead of the marker snapshot below, as retail's
+	# pass updates the radar before it draws the map (inmatch/role_feeds.h
+	# step_hud_radar carries the witness).
+	_game_hud.set_minimap_radar(sim.step_hud_radar(_game_hud.get_radar_frame_gates()))
 	var player_pos: Vector3 = sim.get_local_player_position()
 	_game_hud.set_minimap_state(Vector2(player_pos.x, -player_pos.z),
 			player_pos.y, sim.get_local_player_heading_bam(),
@@ -545,11 +552,6 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# through the gametext table).
 	_game_hud.set_minimap_overlays(
 			sim.get_hud_minimap_overlays(Strings.get_table(Strings.TABLE_GAMETEXT)))
-	# The radar-contact legs (spinmap content-mask bit 10): the engine steps the
-	# contact table once per HUD frame behind the overlay pass's gates and hands
-	# the overlay its snapshot (world/radar_contacts.h carries the witness).
-	_game_hud.set_minimap_radar(sim.step_hud_radar(_hud_ticks(),
-			_game_hud.get_radar_frame_gates()))
 	# A joiner's type-2043 origin entity decodes from the world stream after
 	# the HUD builds — keep querying until it appears (the host resolves the
 	# origin at promotion, so this latches immediately there). Throttled to

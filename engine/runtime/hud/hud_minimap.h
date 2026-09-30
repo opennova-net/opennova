@@ -484,6 +484,14 @@ struct HudMapSprite {
 	// disc/rect crop of a straddling quad, or a ring band.
 	uint32_t geom_first = 0;
 	uint32_t geom_count = 0;
+	// The device applies the pass's own MODULATE2X(TEXTURE, DIFFUSE) colour
+	// stage (saturate(2 * texel * diffuse), alpha MODULATE) to this sprite,
+	// so `color` carries the raw diffuse. Set by the radar marks, whose
+	// material is mode word 0x651 (blend 1, alpha 0x50, colour 0x600); the
+	// other sprites fold the stage into the diffuse at compile.
+	// [orig: HUD_LoadAllTextures @0x59de25..0x59de42 (flags 1617);
+	//  RenderState_DecodeModeColorStage @0x681080 (0x600)]
+	bool modulate2x = false;
 };
 
 inline constexpr uint8_t kHudMapTextureNone = 0xFF;

@@ -355,6 +355,32 @@ bool test_wheel_remainder_dispatches_whole_notches() {
 	return true;
 }
 
+// The death screen's spectator rows: press edges while active, in catalog
+// order, carrying the dispatch codes 500..502; an inactive frame advances the
+// latch without firing [orig: rows 110..112 -> Input_HandleActionBinding
+// cases 500..502 @0x49bd58..0x49bd9e].
+bool test_spectator_rows_edge_to_their_codes() {
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("CycleSpectatorMode");
+	keys.hold("DecSpectatorTarget");
+	auto requests = actions.poll_spectator(keys, true);
+	CHECK(requests.size() == 2 && requests[0].action == Action::Spectate &&
+			requests[0].value == 500 && requests[1].value == 502);
+	CHECK(actions.poll_spectator(keys, true).empty()); // held: no new edge
+	keys.release("CycleSpectatorMode");
+	keys.release("DecSpectatorTarget");
+	keys.hold("IncSpectatorTarget");
+	CHECK(actions.poll_spectator(keys, false).empty()); // inactive: latched, silent
+	CHECK(actions.poll_spectator(keys, true).empty());  // still held since the latch
+	keys.release("IncSpectatorTarget");
+	CHECK(actions.poll_spectator(keys, true).empty());
+	keys.hold("IncSpectatorTarget");
+	requests = actions.poll_spectator(keys, true);
+	CHECK(requests.size() == 1 && requests[0].value == 501);
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
@@ -364,7 +390,8 @@ int main() {
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
 			test_live_binding_modifier_remap_and_use_stream,
 			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
-			test_wheel_remainder_dispatches_whole_notches})
+			test_wheel_remainder_dispatches_whole_notches,
+			test_spectator_rows_edge_to_their_codes})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

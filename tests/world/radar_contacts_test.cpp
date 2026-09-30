@@ -14,6 +14,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/radar_contacts.h>
 #include <runtime/world/round_sim.h>
@@ -227,38 +228,39 @@ void test_tracer_whiz() {
 	// A round from the enemy at x = 30 flying west along y = 1 passes the
 	// listener at the origin one unit off.
 	const FixedVec3 start{3 << 16, 1 << 16, 0};
+	const FixedVec3 kPastListener{-(1 << 16), 1 << 16, 0};
 	const FixedVec3 velocity{-(4 << 16), 0, 0};
-	round_tracer_whiz(world, round, &ammo, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, round, &ammo, start, kPastListener, velocity);
 	CHECK(round.whiz_latched, "a pass inside the radius latches the round");
 	CHECK(state.rows[0].life == 62 && state.rows[0].kind == kRadarKindOlive12,
 			"an enemy shooter lights the olive 12-ring");
 	CHECK(state.rows[0].pos[0] == (30 << 16), "the blip sits at the shooter, not the round");
 	// Latched: never again.
-	round_tracer_whiz(world, round, &ammo, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, round, &ammo, start, kPastListener, velocity);
 	CHECK(state.rows[1].life == 0, "the latch whizzes a round once");
 	// Out of the box: no judgement, no latch.
 	LiveRound far = LiveRound{};
 	far.owner = rig.enemy;
-	round_tracer_whiz(world, far, &ammo, {3 << 16, 9 << 16, 0}, -(1 << 16), 9 << 16, velocity);
+	round_tracer_whiz(world, far, &ammo, {3 << 16, 9 << 16, 0}, {-(1 << 16), 9 << 16, 0}, velocity);
 	CHECK(!far.whiz_latched && state.rows[1].life == 0, "a pass outside the radius is ignored");
 	// Receding: t < 0 fails the gate.
 	LiveRound away;
 	away.owner = rig.enemy;
-	round_tracer_whiz(world, away, &ammo, {-(1 << 16), 1 << 16, 0}, -(5 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, away, &ammo, {-(1 << 16), 1 << 16, 0}, {-(5 << 16), 1 << 16, 0}, velocity);
 	CHECK(!away.whiz_latched, "a round already past the listener does not whiz");
 	// fgrenade ammo never whizzes.
 	AmmoTableEntry grenade = ammo;
 	grenade.flags = 0x10000000u;
 	LiveRound nade;
 	nade.owner = rig.enemy;
-	round_tracer_whiz(world, nade, &grenade, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, nade, &grenade, start, kPastListener, velocity);
 	CHECK(!nade.whiz_latched, "fgrenade skips the leg");
 	// Silenced ammo latches but adds no blip.
 	AmmoTableEntry silenced = ammo;
 	silenced.flags = 0x8u;
 	LiveRound quiet;
 	quiet.owner = rig.enemy;
-	round_tracer_whiz(world, quiet, &silenced, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, quiet, &silenced, start, kPastListener, velocity);
 	CHECK(quiet.whiz_latched && state.rows[1].life == 0, "silenced rounds latch without a blip");
 	// A teammate in a team game adds no blip.
 	world.registry.get(rig.enemy)->team = 1;
@@ -267,7 +269,7 @@ void test_tracer_whiz() {
 	world.match.configure(team);
 	LiveRound friendly;
 	friendly.owner = rig.enemy;
-	round_tracer_whiz(world, friendly, &ammo, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, friendly, &ammo, start, kPastListener, velocity);
 	CHECK(friendly.whiz_latched && state.rows[1].life == 0, "a teammate's round adds no blip");
 	// A class-6 shooter holding a category-3 weapon lights the olive 24-ring.
 	world.registry.get(rig.enemy)->team = 2;
@@ -279,7 +281,7 @@ void test_tracer_whiz() {
 	world.registry.get(rig.enemy)->equipped_adm_index = 3;
 	LiveRound scoped;
 	scoped.owner = rig.enemy;
-	round_tracer_whiz(world, scoped, &ammo, start, -(1 << 16), 1 << 16, velocity);
+	round_tracer_whiz(world, scoped, &ammo, start, kPastListener, velocity);
 	CHECK(state.rows[1].kind == kRadarKindOlive24, "a class-6 category-3 shooter takes the 24-ring");
 }
 
@@ -301,7 +303,8 @@ void test_lock_note_and_hud_frame() {
 	CHECK(state.missile_count == 2, "the repeat appends past the null row");
 	radar_add_blip(world, 7, kEast, kRadarKindRed12);
 	opennova::hud::HudMinimapRadar radar;
-	radar_hud_frame(world, 20, true, false, radar);
+	CHECK(radar_hud_frame(world, 20, true, false, false, radar) == 20,
+			"the frame's update reports the ticks it aged");
 	CHECK(radar.red12[2] == 1, "the frame runs the contact update");
 	CHECK(radar.threats.size() == 2 && radar.threats[0].present == 0 &&
 			radar.threats[1].present == 1, "the snapshot keeps row 0, null");
@@ -310,18 +313,179 @@ void test_lock_note_and_hud_frame() {
 	CHECK(state.missile_count == 0, "the pass clears the count after the map draw");
 	// The pass early-outs neither update nor clear.
 	radar_note_guided_missile(world, world.round_sim.rounds[9], 9);
-	radar_hud_frame(world, 30, false, false, radar);
+	CHECK(radar_hud_frame(world, 30, false, false, false, radar) == 0, "a skipped pass ages nothing");
 	CHECK(state.last_tick == 20 && state.missile_count == 1, "a skipped pass leaves the state alone");
 	// The death screen skips the pass's update unless the map site runs.
 	rig.local->view.death_screen_active = true;
-	radar_hud_frame(world, 40, true, false, radar);
+	radar_hud_frame(world, 40, true, false, false, radar);
 	CHECK(state.last_tick == 20, "the death screen skips the pass's own update");
-	radar_hud_frame(world, 50, true, true, radar);
+	CHECK(radar_hud_frame(world, 50, true, true, false, radar) == 30,
+			"the map site's update ages from the last one");
 	CHECK(state.last_tick == 50, "the corner map's site still updates");
 	rig.local->view.death_screen_active = false;
 	// The round reset.
 	rig.local->reset_for_new_round();
 	CHECK(state.last_tick == 0 && state.rows[0].life == 0, "the round init resets the radar");
+}
+
+void test_zip_impact() {
+	Rig rig;
+	World &world = *rig.world;
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	AmmoTableEntry ammo;
+	ammo.valid = true;
+	ammo.whiz_radius_q16 = 5 << 16;
+	const FixedVec3 start{3 << 16, 1 << 16, 0};
+	const FixedVec3 end{-(1 << 16), 1 << 16, 0};
+	const FixedVec3 velocity{-(4 << 16), 0, 0};
+	LiveRound round;
+	round.owner = rig.enemy;
+	round.ammo_index = 2;
+	round_tracer_whiz(world, round, &ammo, start, end, velocity);
+	CHECK(world.round_sim.impacts.size() == 1, "the whiz presents one impact row");
+	if (!world.round_sim.impacts.empty()) {
+		const RoundImpact &zip = world.round_sim.impacts[0];
+		CHECK(zip.effect_tag == 3 && zip.ammo_index == 2, "the row is the ammo's zip (tag 3)");
+		CHECK(zip.present_sound && !zip.present_effect,
+				"the 0x80000000 record plays the sound leg alone");
+		CHECK(zip.position.x == 0.0f && zip.position.y == 1.0f && zip.position.z == 0.0f,
+				"the zip sits at the closest point o + t*dir");
+	}
+	CHECK(round.prev_z_q16 == start.z, "the tail copy follows the whiz");
+	// A latched round presents nothing more.
+	round_tracer_whiz(world, round, &ammo, start, end, velocity);
+	CHECK(world.round_sim.impacts.size() == 1, "the latch stops the zip too");
+	// ClipWaterFx under water on both Z words drops the zip, not the blip.
+	world.round_sim.impacts.clear();
+	world.env.water_z = 5 << 16;
+	AmmoTableEntry clip = ammo;
+	clip.flags = kAmmoFlagClipWaterFx;
+	LiveRound wet;
+	wet.owner = rig.enemy;
+	wet.prev_z_q16 = 0;
+	round_tracer_whiz(world, wet, &clip, start, end, velocity);
+	CHECK(world.round_sim.impacts.empty() && wet.whiz_latched,
+			"a submerged ClipWaterFx round whizzes without its zip");
+	LiveRound surfacing;
+	surfacing.owner = rig.enemy;
+	surfacing.prev_z_q16 = 6 << 16; // last tick's start above the plane
+	round_tracer_whiz(world, surfacing, &clip, start, end, velocity);
+	CHECK(world.round_sim.impacts.size() == 1, "a +0x88 above the plane keeps the zip");
+	world.env.water_z = 0;
+}
+
+void test_wire_shooter_and_target() {
+	Rig rig;
+	World &world = *rig.world;
+	RadarContactState &state = rig.local->radar;
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	WeaponTableEntry sniper;
+	sniper.valid = true;
+	sniper.category = 3;
+	world.tables.weapons.entries.assign(4, WeaponTableEntry{});
+	world.tables.weapons.entries[3] = sniper;
+	RoundSim::WireActor remote;
+	remote.team = 2;
+	remote.player_class = 6;
+	remote.equipped_adm_index = 3;
+	remote.pos[0] = 40 << 16;
+	world.round_sim.wire_actor_provider = [&remote](uint16_t handle, RoundSim::WireActor &out) {
+		if (handle == 0x0007) { // the local player's own wire handle
+			out = RoundSim::WireActor{};
+			out.is_local = true;
+			return true;
+		}
+		if (handle != 0x0005) return false;
+		out = remote;
+		return true;
+	};
+	AmmoTableEntry ammo;
+	ammo.valid = true;
+	ammo.whiz_radius_q16 = 5 << 16;
+	const FixedVec3 start{3 << 16, 1 << 16, 0};
+	const FixedVec3 end{-(1 << 16), 1 << 16, 0};
+	const FixedVec3 velocity{-(4 << 16), 0, 0};
+	// A joiner's remote round: no registry owner, a wire shooter handle.
+	LiveRound round;
+	round.shooter_handle = 0x0005;
+	round_tracer_whiz(world, round, &ammo, start, end, velocity);
+	CHECK(state.rows[0].life == 62 && state.rows[0].kind == kRadarKindOlive24,
+			"the wire proxy's class 6 / category 3 picks the olive 24-ring");
+	CHECK(state.rows[0].pos[0] == (40 << 16), "the blip sits at the proxy's Position");
+	// A teammate proxy in a team game adds nothing.
+	remote.team = 1;
+	MatchRules team;
+	team.game_type = 0x10000u;
+	world.match.configure(team);
+	LiveRound mate;
+	mate.shooter_handle = 0x0005;
+	round_tracer_whiz(world, mate, &ammo, start, end, velocity);
+	CHECK(mate.whiz_latched && state.rows[1].life == 0, "a teammate proxy adds no blip");
+	// An unresolved handle is a shooterless round: latched, no blip.
+	LiveRound unknown;
+	unknown.shooter_handle = 0x0009;
+	round_tracer_whiz(world, unknown, &ammo, start, end, velocity);
+	CHECK(unknown.whiz_latched && state.rows[1].life == 0, "an unresolved proxy adds no blip");
+	// The guided lock note: the local player's own wire handle is the
+	// target-is-local arm, and a pool-0 wire target never reads the registry.
+	world.round_sim.rounds[3].guided.target = 0x0007;
+	radar_note_guided_missile(world, world.round_sim.rounds[3], 3);
+	CHECK(state.missile_count == 1 && state.lock_tone == kRadarLockToneTicks,
+			"a missile on the local wire handle is noted and sets the tone");
+	state.lock_tone = 0;
+	world.round_sim.rounds[4].guided.target = rig.self.packed; // a remote slot on a joiner
+	radar_note_guided_missile(world, world.round_sim.rounds[4], 4);
+	CHECK(state.missile_count == 1 && state.lock_tone == 0,
+			"a pool-0 wire target resolves through the rows, not the registry");
+	world.round_sim.wire_actor_provider = {};
+}
+
+void test_lock_tone() {
+	Rig rig;
+	World &world = *rig.world;
+	RadarContactState &state = rig.local->radar;
+	world.round_sim.rounds[9].guided.target = rig.self.packed;
+	radar_note_guided_missile(world, world.round_sim.rounds[9], 9);
+	CHECK(state.lock_tone == 31, "the lock note stores 31");
+	radar_tick_lock_tone(state);
+	CHECK(state.lock_tone == 30, "the pending-slot pass drains one per tick");
+	world.tick_pending_sound_slots();
+	CHECK(state.lock_tone == 29, "the world's pending-sound pass drains it");
+	state.lock_tone = 0;
+	radar_tick_lock_tone(state);
+	CHECK(state.lock_tone == 0, "the drain stops at zero");
+	// The HUD pass registers the LPLOCKONME loop while the word is live.
+	state.lock_tone = 5;
+	world.out.sound_emitters.clear();
+	opennova::hud::HudMinimapRadar radar;
+	radar_hud_frame(world, 1, true, false, false, radar);
+	CHECK(world.out.sound_emitters.size() == 1, "a live tone registers one loop");
+	if (world.out.sound_emitters.size() == 1) {
+		const SoundEmitterEvent &tone = world.out.sound_emitters[0];
+		CHECK(tone.set_name == "LPLOCKONME" && tone.lane == 255 && tone.lifetime_ticks == 20 &&
+						tone.pitch_q16 == 0x10000 && tone.volume_q8_8 == 0xFFFF,
+				"SoundEmitter_Register(local, LPLOCKONME, pos, 255, 20, 0x10000, 0xFFFF)");
+		CHECK(tone.source_handle == rig.self.packed, "the loop rides the local player");
+	}
+	world.out.sound_emitters.clear();
+	radar_hud_frame(world, 2, true, false, true, radar);
+	CHECK(world.out.sound_emitters.empty(), "the in-game menu pause skips the loop");
+	rig.local->view.death_screen_active = true;
+	radar_hud_frame(world, 3, true, true, false, radar);
+	CHECK(world.out.sound_emitters.empty(), "the death screen skips the loop");
+	rig.local->view.death_screen_active = false;
+	radar_hud_frame(world, 4, false, false, false, radar);
+	CHECK(world.out.sound_emitters.empty(), "a skipped pass registers nothing");
+	state.lock_tone = 0;
+	radar_hud_frame(world, 5, true, false, false, radar);
+	CHECK(world.out.sound_emitters.empty(), "a dead word registers nothing");
+	// The round's overlay reset leaves the word; the local class init zeroes it.
+	state.lock_tone = 7;
+	radar_reset(state);
+	CHECK(state.lock_tone == 7, "HUD_ResetAllOverlayBuffers does not touch the word");
+	PlayerSpawn spawn;
+	const EntityHandle respawned = spawn_player(world, spawn);
+	CHECK(respawned.valid() && state.lock_tone == 0, "the local player's class init zeroes it");
 }
 
 void test_whiz_radius_resolve() {
@@ -366,6 +530,9 @@ int main() {
 	test_damage_entry_point();
 	test_tracer_whiz();
 	test_lock_note_and_hud_frame();
+	test_zip_impact();
+	test_wire_shooter_and_target();
+	test_lock_tone();
 	test_whiz_radius_resolve();
 	if (g_failures != 0) {
 		std::printf("radar_contacts: %d failure(s)\n", g_failures);

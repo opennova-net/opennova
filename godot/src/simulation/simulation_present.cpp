@@ -21,7 +21,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h> // the authority's location table
 #include <runtime/hud/hud_frame.h>  // the radar gate bits
 #include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
-#include <runtime/world/radar_contacts.h> // the per-HUD-frame radar step
+#include <runtime/inmatch/role_feeds.h> // step_hud_radar, the per-HUD-frame radar step
 #include <runtime/inmatch/present_rows.h> // the PF_* row collectors, both roles (ADR 0043 G3)
 
 #include <cmath>
@@ -196,15 +196,18 @@ Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
 	return out;
 }
 
-PackedInt32Array Simulation::step_hud_radar(int p_hud_tick, int p_gates) {
-	// The frame's contact update, snapshot and missile-count clear are the
-	// engine's (world/radar_contacts.h); this leg only packs the array.
+PackedInt32Array Simulation::step_hud_radar(int p_gates) {
+	// The frame's contact update, lock tone, snapshot, missile-count clear and
+	// the map banks' aging are the engine's (inmatch/role_feeds.h
+	// step_hud_radar); this leg only packs the array. The in-game menu pause
+	// is the session's Paused state.
 	opennova::hud::HudMinimapRadar radar;
 	if (kernel_ != nullptr) {
 		const uint32_t gates = static_cast<uint32_t>(p_gates);
-		opennova::world::radar_hud_frame(kernel_->world, static_cast<uint32_t>(p_hud_tick),
+		opennova::inmatch::step_hud_radar(*kernel_, runtime_,
 				(gates & opennova::hud::HudFrameCompiler::kRadarGatePass) != 0,
-				(gates & opennova::hud::HudFrameCompiler::kRadarGateMapSite) != 0, radar);
+				(gates & opennova::hud::HudFrameCompiler::kRadarGateMapSite) != 0,
+				session_.state() == opennova::inmatch::State::Paused, radar);
 	}
 	std::vector<int32_t> feed;
 	opennova::hud::radar_feed_encode(radar, feed);

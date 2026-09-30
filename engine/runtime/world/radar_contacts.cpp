@@ -23,6 +23,7 @@ namespace {
 // sources are tagged here so the two pools never alias.
 constexpr uint32_t kRadarSourceEntity = 0x10000u;
 constexpr uint32_t kRadarSourceRound = 0x20000u;
+constexpr uint32_t kRadarSourceWire = 0x40000u; // a joiner's wire proxy
 constexpr uint32_t kRadarSourceIndexMask = 0xFFFFu;
 
 int32_t wrap_sub(int32_t a, int32_t b) {
@@ -77,10 +78,10 @@ void radar_add_blip(RadarContactState &state, uint32_t rules, const int32_t loca
 	}
 }
 
-void radar_update_contacts(RadarContactState &state, uint32_t tick, const int32_t viewer_pos[3],
-		uint32_t viewer_yaw) {
+int32_t radar_update_contacts(RadarContactState &state, uint32_t tick,
+		const int32_t viewer_pos[3], uint32_t viewer_yaw) {
 	// Once per tick; the elapsed count may span several [orig: @0x59a7e0..0x59a806].
-	if (state.last_tick == tick) return;
+	if (state.last_tick == tick) return 0;
 	const int32_t elapsed = static_cast<int32_t>(tick - state.last_tick);
 	state.red12.fill(0); // [orig: @0x59a80a..0x59a85f]
 	state.olive12.fill(0);
@@ -131,6 +132,9 @@ void radar_update_contacts(RadarContactState &state, uint32_t tick, const int32_
 		else
 			edge = static_cast<uint16_t>(edge - elapsed);
 	}
+	// A nonzero count ages the map banks, MapOverlay_UpdateTimers(d); the
+	// caller that owns the banks makes that call [orig: @0x59a9c9..0x59a9ce].
+	return elapsed;
 }
 
 void radar_note_missile(RadarContactState &state, uint32_t source, const int32_t pos[3]) {
@@ -199,7 +203,12 @@ void radar_add_blip(World &world, uint32_t source, const int32_t pos[3], int32_t
 }
 
 void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *ammo,
-		const FixedVec3 &start, int32_t end_x, int32_t end_y, const FixedVec3 &velocity) {
+		const FixedVec3 &start, const FixedVec3 &end, const FixedVec3 &velocity) {
+	// The tick's tail copies the Position into +0x80 right after the whiz on
+	// every path, so the zip gate below reads the copy the previous tick (or
+	// the spawn) left [orig: Projectile_UpdatePhysics @0x4ea9fa..0x4eaa15].
+	const int32_t prev_z = round.prev_z_q16;
+	round.prev_z_q16 = start.z;
 	if (ammo == nullptr) return;
 	// The round's ammo-flags copy carries the latch; an fgrenade never whizzes
 	// [orig: +0x114 = ammo flags @0x4ec615; `test 10040000h` @0x4ea98e].
@@ -213,8 +222,8 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	const int32_t lz = to_fixed(listener.z);
 	const int32_t radius = ammo->whiz_radius_q16; // [orig: ammo +0x8C @0x4ea9a8]
 	const auto within = [radius](int32_t a, int32_t b) { return abs32(wrap_sub(a, b)) < radius; };
-	if (!within(start.x, lx) && !within(end_x, lx)) return;
-	if (!within(start.y, ly) && !within(end_y, ly)) return;
+	if (!within(start.x, lx) && !within(end.x, lx)) return;
+	if (!within(start.y, ly) && !within(end.y, ly)) return;
 
 	// Projectile_SpawnTracerScarEffect over the ray record: the start, the
 	// normalised flight direction v * (2^32 / |v|) [orig: @0x4ea181..0x4ea206],
@@ -229,27 +238,73 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 			static_cast<uint32_t>(retail_q16_mul_rhu(dir[1], wrap_sub(ly, start.y))) +
 			static_cast<uint32_t>(retail_q16_mul_rhu(dir[2], wrap_sub(lz, start.z))));
 	const Entity *local = world.registry.get(world.cached.local_player);
-	const Entity *shooter = world.registry.get(round.owner); // projectile +0x170
-	// The ray excludes the shooter unless the ammo is shrapnel (ray[17])
-	// [orig: @0x4ea286..0x4ea29d].
-	const Entity *excluded = (flags & 0x4u) != 0 ? nullptr : shooter;
+	// The projectile's +0x170 shooter: a registry entity, or on a joiner the
+	// wire proxy its round event named, resolved as the retail client
+	// resolves the handle to its own pool slot [orig: @0x42f491 -> @0x4ec670].
+	const Entity *shooter = world.registry.get(round.owner);
+	RoundSim::WireActor wire;
+	const bool wire_shooter = shooter == nullptr && round.shooter_handle != 0xFFFF &&
+			world.round_sim.wire_actor_provider &&
+			world.round_sim.wire_actor_provider(round.shooter_handle, wire);
+	const bool has_shooter = shooter != nullptr || wire_shooter;
+	// The ray excludes the shooter unless the ammo is shrapnel (ray[17]), so
+	// the +0x170 == ray+0x44 test holds for every non-shrapnel round and for
+	// a shooterless shrapnel one [orig: @0x4ea286..0x4ea29d].
+	const bool shooter_excluded = (flags & 0x4u) == 0 || !has_shooter;
 	// [orig: @0x4e5b5e..0x4e5b93]
-	if (local == nullptr || t < 0 || t >= radius || (shooter == excluded && t < 0x10000))
+	if (local == nullptr || t < 0 || t >= radius || (shooter_excluded && t < 0x10000))
 		return;
-	// The zip impact effect at the closest point (AmmoDef_ProcessImpactEffect
-	// type 3 @0x4e5c4a) is not presented here.
+	// The zip: the ammo's tag-3 row at the closest point o + t*dir, the
+	// impact record {no entity, no section, the point, 0x80000000 (the sound
+	// leg alone), the projectile} [orig: @0x4e5b99..0x4e5c4a ->
+	// AmmoDef_ProcessImpactEffect(ammo, 3, record)]. Its projectile gate drops a
+	// ClipWaterFx round whose Z and +0x88 both sit at or under the water plane
+	// [orig: AmmoDef_ProcessImpactEffect @0x40a18d..0x40a1b1]; the flags word
+	// gates the sound on its sign bit and the effect and light on 0x40000000
+	// [orig: @0x40a20d; @0x40a22f; @0x40a280].
+	const bool clipped = (ammo->flags & kAmmoFlagClipWaterFx) != 0 &&
+			start.z <= world.env.water_z && prev_z <= world.env.water_z;
+	if (!clipped && world.round_sim.impacts.size() < RoundSim::kMaxPendingImpacts) {
+		RoundImpact zip;
+		zip.position = Vec3{
+				static_cast<float>(from_fixed(start.x + retail_q16_mul_rhu(t, dir[0]))),
+				static_cast<float>(from_fixed(start.y + retail_q16_mul_rhu(t, dir[1]))),
+				static_cast<float>(from_fixed(start.z + retail_q16_mul_rhu(t, dir[2])))};
+		zip.ammo_index = round.ammo_index;
+		zip.effect_tag = 3; // "zip" [orig: push 3 @0x4e5c20]
+		zip.present_effect = false;
+		zip.present_sound = true;
+		zip.tick = world.logic_tick;
+		zip.source_order = world.round_sim.next_impact_order++;
+		world.round_sim.impacts.push_back(zip);
+	}
 	// The shooter of a non-silenced round (ammo flag 8) lights its own bearing
 	// unless it is a teammate in a team game [orig: @0x4e5c4f..0x4e5c80]; a class-6
 	// shooter holding a category-3 weapon takes the olive 24-ring, anyone else
 	// the olive 12-ring [orig: @0x4e5c82..0x4e5ca6; Radar_AddBlip @0x4e5cb1].
-	if (shooter != nullptr && (ammo->flags & 0x8u) == 0 &&
-			(shooter->team != local->team || (world.match.rules().game_type & 0x10000u) == 0)) {
-		const WeaponTableEntry *weapon = world.tables.weapons.by_index(shooter->equipped_adm_index);
-		const int32_t kind = shooter->player_class == 6 && weapon != nullptr &&
-				weapon->category == 3 ? kRadarKindOlive24 : kRadarKindOlive12;
-		int32_t pos[3];
-		entity_position_q16(world, *shooter, pos);
-		radar_add_blip(world, entity_source_id(*shooter), pos, kind);
+	if (has_shooter && (ammo->flags & 0x8u) == 0) {
+		const uint8_t team = shooter != nullptr ? static_cast<uint8_t>(shooter->team) : wire.team;
+		if (team != static_cast<uint8_t>(local->team) ||
+				(world.match.rules().game_type & 0x10000u) == 0) {
+			const int32_t player_class = shooter != nullptr ? shooter->player_class
+					: wire.player_class;
+			const WeaponTableEntry *weapon = world.tables.weapons.by_index(shooter != nullptr
+							? shooter->equipped_adm_index : wire.equipped_adm_index);
+			const int32_t kind = player_class == 6 && weapon != nullptr &&
+					weapon->category == 3 ? kRadarKindOlive24 : kRadarKindOlive12;
+			int32_t pos[3];
+			uint32_t source;
+			if (shooter != nullptr) {
+				entity_position_q16(world, *shooter, pos);
+				source = entity_source_id(*shooter);
+			} else {
+				pos[0] = wire.pos[0];
+				pos[1] = wire.pos[1];
+				pos[2] = wire.pos[2];
+				source = kRadarSourceWire | round.shooter_handle;
+			}
+			radar_add_blip(world, source, pos, kind);
+		}
 	}
 	round.whiz_latched = true; // [orig: +0x114 |= 0x40000 @0x4e5cb9]
 }
@@ -276,30 +331,75 @@ void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t sl
 	LocalPlayer *local = world.local_player_state;
 	if (local == nullptr || !world.cached.local_player.valid()) return;
 	const EntityHandle self = world.cached.local_player;
-	const Entity *target = world.registry.get(EntityHandle{round.guided.target});
-	if (target == nullptr) return;
 	const uint32_t source = kRadarSourceRound | (slot & kRadarSourceIndexMask);
-	// The target's first occupant, then the target itself [orig:
-	// @0x4465db..0x446602; @0x44660a..0x446622].
-	if (target->primary_occupant.valid() && target->primary_occupant == self)
+	const uint16_t target_handle = static_cast<uint16_t>(round.guided.target);
+	// A joiner's pool-0 target is a wire proxy: its registry holds only its
+	// own body there, so the wire handle resolves through the replica rows,
+	// the local player's own handle being the target-is-local arm; pools 1..3
+	// are registry twins at their wire handles [orig:
+	// Entity_SerializeGuidedMissileState @0x447ece].
+	const bool wire_target = world.round_sim.wire_actor_provider &&
+			(target_handle & 0xF000u) == 0 && target_handle != 0xFFFFu;
+	const Entity *target = wire_target ? nullptr : world.registry.get(EntityHandle{round.guided.target});
+	// The target's first occupant, then the target itself; each arm stores
+	// the lock tone before the list note [orig: @0x4465db..0x446602 (the
+	// store @0x4465f8); @0x44660a..0x446622 (the store @0x446618)].
+	if (target != nullptr && target->primary_occupant.valid() && target->primary_occupant == self) {
+		local->radar.lock_tone = kRadarLockToneTicks;
 		radar_note_missile(local->radar, source, round.guided.pos);
-	if (target->handle == self) radar_note_missile(local->radar, source, round.guided.pos);
+	}
+	bool target_is_local = target != nullptr && target->handle == self;
+	if (wire_target) {
+		RoundSim::WireActor actor;
+		target_is_local = world.round_sim.wire_actor_provider(target_handle, actor) && actor.is_local;
+	}
+	if (target_is_local) {
+		local->radar.lock_tone = kRadarLockToneTicks;
+		radar_note_missile(local->radar, source, round.guided.pos);
+	}
 }
 
-void radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_site,
-		hud::HudMinimapRadar &out) {
+void radar_tick_lock_tone(RadarContactState &state) {
+	if (state.lock_tone != 0) --state.lock_tone; // [orig: @0x5293a5..0x5293af]
+}
+
+int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_site,
+		bool menu_paused, hud::HudMinimapRadar &out) {
 	out = hud::HudMinimapRadar{};
 	LocalPlayer *local = world.local_player_state;
+	Entity *player = local != nullptr ? world.registry.get(world.cached.local_player) : nullptr;
 	const AiEntity *body = local != nullptr ? world.ai.for_handle(world.cached.local_player) : nullptr;
-	if (body == nullptr) return; // [orig: the null-player early-out @0x5a80a1]
+	if (body == nullptr || player == nullptr) return 0; // [orig: the null-player early-out @0x5a80a1]
 	RadarContactState &state = local->radar;
 	// The white hit flash skips the whole pass [orig: @0x5a8098..0x5a809f].
 	const bool runs = pass_runs && !screen_flash_hud_overlays_suppressed(local->view.flash);
-	// The pass's own call skips the death screen; the map site's second call,
-	// a no-op within a tick otherwise, then stands in [orig: @0x5a8164..0x5a817d;
-	// @0x5a790a..0x5a791c].
-	if (runs && (!local->view.death_screen_active || map_site))
-		radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+	int32_t aged = 0;
+	if (runs && !local->view.death_screen_active) {
+		// [orig: @0x5a8164..0x5a817d]
+		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+		// The incoming-lock loop: re-registered every pass frame while the
+		// tone word is live, outside the in-game menu pause, on the local
+		// player's own lane at its Position [orig: @0x5a8185..0x5a81bf].
+		if (!menu_paused && state.lock_tone != 0) {
+			SoundEmitterEvent tone;
+			tone.source_spawn_id = player->registry_spawn_id;
+			tone.source_handle = player->handle.packed;
+			tone.pos = player->position;
+			tone.source_bms_id = player->bms_id;
+			tone.emitted_tick = world.logic_tick;
+			tone.lane = kRadarLockToneLane;
+			tone.lifetime_ticks = kRadarLockToneLifetime;
+			tone.pitch_q16 = 0x10000;
+			tone.volume_q8_8 = 0xFFFF;
+			tone.set_name = kRadarLockToneSet;
+			world.out.sound_emitters.publish(std::move(tone));
+		}
+	} else if (runs && map_site) {
+		// The death screen skips the pass's own call; the corner map's site
+		// then stands in, a no-op within a tick otherwise
+		// [orig: HUD_DrawMapOverlay @0x5a790a..0x5a791c].
+		aged = radar_update_contacts(state, tick, body->pos, static_cast<uint32_t>(body->heading));
+	}
 	out.red12 = state.red12;
 	out.olive12 = state.olive12;
 	out.red24 = state.red24;
@@ -324,6 +424,7 @@ void radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_site,
 	}
 	// The per-frame clear, after the map draw [orig: @0x5a87ef].
 	if (runs) state.missile_count = 0;
+	return aged;
 }
 
 } // namespace opennova::world

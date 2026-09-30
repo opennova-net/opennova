@@ -191,7 +191,7 @@ void MapViewWindow::_draw() {
 	}
 	if (draw == nullptr) return;
 	renderer_.ensure(get_canvas_item(), 0, false, hud->map_additive_material(),
-			hud->map_water_material());
+			hud->map_water_material(), hud->map_modulate2x_material());
 	// The pass is in frame pixels; this window sits at its widget's origin.
 	renderer_.set_transform(Transform2D(0.0, -get_position()));
 	renderer_.render(draw->pass.map, draw->glyphs, hud->map_pass_textures(),

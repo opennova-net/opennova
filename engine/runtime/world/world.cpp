@@ -526,10 +526,15 @@ void World::update_all_entities(const TickContext &ctx) {
 //  @0x526697), between the Client_ProcessNetworkFrame call @0x526692 and the
 //  Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
 void World::run_logic_tick(bool is_authority, TickPhase phase) {
-    out.fire_sounds.tick();
+    tick_pending_sound_slots();
     const TickContext ctx = begin_tick(is_authority, phase);
     run_script_pass(ctx);
     run_entity_pass(ctx);
+}
+
+void World::tick_pending_sound_slots() {
+    out.fire_sounds.tick();
+    if (local_player_state != nullptr) radar_tick_lock_tone(local_player_state->radar);
 }
 
 TickContext World::begin_tick(bool is_authority, TickPhase phase) {

@@ -59,6 +59,7 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::NightVision: p_sim.request_local_player_nvg_toggle(); break;
 		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
 		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
+		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
 	}
 }
 
@@ -122,11 +123,15 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (tick_sim.is_valid() && tick_sim->is_local_spectator()) {
 		// A spectator owns no body motor. Submit the neutral frame while the
 		// existing FlyCamera consumes the viewport input; the world/session
-		// cadence continues through GameWorld.tick as normal.
+		// cadence continues through GameWorld.tick as normal. The death
+		// screen's own rows (the spectate sub-mode and target) still dispatch.
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
 		owner->clear_models();
 		look_delta_ = Vector2();
+		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
+					 p_gameplay_input_active))
+			apply_player_action(*tick_sim.ptr(), request);
 		return frame_input;
 	}
 	owner->set_fly_camera_locked(true);

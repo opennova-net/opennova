@@ -230,6 +230,36 @@ void test_team_id_line(const fnt_font_t *font) {
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
 }
 
+// THE DMGBAR ON THE DEATH SCREEN: the bar draws only inside the spectate
+// arm, off the spectated entity's ratio [orig: HUD_RenderOverlays
+// @0x5a7bc5..0x5a7c04; the living arm @0x5a7ca0].
+void test_health_bar_death_arm(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.health_rect = {2.0f, 739.0f, 140.0f, 18.0f, true};
+	layout.tag_good = 0xFF00FF00u;
+	layout.tag_middle = 0xFFFFFF00u;
+	layout.tag_bad = 0xFFFF0000u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.health_fraction = 1.0f;
+	const auto fill_width = [&]() -> float {
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		for (const HudQuad &q : list.quads)
+			if (q.color == layout.tag_good || q.color == layout.tag_middle ||
+					q.color == layout.tag_bad)
+				return q.x1 - q.x0;
+		return -1.0f;
+	};
+	CHECK(fill_width() > 100.0f); // the living bar
+	state.combat.death_screen = true;
+	CHECK(fill_width() < 0.0f); // no spectate arm: no bar
+	state.session.spectating = true;
+	state.session.spectated_health_fraction = 0.5f;
+	const float half = fill_width();
+	CHECK(half > 60.0f && half < 72.0f); // the target's ratio, not the local one
+}
+
 // THE HUDLS SLOT BAR: the HUDLS_SYSTEM gate, the 6,7,8,9,0 visit packing
 // from HUDLS_SLOT 6, the (0,0) stall, the MOREAV marker, the OR'd colour.
 void test_slot_bar(const fnt_font_t *font) {
@@ -521,6 +551,7 @@ int main() {
 	test_game_info(&font);
 	test_clock(&font);
 	test_team_id_line(&font);
+	test_health_bar_death_arm(&font);
 	test_slot_bar(&font);
 	test_objectives_panel(&font);
 	test_no_hud(&font);

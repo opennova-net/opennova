@@ -14,6 +14,7 @@
 #include <runtime/replication/client_roster_tags.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
+#include <runtime/world/radar_contacts.h> // radar_hud_frame
 #include <runtime/world/radio_call.h> // capture_zone_max_coverage
 
 #include <algorithm>
@@ -205,6 +206,51 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		// [orig: CaptureZone_FindMaxProximityCoverage(&g_LocalPlayerEntity->boundRadius)
 		//  @0x59CDE8]
 		s.zone_coverage = world::capture_zone_max_coverage(w, *player);
+	}
+	// The death screen's spectate arm rebuilds the HUD info for the target and
+	// draws the health bar and the TEAMID line off it, then restores the local
+	// build: the team byte (+0x176 = entity+0x162), the health ratio and the
+	// name the line reads first. A joiner's target is a decoded row, the
+	// authority's a registry entity; the max is the def hp (a row's player
+	// def) without the difficulty term, as the friendly tags read it.
+	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25 — the gate
+	//  `dword_A860F4 && dword_A860F0` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
+	//  (team @0x4b8464, ratio @0x4b87a2..0x4b87d3); HUD_DrawTeamIdLine's name
+	//  @0x59ac3d]
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		if (cs.death_screen_active && cs.spectate_target != 0xFFFF &&
+				cs.death_screen_submode != 0) {
+			int64_t health = 0;
+			int64_t max_hp = 1;
+			bool found = false;
+			if (view.joiner) {
+				if (const replication::ClientEntityState *row = cs.find(cs.spectate_target)) {
+					found = true;
+					s.team = row->team_known ? row->team : 0;
+					s.spectated_name = row->display_name;
+					health = row->health_known ? static_cast<int16_t>(row->health_word) : 0;
+					max_hp = std::max<int32_t>(1, w.tables.player.item_hp);
+				}
+			} else if (const world::Entity *e =
+								w.registry.get(world::EntityHandle{cs.spectate_target})) {
+				found = true;
+				s.team = e->team;
+				s.spectated_name = e->display_name;
+				health = static_cast<int16_t>(e->health);
+				max_hp = std::max<int32_t>(1, e->health_max);
+			}
+			if (found) {
+				s.spectating = true;
+				// The signed Health word over the max, read back unsigned, so a
+				// negative Health caps to a full bar like any ratio past 1
+				// [orig: `idiv` @0x4b87c7, the unsigned cap @0x4b87d1..0x4b87d3].
+				uint32_t ratio = static_cast<uint32_t>(
+						static_cast<int32_t>((health * 65536) / max_hp));
+				if (ratio > 0x10000u) ratio = 0x10000u;
+				s.spectated_health_fraction = static_cast<float>(ratio) / 65536.0f;
+			}
+		}
 	}
 	s.attack_defend = view.kernel->local.attack_defend_role; // dword_B78FE8
 	// The HUDLS scan over the local slot table and each category's first
@@ -982,6 +1028,18 @@ hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint3
 		}
 	}
 	return f;
+}
+
+void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,
+		bool map_site, bool menu_paused, hud::HudMinimapRadar &out) {
+	world::World &w = kernel.world;
+	// Retail's update reads g_CurrentTick [orig: @0x5a8176 / @0x5a7914].
+	const int32_t aged = world::radar_hud_frame(w, w.logic_tick, pass_runs, map_site,
+			menu_paused, out);
+	// [orig: Radar_UpdateContacts `test edi, edi; jz` @0x59a9c9 ->
+	//  MapOverlay_UpdateTimers @0x59a9ce]
+	if (aged != 0 && runtime != nullptr)
+		runtime->view().age_minimap_overlays(static_cast<uint32_t>(aged));
 }
 
 } // namespace opennova::inmatch

@@ -800,6 +800,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			view_.set_viewer_handle(joiner_->has_self_handle()
 					? joiner_->self_handle()
 					: 0xFFFFu);
+			// The spectate walk starts from and skips the local player
+			// [orig: Spectator_CycleTarget_0 @0x52ac56 / @0x52ad09].
+			view_.set_spectate_local_handle(joiner_->has_self_handle()
+					? joiner_->self_handle()
+					: 0xFFFFu);
 			view_.set_mp_attributes(joiner_->mp_attributes());
 			// JoinerConnection has already allocated sequence numbers for exact
 			// admission packets and retained-session reconstruction. They still
@@ -954,7 +959,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6, then @0x42C2EB]
 	advance_zone_timers();
 	advance_tracked_window();
-	view_.tick_minimap_overlays();
+	view_.refresh_minimap_live_markers();
 	const bool preround_active = view_.state().preround_delay_seconds != 0;
 	// Client_ProcessNetworkFrame and its maintenance continue, but the later
 	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is

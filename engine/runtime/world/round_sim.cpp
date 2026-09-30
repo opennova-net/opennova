@@ -1193,6 +1193,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.shot_seq = params.shot_seq;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
+    r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
     r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed_per_tick);
     r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed_per_tick);
     r.vel.z = static_cast<float>(std::sin(pitch) * speed_per_tick);
@@ -1364,6 +1365,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.shot_seq = params.shot_seq;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
+        r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
         r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
         r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
         r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
@@ -1877,8 +1879,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (!collision.hit()) {
             // The tick's tail runs the tracer whiz on every path through the
             // sweep [orig: Projectile_UpdatePhysics @0x4ea98e].
-            round_tracer_whiz(world, r, ammo, position_q16, end_q16.x, end_q16.y,
-                    incoming_velocity_q16);
+            round_tracer_whiz(world, r, ammo, position_q16, end_q16, incoming_velocity_q16);
             r.pos = vec_from_fixed(end_q16);
             if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr && r.guided_family == GuidedFamily::None)
@@ -2362,8 +2363,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.x, incoming_velocity_q16.x),
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
-            round_tracer_whiz(world, r, ammo, position_q16, next_position.x, next_position.y,
-                    incoming_velocity_q16);
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos = vec_from_fixed(next_position);
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
@@ -2401,8 +2401,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.x, incoming_velocity_q16.x),
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
-            round_tracer_whiz(world, r, ammo, position_q16, next_position.x, next_position.y,
-                    incoming_velocity_q16);
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos = vec_from_fixed(next_position);
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
@@ -2414,8 +2413,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             continue;
         }
 
-        round_tracer_whiz(world, r, ammo, position_q16, collision.position_q16.x,
-                collision.position_q16.y, incoming_velocity_q16);
+        round_tracer_whiz(world, r, ammo, position_q16, collision.position_q16,
+                incoming_velocity_q16);
         if (r.trail_slot >= 0) {
             trails.append(r.trail_slot, r.pos);
             trails.request_kill(r.trail_slot);

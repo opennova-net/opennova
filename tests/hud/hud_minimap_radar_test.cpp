@@ -76,11 +76,14 @@ void test_marks_order_colours_and_geometry() {
 			"the 12-ring rides dmgslice.tga");
 	CHECK(m[2]->texture == kHudMapSpriteRadarNarrow && m[3]->texture == kHudMapSpriteRadarNarrow,
 			"the 24-ring rides dmgslc_n.tga");
-	// Hit 0xFFFF2020 / miss 0xFF808020 through the MODULATE2X fold.
-	CHECK(m[0]->color == 0xFFFF4040u, "a red sector draws the hit colour, doubled");
-	CHECK(m[1]->color == 0xFFFFFF40u, "an olive-only sector draws the miss colour, doubled");
-	CHECK(m[2]->color == 0xFFFF4040u, "red beats olive on a shared 24-sector");
-	CHECK(m[3]->color == 0xFFFFFF40u, "the olive 24-sector draws the miss colour");
+	// Hit 0xFFFF2020 / miss 0xFF808020 as the raw diffuse: the device runs
+	// the material's MODULATE2X(TEXTURE, DIFFUSE) stage on these sprites.
+	CHECK(m[0]->color == 0xFFFF2020u, "a red sector draws the hit diffuse");
+	CHECK(m[1]->color == 0xFF808020u, "an olive-only sector draws the miss diffuse");
+	CHECK(m[2]->color == 0xFFFF2020u, "red beats olive on a shared 24-sector");
+	CHECK(m[3]->color == 0xFF808020u, "the olive 24-sector draws the miss diffuse");
+	for (const HudMapSprite *s : m)
+		CHECK(s->modulate2x, "every mark asks the device for the MODULATE2X stage");
 	// Float centre, base = the half-height under bit 16, quad = base x 1.25.
 	for (const HudMapSprite *s : m) {
 		CHECK(near(s->center_x, 900.0f) && near(s->center_y, 650.0f), "the marks centre on the rect");
@@ -144,6 +147,9 @@ void test_threat_ring_geometry_and_states() {
 	CHECK(idle.ring_tris_before_sprite < idle.sprites.size() &&
 			idle.sprites[idle.ring_tris_before_sprite].texture == 1,
 			"the ring draws right before the compass sprite");
+	CHECK(idle.ring_tris_before_sprite < idle.sprites.size() &&
+			!idle.sprites[idle.ring_tris_before_sprite].modulate2x,
+			"the compass keeps its compile-side fold (a white diffuse)");
 	// Radii at 1024 wide: x' = cx -/+ 100 under bit 16, rho0 = 100 - 4 = 96,
 	// R = 96 - 2 = 94 -> bands {93..94, 94..96, 96..97}.
 	const double c0 = opennova::io::bam_table_cos(opennova::io::bam_table_index(0x0ACAA800u));

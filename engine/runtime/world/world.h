@@ -1019,6 +1019,12 @@ public:
     // [orig: Game_ProcessMainFrame @0x5263f0]
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
+    // The frame's pending-sound pass, ahead of the script and entity halves:
+    // the fire-sound countdown, then the incoming-lock tone drain.
+    // [orig: Sound_TickPendingSlots @0x529310 (the slot walk, then the
+    //  dword_B764C0 drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
+    //  @0x526697]
+    void tick_pending_sound_slots();
     TickContext begin_tick(bool is_authority, TickPhase phase);
     void run_script_pass(const TickContext &ctx);
     void run_entity_pass(const TickContext &ctx);

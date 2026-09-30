@@ -922,11 +922,17 @@ struct ClientState {
 	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
 	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
 	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_EnemyTagsVisible
-	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
-	// (unported) and stays 0 here.
+	// @0x42ffb2/@0x430025]. S2C 0x75 writes the same latch, sub-mode and
+	// target [orig: NapiNPClientMsg_SetSpectatorMode @0x4259e0]; the
+	// spectate actions cycle them (client_replica_spectate.cpp).
 	uint8_t hud_hit_feedback_frames = 0; // [orig: dword_A8235C @0x42FF60..0x42FF74]
 	bool death_screen_active = false;
+	// 0 free, 1 chase, 2 first person [orig: dword_A860F0].
 	std::uint8_t death_screen_submode = 0;
+	// The spectated entity's wire handle, 0xFFFF none [orig: dword_A860F4, a
+	// pool pointer]. The falling edge leaves it stale, as retail's does; every
+	// reader gates on the death screen.
+	std::uint16_t spectate_target = 0xFFFF;
 	// The local entity's +0x1E0 "a medic is reviving me" latch: set by S2C
 	// 0x3A, cleared when the local player's own dead->alive edge runs
 	// Game_InitNewRound and at mission start. The DEATH screen hides its

@@ -6,7 +6,9 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/session.h>
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/world/local_player_view.h>
 #include <net/npwire/ingame_message_id.h>
 
@@ -44,6 +46,14 @@ std::vector<uint8_t> linked_record(uint16_t handle, int16_t x, int16_t y,
 	body.push_back(type);
 	body.push_back(height);
 	return body;
+}
+
+// One client tick of the banks as the embedders drive them: the live-marker
+// refresh every tick, then one tick of MapOverlay_UpdateTimers (the HUD's
+// radar update ages the banks by its elapsed count, one per tick here).
+void tick(ns::ClientReplicaPipeline &view) {
+	view.refresh_minimap_live_markers();
+	view.age_minimap_overlays(1);
 }
 
 const ns::ClientMinimapOverlaySlot *find_slot(
@@ -85,7 +95,7 @@ int main() {
 		CHECK(slot->argb == 0xFF304080u, "color 0x0A resolves retail blue");
 	}
 	entity.x = 20 << 16;
-	view.tick_minimap_overlays();
+	tick(view);
 	CHECK(find_slot(view.state().minimap, entity.handle)->x == (20 << 16),
 			"regular marker follows the live entity like retail's draw-time "
 			"pool read");
@@ -107,7 +117,7 @@ int main() {
 				"a flags refresh updates the slot in place, never migrating banks");
 	}
 	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks + 2; ++i)
-		view.tick_minimap_overlays();
+		tick(view);
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
 			"the refreshed slot keeps its transient aging class and expires");
 	// A marker ALLOCATED with 0x10 lands in the persistent bank and never
@@ -115,7 +125,7 @@ int main() {
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 3, 0x09, 0x10));
 	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks + 2; ++i)
-		view.tick_minimap_overlays();
+		tick(view);
 	CHECK(find_slot(view.state().minimap, entity.handle) != nullptr,
 			"persistent 0x10 marker does not expire");
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
@@ -132,7 +142,7 @@ int main() {
 	CHECK(slot != nullptr && slot->argb == 0xFF907000u,
 			"color index 8 resolves the witnessed table entry");
 	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks; ++i)
-		view.tick_minimap_overlays();
+		tick(view);
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
 			"special unlinked marker expires after 1984 ticks");
 	// The alpha-0 reject lives ONLY on the 33..42 alias branch: a DIRECT
@@ -203,11 +213,11 @@ int main() {
 		CHECK(receive(1, 0).hud_designations.empty(), "an expired designation leaves the HUD feed");
 	}
 	entity.x = 30 << 16;
-	view.tick_minimap_overlays();
+	tick(view);
 	slot = find_slot(view.state().minimap, entity.handle);
 	CHECK(slot != nullptr && slot->x == (100 << 16),
 			"linked marker keeps the wire pose (the link only re-handles)");
-	for (int i = 0; i < 2 * 62 + 1; ++i) view.tick_minimap_overlays();
+	for (int i = 0; i < 2 * 62 + 1; ++i) tick(view);
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
 			"link expiry clears its special slot");
 
@@ -234,10 +244,10 @@ int main() {
 		CHECK(slot->x == (5 << 16) && slot->y == (6 << 16),
 				"the undecoded marker pose still rides the wire record");
 	}
-	for (int i = 0; i < 3 * 62 - 1; ++i) view.tick_minimap_overlays();
+	for (int i = 0; i < 3 * 62 - 1; ++i) tick(view);
 	CHECK(find_slot(view.state().minimap, 0x2044) != nullptr,
 			"the link survives without a decoded entity until it lapses");
-	for (int i = 0; i < 2; ++i) view.tick_minimap_overlays();
+	for (int i = 0; i < 2; ++i) tick(view);
 	CHECK(find_slot(view.state().minimap, 0x2044) == nullptr,
 			"link lifetime expiry still frees the slot");
 
@@ -275,7 +285,7 @@ int main() {
 	CHECK(probe != nullptr && probe->remaining_ticks == 0 &&
 			probe->handle == 0xFFFF && probe->x == (4 << 16),
 			"the clear zeroes lifetime + handle and keeps the pose fields");
-	view.tick_minimap_overlays();
+	tick(view);
 	CHECK(probe != nullptr && probe->remaining_ticks > 0,
 			"the surviving 0x6B link re-arms its slot — the marker resurrects");
 	CHECK(probe != nullptr && probe->handle == 0x2006,
@@ -303,6 +313,110 @@ int main() {
 			linked_record(0x2FFE, 1, 1, 0, 5, 1, 4));
 	CHECK(find_slot(view.state().minimap, 0x2FFE) == nullptr,
 			"an out-of-capacity 0x6B handle is dropped");
+
+	// The HUD update's elapsed count ages the banks in one call: a frame
+	// that spans several ticks spends them at once, and a zero count is no
+	// walk at all. [orig: Radar_UpdateContacts @0x59a9c9..0x59a9ce ->
+	// MapOverlay_UpdateTimers(d)]
+	{
+		ns::ClientReplicaPipeline aged;
+		auto &e = aged.state().upsert(0x2031);
+		e.cls = opennova::EntityClass::Vehicle;
+		aged.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2031, 10, 0x0A, 0));
+		aged.age_minimap_overlays(0);
+		const auto *t = find_slot(aged.state().minimap, 0x2031);
+		CHECK(t != nullptr && t->remaining_ticks == ns::kMinimapOverlayLifetimeTicks,
+				"a zero count leaves the banks alone");
+		aged.age_minimap_overlays(1000);
+		t = find_slot(aged.state().minimap, 0x2031);
+		CHECK(t != nullptr && t->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 1000,
+				"a multi-tick count ages the transient bank in one step");
+		aged.age_minimap_overlays(ns::kMinimapOverlayLifetimeTicks - 1000);
+		CHECK(find_slot(aged.state().minimap, 0x2031) == nullptr,
+				"a transient slot frees at or under zero [orig: @0x5bfd01]");
+		// A special slot floors at zero and keeps its handle claimed.
+		aged.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2031, 12, 8, 0x40));
+		aged.age_minimap_overlays(5000);
+		const auto *sp = find_slot(aged.state().minimap, 0x2031, false);
+		CHECK(sp != nullptr && sp->remaining_ticks == 0 && sp->handle == 0x2031,
+				"a special slot floors at zero keeping its handle [orig: @0x5bfd2e]");
+		// A live link whose slot carries flags 0x20 re-arms it at the floor:
+		// lifetime 0, the handle restored, then 1.
+		// [orig: @0x5bfd8b..0x5bfd90, @0x5bfdc8, @0x5bfdd2..0x5bfdd4]
+		aged.apply(opennova::s2c::MINIMAP_OVERLAY,
+				linked_record(0x2032, 1, 1, 0, 10, 1, 4));
+		auto &link = aged.state().minimap.linked[0];
+		CHECK(link.active && link.handle == 0x2032 && link.slot_index >= 0,
+				"the link probe is up");
+		if (link.slot_index >= 0) {
+			auto &slot = aged.state().minimap.special[static_cast<size_t>(link.slot_index)];
+			slot.flags = 0x20u;
+			slot.handle = 0xFFFF;
+			aged.age_minimap_overlays(1);
+			CHECK(slot.remaining_ticks == 1 && slot.handle == 0x2032,
+					"a 0x20-flagged linked slot re-arms at lifetime 1 with its handle");
+		}
+		// A link whose lifetime is already zero is skipped: no re-arm, no lapse.
+		// [orig: the `> 0` test @0x5bfd43]
+		aged.apply(opennova::s2c::MINIMAP_OVERLAY,
+				linked_record(0x2033, 1, 1, 0, 0, 1, 4));
+		aged.age_minimap_overlays(3);
+		bool zero_link_kept = false;
+		for (const auto &l : aged.state().minimap.linked)
+			zero_link_kept |= l.active && l.handle == 0x2033 && l.remaining_ticks == 0;
+		CHECK(zero_link_kept, "a zero-lifetime link is never walked");
+	}
+
+	// The embedder's HUD frame drives the aging: the local player's radar
+	// update on the logic tick hands MapOverlay_UpdateTimers the ticks it
+	// consumed, and a skipped pass (or a repeat within a tick) ages nothing.
+	// [orig: HUD_RenderAllOverlays @0x5a817d -> Radar_UpdateContacts
+	//  @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
+	{
+		opennova::mission::MissionKernel kernel;
+		opennova::world::World &w = kernel.world;
+		w.registry.configure_pool(0, 4);
+		opennova::world::Entity seed;
+		seed.kind = opennova::world::EntityKind::Organic;
+		seed.health = 100;
+		const opennova::world::EntityHandle self = w.registry.spawn(0, seed);
+		w.ai.attach(self);
+		w.cached.local_player = self;
+		opennova::replication::LoopbackChannel channel;
+		opennova::inmatch::ClientRuntime runtime(channel);
+		auto &e = runtime.state().upsert(0x2041);
+		e.cls = opennova::EntityClass::Vehicle;
+		runtime.view().apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2041, 10, 0x0A, 0));
+		opennova::hud::HudMinimapRadar radar;
+		w.logic_tick = 100;
+		opennova::inmatch::step_hud_radar(kernel, &runtime, true, false, false, radar);
+		const auto *aged = find_slot(runtime.state().minimap, 0x2041);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 100,
+				"the HUD frame ages the banks by the radar update's elapsed ticks");
+		opennova::inmatch::step_hud_radar(kernel, &runtime, true, false, false, radar);
+		aged = find_slot(runtime.state().minimap, 0x2041);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 100,
+				"a second frame within the tick ages nothing");
+		w.logic_tick = 160;
+		opennova::inmatch::step_hud_radar(kernel, &runtime, false, false, false, radar);
+		aged = find_slot(runtime.state().minimap, 0x2041);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 100,
+				"a skipped HUD pass leaves the banks on hold");
+		kernel.local.view.death_screen_active = true;
+		opennova::inmatch::step_hud_radar(kernel, &runtime, true, false, false, radar);
+		aged = find_slot(runtime.state().minimap, 0x2041);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 100,
+				"the death screen holds them unless the corner map's site runs");
+		opennova::inmatch::step_hud_radar(kernel, &runtime, true, true, false, radar);
+		aged = find_slot(runtime.state().minimap, 0x2041);
+		CHECK(aged != nullptr &&
+						aged->remaining_ticks == ns::kMinimapOverlayLifetimeTicks - 160,
+				"the map site's update spends the held ticks at once");
+	}
 
 	const auto before = view.state().minimap.revision;
 	const auto malformed_before = view.malformed_bodies();

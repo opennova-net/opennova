@@ -89,18 +89,45 @@ struct RadarContactState {
 	// (nothing here reads it) [orig: sub_59B200 @0x59b236..0x59b258].
 	std::array<RadarMissile, kRadarMissileRows + 1> missiles{};
 	int32_t missile_count = 0; // [orig: dword_2721F3C]
+	// The incoming-lock tone word: every lock note stores 31, the logic tick
+	// drains it one per tick, the local player's class init zeroes it, and
+	// while it is nonzero the HUD pass keeps the LPLOCKONME loop registered.
+	// The round's overlay reset (radar_reset) does not touch it.
+	// [orig: dword_B764C0 — stores @0x4465f8 / @0x446618; the drain
+	//  Sound_TickPendingSlots @0x5293a5..0x5293af; the reset
+	//  PlayerClass_InitEntity @0x4b10de; the reader HUD_RenderAllOverlays
+	//  @0x5a8197]
+	int32_t lock_tone = 0;
 };
+
+// The value every lock note stores [orig: `mov dword_B764C0, 1Fh` @0x4465f8].
+inline constexpr int32_t kRadarLockToneTicks = 31;
+// The HUD pass's lock-tone registration: the LPLOCKONME set resolved at HUD
+// init, on the local player's lane 255 with a 20-tick keep-alive, pitch 1.0
+// and full volume, anchored at the local player's Position.
+// [orig: HUD_InitOverlaySystem @0x5a48c4..0x5a490e (the set);
+//  HUD_RenderAllOverlays @0x5a81a0..0x5a81bf -> SoundEmitter_Register(local,
+//  set, &local->Position, 255, 20, 0x10000, 0xFFFF, 0, 0)]
+inline constexpr const char *kRadarLockToneSet = "LPLOCKONME";
+inline constexpr uint8_t kRadarLockToneLane = 255;
+inline constexpr int32_t kRadarLockToneLifetime = 20;
 
 // [orig: Radar_AddBlip @0x59b280] — `local_pos`/`local_yaw` are
 // g_LocalPlayerEntity's Position and Yaw; `rules` the mpattrib word.
 void radar_add_blip(RadarContactState &state, uint32_t rules, const int32_t local_pos[3],
 		uint32_t local_yaw, uint32_t source, const int32_t pos[3], int32_t kind);
 // [orig: Radar_UpdateContacts @0x59a7e0] — `viewer_pos`/`viewer_yaw` are the
-// HUD viewer's (g_HUDInfoCurrentEntity) Position and Yaw. The trailing
-// MapOverlay_UpdateTimers(d) call @0x59a9ce is not made here: the retained
-// map banks age on their own clock in this runtime (the replica pipeline).
-void radar_update_contacts(RadarContactState &state, uint32_t tick, const int32_t viewer_pos[3],
-		uint32_t viewer_yaw);
+// HUD viewer's (g_HUDInfoCurrentEntity) Position and Yaw. The viewer is
+// always the local player: the pass builds the info from g_LocalPlayerEntity
+// (@0x5a80bc) ahead of both update sites, and the death screen's spectate
+// rebuild (@0x5a7bf1) restores the struct before it returns (@0x5a7c25).
+// Returns the elapsed tick count the update consumed (0 on a repeat within
+// a tick): the count the trailing MapOverlay_UpdateTimers(d) call ages the
+// retained map banks by, which the embedder owns (the replica pipeline's
+// age_minimap_overlays) [orig: `test edi, edi; jz` @0x59a9c9, the call
+// @0x59a9ce].
+int32_t radar_update_contacts(RadarContactState &state, uint32_t tick,
+		const int32_t viewer_pos[3], uint32_t viewer_yaw);
 // [orig: sub_59B200 @0x59b200]
 void radar_note_missile(RadarContactState &state, uint32_t source, const int32_t pos[3]);
 // [orig: HUD_ResetAllOverlayBuffers @0x59dd40 — the missile rows @0x59dd49,
@@ -130,35 +157,51 @@ int32_t radar_damage_kind(const RadarSource &source);
 void radar_add_blip(World &world, uint32_t source, const int32_t pos[3], int32_t kind);
 
 // The tracer whiz: a round whose segment passes within the ammo's whiz
-// radius of the listener lights its shooter's bearing on the olive rings,
-// once per round. Called at the tail of the round's ballistic tick with the
-// tick-start position, the tick's end point and the incoming velocity.
-// [orig: Projectile_UpdatePhysics @0x4ea98e..0x4ea9f2 ->
-//  Projectile_SpawnTracerScarEffect @0x4e5ac0]
+// radius of the listener plays the ammo's zip row at the closest point and
+// lights its shooter's bearing on the olive rings, once per round. Called at
+// the tail of the round's ballistic tick with the tick-start position, the
+// tick's end point and the incoming velocity; the call also stands for the
+// tail's +0x80 copy the next whiz reads (LiveRound::prev_z_q16).
+// On a joiner a remote shooter is a wire proxy with no registry entity: the
+// round's wire shooter handle then resolves through
+// RoundSim::wire_actor_provider, as retail's client resolves it to its own
+// pool slot at the round event [orig: NetPacket_DeserializeRoundEvent
+// @0x42f491 -> RoundData_SpawnRound +0x170 store @0x4ec670].
+// [orig: Projectile_UpdatePhysics @0x4ea98e..0x4ea9f2 (the whiz),
+//  @0x4ea9fa..0x4eaa15 (the +0x80 copy) -> Projectile_SpawnTracerScarEffect
+//  @0x4e5ac0]
 void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *ammo,
-		const FixedVec3 &start, int32_t end_x, int32_t end_y, const FixedVec3 &velocity);
+		const FixedVec3 &start, const FixedVec3 &end, const FixedVec3 &velocity);
 // Stamp every ammo's whiz radius (AmmoTableEntry::whiz_radius_q16, ammo
 // +0x8C) from the loaded sound sets; a null index leaves every radius 0.
 // [orig: AmmoDef_InitEffectsTable @0x40a04b..0x40a07f]
 void resolve_ammo_whiz_radii(AmmoTable &ammo, const audio::SoundSetIndex *sets);
 // The Stinger motor's lock note: a missile whose target is the local player,
-// or a vehicle the local player is the first occupant of, rides the missile
-// list [orig: Entity_UpdateGuidedMissile_0 @0x4465db..0x446622 -> sub_59B200].
-// The lock-tone word the same site sets (dword_B764C0 = 31 @0x4465f8 /
-// @0x446618) has no consumer here: its reader registers the unported
-// SndLpLockOnMe loop [orig: HUD_RenderAllOverlays @0x5a8197..0x5a81bf].
+// or a vehicle the local player is the first occupant of, stores the lock
+// tone and rides the missile list [orig: Entity_UpdateGuidedMissile_0
+// @0x4465db..0x446622 -> dword_B764C0 = 31, sub_59B200]. On a joiner the
+// target is a wire handle the client resolves to its own pool slot
+// [orig: Entity_SerializeGuidedMissileState @0x447ece]: the local player's
+// own wire handle is the target-is-local arm (RoundSim::wire_actor_provider).
 void radar_note_guided_missile(World &world, const LiveRound &round, uint32_t slot);
+// The logic tick's lock-tone drain [orig: Sound_TickPendingSlots
+// @0x5293a5..0x5293af, from Game_ProcessMainFrame @0x526697].
+void radar_tick_lock_tone(RadarContactState &state);
 
 // One HUD frame of the radar legs in HUD_RenderAllOverlays order, into the
 // snapshot the spinmap compile draws: the contact update behind the pass's
 // early-outs (`pass_runs`: no spawn-success gate, hud_detail < 3; the white
 // flash and a missing local player are read here) and the death-screen gate,
 // which the map site's own call (`map_site`: the corner map draws with bits
-// 9/6/10) reopens; then the snapshot; then the per-frame missile-count clear.
+// 9/6/10) reopens; the lock-tone registration behind the same death-screen
+// gate and the in-game menu pause (`menu_paused`); then the snapshot; then
+// the per-frame missile-count clear. Returns the tick count the update aged
+// the contacts by, which the embedder hands MapOverlay_UpdateTimers.
 // [orig: HUD_RenderAllOverlays early-outs @0x5a8084..0x5a80db, the update
-//  @0x5a8164..0x5a817d, HUD_DrawMapOverlay's site @0x5a78ff..0x5a791c, the
-//  count clear @0x5a87ef]
-void radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_site,
-		hud::HudMinimapRadar &out);
+//  @0x5a8164..0x5a817d, the tone @0x5a8185..0x5a81bf (dword_A87050 is the
+//  menu pause), HUD_DrawMapOverlay's site @0x5a78ff..0x5a791c, the count
+//  clear @0x5a87ef]
+int32_t radar_hud_frame(World &world, uint32_t tick, bool pass_runs, bool map_site,
+		bool menu_paused, hud::HudMinimapRadar &out);
 
 } // namespace opennova::world

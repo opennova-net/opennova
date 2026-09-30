@@ -2206,10 +2206,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // own Position), between the threshold test and the
             // authority/Indestructible tests
             // [orig: @0x4b7d23..0x4b7d2d -> Player_OnDamageReceived @0x4dd880].
-            // (org1's own arm @0x4b61e8 sits on ITS death leg instead -- that
-            // motor's health-adjust block, health <= 0 and not already dead --
-            // and this unified motor has no separate org1 death leg to hang it
-            // on, so it stays unported; world-wac-ai-re carries the note.)
+            // (the other org2 arm @0x4b61e8 sits on the death leg of the
+            // health-adjust block @0x4b5f2c..0x4b622d -- the header rates, the
+            // POWER pool timers and the type-1/2 zones -- which is unported as
+            // a whole, D-INF-28; world-wac-ai-re carries the note.)
             if (inf.is_local_player && fall_charges)
                 player_on_damage_received(world, radar_entity_source(world, e.handle), e.pos);
             if (fall_charges && is_authority &&

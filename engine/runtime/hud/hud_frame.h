@@ -783,10 +783,16 @@ struct HudSessionState {
 	int32_t zone_coverage = 0;
 	int team = 0;                        // byte_27234FE (hudInfo+0x176)
 	uint32_t attack_defend = 0;          // dword_B78FE8: 1 defending, 2 attacking
-	// The death screen's spectate target (dword_A860F4 && dword_A860F0) and its
-	// name (+0xF4). The spectate actions are unported: no producer yet.
+	// The death screen's spectate arm (dword_A860F4 && dword_A860F0): the HUD
+	// info rebuilt for the target feeds the health bar and the TEAMID line —
+	// `team` above carries the target's team byte then — plus the target's
+	// name (+0xF4) and its health ratio (hudInfo+92, Health << 16 over the
+	// max, capped at 1). Producer: inmatch::hud_role_facts.
+	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25; HUD_BuildEntityInfo
+	//  @0x4b87a2..0x4b87d3]
 	bool spectating = false;
 	std::string spectated_name;
+	float spectated_health_fraction = 0.0f;
 	HudSessionText text;
 };
 

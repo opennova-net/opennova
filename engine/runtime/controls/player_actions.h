@@ -36,6 +36,9 @@ enum class PlayerAction {
 	NightVision,
 	NvgGain,
 	WaypointCycle, // value -1 = backward (the Shift direction bit)
+	// The death screen's spectator rows (value = the dispatch code 500 / 501
+	// / 502; replication::ClientReplicaPipeline::spectate_action).
+	Spectate,
 };
 
 struct PlayerActionRequest {
@@ -93,6 +96,13 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
+	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
+	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
+	// scan admits them only while the death screen is up, so the embedder
+	// polls them there, on their press edges, while gameplay input is active.
+	// [orig: Input_IsBindingActiveForMode @0x497ea0 — row +8 bit 2 on the
+	//  death screen; rows @0x818810 / @0x81887C / @0x8188E8 -> codes 500..502]
+	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active);
 
 private:
 	struct RowLatch { bool down = false; };
@@ -105,6 +115,7 @@ private:
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
 	bool use_digit_was_down_[10] = {};
+	bool spectator_was_down_[3] = {};
 
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 			PlayerActionFrame &frame);
