@@ -90,18 +90,12 @@ Diagnostic cannot_rewrite(const DocumentType *type, const std::string &file) {
 	return refusal("rename.site", file + " holds no records for a rename to rewrite.", file);
 }
 
-// A field of a record kind of a document type, asked of a blank document of the type (a type's
-// schema never depends on a file's content), one made per kind of file.
-const FieldSchema *site_field(std::map<AssetKind, std::unique_ptr<Document>> &blanks, AssetKind file, NodeKind kind,
-                              const std::string &id) {
-	std::unique_ptr<Document> &blank = blanks[file];
-	if (!blank) {
-		const DocumentType *type = document_type_for(file);
-		if (!type) return nullptr;
-		blank = records_of(type->make());
-		if (!blank) return nullptr;
-	}
-	for (const FieldSchema &field : blank->fields(kind))
+// A field of a record kind of the document type a kind of file opens with, from the type's
+// schema (DocumentType::fields: a type's fields never depend on a file's content).
+const FieldSchema *site_field(AssetKind file, NodeKind kind, const std::string &id) {
+	const DocumentType *type = document_type_for(file);
+	if (!type || !type->fields) return nullptr;
+	for (const FieldSchema &field : type->fields(kind))
 		if (field.id == id) return &field;
 	return nullptr;
 }
@@ -283,10 +277,9 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	        row.spell == NameSpelling::StyleVariable && mns::is_variable_reference(typed) ? mns::variable_name(typed) : typed;
 	// A name its defining field holds as a number (an item's id) is that number as the field
 	// writes it ("0100301" is 100301), before it is compared with the others.
-	std::map<AssetKind, std::unique_ptr<Document>> blanks;
 	const AssetEntry *defining = find_asset(scan, symbol.file);
 	const FieldSchema *defining_field =
-	        defining && !symbol.field.empty() ? site_field(blanks, defining->kind, symbol.address.kind, symbol.field) : nullptr;
+	        defining && !symbol.field.empty() ? site_field(defining->kind, symbol.address.kind, symbol.field) : nullptr;
 	Value number;
 	const bool numeric = defining_field && defining_field->type != FieldType::Text;
 	const bool is_number = numeric && site_value(*defining_field, new_name, number);
@@ -366,7 +359,7 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 	}
 	// Every site's field can hold the new value: within its width, a number where it is one.
 	for (const auto &[site, kind] : sites) {
-		const FieldSchema *field = site_field(blanks, site.kind, kind, site.field);
+		const FieldSchema *field = site_field(site.kind, kind, site.field);
 		Value value;
 		if (!field) {
 			plan.refusals.push_back(refusal("rename.site", site_where(site) + " has no field " + site.field + " the editor writes.",

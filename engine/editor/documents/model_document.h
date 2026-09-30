@@ -120,7 +120,10 @@ public:
 	// kind they hold (model_document_detail::kKinds).
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// What an index field names on this record: the model's CTRL registers by name, LOD 0's
 	// parts, the MTRX rows (any other index typed too).
 	bool record_choices(const NodeAddress &address, const FieldUse &use,

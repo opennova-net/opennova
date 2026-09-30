@@ -9,7 +9,9 @@
 // blank menu names, style.unused).
 #include <editor/documents/document_types.h>
 #include <editor/documents/mns_document.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/graph/style_value_use.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
@@ -428,7 +430,7 @@ static int test_changes_since_save() {
 	return 0;
 }
 
-// What a variable's value is used as (MnsDocument::style_value_use, the Styles view's cell): a
+// What a variable's value is used as (graph/style_value_use, the Styles view's cell): a
 // colour use gives the value its swatch; a use as a string id or as a menu's text is none of a
 // colour, a font and an image, so a value that reads as hex there ("ADD", "FACE") is no colour
 // (S13 D4's second review); a value no menu uses that the game reads whole as hex still is.
@@ -466,7 +468,7 @@ static int test_style_value_use() {
 	const auto colour = [&](const char *name) {
 		NodeAddress line;
 		if (!find_definition(*graph, *styles, name, line)) return -1;
-		return styles->style_value_use(line, graph.get(), graph->generation()).colour ? 1 : 0;
+		return style_value_use(*styles, line, graph.get()).colour ? 1 : 0;
 	};
 	TEST_EXPECT(colour("ID_ONLY") == 0 && colour("TEXT_ONLY") == 0);
 	TEST_EXPECT(colour("PAINT") == 1 && colour("SPARE") == 1);
@@ -474,9 +476,9 @@ static int test_style_value_use() {
 }
 
 // S13 D6: a load in place starts the revisions again at 0 and the rows' identities from 1, so the
-// stylesheet's own memos (the sheet the game reads, what a line's value is used as) key on the load
-// generation as well: FOO a colour, then the file loaded again in place with FOO a font's file, at
-// the same revision and on the same row identity, answers from the new file.
+// stylesheet's own memo (the sheet the game reads, which what a line's value is used as reads) keys
+// on the load generation as well: FOO a colour, then the file loaded again in place with FOO a
+// font's file, at the same revision and on the same row identity, answers from the new file.
 static int test_load_in_place() {
 	editor_test::TempProjectDir dir("opennova_styles_load_in_place");
 	MnsDocument document;
@@ -485,14 +487,14 @@ static int test_load_in_place() {
 	SymbolFacts colour;
 	document.refine_symbol(foo, colour);
 	TEST_EXPECT(colour.value == "FFFF0000" && !colour.inert &&
-	            document.style_value_use(foo, nullptr, 0).colour);
+	            style_value_use(document, foo, nullptr).colour);
 	const uint64_t generation = document.load_generation();
 	TEST_EXPECT(load(document, dir, "FOO arial.fnt\r\n"));
 	TEST_EXPECT(document.revision() == 0 && document.load_generation() != generation &&
 	            row_at(document, 0) == foo);
 	SymbolFacts font;
 	document.refine_symbol(foo, font);
-	TEST_EXPECT(font.value == "arial.fnt" && !document.style_value_use(foo, nullptr, 0).colour);
+	TEST_EXPECT(font.value == "arial.fnt" && !style_value_use(document, foo, nullptr).colour);
 	std::printf("test_load_in_place passed\n");
 	return 0;
 }

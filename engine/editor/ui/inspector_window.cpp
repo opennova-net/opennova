@@ -53,6 +53,13 @@ struct Reveal {
 	float light = 0.0f; // the row's highlight, fading to none
 };
 
+// What the form's controls keep across frames, the window's own: the reference picker's popups,
+// and what an open list of choices' box holds (field_widgets: one list is open at a time).
+struct Controls {
+	ReferencePicker &picker;
+	std::string &typed;
+};
+
 const Document *active(const SessionView &view) {
 	for (const auto &document : view.documents.open)
 		if (document->path() == view.documents.active) return records_of(*document);
@@ -339,8 +346,8 @@ void rename_hint(Workspace &workspace, const Document &document, const NodeAddre
 // (field_widgets::value), each change a Set on every target. compact: a table cell (one line
 // for text, the bits of a flags field in a popup). mixed: the targets differ, so a text shows
 // empty with a hint and a list names no choice; a flag bit changes on each target's own bits.
-void value_control(Workspace &workspace, const Document &document, const Targets &targets, const FieldUse &field,
-                   const Value &value, bool compact, bool mixed = false) {
+void value_control(Workspace &workspace, std::string &typed, const Document &document, const Targets &targets,
+                   const FieldUse &field, const Value &value, bool compact, bool mixed = false) {
 	// The choices it offers: the schema's, or the primary target's own (Document::choices_on).
 	std::vector<FieldChoice> offered;
 	const std::vector<FieldChoice> &choices = document.choices_on(targets.front(), field, offered);
@@ -373,7 +380,7 @@ void value_control(Workspace &workspace, const Document &document, const Targets
 		return;
 	}
 	Value edited = value;
-	const field_widgets::Edited change = field_widgets::value(field, choices, edited, compact, mixed);
+	const field_widgets::Edited change = field_widgets::value(field, choices, edited, compact, typed, mixed);
 	if (change.changed) set(workspace, document, targets, schema.id, std::move(edited), change.coalesce);
 	if (change.finished) window_requests::end_edit(workspace, document.path());
 }
@@ -471,7 +478,7 @@ float begin_row(Reveal *reveal, const NodeAddress &address, const RowFields &fie
 // `block_switch`: a block's own yes / no field (plan_inspector's toggle), the first row of its
 // section, named "In the file" (short enough for a narrow column) and saying what its tick
 // does.
-void field_row(Workspace &workspace, ReferencePicker &picker, const Document &document, const Targets &targets,
+void field_row(Workspace &workspace, Controls &controls, const Document &document, const Targets &targets,
                const FieldUse &field, Reveal *reveal, bool block_switch = false) {
 	const FieldSchema &schema = *field.schema;
 	const NodeAddress &address = targets.front();
@@ -506,12 +513,12 @@ void field_row(Workspace &workspace, ReferencePicker &picker, const Document &do
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
-	value_control(workspace, document, targets, field, value, false, mixed);
+	value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
 	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(workspace, document, targets, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
-		reference_tools(workspace, picker, document, targets, field, value, false, beside);
+		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -525,8 +532,8 @@ void field_row(Workspace &workspace, ReferencePicker &picker, const Document &do
 // A group's fields on one row (field_widgets::group): its name the group's, marked, reverted
 // and revealed as one field's is (any member), then the members side by side, each change a
 // Set on every target; a swatch's pick of every channel one batch, one undo step.
-void group_row(Workspace &workspace, const Document &document, const Targets &targets, const RowFields &fields,
-               Reveal *reveal) {
+void group_row(Workspace &workspace, std::string &typed, const Document &document, const Targets &targets,
+               const RowFields &fields, Reveal *reveal) {
 	const NodeAddress &address = targets.front();
 	std::vector<FieldUse> members;
 	std::vector<Value> values(fields.size());
@@ -551,7 +558,7 @@ void group_row(Workspace &workspace, const Document &document, const Targets &ta
 	ImGui::SetNextItemWidth(-FLT_MIN);
 	size_t changed = SIZE_MAX;
 	const field_widgets::Edited change =
-			field_widgets::group(members, choices, values, changed, mixed);
+			field_widgets::group(members, choices, values, changed, typed, mixed);
 	std::vector<Edit> batch;
 	for (size_t i = 0; change.changed && i < fields.size(); ++i)
 		for (const NodeAddress &target : targets) {
@@ -573,7 +580,7 @@ void group_row(Workspace &workspace, const Document &document, const Targets &ta
 // A section's fields, row by row: a group's neighbours (none left out of the file: each keeps
 // its own written tick) on one row, the others alone; the field `block_switch` names drawn as
 // its block's switch.
-void field_rows(Workspace &workspace, ReferencePicker &picker, const Document &document, const Targets &targets,
+void field_rows(Workspace &workspace, Controls &controls, const Document &document, const Targets &targets,
                 const std::vector<FieldUse> &fields, Reveal *reveal, const std::string &block_switch = std::string()) {
 	auto grouped = [](const FieldUse &field) { return !field.schema->group.empty() && !field.schema->optional; };
 	for (size_t i = 0; i < fields.size();) {
@@ -583,9 +590,9 @@ void field_rows(Workspace &workspace, ReferencePicker &picker, const Document &d
 		if (end - i > 1) {
 			RowFields row;
 			for (size_t j = i; j < end; ++j) row.push_back(&fields[j]);
-			group_row(workspace, document, targets, row, reveal);
+			group_row(workspace, controls.typed, document, targets, row, reveal);
 		} else {
-			field_row(workspace, picker, document, targets, fields[i], reveal,
+			field_row(workspace, controls, document, targets, fields[i], reveal,
 			          !block_switch.empty() && fields[i].schema->id == block_switch);
 		}
 		i = end;
@@ -594,7 +601,7 @@ void field_rows(Workspace &workspace, ReferencePicker &picker, const Document &d
 
 // One cell of a collection's table: the field as it applies to that record, "-" where the
 // game does not read it and the file leaves it out.
-void field_cell(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &address,
+void field_cell(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &address,
                 const FieldSchema &schema) {
 	Value value;
 	if (!document.get(address, schema.id, value)) {
@@ -623,11 +630,11 @@ void field_cell(Workspace &workspace, ReferencePicker &picker, const Document &d
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);
-	value_control(workspace, document, {address}, field, value, true);
+	value_control(workspace, controls.typed, document, {address}, field, value, true);
 	if (present) drop_target(workspace, document, {address}, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
-		reference_tools(workspace, picker, document, {address}, field, value, true, true);
+		reference_tools(workspace, controls.picker, document, {address}, field, value, true, true);
 	if (ignored) {
 		ImGui::SameLine();
 		ImGui::TextColored(kIgnored, "!");
@@ -678,7 +685,7 @@ std::string record_tip(const Document &document, const NodeAddress &address) {
 // The records as a table: a numbered row each (a click selects it; marked when it changed
 // since the last save), a column per field, every cell edited in place. The columns size
 // to the font, resize, and scroll sideways past the table's width.
-void records_table(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
+void records_table(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &owner,
                    const Document::Collection &records, const std::vector<FieldSchema> &fields) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float row = ImGui::GetFrameHeight() + style.CellPadding.y * 2.0f;
@@ -723,7 +730,7 @@ void records_table(Workspace &workspace, ReferencePicker &picker, const Document
 			row_menu(workspace, document, records.spec, address, size_t(i), records.ids.size());
 			for (const FieldSchema &field : fields) {
 				ImGui::TableNextColumn();
-				field_cell(workspace, picker, document, address, field);
+				field_cell(workspace, controls, document, address, field);
 			}
 			ImGui::PopID();
 		}
@@ -752,7 +759,7 @@ void records_list(Workspace &workspace, const Document &document, const NodeAddr
 
 // One collection of `owner`: its tools (Add, and Duplicate / Remove / Up / Down for its
 // selected record), then its records. `titled`: under a heading of its own inside a group.
-void collection_block(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &owner,
+void collection_block(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &owner,
                       const Document::Collection &records, bool titled) {
 	const Document::CollectionSpec &spec = records.spec;
 	const std::vector<NodeId> &ids = records.ids;
@@ -796,7 +803,7 @@ void collection_block(Workspace &workspace, ReferencePicker &picker, const Docum
 		ui_kit::empty_state("None yet.");
 	} else {
 		const std::vector<FieldSchema> &fields = document.fields(spec.kind);
-		if (!fields.empty() && fields.size() <= kTableFields) records_table(workspace, picker, document, owner, records, fields);
+		if (!fields.empty() && fields.size() <= kTableFields) records_table(workspace, controls, document, owner, records, fields);
 		else records_list(workspace, document, owner, records);
 	}
 	ImGui::PopID();
@@ -823,7 +830,7 @@ bool section_changed(const Document &document, const Targets &targets, const Ins
 // block's own switch first, its fields after; then the collections it claims. A section
 // that holds something written, or a field changed since the last save, starts open; one
 // holding the field a request asks to show opens.
-void draw_section(Workspace &workspace, ReferencePicker &picker, const Document &document, const NodeAddress &record,
+void draw_section(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &record,
                   const NodeAddress &owner, const InspectorSection &section, Reveal *reveal) {
 	if (!section.key.empty()) {
 		std::string heading = section.title;
@@ -848,46 +855,14 @@ void draw_section(Workspace &workspace, ReferencePicker &picker, const Document 
 		ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
 		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.6f);
 		// The switch is a field like the others: marked, reverted and shown as they are.
-		if (block_switch) field_row(workspace, picker, document, {record}, section.toggle, reveal, true);
-		field_rows(workspace, picker, document, {record}, section.fields, reveal);
+		if (block_switch) field_row(workspace, controls, document, {record}, section.toggle, reveal, true);
+		field_rows(workspace, controls, document, {record}, section.fields, reveal);
 		ImGui::EndTable();
 	}
 	for (const Document::Collection &collection : section.collections)
-		collection_block(workspace, picker, document, owner, collection,
+		collection_block(workspace, controls, document, owner, collection,
 		                 section.key != document.kind_token(collection.spec.kind));
 	ImGui::PopID();
-}
-
-// Who names this record: the graph's referrers of every symbol it defines (a row's, or a
-// nested record's, a menu window's NAME), a line each cut to the window: the file, the
-// record and the field's name (the whole of it, and the field's id, in its tooltip); a click
-// goes to the use (graph/reference_queries' usage_target).
-void referenced_by(Workspace &workspace, const Document &document, const NodeAddress &record) {
-	const SessionView &view = workspace.view();
-	if (!view.findings.graph) return;
-	std::vector<const GraphEdge *> users;
-	for (const GraphSymbol *symbol : view.findings.graph->symbols_of(document.path(), document.record_path(record))) {
-		if (symbol->inert) continue; // not what the game reads: nothing names this one
-		if (symbol->address.row && symbol->address != record) continue; // another record of the same path
-		for (const GraphEdge *edge : view.findings.graph->referrers_of(symbol->kind, symbol->name, symbol->scope)) users.push_back(edge);
-	}
-	if (users.empty()) return;
-	ImGui::Separator();
-	ImGui::Text("Referenced by %zu field(s)", users.size());
-	for (size_t i = 0; i < users.size(); ++i) {
-		const GraphEdge &edge = *users[i];
-		ImGui::PushID(static_cast<int>(i));
-		const std::string field = edge_field_title(view, edge);
-		const std::string line = edge.source + ": " + (edge.record.empty() ? field : edge.record + " - " + field);
-		const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
-		const bool pressed = ImGui::Selectable((shown + "###use").c_str());
-		if (pressed || ImGui::IsItemHovered()) {
-			const ReferenceTarget target = usage_target(*view.project.scan, edge);
-			if (pressed) go_to(workspace, target);
-			ui_kit::tooltip(line + "\n" + edge.field + "\n" + go_to_words({target}));
-		}
-		ImGui::PopID();
-	}
 }
 
 // The row and every record that holds the selection, each one click away, on a row that
@@ -934,6 +909,59 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 }
 
 } // namespace
+
+// Who names this record: the graph's referrers of every symbol it defines (a row's, or a nested
+// record's, a menu window's NAME), a line each: the file, the record and the field's name, the
+// kind of the use's file found by its path in the scan and its field's name in that kind's schema
+// (edge_field_title). The lines are made again only when what they read moves (users_key): the
+// document's load and revision and the record, the graph (the object and its generation: the
+// edges stay where they are while it stands) and the files. Clipped: a variable a thousand
+// windows use draws only the lines that show, each cut to the window (the whole of it, and the
+// field's id, in its tooltip); a click goes to the use (graph/reference_queries' usage_target).
+void InspectorWindow::referenced_by(const Document &document, const NodeAddress &record) {
+	const SessionView &view = workspace_.view();
+	if (!view.findings.graph) return;
+	const AssetGraph &graph = *view.findings.graph;
+	UsersKey key;
+	key.document = document.identity();
+	key.load = document.load_generation();
+	key.revision = document.revision();
+	key.record = record;
+	key.graph = &graph;
+	key.generation = graph.generation();
+	key.files = revision_key(view.revisions, {ViewConcern::Files});
+	if (!(key == users_key_)) {
+		users_key_ = key;
+		++users_made_;
+		users_.clear();
+		for (const GraphSymbol *symbol : graph.symbols_of(document.path(), document.record_path(record))) {
+			if (symbol->inert) continue; // not what the game reads: nothing names this one
+			if (symbol->address.row && symbol->address != record) continue; // another record of the same path
+			for (const GraphEdge *edge : graph.referrers_of(symbol->kind, symbol->name, symbol->scope)) {
+				const std::string field = edge_field_title(view, *edge);
+				users_.push_back({edge, edge->source + ": " + (edge->record.empty() ? field : edge->record + " - " + field)});
+			}
+		}
+	}
+	if (users_.empty()) return;
+	ImGui::Separator();
+	ImGui::Text("Referenced by %zu field(s)", users_.size());
+	ImGuiListClipper clipper;
+	clipper.Begin(static_cast<int>(users_.size()));
+	while (clipper.Step())
+		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+			const Use &use = users_[size_t(i)];
+			ImGui::PushID(i);
+			const std::string shown = ui_kit::fit(use.line, ImGui::GetContentRegionAvail().x);
+			const bool pressed = ImGui::Selectable((shown + "###use").c_str());
+			if (pressed || ImGui::IsItemHovered()) {
+				const ReferenceTarget target = usage_target(*view.project.scan, *use.edge);
+				if (pressed) go_to(workspace_, target);
+				ui_kit::tooltip(use.line + "\n" + use.edge->field + "\n" + go_to_words({target}));
+			}
+			ImGui::PopID();
+		}
+}
 
 void InspectorWindow::receive(const ViewEvent &event) {
 	const SessionView &view = workspace_.view();
@@ -1016,8 +1044,9 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
 	const std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
+	Controls controls{picker_, typed_};
 	ImGui::BeginDisabled(!editable);
-	for (const InspectorSection &section : plan) draw_section(workspace_, picker_, *document, selection, owner, section, &reveal);
+	for (const InspectorSection &section : plan) draw_section(workspace_, controls, *document, selection, owner, section, &reveal);
 	ImGui::EndDisabled();
 	reveal_scroll_ = reveal.scroll;
 	// F2: Rename everywhere on the record's first field that defines a name.
@@ -1029,7 +1058,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			rename_everywhere(workspace_, *document, selection, field, value);
 			break;
 		}
-	referenced_by(workspace_, *document, selection);
+	referenced_by(*document, selection);
 	findings_.follow(view);
 	findings(view, findings_, *document, *row, selection);
 }
@@ -1084,7 +1113,8 @@ void InspectorWindow::draw_together(const Document &document, const std::vector<
 			        !section.key.empty() && std::any_of(section.fields.begin(), section.fields.end(), [&](const FieldUse &field) {
 				        return field.schema->id == section.key && is_yes_no(*field.schema);
 			        });
-			field_rows(workspace_, picker_, document, records, section.fields, nullptr, has_switch ? section.key : std::string());
+			Controls controls{picker_, typed_};
+			field_rows(workspace_, controls, document, records, section.fields, nullptr, has_switch ? section.key : std::string());
 			ImGui::EndTable();
 		}
 		ImGui::PopID();

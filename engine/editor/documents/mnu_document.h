@@ -96,7 +96,10 @@ public:
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	void walk_records(const Node &row, const RecordVisitor &visit) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A screen or window no by-name lookup returns (lookup_names) is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they

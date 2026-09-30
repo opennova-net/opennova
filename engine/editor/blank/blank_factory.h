@@ -51,10 +51,6 @@ const BlankFactory *find_blank_factory_for_kind(AssetKind kind);
 bool make_blank(const BlankRequest &request, AssetKind kind, std::vector<uint8_t> &out,
                 Diagnostic &error);
 
-// Where a created file goes inside the project tree, by kind ("menus", "fonts", ...;
-// "" for the root). Organization only: the engine sees the flat name.
-const char *blank_placement_dir(AssetKind kind);
-
 // Whether the texture factory makes a placeholder of this name (blank_texture.cpp): the
 // checkerboard the game draws for a texture it cannot load, in the format the name's
 // extension asks for (a .tga or an .mdt as a TGA, which the game reads both as, a .pcx as a

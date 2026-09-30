@@ -6,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
@@ -216,12 +217,13 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// A plain name the archives can carry, whose extension is the kind's, landing
 	// inside the project.
 	std::string problem, message;
-	if (!check_project_file_name(paths_.root, blank_placement_dir(kind), request.path, kind, problem, message)) {
+	const char *const folder = asset_kind_row(kind).folder;
+	if (!check_project_file_name(paths_.root, folder, request.path, kind, problem, message)) {
 		core_.report(make_diagnostic(DiagnosticSeverity::Error, "document." + problem, message, request.path));
 		return;
 	}
 	const auto *existing = view_.project.scan->find(request.path);
-	const std::string relative = (fs::path(blank_placement_dir(kind)) / request.path).generic_string();
+	const std::string relative = (fs::path(folder) / request.path).generic_string();
 	if (!existing) {
 		const auto target = fs::path(paths_.root) / relative;
 		std::error_code ec;

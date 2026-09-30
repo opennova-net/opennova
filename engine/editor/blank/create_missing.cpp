@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <system_error>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/project/project_files.h>
 
@@ -40,7 +41,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			result.unavailable.push_back(row.name);
 			continue;
 		}
-		const std::string dir = blank_placement_dir(row.expected_kind);
+		const std::string dir = asset_kind_row(row.expected_kind).folder;
 		const std::string relative = dir.empty() ? row.name : dir + "/" + row.name;
 		const fs::path target = fs::path(paths.root) / relative;
 		// The report may be older than the tree: a file that has appeared where this one

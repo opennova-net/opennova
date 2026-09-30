@@ -16,8 +16,9 @@ class ProjectCheck;
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
 // document (a DocumentBase: a record type's is its Document, as_records), how to validate one
 // file of the kinds it opens, which are the asset kinds whose row names its id
-// (AssetKindRow::document), and the check of its own it runs across the project's files, if
-// any. The session, the windows and the shell reach a document type only through this table.
+// (AssetKindRow::document), what its records' fields are, and the check of its own it runs across
+// the project's files, if any. The session, the windows and the shell reach a document type only
+// through this table (its view through ui/document_views, keyed by the same id).
 struct DocumentType {
 	DocumentTypeId id = DocumentTypeId::None;
 	const char *name = "";
@@ -29,6 +30,12 @@ struct DocumentType {
 	// is the asset graph's; graph/project_validation.h runs the three over the project, the
 	// validation cache keeping each file's findings until the file changes.
 	std::vector<Diagnostic> (*validate_file)(const DocumentBase &document) = nullptr;
+	// A kind of record's fields without a document (S13 V3): the table the type's documents'
+	// Document::fields(kind) answer, in storage that outlives every document (the type's static
+	// table), none for a kind it does not hold. What a field of a file of the type is called and
+	// what it takes, asked where no document of the file is open (a graph edge's field in Files
+	// and the Inspector, a rename's site); a test's stand-in type may leave it null.
+	const std::vector<FieldSchema> &(*fields)(NodeKind kind) = nullptr;
 	// The type's project check (ADR 0046 S13 V9; documents/project_check.h), null for a type with
 	// none: a check of its own across the project's files that keeps what it made from one
 	// validation to the next (the menu type's render check). The row makes it; the instance lives

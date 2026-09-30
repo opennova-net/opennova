@@ -701,7 +701,7 @@ void MnuDocument::walk_records(const Node &row, const RecordVisitor &visit) cons
 	}
 }
 
-const std::vector<FieldSchema> &MnuDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &MnuDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	if (kind < 0 || size_t(kind) >= kind_entries().size()) return none;
 	return fields_of(kind_entries()[size_t(kind)].shape);
