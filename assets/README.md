@@ -38,6 +38,12 @@ means adding it to this table.
   copy.
 - The game mounts it as a loose root when launched without `--resource-dir`
   (`BootRootMount.bundled_assets_dir` / `mount_bundled`).
+- The web build (ADR 0049) serves it beside the page with an
+  `assets/manifest.json` (`scripts/package_godot_web.sh`), and the page copies
+  every listed file into the engine's in-memory filesystem before the game
+  starts. Every visitor downloads all of it first, so the unreferenced
+  `on_ar15`/`on_arms` art stays out of the site until the game uses it (drop
+  it from the script's excludes and `game-web.yml`'s LFS pull then).
 - `PLAY_RETAIL` and `CHANGE_FOLDER` are wired by control name in
   `godot/game/bundled_menu_companion.gd`. `MainGame` mounts the picked install,
   saves it as `[resources] retail_dir` in `user://opennova.cfg`, and switches
