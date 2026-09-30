@@ -43,9 +43,9 @@ The scripts locate binaries in the Release or Debug output directories.
 ```powershell
 pwsh -File scripts\net\detect_capture.ps1
 pwsh -File scripts\net\capture.ps1 -Action start -Tag retail-ref
-# Run the session, then stop using the tag printed by the start command.
+# Run the session, then stop with the same tag the start command used.
 pwsh -File scripts\net\capture.ps1 -Action stop -Tag retail-ref
-pwsh -File scripts\net\decode.ps1 -Capture <capture.pcapng> -Roles
+pwsh -File scripts\net\decode.ps1 -Capture <capture.pcapng> -Stream
 ```
 
 NovaWorld traffic can contain credentials, account identity, and machine paths.
@@ -54,16 +54,17 @@ Treat every `.pcap`, `.pcapng`, and `.sph` file as sensitive until reviewed.
 ## OpenNova LAN host/join
 
 The launchers find Godot through `GODOT_BIN` or the repo's `.godot-bin`
-convention. On first use, launch OpenNova normally, choose the retail resource
-directory, and close it so that setting exists in persistent user state.
+convention. Pass the retail resource directory with `-ResourceDir`
+(`-HostResourceDir`/`-JoinResourceDir` for the pair): without a `--resource-dir`
+the game boots its bundled menu and ignores the LAN launch flags (ADR 0048).
 
 ```powershell
 pwsh -File scripts\net\host_opennova.ps1 `
-    -Mission ASH_I5A.BMS -Name Host -Port 32768 `
+    -Mission ASH_I5A.BMS -Name Host -Port 32768 -ResourceDir <jo-dir> `
     -Windowed -Resolution 1920x1080
 
 pwsh -File scripts\net\join_opennova.ps1 `
-    -Host 127.0.0.1 -Name Joiner -Port 32768 `
+    -Host 127.0.0.1 -Name Joiner -Port 32768 -ResourceDir <jo-dir> `
     -Windowed -Resolution 1920x1080
 ```
 
@@ -71,6 +72,7 @@ Or start a local pair:
 
 ```powershell
 pwsh -File scripts\net\run_lan_pair.ps1 -Mission ASH_I5A.BMS `
+    -HostResourceDir <jo-dir> -JoinResourceDir <jo-dir> `
     -Windowed -Resolution 1920x1080
 ```
 
@@ -103,3 +105,4 @@ gametype), the record-class mix (golden replicates vehicles; a `Vehicle ours=0`
 row means we send none), the header field value-sets, and per-record-class field
 population (a field golden always fills but we leave zero is an under-send). The
 golden's parsed profile caches to `<golden>.0a.json`, so iterating on our encoder
+only re-decodes our own capture; pass `--refresh` after a decoder change.

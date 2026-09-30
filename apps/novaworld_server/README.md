@@ -64,7 +64,9 @@ All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
 and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
 `ONNET_GLSVSS_AGRMS` (the gate VARs) plus `ONNET_GLSVSS_RESULTS` (what
 `ClientGLSVSSRequest` is answered with). The gate response carries only the
-nineteen keys the retail parser recognises.
+nineteen keys the retail parser recognises. The host/join reflection override
+for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP`,
+`ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`.
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).

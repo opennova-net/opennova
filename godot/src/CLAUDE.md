@@ -62,6 +62,12 @@ Gotchas:
   unregistered class fails to parse (GUT then silently drops those test scripts).
 - The editor loads only `godot/bin/libopennova.*`. A stale editor means a stale
   `godot/bin` DLL — rebuild via `scripts/build_godot.sh` and fully restart.
+- The web build (ADR 0049) compiles this tree as a wasm32 threads side module
+  (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only; `ci.yml`'s
+  `build-gdextension-web` builds it on every PR) with `OPENNOVA_DEVTOOLS` off, as in
+  the release flavour. The templates abort on a throw, so no exceptions as control
+  flow, and a device that starts threads sizes them for the page's fixed pthread pool
+  under `OS::has_feature("web")` (`terrain/terrain_tile_cache_device.cpp`).
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s
