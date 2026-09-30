@@ -575,7 +575,6 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 	if (runtime != nullptr) {
 		const int local_slot = runtime->local_roster_slot();
 		for (const replication::ClientRosterSlot &slot : runtime->state().roster) {
-			if (local_slot < 0) break;
 			if (!slot.bound || slot.team != out.player_team || slot.spectator ||
 					slot.entity_slot < 0)
 				continue;

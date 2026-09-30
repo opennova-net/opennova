@@ -5,8 +5,8 @@
 // player, the HostClient replica fold), N listen frames over a null socket
 // (the logic clock advances once per frame, the 0x0A fan folds into the local
 // ClientState, the viewport seam reaches the ctx), the local C2S gameplay
-// drain (reload and mounted-slot requests reach the server dispatcher while
-// movement stays queued for Server_TickUpdate), and the dedicated
+// drain (reload, mounted-slot, medic and squad requests reach the server
+// dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
 // bring-up (no loopback client, no local player, no local fold).
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/local_role.h>
@@ -18,6 +18,7 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/squad_messages.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/inmatch/null_datagram_socket.h>
@@ -178,6 +179,24 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 1);
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
+		// The host player's command-map sends reach its own server's squad
+		// handlers the same way: a C2S 0x45 naming its own slot lands the
+		// fireteam there. [orig: NetPacket_SendWeaponAction @0x42dceb (0x45)
+		// -> CNapiNetwork_QueueReliableMessage @0x4c4fa0;
+		// NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c00]
+		inmatch::NapiNPConnection *self = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.type == 2 && conn.link.transport == &host.host_loop) self = &conn;
+		CHECK(self != nullptr);
+		if (self != nullptr) {
+			FireteamAssign assign;
+			assign.fireteam = 2;
+			assign.members = {self->reply.player_slot};
+			host.host_loop.client_send(c2s::FIRETEAM_ASSIGN, encode_fireteam_assign(assign));
+			role.drain_host_client_gameplay_requests();
+			CHECK(host.host_loop.c2s_pending() == 0);
+			CHECK(self->fireteam == 2);
+		}
 		// The next frame's Server_TickUpdate drains what the local drain left.
 		host.host_loop.client_send(c2s::ENTITY_UPLINK, std::vector<uint8_t>{0});
 		role.run_tick(tick_input(0));

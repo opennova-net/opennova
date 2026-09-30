@@ -39,14 +39,20 @@ bool Server_HandleSquadMessage(NapiNPServerCtx &ctx, NapiNPConnection &sender, u
 // range, the walk up the leader's chain must not reach the member (a cycle)
 // or leave the slot range, and the member's team must equal the leader's.
 // True with the stored link when accepted (the S2C 0x71 goes out), false for
-// the silent rejections.
-// [orig: NetPacket_WritePlayerChainLink @0x5106d0]
+// the silent rejections. An empty row's leader reads 0, so a walk that
+// reaches row 0 again through an empty row never ends in retail (a host
+// hang); the port rejects a walk still going after `capacity` steps, which
+// only such a spin reaches.
+// [orig: NetPacket_WritePlayerChainLink @0x5106d0, the walk
+//  @0x510718..0x510756]
 bool Server_LinkSquadMember(NapiNPServerCtx &ctx, NapiNPConnection &member, uint8_t leader,
 		uint8_t &stored);
 
 // The break-up of `player`'s squad: its link cleared (0xFF, fireteam 0), S2C
 // 0x71 [0xFF][slot] to the in-match slots of its team, S2C 0x72 [0][""] and
-// [1][""] to it; then the same for every in-match slot it led.
+// [1][""] to it; then the same for every slot it led that is in state 6 (an
+// active, deployed slot before the round end), a loading or post-round
+// member keeping its link.
 // [orig: Server_SendPlayerStateAndSquad @0x518b40 (a misnomer); callers
 //  Server_ChangeEntityTeam @0x518e92 and Server_HandlePlayerDisconnect
 //  @0x51b837]
@@ -55,7 +61,8 @@ void Server_DissolveSquadOf(NapiNPServerCtx &ctx, NapiNPConnection &player);
 // The punt tally: with voting on and at least the minimum active slots, a
 // target whose votes reach round(active x percent) is punted (the reason-40
 // "VOTEDOFF" disconnect) each time a vote brings it there, then every voter
-// for a punted target is reset to 0xFF.
+// for a punted target is reset to 0xFF. A stored target past the capacity
+// counts nothing (retail dereferences a NULL row there, a host crash).
 // [orig: Server_ProcessVoteKickResults @0x511400; the punt
 //  Server_SendValidatedChatToPlayer @0x50a210 -> CNapiNPConnection_SendChatMessage
 //  @0x4c7ef0 (a misnomer: the disconnect event)]

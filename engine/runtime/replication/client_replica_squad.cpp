@@ -21,15 +21,14 @@ ClientRosterSlot *active_slot(ClientState &state, uint8_t index) {
 } // namespace
 
 int ClientReplicaPipeline::local_roster_slot() const {
-	// entity+0x154, the local player's own slot index: the bound slot whose
-	// pool-0 entity is the viewer's.
-	if (viewer_handle_ == 0xFFFFu || (viewer_handle_ >> 12) != 0) return -1;
-	const int16_t entity_slot = static_cast<int16_t>(viewer_handle_ & 0xFFFu);
-	for (size_t i = 0; i < state_.roster.size(); ++i) {
-		const ClientRosterSlot &slot = state_.roster[i];
-		if (slot.bound && slot.entity_slot == entity_slot) return static_cast<int>(i);
-	}
-	return -1;
+	// g_LocalPlayerEntity+0x154, the local player's own slot index. The host
+	// stamps a player entity's +0x154 from its slot's +20 id, the id S2C 0x04
+	// byte 17 carries as g_LocalPlayerSlotId, so both name one slot: the one
+	// set_local_player_slot latches (a joiner's 0x04, the listen host's own
+	// connection), live while the player is dead or spectating.
+	// [orig: Server_PlayerAdd @0x51d087..0x51d08b; Server_InitAllPlayerEntitiesForRound
+	//  @0x516b97..0x516b9a; NapiNPClientMsg_SessionSlotConfig @0x4254a2]
+	return local_player_slot_;
 }
 
 void ClientReplicaPipeline::apply_squad_join(const std::vector<uint8_t> &body) {
@@ -37,15 +36,15 @@ void ClientReplicaPipeline::apply_squad_join(const std::vector<uint8_t> &body) {
 	//  reset @0x42564a..0x425652; `leader == local slot` @0x42565e (the line
 	//  unless +50 & 2 @0x42566c, the RECRUIT_ACCEPT sound unless +50 & 1
 	//  @0x4256a0, the waypoint push j_Server_BroadcastChatToAllPlayers
-	//  @0x4256d1); `leader == 0xFF` @0x4256d8 -> the foreign-waypoint sweep
-	//  @0x4256e0; the team-list refresh @0x4256e5]
+	//  @0x4256d1); `leader == 0xFF` @0x4256db -> the foreign-waypoint sweep
+	//  @0x4256e0 whichever member the message names (no local-slot test);
+	//  the team-list refresh @0x4256e5]
 	const SquadJoin join = decode_squad_join(body.data(), body.size());
 	ClientRosterSlot *slot = active_slot(state_, join.member);
 	if (slot == nullptr) return;
 	slot->squad_leader = join.leader;
 	slot->fireteam = 0;
-	const int local = local_roster_slot();
-	if (local >= 0 && join.leader == static_cast<uint8_t>(local)) {
+	if (join.leader == local_player_slot_) {
 		ClientSquadEvent event;
 		event.kind = ClientSquadEvent::Kind::MemberJoined;
 		event.slot = join.member;
@@ -91,8 +90,7 @@ void ClientReplicaPipeline::apply_fireteam_set(const std::vector<uint8_t> &body)
 	ClientRosterSlot *slot = active_slot(state_, set.member);
 	if (slot == nullptr) return;
 	slot->fireteam = set.fireteam;
-	const int local = local_roster_slot();
-	if (local >= 0 && set.member == static_cast<uint8_t>(local)) {
+	if (set.member == local_player_slot_) {
 		const ClientRosterSlot *leader = active_slot(state_, slot->squad_leader);
 		if (leader != nullptr && (leader->radio_mute_flags & 2u) == 0u) {
 			ClientSquadEvent event;

@@ -664,16 +664,24 @@ struct NapiNPConnection {
 
 	// The command map's squad bytes on the player slot: its leader's slot
 	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the
-	// player add, and the slot it votes to punt (+100578; the add's slot
-	// memset leaves 0). (server_squad.h)
-	// [orig: Server_PlayerAdd @0x51cf0a (+0x188E0 = 0xFF, +0x188E1 = 0; the
-	//  loop @0x51d4e0 an older cite named fills slot+0x1708A's four 0xFFFF
-	//  words, not the leader); NetPacket_WritePlayerChainLink @0x5106d0;
+	// player add, and the slot it votes to punt (+100578). Retail's add
+	// leaves the punt byte at the row memset's 0, which names row 0, always
+	// the host's own local row (+5), so the tally skips it and a non-voter
+	// counts nothing; the port's slot 0 can be a joiner's (a dedicated host
+	// has no local slot), so the seed is 0xFF, the no-vote value the tally's
+	// reset writes. (server_squad.h)
+	// [orig: Server_PlayerAdd @0x51cd06 (the row memset), @0x51cf0a
+	//  (+0x188E0 = 0xFF, +0x188E1 = 0; the loop @0x51d4e0 an older cite named
+	//  fills slot+0x1708A's four 0xFFFF words, not the leader);
+	//  Server_InitNewRoundState @0x51ca31..0x51ca35 (g_LocalNetPlayer, the
+	//  table's row 0, active and local); Server_ProcessVoteKickResults
+	//  @0x5114dc (the +5 skip), @0x511551 (the 0xFF reset);
+	//  NetPacket_WritePlayerChainLink @0x5106d0;
 	//  NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c00;
 	//  NapiNPServerMsg_VoteKick @0x518f10]
 	uint8_t squad_leader = 0xFF;
 	uint8_t fireteam = 0;
-	uint8_t punt_vote = 0;
+	uint8_t punt_vote = 0xFF;
 
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)

@@ -190,7 +190,24 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  NapiNPClientMsg_TeamAssign @0x431ae4 / @0x431b05;
 		//  NetPacket_SendEmoteRequest @0x42c14c]; its radio call too
 		// [orig: NetPacket_SendRadioCallRequest @0x42c17c].
-		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
+		// The host player's command-map sends ride it too: each squad /
+		// waypoint / punt sender is a bare QueueReliableMessage on the local
+		// client's connection, and the server handlers read the host
+		// context (server_squad.h).
+		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
+		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
+		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
+		//  NetPacket_SendWeaponAction @0x42dceb (0x45), NetPacket_SendTeamChange
+		//  @0x42dd19 (0x46), NetPacket_SendVoteKick @0x42dd69 (0x4B),
+		//  NetPacket_SendEntityUpdate @0x42de21 (0x4F),
+		//  CMap_HandlePlayerListCallback @0x5488b9 (0x3F) — every sender name
+		//  a misnomer; CNapiNetwork_QueueReliableMessage @0x4c4fa0 queues on
+		//  the local client connection (this+0xE60)]
+		const bool squad = dg.tag == c2s::WAYPOINT_SHARE || dg.tag == c2s::PUNT_VOTE ||
+				dg.tag == c2s::SQUAD_JOIN_REQUEST || dg.tag == c2s::SQUAD_ORDER_REQUEST ||
+				dg.tag == c2s::FIRETEAM_ASSIGN || dg.tag == c2s::SQUAD_RECRUIT ||
+				dg.tag == c2s::GO_CODE || dg.tag == c2s::WAYPOINT_DELETE;
+		if (!squad && dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
@@ -198,9 +215,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
-		// The chat handler, the snapshot builder and the radio call (its
-		// designation table and zone test) read the host context.
-		const bool reads_ctx = dg.tag == c2s::CHAT_MESSAGE ||
+		// The chat handler, the snapshot builder, the radio call (its
+		// designation table and zone test) and the squad handlers read the
+		// host context.
+		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));

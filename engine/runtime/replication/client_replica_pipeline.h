@@ -395,8 +395,9 @@ public:
 	static constexpr int kSpectateActionPrevTarget = 502;
 	void spectate_action(int code);
 
-	// The local player's roster slot (entity+0x154): the bound slot driving
-	// the viewer's pool-0 entity, -1 when none.
+	// The local player's roster slot (entity+0x154, which the host stamps
+	// from the slot id S2C 0x04 byte 17 carries): the slot
+	// set_local_player_slot latched, whether or not its entity is bound.
 	int local_roster_slot() const;
 private:
 	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].

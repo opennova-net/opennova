@@ -107,9 +107,8 @@ void ClientRuntime::clear_user_waypoints(world::World &world) {
 void ClientRuntime::send_go_code(world::World &world, uint8_t code) {
 	// NetPacket_SendVoteKick (a misnomer) with entity+0x154, then
 	// Server_PlayGoCodeSoundAndChat(local, code, 0) [orig: @0x5482ad, @0x5482bc].
-	const int slot = local_roster_slot();
 	GoCode go;
-	go.leader = static_cast<uint8_t>(slot < 0 ? 0xFF : slot);
+	go.leader = static_cast<uint8_t>(local_roster_slot());
 	go.code = code;
 	queue_squad_message(c2s::GO_CODE, encode_go_code(go));
 	replication::ClientSquadEvent event;

@@ -6,22 +6,44 @@
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect
 #include <runtime/world/world.h>
 
+#include <array>
 #include <cmath>
 
 namespace opennova::inmatch {
 
 namespace {
 
+// The punt tally's per-slot counts: a 251-dword stack array, one per row of
+// the 251-row slot table the capacity clamps to (GameConfig::
+// total_player_slot_capacity) [orig: Server_ProcessVoteKickResults — the
+// 0x3EC-byte `vote_tallies` memset @0x511496].
+constexpr size_t kVoteTallyRows = 251;
+
+// The slot's active byte (+4): its player was added.
+bool slot_active(const NapiNPConnection &c) {
+	return c.phase >= ConnectionPhase::PlayerAdded && !c.reply.player_slot_reserved;
+}
+
 // PlayerState_GetByIndex + the slot's active byte (+4): the connection
 // holding player slot `index` once its player was added.
 // [orig: PlayerState_GetByIndex @0x500850]
 NapiNPConnection *slot_connection(NapiNPServerCtx &ctx, uint8_t index) {
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (c.phase >= ConnectionPhase::PlayerAdded && c.reply.player_slot == index &&
-				!c.reply.player_slot_reserved)
-			return &c;
+		if (slot_active(c) && c.reply.player_slot == index) return &c;
 	}
 	return nullptr;
+}
+
+// The squad break-up's member test, slot state 6 exactly: an active slot in
+// the match before the round end moves it to 7 (Match's outcome latch stands
+// for that store, as in the play-tick walk). No transport test, and the bot
+// byte +0x178E3 is always clear here (no bot slots exist).
+// [orig: Server_SendPlayerStateAndSquad @0x518c3f..0x518c70 — +4,
+//  `+0x20 == 6`, !+0x178E3; Server_ProcessRoundEnd — the 6 -> 7 store
+//  @0x51685e]
+bool slot_state_6(const NapiNPServerCtx &ctx, const NapiNPConnection &c) {
+	if (!slot_active(c) || !is_in_match(c)) return false;
+	return ctx.world == nullptr || !ctx.world->match.outcome().ended;
 }
 
 // The slot's team byte (+0x1A0): the reserved / assigned team, 0 for an
@@ -31,8 +53,9 @@ uint8_t slot_team(const NapiNPConnection *c) {
 }
 
 // A slot's leader byte: an unused slot reads 0 — the slot table's allocation
-// zeroes +0x188E0..E3 and the player add alone seeds 0xFF.
-// [orig: Server_AllocatePlayerSlotTable @0x51c24a; Server_PlayerAdd @0x51cf0a]
+// and the disconnect zero the whole row, and the player add alone seeds 0xFF.
+// [orig: Server_AllocatePlayerSlotTable @0x51c1cb; Server_HandlePlayerDisconnect
+//  @0x51b87d; Server_PlayerAdd @0x51cf0a]
 uint8_t slot_leader(const NapiNPConnection *c) {
 	return c != nullptr ? c->squad_leader : uint8_t{0};
 }
@@ -122,9 +145,18 @@ bool Server_LinkSquadMember(NapiNPServerCtx &ctx, NapiNPConnection &member, uint
 		const NapiNPConnection *leader_slot = slot_connection(ctx, leader);
 		leader_team = slot_team(leader_slot);
 		uint8_t up = slot_leader(leader_slot);
+		// An empty row's leader reads 0, so a chain reaching one steps to row
+		// 0; when row 0's own chain leads back through an empty row (a stale
+		// link the break-up leaves on a member past state 6), or row 0 is
+		// itself empty (a port host with no local row), the walk spins
+		// forever, a retail host hang. Every step lands on a row below the
+		// capacity, so a walk still going after `capacity` steps has revisited
+		// a row and can only be such a spin; the port rejects the link there.
+		uint32_t steps = 0;
 		while (up != 0xFFu) {
 			if (up == member_id) return false;
 			if (up >= capacity) return false;
+			if (++steps > capacity) return false;
 			up = slot_leader(slot_connection(ctx, up));
 		}
 	}
@@ -157,10 +189,12 @@ void Server_DissolveSquadOf(NapiNPServerCtx &ctx, NapiNPConnection &player) {
 	};
 	const uint8_t id = player.reply.player_slot;
 	dissolve_one(player);
-	// Every in-game slot it led goes the same way [orig: @0x518c31..0x518d65 —
-	//  +4, state == 6, +0x178E3 clear, CO == the player's slot].
+	// Every slot in state 6 it led goes the same way; a member still loading
+	// (or past the round end, state 7) keeps its leader byte on the freed row,
+	// as in retail [orig: @0x518c31..0x518d65 — +4, state == 6, +0x178E3
+	//  clear, CO == the player's slot].
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (&c == &player || !in_game(c) || c.squad_leader != id) continue;
+		if (&c == &player || !slot_state_6(ctx, c) || c.squad_leader != id) continue;
 		dissolve_one(c);
 	}
 }
@@ -177,14 +211,21 @@ void Server_ProcessVoteKickResults(NapiNPServerCtx &ctx) {
 	if (active < cfg.voting_min_players) return;
 	const uint32_t threshold = static_cast<uint32_t>(static_cast<int64_t>(
 			static_cast<double>(active) * static_cast<double>(cfg.voting_percent) + 0.5));
-	std::vector<uint32_t> tally(251, 0);
+	std::array<uint32_t, kVoteTallyRows> tally{};
 	for (uint32_t index = 0; index < capacity; ++index) {
 		NapiNPConnection *voter = slot_connection(ctx, static_cast<uint8_t>(index));
 		if (voter == nullptr) continue;
 		const uint8_t target = voter->punt_vote;
 		if (target == 0xFFu) continue;
+		// A stored target past the capacity (the 0x3F handler stores any byte)
+		// has no row: retail reads its local byte through a NULL row, a host
+		// crash; the port counts no vote for it. Below the capacity the count
+		// stays inside the 251 rows.
+		// [orig: `target < capacity ? row : 0` @0x5114c2..0x5114d0, the +5
+		//  read @0x5114dc]
+		if (target >= capacity) continue;
 		// The vote counts unless the target slot is the local one (+5).
-		NapiNPConnection *victim = target < capacity ? slot_connection(ctx, target) : nullptr;
+		NapiNPConnection *victim = slot_connection(ctx, target);
 		if (victim != nullptr && victim->type == NapiNPConnection::kTypeClientSide) continue;
 		if (++tally[target] < threshold) continue;
 		// Each vote that reaches the threshold punts again:
@@ -200,10 +241,14 @@ void Server_ProcessVoteKickResults(NapiNPServerCtx &ctx) {
 		Server_StageHostDisconnect(*victim, event);
 	}
 	// Every live voter for a punted target starts over [orig: the second pass
-	//  — +4 and an entity, +100578 = 0xFF].
+	//  — +4 and an entity, +100578 = 0xFF]. A stored target past the 251
+	//  rows reads no count (retail reads past its stack array there, after
+	//  the first pass has already crashed on that vote) [orig: @0x51154b].
 	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
-		if (c.punt_vote != 0xFFu && tally[c.punt_vote] >= threshold) c.punt_vote = 0xFF;
+		if (c.punt_vote == 0xFFu) continue;
+		const uint32_t count = c.punt_vote < tally.size() ? tally[c.punt_vote] : 0u;
+		if (count >= threshold) c.punt_vote = 0xFF;
 	}
 }
 

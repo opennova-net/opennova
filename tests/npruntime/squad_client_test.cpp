@@ -106,6 +106,8 @@ void test_join_and_breakup() {
 	c.runtime.apply_received_effects(c.world);
 	CHECK(c.pool4_rows() == 1);
 	// A local placement stays when the squad breaks up; the foreign row goes.
+	// The sweep runs for a 0x71 [0xFF] whichever member it names (Mate here,
+	// not the local slot) [orig: @0x4256db..0x4256e0, no member test].
 	const w::EntityHandle own = w::place_user_waypoint(c.world, 5 << 16, 6 << 16, "MINE");
 	CHECK(own.valid() && c.world.user_waypoints.count == 1 && c.pool4_rows() == 2);
 	join.leader = 0xFF;
@@ -150,6 +152,48 @@ void test_orders_fireteam_go_code_and_destroy() {
 	c.runtime.view().apply(s2c::DESTROY_ENTITY, encode_entity_handle16(row.packed));
 	c.runtime.apply_received_effects(c.world);
 	CHECK(c.world.registry.get(row) == nullptr);
+}
+
+// The local slot the squad folds compare is the latched player slot
+// (retail's g_LocalPlayerEntity+0x154, stamped from the slot id 0x04 byte 17
+// carries), not a roster scan for the viewer's entity: it holds while the
+// local roster row has no entity bound (dead, spectating) and on a view with
+// no viewer handle (the listen host's).
+// [orig: NapiNPClientMsg_HandleSquadJoin @0x425666..0x42566c;
+//  NapiNPClientMsg_0x073 @0x4257d6..0x4257dc; Server_PlayerAdd @0x51d08b]
+void test_local_slot_is_the_latched_slot() {
+	{
+		Client c;
+		c.runtime.view().set_local_player_slot(0);
+		c.bind(0, "Lead", w::EntityHandle{static_cast<uint16_t>(0x00FF)}); // no entity
+		CHECK(c.runtime.state().roster[0].entity_slot == -1);
+		CHECK(c.runtime.local_roster_slot() == 0);
+		SquadJoin join;
+		join.leader = 0;
+		join.member = 1;
+		c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+		c.runtime.apply_received_effects(c.world);
+		const auto lines = c.runtime.drain_squad_lines();
+		CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::Join);
+	}
+	{
+		Client c;
+		c.runtime.view().set_viewer_handle(0xFFFF); // the listen host's view
+		c.runtime.view().set_local_player_slot(1);
+		CHECK(c.runtime.local_roster_slot() == 1);
+		SquadJoin join;
+		join.leader = 0;
+		join.member = 1;
+		c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
+		FireteamSet set;
+		set.member = 1;
+		set.fireteam = 3;
+		c.runtime.view().apply(s2c::FIRETEAM_SET, encode_fireteam_set(set));
+		c.runtime.apply_received_effects(c.world);
+		const auto lines = c.runtime.drain_squad_lines();
+		CHECK(lines.size() == 1 && lines[0].kind == hud::SquadFeedLine::Kind::Fireteam &&
+				lines[0].value == 3);
+	}
 }
 
 void test_placed_waypoint_table() {
@@ -214,6 +258,7 @@ void test_feed_lines() {
 int main() {
 	test_join_and_breakup();
 	test_orders_fireteam_go_code_and_destroy();
+	test_local_slot_is_the_latched_slot();
 	test_placed_waypoint_table();
 	test_feed_lines();
 	if (failures == 0) std::printf("squad_client: all checks passed\n");

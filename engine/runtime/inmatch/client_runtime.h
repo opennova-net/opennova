@@ -299,7 +299,8 @@ public:
 	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
 	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
 	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
-	// The local player's roster slot (entity+0x154), -1 when unbound.
+	// The local player's roster slot (entity+0x154; the pipeline's
+	// set_local_player_slot).
 	int local_roster_slot() const { return view_.local_roster_slot(); }
 	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
 	std::vector<hud::SquadFeedLine> drain_squad_lines();
