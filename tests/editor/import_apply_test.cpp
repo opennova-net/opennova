@@ -9,9 +9,10 @@
 // was, a failure while publishing is said file by file, an import record goes in with its
 // file, and a crash's staging folder is never scanned and goes with the next import; an
 // .o3d's textures come through its plan, a direct import saying which it leaves; a plan cut
-// by its cap holds a converter's files whole or not at all; and, with a packed game install
-// (OPENNOVA_JO_DIR), a retail menu and its stylesheet imported with the files they need,
-// against what is known of them without the planner.
+// by its cap holds a converter's files whole or not at all; the unsaved guard reads the plan the
+// dialog shows (S13 A3); and, with a packed game install (OPENNOVA_JO_DIR), a retail menu and
+// its stylesheet imported with the files they need, against what is known of them without the
+// planner.
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
@@ -335,6 +337,60 @@ static int test_apply_reads_the_disk() {
 	return 0;
 }
 
+// The unsaved guard reads the plan the import dialog shows (S13 A3: the ImportPlan operation's),
+// not one made again in the request: a catalog open with unsaved edits, the dialog planning a file
+// of its name over it, the file to import then gone. Import with replace waits on the unsaved
+// prompt, which lists the catalog as the shown plan puts the file there (a plan made in the
+// request would find the file gone and list nothing); its Save writes the edits, and the import,
+// planning again before it writes, finds its file gone and writes nothing (import.changed).
+static int test_apply_guard_reads_the_shown_plan() {
+	Project project("opennova_editor_apply_guard");
+	const std::string root = project.root();
+	const SessionView &view = project.view();
+	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("items.def"));
+	const Document *items = project.session.document_for("items.def");
+	TEST_EXPECT(items != nullptr && !items->rows().empty());
+	if (!items || items->rows().empty()) return 1;
+	EditorRequest edit = request::edit_record("defs/items.def", Edit());
+	edit.edits[0].address = {items->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item), 0};
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(20);
+	project.session.handle(edit);
+	TEST_EXPECT(items->dirty());
+	const std::string loose = project.dir.file("art/items.def");
+	TEST_EXPECT(editor_test::write_text(loose, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
+	preview(project.session, {loose});
+	const ImportPlanRow *row = row_named(*view.dialogs.import_preview.plan, "items.def");
+	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected &&
+	            row->destination == "defs/items.def");
+	const std::vector<ImportSource> shown = selected_sources(*view.dialogs.import_preview.plan);
+	std::error_code ec;
+	fs::remove(loose, ec);
+	TEST_EXPECT(!ec);
+	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
+	request.imports = shown;
+	request.replace = true;
+	project.session.handle(request);
+	const DialogsView::UnsavedPrompt &prompt = view.dialogs.unsaved_prompt;
+	TEST_EXPECT(project.session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::ImportFiles &&
+	            prompt.files == std::vector<std::string>({"defs/items.def"}) && !prompt.can_discard);
+	project.session.handle(request::resolve_unsaved(UnsavedChoice::Save));
+	project.session.run_operations();
+	std::string text, error;
+	TEST_EXPECT(!items->dirty() && read_file_text(root + "/defs/items.def", text, error) &&
+	            text.find("hp 20") != std::string::npos);
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end != OperationEnd::Done && view.dialogs.import_preview.changed);
+	bool changed = false;
+	for (const Diagnostic &d : view.activity.last_operation.findings) changed = changed || d.code == "import.changed";
+	TEST_EXPECT(changed);
+	project.session.handle(request::cancel_import());
+	return 0;
+}
+
 // An .o3d's textures come with it only through its plan. Imported with the files it needs,
 // spinner.o3d beside SPINNER.TGA lands the model and the texture, and the model's texture row
 // resolves to it; glow.tga, found nowhere, is the plan's not-found row and the import's
@@ -549,6 +605,7 @@ int run_import_apply_tests() {
 	failures += test_apply_record_with_its_file();
 	failures += test_apply_cap_keeps_groups();
 	failures += test_apply_staging_leftover();
+	failures += test_apply_guard_reads_the_shown_plan();
 	failures += test_apply_retail_menu();
 	return failures;
 }

@@ -260,18 +260,30 @@ void ImportController::set_install_files(std::vector<std::string> names) {
 
 // An import writes over a project file only when it replaces one (else a file of the name is
 // refused, or kept when it holds the same bytes): the files its sources make land where the
-// plan puts them. The plan has no cap here: import_assets writes every file of the request, so
-// every destination is looked at.
+// plan puts them. With the import dialog open that is the plan it shows (the ImportPlan
+// operation's, S13 A3), reused: the import plans again before it writes and writes nothing when
+// the plan is not that one. With none open, the files asked for are planned here, over the view's
+// scan and graph, with no cap: import_assets writes every file of the request, so every
+// destination is looked at.
 void ImportController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
 	if (!view_.project.open || !request.replace || !documents.documents_dirty()) return;
-	core_.problems().validate_pending();
-	const ImportPlan plan = plan_import(request.imports, false, paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(),
-	                                    core_.game_install(), SIZE_MAX);
+	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	std::shared_ptr<const ImportPlan> plan = preview.open ? preview.plan : nullptr;
+	if (!plan) {
+		core_.problems().validate_pending();
+		plan = std::make_shared<const ImportPlan>(plan_import(request.imports, false, paths_, *view_.project.document,
+				*view_.project.scan, core_.problems().graph(), core_.game_install(), SIZE_MAX));
+	}
+	// A row the request asks for, which the plan finds: where its file lands.
+	const auto writes = [&request](const ImportPlanRow &row) {
+		return row.state != ImportPlanRow::State::NotFound &&
+		       std::find(request.imports.begin(), request.imports.end(), row.source) != request.imports.end();
+	};
 	for (const auto &document : documents.documents()) {
 		if (!document->dirty()) continue;
-		if (std::any_of(plan.rows.begin(), plan.rows.end(), [&document](const ImportPlanRow &row) {
-			    return row.state != ImportPlanRow::State::NotFound && row.destination == document->path();
+		if (std::any_of(plan->rows.begin(), plan->rows.end(), [&](const ImportPlanRow &row) {
+			    return writes(row) && row.destination == document->path();
 		    }))
 			files.push_back(document->path());
 	}
