@@ -89,7 +89,7 @@ nw::OrganicSpawnRecord organic_record(
 	rec.player_class = 5;
 	rec.ai_action = 6;
 	rec.skip_byte = 7;
-	rec.unused_byte = 8;
+	rec.player_slot_id = 8;
 	rec.alert_level = 9;
 	rec.sub_type = 10;
 	rec.weapon_type = 11;

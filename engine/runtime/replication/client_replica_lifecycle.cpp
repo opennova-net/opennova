@@ -76,7 +76,7 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.spawn_player_class = rec.player_class;
     row.spawn_ai_state = rec.ai_state;
     row.spawn_anim_slot = rec.anim_slot;
-    row.spawn_byte_154 = rec.unused_byte;
+    row.spawn_byte_154 = rec.player_slot_id;
     row.spawn_mount_mask = rec.seat_mask;
     for (std::size_t i = 0; i < 8; ++i)
         row.spawn_mount_handles[i] = resolved_spawn_handle(rec.mount_handles[i]);

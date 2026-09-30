@@ -305,7 +305,7 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 		w.u8(rec.player_class);
 		w.u8(rec.ai_action);
 		w.u8(rec.skip_byte);
-		w.u8(rec.unused_byte);
+		w.u8(rec.player_slot_id);
 		w.u8(rec.alert_level);
 		w.u8(rec.sub_type);
 		w.u8(rec.weapon_type);
@@ -349,7 +349,7 @@ std::vector<uint8_t> encode_full_entity_spawn(const FullEntitySpawnRecord &rec) 
 	w.u16(rec.net_id);             // entity+348 [0x5051c6]
 	w.u8(rec.player_class);        // entity+660 [0x5051db]
 	w.u8(0);                       // hard 0 in the original [0x5051e8]
-	w.u8(rec.unused_byte);         // entity+340 [0x5051fd]
+	w.u8(rec.player_slot_id);         // entity+340 [0x5051fd]
 	w.u8(rec.alert_level);         // entity+533 [0x505211]
 	w.u8(rec.sub_type);            // entity+532 [0x50522c]
 	return out;

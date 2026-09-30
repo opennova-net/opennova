@@ -341,6 +341,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world::apply_spawn_point_latches(*world.registry.get(h), sel);
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+	world.registry.get(h)->player_slot_id = conn.reply.player_slot; // entity+0x154 (Entity::player_slot_id)
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
@@ -796,6 +797,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
 	conn->link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
+	world.registry.get(h)->player_slot_id = *player_slot; // entity+0x154 (Entity::player_slot_id)
 	// [orig: Server_PlayerAdd @0x51CBC0 binds the fresh player allocation]
 	conn->link.transport = transport;
 	conn->link.mode = replication::TransportMode::Client;

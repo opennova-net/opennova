@@ -457,7 +457,7 @@ bool decode_organic_spawn_batch(const uint8_t *body, size_t len,
 		rec.player_class = c.u8();
 		rec.ai_action = c.u8();
 		rec.skip_byte = c.u8();   // discarded by the handler (@ 0x42e9f5)
-		rec.unused_byte = c.u8();
+		rec.player_slot_id = c.u8();
 		rec.alert_level = c.u8();
 		rec.sub_type = c.u8();
 		rec.weapon_type = c.u8();
@@ -508,7 +508,7 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 	out.net_id = c.u16();
 	out.player_class = c.u8();
 	out.skip_byte = c.u8();   // discarded by the handler (@ 0x433b26)
-	out.unused_byte = c.u8();
+	out.player_slot_id = c.u8();
 	out.alert_level = c.u8();
 	out.sub_type = c.u8();
 	return c.ok && (c.p == c.end);

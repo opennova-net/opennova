@@ -660,6 +660,14 @@ struct Entity {
     // @0x43c390 (+0x374 write @0x43c522); Server_PlayerAdd @0x51cbc0 (@0x51d0b1);
     // Server_InitAllPlayerEntitiesForRound @0x516aa0 (@0x516b8e); net-re §5.23 D-NET-146]
     uint8_t anim_slot = 0;
+    // A player entity's own roster slot id (entity+0x154): the host stamps it
+    // from the slot's +0x14 id at the add and at every round's re-init, and
+    // both spawn records carry it, so a client's squad legs read their own
+    // slot off it (0 on every other entity, the row memset).
+    // [orig: Server_PlayerAdd @0x51d087..0x51d08b; Server_InitAllPlayerEntitiesForRound
+    //  @0x516b97..0x516b9a; NetPacket_SerializeEntityStatesToBuffer @0x503316..0x503327;
+    //  the 0x18 record @0x5051f0..0x5051fd]
+    uint8_t player_slot_id = 0;
     uint8_t radio_request = 0; // entity+885 [orig: @0x430C50]
     uint8_t radio_request_seconds = 0; // entity+886
     // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per

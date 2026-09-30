@@ -372,7 +372,7 @@ struct OrganicSpawnRecord {
 	uint8_t  player_class = 0;   // entity+660 (0x294 = GamePlayerEntity.playerClass, the soldier class 5-9; net-re D-NET-103)
 	uint8_t  ai_action = 0;      // *(entity+104)+32 (AI sub-struct)
 	uint8_t  skip_byte = 0;      // cursor advance only; retail discards it
-	uint8_t  unused_byte = 0;    // entity+340 (0x154)
+	uint8_t  player_slot_id = 0; // entity+340 (0x154): a player's own roster slot id
 	uint8_t  alert_level = 0;    // entity+533 (0x215)
 	uint8_t  sub_type = 0;       // entity+532 (0x214)
 	uint8_t  weapon_type = 0;    // entity+343 (0x157)
@@ -438,7 +438,7 @@ struct FullEntitySpawnRecord {
 	uint16_t net_id = 0;           // entity+348 (0x15C) minimap slot id
 	uint8_t  player_class = 0;     // entity+660 (0x294)
 	uint8_t  skip_byte = 0;        // wire constant 0 (client discards; cursor advance only)
-	uint8_t  unused_byte = 0;      // entity+340 (0x154)
+	uint8_t  player_slot_id = 0;   // entity+340 (0x154): a player's own roster slot id
 	uint8_t  alert_level = 0;      // entity+533 (0x215)
 	uint8_t  sub_type = 0;         // entity+532 (0x214)
 };

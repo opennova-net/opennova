@@ -401,6 +401,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 				? player_wire_net_id(e)
 				: e.net_id;
 		rec.player_class = player_class_for_wire(e);
+		rec.player_slot_id = e.player_slot_id; // entity+0x154 [orig: @0x503316..0x503327]
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<uint16_t>(batch.records.size());
@@ -472,7 +473,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 			: e.net_id;
 	rec.player_class = player_class_for_wire(e);
 	// The wire struct retains its early alert_level name, but the grilled source is refNum.
-	// entity+340 remains the sole unmodeled live-record byte and therefore stays zero.
+	rec.player_slot_id = e.player_slot_id; // entity+340 [orig: @0x5051f0..0x5051fd]
 	rec.alert_level = e.ref_num;
 	rec.sub_type = e.sub_type;
 	return rec;
