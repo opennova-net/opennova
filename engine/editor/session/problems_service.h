@@ -16,7 +16,7 @@
 
 namespace opennova::editor {
 
-class MenuRenderCheck;
+class ProjectChecks;
 class SessionCore;
 struct ProjectFindingsInput;
 struct SessionView;
@@ -25,22 +25,24 @@ struct SessionView;
 // leaves it due rather than running it; a request from outside returns validated, and a pump that
 // holds validation validates once, at its poll) and what the one findings composer reads
 // (compose_project_findings, project/project_findings: the asset graph, the validation cache, the
-// menu render check and the project's files as the open documents stand in for theirs; the last
-// Play's own findings; the last build's own; the open documents' own). The findings a request
-// reports are an input of their own (add_reported), shown after the composed rows, so reporting a
-// finding never validates: the validation an edit had left due when it was reported keeps it (it
-// ran first, when report() validated), and a later one drops it. A kept finding is compared with
-// the composed rows alone: one the composition makes too is shown once, and a finding reported
-// twice is two rows. It keeps the Problems query and the fixes the query seam's problems row
-// asks for (answer, fixes), each until what it reads moves.
+// document types' project checks (S13 V9: the state each keeps between validations lives here,
+// one per type by its DocumentTypeId) and the project's files as the open documents stand in for
+// theirs; the last Play's own findings; the last build's own; the open documents' own). The
+// findings a request reports are an input of their own (add_reported), shown after the composed
+// rows, so reporting a finding never validates: the validation an edit had left due when it was
+// reported keeps it (it ran first, when report() validated), and a later one drops it. A kept
+// finding is compared with the composed rows alone: one the composition makes too is shown once,
+// and a finding reported twice is two rows. It keeps the Problems query and the fixes the query
+// seam's problems row asks for (answer, fixes), each until what it reads moves.
 //
 // A validation is stepped (S13 A3): the graph's update, then each file's own findings, a file at a
-// time (graph/project_validation.h's ProjectValidation), then the render check and the rows. The
-// poll steps the one left due within its budget (step_validation), so the first validation of a
-// large project spreads over frames while the editor draws; what cannot wait (a request from
-// outside returning validated, a flow that reads the graph, the build's gate) runs it to its end.
-// What it reads is held as it was when it started (the scan, the project, the open documents and
-// their states), and it starts again when that moved; a gesture's edits hold it until they end.
+// time (graph/project_validation.h's ProjectValidation), then the project checks, a check a step
+// (documents/project_check.h), then the rows. The poll steps the one left due within its budget
+// (step_validation), so the first validation of a large project spreads over frames while the
+// editor draws; what cannot wait (a request from outside returning validated, a flow that reads
+// the graph, the build's gate) runs it to its end. What it reads is held as it was when it started
+// (the scan, the project, the open documents and their states), and it starts again when that
+// moved; a gesture's edits hold it until they end.
 class ProblemsService {
 public:
 	explicit ProblemsService(SessionCore &core);
@@ -91,14 +93,15 @@ public:
 	void clear_build_findings() { build_findings_.clear(); }
 	// The last Play's own (a nonzero exit), rows until Play starts again or the project closes.
 	void set_play_findings(std::vector<Diagnostic> findings) { play_findings_ = std::move(findings); }
-	// What the open project held goes (close_project): the graph emptied under a new generation, the
-	// render check, the cache and the last validation's findings; nothing left due or under way.
+	// What the open project held goes (close_project): the graph emptied under a new generation,
+	// what the project checks held, the cache and the last validation's findings; nothing left due
+	// or under way.
 	void clear();
 
 	const AssetGraph &graph() const { return *graph_; }
 	// The last validation's gate, which the build plan gates on: every document type's findings
-	// over the files, the use checks' and the graph's, then the open documents' own (the render
-	// check's notes are not: they never block a build). A copy of those Problems rows.
+	// over the files, the use checks' and the graph's, then the open documents' own (the project
+	// checks' findings are not: they never block a build). A copy of those Problems rows.
 	std::vector<Diagnostic> gate_findings();
 	// What the last validation did: the files whose own findings it made and kept, the closed
 	// files it read.
@@ -124,8 +127,8 @@ private:
 	// cursor over the graph and the cache.
 	struct Pass;
 
-	// What the last composition read beside the graph, the files' own findings and the render
-	// check (whose refresh says whether they moved): the rows stand while these do and the rows
+	// What the last composition read beside the graph, the files' own findings and the project
+	// checks (whose refresh says whether they moved): the rows stand while these do and the rows
 	// are as many as it left.
 	struct Composed {
 		bool made = false;
@@ -151,11 +154,13 @@ private:
 	SessionView &view_;
 	std::shared_ptr<AssetGraph> graph_ = std::make_shared<AssetGraph>();
 	std::shared_ptr<ProjectAssetSource> assets_ = std::make_shared<ProjectAssetSource>();
-	std::shared_ptr<MenuRenderCheck> render_check_;
+	// The document types' project checks, one per type that has one (S13 V9): what each keeps
+	// between validations, made when the session is.
+	std::shared_ptr<ProjectChecks> checks_;
 	ValidationCache validation_cache_;
 	// Where the last validation's gate sits among the view's rows, counted from their end, so the
 	// rows a Play drops before it (its boot report's, its crash's) leave it where it is: its size,
-	// the composed rows after it (the render check's notes, the last build's own) and the rows
+	// the composed rows after it (the project checks' findings, the last build's own) and the rows
 	// after those (the reported findings a validation kept, and those reported since).
 	size_t gate_size_ = 0, gate_tail_ = 0, trailing_ = 0;
 	Composed composed_;

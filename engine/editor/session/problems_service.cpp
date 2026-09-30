@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <utility>
 
+#include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
-#include <editor/preview/menu_render_check.h>
 #include <editor/project/project_findings.h>
 #include <editor/session/document_set.h>
 #include <editor/session/session_core.h>
@@ -32,7 +32,8 @@ DocumentState state_of(const DocumentBase &document) {
 
 // The validation under way: the project's paths, its document and scan and the open documents as
 // they were when it started (held, so a scan the session replaced meanwhile is still the one it
-// reads), their states, and the cursor over the session's graph and cache.
+// reads), their states, the cursor over the session's graph and cache, then the project checks
+// it has run (ProjectChecks' slots, one a step) and whether one said its findings moved.
 struct ProblemsService::Pass {
 	Pass(const ProjectPaths &p, std::shared_ptr<const ProjectDocument> d, std::shared_ptr<const AssetScan> s,
 			std::vector<std::shared_ptr<const DocumentBase>> o, AssetGraph &graph, ValidationCache &cache) :
@@ -47,14 +48,16 @@ struct ProblemsService::Pass {
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::vector<DocumentState> states;
 	ProjectValidation validation;
+	size_t checks_run = 0; // the project checks' slots updated (ProjectChecks::slot_count)
+	bool checks_moved = false;
 	bool graph_shown = false; // Graph moved for its update
 };
 
 ProblemsService::ProblemsService(SessionCore &core) :
-		core_(core), view_(core.view()), render_check_(std::make_shared<MenuRenderCheck>()) {
+		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()) {
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
-	view_.findings.render_check = render_check_;
+	view_.findings.project_checks = checks_;
 }
 
 ProblemsService::~ProblemsService() = default;
@@ -63,11 +66,12 @@ ProblemsService::~ProblemsService() = default;
 // (project/project_findings): the scan's, the requirements', the files the last Play's game
 // reported missing and its nonzero exit, each file's own (the open documents standing in for
 // theirs, every file's kept in the cache until it changes) with the use checks', the graph's and
-// the open documents' own (a file changed outside the editor that was not read again), the menu
-// render check's notes and the last build's own findings (after the gate the build reads: a
-// note never blocks a build, nor does the last Play's report, which only the next Play can
-// clear, nor the last build's, which the next build replaces). They replace the Problems rows:
-// Findings moves only when they differ, and Graph only when the graph's update changed it.
+// the open documents' own (a file changed outside the editor that was not read again), the
+// document types' project checks' findings (the menu render check's notes) and the last build's
+// own findings (after the gate the build reads: a project check's finding never blocks a build,
+// nor does the last Play's report, which only the next Play can clear, nor the last build's,
+// which the next build replaces). They replace the Problems rows: Findings moves only when they
+// differ, and Graph only when the graph's update changed it.
 void ProblemsService::validate_documents() {
 	compose(false);
 }
@@ -104,12 +108,24 @@ bool ProblemsService::step_pass(uint64_t bytes) {
 		pass_ = std::make_unique<Pass>(core_.paths(), view_.project.document, view_.project.scan, view_.documents.open,
 				*graph_, validation_cache_);
 	}
-	const bool done = pass_->validation.step(pass_->input(), bytes);
-	if (!pass_->graph_shown && pass_->validation.graph_moved()) {
-		pass_->graph_shown = true;
-		core_.touch(ViewConcern::Graph);
+	Pass &pass = *pass_;
+	if (!pass.validation.done()) {
+		pass.validation.step(pass.input(), bytes);
+		if (!pass.graph_shown && pass.validation.graph_moved()) {
+			pass.graph_shown = true;
+			core_.touch(ViewConcern::Graph);
+		}
+		return false;
 	}
-	return done;
+	// After the last file's own findings, the project checks a check a step (a check reads which
+	// files' records their own checks read): the slots with no check pass by in the same step.
+	const ValidationInput input = pass.input();
+	while (pass.checks_run < checks_->slot_count()) {
+		const bool ran = checks_->has_check(pass.checks_run);
+		if (checks_->update_slot(pass.checks_run++, {input, validation_cache_, *assets_})) pass.checks_moved = true;
+		if (ran) return false;
+	}
+	return true;
 }
 
 void ProblemsService::step_validation(const PollBudget &budget, const OperationClock &clock) {
@@ -136,25 +152,22 @@ void ProblemsService::show_validation() {
 }
 
 void ProblemsService::compose_rows(bool keep_reported) {
-	const bool files_moved = pass_->validation.moved();
+	const bool moved = pass_->validation.moved() || pass_->checks_moved;
 	pass_.reset();
 	const std::vector<Diagnostic> open = core_.documents().findings();
 	const ProjectFindingsInput input{core_.paths(),        *view_.project.document,    *view_.project.scan,
 	                                 *view_.project.requirements, view_.documents.open, view_.activity.boot_missing,
 	                                 play_findings_,              open,                 build_findings_};
-	// The graph, each file's own findings (the pass that ended) and the render check first: when none
-	// of them moved, no other input the rows are made of did, no reported finding waits on this
+	// The graph, each file's own findings and the project checks (the pass that ended) first: when
+	// none of them moved, no other input the rows are made of did, no reported finding waits on this
 	// validation and the rows are as it left them, they stand. No row is composed, copied or compared
 	// then; the small inputs are compared with their copies (Composed::same), and the open documents'
 	// own findings are made again for it.
-	const ValidationInput validation{input.paths, input.project, input.scan, input.open};
-	const bool notes_moved = render_check_->update(validation, *assets_);
-	const bool moved = files_moved || notes_moved;
 	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.findings.diagnostics.size())) {
 		show_validation();
 		return;
 	}
-	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *render_check_);
+	ProjectFindings findings = collect_project_findings(input, *graph_, validation_cache_, *checks_);
 	++compositions_;
 	gate_size_ = findings.gate_end - findings.gate_begin;
 	gate_tail_ = findings.rows.size() - findings.gate_end;
@@ -214,7 +227,7 @@ std::vector<Diagnostic> ProblemsService::gate_findings() {
 void ProblemsService::clear() {
 	graph_->clear();
 	assets_->clear();
-	render_check_->clear();
+	checks_->clear();
 	validation_cache_ = ValidationCache();
 	composed_ = Composed();
 	gate_size_ = gate_tail_ = trailing_ = 0;

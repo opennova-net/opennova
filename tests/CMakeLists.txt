@@ -3660,6 +3660,15 @@ target_link_libraries(editor_long_operations_test PRIVATE opennova_editor)
 target_include_directories(editor_long_operations_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_long_operations COMMAND editor_long_operations_test)
 
+# The document types' project checks (S13 V9): a type's own check across the project's files,
+# made by its registry row (the menu type's render check) and kept by whoever validates; a
+# stand-in type's check runs once per validation, its findings after the build's gate, and its
+# answer that they moved is what composes the Problems rows again.
+add_executable(editor_project_checks_test editor/project_checks_test.cpp)
+target_link_libraries(editor_project_checks_test PRIVATE opennova_editor)
+target_include_directories(editor_project_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_checks COMMAND editor_project_checks_test)
+
 # The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
 # cancelled between two steps, finished once; the busy gate's four answers over a real build
 # (refused, joined, superseded as the table says, cancelled first); edits during a build.

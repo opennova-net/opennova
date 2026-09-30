@@ -29,6 +29,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/assets/project_scan.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
@@ -850,14 +851,15 @@ static int test_retail_open() {
 		const double files_ms = ms_since(part);
 		ProjectAssetSource assets;
 		assets.set_scan(paths.root, *v.project.scan, v.project.document->target_game);
-		MenuRenderCheck check;
+		ProjectChecks checks;
 		part = clock::now();
-		check.update(input, assets);
+		checks.update({input, cache, assets});
 		const double render_ms = ms_since(part);
+		const MenuRenderCheck *check = menu_render_check(&checks);
 		std::printf("retail: the validation's parts afresh: the graph's update %.0f ms (%zu files read), the files' own "
 		            "findings %.0f ms (%zu files, the longest %.1f ms, %s), the render check %.0f ms (%zu menus rendered)\n",
 		            graph_ms, graph.stats().files_extracted, files_ms, validation_files(*v.project.scan).size(),
-		            longest_file, longest_name.c_str(), render_ms, check.rendered());
+		            longest_file, longest_name.c_str(), render_ms, check ? check->rendered() : size_t(0));
 	}
 	// The dependency mount's base layer over the whole install, which an expansion project's Open
 	// would build (ADR 0046 d12's later list): one call today, timed.
