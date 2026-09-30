@@ -1,6 +1,7 @@
 #include "def_catalog_document.h"
 
 #include <base/io/strutil.h>
+#include <editor/project/project_files.h>
 #include <editor/session/session_view.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -527,7 +528,7 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 		use.reference = ReferenceKind::None;
 		return;
 	}
-	std::string model = std::filesystem::path(std::get<std::string>(graphic)).filename().generic_string();
+	std::string model = basename_of(std::get<std::string>(graphic));
 	if (std::filesystem::path(model).extension().empty()) model += ".3di";
 	use.scope = strutil::to_upper(model);
 }

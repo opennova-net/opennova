@@ -1,20 +1,11 @@
 #include <editor/preview/texture_header.h>
 
-#include <cstring>
-
+#include <editor/import/png_decode.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 
 namespace opennova::editor {
-
-namespace {
-
-uint32_t be32(const std::vector<uint8_t> &b, size_t at) {
-	return (uint32_t(b[at]) << 24) | (uint32_t(b[at + 1]) << 16) | (uint32_t(b[at + 2]) << 8) | uint32_t(b[at + 3]);
-}
-
-} // namespace
 
 bool texture_header_size(menu::MenuTextureFormat format, const std::vector<uint8_t> &bytes, int *width,
                          int *height) {
@@ -26,15 +17,9 @@ bool texture_header_size(menu::MenuTextureFormat format, const std::vector<uint8
 	case menu::MenuTextureFormat::Dds:
 		if (!dds::dds_header_size(bytes.data(), bytes.size(), w, h)) return false;
 		break;
-	case menu::MenuTextureFormat::Png: {
-		static const uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
-		if (bytes.size() < 24 || std::memcmp(bytes.data(), kSignature, 8) != 0 ||
-		    std::memcmp(bytes.data() + 12, "IHDR", 4) != 0)
-			return false;
-		w = be32(bytes, 16);
-		h = be32(bytes, 20);
+	case menu::MenuTextureFormat::Png:
+		if (!png_header_size(bytes, w, h)) return false;
 		break;
-	}
 	case menu::MenuTextureFormat::Pcx: {
 		RgbaImage image;
 		std::string error;

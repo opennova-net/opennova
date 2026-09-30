@@ -1,7 +1,6 @@
 #include "reference_picker.h"
 
 #include <editor/ui/editor_requests.h>
-#include <editor/ui/table_cells.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -73,7 +72,7 @@ void ReferencePicker::prune(const SessionView &view) {
 bool ReferencePicker::draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldUse &field,
                            const Value &value, bool compact, std::string &picked, bool others) {
 	if (ImGui::SmallButton(compact ? "..." : "Pick")) ImGui::OpenPopup("references");
-	hover_tip(reference_row(field.reference).also_offers == ReferenceKind::StyleVar
+	ui_kit::tooltip(reference_row(field.reference).also_offers == ReferenceKind::StyleVar
 	                  ? "Pick a file of the project or a variable of the stylesheet."
 	                  : "Pick a name the project has.");
 	// The popup's own id, the document and the record key its state: another record's field of
@@ -109,7 +108,7 @@ bool ReferencePicker::draw_popup(EditorHost &host, Popup &popup, std::string &pi
 	if (inert) {
 		const std::string label = "Show unreachable (" + std::to_string(inert) + ")";
 		if (ImGui::Checkbox(label.c_str(), &popup.unreachable)) popup.cursor = 0;
-		hover_tip("Names defined only where no lookup of the game finds them.");
+		ui_kit::tooltip("Names defined only where no lookup of the game finds them.");
 	}
 	// The rows shown: the filter's matches, the unreachable ones while shown.
 	std::vector<const ReferenceChoice *> shown;

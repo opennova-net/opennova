@@ -33,7 +33,7 @@ std::string stem_of(const std::string &name) { return fs::path(name).stem().gene
 const AssetEntry *find_asset(const AssetScan &scan, const std::string &file) {
 	for (const AssetEntry &asset : scan.entries)
 		if (asset.relative_path == file) return &asset;
-	const std::string wanted = key(fs::path(file).filename().generic_string());
+	const std::string wanted = key(basename_of(file));
 	for (const AssetEntry &asset : scan.entries)
 		if (key(asset.logical_name) == wanted) return &asset;
 	return nullptr;

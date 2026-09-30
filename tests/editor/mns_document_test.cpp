@@ -16,6 +16,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -32,15 +33,7 @@ constexpr NodeKind kBlank = node_kind(StyleKind::Blank);
 constexpr NodeKind kConditional = node_kind(StyleKind::Conditional);
 constexpr NodeKind kInactive = node_kind(StyleKind::Inactive);
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 // A stylesheet of `text` loaded as a document, the file written under `dir`.
 bool load(MnsDocument &document, const editor_test::TempProjectDir &dir, const std::string &text,

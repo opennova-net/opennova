@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -35,5 +36,9 @@ std::string shown_value(const FieldSchema &field, const Value &value);
 // Whether the file writes the field on the record: present (Document::present), and a yes / no
 // field set to yes (the writer puts a flag down only then).
 bool written(const Document &document, const NodeAddress &address, const FieldSchema &field);
+
+// A count with its noun, plural but for one ("1 file", "3 files"): the windows' and the fixes'
+// numbers in words.
+std::string counted(size_t count, const char *noun);
 
 } // namespace opennova::editor

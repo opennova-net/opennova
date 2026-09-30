@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <editor/ui/editor_host.h>
@@ -35,6 +36,8 @@ private:
 
 	uint64_t serial_ = 0;       // the plan the checks were taken from
 	std::vector<bool> checked_; // per plan row: taken by the import
+	// Per plan row: why the import cannot take it ("" when it can), found once per plan.
+	std::vector<std::string> why_not_;
 	std::vector<bool> chosen_;  // per choice: among the files chosen
 	char filter_[128]{};
 	bool replace_existing_ = false;

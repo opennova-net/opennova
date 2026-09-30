@@ -104,6 +104,13 @@ public:
 	std::vector<ProblemFix> bulk(const SessionView &view, size_t index);
 	// How many findings' fixes it holds for the key it keeps (each planned once).
 	size_t size() const { return fixes_.size(); }
+	// How many times it has started again (the view or its key moved), `view` followed first:
+	// what a reader made of the fixes (the Problems list's Fix alls) is made again when this
+	// moves.
+	uint64_t generation(const SessionView &view) {
+		follow(view);
+		return generation_;
+	}
 
 private:
 	// Forgets what it keeps when the view or its key moved; the view's index.
@@ -113,6 +120,7 @@ private:
 	RevisionKey key_;
 	std::unique_ptr<ProblemFixIndex> index_;
 	std::map<size_t, std::vector<ProblemFix>> fixes_;
+	uint64_t generation_ = 0;
 };
 
 } // namespace opennova::editor

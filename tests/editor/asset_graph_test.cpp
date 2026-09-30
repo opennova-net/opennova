@@ -45,6 +45,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 
 using namespace opennova::editor;
@@ -52,15 +53,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 const GraphEdge *edge_to(const AssetGraph &graph, const std::string &source, ReferenceKind kind, const std::string &value) {
 	for (const GraphEdge &edge : graph.edges())

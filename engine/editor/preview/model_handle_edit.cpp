@@ -54,8 +54,6 @@ Edit set(const NodeAddress &record, const char *field, double value, uint64_t ge
 
 } // namespace
 
-const char *model_handle_token(ModelHandle handle) { return handle == ModelHandle::Axis ? "axis" : "place"; }
-
 bool model_handle_from_token(const char *token, ModelHandle &out) {
 	if (std::strcmp(token, "place") == 0) out = ModelHandle::Place;
 	else if (std::strcmp(token, "axis") == 0) out = ModelHandle::Axis;

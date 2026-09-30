@@ -1,9 +1,9 @@
 #include <editor/ui/preview_window.h>
 
-#include <filesystem>
 #include <string>
 
 #include <editor/model/document.h>
+#include <editor/project/project_files.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -17,8 +17,6 @@ const Document *open_document(const SessionView &view, const std::string &path) 
 		if (document && document->path() == path) return document.get();
 	return nullptr;
 }
-
-std::string file_name(const std::string &path) { return std::filesystem::path(path).filename().generic_string(); }
 
 } // namespace
 
@@ -46,12 +44,8 @@ PreviewFamily preview_family(const SessionView &view, PreviewFamily last) {
 }
 
 void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
-	drawn_ = true;
 	const SessionView &view = host_.view();
 	const PreviewFamily family = preview_family(view, shown_);
-	// The pane not shown lets go of what a press or a key began on it.
-	if (family != PreviewFamily::Menu) menu_.end_gestures();
-	if (family != PreviewFamily::Model) model_.end_gestures();
 	if (family == PreviewFamily::None) {
 		ui_kit::empty_state("Open a menu, a model or an animation to preview it.");
 		return;
@@ -65,12 +59,10 @@ void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	ImGui::PopID();
 }
 
+// The pane not shown, or not drawn at all, lets go of what a press or a key began on it.
 void PreviewWindow::end_frame() {
-	if (!drawn_) {
-		menu_.end_gestures();
-		model_.end_gestures();
-	}
-	drawn_ = false;
+	menu_.end_frame();
+	model_.end_frame();
 }
 
 // "main.mnu - STARTUP", "skinned.3di" or "walk.bad on skinned.3di", cut to the width the
@@ -78,7 +70,7 @@ void PreviewWindow::end_frame() {
 void PreviewWindow::header_(const SessionView &view, PreviewFamily family) {
 	const std::string &path = family == PreviewFamily::Menu ? view.menu_preview.path : view.model_preview.path;
 	const Document *document = open_document(view, path);
-	std::string text = file_name(path);
+	std::string text = basename_of(path);
 	if (family == PreviewFamily::Menu) {
 		if (const Node *screen = document ? document->row(view.menu_preview.screen) : nullptr)
 			text += " - " + screen->name();

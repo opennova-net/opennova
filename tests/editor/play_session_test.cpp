@@ -11,52 +11,11 @@
 #include <editor/run/play_session.h>
 
 #include "common/test_expect.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 
-struct FakePlatform : ProcessPlatform {
-	int64_t next_pid = 100;
-	int64_t clock = 1000;
-	bool spawn_fails = false;
-	std::vector<int64_t> running;
-	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
-	std::vector<std::string> log;
-	LaunchPlan last_plan;
-
-	int64_t spawn(const LaunchPlan &plan) override {
-		last_plan = plan;
-		if (spawn_fails) return -1;
-		running.push_back(next_pid);
-		log.push_back("spawn " + std::to_string(next_pid));
-		return next_pid++;
-	}
-	bool is_running(int64_t pid) override {
-		for (int64_t p : running) if (p == pid) return true;
-		return false;
-	}
-	bool terminate(int64_t pid) override {
-		log.push_back("terminate " + std::to_string(pid));
-		return true;
-	}
-	bool kill(int64_t pid) override {
-		log.push_back("kill " + std::to_string(pid));
-		exit_child(pid);
-		return true;
-	}
-	bool exit_code(int64_t pid, uint32_t &out) override {
-		const auto it = codes.find(pid);
-		if (it == codes.end() || is_running(pid)) return false;
-		out = it->second;
-		return true;
-	}
-	void release(int64_t pid) override { log.push_back("release " + std::to_string(pid)); }
-	int64_t now_ms() override { return clock; }
-	void sleep_ms(int64_t ms) override { clock += ms; } // a wait only ever advances this clock
-	void exit_child(int64_t pid) {
-		for (size_t i = 0; i < running.size(); ++i)
-			if (running[i] == pid) running.erase(running.begin() + static_cast<long>(i));
-	}
-};
+using editor_test::FakePlatform;
 
 static int test_launch_plans() {
 	const LaunchPlan play = make_play_launch_plan("C:/tools/opennova.exe", "C:/p/.opennova/build/play/abc", "jo", 8975, "m.bms");
@@ -95,7 +54,11 @@ static int test_launch_plans() {
 }
 
 static int test_lifecycle() {
+	// A child that runs on after a stop request until the test ends it (or the deadline kills it).
 	FakePlatform platform;
+	platform.next_pid = 100;
+	platform.clock = 1000;
+	platform.terminate_exits = false;
 	PlaySession session(platform);
 	Diagnostic error;
 	TEST_EXPECT(session.state() == PlayState::Stopped);

@@ -25,50 +25,14 @@
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 #include "editor/png_test_support.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
 
-struct FakePlatform : ProcessPlatform {
-	int64_t next_pid = 500;
-	int64_t clock = 0;
-	bool spawn_fails = false;
-	bool spawn_supported = true;
-	std::vector<int64_t> running;
-	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
-	LaunchPlan last_plan;
-	int spawns = 0;
-
-	bool can_spawn() const override { return spawn_supported; }
-	int64_t spawn(const LaunchPlan &plan) override {
-		last_plan = plan;
-		++spawns;
-		if (spawn_fails) return -1;
-		running.push_back(next_pid);
-		return next_pid++;
-	}
-	bool is_running(int64_t pid) override {
-		for (int64_t p : running) if (p == pid) return true;
-		return false;
-	}
-	bool terminate(int64_t pid) override { exit_child(pid); return true; }
-	bool kill(int64_t pid) override { exit_child(pid); return true; }
-	bool exit_code(int64_t pid, uint32_t &out) override {
-		const auto it = codes.find(pid);
-		if (it == codes.end() || is_running(pid)) return false;
-		out = it->second;
-		return true;
-	}
-	void release(int64_t) override {}
-	int64_t now_ms() override { return clock; }
-	void sleep_ms(int64_t ms) override { clock += ms; }
-	void exit_child(int64_t pid) {
-		for (size_t i = 0; i < running.size(); ++i)
-			if (running[i] == pid) running.erase(running.begin() + static_cast<std::ptrdiff_t>(i));
-	}
-};
+using editor_test::FakePlatform;
 
 static bool output_has(const SessionView &v, const std::string &needle) {
 	for (const std::string &line : v.output)

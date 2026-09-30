@@ -91,7 +91,7 @@ bool import_source_named(const std::string &only, const std::string &source_rela
 	if (only.empty()) return true;
 	const std::string wanted = strutil::to_lower(only);
 	return wanted == strutil::to_lower(source_relative_path) ||
-	       wanted == strutil::to_lower(fs::path(source_relative_path).filename().generic_string());
+	       wanted == strutil::to_lower(basename_of(source_relative_path));
 }
 
 std::string import_output_dir(const ProjectPaths &paths, const std::string &source_relative_path) {

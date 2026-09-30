@@ -162,6 +162,7 @@ const ProblemAnswer &ProblemQueryCache::answer(const ProblemQuery &query, const 
 		view_ = &view;
 		key_ = key;
 		query_ = query;
+		++generation_;
 	}
 	return answer_;
 }

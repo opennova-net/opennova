@@ -42,6 +42,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
 #include "editor/png_test_support.h"
 
@@ -71,15 +72,7 @@ bool mark_for_import(const std::string &source) {
 	return save_import_sidecar(source + ".import", sidecar, error);
 }
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 const uint8_t *pixel(const RgbaImage &image, int x, int y) { return &image.pixels[size_t((y * image.width + x) * 4)]; }
 

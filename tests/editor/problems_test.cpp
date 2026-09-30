@@ -10,8 +10,9 @@
 // rename (S11c: the window's Fix all); a Fix all merged from them; where a finding takes
 // Problems (nowhere for a required file the project lacks, a catalog finding to its file and
 // record, Files for a file the editor does not open); a missing texture's placeholder, applied
-// over a real session (S11h); and (S12) the places and fixes the findings that named no record
-// or had no fix gained, applied over a real session.
+// over a real session (S11h); (S12) the places and fixes the findings that named no record
+// or had no fix gained, applied over a real session; and (S13 V1) the findings by file and
+// record (FindingsIndex), made again only when the view moves.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -26,6 +27,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/session/findings_index.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -35,21 +37,14 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
 
 namespace {
 
-struct NoProcess : ProcessPlatform {
-	int64_t spawn(const LaunchPlan &) override { return -1; }
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
-};
+using editor_test::NoProcess;
 
 // a.mnu: a button that opens screen B of b.mnu (an ACTION naming that file); b.mnu: that screen.
 const char *const kMenuA =
@@ -211,15 +206,18 @@ static int test_query() {
 	const ProblemAnswer filtered = answer_problems(query, view);
 	TEST_EXPECT(filtered.rows.size() == 4 && filtered.total() == 7 && filtered.groups.size() == 4);
 
-	// The answer kept while the revision and the query stand (a change the revision does not
-	// mark is not seen), asked again when either moves.
+	// The answer kept while what it reads (the findings) and the query stand (a change no counter
+	// marks is not seen), asked again when either moves; each one made counted (its generation,
+	// which a reader of the answer follows).
 	ProblemQueryCache cache;
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
+	const uint64_t made = cache.generation();
 	view.diagnostics.pop_back();
-	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
+	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7 && cache.generation() == made);
 	view.revisions.touch(ViewConcern::Findings);
-	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6);
-	TEST_EXPECT(cache.answer(query, view).rows.size() == 3);
+	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6 &&
+	            cache.generation() == made + 1);
+	TEST_EXPECT(cache.answer(query, view).rows.size() == 3 && cache.generation() == made + 2);
 	return 0;
 }
 
@@ -470,23 +468,25 @@ static int test_rewrite_unserializable() {
 	return 0;
 }
 
-// The fixes kept while the view's revision stands (a Use fix plans a rename; the window and
-// the editor MCP ask again and again): asked again, the same answer, even when the view
-// changed without its revision moving; asked after the revision moves, the fixes of now.
+// The fixes kept while what they read stands (a Use fix plans a rename; the window and the
+// editor MCP ask again and again): asked again, the same answer, even when the view changed
+// without a counter moving; asked after the findings' counter moves, the fixes of now, the
+// cache's generation (which a reader of the fixes follows) moving once.
 static int test_fix_cache() {
 	SessionView view;
 	view.project_open = true;
 	view.diagnostics = {finding(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/menu_style.mns"),
 	                    finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows.", "menus/a.mnu")};
 	ProblemFixCache cache;
+	const uint64_t started = cache.generation(view);
 	const std::vector<ProblemFix> *first = &cache.fixes(view, 0);
 	TEST_EXPECT(first->size() == 1 && (*first)[0].label == "Rewrite menu_style.mns");
 	TEST_EXPECT(cache.fixes(view, 1).empty() && cache.fixes(view, 7).empty());
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
 	view.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
-	TEST_EXPECT(cache.fixes(view, 0).size() == 1);
+	TEST_EXPECT(cache.fixes(view, 0).size() == 1 && cache.generation(view) == started);
 	view.revisions.touch(ViewConcern::Findings);
-	TEST_EXPECT(cache.fixes(view, 0).empty());
+	TEST_EXPECT(cache.fixes(view, 0).empty() && cache.generation(view) == started + 1);
 	return 0;
 }
 
@@ -1047,8 +1047,64 @@ static int test_locations_and_fixes() {
 	return 0;
 }
 
+// A view's findings by file and by record: a row's are its own and every record's it holds, a
+// nested record's its own; a file with none has none; made again when the findings' counter
+// moves, the findings are another count or elsewhere in memory, and for another view (a
+// finding changed in place, unmarked, is not seen); asked while the findings are fewer than it
+// names, the ones past their end are left out.
+static int test_findings_index() {
+	SessionView v;
+	const auto on = [](const char *file, NodeId row, NodeId child, const char *code) {
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, code, code, file);
+		d.row_id = row;
+		d.child_id = child;
+		return d;
+	};
+	v.diagnostics = {make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "project"),
+	                 on("a.mnu", 5, 0, "row"), on("a.mnu", 5, 7, "child"),
+	                 on("b.mnu", 5, 0, "other file"), on("a.mnu", 0, 0, "the file"),
+	                 on("a.mnu", 6, 7, "another row")};
+	FindingsIndex index;
+	index.follow(v);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1, 2, 4, 5}));
+	TEST_EXPECT(index.of_file("b.mnu") == std::vector<size_t>({3}));
+	TEST_EXPECT(index.of_file("c.mnu").empty());
+	TEST_EXPECT(index.of_record("a.mnu", 5, 0) == std::vector<size_t>({1, 2}));
+	TEST_EXPECT(index.of_record("a.mnu", 5, 7) == std::vector<size_t>({2}));
+	TEST_EXPECT(index.of_record("a.mnu", 6, 0) == std::vector<size_t>({5}));
+	TEST_EXPECT(index.of_record("a.mnu", 9, 0).empty());
+	// Kept while the view and its findings stand; made again once the findings' counter moves,
+	// they are another count or elsewhere in memory, or for another view.
+	v.diagnostics[3].asset = "c.mnu"; // in place, unmarked
+	index.follow(v);
+	TEST_EXPECT(index.of_file("b.mnu") == std::vector<size_t>({3}) &&
+	            index.of_file("c.mnu").empty());
+	v.diagnostics[3].asset = "b.mnu";
+	v.diagnostics.push_back(on("c.mnu", 1, 0, "later")); // unmarked, but one more
+	index.follow(v);
+	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
+	v.revisions.touch(ViewConcern::Findings);
+	index.follow(v);
+	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
+	// Two findings left, asked before the index follows: what it names past them is left out.
+	v.diagnostics.resize(2);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
+	            index.of_file("c.mnu").empty());
+	TEST_EXPECT(index.of_record("a.mnu", 5, 0) == std::vector<size_t>({1}) &&
+	            index.of_record("a.mnu", 5, 7).empty() && index.of_record("a.mnu", 6, 0).empty());
+	index.follow(v);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
+	            index.of_file("b.mnu").empty());
+	SessionView other = v;
+	other.diagnostics.clear();
+	index.follow(other);
+	TEST_EXPECT(index.of_file("a.mnu").empty());
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_findings_index();
 	failures += test_locations_and_fixes();
 	failures += test_query();
 	failures += test_fixes();

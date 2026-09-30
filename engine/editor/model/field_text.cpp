@@ -75,4 +75,8 @@ bool written(const Document &document, const NodeAddress &address, const FieldSc
 	return number && *number != 0;
 }
 
+std::string counted(size_t count, const char *noun) {
+	return std::to_string(count) + " " + noun + (count == 1 ? "" : "s");
+}
+
 } // namespace opennova::editor

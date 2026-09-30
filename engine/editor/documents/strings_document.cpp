@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <filesystem>
 #include <set>
 
 namespace opennova::editor {
@@ -161,7 +160,7 @@ size_t StringsDocument::place_of(const NodeAddress &address) const {
 void StringsDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	const Node *section = row(address.row);
 	if (use.defines == ReferenceKind::TextId && section)
-		use.scope = strutil::to_upper(std::filesystem::path(path()).filename().generic_string()) + "/" + section->name();
+		use.scope = strutil::to_upper(basename_of(path())) + "/" + section->name();
 }
 
 void StringsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {

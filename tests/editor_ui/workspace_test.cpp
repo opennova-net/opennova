@@ -30,6 +30,7 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_state.h>
 #include <editor/project/project_document.h>
@@ -1365,7 +1366,8 @@ struct PreviewRun {
 
 size_t count_of_kind(const std::vector<EditorRequest> &requests, EditorRequestKind kind) {
 	size_t count = 0;
-	for (const EditorRequest &request : requests) count += request.kind == kind ? 1 : 0;
+	for (const EditorRequest &request : requests)
+		count += request.kind == kind ? 1 : 0;
 	return count;
 }
 
@@ -1396,7 +1398,7 @@ void test_preview_follows() {
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{session, device, ui, {}};
+	PreviewRun run{ session, device, ui, {} };
 	const char *const kNothing = "open a menu, a model or an animation to preview it.";
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing to preview: what to open");
@@ -1481,15 +1483,18 @@ void test_preview_model_gestures() {
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{session, device, ui, {}};
+	PreviewRun run{ session, device, ui, {} };
 	run.open("main.mnu");
 	run.open("models/armory.3di");
-	const auto *armory = dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
-	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready, "armory previewed");
-	if (!armory || !armory->model_row()) return;
+	const auto *armory =
+			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
+	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready,
+			"armory previewed");
+	if (!armory || !armory->model_row())
+		return;
 	const ModelRow &row = *armory->model_row();
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, armory->path());
-	select.edit.address = {row.id, node_kind(ModelKind::UserPoint), row.collections[3][0]};
+	select.edit.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();
@@ -1519,11 +1524,15 @@ void test_preview_model_gestures() {
 	const ModelOverlay *marker = nullptr;
 	const std::vector<ModelOverlay> overlays = device.held.overlays();
 	for (const ModelOverlay &overlay : overlays)
-		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0) marker = &overlay;
+		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0)
+			marker = &overlay;
 	float x = 0.0f, y = 0.0f;
-	CHECK(marker && device.held.camera().project(marker->at, device.held.device_width(), device.held.device_height(), x, y),
-	      "the marker on the picture");
-	if (!marker) return;
+	CHECK(marker &&
+					device.held.camera().project(marker->at, device.held.device_width(),
+							device.held.device_height(), x, y),
+			"the marker on the picture");
+	if (!marker)
+		return;
 	const ImVec2 at(device.origin.x + x, device.origin.y + y);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
 	ui.mouse(at.x, at.y);
@@ -1532,19 +1541,85 @@ void test_preview_model_gestures() {
 	run.pump();
 	std::vector<EditorRequest> requests = run.take();
 	const EditorRequest *step = only(requests, EditorRequestKind::EditRecord);
-	CHECK(step && step->path == armory->path() && count_of_kind(requests, EditorRequestKind::EndEdit) == 0,
-	      "the drag's first step");
+	CHECK(step && step->path == armory->path() &&
+					count_of_kind(requests, EditorRequestKind::EndEdit) == 0,
+			"the drag's first step");
 	session.handle(make_request(EditorRequestKind::OpenDocument, "main.mnu"));
 	run.settle();
 	requests = run.take();
 	const EditorRequest *end = only(requests, EditorRequestKind::EndEdit);
-	CHECK(end && end->path == armory->path() && count_of_kind(requests, EditorRequestKind::EditRecord) == 0,
-	      "the menu made active mid-drag: the drag's one end, for the model");
+	CHECK(end && end->path == armory->path() &&
+					count_of_kind(requests, EditorRequestKind::EditRecord) == 0,
+			"the menu made active mid-drag: the drag's one end, for the model");
 	ui.mouse(at.x + 60.0f, at.y + 20.0f);
 	ui.button(false);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
 	run.settle();
 	CHECK(run.take().empty(), "letting go raises nothing");
+}
+
+// The model pane's pointer through ImGui over a real session, raising no request: the middle
+// button drags the camera's target (a pan), a wheel notch over the picture dollies it
+// (kModelWheelDolly of the distance), a double-click frames the selected marker.
+void test_preview_model_pane_input() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_input");
+	NoProcess platform;
+	ProjectSession session(platform, dir.file("settings.json"));
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	ModelDevice device;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_model_preview_viewport(&device);
+	PreviewRun run{ session, device, ui, {} };
+	run.open("models/armory.3di");
+	const auto *armory =
+			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
+	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready,
+			"armory previewed");
+	if (!armory || !armory->model_row())
+		return;
+	const ModelRow &row = *armory->model_row();
+	EditorRequest select = make_request(EditorRequestKind::SelectRecord, armory->path());
+	select.edit.address = { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	session.handle(select);
+	ui.focus("Preview");
+	run.settle();
+	run.take();
+	// A point on the picture away from every marker: its top-left corner.
+	const ImVec2 corner(device.origin.x + 12.0f, device.origin.y + 12.0f);
+
+	// The middle button drags the camera's target.
+	const PreviewVec3 target = device.held.camera().target;
+	ui.mouse(corner.x, corner.y);
+	ui.button(true, 2);
+	ui.mouse(corner.x + 40.0f, corner.y + 10.0f);
+	ui.mouse(corner.x + 80.0f, corner.y + 20.0f);
+	ui.button(false, 2);
+	run.settle();
+	const PreviewVec3 panned = device.held.camera().target;
+	CHECK(panned.x != target.x || panned.y != target.y || panned.z != target.z,
+			"the middle button pans the camera");
+
+	// A wheel notch over the picture dollies the camera toward its target.
+	const float distance = device.held.camera().distance;
+	ui.mouse(corner.x, corner.y);
+	ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
+	ui.frames(2);
+	run.settle();
+	CHECK(std::fabs(device.held.camera().distance - distance * kModelWheelDolly) < 1e-3f,
+			"a wheel notch dollies the camera");
+
+	// A double-click frames the selected marker.
+	device.held.camera().distance = 40.0f;
+	ui.mouse(corner.x, corner.y);
+	ui.button(true);
+	ui.button(false);
+	ui.button(true);
+	ui.button(false);
+	run.settle();
+	CHECK(device.held.camera().distance != 40.0f, "a double-click frames the selected marker");
+	CHECK(run.take().empty(), "the camera's gestures raise nothing");
 }
 
 // The OS window's title: the product, the project's name before it, a bullet while a file has
@@ -1634,6 +1709,7 @@ void run_workspace_tests() {
 	test_import_dialog_problem_root();
 	test_preview_follows();
 	test_preview_model_gestures();
+	test_preview_model_pane_input();
 	test_window_title();
 }
 
