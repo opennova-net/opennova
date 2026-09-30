@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/view/session_view.h>
@@ -224,7 +225,7 @@ void test_outline_marks() {
 	CHECK(text.find("walk forward") != std::string::npos && text.find("anim_walk_forward") == std::string::npos,
 	      "a row by its slot's words, not its key");
 	NodeAddress walk;
-	CHECK(table->find("anim_walk_forward", walk), "the walk row");
+	CHECK(find_definition(AssetGraph(), *table, "anim_walk_forward", walk), "the walk row");
 	EditorRequest pick = make_request(EditorRequestKind::SelectRecord, table->path());
 	pick.edit.address = walk;
 	session.handle(pick);
@@ -429,9 +430,11 @@ void test_reveal_in_views() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, strings_path));
 	const Document *strings = session.document_for(strings_path);
 	NodeAddress first, near, middle, late;
-	CHECK(strings && strings->find("KEY_000", first) && strings->find("KEY_003", near) && strings->find("KEY_100", middle) &&
-	              strings->find("KEY_180", late),
-	      "the keys");
+	CHECK(strings && find_definition(AssetGraph(), *strings, "KEY_000", first) &&
+					find_definition(AssetGraph(), *strings, "KEY_003", near) &&
+					find_definition(AssetGraph(), *strings, "KEY_100", middle) &&
+					find_definition(AssetGraph(), *strings, "KEY_180", late),
+			"the keys");
 	if (!strings || !first.child || !near.child || !middle.child || !late.child) return;
 	const auto go_to = [&](const std::string &path, const std::string &locator, const char *field) {
 		EditorRequest open = make_request(EditorRequestKind::OpenDocument, path, locator);

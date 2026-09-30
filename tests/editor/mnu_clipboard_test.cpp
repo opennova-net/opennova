@@ -15,6 +15,7 @@
 
 #include <editor/documents/mnu_clipboard.h>
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 
 #include "common/test_expect.h"
 #include "editor/menu_test_support.h"
@@ -59,7 +60,7 @@ constexpr NodeKind kWindow = node_kind(MenuKind::Window);
 
 NodeAddress named(const Document &document, const char *name) {
 	NodeAddress address;
-	document.find(name, address);
+	find_definition(AssetGraph(), document, name, address);
 	return address;
 }
 

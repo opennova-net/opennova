@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/import/import_plan.h>
 #include <editor/preview/menu_preview_state.h>
 #include <editor/preview/menu_preview_viewport.h>
@@ -285,7 +286,7 @@ inline std::shared_ptr<MnuDocument> load_menu(const editor_test::TempProjectDir 
 
 inline NodeAddress named(const Document &document, const char *name) {
 	NodeAddress address;
-	document.find(name, address);
+	find_definition(AssetGraph(), document, name, address);
 	return address;
 }
 

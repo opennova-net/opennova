@@ -39,7 +39,7 @@ const std::vector<ProjectFind::Usage> &ProjectFind::usages(const SessionView &vi
 		Usage use;
 		use.line = edge->source + ": " + (edge->record.empty() ? "" : edge->record + " - ") + edge_field_title(view, *edge);
 		use.tip = use.line + "\n" + edge->field + " = " + edge->value;
-		use.target = usage_target(*edge, view);
+		use.target = usage_target(*view.project.scan, *edge);
 		out.push_back(std::move(use));
 	}
 	return usages_.emplace(hit, std::move(out)).first->second;
@@ -110,7 +110,8 @@ void ProjectFind::draw(Workspace &workspace) {
 		ui_kit::tooltip(tip);
 		ImGui::SameLine(right - ui_kit::button_width("Go to"));
 		if (ImGui::SmallButton("Go to"))
-			go(hit.symbol ? symbol_target(*hit.symbol, view) : file_target(hit.file, view));
+			go(hit.symbol ? symbol_target(*view.project.scan, *hit.symbol)
+						  : file_target(*view.project.scan, hit.file));
 		ui_kit::tooltip(hit.symbol ? "Open the record that defines it." : "Open the file, or show it in Files.");
 		if (expanded) {
 			// Its uses, made once while the hits stand, the rows out of sight not drawn.

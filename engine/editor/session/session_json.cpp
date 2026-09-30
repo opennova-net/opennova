@@ -10,6 +10,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
@@ -1038,12 +1039,16 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 
 	JsonValue graph = JsonValue::make_object();
 	if (view.findings.graph) {
-		graph.set("edges", json_number(double(view.findings.graph->edges().size())));
-		graph.set("symbols", json_number(double(view.findings.graph->symbols().size())));
-		graph.set("missing", json_number(double(view.findings.graph->missing().size())));
-		graph.set("files_extracted", json_number(double(view.findings.graph->stats().files_extracted)));
-		graph.set("files_reused", json_number(double(view.findings.graph->stats().files_reused)));
-		graph.set("files_failed", json_number(double(view.findings.graph->stats().files_failed)));
+		const GraphStats &stats = view.findings.graph->stats();
+		graph.set("edges", json_number(double(view.findings.graph->edge_count())));
+		graph.set("symbols", json_number(double(view.findings.graph->symbol_count())));
+		graph.set("missing", json_number(double(view.findings.graph->missing_count())));
+		graph.set("files_extracted", json_number(double(stats.files_extracted)));
+		graph.set("files_reused", json_number(double(stats.files_reused)));
+		graph.set("files_failed", json_number(double(stats.files_failed)));
+		graph.set("files_patched", json_number(double(stats.files_patched)));
+		graph.set("edges_resolved", json_number(double(stats.edges_resolved)));
+		graph.set("findings_made", json_number(double(stats.findings_made)));
 	}
 	out.set("graph", std::move(graph));
 
@@ -1234,10 +1239,13 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		if (field.reference != ReferenceKind::None) {
 			entry.set("reference", json_string(reference_row(field.reference).token));
 			std::string symbol;
-			const ReferenceStatus status = document.reference_status(field, value, view, &symbol);
+			const ReferenceStatus status = view.findings.graph
+					? reference_status(*view.findings.graph, field, value, &symbol)
+					: ReferenceStatus::Unverified;
 			entry.set("reference_status", json_string(reference_status_token(status)));
 			if (!symbol.empty()) entry.set("symbol", json_string(symbol));
-			const std::string target = document.reference_target_file(field, value, view);
+			const std::string target =
+					view.findings.graph ? reference_target_file(*view.findings.graph, field, value) : std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
@@ -1298,7 +1306,8 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices = document.reference_choices(field, view);
+	const std::vector<ReferenceChoice> choices =
+	        view.findings.graph ? reference_choices(*view.findings.graph, field) : std::vector<ReferenceChoice>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceChoice &choice : choices) {
 		JsonValue entry = JsonValue::make_object();
@@ -1327,7 +1336,9 @@ JsonValue reference_targets_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceTarget> targets = document.reference_targets(field, value, view);
+	const std::vector<ReferenceTarget> targets = view.findings.graph
+			? reference_targets(*view.findings.graph, *view.project.scan, field, value)
+			: std::vector<ReferenceTarget>();
 	JsonValue list = JsonValue::make_array();
 	for (const ReferenceTarget &target : targets) {
 		JsonValue entry = JsonValue::make_object();

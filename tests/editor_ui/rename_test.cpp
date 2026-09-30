@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/reference_queries.h>
 #include <editor/ui/inspector_layout.h>
 #include "editor_ui_test_support.h"
 
@@ -41,7 +42,7 @@ void test_rename_everywhere_ui() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, weapons_path));
 	const Document *document = session.document_for(weapons_path);
 	NodeAddress gun;
-	CHECK(document && document->find("GUN_A", gun), "the weapon");
+	CHECK(document && find_definition(AssetGraph(), *document, "GUN_A", gun), "the weapon");
 	if (!document || !gun.row) return;
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, weapons_path);
 	select.edit.address = gun;
@@ -125,7 +126,7 @@ void test_hint_on_a_fallback() {
 	session.handle(make_request(EditorRequestKind::OpenDocument, brand_path));
 	const Document *brand = session.document_for(brand_path);
 	NodeAddress line;
-	CHECK(brand && brand->find("X_COLOR", line), "brand.mns's line");
+	CHECK(brand && find_definition(AssetGraph(), *brand, "X_COLOR", line), "brand.mns's line");
 	if (!brand || !line.row) return;
 	EditorRequest select = make_request(EditorRequestKind::SelectRecord, brand_path);
 	select.edit.address = line;

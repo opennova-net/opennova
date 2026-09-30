@@ -495,6 +495,15 @@ record is there: importing it writes the record, and a `.png` with none is a tex
 build packs as it is.
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route)
 
+**Base layer**:
+What a read-only dependency mount (a game install a project builds on) gives the project's
+asset graph: its files and the names they define, read once and never edited. A lookup by name
+tries the project first, then the base layer, whose file of a name the project also has is
+hidden with the names it defines (project assets win); the base layer makes no reference and no
+finding of its own.
+_Avoid_: second graph (one graph, the base under it), import (an import copies files in; the
+base layer only answers names)
+
 **Requirement**:
 One row of the editor's checklist: a file the engine demands by name (a Required
 resources manifest row with its witnessed severity and failure text, keyed by a stable

@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>

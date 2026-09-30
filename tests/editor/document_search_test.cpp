@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/model/field_text.h>
 #include <editor/session/preferences_store.h>
@@ -150,7 +151,7 @@ static int test_each_document_type() {
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
 	NodeAddress item;
-	TEST_EXPECT(items->find("100300", item));
+	TEST_EXPECT(find_definition(AssetGraph(), *items, "100300", item));
 	const std::vector<DocumentHit> ninety = find_in_document(*items, "90");
 	const auto turn = std::find_if(ninety.begin(), ninety.end(), [](const DocumentHit &hit) { return hit.field == "turn_rate"; });
 	TEST_EXPECT(turn != ninety.end() && turn->text == "90" && turn->address == item);

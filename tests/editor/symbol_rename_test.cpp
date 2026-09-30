@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
@@ -91,8 +92,8 @@ struct Project {
 };
 
 const GraphEdge *edge_to(const AssetGraph &graph, const std::string &source, ReferenceKind kind, const std::string &value) {
-	for (const GraphEdge &edge : graph.edges())
-		if (edge.source == source && edge.kind == kind && edge.value == value) return &edge;
+	for (const GraphEdge *edge : graph.references_of(source))
+		if (edge->source == source && edge->kind == kind && edge->value == value) return edge;
 	return nullptr;
 }
 
@@ -389,7 +390,7 @@ static int test_saved_use_behind_an_edit() {
 	project.session.handle(make_request(EditorRequestKind::OpenDocument, items));
 	Document *table = project.session.document_for(items);
 	NodeAddress carrier;
-	TEST_EXPECT(table && table->find("100300", carrier));
+	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "100300", carrier));
 	if (!table) return 1;
 	EditorRequest edit = make_request(EditorRequestKind::EditRecord, items);
 	edit.edit.address = carrier;
@@ -549,7 +550,7 @@ static int test_open_menu_that_does_not_write() {
 	project.session.handle(make_request(EditorRequestKind::OpenDocument, "menus/c.mnu"));
 	Document *menu = project.session.document_for("menus/c.mnu");
 	NodeAddress w;
-	TEST_EXPECT(menu && menu->find("W", w));
+	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "W", w));
 	if (!menu) return 1;
 	EditorRequest edit = make_request(EditorRequestKind::EditRecord, "menus/c.mnu");
 	edit.edit.address = w;
