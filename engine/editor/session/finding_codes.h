@@ -5,6 +5,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <editor/model/diagnostic.h>
 
@@ -269,6 +270,22 @@ FindingTable core_finding_codes();
 // The row of a token: the core's, else a registered document type's own (DocumentType::findings,
 // a test's stand-in in its type's place); null for a token no table declares.
 const FindingCodeRow *finding_row(const std::string &token);
+
+// A table and whose it is: "core", or its document type's name.
+struct NamedFindingTable {
+	const char *owner = "";
+	FindingTable rows;
+};
+// Every table, the editor's own first, then each registered document type's in the registry's
+// order (a test's stand-in in its type's place): every code the editor and the types know, as the
+// editor MCP's catalog lists them.
+std::vector<NamedFindingTable> finding_tables();
+
+// A column's wire form (the catalog's): the fixes as "none", "requirement", "wrong_kind",
+// "rename", "reset_row", "reference", "unimported_texture", "reload", "reimport" or "rewrite";
+// the place as "content" or "file".
+const char *finding_fix_token(FindingFix fixes);
+const char *finding_place_token(FindingPlace place);
 
 // A finding of a row's code, at a place (the file's project-relative path, the field).
 inline Diagnostic make_finding(const FindingCodeRow &row, DiagnosticSeverity severity,

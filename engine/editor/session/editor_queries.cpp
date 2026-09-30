@@ -18,6 +18,7 @@
 #include <editor/model/document_search.h>
 #include <editor/preview/menu_report.h>
 #include <editor/session/document_set.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -840,8 +841,11 @@ constexpr EditorQueryRow kRows[] = {
 			"What the session answers and takes: every request kind with the fields it takes and "
 			"needs, who serves it and what it does; every request field; every query with its "
 			"params, the list it pages and the concerns it reads; the state's sections; the view's "
-			"concerns; and the codes of the findings the session holds now (S13 A6's findings "
-			"table will list every code the session and the types know).")
+			"concerns; and every finding code the session and the document types know (the "
+			"editor's own table's, then each type's): its code, its table (core or the type's "
+			"name), the fixes Problems offers, what a Rewrite does, whether the finding says the "
+			"file does not serialize (blocks_save), where Problems takes it (content or file) and "
+			"how many of the findings held now carry it (count).")
 			.row,
 };
 
@@ -1080,17 +1084,27 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 	for (size_t i = 0; i < kViewConcernCount; ++i)
 		concerns.push(json_string(view_concern_token(static_cast<ViewConcern>(i))));
 	out.set("concerns", std::move(concerns));
-	// The codes of the findings the session holds now (the Problems rows), each once with how many
-	// rows carry it: S13 A6's findings table lists every code the session and the types know.
-	std::map<std::string, size_t> codes;
+	// Every finding code the session and the types know (S13 A6: the rows of the editor's own
+	// table, then each document type's), with what Problems does with a finding of it and how many
+	// of the findings the session holds now (the Problems rows) carry it.
+	std::map<std::string, size_t> held;
 	for (const Diagnostic &d : context.core.view().findings.diagnostics)
-		++codes[d.code];
+		++held[d.code];
 	JsonValue findings = JsonValue::make_array();
-	for (const auto &[code, count] : codes) {
-		JsonValue entry = JsonValue::make_object();
-		entry.set("code", json_string(code));
-		entry.set("count", json_number(double(count)));
-		findings.push(std::move(entry));
+	for (const NamedFindingTable &table : finding_tables()) {
+		for (const FindingCodeRow &row : table.rows) {
+			JsonValue entry = JsonValue::make_object();
+			entry.set("code", json_string(row.token));
+			entry.set("table", json_string(table.owner));
+			entry.set("fixes", json_string(finding_fix_token(row.fixes)));
+			if (row.rewrite_does)
+				entry.set("rewrite_does", json_string(row.rewrite_does));
+			entry.set("blocks_save", JsonValue::make_bool(row.blocks_save));
+			entry.set("place", json_string(finding_place_token(row.place)));
+			const auto count = held.find(row.token);
+			entry.set("count", json_number(double(count == held.end() ? 0 : count->second)));
+			findings.push(std::move(entry));
+		}
 	}
 	out.set("finding_codes", std::move(findings));
 	out.set("page_max", json_number(double(kQueryPageMax)));

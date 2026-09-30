@@ -193,4 +193,33 @@ const FindingCodeRow *finding_row(const std::string &token) {
 	return nullptr;
 }
 
+std::vector<NamedFindingTable> finding_tables() {
+	std::vector<NamedFindingTable> out{ { "core", core_finding_codes() } };
+	for (size_t i = 1; i <= kDocumentTypeCount; ++i) {
+		const DocumentType *type = document_type(static_cast<DocumentTypeId>(i));
+		if (type && type->findings) out.push_back({ type->name, type->findings() });
+	}
+	return out;
+}
+
+const char *finding_fix_token(FindingFix fixes) {
+	switch (fixes) {
+	case F::None: return "none";
+	case F::Requirement: return "requirement";
+	case F::WrongKind: return "wrong_kind";
+	case F::Rename: return "rename";
+	case F::ResetRow: return "reset_row";
+	case F::Reference: return "reference";
+	case F::UnimportedTexture: return "unimported_texture";
+	case F::Reload: return "reload";
+	case F::Reimport: return "reimport";
+	case F::Rewrite: return "rewrite";
+	}
+	return "none";
+}
+
+const char *finding_place_token(FindingPlace place) {
+	return place == P::File ? "file" : "content";
+}
+
 } // namespace opennova::editor

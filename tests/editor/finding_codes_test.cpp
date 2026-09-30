@@ -87,6 +87,21 @@ static int test_tokens_unique() {
 	}
 	TEST_EXPECT(tables().size() == 1 + kDocumentTypeCount);
 	TEST_EXPECT(core_finding_codes().count == kCoreFindingCount);
+	// finding_tables (what the editor MCP's catalog lists) is the same walk.
+	const std::vector<Table> walked = tables();
+	const std::vector<NamedFindingTable> named = finding_tables();
+	TEST_EXPECT(named.size() == walked.size());
+	for (size_t i = 0; i < named.size() && i < walked.size(); ++i)
+		TEST_EXPECT(walked[i].owner == named[i].owner && walked[i].rows.rows == named[i].rows.rows &&
+		            walked[i].rows.count == named[i].rows.count);
+	// The columns' wire forms, each its own.
+	std::set<std::string> fixes;
+	for (const FindingFix fix : { FindingFix::None, FindingFix::Requirement, FindingFix::WrongKind, FindingFix::Rename,
+	                              FindingFix::ResetRow, FindingFix::Reference, FindingFix::UnimportedTexture,
+	                              FindingFix::Reload, FindingFix::Reimport, FindingFix::Rewrite })
+		TEST_EXPECT(fixes.insert(finding_fix_token(fix)).second);
+	TEST_EXPECT(std::string(finding_place_token(FindingPlace::Content)) == "content" &&
+	            std::string(finding_place_token(FindingPlace::File)) == "file");
 	std::printf("%zu finding codes in %zu tables (%zu the editor's own)\n", rows, tables().size(),
 	            kCoreFindingCount);
 	return 0;
