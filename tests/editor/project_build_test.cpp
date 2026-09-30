@@ -20,6 +20,8 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/blank/create_missing.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
@@ -148,7 +150,11 @@ struct Project {
 	}
 	BuildPlan plan() {
 		const AssetScan scan = scan_project_assets(paths, doc);
-		return plan_build(paths, scan, evaluate_requirements(doc, scan), validate_open_documents(paths, doc, scan, {}));
+		AssetGraph graph;
+		ValidationCache cache;
+		const std::vector<std::shared_ptr<const Document>> open;
+		return plan_build(paths, scan, evaluate_requirements(doc, scan),
+				validate_project({ paths, doc, scan, open }, graph, cache));
 	}
 	bool fill() {
 		const AssetScan scan = scan_project_assets(paths, doc);

@@ -1338,44 +1338,35 @@ void action_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings)
 
 } // namespace
 
-std::vector<Diagnostic> validate_menus(const ValidationInput &input, const AssetGraph &) {
+std::vector<Diagnostic> validate_menu_file(const Document &document) {
 	std::vector<Diagnostic> findings;
-	for (const AssetEntry &asset : input.scan.entries) {
-		if (!is_menu_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
-			continue;
-		}
-		// What retail's reader leaves out (a warning: a save drops it) and what the file
-		// cannot hold or retail faults on (an error: it blocks the save and the build), on the
-		// screen or window the reader found it in (its locator, in the file as loaded: wherever
-		// that record is now, source_address; gone since, the file), so Problems selects it,
-		// named by its path when the reader named none.
-		source_issue_findings(*document, "menu.invalid_input", "menu.ignored_input", findings,
-				[&](Diagnostic &finding) {
-					if (finding.row_id && finding.record.empty())
-						finding.record = document->record_path(
-								{ finding.row_id, finding.record_kind, finding.child_id });
-				});
-		if (document->blocked()) continue;
-		// On the record and the field that cause it, so the inspector shows it there and
-		// Problems selects it.
-		for (const SourceIssue &issue : input.cache.serialize_issues(*document)) {
-			auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "menu.unserializable", issue.message,
-			                                  document->path(), issue.field);
-			diagnostic.record = issue.record;
-			const NodeAddress address = issue.locator.empty() ? NodeAddress() : document->address_at(issue.locator);
-			diagnostic.row_id = address.row;
-			diagnostic.child_id = address.child;
-			diagnostic.record_kind = address.kind;
-			findings.push_back(std::move(diagnostic));
-		}
-		if (const auto *menu = dynamic_cast<const MnuDocument *>(document.get())) {
-			name_findings(*menu, findings);
-			action_findings(*menu, findings);
-		}
+	// What retail's reader leaves out (a warning: a save drops it) and what the file
+	// cannot hold or retail faults on (an error: it blocks the save and the build), on the
+	// screen or window the reader found it in (its locator, in the file as loaded: wherever
+	// that record is now, source_address; gone since, the file), so Problems selects it,
+	// named by its path when the reader named none.
+	source_issue_findings(document, "menu.invalid_input", "menu.ignored_input", findings,
+			[&](Diagnostic &finding) {
+				if (finding.row_id && finding.record.empty())
+					finding.record = document.record_path(
+							{ finding.row_id, finding.record_kind, finding.child_id });
+			});
+	if (document.blocked()) return findings;
+	// On the record and the field that cause it, so the inspector shows it there and
+	// Problems selects it.
+	for (const SourceIssue &issue : document.serialize().issues) {
+		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "menu.unserializable", issue.message,
+		                                  document.path(), issue.field);
+		diagnostic.record = issue.record;
+		const NodeAddress address = issue.locator.empty() ? NodeAddress() : document.address_at(issue.locator);
+		diagnostic.row_id = address.row;
+		diagnostic.child_id = address.child;
+		diagnostic.record_kind = address.kind;
+		findings.push_back(std::move(diagnostic));
+	}
+	if (const auto *menu = dynamic_cast<const MnuDocument *>(&document)) {
+		name_findings(*menu, findings);
+		action_findings(*menu, findings);
 	}
 	return findings;
 }

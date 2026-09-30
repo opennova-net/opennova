@@ -16,6 +16,7 @@
 // Rename everywhere rewrites its uses.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>

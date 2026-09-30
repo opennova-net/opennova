@@ -7,7 +7,6 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/document.h>
 #include <formats/mns/mns_document.h>
@@ -23,10 +22,10 @@ namespace opennova::editor {
 // The #if / #else / #endif lines, the lines they switch off and a variable whose value
 // crosses other lines stay where they are; only their own fields change. Nothing is
 // dropped: the document has no source issues, and its diagnostics are the Problems rows
-// (validate_styles). Every line ends CR LF, the only line end the game reads without
+// (validate_styles_file). Every line ends CR LF, the only line end the game reads without
 // stopping [orig: NapiConfigMap_ParseKeyValueBuffer @ 0x639c3b]: a file with other line ends loads
 // with CR LF ones (the rows hold what Save writes), and the file state remembers its
-// first line that did not, which validate_styles reports until Save writes the file.
+// first line that did not, which validate_styles_file reports until Save writes the file.
 
 enum class StyleKind : NodeKind { Variable = 0, Comment = 1, Blank = 2, Conditional = 3, Inactive = 4 };
 constexpr NodeKind node_kind(StyleKind kind) { return static_cast<NodeKind>(kind); }
@@ -140,15 +139,15 @@ private:
 
 bool is_style_kind(AssetKind kind);
 
-// The stylesheet document type's validator (document_types): every .mns in the project,
-// open documents standing in for their files. What the game does with each odd line
-// (the format's diagnostics: an error where it stops reading or would stop responding,
-// or where the document cannot show a line the way the game reads it); a stylesheet the
-// game does not read; and on the definition the game reads, through the graph's uses of
-// it: a name brand.mns redefines, a value used as a colour that is not one, a value used
-// as more than one of colour, font and image, a name no menu uses (style.unused, info),
-// markup the game pastes into the menus, a %NAME% inside a value (never expanded), a
-// doubled backslash, a value the game reads otherwise than shown.
-std::vector<Diagnostic> validate_styles(const ValidationInput &input, const AssetGraph &graph);
+// The stylesheet document type's validator over one .mns (DocumentType::validate_file), an
+// open document standing in for its file, in one pass over its rows. What the game does with
+// each odd line (the format's diagnostics: an error where it stops reading or would stop
+// responding, or where the document cannot show a line the way the game reads it); a
+// stylesheet the game does not read; and on the definition the game reads of each name:
+// markup the game pastes into the menus, a %NAME% inside a value (never expanded), a doubled
+// backslash, a value the game reads otherwise than shown. What the menus make of a definition
+// (a name brand.mns redefines, a value used as a colour that is not one, a value used as more
+// than one of colour, font and image, a name no menu uses) is graph/use_checks'.
+std::vector<Diagnostic> validate_styles_file(const Document &document);
 
 } // namespace opennova::editor

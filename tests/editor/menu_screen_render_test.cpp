@@ -5,7 +5,8 @@
 // its font from fonts/, the document's windows in the compiler's order. An edit that cuts
 // TITLE's label or makes a colour transparent shows on TITLE and on the APPEARANCE row; a
 // texture the project lacks is the graph's finding, the preview's note only; the build
-// still packs. A menu renders again only when it, the stylesheets or a file it read move.
+// still packs. A menu renders again only when it or a file it read moves, or a variable it
+// names changes (S13 D4: a stylesheet edit that changes no variable renders nothing).
 // The retail legs (each a SKIP-LEG without its root): every screen of the shipped menus
 // loose at OPENNOVA_JO_ASSETS' root (read with the files beside them) and of every .mnu
 // OPENNOVA_JO_DIR's packed install serves (read with that mount's files) renders, in the
@@ -178,7 +179,9 @@ static int test_blank_startup() {
 	return 0;
 }
 
-// A menu renders again only when it, the stylesheets or a file it read move.
+// A menu renders again only when it or a file it read moves, or a variable of the shell's
+// stylesheets it names comes, goes or takes another value (S13 D4); a closed menu is read by the
+// check itself and read again only when its file moves.
 static int test_render_again_only_when_moved() {
 	editor_test::TempProjectDir dir("opennova_editor_menu_render_again");
 	NoProcess platform;
@@ -208,13 +211,40 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	edit(session, *menu, title, "position.top", int64_t(130));
 	TEST_EXPECT(check.rendered() == 1);
-	// A stylesheet edit reaches every menu (its %VAR% list).
+	// A second menu, closed, naming TRIM_COLOR alone (which the blank STARTUP does not name): the
+	// check reads it itself and renders it, and a rescan finding it as it was renders nothing.
+	const std::string root = view.project_root;
+	TEST_EXPECT(editor_test::write_text(root + "/menus/trim.mnu",
+			"<SCREEN>\r\n<NAME>TRIM</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"BAND\">\r\n"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
+			"</POSITION>\r\n"
+			"<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%TRIM_COLOR%</APPEARANCE>\r\n"
+			"</WINDOW>\r\n</SCREEN>\r\n"));
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(check.rendered() == 1 && check.document("menus/trim.mnu") != nullptr);
+	session.handle(make_request(EditorRequestKind::Rescan));
+	TEST_EXPECT(check.rendered() == 0);
+	// A stylesheet edit that changes no variable's value (its comment) renders nothing; a
+	// variable changed renders again the menus naming it, and those alone.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
-	NodeAddress fg;
-	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg));
+	NodeAddress fg, trim;
+	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg) &&
+			find_definition(AssetGraph(), *style, "TRIM_COLOR", trim));
+	if (!style)
+		return 1;
+	const NodeAddress comment{ style->rows()[0]->id, style->rows()[0]->kind, 0 };
+	edit(session, *style, comment, "text", std::string("// The shell's variables."));
+	TEST_EXPECT(style->dirty() && check.rendered() == 0);
 	edit(session, *style, fg, "value", std::string("FFFF0000"));
-	TEST_EXPECT(check.rendered() == menus);
+	TEST_EXPECT(check.rendered() == 1);
+	TEST_EXPECT(render_findings(view, "menu.render.color_transparent").empty());
+	// TRIM_COLOR made a six-digit colour: trim.mnu alone renders again, its note on BAND's row.
+	edit(session, *style, trim, "value", std::string("FF8000"));
+	TEST_EXPECT(check.rendered() == 1);
+	const std::vector<const Diagnostic *> band =
+			render_findings(view, "menu.render.color_transparent");
+	TEST_EXPECT(band.size() == 1 && band[0]->asset == "menus/trim.mnu");
 	// Closed with the project (its edits discarded): nothing kept.
 	TEST_EXPECT(check.render("menus/main.mnu", title.row));
 	session.handle(make_request(EditorRequestKind::CloseProject));

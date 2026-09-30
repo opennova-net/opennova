@@ -15,6 +15,7 @@
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -308,7 +309,10 @@ int findings_follow_rows() {
 	const NodeId reset = table->rows()[0]->id, idle = table->rows()[1]->id;
 	const auto tail_row = [&]() -> NodeId {
 		const AssetScan scan = scan_project_assets(paths, project);
-		for (const Diagnostic &d : validate_open_documents(paths, project, scan, {table}))
+		AssetGraph graph;
+		ValidationCache cache;
+		const std::vector<std::shared_ptr<const Document>> open{ table };
+		for (const Diagnostic &d : validate_project({ paths, project, scan, open }, graph, cache))
 			if (d.code == "animation_map.ignored_input" && d.asset == "notes.adm") return d.row_id;
 		return NodeId(-1);
 	};
@@ -384,7 +388,10 @@ int validation_and_graph() {
 	}
 	const AssetScan scan = scan_project_assets(paths, project);
 	AssetGraph graph;
-	const std::vector<Diagnostic> findings = validate_open_documents(paths, project, scan, {}, &graph);
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const Document>> open;
+	const std::vector<Diagnostic> findings =
+			validate_project({ paths, project, scan, open }, graph, cache);
 	const auto find = [&](const char *code, const char *asset, size_t nth = 0) -> const Diagnostic * {
 		for (const Diagnostic &d : findings)
 			if (d.code == code && d.asset == asset && nth-- == 0) return &d;

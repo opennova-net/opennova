@@ -47,7 +47,8 @@ void ProblemsService::compose(bool keep_reported) {
 	        {core_.paths(), view_.document, view_.scan, view_.requirements, view_.documents, view_.boot_missing,
 	         play_findings_, open, build_findings_},
 	        *graph_, validation_cache_, *render_check_, *assets_);
-	document_findings_ = std::move(findings.documents);
+	gate_size_ = findings.gate_end - findings.gate_begin;
+	gate_tail_ = findings.rows.size() - findings.gate_end;
 	// The findings kept after the composed rows, each as often as it was reported (two refusals of
 	// the same edit are two rows, as they were); one the composition makes too is its row alone.
 	const size_t composed = findings.rows.size();
@@ -57,6 +58,7 @@ void ProblemsService::compose(bool keep_reported) {
 			if (reported.kept && std::find(findings.rows.begin(), composed_end, reported.finding) == composed_end)
 				findings.rows.push_back(reported.finding);
 		}
+	trailing_ = findings.rows.size() - composed;
 	reported_.clear();
 	if (findings.rows != view_.diagnostics) {
 		view_.diagnostics = std::move(findings.rows);
@@ -67,8 +69,18 @@ void ProblemsService::compose(bool keep_reported) {
 
 void ProblemsService::add_reported(const Diagnostic &d) {
 	view_.diagnostics.push_back(d);
+	++trailing_;
 	reported_.push_back({d, validation_due_});
 	core_.touch(ViewConcern::Findings);
+}
+
+std::vector<Diagnostic> ProblemsService::gate_findings() const {
+	const std::vector<Diagnostic> &rows = view_.diagnostics;
+	const size_t after = gate_tail_ + trailing_;
+	if (after + gate_size_ > rows.size())
+		return {};
+	const auto end = rows.end() - static_cast<std::ptrdiff_t>(after);
+	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
 }
 
 void ProblemsService::clear() {
@@ -76,7 +88,7 @@ void ProblemsService::clear() {
 	assets_->clear();
 	render_check_->clear();
 	validation_cache_ = ValidationCache();
-	document_findings_.clear();
+	gate_size_ = gate_tail_ = trailing_ = 0;
 	reported_.clear();
 	validation_due_ = false;
 }

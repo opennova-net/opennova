@@ -477,7 +477,8 @@ void SessionCore::start_build(bool then_play) {
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	const BuildPlan plan = plan_build(paths_, view_.scan, view_.requirements, problems().document_findings());
+	const BuildPlan plan =
+			plan_build(paths_, view_.scan, view_.requirements, problems().gate_findings());
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot

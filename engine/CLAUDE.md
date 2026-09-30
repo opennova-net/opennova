@@ -48,10 +48,15 @@
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
-    session and the windows reach a type through), `graph` (the asset graph: typed edges from the engine's own
+    session and the windows reach a type through, each type's `validate_file` its file's own
+    findings from its document alone, which `validation_cache` keeps per file until the file
+    changes, never keeping a closed file's document), `graph` (the asset graph: typed edges from the engine's own
     parsed records in a slot per file that an update patches, the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
-    (a read-only dependency mount's), and the rename transaction), `import` (the importers: a PNG to the game's
+    (a read-only dependency mount's), and the rename transaction; what other files make of what one
+    defines, one `use_checks` row per asset kind, and `project_validation`, the one pass over the
+    project's files: the graph's update, each file's own findings, the use checks, the graph's
+    findings), `import` (the importers: a PNG to the game's
     PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
     one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
     (the menu preview's portable half: what it shows, when to configure it again, its
@@ -60,7 +65,8 @@
     `MenuFrame` is its device; the model preview's portable half: its orbit camera and the
     level the game draws, what it shows and when the device builds again, its JSON; the
     shell's `ObjectModel` is its device; and the render check: every menu screen compiled headless,
-    its compiler notes as Problems rows; a menu's tree and findings as the editor
+    its compiler notes as Problems rows, a menu rendered again only when it, a file it read or a
+    variable it names changes; a menu's tree and findings as the editor
     MCP's `editor_menu` reads them, and the batch it sends, on the same menu; and the
     canvas's portable half: its one gesture machine, its overlay shapes, and what a press
     on the menu's or the model's picture takes, what a drag writes and what is drawn), `ui`

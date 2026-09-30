@@ -376,60 +376,51 @@ bool AnimationDocument::accept_change(const Change &change, std::string &error) 
 	return true;
 }
 
-std::vector<Diagnostic> validate_animations(const ValidationInput &input, const AssetGraph &) {
+std::vector<Diagnostic> validate_animation_file(const Document &document) {
 	std::vector<Diagnostic> findings;
 	const uint32_t known = known_trigger_bits();
-	for (const auto &asset : input.scan.entries) {
-		if (!is_animation_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
-			continue;
-		}
-		const auto *clip_document = dynamic_cast<const AnimationDocument *>(document.get());
-		const ClipRow *row = clip_document ? clip_document->clip() : nullptr;
-		if (!row) continue;
-		if (row->fps != 30) {
-			Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.fps",
-			                               "This clip plays at " + std::to_string(row->fps) +
-			                                       " frames per second; every retail clip plays at 30.",
-			                               document->path(), "fps");
-			d.row_id = row->id;
-			d.record_kind = kClip;
-			findings.push_back(std::move(d));
-		}
-		// A bone whose parent does not come before it: the rig builds a bone's pose on its
-		// parent's, in bone order (bad_parent_in_order).
-		for (size_t i = 0; i < row->bones.size(); ++i) {
-			const int32_t parent = row->bones[i].parent_index;
-			if (bad::bad_parent_in_order(parent, i)) continue;
-			const std::string name = row->bones[i].name;
-			const std::string message =
-			        parent >= 0 && size_t(parent) < row->bones.size()
-			                ? "Bone " + name + "'s parent, " + row->bones[size_t(parent)].name +
-			                          ", is numbered after it: the rig builds each bone's pose on its parent's, in bone "
-			                          "order, so the parent's is not built yet when " + name + " reads it."
-			                : "Bone " + name + "'s parent, " + std::to_string(parent) +
-			                          ", is no bone of the clip: the rig builds each bone's pose on its parent's.";
-			Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "animation.parent_order", message, document->path(), "parent");
-			d.row_id = row->id;
-			d.record_kind = kBone;
-			d.child_id = row->collections[0][i];
-			d.record = document->record_path({row->id, kBone, d.child_id});
-			findings.push_back(std::move(d));
-		}
-		for (size_t i = 0; i < row->events.size(); ++i) {
-			if ((static_cast<uint32_t>(row->events[i].trigger) & ~known) == 0) continue;
-			Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.trigger_unknown",
-			                               "Frame " + std::to_string(i) + " sets a trigger bit the engine does not read.",
-			                               document->path(), "trigger");
-			d.row_id = row->id;
-			d.record_kind = kEvent;
-			d.child_id = row->collections[1][i];
-			d.record = document->record_path({row->id, kEvent, d.child_id});
-			findings.push_back(std::move(d));
-		}
+	const auto *clip_document = dynamic_cast<const AnimationDocument *>(&document);
+	const ClipRow *row = clip_document ? clip_document->clip() : nullptr;
+	if (!row) return findings;
+	if (row->fps != 30) {
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.fps",
+		                               "This clip plays at " + std::to_string(row->fps) +
+		                                       " frames per second; every retail clip plays at 30.",
+		                               document.path(), "fps");
+		d.row_id = row->id;
+		d.record_kind = kClip;
+		findings.push_back(std::move(d));
+	}
+	// A bone whose parent does not come before it: the rig builds a bone's pose on its
+	// parent's, in bone order (bad_parent_in_order).
+	for (size_t i = 0; i < row->bones.size(); ++i) {
+		const int32_t parent = row->bones[i].parent_index;
+		if (bad::bad_parent_in_order(parent, i)) continue;
+		const std::string name = row->bones[i].name;
+		const std::string message =
+		        parent >= 0 && size_t(parent) < row->bones.size()
+		                ? "Bone " + name + "'s parent, " + row->bones[size_t(parent)].name +
+		                          ", is numbered after it: the rig builds each bone's pose on its parent's, in bone "
+		                          "order, so the parent's is not built yet when " + name + " reads it."
+		                : "Bone " + name + "'s parent, " + std::to_string(parent) +
+		                          ", is no bone of the clip: the rig builds each bone's pose on its parent's.";
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Warning, "animation.parent_order", message, document.path(), "parent");
+		d.row_id = row->id;
+		d.record_kind = kBone;
+		d.child_id = row->collections[0][i];
+		d.record = document.record_path({row->id, kBone, d.child_id});
+		findings.push_back(std::move(d));
+	}
+	for (size_t i = 0; i < row->events.size(); ++i) {
+		if ((static_cast<uint32_t>(row->events[i].trigger) & ~known) == 0) continue;
+		Diagnostic d = make_diagnostic(DiagnosticSeverity::Info, "animation.trigger_unknown",
+		                               "Frame " + std::to_string(i) + " sets a trigger bit the engine does not read.",
+		                               document.path(), "trigger");
+		d.row_id = row->id;
+		d.record_kind = kEvent;
+		d.child_id = row->collections[1][i];
+		d.record = document.record_path({row->id, kEvent, d.child_id});
+		findings.push_back(std::move(d));
 	}
 	return findings;
 }

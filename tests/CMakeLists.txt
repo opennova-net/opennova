@@ -3628,6 +3628,16 @@ target_link_libraries(editor_session_test PRIVATE opennova_editor)
 target_include_directories(editor_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session COMMAND editor_session_test)
 
+# Per-file validation (S13 D4): each file's own findings kept in the validation cache by what
+# they were made from, a closed file read and let go; what other files make of what one defines
+# (graph/use_checks); the project's rows as the one pass makes them, the trunk's before the
+# split pinned over the fixtures. Retail leg (OPENNOVA_JO_DIR): the install's files a document
+# type opens validated, then an edit of one validating it alone.
+add_executable(editor_project_validation_test editor/project_validation_test.cpp)
+target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
+target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_project_validation COMMAND editor_project_validation_test)
+
 # The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
 # cancelled between two steps, finished once; the busy gate's four answers over a real build
 # (refused, joined, superseded as the table says, cancelled first); edits during a build.

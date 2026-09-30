@@ -16,6 +16,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
@@ -957,14 +958,15 @@ static const Diagnostic *finding_on(const std::vector<Diagnostic> &diagnostics, 
 	return nullptr;
 }
 
-// What a validation costs (ADR 0046 S9e): it reads each closed catalog, table and menu
-// once and reuses it while the scan says its size and modified time hold, so an edit to
-// an open document reads no file; the edits a pump holds validate once, at its poll, and
-// a finding reported inside the burst survives it; the build gates on the session's own
-// findings, so an error an unsaved edit made still blocks it; a closed file changed on
-// disk is read again at the next refresh, alone; an open one changed on disk is read
-// again (or kept as it was, its error blocking) before the build's gate; a rename inside
-// a held pump plans over the burst's edits.
+// What a validation costs (ADR 0046 S9e, S13 D4): each file's own findings are made once and
+// kept while what they were made from holds (a closed file's size and modified time as the
+// scan says them, an open document's instance and revision), so an edit to an open document
+// validates that document alone, extracts it alone and reads no file; the edits a pump holds
+// validate once, at its poll, and a finding reported inside the burst survives it; the build
+// gates on the session's own findings, so an error an unsaved edit made still blocks it; a
+// closed file changed on disk is read again at the next refresh, alone; an open one changed on
+// disk is read again (or kept as it was, its error blocking) before the build's gate; a rename
+// inside a held pump plans over the burst's edits.
 static int test_validation_cost() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validation");
 	FakePlatform platform;
@@ -979,14 +981,17 @@ static int test_validation_cost() {
 	for (const AssetEntry &asset : v.scan.entries) editable += is_editable_kind(asset.kind) ? 1 : 0;
 	TEST_EXPECT(editable >= 3); // the item and weapon tables, the string tables, the startup menu
 	// Create-missing's refresh read every new file once.
-	TEST_EXPECT(stats.files_loaded == editable && stats.files_reused == 0 && stats.files_failed == 0);
+	TEST_EXPECT(stats.files_validated == editable && stats.files_loaded == editable &&
+			stats.files_reused == 0 && stats.files_failed == 0);
 
-	// Opening a document validates at once, reading nothing: the other files are reused.
+	// Opening a document validates at once, from the document, reading nothing: the other files'
+	// findings are kept.
 	session.handle(make_request(EditorRequestKind::OpenDocument, "items.def"));
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
-	TEST_EXPECT(stats.files_loaded == 0 && stats.files_reused == editable - 1);
+	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 0 &&
+			stats.files_reused == editable - 1);
 	const NodeAddress marker{items->rows()[0]->id, items->rows()[0]->kind, 0};
 	auto set = [&](const char *field, Value value) {
 		EditorRequest request = make_request(EditorRequestKind::EditRecord, items->path());
@@ -996,10 +1001,13 @@ static int test_validation_cost() {
 		session.handle(request);
 	};
 
-	// One Set on the open document: one validation, no file read, the edit's finding listed.
+	// One Set on the open document: one validation of that document alone, no file read, the
+	// graph extracting that document alone, the edit's finding listed.
 	size_t passes = stats.passes;
 	set("type", int64_t(0));
-	TEST_EXPECT(stats.passes == passes + 1 && stats.files_loaded == 0 && stats.files_reused == editable - 1);
+	TEST_EXPECT(stats.passes == passes + 1 && stats.files_validated == 1 &&
+			stats.files_loaded == 0 && stats.files_reused == editable - 1);
+	TEST_EXPECT(v.graph->stats().files_extracted == 1);
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
 	TEST_EXPECT(!has_code(v.diagnostics, "catalog.item_type"));
@@ -1083,15 +1091,18 @@ static int test_validation_cost() {
 	// A UTF-16 byte-order mark and half a code unit: a menu that cannot be decoded.
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, {0xFF, 0xFE, 0x41}));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(stats.files_loaded == 1 && stats.files_failed == 1 && stats.files_reused == editable - 2);
+	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 1 &&
+			stats.files_reused == editable - 1);
 	TEST_EXPECT(session.document_for("items.def") == items); // open and unchanged: kept as it is
 	TEST_EXPECT(finding_on(v.diagnostics, menu) != nullptr);
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(stats.files_loaded == 0 && stats.files_reused == editable - 1);
+	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
+			stats.files_reused == editable);
 	TEST_EXPECT(finding_on(v.diagnostics, menu) != nullptr);
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(stats.files_loaded == 1 && stats.files_failed == 0 && stats.files_reused == editable - 2);
+	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 && stats.files_failed == 0 &&
+			stats.files_reused == editable - 1);
 	TEST_EXPECT(finding_on(v.diagnostics, menu) == nullptr);
 	// The same size with a new modified time: read again too.
 	const AssetEntry *weapons = v.scan.find("weapon.def");
@@ -1100,7 +1111,8 @@ static int test_validation_cost() {
 	const fs::path weapon_path = fs::path(root) / weapons->relative_path;
 	fs::last_write_time(weapon_path, fs::last_write_time(weapon_path) + std::chrono::hours(1));
 	session.handle(make_request(EditorRequestKind::Rescan));
-	TEST_EXPECT(stats.files_loaded == 1 && stats.files_reused == editable - 2);
+	TEST_EXPECT(stats.files_validated == 1 && stats.files_loaded == 1 &&
+			stats.files_reused == editable - 1);
 
 	// Build packs the files on disk: a clean open document whose file changed outside the
 	// editor is read again before the gate, so the gate sees what the build packs.
@@ -1175,7 +1187,8 @@ static int test_validation_cost() {
 	TEST_EXPECT(!menu_document->dirty());
 	// Closing the project forgets what was read.
 	session.handle(make_request(EditorRequestKind::CloseProject));
-	TEST_EXPECT(stats.files_loaded == 0 && stats.files_reused == 0 && stats.passes == 0);
+	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 && stats.files_reused == 0 &&
+			stats.passes == 0);
 	return 0;
 }
 

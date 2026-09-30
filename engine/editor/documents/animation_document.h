@@ -5,14 +5,11 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/model/document.h>
 #include <formats/bad/bad.h>
 #include <runtime/assets/asset_store.h>
 
 namespace opennova::editor {
-
-class AssetGraph;
 
 // A clip (ADR 0046 S10): a `.bad`, whose engine data the editor changes: the header's
 // version, frame rate and flags, each bone's name, and each frame's event (the hips'
@@ -76,11 +73,11 @@ protected:
 
 bool is_animation_kind(AssetKind kind);
 
-// The clip document type's validator (document_types): every clip loads, open documents
-// standing in for their files; a frame rate other than the 30 every retail clip plays at
+// The clip document type's validator over one clip (DocumentType::validate_file), an open
+// document standing in for its file: a frame rate other than the 30 every retail clip plays at
 // and an event bit the engine does not read are notes; a bone whose parent does not come
 // before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
 // warning on its parent.
-std::vector<Diagnostic> validate_animations(const ValidationInput &input, const AssetGraph &graph);
+std::vector<Diagnostic> validate_animation_file(const Document &document);
 
 } // namespace opennova::editor

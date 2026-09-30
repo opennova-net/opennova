@@ -10,15 +10,12 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_ids.h>
-#include <editor/documents/validation_cache.h>
 #include <editor/model/document.h>
 #include <editor/project/project_document.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_schema.h>
 
 namespace opennova::editor {
-
-class AssetGraph;
 
 // A menu file (ADR 0046 S6c, S9h): `mnu::Document`'s screens as rows, every record the
 // format holds a record here at its own depth, through the format's property table
@@ -202,14 +199,14 @@ std::string menu_text_scope(const std::string &table);
 std::string menu_screen_scope(const std::string &menu_file);
 std::string menu_window_scope(const std::string &menu_file, const std::string &screen);
 
-// The menu document type's validator (document_types): every menu in the project loads,
-// open documents standing in for their files; two screens or two windows of a screen of
-// one NAME (menu.duplicate_screen / menu.duplicate_window: the lookups find one of them)
-// and an ACTION the game never runs or ignores (menu.action_inert: on a window with no
-// NAME, a TYPE none of the sixteen, a WINDOW row with no STATE it acts on) are warnings;
-// the references a menu makes (fonts and colors through the stylesheet, textures, sound
-// banks, other menus and their screens, windows, string tables and string ids) are the
-// asset graph's.
-std::vector<Diagnostic> validate_menus(const ValidationInput &input, const AssetGraph &graph);
+// The menu document type's validator over one menu (DocumentType::validate_file), an open
+// document standing in for its file: what its reader leaves out and what it cannot hold or
+// write; two screens or two windows of a screen of one NAME (menu.duplicate_screen /
+// menu.duplicate_window: the lookups find one of them) and an ACTION the game never runs or
+// ignores (menu.action_inert: on a window with no NAME, a TYPE none of the sixteen, a WINDOW
+// row with no STATE it acts on) are warnings; the references a menu makes (fonts and colors
+// through the stylesheet, textures, sound banks, other menus and their screens, windows,
+// string tables and string ids) are the asset graph's.
+std::vector<Diagnostic> validate_menu_file(const Document &document);
 
 } // namespace opennova::editor

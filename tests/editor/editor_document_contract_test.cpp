@@ -27,7 +27,9 @@
 // undo still finds every record where it was and answers what changed in it as it did. S13 D5
 // adds the type's record kinds (kinds()): each named back by its token, no two sharing a kind or
 // a token, a kind the outline adds a row of being a row of the file; every row of the file of a
-// kind that is a row, and every record a collection holds of a kind the table has.
+// kind that is a row, and every record a collection holds of a kind the table has. S13 D4 adds the
+// type's validate_file: the file's own findings from its document alone, each on the file and on
+// a record the document holds, the same findings from a second load of the file.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -60,9 +62,10 @@ int g_failures = 0;
 // What was checked, for the summary line: records, fields set to their own value, symbols, and
 // lookups of a name in another scope that defines it too; optional fields left out and written
 // again and those a type keeps written, files with a real change and its undo, files whose field
-// took two coalesced Sets, records pasted, and snapshots.
+// took two coalesced Sets, records pasted, snapshots, and the findings validate_file made.
 size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
+size_t g_findings = 0;
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 
 // A type's optional fields over its files: those asked to be left out or written again, and those
@@ -707,6 +710,28 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 	check(done, fixture.name, "a document with a real change in it takes a snapshot");
 }
 
+// The type's validate_file (S13 D4): the file's own findings from its document alone, each on the
+// file and, where it names a record, on one the document holds; a second load of the file, which
+// gives its records the same identities, validates to the same findings.
+void check_validate_file(
+		const DocumentType &type, const Fixture &fixture, const Document &document) {
+	const std::vector<Diagnostic> findings = type.validate_file(document);
+	for (const Diagnostic &d : findings) {
+		const std::string where = fixture.name + " " + d.code;
+		check(d.asset == document.path(), where,
+				"validate_file's findings are on the document's file");
+		if (d.row_id)
+			check(document.address_of(d.child_id ? d.child_id : d.row_id).row == d.row_id, where,
+					"a finding names a record the document holds");
+	}
+	std::unique_ptr<Document> twin = type.make();
+	Diagnostic error;
+	check(twin->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error) &&
+					type.validate_file(*twin) == findings,
+			fixture.name, "a second load of the file validates to the same findings");
+	g_findings += findings.size();
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<Document> document = type.make();
 	Diagnostic error;
@@ -730,6 +755,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 	}
 
 	check_kinds(fixture, *document, records);
+	check_validate_file(type, fixture, *document);
 	check_places(type, fixture, *document, records);
 	for (const NodeAddress &address : records)
 		for (const FieldSchema &schema : document->fields(address.kind)) check_schema(fixture, *document, address, schema);
@@ -772,11 +798,14 @@ int main() {
 	check(g_other_scopes > 0, "the files", "a name defined in two scopes is looked up in the other");
 	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
 	if (g_failures == 0)
-		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
-		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
-		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
-		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu record kinds)\n",
-		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
-		            g_changes, g_coalesced, g_pastes, g_snapshots, g_kinds.size());
+		std::printf("editor_document_contract: all %zu document types keep the contract "
+					"(%zu files, %zu records, %zu fields set to their own value, %zu symbols, "
+					"%zu lookups in another scope of the name, %zu optional fields left out and "
+					"written again, %zu kept always written, %zu real changes undone and redone, "
+					"%zu coalesced, %zu records pasted, %zu snapshots, %zu record kinds, "
+					"%zu findings validate_file made)\n",
+				types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes,
+				g_presences, g_kept, g_changes, g_coalesced, g_pastes, g_snapshots, g_kinds.size(),
+				g_findings);
 	return g_failures == 0 ? 0 : 1;
 }

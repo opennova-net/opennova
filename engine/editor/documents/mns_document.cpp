@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <set>
+#include <unordered_map>
 
 namespace opennova::editor {
 namespace {
@@ -466,111 +467,107 @@ bool MnsDocument::accept_change(const Change &change, std::string &error) const 
 	return false;
 }
 
-std::vector<Diagnostic> validate_styles(const ValidationInput &input, const AssetGraph &graph) {
+std::vector<Diagnostic> validate_styles_file(const Document &document) {
 	std::vector<Diagnostic> findings;
-	for (const AssetEntry &asset : input.scan.entries) {
-		if (!is_style_kind(asset.kind)) continue;
-		Diagnostic error;
-		const std::shared_ptr<const Document> document = input.document(asset, error);
-		if (!document) {
-			findings.push_back(error);
+	const auto *styles = dynamic_cast<const MnsDocument *>(&document);
+	if (!styles)
+		return findings;
+	const std::string &path = styles->path();
+	const std::vector<std::shared_ptr<const Node>> &rows = styles->rows();
+	// In one pass over the rows (S13 D4: each row had asked winning_row and line_of, each a walk
+	// of the rows): each row's first line, and the last definition of each name in the file, the
+	// one the game reads.
+	std::vector<int> first_lines;
+	first_lines.reserve(rows.size());
+	std::unordered_map<std::string, NodeId> last_of; // a name, upper case: its last variable row
+	int end = 1; // the line after the last row's
+	for (const auto &row : rows) {
+		first_lines.push_back(end);
+		end += int(line_count(style_of(*row).native));
+		if (row->kind == kVariable)
+			last_of[strutil::to_upper(row->name())] = row->id;
+	}
+	const auto read_by_the_game = [&](const Node &row) {
+		const auto last = last_of.find(strutil::to_upper(mns::variable_name(row.name())));
+		return last != last_of.end() && last->second == row.id;
+	};
+	// A finding on the row a line is in (row_at_line's).
+	auto on_line = [&](DiagnosticSeverity severity, const std::string &code,
+						   const std::string &message, int line,
+						   const std::string &field = std::string()) {
+		Diagnostic d = make_diagnostic(severity, code, message, path, field);
+		d.line = size_t(line > 0 ? line : 0);
+		const size_t at = size_t(std::upper_bound(first_lines.begin(), first_lines.end(), line) -
+				first_lines.begin());
+		if (line >= 1 && line < end && at > 0) {
+			const Node &row = *rows[at - 1];
+			d.row_id = row.id;
+			d.record_kind = row.kind;
+			d.record = row.name();
+		}
+		findings.push_back(std::move(d));
+	};
+	const mns::EvaluationResult evaluated = styles->native().evaluate();
+	// What the game does with each odd line.
+	for (const mns::Diagnostic &d : evaluated.diagnostics)
+		on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error
+												   : DiagnosticSeverity::Warning,
+				style_code(d.code), sentence(d.message), d.line);
+	// The rows end CR LF; the file keeps the line ends it was read with until Save
+	// writes it (the build packs the file).
+	const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
+	if (file && file->line_end_line && !styles->wrote_file())
+		on_line(DiagnosticSeverity::Error, "style.line_ending",
+				sentence(file->line_end_message) +
+						" The editor ends every line CR LF when it saves the file.",
+				file->line_end_line);
+	// The game reads only the shell's two [orig: Menu_InitShellResources @ 0x552604, @ 0x552616].
+	if (!styles->read_by_game()) {
+		findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.not_loaded",
+				"The game reads only menu_style.mns and brand.mns: nothing reads " +
+						basename_of(path) + ".",
+				path));
+		return findings;
+	}
+	// On the definition the game reads of each name; what the menus make of it (a name brand.mns
+	// defines too, one no menu uses, a value used as what it is not) is graph/use_checks'.
+	for (size_t i = 0; i < rows.size(); ++i) {
+		const Node &row = *rows[i];
+		if (row.kind != kVariable || !read_by_the_game(row))
 			continue;
-		}
-		const auto *styles = dynamic_cast<const MnsDocument *>(document.get());
-		if (!styles) continue;
-		const std::string &path = styles->path();
-		// A finding on the row a line is in.
-		auto on_line = [&](DiagnosticSeverity severity, const std::string &code, const std::string &message, int line,
-		                   const std::string &field = std::string()) {
-			Diagnostic d = make_diagnostic(severity, code, message, path, field);
-			d.line = size_t(line > 0 ? line : 0);
-			if (const Node *row = styles->row(styles->row_at_line(line))) {
-				d.row_id = row->id;
-				d.record_kind = row->kind;
-				d.record = row->name();
-			}
-			findings.push_back(std::move(d));
-		};
-		const mns::EvaluationResult evaluated = styles->native().evaluate();
-		// What the game does with each odd line.
-		for (const mns::Diagnostic &d : evaluated.diagnostics)
-			on_line(d.severity == mns::Severity::Error ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-			        style_code(d.code), sentence(d.message), d.line);
-		// The rows end CR LF; the file keeps the line ends it was read with until Save
-		// writes it (the build packs the file).
-		const auto *file = dynamic_cast<const StyleFileState *>(styles->file_state());
-		if (file && file->line_end_line && !styles->wrote_file())
-			on_line(DiagnosticSeverity::Error, "style.line_ending",
-			        sentence(file->line_end_message) + " The editor ends every line CR LF when it saves the file.",
-			        file->line_end_line);
-		// The game reads only the shell's two [orig: Menu_InitShellResources @ 0x552604, @ 0x552616].
-		if (!styles->read_by_game()) {
-			findings.push_back(make_diagnostic(DiagnosticSeverity::Warning, "style.not_loaded",
-			                                   "The game reads only menu_style.mns and brand.mns: nothing reads " +
-			                                           basename_of(path) + ".",
-			                                   path));
+		const std::string name = row.name();
+		const std::string value = mns::game_value(style_of(row).native);
+		const int line = first_lines[i];
+		if (value.empty())
+			continue; // a name the game ignores (no-value)
+		if (value.find_first_of("<>&\"") != std::string::npos)
+			on_line(DiagnosticSeverity::Warning, "style.xml_char",
+					"The game pastes " + name +
+							"'s value into each menu before reading the menu, so its < > & or \" "
+							"can break the menus that use it.",
+					line, "value");
+		// The game pastes a value and scans on after it, so a reference in it stays as
+		// written [orig: NapiXML_ExpandVariablesInText @ 0x63a000, the copy @ 0x63a450..0x63a4d1].
+		if (mns::holds_variable_reference(value))
+			on_line(DiagnosticSeverity::Warning, "style.nested_var",
+					"The game does not expand a %NAME% inside a value: the menus get " + name +
+							"'s value as written.",
+					line, "value");
+		if (value.find("\\\\") != std::string::npos)
+			on_line(DiagnosticSeverity::Info, "style.backslash",
+					"The game keeps both backslashes of each '\\\\' in " + name + "'s value.", line,
+					"value");
+		// The document's reading against the game's own, where the game reads this far.
+		if (evaluated.stopped_line && line >= evaluated.stopped_line)
 			continue;
-		}
-		for (const auto &row : styles->rows()) {
-			if (row->kind != kVariable || styles->winning_row(row->name()) != row->id) continue;
-			const std::string name = row->name();
-			const std::string value = mns::game_value(style_of(*row).native);
-			const int line = styles->line_of(row->id);
-			if (value.empty()) continue; // a name the game ignores (no-value)
-			const GraphSymbol *binding = graph.style_binding(name);
-			const bool is_binding = binding && binding->file == path;
-			if (binding && !is_binding && menu::is_shell_stylesheet(basename_of(binding->file)) &&
-			    strutil::iequals(basename_of(path), menu::kShellStylesheets[0].name))
-				on_line(DiagnosticSeverity::Info, "style.overridden_by_brand",
-				        basename_of(binding->file) + " defines " + name + " too: the game reads its value, '" +
-				                binding->value + "'.",
-				        line, "value");
-			if (is_binding) {
-				// The uses of the variable, by what its value must be there.
-				bool color = false, font = false, image = false;
-				const std::vector<const GraphEdge *> uses = graph.referrers_of(ReferenceKind::StyleVar, name);
-				for (const GraphEdge *edge : uses) {
-					if (edge->through == ReferenceKind::None) color = true;
-					else if (edge->through == ReferenceKind::Font) font = true;
-					else image = true;
-				}
-				// Every colour, font and image a menu names through a variable is an edge
-				// (every APPEARANCE, ITEM and FONT field), so none means no menu uses it.
-				if (uses.empty())
-					on_line(DiagnosticSeverity::Info, "style.unused",
-					        "No menu of the project names %" + name + "%.", line, "value");
-				if (color && !mnu::color_reads_whole(value))
-					on_line(DiagnosticSeverity::Warning, "style.not_a_color",
-					        name + " is used as a colour, but '" + value +
-					                "' is not one (AARRGGBB hex digits): the game reads only its leading hex digits.",
-					        line, "value");
-				if (int(color) + int(font) + int(image) > 1)
-					on_line(DiagnosticSeverity::Warning, "style.mixed_use",
-					        name + " is used as more than one of a colour, a font and an image.", line, "value");
-			}
-			if (value.find_first_of("<>&\"") != std::string::npos)
-				on_line(DiagnosticSeverity::Warning, "style.xml_char",
-				        "The game pastes " + name + "'s value into each menu before reading the menu, so its < > & or \" "
-				        "can break the menus that use it.",
-				        line, "value");
-			// The game pastes a value and scans on after it, so a reference in it stays as
-			// written [orig: NapiXML_ExpandVariablesInText @ 0x63a000, the copy @ 0x63a450..0x63a4d1].
-			if (mns::holds_variable_reference(value))
-				on_line(DiagnosticSeverity::Warning, "style.nested_var",
-				        "The game does not expand a %NAME% inside a value: the menus get " + name + "'s value as written.",
-				        line, "value");
-			if (value.find("\\\\") != std::string::npos)
-				on_line(DiagnosticSeverity::Info, "style.backslash",
-				        "The game keeps both backslashes of each '\\\\' in " + name + "'s value.", line, "value");
-			// The document's reading against the game's own, where the game reads this far.
-			if (evaluated.stopped_line && line >= evaluated.stopped_line) continue;
-			if (!evaluated.sheet.has(name))
-				on_line(DiagnosticSeverity::Warning, "style.read_differently",
-				        "The game does not read " + name + " as it stands here.", line, "value");
-			else if (evaluated.sheet.get(name) != value)
-				on_line(DiagnosticSeverity::Warning, "style.read_differently",
-				        "The game reads " + name + " as '" + evaluated.sheet.get(name) + "', not as shown.", line, "value");
-		}
+		if (!evaluated.sheet.has(name))
+			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+					"The game does not read " + name + " as it stands here.", line, "value");
+		else if (evaluated.sheet.get(name) != value)
+			on_line(DiagnosticSeverity::Warning, "style.read_differently",
+					"The game reads " + name + " as '" + evaluated.sheet.get(name) +
+							"', not as shown.",
+					line, "value");
 	}
 	return findings;
 }

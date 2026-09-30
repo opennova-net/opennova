@@ -15,71 +15,77 @@
 
 namespace opennova::editor {
 
+// What the last validation over a cache did (ADR 0046 S13 D4): the files whose own findings it
+// made and those whose findings it kept, the closed files it read from disk to make theirs and of
+// those the ones that did not load; and every validation run over the cache.
 struct ValidationStats {
-	size_t passes = 0;       // validations run over this cache, all told
-	size_t files_loaded = 0; // closed files read from disk on the last validation
-	size_t files_reused = 0; // closed files unchanged since they were read
-	size_t files_failed = 0; // of the files read on the last validation, the ones that did not load
+	size_t passes = 0; // validations run over this cache, all told
+	size_t files_validated = 0; // files whose own findings the last validation made
+	size_t files_reused = 0; // files whose findings it kept: nothing they were made from moved
+	size_t files_loaded = 0; // closed files it read from disk to make theirs
+	size_t files_failed = 0; // of those, the ones that did not load
 };
 
-// The closed files the validators read, kept from one validation to the next (ADR 0046
-// d9, S9e). A file is read again only when the scan says its size or modified time
-// changed (the asset graph's extraction cache is the precedent), so an edit to one
-// open document does not parse every other catalog, table and menu in the project
-// again; a file that does not load keeps its finding the same way. An open document is
-// never cached here: it stands in for its file. The issues of a document's serialized
-// form are kept per document instance and revision, open or closed, so an unchanged
-// document is not serialized again either.
-class ValidationCache {
-public:
-	// A validation starts: the per-pass counters restart and every file is unread.
-	void begin();
-	// A closed file as a document of its type, read or reused. Null, with `error`, when
-	// the file does not load.
-	std::shared_ptr<const Document> closed(const ProjectPaths &paths, const ProjectDocument &project,
-	                                       const AssetEntry &asset, Diagnostic &error);
-	// What serializing `document` reports, from the last serialization of this instance
-	// at this revision when there is one.
-	const std::vector<SourceIssue> &serialize_issues(const Document &document);
-	// The validation ends: the files it did not read (gone from the scan, or open now)
-	// leave the cache.
-	void end();
-	const ValidationStats &stats() const { return stats_; }
-
-private:
-	struct Entry {
-		uint64_t size = 0;
-		int64_t modified = 0;
-		AssetKind kind = AssetKind::Unknown;
-		std::string game;
-		std::shared_ptr<const Document> document; // null when the file did not load
-		Diagnostic error;                          // why it did not
-		bool filled = false;                       // read at least once
-		bool read = false;                         // read by the current validation
-	};
-	struct Serialized {
-		uint64_t identity = 0;
-		uint64_t revision = 0;
-		std::vector<SourceIssue> issues;
-		bool read = false;
-	};
-	std::map<std::string, Entry> entries_;         // by project-relative path
-	std::map<std::string, Serialized> serialized_; // by project-relative path
-	ValidationStats stats_;
-};
-
-// What one validation hands each document type's validator (document_types.h): the
-// project's files, each as a document, an open document standing in for its file.
+// The project's files as one validation reads them (graph/project_validation.h): the scan's
+// files, an open document standing in for its file.
 struct ValidationInput {
 	const ProjectPaths &paths;
 	const ProjectDocument &project;
 	const AssetScan &scan;
 	const std::vector<std::shared_ptr<const Document>> &open;
-	ValidationCache &cache;
 
-	// The open document for the file, else the file itself through the cache. Null, with
-	// `error`, when the file does not load.
-	std::shared_ptr<const Document> document(const AssetEntry &asset, Diagnostic &error) const;
+	// The open document standing in for a file; null for a closed one.
+	std::shared_ptr<const Document> open_document(const AssetEntry &asset) const;
+};
+
+// Each file's own findings (ADR 0046 d9, S9e, S13 D4), kept from one validation to the next: its
+// document type's validate_file over its document (documents/document_types.h), or why the file
+// did not load. They are made again only when what they were made from moved: an open
+// document's instance, revision, unsaved state and whether Save wrote its file (a save reads the
+// file's source findings again, and a stylesheet's line ends follow the file written); a closed
+// file's size, last write and kind as the scan lists them, and the project's game (the asset
+// graph's extraction is the precedent). So an edit of one open document validates that document
+// alone and reads no file. A closed file is loaded for its findings and let go: the cache keeps
+// the findings, never the document (a model's geometry included). A load gives the same file's
+// records the same identities, so a finding still names its record (row_id, child_id) in the
+// document a later load or an open of the file makes.
+class ValidationCache {
+public:
+	// A validation starts: its counters restart and no file has been asked.
+	void begin();
+	// A file's own findings, made or kept (above); none for a kind no document type opens.
+	const std::vector<Diagnostic> &file_findings(
+			const ValidationInput &input, const AssetEntry &asset);
+	// Whether the file's own checks read its records in this validation: it loaded, and no source
+	// error blocks it (a blocked file's findings are its source findings alone). What another
+	// file's check reads of its records follows (graph/use_checks.h).
+	bool records_checked(const std::string &path) const;
+	// The validation ends: the files it did not ask (gone from the scan) leave the cache.
+	void end();
+	const ValidationStats &stats() const { return stats_; }
+	// The closed files' documents this cache loaded that are alive, anywhere: none once their
+	// findings are made (nothing keeps a closed file resident).
+	size_t documents_alive() const { return *alive_; }
+
+private:
+	struct Entry {
+		bool filled = false; // made at least once
+		bool asked = false; // asked by the current validation
+		bool checked = false; // its records were read (records_checked)
+		// What the findings were made from: an open document, or a closed file as the scan lists
+		// it.
+		bool open = false;
+		uint64_t identity = 0, revision = 0;
+		bool dirty = false, wrote_file = false;
+		uint64_t size = 0;
+		int64_t modified = 0;
+		AssetKind kind = AssetKind::Unknown;
+		std::string game;
+		std::vector<Diagnostic> findings;
+	};
+	std::map<std::string, Entry> entries_; // by project-relative path
+	ValidationStats stats_;
+	std::shared_ptr<size_t> alive_ = std::make_shared<size_t>(0);
 };
 
 } // namespace opennova::editor

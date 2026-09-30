@@ -27,6 +27,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/project_validation.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
@@ -255,8 +256,10 @@ static int test_import_pass() {
 	// naming the PNG finds nothing the game can load.
 	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.pcx") == ReferenceStatus::Present);
 	TEST_EXPECT(view.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Missing);
+	AssetGraph graph;
+	ValidationCache cache;
 	const BuildPlan plan = plan_build(paths, view.scan, view.requirements,
-	                                  validate_open_documents(paths, view.document, view.scan, view.documents));
+			validate_project({ paths, view.document, view.scan, view.documents }, graph, cache));
 	bool packed = false, source_packed = false;
 	for (const BuildArchive &archive : plan.archives)
 		for (const BuildEntry &entry : archive.entries) {
