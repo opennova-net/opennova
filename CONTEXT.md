@@ -692,9 +692,12 @@ A document type's own check across the project's files, run with every validatio
 file's own findings: it reads the files itself, keeps what it made from one validation to the
 next and makes again only what moved, and says whether its findings moved (the menu type's render
 check renders a menu again only when it, a file its screens read or a variable it names changed).
-Its findings are Problems rows after the build's gate, never in it. A use check is the other
-cross-file finding: a function of the asset graph, keeping nothing.
-_Avoid_: use check (stateless, one per kind of file), validation (a file's own findings)
+Its findings are Problems rows after the build's gate, never in it, and never a finding a use check
+or the asset graph makes. A use check is the other cross-file finding, one whose rows are in the
+gate: a function of the asset graph, keeping nothing. Which one a finding is, is chosen by whether
+it may block a build.
+_Avoid_: use check (in the gate, stateless, one per kind of file), validation (a file's own
+findings)
 
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells

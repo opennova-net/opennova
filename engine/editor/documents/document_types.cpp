@@ -8,9 +8,9 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
-// The menu type's project check: the render check runs the preview's headless screen compile
-// (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
-#include <editor/preview/menu_render_check.h>
+// The menu type's project check, by its hook alone: the render check runs the preview's headless
+// screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
+#include <editor/preview/make_menu_render_check.h>
 
 #include <array>
 #include <atomic>

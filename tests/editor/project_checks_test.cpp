@@ -1,7 +1,9 @@
 // The document types' project checks (ADR 0046 S13 V9): a type's own check across the project's
 // files that keeps what it made from one validation to the next, made by its registry row
 // (DocumentType::project_check) and kept by whoever validates, one per type by its DocumentTypeId
-// (ProjectChecks). The menu type's is the render check, and no other registered type has one.
+// (ProjectChecks). The menu type's is the render check, and no other registered type has one; it
+// reads a closed menu only where the validation's own checks read its records (with the menu
+// type's row standing in with documents that hold no records, it reads and renders none).
 // A test's check, on the item catalogs' type standing in for itself (the same documents and own
 // findings, DocumentTypeStandIn), runs once per validation, after every file's own findings (it
 // reads which files' records their own checks read); its findings are rows after the build's gate
@@ -39,6 +41,7 @@
 #include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
+#include "editor/blob_document.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -99,6 +102,21 @@ const DocumentType &probe_type() {
 Diagnostic probe_finding() {
 	return make_diagnostic(DiagnosticSeverity::Error, "probe.found", "The probe found this.",
 			"defs/items.def");
+}
+
+std::unique_ptr<DocumentBase> make_blob() { return std::make_unique<editor_test::BlobDocument>(); }
+
+// The menu type's row with documents that hold no records (S13 D6's blob) and its hook kept: the
+// validation reads no menu's records, and the render check is still the menu type's check.
+// Copied from the registry before any stand-in is in place.
+const DocumentType &blob_menu_type() {
+	static const DocumentType type = [] {
+		DocumentType row = *document_type(DocumentTypeId::Menu);
+		row.name = "menu_blob";
+		row.make = make_blob;
+		return row;
+	}();
+	return type;
 }
 
 std::string window(const std::string &name, const std::string &body) {
@@ -225,6 +243,50 @@ static int test_registry() {
 	TEST_EXPECT(checks.of(DocumentTypeId::Catalog) == nullptr && checks.findings_size() == 0 &&
 			g_probe.updates == 1);
 	TEST_EXPECT(!checks.update(input));
+	return 0;
+}
+
+// The render check reads a closed menu only where the validation's own checks read its records
+// (ValidationCache::records_checked), which is the contract a type's check keeps whatever its
+// type's documents are. Over the same project: with the menu type's row as registered, main.mnu is
+// read and rendered (its transparent colour a note); with the row standing in with documents that
+// hold no records (the hook kept), the file's own finding is document.no_records, and the render
+// check has no document for it and no note. Each leg has its own cache and checks (a cache keeps
+// a file's answer until its stamps move).
+static int test_records_checked_gate() {
+	(void)blob_menu_type();
+	Project project("opennova_editor_project_checks_gate");
+	TEST_EXPECT(project.make(composed_files()));
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput validation{ project.paths, project.document, project.scan, open };
+	const auto notes = [](const ProjectChecks &checks) {
+		std::vector<Diagnostic> rows;
+		checks.append_findings(rows);
+		return first_of(rows, "menu.render.") != SIZE_MAX;
+	};
+	{
+		AssetGraph graph;
+		ValidationCache cache;
+		ProjectChecks checks;
+		refresh_project(validation, graph, cache);
+		TEST_EXPECT(cache.records_checked("menus/main.mnu"));
+		TEST_EXPECT(checks.update({ validation, cache, project.files }));
+		const MenuRenderCheck *check = menu_render_check(&checks);
+		TEST_EXPECT(check != nullptr && check->document("menus/main.mnu") != nullptr && notes(checks));
+	}
+	{
+		const DocumentTypeStandIn stand_in(blob_menu_type());
+		AssetGraph graph;
+		ValidationCache cache;
+		ProjectChecks checks;
+		refresh_project(validation, graph, cache);
+		const std::vector<Diagnostic> *own = cache.kept_findings("menus/main.mnu");
+		TEST_EXPECT(!cache.records_checked("menus/main.mnu") && own && own->size() == 1 &&
+				own->front().code == "document.no_records");
+		checks.update({ validation, cache, project.files });
+		const MenuRenderCheck *check = menu_render_check(&checks);
+		TEST_EXPECT(check != nullptr && check->document("menus/main.mnu") == nullptr && !notes(checks));
+	}
 	return 0;
 }
 
@@ -384,6 +446,7 @@ static int test_session() {
 int main() {
 	int failures = 0;
 	failures += test_registry();
+	failures += test_records_checked_gate();
 	failures += test_composition_order();
 	failures += test_session();
 	if (failures == 0)

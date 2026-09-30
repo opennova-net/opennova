@@ -17,7 +17,9 @@ namespace opennova::editor {
 // lives here, with whoever validates (the session's ProblemsService; the command line for its one
 // validation). Each is made when this is, from the row the registry answers then, and made again
 // at an update when the registry answers another row for its type (a test's stand-in put in place
-// or gone), as validate_file and make follow the registry. The composition runs them after each
+// or gone). The validation cache follows such a swap only for the files it validates again (it
+// keeps the others' findings until their stamps move), so a check made afresh after one reads
+// records_checked answers the previous row made. The composition runs the checks after each
 // file's own findings and puts their findings after the build's gate
 // (project/project_findings.h).
 class ProjectChecks {

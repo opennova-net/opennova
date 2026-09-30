@@ -103,12 +103,10 @@ private:
 	size_t rendered_ = 0;
 };
 
-// The menu type's registry hook (DocumentType::project_check): a render check with nothing
-// rendered yet.
-std::unique_ptr<ProjectCheck> make_menu_render_check();
-// The render check among a validation's project checks (the menu type's), null when there are
-// none (no project validated) or the menu type's check is another (a test's stand-in in its
-// place).
+// The render check among a validation's project checks (the menu type's; the registry's hook that
+// makes it is make_menu_render_check.h's): null when `checks` is null (a view no session made: a
+// session makes its checks when it is made) or the menu type's check is not the render check (a
+// test's stand-in in its place).
 const MenuRenderCheck *menu_render_check(const ProjectChecks *checks);
 
 } // namespace opennova::editor

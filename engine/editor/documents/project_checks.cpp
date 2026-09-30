@@ -1,5 +1,7 @@
 #include "project_checks.h"
 
+#include <cassert>
+
 #include <editor/documents/document_types.h>
 
 namespace opennova::editor {
@@ -20,6 +22,14 @@ bool ProjectChecks::follow_registry() {
 		slot.make = make;
 		slot.check = make ? make() : nullptr;
 	}
+#ifndef NDEBUG
+	// A check is one type's, a stand-in's rows included, which document_types.cpp's static_assert
+	// over the registered rows cannot see.
+	for (size_t i = 0; i < slots_.size(); ++i)
+		for (size_t j = i + 1; j < slots_.size(); ++j)
+			assert((!slots_[i].make || slots_[i].make != slots_[j].make) &&
+					"no two types' rows name one project check");
+#endif
 	return moved;
 }
 

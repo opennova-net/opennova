@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
+#include <editor/preview/make_menu_render_check.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_schema.h>
 

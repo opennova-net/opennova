@@ -26,11 +26,20 @@ struct ProjectCheckInput {
 // (preview/menu_render_check.h), every screen of every menu compiled the way the game draws it.
 // It reads the files itself, keeps what it made from one validation to the next, makes again only
 // what moved (a menu renders again when it, a file its screens read or a variable it names moved)
-// and says whether its findings moved, so a validation that moves nothing composes nothing. A use
-// check (graph/use_checks.h) is the other cross-file finding: stateless, a function of the asset
-// graph made again with every composition. A project check's findings are Problems rows after the
-// build's gate (project/project_findings.h), never in it: what the game makes of the files there
-// never blocks a build.
+// and says whether its findings moved, so a validation that moves nothing composes nothing.
+//
+// A use check (graph/use_checks.h) is the other cross-file finding. Which one a finding is, is
+// chosen by whether it may block a build: a use check's rows are inside the build's gate, a project
+// check's never are (they are Problems rows after the gate, project/project_findings.h: what the
+// game makes of the files there never blocks a build). The rest follows from that. A use check
+// takes the asset graph and the validation cache, keeps nothing and is made again with every
+// composition, one per asset kind (kUseChecks); a project check takes the files and no graph,
+// keeps its state, one per document type. A project check never repeats a use check's finding or
+// the graph's: menu_note_problem's list of the notes the render check leaves out (a name the
+// project lacks is the graph's reference.missing, and so on) is the instance. One fact is read both
+// ways today: which variables a menu uses, as the graph's StyleVar edges and as the render check's
+// variables_named (the %NAME%s of the menu's saved text). The graph owns it: style.unused and
+// Rename read the edges; variables_named only decides which menus to render again.
 //
 // A type's registry row makes its check (DocumentType::project_check). The row is constexpr, so the
 // instance lives with whoever validates, one per type by its DocumentTypeId (ProjectChecks: the

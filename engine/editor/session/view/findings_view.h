@@ -13,8 +13,9 @@ class ProjectChecks;
 
 // What the project's validation found, as the view shows it (ADR 0046 S13 V4; the Findings and
 // Graph concerns): the Problems rows, and what the rows were made from and the windows read too,
-// each shared (null before the first validation) and forward-declared, so a header naming the
-// view pulls none of the graph's, the asset source's or the project checks' headers.
+// each shared (made with the session, which fills them as it validates: null only in a view no
+// session made) and forward-declared, so a header naming the view pulls none of the graph's, the
+// asset source's or the project checks' headers.
 struct FindingsView {
 	// The project's current findings (scan + requirements) followed by the last action's.
 	std::vector<Diagnostic> diagnostics;
