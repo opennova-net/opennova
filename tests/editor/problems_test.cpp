@@ -903,7 +903,7 @@ static int test_locations_and_fixes() {
 	for (const Document::Collection &collection : menu->collections_of(main_window))
 		if (std::string(menu->kind_token(collection.spec.kind)) == "window" && collection.ids.size() == 2)
 			second_go = {main_window.row, collection.spec.kind, collection.ids[1]};
-	TEST_EXPECT(second_go.child && menu->record_name(second_go) == "GO" && v.documents.selection == second_go);
+	TEST_EXPECT(second_go.child && menu->record_name(second_go) == "GO" && v.documents.selection.primary == second_go);
 
 	// An ungrouped table: on the first string the game reads under another section.
 	const Diagnostic *regrouped = finding_in("strings.regrouped", "strings/ungrouped.bin");
@@ -911,7 +911,7 @@ static int test_locations_and_fixes() {
 	if (!regrouped) return 1;
 	session.handle(problem_location(*regrouped, v).request());
 	const Document *strings = session.document_for("strings/ungrouped.bin");
-	TEST_EXPECT(strings && v.documents.active == strings->path() && strings->record_name(v.documents.selection) == "MM_Cafe");
+	TEST_EXPECT(strings && v.documents.active == strings->path() && strings->record_name(v.documents.selection.primary) == "MM_Cafe");
 
 	// A table with no anim_reset row: on its first row's key; the fix opens the table and adds
 	// the row, one step Undo takes back.
@@ -927,7 +927,7 @@ static int test_locations_and_fixes() {
 	Document *adm = session.document_for("anims/noreset.adm");
 	TEST_EXPECT(session.outcome().done() && adm && adm->dirty() && adm->rows().size() == 2);
 	if (!adm) return 1;
-	TEST_EXPECT(adm->record_name(v.documents.selection) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
+	TEST_EXPECT(adm->record_name(v.documents.selection.primary) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
 	session.handle(request::undo(adm->path()));
 	TEST_EXPECT(!adm->dirty() && finding_in("animation_map.no_reset", adm->path()));
 

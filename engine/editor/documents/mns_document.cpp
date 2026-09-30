@@ -4,6 +4,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
@@ -123,6 +124,17 @@ std::string style_code(const std::string &code) {
 }
 
 } // namespace
+
+size_t StyleRow::footprint() const {
+	size_t bytes = sizeof(StyleRow) + collections_footprint() + footprint_of(native.leading_ws) +
+	               footprint_of(native.text) + footprint_of(native.eol) + footprint_of(native.directive_arg) +
+	               footprint_of(native.define_lines);
+	for (const mns::DefineLine &line : native.define_lines)
+		bytes += footprint_of(line.leading_ws) + footprint_of(line.name) + footprint_of(line.sep_ws) +
+		         footprint_of(line.chunk) + footprint_of(line.pre_comment_ws) + footprint_of(line.post_backslash_ws) +
+		         footprint_of(line.comment) + footprint_of(line.eol);
+	return bytes;
+}
 
 std::string StyleRow::name() const {
 	switch (native.kind) {
@@ -371,7 +383,8 @@ bool MnsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	return true;
 }
 
-std::shared_ptr<Node> MnsDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
+std::shared_ptr<Node> MnsDocument::make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &,
+                                             std::string &error) {
 	auto row = std::make_shared<StyleRow>();
 	row->kind = kind;
 	switch (kind) {
@@ -438,12 +451,11 @@ bool MnsDocument::edit_collection(Node &, const Edit &, const IdAllocator &, Nod
 	return false;
 }
 
-bool MnsDocument::accept_change(const Change &change, std::string &error) const {
-	// A frozen row keeps its place: only an in-place Set of its own fields passes.
-	const bool in_place = change.before && change.after && change.before->id == change.after->id &&
-	                      change.before_position == change.after_position;
-	if (!in_place) {
-		for (const Node *row : {change.before.get(), change.after.get()}) {
+bool MnsDocument::accept_step(const EditStep &step, const StagedRows &staged, std::string &error) const {
+	// A frozen row keeps its place: only a change of its own fields, in place, passes.
+	for (const RowSwap &swap : step.swaps) {
+		if (swap.in_place()) continue;
+		for (const Node *row : {swap.before.get(), swap.after.get()}) {
 			if (!row || !frozen(*row)) continue;
 			if (row->kind == kConditional)
 				error = "The #if, #else and #endif lines stay where they are: change them in the file itself.";
@@ -455,8 +467,7 @@ bool MnsDocument::accept_change(const Change &change, std::string &error) const 
 			return false;
 		}
 	}
-	std::vector<std::shared_ptr<const Node>> proposed = rows();
-	apply_change(proposed, change, true);
+	const std::vector<std::shared_ptr<const Node>> &proposed = staged.rows();
 	size_t first = 0;
 	switch (mns::reread(natives_of(proposed), kCrlf, &first)) {
 	case mns::Reread::Same: return true;

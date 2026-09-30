@@ -219,8 +219,8 @@ int structure_and_save() {
 	TEST_EXPECT(!find_definition(AssetGraph(), *document, "EXIT", elsewhere,
 			menu_window_scope(document->path(), document->rows()[1]->name())));
 	session.handle(request::open_document("main.mnu", document->locator(exit)));
-	TEST_EXPECT(view.documents.selection == exit &&
-			window_of(*document, view.documents.selection)->name == "EXIT");
+	TEST_EXPECT(view.documents.selection.primary == exit &&
+			window_of(*document, view.documents.selection.primary)->name == "EXIT");
 	return 0;
 }
 
@@ -436,17 +436,17 @@ int windows_at_depth() {
 	EditorRequest remove = request::edit_record(document->path(), op(EditOperation::Remove, exit));
 	session.handle(remove);
 	const SessionView &view = session.view();
-	TEST_EXPECT(view.documents.selection == root &&
-			view.documents.selected == std::vector<NodeAddress>{ root });
+	TEST_EXPECT(view.documents.selection.primary == root &&
+			view.documents.selection.records == std::vector<NodeAddress>{ root });
 	session.handle(request::undo(document->path()));
-	TEST_EXPECT(view.documents.selection == root && window_of(*document, exit));
+	TEST_EXPECT(view.documents.selection.primary == root && window_of(*document, exit));
 	// A window added inside TITLE is selected.
 	EditorRequest add = request::edit_record(
 			document->path(), op(EditOperation::Add, { 0, kWindow, 0 }, title.child));
 	session.handle(add);
 	TEST_EXPECT(session.last_edit_ok() &&
-			view.documents.selection.child == document->last_added() &&
-			document->ancestors(view.documents.selection).back() == title);
+			view.documents.selection.primary.child == document->last_added() &&
+			document->ancestors(view.documents.selection.primary).back() == title);
 	session.handle(request::undo(document->path()));
 	// A drag: edits sharing a gesture are one undo step, and the session validates once,
 	// when the gesture ends, however many samples it took.
@@ -724,13 +724,13 @@ int copy_and_paste() {
 	TEST_EXPECT(session.last_edit_ok() && document->identities_match());
 	second = document->rows()[1].get();
 	TEST_EXPECT(window_names(*document, *second) == std::vector<std::string>({"MAIN", "TITLE", "EXIT"}));
-	TEST_EXPECT(view.documents.selected.size() == 2 && window_of(*document, view.documents.selected[0])->name == "TITLE");
+	TEST_EXPECT(view.documents.selection.records.size() == 2 && window_of(*document, view.documents.selection.records[0])->name == "TITLE");
 	// Again into the first screen: every name taken, so each is made unique.
 	TEST_EXPECT(paste_into(*document, 0, SIZE_MAX));
 	TEST_EXPECT(window_names(*document, *document->rows()[0]) ==
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "TITLE2", "EXIT2"}));
 	TEST_EXPECT(document->collections_of({document->rows()[0]->id, kScreen, 0})[0].ids.size() == 3);
-	TEST_EXPECT(window_of(*document, view.documents.selection)->name == "TITLE2" && depth_of(*document, view.documents.selection) == 0);
+	TEST_EXPECT(window_of(*document, view.documents.selection.primary)->name == "TITLE2" && depth_of(*document, view.documents.selection.primary) == 0);
 	session.handle(request::undo(document->path()));
 	// Into another menu file.
 	session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
@@ -795,9 +795,9 @@ int duplicate_selection() {
 	TEST_EXPECT(duplicate());
 	const Node *screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) == std::vector<std::string>({"MAIN", "TITLE", "TITLE2", "EXIT", "EXIT2"}));
-	TEST_EXPECT(view.documents.selected.size() == 2 && window_of(*document, view.documents.selected[0])->name == "TITLE2" &&
-	            window_of(*document, view.documents.selected[1])->name == "EXIT2" &&
-	            window_of(*document, view.documents.selection)->name == "TITLE2");
+	TEST_EXPECT(view.documents.selection.records.size() == 2 && window_of(*document, view.documents.selection.records[0])->name == "TITLE2" &&
+	            window_of(*document, view.documents.selection.records[1])->name == "EXIT2" &&
+	            window_of(*document, view.documents.selection.primary)->name == "TITLE2");
 	TEST_EXPECT(undo());
 	// MAIN with TITLE inside it: MAIN once, with everything it holds, after itself among the roots.
 	select(main, SelectMode::Replace);
@@ -806,8 +806,8 @@ int duplicate_selection() {
 	screen = document->rows()[0].get();
 	TEST_EXPECT(window_names(*document, *screen) ==
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "MAIN2", "TITLE2", "EXIT2"}));
-	TEST_EXPECT(view.documents.selected.size() == 1 &&
-			depth_of(*document, view.documents.selection) == 0);
+	TEST_EXPECT(view.documents.selection.records.size() == 1 &&
+			depth_of(*document, view.documents.selection.primary) == 0);
 	TEST_EXPECT(undo());
 	// Two of EXIT's four APPEARANCE rows (the first and the third): each copy after its own.
 	select(child_of(*document, exit, "appearance", 0), SelectMode::Replace);

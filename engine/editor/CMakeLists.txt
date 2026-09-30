@@ -25,13 +25,14 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/create_missing.cpp
-    # model — the neutral editing core: the document lifecycle and the undo journal, what a field
-    # shows, and the find over a document's fields
+    # model — the neutral editing core: the document lifecycle and the undo journal, a batch's
+    # rows before it commits, what a field shows, and the find over a document's fields
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
@@ -118,8 +119,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
-    # imports, renames, the unsaved guard, the preferences over their store), and what Problems
-    # shows of its findings and offers to do about them
+    # imports, renames, the unsaved guard, the preferences over their store), what Problems
+    # shows of its findings and offers to do about them, and the selection (S13 D7)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
@@ -135,6 +136,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp

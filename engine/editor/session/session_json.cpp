@@ -457,13 +457,14 @@ bool texts_of(const JsonValue &json, const char *token, std::vector<std::string>
 	return true;
 }
 
-// A record's address: {row, kind, child}, each left out 0.
-bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error) {
+// A record's address: {row, kind, child}, each left out 0; `what` names it in a refusal.
+bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error,
+		const std::string &what = "address") {
 	if (!json.is_object()) {
-		error = "\"address\" must be an object {row, kind, child}.";
+		error = "\"" + what + "\" must be an object {row, kind, child}.";
 		return false;
 	}
-	if (!members_known(json, {"row", "kind", "child"}, "address", error)) return false;
+	if (!members_known(json, {"row", "kind", "child"}, what.c_str(), error)) return false;
 	NodeAddress address;
 	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row)) {
 		error = "\"row\" must be a record identity.";
@@ -587,6 +588,21 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Address: return address_from_json(json, request.address, error);
+	case F::Records: {
+		if (!json.is_array()) {
+			error = "\"records\" must be an array of addresses {row, kind, child}.";
+			return false;
+		}
+		std::vector<NodeAddress> records;
+		for (size_t i = 0; i < json.array.size(); ++i) {
+			NodeAddress address;
+			if (!address_from_json(json.array[i], address, error, "records[" + std::to_string(i) + "]"))
+				return false;
+			records.push_back(address);
+		}
+		request.records = std::move(records);
+		return true;
+	}
 	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
 	case F::Mode:
 		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
@@ -639,6 +655,10 @@ bool field_to_json(RequestFieldId id, const EditorRequest &request, JsonValue &o
 	case F::Address:
 		out = address_to_json(request.address);
 		return request.address != NodeAddress();
+	case F::Records:
+		out = JsonValue::make_array();
+		for (const NodeAddress &address : request.records) out.push(address_to_json(address));
+		return !request.records.empty();
 	case F::PasteAt:
 		out = paste_at_to_json(request.paste_at);
 		return !(request.paste_at == PasteAt());
@@ -1089,9 +1109,9 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	}
 	out.set("documents", std::move(documents));
 	out.set("active_document", json_string(view.documents.active));
-	out.set("selection", address_to_json(view.documents.selection));
+	out.set("selection", address_to_json(view.documents.selection.primary));
 	JsonValue selected = JsonValue::make_array();
-	for (const NodeAddress &address : view.documents.selected)
+	for (const NodeAddress &address : view.documents.selection.records)
 		selected.push(address_to_json(address));
 	out.set("selected", std::move(selected));
 	out.set("clipboard_bytes", json_number(double(view.documents.clipboard.size())));

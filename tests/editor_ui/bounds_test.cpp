@@ -211,7 +211,7 @@ struct Sweep {
 		if (document && record && find_definition(AssetGraph(), *document, record, address)) {
 			EditorRequest select = request::select_record(document->path(), address);
 			session.handle(select);
-		} else if (document && !record && !document->rows().empty() && !session.view().documents.selection.row) {
+		} else if (document && !record && !document->rows().empty() && !session.view().documents.selection.primary.row) {
 			EditorRequest select = request::select_record(document->path(),
 					{ document->rows().front()->id, document->rows().front()->kind, 0 });
 			session.handle(select);
@@ -223,12 +223,12 @@ struct Sweep {
 	void unfold() {
 		const Document *document = session.document_for(view.documents.active);
 		ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
-		if (!document || !inspector || !view.documents.selection.row) return;
-		NodeAddress owner = view.documents.selection;
+		if (!document || !inspector || !view.documents.selection.primary.row) return;
+		NodeAddress owner = view.documents.selection.primary;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
 		for (const InspectorSection &section :
-				plan_inspector(*document, view.documents.selection, owner, ""))
+				plan_inspector(*document, view.documents.selection.primary, owner, ""))
 			if (!section.key.empty()) inspector->StateStorage.SetInt(item_id(inspector->ID, {("###" + section.key).c_str()}), 1);
 		if (ImGuiWindow *window = ImGui::FindWindowByName("Document"))
 			window->StateStorage.SetInt(item_id(document_tab_id(document->path()), {"spawn"}), 1);
@@ -238,15 +238,15 @@ struct Sweep {
 	// form has none or it did not open.
 	bool open_picker() {
 		const Document *document = session.document_for(view.documents.active);
-		if (!document || !view.documents.selection.row) return false;
-		NodeAddress owner = view.documents.selection;
+		if (!document || !view.documents.selection.primary.row) return false;
+		NodeAddress owner = view.documents.selection.primary;
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
 		for (const InspectorSection &section :
-				plan_inspector(*document, view.documents.selection, owner, ""))
+				plan_inspector(*document, view.documents.selection.primary, owner, ""))
 			for (const FieldUse &field : section.fields) {
 				if (field.reference == ReferenceKind::None || field.schema->type != FieldType::Text) continue;
-				if (field.schema->optional && !document->present(view.documents.selection, field.schema->id)) continue;
+				if (field.schema->optional && !document->present(view.documents.selection.primary, field.schema->id)) continue;
 				ui.activate(item_id(Ui::window_id("Inspector"), {section.key.c_str(), "fields", field.schema->id.c_str(), "Pick"}));
 				ui.frames(2);
 				return GImGui->OpenPopupStack.Size > 0;

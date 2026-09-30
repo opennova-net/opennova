@@ -248,6 +248,19 @@ ModelRow::ModelRow() {
 
 std::shared_ptr<Node> ModelRow::clone() const { return std::make_shared<ModelRow>(*this); }
 
+size_t ModelRow::footprint() const {
+	size_t bytes = sizeof(ModelRow) + collections_footprint() + footprint_of(lods) + footprint_of(materials) +
+	               footprint_of(lights) + footprint_of(user_points) + footprint_of(registers) + footprint_of(frames);
+	for (const ModelLod &lod : lods) bytes += footprint_of(lod.panm) + footprint_of(lod.panm_ids);
+	for (const ModelMaterial &material : materials) bytes += footprint_of(material.texture_ids);
+	return bytes;
+}
+
+size_t CollisionRow::footprint() const {
+	return sizeof(CollisionRow) + collections_footprint() + footprint_of(sections) + footprint_of(volumes) +
+	       footprint_of(faces) + footprint_of(occlusion);
+}
+
 void ModelRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
 	for (auto &collection : collections)
 		for (NodeId &id : collection) fn(id);
@@ -566,7 +579,8 @@ bool ModelDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 	return true;
 }
 
-std::shared_ptr<Node> ModelDocument::make_node(NodeKind, NodeId, std::string &error) {
+std::shared_ptr<Node> ModelDocument::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+                                               std::string &error) {
 	error = "A model keeps its model and collision rows; add records inside them.";
 	return nullptr;
 }
@@ -613,8 +627,9 @@ bool ModelDocument::set_field(Node &node, const NodeAddress &address, const std:
 	return true;
 }
 
-bool ModelDocument::accept_change(const Change &change, std::string &error) const {
-	if (!change.before || !change.after) {
+bool ModelDocument::accept_step(const EditStep &step, const StagedRows &, std::string &error) const {
+	for (const RowSwap &swap : step.swaps) {
+		if (swap.before && swap.after) continue;
 		error = "A model keeps its model and collision rows.";
 		return false;
 	}

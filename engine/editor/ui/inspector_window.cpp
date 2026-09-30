@@ -712,7 +712,7 @@ void records_table(Workspace &workspace, ReferencePicker &picker, const Document
 			ImGui::TableNextRow(ImGuiTableRowFlags_None, row);
 			ImGui::PushID(static_cast<int>(address.child));
 			ImGui::TableNextColumn();
-			const bool on = holds(workspace.view().documents.selected, address);
+			const bool on = workspace.view().documents.selection.holds(address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
 			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
@@ -742,7 +742,7 @@ void records_list(Workspace &workspace, const Document &document, const NodeAddr
 		const std::string name =
 		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
 		                    ImGui::GetContentRegionAvail().x);
-		if (ImGui::Selectable((name + "###record").c_str(), holds(workspace.view().documents.selected, address))) select_row(workspace, document, address);
+		if (ImGui::Selectable((name + "###record").c_str(), workspace.view().documents.selection.holds(address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
 		ui_kit::tooltip_lazy([&] { return record_tip(document, address); });
 		row_menu(workspace, document, records.spec, address, i, records.ids.size());
@@ -771,7 +771,7 @@ void collection_block(Workspace &workspace, ReferencePicker &picker, const Docum
 	}
 	size_t selected = SIZE_MAX;
 	for (size_t i = 0; i < ids.size(); ++i)
-		if (workspace.view().documents.selection.kind == spec.kind && workspace.view().documents.selection.child == ids[i]) selected = i;
+		if (workspace.view().documents.selection.primary.kind == spec.kind && workspace.view().documents.selection.primary.child == ids[i]) selected = i;
 	if (!spec.fixed) {
 		ImGui::BeginDisabled(document.blocked());
 		ui_kit::WrapRow row;
@@ -950,16 +950,16 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	// The fields asked to show since the Inspector last drew, each taken now (read below).
 	const std::vector<HeldReveal> reveals = events_.take();
 	const Document *document = active(view);
-	if (!document || !view.documents.selection.row) {
+	if (!document || !view.documents.selection.primary.row) {
 		ui_kit::empty_state("Select a record.", "Its fields and lists show here.");
 		return;
 	}
-	const Node *row = document->row(view.documents.selection.row);
+	const Node *row = document->row(view.documents.selection.primary.row);
 	if (!row) {
 		ui_kit::empty_state("The selected record was removed.");
 		return;
 	}
-	const NodeAddress selection = view.documents.selection;
+	const NodeAddress selection = view.documents.selection.primary;
 	// A field a request asks to show (a Problems row's): each ask on the record selected now, in
 	// this document, shown once, the filter cleared so nothing hides it; the same row clicked
 	// again is another ask, shown again. An ask about a record no longer selected shows nothing,
@@ -990,7 +990,7 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	breadcrumb(workspace_, *document, selection);
 	// Several records of one kind: the fields they share, each change set on every one.
 	Targets together{selection};
-	for (const NodeAddress &address : view.documents.selected)
+	for (const NodeAddress &address : view.documents.selection.records)
 		if (address != selection) together.push_back(address);
 	const bool one_kind = std::all_of(together.begin(), together.end(),
 	                                  [&](const NodeAddress &address) { return address.kind == selection.kind; });

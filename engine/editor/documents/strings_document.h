@@ -32,6 +32,7 @@ struct StringsSection : Node {
 	StringsSection();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<StringsSection>(*this); }
 	std::string name() const override { return section_name; }
+	size_t footprint() const override;
 };
 
 class StringsDocument : public Document {
@@ -57,13 +58,15 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	// A duplicated section is named anew: under its original's name no lookup would find it.
-	void prepare_duplicate(Node &copy) const override;
+	void prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const override;
 
 private:
 	// A string's index in its section as the document's index places it (SIZE_MAX for none):

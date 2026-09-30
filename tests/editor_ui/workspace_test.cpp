@@ -261,7 +261,7 @@ void test_workspace_layout() {
 	editor_test::own(v.project.scan).index();
 	v.documents.open.push_back(catalog);
 	v.documents.active = catalog->path();
-	v.documents.selection = { catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item),
+	v.documents.selection.primary = { catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item),
 		0 };
 	windows.set_view(&v);
 	for (uint64_t i = 9; i < 15; ++i) frame(windows, i);
@@ -506,7 +506,7 @@ void test_view_prompt_outlives_its_tab() {
 	CHECK(ask(reread), "asked about the menu read again");
 	v.documents.open = {b};
 	v.documents.active = b->path();
-	v.documents.select_only({});
+	v.documents.selection.select_only(v.documents.active, NodeAddress());
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
@@ -1876,8 +1876,8 @@ void test_view_event_mailboxes() {
 	ui.frames(3);
 	CHECK(documents->held_events(b->path()) == 1, "held while b's view does not draw");
 	v.documents.active = b->path();
-	v.documents.selection = screen;
-	v.documents.selected = { screen };
+	v.documents.selection.primary = screen;
+	v.documents.selection.records = { screen };
 	v.revisions.touch(ViewConcern::ActiveDocument);
 	ui.frames(4);
 	CHECK(documents->held_events(b->path()) == 0, "taken as b's view draws");

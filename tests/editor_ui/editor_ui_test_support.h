@@ -321,8 +321,8 @@ inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 }
 
 inline void select_in(SessionView &v, const NodeAddress &address) {
-	v.documents.selection = address;
-	v.documents.selected = {address};
+	v.documents.selection.primary = address;
+	v.documents.selection.records = {address};
 	v.revisions.touch(ViewConcern::Selection);
 }
 

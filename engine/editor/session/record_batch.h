@@ -14,8 +14,8 @@ class ProjectSession;
 // Edits named the way the editor MCP names records (ADR 0046 S9m, `editor_menu`): a record
 // by its identity, a record kind by its token, and a record the batch itself makes by the
 // label its edit gave it (the core's batch_made underneath), so one undo step can add a
-// window and fill it in: its fields, its ACTIONs, a SOUND, an ITEM. Any document type; one
-// row per batch, as every batch.
+// window and fill it in: its fields, its ACTIONs, a SOUND, an ITEM. Any document type; any rows
+// (S13 D7), as every batch.
 struct RecordBatch {
 	std::vector<Edit> edits;
 	// One per edit that makes a record (an add, a duplicate), in order: the label it gave

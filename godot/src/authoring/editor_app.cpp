@@ -801,7 +801,7 @@ bool EditorApp::select_record(int64_t p_id, const String &p_mode) {
 PackedInt64Array EditorApp::get_selected_records() const {
 	PackedInt64Array ids;
 	if (session_)
-		for (const NodeAddress &address : session_->view().documents.selected) ids.push_back(identity_of(address));
+		for (const NodeAddress &address : session_->view().documents.selection.records) ids.push_back(identity_of(address));
 	return ids;
 }
 bool EditorApp::copy_records() {

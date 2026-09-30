@@ -243,7 +243,7 @@ bool menu_preview_drag(ProjectSession &session, const MenuPreviewSnapshot &snaps
 	if (!held.child) return false;
 	const SessionView &view = session.view();
 	const std::vector<NodeAddress> selected = view.documents.active == document.path()
-			? selected_windows(document, view.documents.selection, view.documents.selected,
+			? selected_windows(document, view.documents.selection.primary, view.documents.selection.records,
 					  snapshot.screen->id)
 			: std::vector<NodeAddress>();
 	LayoutPress press;

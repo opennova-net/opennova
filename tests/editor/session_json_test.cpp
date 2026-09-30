@@ -233,6 +233,17 @@ static int test_request_round_trip() {
 	const EditorRequest select = request::select_record("menus/main.mnu", {7, 1, 9}, SelectMode::Toggle);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(select)).c_str(), parsed));
 	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.mode == SelectMode::Toggle && back.address == select.address);
+	// A marquee's records with its primary (S13 D7), of any rows; one that is no address is refused
+	// by its place, and records that are no list by their name.
+	const EditorRequest marquee =
+	        request::select_record("menus/main.mnu", {7, 1, 9}, SelectMode::Add, {{8, 0, 0}, {9, 1, 12}});
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(marquee)).c_str(), parsed));
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == marquee && back.records.size() == 2 &&
+	            back.records[1] == NodeAddress({9, 1, 12}));
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":[{\"row\":2},{\"rows\":3}]}", back)
+	                    .find("records[1]") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":{\"row\":2}}", back)
+	                    .find("records") != std::string::npos);
 	// A Paste's place: its row, its owner and its index; none named, after the selection.
 	TEST_EXPECT(request_error("{\"kind\":\"paste\",\"paste_at\":{\"parent\":4,\"position\":1}}", back).empty());
 	TEST_EXPECT(back.kind == EditorRequestKind::Paste && back.paste_at.parent == 4 && back.paste_at.position == 1 &&
@@ -447,6 +458,7 @@ static EditorRequest table_sample(EditorRequestKind kind) {
 			break;
 		}
 		case F::Address: out.address = {7, 1, 9}; break;
+		case F::Records: out.records = {{7, 1, 9}, {8, 0, 0}}; break;
 		case F::PasteAt: out.paste_at = PasteAt{3, 4, 1}; break;
 		case F::Mode: out.mode = SelectMode::Toggle; break;
 		case F::Choice: out.choice = UnsavedChoice::Discard; break;
@@ -977,7 +989,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
 	std::vector<JsonValue> asked = reveals();
 	const JsonValue *asked_at = asked.size() == 1 ? asked[0].get("address") : nullptr;
-	TEST_EXPECT(view.documents.selection == title_address && asked.size() == 1 &&
+	TEST_EXPECT(view.documents.selection.primary == title_address && asked.size() == 1 &&
 			asked[0].get_string("path", "") == document->path() &&
 			asked[0].get_string("field", "") == "string.value" && asked[0].get("flag") == nullptr &&
 			asked[0].get("tag") == nullptr);
@@ -1044,6 +1056,19 @@ static int test_over_a_session() {
 	TEST_EXPECT(json.get("selected") && json.get("selected")->array.size() == 2 &&
 	            uint64_t(json.get("selection")->get_number("child", 0)) == exit_address.child);
 	TEST_EXPECT(json.get_int("clipboard_bytes", -1) == 0);
+	// A marquee through JSON (S13 D7): the records named with it, the primary the one named, the
+	// screen row with them (any rows of the document).
+	const auto address_json = [](const NodeAddress &address) {
+		return "{\"row\":" + std::to_string(address.row) + ",\"kind\":" + std::to_string(address.kind) +
+		       ",\"child\":" + std::to_string(address.child) + "}";
+	};
+	const NodeAddress screen_row{title_address.row, 0, 0};
+	const std::string marquee_json = "{\"kind\":\"select_record\",\"address\":" + address_json(exit_address) +
+	                                 ",\"records\":[" + address_json(title_address) + "," + address_json(screen_row) + "]}";
+	TEST_EXPECT(request_error(marquee_json.c_str(), request).empty() && session.handle(request));
+	json = session_view_to_json(view);
+	TEST_EXPECT(json.get("selected") && json.get("selected")->array.size() == 3 &&
+	            uint64_t(json.get("selection")->get_number("child", 0)) == exit_address.child);
 	const std::string clear = "{\"kind\":\"edit_record\",\"edits\":[{\"operation\":\"clear\",\"row\":" +
 	                          std::to_string(title_address.row) + ",\"kind\":" + std::to_string(title_address.kind) +
 	                          ",\"child\":" + std::to_string(title_address.child) + ",\"field\":\"position.left\"}]}";
@@ -1246,6 +1271,7 @@ namespace {
 struct MetadataRow : Node {
 	std::shared_ptr<Node> clone() const override { return std::make_shared<MetadataRow>(*this); }
 	std::string name() const override { return "light"; }
+	size_t footprint() const override { return sizeof(MetadataRow); }
 };
 
 class MetadataDocument : public Document {
@@ -1315,7 +1341,8 @@ protected:
 		                           : Value(std::string("pilot"));
 		return true;
 	}
-	std::shared_ptr<Node> make_node(NodeKind, NodeId, std::string &error) override {
+	std::shared_ptr<Node> make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+	                                std::string &error) override {
 		error = "No records are added here.";
 		return nullptr;
 	}

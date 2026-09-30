@@ -713,8 +713,8 @@ void test_inspector_ui() {
 	// S9k2: BACK and TITLE selected together (BACK the primary): the fields they share, the
 	// type marked mixed; a switch sets both in one batch.
 	const NodeAddress title = named(*document, "TITLE");
-	v.documents.selection = back;
-	v.documents.selected = {back, title};
+	v.documents.selection.primary = back;
+	v.documents.selection.records = {back, title};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	ui.drain();
@@ -1287,8 +1287,8 @@ void test_preview_several_windows_ui() {
 	      "Ctrl+click toggles a window");
 
 	// BOX and OTHER selected, OTHER the primary: a drag of BOX moves both, snapped by BOX.
-	v.documents.selection = other;
-	v.documents.selected = {box, other};
+	v.documents.selection.primary = other;
+	v.documents.selection.records = {box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1347,14 +1347,14 @@ void test_preview_several_windows_ui() {
 	      "Ctrl+V pastes after the primary window (OTHER)");
 	// Copy, Cut and Duplicate take the selection as it is: with the screen among it (or a
 	// window's list row) the preview raises none of them, as the menu view does not.
-	v.documents.selected = {screen_address, box, other};
+	v.documents.selection.records = {screen_address, box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
 	CHECK(!only(chord(ImGuiKey_C), EditorRequestKind::Copy) && !only(chord(ImGuiKey_X), EditorRequestKind::Cut) &&
 	              !only(chord(ImGuiKey_D), EditorRequestKind::Duplicate),
 	      "the screen selected with the windows: no Copy, Cut or Duplicate");
-	v.documents.selected = {box, other};
+	v.documents.selection.records = {box, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -1379,8 +1379,8 @@ void test_preview_several_windows_ui() {
 	// MAIN and OTHER selected, OTHER the primary: a press on BOX (not selected, but inside
 	// MAIN's rect) is a press inside a selected window, so the drag moves MAIN (OTHER rides
 	// inside it), and MAIN becomes the primary with OTHER still selected.
-	v.documents.selection = other;
-	v.documents.selected = {main, other};
+	v.documents.selection.primary = other;
+	v.documents.selection.records = {main, other};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(2);
 	ui.drain();
@@ -2123,7 +2123,7 @@ void test_styles_lines_listed() {
 	session.handle(request::open_record(location.path, location.record, location.field));
 	ui.frames(2);
 	ui.drain();
-	CHECK(v.documents.selection.row == comment, "the Problems row selects the comment");
+	CHECK(v.documents.selection.primary.row == comment, "the Problems row selects the comment");
 	for (const char *tool : {"Duplicate", "Remove", "Up", "Down"}) CHECK(press(tool).empty(), tool);
 	CHECK(text() == original, "no row tool acts on a line the table does not list");
 	const std::vector<EditorRequest> added = press("Add variable");

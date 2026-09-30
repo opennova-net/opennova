@@ -90,7 +90,8 @@ bool parse_edit(const JsonValue &json, size_t index, const Document &document, s
 		return false;
 	}
 	// Operations the core knows that a batch does not send: an apply's change is made in C++ by
-	// its document type (Edit::payload, S13 D6); a paste and a file-wide value go one at a time.
+	// its document type (Edit::payload, S13 D6); a paste carries the session's clipboard (the paste
+	// request's) and a file-wide value goes by edit_record's own form.
 	if (edit.operation == EditOperation::Apply) {
 		error = "An apply edit carries a change its document type makes in C++: a batch cannot "
 		        "send one.";

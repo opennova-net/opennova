@@ -6,6 +6,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <runtime/menu/menu_screen_inputs.h>
 #include <runtime/menu/menu_text_tables.h>
@@ -585,6 +586,43 @@ NodeKind menu_kind(const std::string &token) { return kind_of(token.c_str()); }
 
 MenuScreen::MenuScreen() { kind = kScreen; }
 
+namespace {
+
+// What a window holds of its own beyond its object: its words, its lists, its children and its
+// parts (each window it holds counted whole).
+size_t window_content(const mnu::Window &window) {
+	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) + footprint_of(window.orientation) +
+	               footprint_of(window.text_rsrc) + footprint_of(window.private_data) + footprint_of(window.appearances) +
+	               footprint_of(window.sounds) + footprint_of(window.actions) + footprint_of(window.datasources) +
+	               footprint_of(window.hotkeys) + footprint_of(window.shuttle) + footprint_of(window.scrollup) +
+	               footprint_of(window.scrolldown) + footprint_of(window.extras) +
+	               footprint_of(window.extra_attributes) + footprint_of(window.children);
+	for (const std::string &source : window.datasources) bytes += footprint_of(source);
+	for (const mnu::Window &child : window.children) bytes += window_content(child);
+	for (const mnu::WindowPart *part : {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
+		if (const mnu::Window *held = part->latent()) bytes += sizeof(mnu::Window) + window_content(*held);
+	return bytes;
+}
+
+size_t ids_content(const RecordIds &ids) {
+	size_t bytes = footprint_of(ids.lists);
+	for (const std::vector<RecordIds> &list : ids.lists) {
+		bytes += footprint_of(list);
+		for (const RecordIds &item : list) bytes += ids_content(item);
+	}
+	return bytes;
+}
+
+} // namespace
+
+size_t MenuScreen::footprint() const {
+	size_t bytes = sizeof(MenuScreen) + collections_footprint() + footprint_of(screen.name) +
+	               footprint_of(screen.roots) + footprint_of(roots);
+	for (const mnu::Window &root : screen.roots) bytes += window_content(root);
+	for (const RecordIds &root : roots) bytes += ids_content(root);
+	return bytes;
+}
+
 // The clone shares the places (immutable, and right for the clone until a structural edit
 // or new identities make them again).
 std::shared_ptr<Node> MenuScreen::clone() const { return std::make_shared<MenuScreen>(*this); }
@@ -1060,12 +1098,13 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	return true;
 }
 
-std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
+std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
+                                             std::string &error) {
 	if (kind != kScreen) { error = "A menu adds screens at the top level; windows nest under a screen."; return nullptr; }
 	auto row = std::make_shared<MenuScreen>();
 	// A name no other screen has: the game finds the last of two screens of one name, so a
 	// new screen under an existing one's name would stand in for it (prepare_duplicate).
-	row->screen.name = unique_name(menu_screen_names(rows()), "SCREEN" + std::to_string(id));
+	row->screen.name = unique_name(menu_screen_names(rows), "SCREEN" + std::to_string(id));
 	mnu::Window main;
 	main.name = "MAIN";
 	main.type = mnu::WindowType::Window;
@@ -1277,15 +1316,17 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 // "the last of a name is the one found"), so a copy keeping the original's name would take
 // its place for every ACTION naming it: the copy is renamed, compared as the lookups
 // compare names.
-void MnuDocument::prepare_duplicate(Node &copy) const {
+void MnuDocument::prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
 	mnu::Screen &screen = screen_of(copy).screen;
-	screen.name = unique_name(menu_screen_names(rows()), screen.name);
+	screen.name = unique_name(menu_screen_names(rows), screen.name);
 }
 
 // An editor rule, as a screen keeps one root window: a menu with no screen has nothing
 // to show, so the last screen stays (the menu view's Remove waits for a second one).
-bool MnuDocument::accept_change(const Change &change, std::string &error) const {
-	if (change.before && !change.after && rows().size() == 1) {
+bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
+	if (rows.size() != 0) return true;
+	for (const RowSwap &swap : step.swaps) {
+		if (!swap.before || swap.after) continue;
 		error = "A menu keeps at least one screen.";
 		return false;
 	}

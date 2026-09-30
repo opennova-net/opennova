@@ -123,8 +123,8 @@ public:
 	bool duplicate_record(int64_t p_id);
 	bool move_record(int64_t p_id, int p_position, int64_t p_parent = 0);
 	// The selection: a record selected ("replace", "add" to it, "toggle" in or out of it;
-	// the selected records stay inside one row), the selected identities (the primary
-	// last selected among them).
+	// the selected records may be of any rows), the selected identities (the primary
+	// among them).
 	bool select_record(int64_t p_id, const String &p_mode = "replace");
 	PackedInt64Array get_selected_records() const;
 	// The clipboard: the selected records copied, or cut (copied, then removed as one

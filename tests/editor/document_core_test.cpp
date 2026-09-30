@@ -6,12 +6,15 @@
 // reparent; the refusals (out of the row, into itself, a fixed collection, a wrong kind,
 // a stale identity, Clear on a field that is always written); a Move that changes
 // nothing records nothing (B5); a batch is one undo step and undo swaps the identical row
-// back; coalesced batches and gestures fold (never across rows, never over the saved
-// checkpoint); the clipboard round trip through copy() and a Paste; the selection model
-// the session keeps (SessionView) repaired after edits and undo; the type's veto on a
-// change (accept_change) refusing any edit before it commits; a typing burst one step, a new
-// name its record's edit alone; one step over several changes undone and redone as one; a
-// batch filling in the records it makes (batch_made). S11a: the saved baseline and what
+// back; coalesced batches and gestures fold (never over the saved checkpoint); the clipboard
+// round trip through copy() and a Paste; the type's veto on a step (accept_step) refusing any
+// batch before it commits; a typing burst one step, a new name its record's edit alone; a
+// batch filling in the records it makes (batch_made). S13 D7: a batch over several rows one
+// step (what S9l's follow did), mixing rows added, duplicated, removed, moved and pasted at
+// the top, the file-wide state and records' fields, undone and redone byte for byte; 500 rows
+// of 5,000 edited in one batch cloned once each; a gesture folding over every row it changes;
+// the history's steps and what changed since a state; its budget; the selection (Selection)
+// over any rows, repaired asking only for the rows a step touched. S11a: the saved baseline and what
 // changed since it (a field, a record, the file-wide state, the edits that give a field
 // back), and the canonical rewrite. S11f: a document read from bytes alone has the rows a
 // file's load gives and no file to save to. S13 D6: a change the type makes in C++ (an Apply
@@ -28,15 +31,18 @@
 #include <cstdio>
 #include <functional>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
+#include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
-#include <editor/session/view/session_view.h>
+#include <editor/session/selection.h>
 
 #include "common/test_expect.h"
 #include "editor/blob_document.h"
@@ -71,6 +77,10 @@ struct FakeGroup : Node {
 	FakeGroup() { kind = kGroup; }
 	std::shared_ptr<Node> clone() const override { return std::make_shared<FakeGroup>(*this); }
 	std::string name() const override { return title; }
+	size_t footprint() const override {
+		return sizeof(FakeGroup) + collections_footprint() + footprint_of(title) + footprint_of(header) +
+		       footprint_of(items);
+	}
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override {
 		fn(header_id);
 		std::function<void(FakeItem &)> item = [&](FakeItem &entry) {
@@ -220,10 +230,20 @@ public:
 		return result;
 	}
 	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<FakeDocument>(*this); }
-	// The payload: "items" or "leaves", then the records in the file's own form.
+	// The payload: "groups", "items" or "leaves", then the records in the file's own form.
 	std::string copy(const std::vector<NodeAddress> &records) const override {
 		if (records.empty()) return std::string();
 		const NodeKind kind = records.front().kind;
+		if (kind == kGroup) {
+			std::string payload = "groups\n";
+			for (const NodeAddress &record : records) {
+				if (record.kind != kGroup || record.child || !row(record.row)) return std::string();
+				const FakeGroup &group = group_of(record.row);
+				payload += "G " + group.title + "\nH " + group.header + "\n";
+				for (const FakeItem &item : group.items) write_item(item, 1, payload);
+			}
+			return payload;
+		}
 		if (kind != kItem && kind != kLeaf) return std::string();
 		std::string payload = kind == kItem ? "items\n" : "leaves\n";
 		for (const NodeAddress &record : records) {
@@ -297,7 +317,8 @@ protected:
 		}
 		return true;
 	}
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId, std::string &error) override {
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+	                                std::string &error) override {
 		if (kind != kGroup) { error = "Groups are the rows."; return nullptr; }
 		auto group = std::make_shared<FakeGroup>();
 		group->title = "new";
@@ -455,8 +476,37 @@ protected:
 		state = note;
 		return true;
 	}
-	bool accept_change(const Change &change, std::string &error) const override {
-		if (!veto || veto(change)) return true;
+	// Groups pasted at the top, each under a title no row has (the title, then the title and a
+	// number); the payload of any other records refused.
+	bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
+	                std::vector<std::shared_ptr<Node>> &out, std::string &error) override {
+		const auto *payload = std::get_if<std::string>(&edit.value);
+		if (!payload || payload->rfind("groups\n", 0) != 0) {
+			error = "Only groups paste at the top.";
+			return false;
+		}
+		std::vector<std::shared_ptr<Node>> groups;
+		std::shared_ptr<const FileState> state;
+		std::vector<SourceIssue> issues;
+		Diagnostic why;
+		const std::string body = payload->substr(7);
+		if (!parse(std::vector<uint8_t>(body.begin(), body.end()), groups, state, issues, why)) {
+			error = "Not a fake clipboard.";
+			return false;
+		}
+		std::set<std::string> taken;
+		for (const auto &row : rows) taken.insert(row->name());
+		for (auto &node : groups) {
+			FakeGroup &group = static_cast<FakeGroup &>(*node);
+			const std::string stem = group.title;
+			for (int n = 2; taken.count(group.title); ++n) group.title = stem + std::to_string(n);
+			taken.insert(group.title);
+			out.push_back(node);
+		}
+		return true;
+	}
+	bool accept_step(const EditStep &step, const StagedRows &, std::string &error) const override {
+		if (!veto || veto(step)) return true;
 		error = "Vetoed.";
 		return false;
 	}
@@ -508,7 +558,7 @@ protected:
 	}
 
 public:
-	std::function<bool(const Change &)> veto; // false refuses the change (unset: every change is accepted)
+	std::function<bool(const EditStep &)> veto; // false refuses the step (unset: every step is accepted)
 	const std::string &game_name() const { return game(); }
 
 private:
@@ -573,6 +623,9 @@ constexpr NodeKind kLine = 0;
 // the field must never copy.
 constexpr size_t kTags = 252;
 size_t g_line_clones = 0, g_line_reads = 0;
+// What each line says it holds besides its words (S13 D7's budget test: a line of many bytes
+// without allocating them).
+size_t g_line_heft = 0;
 
 struct FlatLine : Node {
 	std::string title;
@@ -584,6 +637,7 @@ struct FlatLine : Node {
 		return std::make_shared<FlatLine>(*this);
 	}
 	std::string name() const override { return title; }
+	size_t footprint() const override { return sizeof(FlatLine) + footprint_of(title) + footprint_of(tag) + g_line_heft; }
 };
 
 // One line per row, "L <title> <weight> <tag>"; each read of a field counted.
@@ -658,7 +712,10 @@ protected:
 		}
 		return true;
 	}
-	std::shared_ptr<Node> make_node(NodeKind, NodeId, std::string &) override { return std::make_shared<FlatLine>(); }
+	std::shared_ptr<Node> make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+	                                std::string &) override {
+		return std::make_shared<FlatLine>();
+	}
 	bool set_field(Node &node, const NodeAddress &, const std::string &field, const Value &value,
 	               std::string &error) override {
 		auto &line = static_cast<FlatLine &>(node);
@@ -903,10 +960,11 @@ static int test_add_with_a_value() {
 	return 0;
 }
 
-// The type's veto (accept_change) sees every change before it commits, the rows added,
-// removed, moved and duplicated included (which never reach the type otherwise), as the
-// row swap it is; a refused one commits nothing and leaves the history and last_added as
-// they were.
+// The type's veto (accept_step) sees every batch's step before it commits, the rows added,
+// removed, moved and duplicated included (which never reach the type otherwise), as the swaps it
+// is (a row added: no before; removed: no after; moved: taken out and put back; any other in
+// place), with the rows as the step leaves them; a refused one commits nothing and leaves the
+// history and last_added as they were.
 static int test_veto() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -916,9 +974,9 @@ static int test_veto() {
 	const NodeId added = document.last_added();
 	const uint64_t revision = document.revision();
 	const std::string text = document.serialize().text;
-	std::vector<Change> seen;
-	document.veto = [&](const Change &change) {
-		seen.push_back(change);
+	std::vector<EditStep> seen;
+	document.veto = [&](const EditStep &step) {
+		seen.push_back(step);
 		return false;
 	};
 	TEST_EXPECT(!document.apply(make(EditOperation::Add, {0, kGroup, 0}), error) && error.code == "document.structure" &&
@@ -928,19 +986,36 @@ static int test_veto() {
 	TEST_EXPECT(!document.apply(make(EditOperation::Duplicate, fake.beta, 0, 2), error));
 	TEST_EXPECT(!document.apply(make(EditOperation::Add, {fake.alpha.row, kItem, 0}, fake.a1.child), error));
 	TEST_EXPECT(!document.apply(set(fake.y, "name", std::string("z")), error) && error.code == "document.structure");
+	TEST_EXPECT(!document.apply({set(fake.y, "name", std::string("z")), set(fake.b1, "name", std::string("c")),
+	                             make(EditOperation::Add, {0, kGroup, 0}, 0, 0)},
+	                            error) &&
+	            error.code == "document.structure");
 	TEST_EXPECT(document.revision() == revision && document.last_added() == added && document.serialize().text == text &&
 	            document.rows().size() == 2);
-	TEST_EXPECT(seen.size() == 6);
-	if (seen.size() == 6) {
-		TEST_EXPECT(!seen[0].before && seen[0].after && seen[0].after_position == 2);
-		TEST_EXPECT(seen[1].before && seen[1].before->id == fake.beta.row && !seen[1].after);
-		TEST_EXPECT(seen[2].before && seen[2].after && seen[2].before_position == 1 && seen[2].after_position == 0);
-		TEST_EXPECT(!seen[3].before && seen[3].after && seen[3].after->id != fake.beta.row);
-		TEST_EXPECT(seen[4].before && seen[4].after && seen[4].before->id == fake.alpha.row && seen[4].after->id == fake.alpha.row);
-		TEST_EXPECT(seen[5].before && seen[5].after && seen[5].before_position == 0);
+	TEST_EXPECT(seen.size() == 7);
+	const auto one = [&](size_t i) -> const RowSwap & { return seen[i].swaps.front(); };
+	if (seen.size() == 7 && std::all_of(seen.begin(), seen.begin() + 6, [](const EditStep &s) { return s.swaps.size() == 1; })) {
+		TEST_EXPECT(!one(0).before && one(0).after && one(0).after_position == 2 && seen[0].changes_rows());
+		TEST_EXPECT(one(1).before && one(1).before->id == fake.beta.row && !one(1).after && one(1).before_position == 1);
+		TEST_EXPECT(one(2).moved && one(2).before == one(2).after && one(2).before_position == 1 && one(2).after_position == 0);
+		TEST_EXPECT(!one(3).before && one(3).after && one(3).after->id != fake.beta.row && one(3).after_position == 2);
+		TEST_EXPECT(one(4).in_place() && one(4).before->id == fake.alpha.row && one(4).after->id == fake.alpha.row &&
+		            !seen[4].changes_rows());
+		TEST_EXPECT(one(5).in_place() && one(5).before_position == 0 && one(5).after_position == 0);
+		// Two rows changed and one put in first: each kept row's index shifts, still in place.
+		TEST_EXPECT(seen[6].swaps.size() == 3 && seen[6].changes_rows());
+		for (const RowSwap &swap : seen[6].swaps)
+			TEST_EXPECT(swap.before ? swap.in_place() && swap.after_position == swap.before_position + 1
+			                        : swap.after && swap.after_position == 0);
+	} else {
+		TEST_EXPECT(false);
 	}
 	// Accepted: the same Remove commits.
-	document.veto = [](const Change &change) { return !(change.before && !change.after && change.before_position == 0); };
+	document.veto = [](const EditStep &step) {
+		for (const RowSwap &swap : step.swaps)
+			if (swap.before && !swap.after && swap.before_position == 0) return false;
+		return true;
+	};
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.beta), error) && document.rows().size() == 1);
 	TEST_EXPECT(!document.apply(make(EditOperation::Remove, fake.alpha), error) && document.rows().size() == 1);
 	document.veto = nullptr;
@@ -972,12 +1047,14 @@ static int test_batches_and_gestures() {
 	// removed, then its leaf, is refused, and nothing is committed.
 	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.a1), make(EditOperation::Remove, fake.x)}, error) &&
 	            error.code == "document.selection");
-	// Refused: two rows, or a row-level edit, in one batch.
-	TEST_EXPECT(!document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), set(fake.b1, "name", std::string("B"))}, error) &&
-	            error.code == "document.batch");
-	TEST_EXPECT(!document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), make(EditOperation::Remove, fake.beta)}, error) &&
-	            error.code == "document.batch");
 	TEST_EXPECT(document.rows()[0].get() == before && !document.can_undo());
+	// Two rows, and a row's own edit with a record's, in one batch: one step (S13 D7).
+	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), set(fake.b1, "name", std::string("B"))}, error));
+	document.undo();
+	TEST_EXPECT(document.apply(std::vector<Edit>{set(fake.a1, "name", std::string("A")), make(EditOperation::Remove, fake.beta)}, error) &&
+	            document.rows().size() == 1);
+	document.undo();
+	TEST_EXPECT(document.rows()[0].get() == before && document.serialize().text == fake.original && !document.can_undo());
 
 	// Coalesced batches of the same fields fold into one step (a drag without a gesture),
 	// each applied to the row as the group found it; the group ends at end_edit_group.
@@ -996,8 +1073,8 @@ static int test_batches_and_gestures() {
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 
-	// A gesture: edits sharing it fold into one step on their row, each building on the
-	// last (a leaf added, then renamed, then moved), until the group ends.
+	// A gesture: edits sharing it fold into one step, each building on the last (a leaf added,
+	// then renamed, then moved), until the group ends.
 	const uint64_t gesture = next_edit_gesture();
 	TEST_EXPECT(gesture != 0 && next_edit_gesture() != gesture);
 	Edit add = make(EditOperation::Add, {0, kLeaf, 0}, fake.a2.child);
@@ -1011,14 +1088,13 @@ static int test_batches_and_gestures() {
 	TEST_EXPECT(document.apply(rename, error) && document.apply(move, error));
 	Document::Placement at;
 	TEST_EXPECT(document.placement(leaf, at) && at.owner == fake.a1 && at.index == 0);
-	// The same gesture on another row is a step of its own.
+	// The same gesture on another row folds into the same step (S13 D7: a gesture folds over
+	// every row it changes).
 	Edit other = set(fake.b1, "name", std::string("B"));
 	other.gesture = gesture;
 	TEST_EXPECT(document.apply(other, error));
 	document.undo();
-	TEST_EXPECT(document.address_of(leaf.child) == leaf);
-	document.undo();
-	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
+	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo() && !document.address_of(leaf.child).row);
 	// A gesture never swallows the saved checkpoint: the step after a save is its own.
 	document.redo();
 	TEST_EXPECT(document.save(error) && !document.dirty());
@@ -1034,9 +1110,8 @@ static int test_batches_and_gestures() {
 // typed on the way (the name cleared) leaving nothing behind; a new name is its record's edit
 // alone (Rename everywhere rewrites what names it: S13 D5 cut the same-file follow, which planned
 // each keystroke's sites in the same step); a keystroke the type vetoes keeps the step as the one
-// before left it, the group still open; the saved checkpoint ends the group. S13 D7's batch over
-// several rows lands here as its multi-row case; the step over several changes it commits
-// through is EditHistory's (test_joined_step).
+// before left it, the group still open; the saved checkpoint ends the group. Its batch over
+// several rows is test_follow_in_one_step.
 static int test_typing_burst() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -1054,7 +1129,7 @@ static int test_typing_burst() {
 	TEST_EXPECT(type("n") && type("") && name(fake.a1).empty());
 	TEST_EXPECT(type("ne") && type("new") && name(fake.a1) == "new");
 	TEST_EXPECT(name(fake.x) == "x" && name(fake.b1) == "b1");
-	document.veto = [](const Change &) { return false; };
+	document.veto = [](const EditStep &) { return false; };
 	TEST_EXPECT(!type("newer") && error.code == "document.structure");
 	document.veto = nullptr;
 	TEST_EXPECT(name(fake.a1) == "new" && document.can_undo());
@@ -1070,52 +1145,78 @@ static int test_typing_burst() {
 	return 0;
 }
 
-// One step over several changes (EditHistory::commit of several, each joined to the one before
-// it), which a batch over several rows commits through: undone and redone whole, and nothing
-// folds into it, a change under its key after it being a step of its own. With no production
-// caller since S13 D5 (S13 D7's multi-row step is the next), its group rules are held here: its
-// key's reopen() undoes the whole step, back to the revision before it, and resume() redoes it;
-// drop() forgets it and ends the group; the saved checkpoint is never reopened.
-static int test_joined_step() {
-	std::vector<std::shared_ptr<const Node>> rows;
-	std::shared_ptr<const FileState> state;
-	EditHistory history(rows, state);
+// The history's steps (S13 D7): a step is a swap per row it changes. One over two rows is undone
+// and redone whole; a step that moves a row (taken out and put back, its two versions one row) and
+// one that adds and removes rows undo and redo to the very rows they found, in order; a later step
+// under its key folds into an in-place step (each row's first before and latest after, a row it
+// meets late joining it), never into one that changes rows, which ends its group. Its key's
+// reopen() undoes the whole step, back to the revision before it, and resume() redoes it; drop()
+// forgets it and ends the group; the saved checkpoint is never reopened.
+static int test_history_steps() {
+	using Row = std::shared_ptr<const Node>;
 	const auto group = [](NodeId id, const char *title) {
 		auto node = std::make_shared<FakeGroup>();
 		node->id = id;
 		node->title = title;
-		return std::shared_ptr<const Node>(node);
+		return Row(node);
 	};
-	using Row = std::shared_ptr<const Node>;
-	const auto change = [](const Row &before, Row after, size_t at) {
-		Change out;
-		out.before = before;
-		out.after = std::move(after);
-		out.before_position = out.after_position = at;
+	const auto swap = [](const Row &before, Row after, size_t from, size_t to, bool moved = false) {
+		return RowSwap{before, std::move(after), from, to, moved};
+	};
+	const auto step = [](std::vector<RowSwap> swaps) {
+		EditStep out;
+		out.swaps = std::move(swaps);
 		return out;
 	};
+	std::vector<Row> rows;
+	std::shared_ptr<const FileState> state;
 	const auto titles = [&] {
 		std::string out;
 		for (const auto &row : rows) out += row->name();
 		return out;
 	};
-	rows = {group(1, "a"), group(2, "b")};
-	const std::vector<Change> both{change(rows[0], group(1, "A"), 0),
-	                               change(rows[1], group(2, "B"), 1)};
-	history.commit(both, "k");
-	TEST_EXPECT(titles() == "AB" && history.can_undo() && history.dirty());
-	history.commit(change(rows[0], group(1, "Z"), 0), "k");
-	TEST_EXPECT(titles() == "ZB");
+	EditHistory history(rows, state);
+	rows = {group(1, "a"), group(2, "b"), group(3, "c")};
+	const std::vector<Row> start = rows;
+	history.commit(step({swap(rows[0], group(1, "A"), 0, 0), swap(rows[1], group(2, "B"), 1, 1)}), "k");
+	TEST_EXPECT(titles() == "ABc" && history.can_undo() && history.dirty() && history.steps() == 1);
+	// A later step under the key folds into it (the group is open): a's latest after, b's first
+	// before, and c joins.
+	history.commit(step({swap(rows[0], group(1, "Z"), 0, 0), swap(rows[2], group(3, "C"), 2, 2)}), "k");
+	TEST_EXPECT(titles() == "ZBC" && history.steps() == 1);
+	const std::vector<Row> folded = rows;
+	// c moved to the top under the open key: a step of its own, never folded, and it ends the group
+	// (the next step under the key is its own too).
+	history.commit(step({swap(rows[2], rows[2], 2, 0, true)}), "k");
+	TEST_EXPECT(titles() == "CZB" && history.steps() == 2);
+	const std::vector<Row> moved = rows;
+	history.commit(step({swap(rows[0], group(3, "c3"), 0, 0)}), "k");
+	TEST_EXPECT(titles() == "c3ZB" && history.steps() == 3);
 	history.undo();
-	TEST_EXPECT(titles() == "AB" && history.can_undo());
+	TEST_EXPECT(rows == moved);
 	history.undo();
-	TEST_EXPECT(titles() == "ab" && !history.can_undo() && !history.dirty());
+	TEST_EXPECT(rows == folded);
+	history.undo(); // the folded step whole: the rows it found
+	TEST_EXPECT(rows == start && !history.can_undo() && !history.dirty());
+	for (int i = 0; i < 3; ++i) history.redo();
+	TEST_EXPECT(titles() == "c3ZB" && !history.can_redo());
+	// A row added at the end and b removed: undone and redone to the very rows.
+	const std::vector<Row> before_rows = rows;
+	history.commit(step({swap(nullptr, group(4, "d"), 0, 2), swap(rows[2], nullptr, 2, 0)}), "k");
+	TEST_EXPECT(titles() == "c3Zd" && history.steps() == 4);
+	const std::vector<Row> after_rows = rows;
+	history.undo();
+	TEST_EXPECT(rows == before_rows);
 	history.redo();
-	TEST_EXPECT(titles() == "AB" && history.can_redo());
-	history.redo();
-	TEST_EXPECT(titles() == "ZB" && !history.can_redo());
+	TEST_EXPECT(rows == after_rows);
+	// An undo or a redo ends the group: an in-place step under the key after it is its own.
+	history.commit(step({swap(rows[1], group(1, "z"), 1, 1)}), "k");
+	history.commit(step({swap(rows[1], group(1, "zz"), 1, 1)}), "k"); // folds into the one before
+	TEST_EXPECT(titles() == "c3zzd" && history.steps() == 5);
+	history.undo();
+	TEST_EXPECT(rows == after_rows);
 
-	std::vector<std::shared_ptr<const Node>> rows2 = {group(1, "a"), group(2, "b")};
+	std::vector<Row> rows2 = {group(1, "a"), group(2, "b")};
 	std::shared_ptr<const FileState> state2;
 	EditHistory group_history(rows2, state2);
 	const auto titles2 = [&] {
@@ -1124,9 +1225,7 @@ static int test_joined_step() {
 		return out;
 	};
 	const auto commit_both = [&] {
-		group_history.commit(std::vector<Change>{change(rows2[0], group(1, "A"), 0),
-		                                         change(rows2[1], group(2, "B"), 1)},
-		                     "k");
+		group_history.commit(step({swap(rows2[0], group(1, "A"), 0, 0), swap(rows2[1], group(2, "B"), 1, 1)}), "k");
 	};
 	commit_both();
 	TEST_EXPECT(titles2() == "AB" && group_history.revision() != 0);
@@ -1147,8 +1246,10 @@ static int test_joined_step() {
 // an item added into a1 (the row named by its owner), then named, weighed and given a leaf
 // through batch_made (the leaf's edit naming no row), a leaf moved into it, a2 duplicated
 // and the copy renamed: one undo step, redone whole; the selection the session makes of it
-// is what no other made record holds. Refused with nothing committed: a batch_made naming a
-// later edit, itself, an edit that made nothing, or another row.
+// is what no other made record holds. S13 D7: a row it makes, named by batch_made as a row, as a
+// record and as an owner (a group added, named, an item put in it). Refused with nothing
+// committed: a batch_made naming a later edit, itself, an edit that made nothing, or another row;
+// an edit naming a row an earlier edit of the batch removed.
 static int test_batch_made() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -1178,9 +1279,10 @@ static int test_batch_made() {
 	TEST_EXPECT(document.placement(leafy, at) && at.owner == fresh && at.index == 1);
 	TEST_EXPECT(document.record_path(copy) == "alpha/a2copy" && document.placement(copy, at) && at.index == 2);
 	// The session selects what no other made record holds: the new item and the copy.
-	SessionView view;
-	view.documents.select_added(document);
-	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({fresh, copy}) && view.documents.selection == fresh);
+	Selection selection;
+	selection.select_added(document);
+	TEST_EXPECT(selection.records == std::vector<NodeAddress>({fresh, copy}) && selection.primary == fresh &&
+	            selection.document == document.path());
 	document.undo();
 	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	document.redo();
@@ -1203,7 +1305,28 @@ static int test_batch_made() {
 	                                              set({fake.beta.row, kItem, batch_made(0)}, "name", std::string("elsewhere"))},
 	                            error) &&
 	            error.code == "document.batch");
+	TEST_EXPECT(!document.apply(std::vector<Edit>{make(EditOperation::Remove, fake.beta),
+	                                              set(fake.b1, "name", std::string("gone"))},
+	                            error) &&
+	            error.code == "document.batch" && error.message.find("removed") != std::string::npos);
 	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo());
+
+	// A row the batch makes: named as a row (its own field), as an owner (an item put in it) and
+	// as a record (the item named through the edit that made it); one step.
+	Edit row = make(EditOperation::Add, {0, kGroup, 0});
+	const std::vector<Edit> rows{
+	        row,                                                             // 0: a group at the end
+	        set({batch_made(0), kGroup, 0}, "name", std::string("gamma")),   // 1: its name
+	        make(EditOperation::Add, {0, kItem, 0}, batch_made(0)),          // 2: an item in it
+	        set({0, kItem, batch_made(2)}, "name", std::string("g1")),       // 3
+	        set({0, kGroup, batch_made(0)}, "name", std::string("gamma2")),  // 4: the group, named as a record
+	};
+	TEST_EXPECT(document.apply(rows, error));
+	TEST_EXPECT(document.rows().size() == 3 && document.rows().back()->name() == "gamma2" &&
+	            document.last_added_records().size() == 2);
+	TEST_EXPECT(document.serialize().text == fake.original + "G gamma2\nH \nI 1 g1\n");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
 	return 0;
 }
 
@@ -1249,57 +1372,117 @@ static int test_clipboard() {
 	return 0;
 }
 
-// The selection the session keeps: one row, a primary among the selected, repaired after
-// edits and undo.
+// The selection the session keeps (S13 D7): records of any rows of one document, a primary among
+// them, a serial taking a new value with each change; a marquee's records named with a primary;
+// repaired after edits and undo.
 static int test_selection() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
 	FakeDocument &document = fake.document;
-	SessionView view;
-	view.documents.select(document.path(), fake.x, SelectMode::Replace);
-	view.documents.select(document.path(), fake.y, SelectMode::Add);
-	TEST_EXPECT(view.documents.selection == fake.y &&
-			view.documents.selected == std::vector<NodeAddress>({ fake.x, fake.y }));
-	view.documents.select(document.path(), fake.y, SelectMode::Toggle);
-	TEST_EXPECT(view.documents.selection == fake.x &&
-			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
-	view.documents.select(document.path(), fake.a2, SelectMode::Toggle);
-	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected.size() == 2);
-	// Another row (or another document) starts over, whatever the mode.
-	view.documents.select(document.path(), fake.b1, SelectMode::Add);
-	TEST_EXPECT(view.documents.selection == fake.b1 &&
-			view.documents.selected == std::vector<NodeAddress>({ fake.b1 }));
-	view.documents.select("other.txt", fake.x, SelectMode::Add);
-	TEST_EXPECT(view.documents.active == "other.txt" &&
-			view.documents.selected == std::vector<NodeAddress>({ fake.x }));
-	view.documents.select(document.path(), NodeAddress(), SelectMode::Replace);
-	TEST_EXPECT(view.documents.selected.empty() && view.documents.selection == NodeAddress());
+	const std::string path = document.path();
+	Selection selection;
+	const auto is = [&](const NodeAddress &primary, std::vector<NodeAddress> records) {
+		return selection.primary == primary && selection.records == records;
+	};
+	selection.select(path, fake.x, {}, SelectMode::Replace);
+	selection.select(path, fake.y, {}, SelectMode::Add);
+	TEST_EXPECT(is(fake.y, {fake.x, fake.y}) && selection.document == path);
+	selection.select(path, fake.y, {}, SelectMode::Toggle);
+	TEST_EXPECT(is(fake.x, {fake.x}));
+	selection.select(path, fake.a2, {}, SelectMode::Toggle);
+	TEST_EXPECT(is(fake.a2, {fake.x, fake.a2}));
+	// Another row joins; another document starts over, whatever the mode.
+	uint64_t serial = selection.serial;
+	selection.select(path, fake.b1, {}, SelectMode::Add);
+	TEST_EXPECT(is(fake.b1, {fake.x, fake.a2, fake.b1}) && selection.serial != serial);
+	selection.select("other.txt", fake.x, {}, SelectMode::Add);
+	TEST_EXPECT(selection.document == "other.txt" && is(fake.x, {fake.x}));
+	selection.select(path, NodeAddress(), {}, SelectMode::Replace);
+	TEST_EXPECT(selection.empty() && selection.primary == NodeAddress() && selection.document == path);
+	// A marquee: records named with a primary; Add joins more, Toggle leaves those selected and
+	// joins the others, the primary staying while it is selected.
+	selection.select(path, fake.a1, {fake.x, fake.b1}, SelectMode::Replace);
+	TEST_EXPECT(is(fake.a1, {fake.x, fake.b1, fake.a1}));
+	selection.select(path, NodeAddress(), {fake.y}, SelectMode::Add);
+	TEST_EXPECT(is(fake.y, {fake.x, fake.b1, fake.a1, fake.y}));
+	selection.select(path, NodeAddress(), {fake.x, fake.a2}, SelectMode::Toggle);
+	TEST_EXPECT(is(fake.y, {fake.b1, fake.a1, fake.y, fake.a2}));
+	TEST_EXPECT(selection.holds(fake.a2) && !selection.holds(fake.x));
 
 	// Removing the primary selects its owner.
 	Diagnostic error;
-	view.documents.select(document.path(), fake.x, SelectMode::Replace);
-	view.documents.select(document.path(), fake.a1b, SelectMode::Add);
+	selection.select(path, fake.x, {}, SelectMode::Replace);
+	selection.select(path, fake.a1b, {}, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.a1b), error));
-	view.documents.repair_selection(document, fake.a1);
-	TEST_EXPECT(view.documents.selection == fake.a1 &&
-			view.documents.selected == std::vector<NodeAddress>({ fake.a1 }));
+	selection.repair(document, nullptr, fake.a1);
+	TEST_EXPECT(is(fake.a1, {fake.a1}));
 	document.undo();
-	// A record removed that was selected but not the primary just drops out.
-	view.documents.select(document.path(), fake.x, SelectMode::Replace);
-	view.documents.select(document.path(), fake.y, SelectMode::Add);
-	view.documents.select(document.path(), fake.a2, SelectMode::Add);
+	// A record removed that was selected but not the primary just drops out; one of another row
+	// stays.
+	selection.select(path, fake.x, {}, SelectMode::Replace);
+	selection.select(path, fake.y, {}, SelectMode::Add);
+	selection.select(path, fake.b1, {}, SelectMode::Add);
+	selection.select(path, fake.a2, {}, SelectMode::Add);
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error));
-	view.documents.repair_selection(document, fake.alpha);
-	TEST_EXPECT(view.documents.selection == fake.a2 && view.documents.selected == std::vector<NodeAddress>({fake.x, fake.a2}));
+	serial = selection.serial;
+	selection.repair(document, nullptr, fake.alpha);
+	TEST_EXPECT(is(fake.a2, {fake.x, fake.b1, fake.a2}) && selection.serial != serial);
+	serial = selection.serial;
+	selection.repair(document, nullptr, fake.alpha); // nothing gone: the same selection
+	TEST_EXPECT(selection.serial == serial);
 	document.undo();
-	// A record added is the selection; its undo leaves the last one still there, or none.
+	// What an edit made is the selection; its undo leaves none.
 	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a2, 0, 2), error));
-	view.documents.select_added(document);
+	selection.select_added(document);
 	const NodeAddress duplicate = document.address_of(document.last_added());
-	TEST_EXPECT(view.documents.selection == duplicate && view.documents.selected == std::vector<NodeAddress>({duplicate}));
+	TEST_EXPECT(is(duplicate, {duplicate}));
 	document.undo();
-	view.documents.repair_selection(document, NodeAddress());
-	TEST_EXPECT(view.documents.selection == NodeAddress() && view.documents.selected.empty());
+	selection.repair(document, nullptr, NodeAddress());
+	TEST_EXPECT(selection.empty() && selection.primary == NodeAddress());
+	// Another document's repair leaves it as it is.
+	selection.select(path, fake.x, {}, SelectMode::Replace);
+	FakeDocument other;
+	TEST_EXPECT(other.load_bytes(bytes_of(kFile), "other.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(selection.repair(other, nullptr, NodeAddress()) == 0 && is(fake.x, {fake.x}));
+	return 0;
+}
+
+// The selection repaired after a step asks only for the records of the rows the step touched (S13
+// D7): 500 lines of 5,000 selected, a Set of one asks for that one; a selected line removed drops
+// out unasked, the primary among them giving way to the last line still selected; with no change
+// set (the document could not say) every record is asked for.
+static int test_selection_repair() {
+	constexpr size_t kRows = 5000, kSelected = 500;
+	std::string text;
+	for (size_t i = 0; i < kRows; ++i) text += "L line" + std::to_string(i) + " " + std::to_string(i) + " TAG1\n";
+	FlatDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of(text), "lines.txt", AssetKind::Unknown, "jo", error));
+	const auto line = [&](size_t i) {
+		const Node &row = *document.rows()[i];
+		return NodeAddress{row.id, row.kind, 0};
+	};
+	std::vector<NodeAddress> marquee;
+	for (size_t i = 0; i < kSelected; ++i) marquee.push_back(line(i * 10));
+	Selection selection;
+	selection.select(document.path(), line(0), marquee, SelectMode::Replace);
+	TEST_EXPECT(selection.records.size() == kSelected && selection.primary == line(0));
+	const auto repaired = [&](const std::vector<Edit> &edits) -> size_t {
+		const uint64_t load = document.load_generation(), revision = document.revision();
+		Diagnostic refused;
+		if (!document.apply(edits, refused)) return SIZE_MAX;
+		ChangeSet changes;
+		if (!document.changes_since(load, revision, changes)) return SIZE_MAX;
+		return selection.repair(document, &changes, NodeAddress());
+	};
+	const uint64_t serial = selection.serial;
+	TEST_EXPECT(repaired({set(line(10), "weight", int64_t(-1))}) == 1);
+	TEST_EXPECT(selection.records.size() == kSelected && selection.serial == serial);
+	TEST_EXPECT(repaired({set(line(11), "weight", int64_t(-1))}) == 0); // a line not selected
+	const NodeAddress gone = line(20), primary = line(0), last = line((kSelected - 1) * 10);
+	TEST_EXPECT(repaired({make(EditOperation::Remove, gone), make(EditOperation::Remove, primary)}) == 0);
+	TEST_EXPECT(selection.records.size() == kSelected - 2 && !selection.holds(gone) && selection.primary == last);
+	TEST_EXPECT(selection.repair(document, nullptr, NodeAddress()) == kSelected - 2);
 	return 0;
 }
 
@@ -1691,9 +1874,10 @@ static int test_snapshot() {
 // redone byte for byte (a rename; a rename with the note; a leaf added under a fresh identity);
 // one step with the Set of its batch; a gesture's Applies folding into one; none for a payload
 // that changes nothing. Naming no row, the file-wide state alone (apply_file_payload): one step,
-// a gesture's folding into one, none when it changes nothing. Refused, nothing committed: another
-// type's payload or none (document.payload, the type's words or the base's), a batch holding one,
-// a file payload naming an item's parts; and every one by a type that takes none (the defaults).
+// a gesture's folding into one, none when it changes nothing, one step with a batch's other edits
+// (S13 D7). Refused, nothing committed: another type's payload or none (document.payload, the
+// type's words or the base's), a batch holding one, a file payload naming an item's parts; and
+// every one by a type that takes none (the defaults).
 static int test_apply_payload() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -1791,10 +1975,14 @@ static int test_apply_payload() {
 	TEST_EXPECT(!document.apply(apply({}, fake_change("name")), error) &&
 	            error.code == "document.payload" &&
 	            error.message == "A name or a leaf needs its item.");
-	const Edit file_note = apply({}, fake_change("", "", "x"));
-	TEST_EXPECT(!document.apply({file_note, set(fake.x, "name", std::string("zz"))}, error) &&
-	            error.code == "document.batch");
 	TEST_EXPECT(document.revision() == revision && text() == renamed);
+	// One naming no row among other edits: one step with them (S13 D7).
+	const Edit file_note = apply({}, fake_change("", "", "x"));
+	Value renamed_x;
+	TEST_EXPECT(document.apply({file_note, set(fake.x, "name", std::string("zz"))}, error) && note() == "x" &&
+	            document.get(fake.x, "name", renamed_x) && std::get<std::string>(renamed_x) == "zz");
+	document.undo();
+	TEST_EXPECT(text() == renamed && note().empty());
 	// A type that takes none refuses every one (the defaults).
 	FlatDocument flat;
 	TEST_EXPECT(flat.load_bytes(bytes_of("L a 1 TAG1\n"), "flat.txt", AssetKind::Unknown, "jo",
@@ -1949,6 +2137,350 @@ static int test_document_base() {
 	return 0;
 }
 
+// What S9l's same-file follow committed as one step and S13 D5 cut, now any batch over several rows
+// (S13 D7): a1's name, x in its own row and b1 in beta's, one step undone and redone together;
+// typing on a2 first folds neither into it nor it into the typing. A coalesced burst over two rows
+// is one step, each keystroke applied to the rows as the group found them; a keystroke the type
+// vetoes (on either row) keeps the group's step. Nothing is committed when an edit of a batch is
+// refused, on either row, or the type vetoes its step, and the redo branch stays.
+static int test_follow_in_one_step() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	const auto name = [&](const NodeAddress &address) {
+		Value value;
+		return document.get(address, "name", value) ? std::get<std::string>(value) : std::string("?");
+	};
+	const std::vector<Edit> rename{set(fake.a1, "name", std::string("A")), set(fake.x, "name", std::string("X")),
+	                               set(fake.b1, "name", std::string("B"))};
+	Edit typed = set(fake.a2, "name", std::string("typed"));
+	typed.coalesce = true;
+	TEST_EXPECT(document.apply(typed, error));
+	TEST_EXPECT(document.apply(rename, error));
+	TEST_EXPECT(name(fake.a1) == "A" && name(fake.x) == "X" && name(fake.b1) == "B");
+	document.undo();
+	TEST_EXPECT(name(fake.a1) == "a1" && name(fake.x) == "x" && name(fake.b1) == "b1" && name(fake.a2) == "typed");
+	document.redo();
+	TEST_EXPECT(name(fake.a1) == "A" && name(fake.x) == "X" && name(fake.b1) == "B");
+	document.undo();
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
+
+	// A coalesced burst over two rows: each keystroke from what the group found, one step.
+	const auto type = [&](const char *text) {
+		Edit a = set(fake.a1, "name", std::string(text)), b = set(fake.b1, "name", std::string(text) + "!");
+		a.coalesce = b.coalesce = true;
+		return document.apply(std::vector<Edit>{a, b}, error);
+	};
+	TEST_EXPECT(type("n") && type("") && name(fake.a1).empty() && name(fake.b1) == "!");
+	TEST_EXPECT(type("ne") && type("new") && name(fake.a1) == "new" && name(fake.b1) == "new!");
+	const auto refuse_beta = [&](const EditStep &step) {
+		for (const RowSwap &swap : step.swaps)
+			if (swap.id() == fake.beta.row) return false;
+		return true;
+	};
+	document.veto = refuse_beta;
+	TEST_EXPECT(!type("newer") && error.code == "document.structure");
+	document.veto = nullptr;
+	TEST_EXPECT(name(fake.a1) == "new" && name(fake.b1) == "new!" && document.can_undo());
+	TEST_EXPECT(type("news") && name(fake.a1) == "news" && name(fake.b1) == "news!");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
+
+	// Refused, nothing committed: an edit refused on either row, the type's veto on either row.
+	const uint64_t revision = document.revision();
+	TEST_EXPECT(!document.apply({set(fake.a1, "name", std::string("A")), set({fake.beta.row, kItem, 99999}, "name", std::string("gone"))},
+	                            error) &&
+	            error.code == "document.selection");
+	TEST_EXPECT(!document.apply({set({fake.alpha.row, kItem, 99999}, "name", std::string("gone")), set(fake.b1, "name", std::string("B"))},
+	                            error) &&
+	            error.code == "document.selection");
+	document.veto = refuse_beta;
+	TEST_EXPECT(!document.apply(rename, error) && error.code == "document.structure");
+	document.veto = nullptr;
+	TEST_EXPECT(document.revision() == revision && document.serialize().text == fake.original && !document.can_undo() &&
+	            document.can_redo());
+	return 0;
+}
+
+// Five hundred of 5,000 lines in one batch, two fields each (S13 D7): each line cloned once, however
+// many edits change it, the others never; one step, whose rows are the edited lines' two versions
+// (the history's bytes theirs alone), undone to the very rows the batch found and redone to the
+// very rows it made (no clone either way).
+static int test_multi_row_batches() {
+	constexpr size_t kRows = 5000, kTouched = 500;
+	std::string text;
+	for (size_t i = 0; i < kRows; ++i) text += "L line" + std::to_string(i) + " " + std::to_string(i) + " TAG1\n";
+	FlatDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of(text), "lines.txt", AssetKind::Unknown, "jo", error));
+	const auto line = [&](size_t i) {
+		const Node &row = *document.rows()[i];
+		return NodeAddress{row.id, row.kind, 0};
+	};
+	std::vector<Edit> batch;
+	for (size_t i = 0; i < kTouched; ++i) {
+		batch.push_back(set(line(i * 10), "weight", int64_t(-1)));
+		batch.push_back(set(line(i * 10), "tag", std::string("TAG2")));
+	}
+	const std::vector<std::shared_ptr<const Node>> found = document.rows();
+	g_line_clones = 0;
+	TEST_EXPECT(document.apply(batch, error));
+	TEST_EXPECT(g_line_clones == kTouched);
+	const std::vector<std::shared_ptr<const Node>> made = document.rows();
+	size_t swapped = 0, footprints = 0;
+	for (size_t i = 0; i < kRows; ++i) {
+		if (made[i] == found[i]) continue;
+		++swapped;
+		footprints += made[i]->footprint() + found[i]->footprint();
+	}
+	TEST_EXPECT(swapped == kTouched && document.history_bytes() == footprints);
+	document.undo();
+	TEST_EXPECT(document.rows() == found && !document.can_undo() && document.serialize().text == text);
+	document.redo();
+	TEST_EXPECT(document.rows() == made && g_line_clones == kTouched);
+	return 0;
+}
+
+// A batch mixing every kind of edit (S13 D7): a group added and named, an item put in it and named
+// (batch_made), a group duplicated, one moved to the top, one removed, groups pasted at the top
+// (paste_rows, under a title no row has), the file-wide note and a record's field: one step, whose
+// undo gives the bytes the file held and whose redo the bytes it made, byte for byte; everything it
+// made listed (last_added_records), in its edits' order.
+static int test_mixed_batch() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	// Four groups: alpha, beta, delta, eps.
+	TEST_EXPECT(document.apply({make(EditOperation::Add, {0, kGroup, 0}), make(EditOperation::Add, {0, kGroup, 0})}, error));
+	TEST_EXPECT(document.apply({set({document.rows()[2]->id, kGroup, 0}, "name", std::string("delta")),
+	                            set({document.rows()[3]->id, kGroup, 0}, "name", std::string("eps"))},
+	                           error));
+	const NodeAddress delta{document.rows()[2]->id, kGroup, 0}, eps{document.rows()[3]->id, kGroup, 0};
+	TEST_EXPECT(document.save(error) && !document.dirty());
+	const std::string saved = document.serialize().text;
+	const std::string pasted = document.copy({fake.beta});
+	TEST_EXPECT(pasted.rfind("groups\n", 0) == 0);
+	Edit gamma = make(EditOperation::Add, {0, kGroup, 0});
+	gamma.field = "name";
+	gamma.value = std::string("gamma");
+	Edit paste = make(EditOperation::Paste, {0, 0, 0});
+	paste.value = pasted;
+	Edit note;
+	note.operation = EditOperation::SetFileValue;
+	note.value = std::string("mixed");
+	const std::vector<Edit> batch{
+	        gamma,                                                     // 0: a group at the end
+	        make(EditOperation::Add, {0, kItem, 0}, batch_made(0)),    // 1: an item in it
+	        set({0, kItem, batch_made(1)}, "name", std::string("g1")), // 2
+	        make(EditOperation::Duplicate, fake.alpha, 0, 1),          // 3: alpha copied after itself
+	        make(EditOperation::Move, eps, 0, 0),                      // 4: eps to the top
+	        make(EditOperation::Remove, delta),                        // 5
+	        paste,                                                     // 6: beta pasted at the end
+	        note,                                                      // 7
+	        set(fake.a1, "name", std::string("A1")),                   // 8
+	        set({batch_made(6), kGroup, 0}, "name", std::string("pasted")), // 9: the pasted group
+	};
+	TEST_EXPECT(document.apply(batch, error));
+	const std::string after = document.serialize().text;
+	std::vector<std::string> titles;
+	for (const auto &row : document.rows()) titles.push_back(row->name());
+	TEST_EXPECT(titles == std::vector<std::string>({"eps", "alpha", "alpha", "beta", "gamma", "pasted"}));
+	TEST_EXPECT(after.rfind("N mixed\n", 0) == 0 && after.find("I 1 A1 5\n") != std::string::npos &&
+	            after.find("G gamma\nH \nI 1 g1\n") != std::string::npos);
+	const std::vector<NodeId> made = document.last_added_records();
+	TEST_EXPECT(made.size() == 4 && document.address_of(made[0]).kind == kGroup && document.address_of(made[1]).kind == kItem &&
+	            document.row(made[2]) && document.row(made[3]) && document.row(made[3])->name() == "pasted");
+	TEST_EXPECT(document.dirty() && document.can_undo());
+	document.undo();
+	const uint64_t before = document.revision();
+	TEST_EXPECT(document.serialize().text == saved && !document.dirty());
+	document.redo();
+	TEST_EXPECT(document.serialize().text == after && document.dirty());
+	document.undo();
+
+	// The same batch with an edit naming the row it removed: refused, nothing committed.
+	std::vector<Edit> late = batch;
+	late.push_back(set(delta, "name", std::string("late")));
+	TEST_EXPECT(!document.apply(late, error) && error.code == "document.batch");
+	TEST_EXPECT(document.serialize().text == saved && document.revision() == before && document.can_redo());
+	return 0;
+}
+
+// A gesture folds over every row it changes (S13 D7): three batches, b1 joining at the second, one
+// step whose undo gives each row its version from before the gesture and whose redo the latest; a
+// batch of the gesture that adds a row is a step of its own and ends the group (the gesture's next
+// batch a new step); the saved checkpoint is never folded over.
+static int test_gesture_across_rows() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	const auto weight = [&](const NodeAddress &address) {
+		Value value;
+		return document.get(address, "weight", value) ? std::get<int64_t>(value) : int64_t(-99);
+	};
+	uint64_t gesture = next_edit_gesture();
+	const auto drag = [&](int64_t to, bool with_b1) {
+		std::vector<Edit> edits{set(fake.a1, "weight", to)};
+		if (with_b1) edits.push_back(set(fake.b1, "weight", to));
+		for (Edit &edit : edits) edit.gesture = gesture;
+		return document.apply(edits, error);
+	};
+	TEST_EXPECT(drag(10, false) && drag(11, true) && drag(12, true));
+	TEST_EXPECT(weight(fake.a1) == 12 && weight(fake.b1) == 12);
+	const std::string dragged = document.serialize().text;
+	document.undo();
+	TEST_EXPECT(document.serialize().text == fake.original && !document.can_undo());
+	document.redo();
+	TEST_EXPECT(document.serialize().text == dragged);
+	// A batch of the gesture adding a row: a step of its own, ending the group.
+	gesture = next_edit_gesture();
+	TEST_EXPECT(drag(20, true));
+	Edit add = make(EditOperation::Add, {0, kGroup, 0});
+	add.gesture = gesture;
+	TEST_EXPECT(document.apply(add, error) && drag(21, true));
+	document.undo(); // the drag after the row: its own step
+	TEST_EXPECT(document.rows().size() == 3 && weight(fake.a1) == 20);
+	document.undo(); // the row
+	TEST_EXPECT(document.rows().size() == 2 && weight(fake.a1) == 20);
+	document.undo(); // the drag before it
+	TEST_EXPECT(document.serialize().text == dragged);
+	// Never over the saved checkpoint: a drag, a save, the same gesture on: two steps.
+	gesture = next_edit_gesture();
+	TEST_EXPECT(drag(30, true) && document.save(error) && drag(31, true) && document.dirty());
+	document.undo();
+	TEST_EXPECT(!document.dirty() && weight(fake.b1) == 30 && document.can_undo());
+	return 0;
+}
+
+// What changed since a state (S13 D7, DocumentBase::changes_since): after an edit (the row it
+// changed), its undo and its redo; inside a gesture's step (a state a fold took in answers the rows
+// the later batches changed, and after the step's undo, every row the step had changed by then);
+// rows added, moved (reordered) and removed and the file-wide state; the state it is at, empty.
+// False for a state of a branch an edit after an undo discarded, of another load, and for a kind
+// that does not say (the base's default, a blob).
+static int test_changes_since() {
+	Loaded fake;
+	TEST_EXPECT(fake.load());
+	FakeDocument &document = fake.document;
+	Diagnostic error;
+	const uint64_t load = document.load_generation();
+	RowChanges rows;
+	const auto since = [&](uint64_t revision) {
+		ChangeSet changes;
+		if (!document.changes_since(load, revision, changes)) return false;
+		rows = std::get<RowChanges>(changes);
+		return true;
+	};
+	using Ids = std::vector<NodeId>;
+	const NodeId alpha = fake.alpha.row, beta = fake.beta.row;
+	const uint64_t start = document.revision();
+	TEST_EXPECT(since(start) && rows.empty());
+	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error));
+	const uint64_t edited = document.revision();
+	TEST_EXPECT(since(start) && rows.changed == Ids{alpha} && rows.added.empty() && rows.removed.empty() &&
+	            !rows.reordered && !rows.file_state);
+	document.undo();
+	TEST_EXPECT(since(edited) && rows.changed == Ids{alpha} && since(start) && rows.empty());
+	document.redo();
+	TEST_EXPECT(since(start) && rows.changed == Ids{alpha} && since(edited) && rows.empty());
+	document.undo();
+
+	// A gesture's step: a1, then a1 and b1, then a1 again.
+	const uint64_t gesture = next_edit_gesture();
+	const auto drag = [&](int64_t to, bool with_b1) {
+		std::vector<Edit> edits{set(fake.a1, "weight", to)};
+		if (with_b1) edits.push_back(set(fake.b1, "weight", to));
+		for (Edit &edit : edits) edit.gesture = gesture;
+		return document.apply(edits, error);
+	};
+	TEST_EXPECT(drag(1, false));
+	const uint64_t first = document.revision();
+	TEST_EXPECT(drag(2, true));
+	const uint64_t second = document.revision();
+	TEST_EXPECT(drag(3, false));
+	const uint64_t third = document.revision();
+	TEST_EXPECT(since(first) && rows.changed == (Ids{alpha, beta}) && since(second) && rows.changed == Ids{alpha});
+	TEST_EXPECT(since(start) && rows.changed == (Ids{alpha, beta}) && since(third) && rows.empty());
+	document.undo();
+	TEST_EXPECT(since(first) && rows.changed == Ids{alpha} && since(second) && rows.changed == (Ids{alpha, beta}));
+	TEST_EXPECT(since(third) && rows.changed == (Ids{alpha, beta}));
+
+	// An edit after the undo discards the gesture's branch: its states are no longer held.
+	TEST_EXPECT(document.apply({make(EditOperation::Add, {0, kGroup, 0}), make(EditOperation::Move, fake.beta, 0, 0)}, error));
+	const NodeId gamma = document.last_added();
+	TEST_EXPECT(!since(first) && !since(second) && !since(third));
+	TEST_EXPECT(since(start) && rows.added == Ids{gamma} && rows.reordered && rows.changed.empty() && rows.removed.empty());
+	const uint64_t shaped = document.revision();
+	Edit note;
+	note.operation = EditOperation::SetFileValue;
+	note.value = std::string("n");
+	TEST_EXPECT(document.apply({make(EditOperation::Remove, fake.alpha), note}, error));
+	TEST_EXPECT(since(shaped) && rows.removed == Ids{alpha} && rows.file_state && !rows.reordered && rows.added.empty());
+	TEST_EXPECT(since(start) && rows.added == Ids{gamma} && rows.removed == Ids{alpha} && rows.file_state);
+	document.undo();
+	TEST_EXPECT(since(shaped) && rows.empty());
+	document.undo();
+	TEST_EXPECT(since(start) && rows.empty() && since(shaped) && rows.removed == Ids{gamma} && rows.reordered);
+
+	// Another load's state; a kind that does not say.
+	TEST_EXPECT(document.load(fake.dir.file("fake.txt"), "fake.txt", AssetKind::Unknown, "jo", error));
+	ChangeSet changes;
+	TEST_EXPECT(!document.changes_since(load, document.revision(), changes));
+	TEST_EXPECT(document.changes_since(document.load_generation(), document.revision(), changes) &&
+	            std::get<RowChanges>(changes).empty());
+	editor_test::BlobDocument blob;
+	TEST_EXPECT(blob.load_bytes(bytes_of("one\n"), "b.txt", AssetKind::Unknown, "jo", error));
+	TEST_EXPECT(!blob.changes_since(blob.load_generation(), blob.revision(), changes));
+	return 0;
+}
+
+// The history's budget (S13 D7): 64 MiB of rows, the oldest steps given up first, never the last.
+// Lines each saying they hold 8 MiB (g_line_heft): a step holds a line's two versions, so the
+// history keeps the steps whose rows fit and gives up the rest, its bytes within the budget; dirty
+// stays exact (the saved state's revision is never given again: the document stays dirty through
+// every undo it has left, and what changed since a state given up is not said); a single step past
+// the budget stays, and gives way to the next.
+static int test_history_budget() {
+	const size_t budget = HistoryBudget().bytes;
+	TEST_EXPECT(budget == size_t(64) << 20 && HistoryBudget().min_steps == 1);
+	g_line_heft = size_t(8) << 20;
+	editor_test::TempProjectDir dir{"opennova_history_budget_test"};
+	TEST_EXPECT(editor_test::write_text(dir.file("heavy.txt"), "L a 1 TAG1\nL b 2 TAG1\n"));
+	FlatDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("heavy.txt"), "heavy.txt", AssetKind::Unknown, "jo", error));
+	const NodeAddress a{document.rows()[0]->id, kLine, 0};
+	const uint64_t load = document.load_generation(), start = document.revision();
+	const size_t per_step = 2 * document.rows()[0]->footprint();
+	const size_t kept = budget / per_step;
+	TEST_EXPECT(kept >= 1 && kept < 10);
+	for (int64_t i = 0; i < 10; ++i) TEST_EXPECT(document.apply(set(a, "weight", 100 + i), error));
+	TEST_EXPECT(document.history_bytes() == kept * per_step && document.history_bytes() <= budget && document.dirty());
+	ChangeSet changes;
+	TEST_EXPECT(!document.changes_since(load, start, changes));
+	size_t undone = 0;
+	while (document.can_undo()) {
+		document.undo();
+		++undone;
+		TEST_EXPECT(document.dirty());
+	}
+	Value weight;
+	TEST_EXPECT(undone == kept && document.get(a, "weight", weight) && std::get<int64_t>(weight) == int64_t(109 - kept));
+	TEST_EXPECT(document.save(error) && !document.dirty());
+	// One line far past the budget: its step stays, and gives way to the next.
+	g_line_heft = size_t(100) << 20;
+	TEST_EXPECT(document.apply(set(a, "weight", int64_t(1)), error) && document.can_undo() && document.history_bytes() > budget);
+	TEST_EXPECT(document.apply(set(a, "weight", int64_t(2)), error));
+	document.undo();
+	TEST_EXPECT(!document.can_undo() && document.get(a, "weight", weight) && std::get<int64_t>(weight) == 1 && document.dirty());
+	g_line_heft = 0;
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_document_base();
@@ -1966,10 +2498,17 @@ int main() {
 	failures += test_veto();
 	failures += test_batches_and_gestures();
 	failures += test_typing_burst();
-	failures += test_joined_step();
+	failures += test_history_steps();
 	failures += test_batch_made();
 	failures += test_clipboard();
 	failures += test_selection();
+	failures += test_selection_repair();
+	failures += test_follow_in_one_step();
+	failures += test_multi_row_batches();
+	failures += test_mixed_batch();
+	failures += test_gesture_across_rows();
+	failures += test_changes_since();
+	failures += test_history_budget();
 	if (failures == 0) std::printf("editor_document_core: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

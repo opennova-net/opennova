@@ -249,10 +249,10 @@ static int go_to_record() {
 	session.handle(request::open_document(item->file, item->locator, item->field));
 	items = session.document_for("items.def");
 	TEST_EXPECT(items && view.documents.active == items->path());
-	TEST_EXPECT(items && view.documents.selection.row == items->rows()[0]->id && view.documents.selection.kind == node_kind(DefRecordKind::Item));
+	TEST_EXPECT(items && view.documents.selection.primary.row == items->rows()[0]->id && view.documents.selection.primary.kind == node_kind(DefRecordKind::Item));
 	TEST_EXPECT(editor_test::revealed_field(view) == "id");
 	session.handle(request::open_document("weapon.def", "7"));
-	TEST_EXPECT(session.document_for("weapon.def") != nullptr && view.documents.selection.row == 0);
+	TEST_EXPECT(session.document_for("weapon.def") != nullptr && view.documents.selection.primary.row == 0);
 	return 0;
 }
 static int remove_last_item() {

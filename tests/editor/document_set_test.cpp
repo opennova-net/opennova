@@ -87,9 +87,9 @@ static int test_paste_and_duplicate_agree() {
 		const std::string pasted = menus.menu().serialize().text;
 		Document::Placement pasted_at;
 		TEST_EXPECT(pasted != original &&
-				menus.menu().placement(v.documents.selection, pasted_at) &&
+				menus.menu().placement(v.documents.selection.primary, pasted_at) &&
 				pasted_at.owner.child == parent && pasted_at.index == position);
-		const std::string pasted_name = menus.menu().record_name(v.documents.selection);
+		const std::string pasted_name = menus.menu().record_name(v.documents.selection.primary);
 		menus.session.handle(request::undo(menus.menu().path()));
 		TEST_EXPECT(menus.menu().serialize().text == original);
 
@@ -97,8 +97,8 @@ static int test_paste_and_duplicate_agree() {
 		menus.select(menus.at(locator));
 		TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
 		Document::Placement duplicated_at;
-		TEST_EXPECT(menus.menu().placement(v.documents.selection, duplicated_at) && duplicated_at.owner.child == parent &&
-		            duplicated_at.index == position && menus.menu().record_name(v.documents.selection) == pasted_name);
+		TEST_EXPECT(menus.menu().placement(v.documents.selection.primary, duplicated_at) && duplicated_at.owner.child == parent &&
+		            duplicated_at.index == position && menus.menu().record_name(v.documents.selection.primary) == pasted_name);
 		TEST_EXPECT(menus.menu().serialize().text == pasted);
 		menus.session.handle(request::undo(menus.menu().path()));
 		TEST_EXPECT(menus.menu().serialize().text == original);
@@ -113,7 +113,7 @@ static int test_paste_and_duplicate_agree() {
 	TEST_EXPECT(DocumentSet::position_after(menus.menu(), screen, parent, position) && parent == 0 && position == 1);
 	menus.select(screen);
 	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate));
-	TEST_EXPECT(menus.menu().rows().size() == 2 && v.documents.selection.row == menus.menu().rows()[1]->id && !v.documents.selection.child);
+	TEST_EXPECT(menus.menu().rows().size() == 2 && v.documents.selection.primary.row == menus.menu().rows()[1]->id && !v.documents.selection.primary.child);
 	menus.session.handle(request::undo(menus.menu().path()));
 	TEST_EXPECT(menus.menu().serialize().text == original);
 	// A row selected takes a Paste into itself, at its end: a copy of TITLE lands after MAIN, a root
@@ -123,7 +123,7 @@ static int test_paste_and_duplicate_agree() {
 	menus.select(screen);
 	TEST_EXPECT(menus.act(EditorRequestKind::Paste));
 	Document::Placement into;
-	TEST_EXPECT(menus.menu().placement(v.documents.selection, into) && into.owner.child == 0 && into.index == 1);
+	TEST_EXPECT(menus.menu().placement(v.documents.selection.primary, into) && into.owner.child == 0 && into.index == 1);
 	// A record the document does not hold has no place.
 	TEST_EXPECT(!DocumentSet::position_after(menus.menu(), {screen.row, screen.kind, 987654}, parent, position));
 	TEST_EXPECT(!DocumentSet::position_after(menus.menu(), {987654, screen.kind, 0}, parent, position));
@@ -140,21 +140,21 @@ static int test_remembered_selections() {
 	const std::string menu = menus.menu().path();
 	menus.select(menus.at(kTitle));
 	menus.select(menus.at(kExit), SelectMode::Add);
-	TEST_EXPECT(v.documents.selection == menus.at(kExit) && v.documents.selected.size() == 2);
+	TEST_EXPECT(v.documents.selection.primary == menus.at(kExit) && v.documents.selection.records.size() == 2);
 
 	// Another document active: its own selection; then back, the menu's as it was.
 	menus.session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	const Document *extra = menus.session.document_for("extra.mnu");
 	TEST_EXPECT(extra && v.documents.active == extra->path());
-	TEST_EXPECT(v.documents.selection.row == extra->rows().front()->id && !v.documents.selection.child); // its first screen
+	TEST_EXPECT(v.documents.selection.primary.row == extra->rows().front()->id && !v.documents.selection.primary.child); // its first screen
 	const NodeAddress extra_main = extra->address_at(kMain);
 	menus.select(extra_main, SelectMode::Replace, extra->path());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.documents.active == menu && v.documents.selection == menus.at(kExit) &&
-			v.documents.selected ==
+	TEST_EXPECT(v.documents.active == menu && v.documents.selection.primary == menus.at(kExit) &&
+			v.documents.selection.records ==
 					std::vector<NodeAddress>({ menus.at(kTitle), menus.at(kExit) }));
 	menus.session.handle(request::open_document("extra.mnu"));
-	TEST_EXPECT(v.documents.active == extra->path() && v.documents.selection == extra_main && v.documents.selected.size() == 1);
+	TEST_EXPECT(v.documents.active == extra->path() && v.documents.selection.primary == extra_main && v.documents.selection.records.size() == 1);
 
 	// The menu's file changed outside the editor: a Rescan reads it again, and it keeps no
 	// selection (its records are new ones).
@@ -167,8 +167,8 @@ static int test_remembered_selections() {
 	}
 	menus.session.handle(request::rescan());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 && v.documents.selection.row == menus.menu().rows().front()->id &&
-	            !v.documents.selection.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selection.records.size() == 1 && v.documents.selection.primary.row == menus.menu().rows().front()->id &&
+	            !v.documents.selection.primary.child);
 
 	// Selected again, then closed while another is active, and opened again: none kept.
 	menus.select(menus.at(kTitle));
@@ -176,8 +176,8 @@ static int test_remembered_selections() {
 	menus.session.handle(request::close_document(menu));
 	TEST_EXPECT(!menus.session.document_for(menu) && v.documents.active == extra->path());
 	menus.session.handle(request::open_document(menu));
-	TEST_EXPECT(v.documents.active == menu && v.documents.selected.size() == 1 &&
-			!v.documents.selection.child);
+	TEST_EXPECT(v.documents.active == menu && v.documents.selection.records.size() == 1 &&
+			!v.documents.selection.primary.child);
 	return 0;
 }
 

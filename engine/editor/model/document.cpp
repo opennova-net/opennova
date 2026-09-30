@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cstdlib>
 
+#include <editor/model/staged_rows.h>
+
 namespace opennova::editor {
 
 uint64_t next_edit_gesture() {
@@ -24,21 +26,6 @@ bool fail(Diagnostic &error, const std::string &path, const char *code, const st
           const std::string &field = {}) {
 	error = make_diagnostic(DiagnosticSeverity::Error, code, message, path, field);
 	return false;
-}
-
-// True for an edit that adds, removes or moves a whole row (or pastes rows at the top
-// level): it changes the row list, not one row; and for an Apply naming no row, which changes
-// the file-wide state alone.
-bool row_level(const Edit &edit) {
-	switch (edit.operation) {
-	case EditOperation::Add:
-	case EditOperation::Paste: return edit.address.row == 0 && edit.parent == 0;
-	case EditOperation::Duplicate:
-	case EditOperation::Remove:
-	case EditOperation::Move: return edit.address.child == 0;
-	case EditOperation::Apply: return edit.address.row == 0;
-	default: return false;
-	}
 }
 
 // True for an edit that may change what a row holds (an Apply's payload may too): a later edit
@@ -362,7 +349,8 @@ void Document::assign_ids(Node &row) {
 	row.for_each_identity([this](NodeId &id) { id = allocate_id(); });
 }
 
-std::shared_ptr<Node> Document::make_node(NodeKind, NodeId, std::string &error) {
+std::shared_ptr<Node> Document::make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+                                          std::string &error) {
 	error = "This document cannot add that record.";
 	return nullptr;
 }
@@ -393,6 +381,12 @@ bool Document::apply_file_payload(std::shared_ptr<const FileState> &, const Edit
 
 bool Document::paste_records(Node &, const Edit &, const IdAllocator &, std::vector<NodeId> &, std::string &error) {
 	error = "This document cannot paste records.";
+	return false;
+}
+
+bool Document::paste_rows(const Edit &, const std::vector<std::shared_ptr<const Node>> &,
+                          std::vector<std::shared_ptr<Node>> &, std::string &error) {
+	error = "Paste inside a record: select where the records go.";
 	return false;
 }
 
@@ -428,169 +422,46 @@ void Document::on_saved() {
 	set_baseline();
 }
 
-// A whole row added, duplicated, removed or moved (or a file-wide value set): one edit,
-// one step, never folded. An Apply naming no row, the file-wide state alone: one step, a
-// gesture's folding into one.
-bool Document::apply_row_edit(const Edit &edit, Diagnostic &error) {
-	Change change;
-	change.before_state = change.after_state = file_state_;
-	if (edit.operation == EditOperation::SetFileValue) {
-		std::shared_ptr<const FileState> updated = file_state_;
-		if (!set_file_value(updated, edit, error)) return false;
-		change.after_state = updated;
-		return commit(std::move(change), {}, error);
-	}
-	std::string message;
-	if (edit.operation == EditOperation::Apply) {
-		if (!edit.payload)
-			return fail(error, path(), "document.payload", "This change carries nothing to apply.");
-		std::shared_ptr<const FileState> updated = file_state_;
-		bool changes = true;
-		if (!apply_file_payload(updated, *edit.payload, changes, message))
-			return fail(error, path(), "document.payload",
-			            message.empty() ? "This document does not take that change." : message);
-		if (!changes) return true; // the file-wide state as it was: no step
-		change.after_state = updated;
-		// A gesture's changes fold into one step, keyed by the file rather than a row.
-		const std::string key =
-		        edit.gesture ? "g" + std::to_string(edit.gesture) + "/file" : std::string();
-		return commit(std::move(change), key, error);
-	}
-	std::shared_ptr<Node> updated;
-	if (edit.operation == EditOperation::Paste)
-		return fail(error, path(), "document.paste", "Paste inside a record: select where the records go.");
-	if (edit.operation == EditOperation::Add) {
-		const NodeId id = allocate_id();
-		updated = make_node(edit.address.kind, id, message);
-		if (!updated) return fail(error, path(), "document.kind", message.empty() ? "This document cannot add that record." : message);
-		updated->id = id;
-		assign_ids(*updated);
-		// The new row's field, set in the same step (Edit::field on an Add).
-		if (!edit.field.empty()) {
-			if (!set_field(*updated, {id, edit.address.kind, 0}, edit.field, edit.value, message))
-				return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
-			after_edit(*updated);
-		}
-		change.after = updated;
-		change.after_position = std::min(edit.position, rows_.size());
-		if (!commit(std::move(change), {}, error)) return false;
-		last_added_ = id;
-		added_ = {id};
-		return true;
-	}
-	const size_t index = row_index(edit.address.row);
-	if (index == rows_.size()) return fail(error, path(), "document.selection", "The selected record no longer exists.");
-	if (rows_[index]->kind != edit.address.kind)
-		return fail(error, path(), "document.selection",
-		            std::string("Wrong kind: the record is ") + kind_label(rows_[index]->kind) + ", the address says " + kind_words(*this, edit.address.kind) + ".");
-	if (edit.parent) return fail(error, path(), "document.collection", "A row moves among the rows only.");
-	change.before = rows_[index];
-	change.before_position = index;
-	if (edit.operation == EditOperation::Remove) {
-		change.after_state = state_after_remove(file_state_, rows_.size() - 1);
-		change.after_position = index;
-	} else if (edit.operation == EditOperation::Duplicate) {
-		updated = rows_[index]->clone();
-		updated->id = allocate_id();
-		assign_ids(*updated);
-		prepare_duplicate(*updated);
-		change.before.reset();
-		change.after_position = std::min(edit.position, rows_.size());
-	} else {
-		change.after_position = std::min(edit.position, rows_.size() - 1);
-		// A Move that leaves the row where it is changes nothing: no history step, so the
-		// document stays clean.
-		if (change.after_position == index) return true;
-		updated = rows_[index]->clone();
-	}
-	if (updated) {
-		after_edit(*updated);
-		change.after = updated;
-	}
-	const NodeId made = edit.operation == EditOperation::Duplicate ? updated->id : 0;
-	if (!commit(std::move(change), {}, error)) return false;
-	if (made) {
-		last_added_ = made;
-		added_ = {made};
-	}
-	return true;
-}
-
-bool Document::commit(Change change, const std::string &key, Diagnostic &error) {
-	std::string message;
-	if (!accept_change(change, message))
-		return fail(error, path(), "document.structure", message.empty() ? "This document refuses that change." : message);
-	history_.commit(std::move(change), key);
-	return true;
-}
-
 bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (edits.empty()) return true;
-	for (const Edit &edit : edits) {
-		if (edit.operation != EditOperation::SetFileValue && !row_level(edit)) continue;
-		if (edits.size() == 1) return apply_row_edit(edit, error);
-		return fail(error, path(), "document.batch", "Rows and file-wide values change one edit at a time, not in a batch.");
-	}
-	NodeId row = 0;
-	if (!batch_row(edits, row, error)) return false;
 	bool builds = false;
-	const std::string key = step_key(edits, row, builds);
-	// A coalesced batch (typing) applies to the row as its group found it, so the group's one
-	// step is that row plus the latest value: an empty value typed on the way to a new one (an
+	const std::string key = step_key(edits, builds);
+	// A coalesced batch (typing) applies to the rows as its group found them, so the group's one
+	// step is those rows plus the latest values: an empty value typed on the way to a new one (an
 	// image or a hotkey cleared and retyped, a name) cannot drop what the new value keeps, and a
-	// group that ends empty is the clear. A gesture's edits build on each other instead.
+	// group that ends empty is the clear. A gesture's batches build on each other instead.
 	const bool reopened = !builds && history_.reopen(key);
 	const auto refused = [&]() {
 		if (reopened) history_.resume(); // the group's step as it was
 		return false;
 	};
-	RowBatch batch;
-	if (!prepare_row_batch(edits, batch, error)) return refused();
-	if (!batch.changed) {
+	StagedRows staged(rows_, file_state_, [this](NodeId id) { return row_index(id); });
+	std::vector<NodeId> added;
+	if (!stage_edits(edits, staged, added, error)) return refused();
+	staged.for_each_changed([this](Node &row) { after_edit(row); });
+	EditStep step = staged.step();
+	if (step.empty()) {
 		// Nothing changes. A reopened group typed back to the values it found is no step at all:
 		// the document stays as the group found it (clean again when that was saved).
 		if (reopened) history_.drop();
 		return true;
 	}
-	// The change is the type's to refuse before it commits.
+	// The step is the type's to refuse before it commits.
 	std::string message;
-	if (!accept_change(batch.change, message)) {
+	if (!accept_step(step, staged, message)) {
 		fail(error, path(), "document.structure",
 		     message.empty() ? "This document refuses that change." : message);
 		return refused();
 	}
-	history_.commit(std::move(batch.change), key);
-	if (!batch.added.empty()) {
-		added_ = batch.added;
-		last_added_ = batch.added.front();
+	history_.commit(std::move(step), key);
+	if (!added.empty()) {
+		added_ = std::move(added);
+		last_added_ = added_.front();
 	}
 	return true;
 }
 
-bool Document::batch_row(const std::vector<Edit> &edits, NodeId &row, Diagnostic &error) const {
-	// Every edit changes one row: the row an Add or a Paste goes into is its owner's.
-	row = 0;
-	for (const Edit &edit : edits) {
-		NodeId id = edit.address.row;
-		const bool into = edit.operation == EditOperation::Add || edit.operation == EditOperation::Paste;
-		// A record the batch makes is in the batch's row: its edit names that row, or none.
-		if (is_batch_made(edit.address.child) || (into && is_batch_made(edit.parent))) {
-			if (!id) continue;
-		} else if (into && edit.parent) {
-			const NodeAddress owner = address_of(edit.parent);
-			if (!owner.row) return fail(error, path(), "document.selection", "The record to add into no longer exists.");
-			if (edit.address.row && edit.address.row != owner.row)
-				return fail(error, path(), "document.selection", "The record to add into is in another row than the edit names.");
-			id = owner.row;
-		}
-		if (row && id != row)
-			return fail(error, path(), "document.batch", "A batch edits one row: edit other rows in another change.");
-		row = id;
-	}
-	return true;
-}
-
-std::string Document::step_key(const std::vector<Edit> &edits, NodeId row, bool &builds) {
+std::string Document::step_key(const std::vector<Edit> &edits, bool &builds) {
 	const uint64_t gesture = edits.front().gesture;
 	bool same_gesture = gesture != 0, all_coalesce = true;
 	for (const Edit &edit : edits) {
@@ -598,7 +469,9 @@ std::string Document::step_key(const std::vector<Edit> &edits, NodeId row, bool 
 		all_coalesce = all_coalesce && edit.coalesce && edit.operation == EditOperation::Set;
 	}
 	builds = same_gesture;
-	if (same_gesture) return "g" + std::to_string(gesture) + "/r" + std::to_string(row);
+	// A gesture's batches fold over every row they change (S13 D7: a drag of several records is one
+	// step), so its key names no row.
+	if (same_gesture) return "g" + std::to_string(gesture);
 	std::string key;
 	if (all_coalesce)
 		for (const Edit &edit : edits)
@@ -606,65 +479,176 @@ std::string Document::step_key(const std::vector<Edit> &edits, NodeId row, bool 
 	return key;
 }
 
-bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, Diagnostic &error) {
-	NodeId row_id = 0;
-	if (!batch_row(edits, row_id, error)) return false;
-	const size_t index = row_index(row_id);
-	if (index == rows_.size()) return fail(error, path(), "document.selection", "The selected record no longer exists.");
-	const std::shared_ptr<const Node> current = rows_[index];
-	std::shared_ptr<Node> updated = current->clone();
-
+bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged, std::vector<NodeId> &added,
+                           Diagnostic &error) {
 	const IdAllocator allocate = [this] { return allocate_id(); };
-	std::vector<NodeId> added;
-	bool changed = false, reshaped = false;
-	// The file-wide state as the batch leaves it (an Apply's payload may change it too).
-	std::shared_ptr<const FileState> state = file_state_;
-	const std::string row_label = kind_label(current->kind);
-	// A nested record's placement: the committed row's index until an edit of this batch
-	// changes the row's shape, then a walk of the clone.
-	auto place = [&](NodeId child, Placement &at) {
-		return reshaped ? placement_in(*updated, child, at) : placement({row_id, 0, child}, at);
+	// What each edit made, which a later edit names by batch_made(its index): a row (row == id), or
+	// a record in the row `row`.
+	struct Made {
+		NodeId id = 0, row = 0;
 	};
-	// The owner a record goes into: a record of this row, or the row itself (0).
-	auto owner_of = [&](NodeId parent, NodeAddress &owner) {
-		if (!parent || parent == row_id) { owner = {row_id, updated->kind, 0}; return true; }
-		Placement at;
-		if (!place(parent, at)) return false;
-		owner = {row_id, at.spec.kind, parent};
-		return true;
-	};
-	auto find_collection = [&](const NodeAddress &owner, NodeKind kind, Collection &out) {
-		for (const Collection &collection : collections(*updated, owner))
-			if (collection.spec.kind == kind) { out = collection; return true; }
-		return false;
-	};
-
-	// The record each edit made, which a later edit names by batch_made(its index).
-	std::vector<NodeId> made(edits.size(), 0);
+	std::vector<Made> made(edits.size());
 	for (size_t i = 0; i < edits.size(); ++i) {
 		Edit edit = edits[i];
-		const auto resolve_made = [&](NodeId &id) {
-			if (!is_batch_made(id)) return true;
-			const NodeId earlier = id - kBatchMadeBase;
-			if (earlier >= NodeId(i) || !made[size_t(earlier)]) return false;
-			id = made[size_t(earlier)];
+		std::string message;
+		const auto earlier = [&](NodeId id, Made &out) {
+			const NodeId index = id - kBatchMadeBase;
+			if (index >= NodeId(i) || !made[size_t(index)].id) return false;
+			out = made[size_t(index)];
 			return true;
 		};
-		if (!resolve_made(edit.address.child) || !resolve_made(edit.parent))
+		const auto names_nothing_made = [&]() {
 			return fail(error, path(), "document.batch", "An edit names a record that no earlier edit of its batch made.");
-		if (!edit.address.row) edit.address.row = row_id;
-		std::string message;
+		};
+		const auto made_elsewhere = [&]() {
+			return fail(error, path(), "document.batch",
+			            "An edit names a record its batch made in another row than the edit names.");
+		};
+		// A row or a record an earlier edit made, named by batch_made: its identity, in its row (a made
+		// row named as a record, or as an owner, is the row itself).
+		Made earlier_made;
+		if (is_batch_made(edit.address.row)) {
+			if (!earlier(edit.address.row, earlier_made)) return names_nothing_made();
+			edit.address.row = earlier_made.row;
+		}
+		if (is_batch_made(edit.address.child)) {
+			if (!earlier(edit.address.child, earlier_made)) return names_nothing_made();
+			if (edit.address.row && edit.address.row != earlier_made.row) return made_elsewhere();
+			edit.address.row = earlier_made.row;
+			edit.address.child = earlier_made.id == earlier_made.row ? 0 : earlier_made.id;
+		}
+		if (is_batch_made(edit.parent)) {
+			if (!earlier(edit.parent, earlier_made)) return names_nothing_made();
+			if (edit.address.row && edit.address.row != earlier_made.row) return made_elsewhere();
+			edit.address.row = earlier_made.row;
+			edit.parent = earlier_made.id == earlier_made.row ? 0 : earlier_made.id;
+		}
+
+		// The file-wide state alone: a value, or a change the type made naming no row.
+		if (edit.operation == EditOperation::SetFileValue) {
+			if (!set_file_value(staged.state(), edit, error)) return false;
+			continue;
+		}
+		if (edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child) {
+			if (!edit.payload) return fail(error, path(), "document.payload", "This change carries nothing to apply.");
+			bool changes = true;
+			if (!apply_file_payload(staged.state(), *edit.payload, changes, message))
+				return fail(error, path(), "document.payload",
+				            message.empty() ? "This document does not take that change." : message);
+			continue;
+		}
+
+		// The row the edit is about: the one it names, else the one its record or its owner is in.
+		const bool into = edit.operation == EditOperation::Add || edit.operation == EditOperation::Paste;
+		if (into && edit.parent && !is_batch_made(edits[i].parent)) {
+			const NodeAddress owner = address_of(edit.parent);
+			if (!owner.row) return fail(error, path(), "document.selection", "The record to add into no longer exists.");
+			if (edit.address.row && edit.address.row != owner.row)
+				return fail(error, path(), "document.selection", "The record to add into is in another row than the edit names.");
+			edit.address.row = owner.row;
+		} else if (!edit.address.row && edit.address.child) {
+			edit.address.row = address_of(edit.address.child).row;
+		}
+
+		// A row of the file: added, pasted at the top level, duplicated, removed or moved.
+		if (into && !edit.address.row) {
+			if (edit.operation == EditOperation::Add) {
+				const NodeId id = allocate_id();
+				std::shared_ptr<Node> row = make_node(edit.address.kind, id, staged.rows(), message);
+				if (!row)
+					return fail(error, path(), "document.kind", message.empty() ? "This document cannot add that record." : message);
+				row->id = id;
+				assign_ids(*row);
+				// The new row's field, set in the same step (Edit::field on an Add).
+				if (!edit.field.empty() && !set_field(*row, {id, edit.address.kind, 0}, edit.field, edit.value, message))
+					return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
+				staged.insert(std::move(row), edit.position);
+				made[i] = {id, id};
+				added.push_back(id);
+				continue;
+			}
+			std::vector<std::shared_ptr<Node>> pasted;
+			if (!paste_rows(edit, staged.rows(), pasted, message))
+				return fail(error, path(), "document.paste", message.empty() ? "These records cannot be pasted here." : message);
+			size_t at = std::min(edit.position, staged.size());
+			for (auto &row : pasted) {
+				const NodeId id = allocate_id();
+				row->id = id;
+				assign_ids(*row);
+				if (!made[i].id) made[i] = {id, id};
+				added.push_back(id);
+				staged.insert(std::move(row), at++);
+			}
+			continue;
+		}
+		const NodeId row_id = edit.address.row;
+		if (staged.removed(row_id))
+			return fail(error, path(), "document.batch", "An edit names a row an earlier edit of its batch removed.");
+		const Node *current = staged.find(row_id);
+		if (!current) return fail(error, path(), "document.selection", "The selected record no longer exists.");
+		const std::string row_label = kind_label(current->kind);
+		const bool on_row = !into && !edit.address.child;
+		if (on_row && current->kind != edit.address.kind)
+			return fail(error, path(), "document.selection",
+			            "Wrong kind: the record is " + row_label + ", the address says " + kind_words(*this, edit.address.kind) + ".");
+		if (on_row && (edit.operation == EditOperation::Duplicate || edit.operation == EditOperation::Remove ||
+		               edit.operation == EditOperation::Move)) {
+			if (edit.parent) return fail(error, path(), "document.collection", "A row moves among the rows only.");
+			if (edit.operation == EditOperation::Remove) {
+				staged.state() = state_after_remove(staged.state(), staged.size() - 1);
+				staged.remove(row_id);
+			} else if (edit.operation == EditOperation::Duplicate) {
+				std::shared_ptr<Node> copy = current->clone();
+				copy->id = allocate_id();
+				assign_ids(*copy);
+				prepare_duplicate(*copy, staged.rows());
+				const NodeId id = copy->id;
+				staged.insert(std::move(copy), edit.position);
+				made[i] = {id, id};
+				added.push_back(id);
+			} else {
+				// A Move that leaves the row where it is changes nothing.
+				staged.move(row_id, edit.position);
+			}
+			continue;
+		}
+
+		// A record inside the row: the row's clone changed (the row cloned on its first touch).
+		Node *updated = staged.touch(row_id);
+		// A nested record's placement: the committed row's index until an edit of this batch changes
+		// the row's shape (or the batch made the row), then a walk of the clone.
+		auto place = [&](NodeId child, Placement &at) {
+			return staged.reshaped(row_id) ? placement_in(*updated, child, at) : placement({row_id, 0, child}, at);
+		};
+		// The owner a record goes into: a record of this row, or the row itself (0).
+		auto owner_of = [&](NodeId parent, NodeAddress &owner) {
+			if (!parent || parent == row_id) {
+				owner = {row_id, updated->kind, 0};
+				return true;
+			}
+			Placement at;
+			if (!place(parent, at)) return false;
+			owner = {row_id, at.spec.kind, parent};
+			return true;
+		};
+		auto find_collection = [&](const NodeAddress &owner, NodeKind kind, Collection &out) {
+			for (const Collection &collection : collections(*updated, owner))
+				if (collection.spec.kind == kind) {
+					out = collection;
+					return true;
+				}
+			return false;
+		};
 		const NodeAddress &address = edit.address;
 		Edit hook = edit;
-		hook.address.row = row_id;
 		Placement at;
-		// Resolve the address: every edit but an Add or a Paste names an existing record of
-		// the kind it says.
-		if (edit.operation != EditOperation::Add && edit.operation != EditOperation::Paste) {
+		// Resolve the address: every edit but an Add or a Paste names an existing record of the kind
+		// it says.
+		if (!into) {
 			if (!address.child) {
 				if (updated->kind != address.kind)
 					return fail(error, path(), "document.selection",
-					            std::string("Wrong kind: the record is ") + row_label + ", the address says " + kind_words(*this, address.kind) + ".");
+					            "Wrong kind: the record is " + row_label + ", the address says " + kind_words(*this, address.kind) + ".");
 			} else if (!place(address.child, at)) {
 				return fail(error, path(), "document.selection", "The selected record no longer exists.");
 			} else if (at.spec.kind != address.kind) {
@@ -675,8 +659,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 		switch (edit.operation) {
 		case EditOperation::Set: {
 			// A Set of the value the field holds changes nothing (as the record reads it, a def's
-			// number in its written units included, and whether an optional field is written): no
-			// history step, as for a Clear, a Write or a Move that leaves the record as it is.
+			// number in its written units included, and whether an optional field is written).
 			Value before, after;
 			const bool read_before = read(*updated, address, edit.field, before);
 			const bool written_before = read_present(*updated, address, edit.field);
@@ -688,13 +671,11 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			break;
 		}
 		case EditOperation::Apply: {
-			// A change the type made in C++, to the record and the file-wide state as the batch
-			// has left them; one that changes nothing is no step, as a Set of the value held.
-			if (!edit.payload)
-				return fail(error, path(), "document.payload",
-				            "This change carries nothing to apply.");
+			// A change the type made in C++, to the record and the file-wide state as the batch has
+			// left them; one that changes nothing is nothing, as a Set of the value held.
+			if (!edit.payload) return fail(error, path(), "document.payload", "This change carries nothing to apply.");
 			bool changes = true;
-			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
+			if (!apply_payload(*updated, address, *edit.payload, staged.state(), allocate, changes, message))
 				return fail(error, path(), "document.payload",
 				            message.empty() ? "This document does not take that change." : message);
 			if (!changes) continue;
@@ -707,9 +688,8 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			if (!schema->optional || schema->read_only)
 				return fail(error, path(), "document.value", "This field is always written.", edit.field);
 			const bool written = edit.operation == EditOperation::Write;
-			// A field already left out (Clear) or already written (Write) changes nothing. The
-			// committed row answers while no earlier edit of the batch has changed the clone.
-			if (!changed && present(address, edit.field) == written) continue;
+			// A field already left out (Clear) or already written (Write) changes nothing.
+			if (read_present(*updated, address, edit.field) == written) continue;
 			if (!set_present(*updated, address, edit.field, written, message))
 				return fail(error, path(), "document.value", message.empty() ? "This field is always written." : message, edit.field);
 			break;
@@ -725,7 +705,7 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 				if (!paste_records(*updated, hook, allocate, pasted, message))
 					return fail(error, path(), "document.paste", message.empty() ? "These records cannot be pasted here." : message);
 				added.insert(added.end(), pasted.begin(), pasted.end());
-				if (!pasted.empty()) made[i] = pasted.front();
+				if (!pasted.empty()) made[i] = {pasted.front(), row_id};
 				break;
 			}
 			Collection collection;
@@ -738,8 +718,10 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
 				return fail(error, path(), "document.collection", message.empty() ? "This collection cannot accept that edit." : message);
-			if (one) added.push_back(one);
-			made[i] = one;
+			if (one) {
+				added.push_back(one);
+				made[i] = {one, row_id};
+			}
 			// The new record's field, set in the same step (Edit::field on an Add).
 			if (!edit.field.empty() && (!one || !set_field(*updated, {row_id, address.kind, one}, edit.field, edit.value, message)))
 				return fail(error, path(), "document.value", message.empty() ? "Unknown field." : message, edit.field);
@@ -748,7 +730,6 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 		case EditOperation::Duplicate:
 		case EditOperation::Remove:
 		case EditOperation::Move: {
-			if (!address.child) return fail(error, path(), "document.collection", "A row is duplicated, removed or moved on its own.");
 			if (at.spec.fixed)
 				return fail(error, path(), "document.collection", std::string("The ") + at.spec.label + " of this " +
 				            kind_label(at.owner.kind) + " is fixed: it stays where it is.");
@@ -785,25 +766,26 @@ bool Document::prepare_row_batch(const std::vector<Edit> &edits, RowBatch &out, 
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
 				return fail(error, path(), "document.collection", message.empty() ? "This collection cannot accept that edit." : message);
-			if (one) added.push_back(one);
-			made[i] = one;
+			if (one) {
+				added.push_back(one);
+				made[i] = {one, row_id};
+			}
 			break;
 		}
 		default:
-			return fail(error, path(), "document.batch", "Rows and file-wide values change one edit at a time, not in a batch.");
+			return fail(error, path(), "document.batch", "This edit names no record.");
 		}
-		changed = true;
-		reshaped = reshaped || structural(edit.operation);
+		staged.mark_changed(row_id);
+		if (structural(edit.operation)) staged.mark_reshaped(row_id);
 	}
-	out.changed = changed;
-	if (!changed) return true;
-	after_edit(*updated);
-	out.change.before_state = file_state_;
-	out.change.after_state = state;
-	out.change.before = current;
-	out.change.before_position = out.change.after_position = index;
-	out.change.after = updated;
-	out.added = std::move(added);
+	return true;
+}
+
+bool Document::changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const {
+	if (load_generation != this->load_generation()) return false;
+	editor::RowChanges rows;
+	if (!history_.changes_since(revision, rows)) return false;
+	out = std::move(rows);
 	return true;
 }
 
@@ -858,10 +840,10 @@ bool Document::field_differs(const NodeAddress &address, const FieldSchema &fiel
 	return field.optional && read_present(*now, address, field.id) != read_present(*saved, address, field.id);
 }
 
-Document::RowChanges &Document::row_changes(NodeId row, const std::shared_ptr<const Node> &now,
+Document::RowAnswers &Document::row_changes(NodeId row, const std::shared_ptr<const Node> &now,
                                             const std::shared_ptr<const Node> &saved) const {
-	RowChanges &changes = row_changes_[row];
-	if (changes.now != now || changes.saved != saved) changes = RowChanges{now, saved, {}, {}};
+	RowAnswers &changes = row_changes_[row];
+	if (changes.now != now || changes.saved != saved) changes = RowAnswers{now, saved, {}, {}};
 	return changes;
 }
 

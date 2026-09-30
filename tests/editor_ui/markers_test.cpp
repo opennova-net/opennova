@@ -190,8 +190,8 @@ void test_field_marks() {
 	// BACK and TITLE together, TITLE's Hidden set: the shared form marks it.
 	std::shared_ptr<MnuDocument> fresh = load_menu(dir);
 	replace_view(v, menu_view(fresh));
-	v.documents.selection = named(*fresh, "BACK");
-	v.documents.selected = {named(*fresh, "BACK"), named(*fresh, "TITLE")};
+	v.documents.selection.primary = named(*fresh, "BACK");
+	v.documents.selection.records = {named(*fresh, "BACK"), named(*fresh, "TITLE")};
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
 	CHECK(!drew_mark("Inspector", Change::Changed) && !drew_mark("Document/windows", Change::Changed), "read fresh: nothing");
@@ -557,7 +557,7 @@ void test_reveal_in_views() {
 	ui.frames(3);
 	go_to(model->path(), model->locator(point), "name");
 	ui.frames(4);
-	CHECK(v.documents.selection == point && drew_selected("Document/outline"), "the outline opened to the point");
+	CHECK(v.documents.selection.primary == point && drew_selected("Document/outline"), "the outline opened to the point");
 	ui.drain();
 }
 
@@ -642,8 +642,8 @@ void test_revert_several() {
 	std::shared_ptr<MnuDocument> document = load_menu(dir);
 	const NodeAddress back = named(*document, "BACK"), title = named(*document, "TITLE");
 	SessionView v = menu_view(document);
-	v.documents.selection = back;
-	v.documents.selected = {back, title};
+	v.documents.selection.primary = back;
+	v.documents.selection.records = {back, title};
 	v.revisions.touch(ViewConcern::Selection);
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);

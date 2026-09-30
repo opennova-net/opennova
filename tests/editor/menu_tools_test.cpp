@@ -190,7 +190,7 @@ static int test_menu_tools() {
 	TEST_EXPECT(menu->get(show, "target", value) && std::get<std::string>(value) == "TITLE");
 	TEST_EXPECT(menu->collections_of(hello).size() > 0);
 	// The selection is the two windows (their ACTIONs, SOUND and ITEM held by them).
-	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({hello, choices}) && view.documents.selection == hello);
+	TEST_EXPECT(view.documents.selection.records == std::vector<NodeAddress>({hello, choices}) && view.documents.selection.primary == hello);
 
 	// The tree now: the button with its lists, text and rect; the list with its item.
 	tree = menu_tree_to_json(view, "");

@@ -44,6 +44,9 @@ struct MenuScreen : Node {
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return screen.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
+	// The screen's windows, all they hold, and their identities (the places a clone shares are not
+	// its own).
+	size_t footprint() const override;
 
 	// Where each identity sits: the root's index, then each list and index down to it. Made
 	// when the row is (for_each_identity, which gives a new or duplicated row its identities)
@@ -151,7 +154,10 @@ protected:
 	// A field: whether the file writes it. "": whether the record itself is written (not
 	// inside an absent ITEMS or a part left out).
 	bool read_present(const Node &row, const NodeAddress &address, const std::string &field) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	// A new screen, named as no screen of `rows` (the rows as its batch has left them) is.
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool set_present(Node &row, const NodeAddress &address, const std::string &field, bool present,
@@ -169,10 +175,10 @@ protected:
 	// position, fresh identities, names made unique within the screen.
 	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                   std::string &error) override;
-	// A duplicated screen takes a name no other screen has (OPTIONS then OPTIONS2).
-	void prepare_duplicate(Node &copy) const override;
-	// A menu keeps at least one screen: removing its last one is refused.
-	bool accept_change(const Change &change, std::string &error) const override;
+	// A duplicated screen takes a name no other screen of `rows` has (OPTIONS then OPTIONS2).
+	void prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const override;
+	// A menu keeps at least one screen: a step that removes its last one is refused.
+	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
 
 private:
 	struct SavedImage {

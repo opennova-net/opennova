@@ -16,7 +16,7 @@ namespace opennova::editor {
 // A menu stylesheet (ADR 0046 S9i, ADR 0014): the `.mns` files, one row per line of the
 // lossless mns::Document (a variable spanning several lines is one row). A variable's
 // value is the value the game reads, as written (a "\\" pair stays doubled, the game
-// keeps both). Every change is checked before it commits (accept_change): the rows are
+// keeps both). Every step is checked before it commits (accept_step): the rows are
 // rendered and read again, and a change the game would read otherwise (a line inside a
 // switched-off #if block, a line the variable above would take as its value) is refused.
 // The #if / #else / #endif lines, the lines they switch off and a variable whose value
@@ -36,6 +36,8 @@ struct StyleRow : Node {
 	std::shared_ptr<Node> clone() const override { return std::make_shared<StyleRow>(*this); }
 	// A variable's name, a comment's or a directive's text; "" for a blank line.
 	std::string name() const override;
+	// The line's text and each physical line a variable spans.
+	size_t footprint() const override;
 };
 
 // What a variable line's value is used as (ADR 0046 S9i; S13 V1: the stylesheet view draws it,
@@ -110,12 +112,14 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	bool accept_change(const Change &change, std::string &error) const override;
+	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
 
 private:
 	// The variables the game reads of the rows as they stand (native().evaluate()), once per

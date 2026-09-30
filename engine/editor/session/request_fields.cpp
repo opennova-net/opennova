@@ -41,12 +41,13 @@ constexpr RequestField kFields[] = {
 			"(install: the path is the game install; native: a loose file copied as the game's "
 			"own)." },
 	{ F::Edits, "edits", J::Objects,
-			"Edits on one row, one undo step: {operation (set, clear, write, add, duplicate, "
-			"remove, "
-			"move, paste, set_file_value), row, kind, child, parent, field, value, position, "
-			"coalesce, "
-			"gesture}." },
+			"Edits on any rows of one document, one undo step: {operation (set, clear, write, add, "
+			"duplicate, remove, move, paste, set_file_value), row, kind, child, parent, field, "
+			"value, position, coalesce, gesture}." },
 	{ F::Address, "address", J::Object, "A record by its address, {row, kind, child}." },
+	{ F::Records, "records", J::Objects,
+			"Records by their addresses, [{row, kind, child}]: those a selection takes with the "
+			"address (of any rows of the document)." },
 	{ F::PasteAt, "paste_at", J::Object,
 			"Where a paste goes, {row, parent, position}: into the owner parent (0 = the row) at "
 			"position; left out, after the selection." },

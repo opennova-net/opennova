@@ -33,6 +33,8 @@ struct CatalogRow : Node {
 
 	std::shared_ptr<Node> clone() const override { return std::make_shared<CatalogRow>(*this); }
 	std::string name() const override;
+	// The record and the arrays it owns (its attachments, actions, sights or effects).
+	size_t footprint() const override;
 	def::DefRecordKind record_kind() const { return def_kind(kind); }
 	void *record();
 	const void *record() const;
@@ -84,7 +86,9 @@ protected:
 	                 std::string &error) override;
 	// The vehicle spawn registry: the same IDs in the same slots.
 	bool same_file_state(const FileState *a, const FileState *b) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
