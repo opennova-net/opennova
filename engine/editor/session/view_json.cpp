@@ -19,9 +19,9 @@ namespace opennova::editor {
 
 namespace {
 
-using io::JsonValue;
 using io::json_number;
 using io::json_string;
+using io::JsonValue;
 
 using C = ViewConcern;
 
@@ -63,7 +63,8 @@ JsonValue project_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(view.project.open));
 	out.set("quit_requested", boolean(view.dialogs.quit_requested));
-	if (!view.project.open) return out;
+	if (!view.project.open)
+		return out;
 	const ProjectDocument &document = *view.project.document;
 	out.set("root", json_string(view.project.root));
 	out.set("title", json_string(document.title));
@@ -95,10 +96,12 @@ JsonValue requirements_section(const SessionView &view) {
 		entry.set("required", boolean(row.required));
 		entry.set("state", json_string(requirement_state_token(row.state)));
 		entry.set("expected_kind", json_string(asset_kind_token(row.expected_kind)));
-		if (!row.asset_path.empty()) entry.set("asset", json_string(row.asset_path));
+		if (!row.asset_path.empty())
+			entry.set("asset", json_string(row.asset_path));
 		if (row.found_kind != AssetKind::Unknown)
 			entry.set("found_kind", json_string(asset_kind_token(row.found_kind)));
-		if (view.activity.missing_at_boot(row.name)) entry.set("boot_missing", boolean(true));
+		if (view.activity.missing_at_boot(row.name))
+			entry.set("boot_missing", boolean(true));
 		rows.push(std::move(entry));
 	}
 	out.set("rows", std::move(rows));
@@ -111,7 +114,8 @@ JsonValue documents_section(const SessionView &view) {
 	out.set("active", json_string(view.documents.active));
 	JsonValue open = JsonValue::make_array();
 	for (const auto &document : view.documents.open) {
-		if (!document) continue;
+		if (!document)
+			continue;
 		JsonValue entry = JsonValue::make_object();
 		entry.set("path", json_string(document->path()));
 		entry.set("kind", json_string(asset_kind_token(document->kind())));
@@ -149,8 +153,9 @@ JsonValue run_section(const SessionView &view) {
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
-	out.set("exit_code", activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
-													  : JsonValue::make_null());
+	out.set("exit_code",
+			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
+										 : JsonValue::make_null());
 	out.set("in_install", boolean(view.project.play_retail));
 	out.set("game_install", json_string(view.project.retail_directory));
 	out.set("source_run", boolean(activity.source_run));
@@ -168,7 +173,8 @@ JsonValue import_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
-	if (preview.changed) out.set("changed", boolean(true));
+	if (preview.changed)
+		out.set("changed", boolean(true));
 	size_t rows = 0, not_found = 0;
 	for (const ImportPlanRow &row : plan.rows)
 		++(row.state == ImportPlanRow::State::NotFound ? not_found : rows);
@@ -204,7 +210,8 @@ JsonValue dialogs_section(const SessionView &view) {
 	prompt.set("open", boolean(unsaved.open));
 	if (unsaved.open) {
 		prompt.set("action", json_string(editor_request_kind_token(unsaved.action)));
-		if (!unsaved.target.empty()) prompt.set("target", json_string(unsaved.target));
+		if (!unsaved.target.empty())
+			prompt.set("target", json_string(unsaved.target));
 		prompt.set("files", strings_to_json(unsaved.files));
 		prompt.set("can_discard", boolean(unsaved.can_discard));
 	}
@@ -215,18 +222,23 @@ JsonValue dialogs_section(const SessionView &view) {
 		JsonValue preview = JsonValue::make_object();
 		preview.set("serial", json_number(double(rename.serial)));
 		preview.set("symbol", boolean(rename.symbol));
-		if (rename.symbol) preview.set("kind", json_string(reference_row(rename.kind).token));
+		if (rename.symbol)
+			preview.set("kind", json_string(reference_row(rename.kind).token));
 		preview.set("path", json_string(rename.path));
-		if (!rename.locator.empty()) preview.set("locator", json_string(rename.locator));
-		if (!rename.field.empty()) preview.set("field", json_string(rename.field));
+		if (!rename.locator.empty())
+			preview.set("locator", json_string(rename.locator));
+		if (!rename.field.empty())
+			preview.set("field", json_string(rename.field));
 		preview.set("old_name", json_string(rename.old_name));
 		preview.set("new_name", json_string(rename.new_name));
 		JsonValue sites = JsonValue::make_array();
 		for (const RenameSite &site : *rename.sites) {
 			JsonValue entry = JsonValue::make_object();
 			entry.set("file", json_string(site.file));
-			if (!site.record.empty()) entry.set("record", json_string(site.record));
-			if (!site.locator.empty()) entry.set("locator", json_string(site.locator));
+			if (!site.record.empty())
+				entry.set("record", json_string(site.record));
+			if (!site.locator.empty())
+				entry.set("locator", json_string(site.locator));
 			entry.set("field", json_string(site.field));
 			entry.set("before", json_string(site.before));
 			entry.set("after", json_string(site.after));
@@ -266,7 +278,8 @@ JsonValue problem_counts_section(const SessionView &view) {
 // its last update did.
 JsonValue graph_counts_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
-	if (!view.findings.graph) return out;
+	if (!view.findings.graph)
+		return out;
 	const AssetGraph &graph = *view.findings.graph;
 	const GraphStats &stats = graph.stats();
 	out.set("edges", json_number(double(graph.edge_count())));
@@ -322,8 +335,8 @@ constexpr ViewSectionRow kSections[] = {
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },
-	{ S::Documents, "documents",
-			concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument }), documents_section,
+	{ S::Documents, "documents", concern_set({ C::Documents, C::DocumentSet, C::ActiveDocument }),
+			documents_section,
 			"The open documents in short (path, kind, dirty, revision, can_undo, can_redo; the "
 			"documents query answers each whole) and the active one." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
@@ -336,8 +349,7 @@ constexpr ViewSectionRow kSections[] = {
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
 			"the files it reported missing at boot, and what Play runs (the game install, in it or "
 			"not, the runtime)." },
-	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }),
-			import_section,
+	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, with_dependencies, its lists' counts; the "
 			"import_preview query pages its plan), the editor's import setting, the project's "
 			"imported sources and the game install's file count." },
@@ -363,7 +375,8 @@ static_assert(std::size(kSections) == kViewSectionCount, "every view section has
 
 constexpr bool sections_in_order() {
 	for (size_t i = 0; i < kViewSectionCount; ++i)
-		if (kSections[i].section != static_cast<ViewSection>(i)) return false;
+		if (kSections[i].section != static_cast<ViewSection>(i))
+			return false;
 	return true;
 }
 static_assert(sections_in_order(), "the view section rows follow the enum's order");
@@ -380,9 +393,11 @@ constexpr bool same_text(const char *a, const char *b) {
 constexpr bool sections_named() {
 	for (size_t i = 0; i < kViewSectionCount; ++i) {
 		const ViewSectionRow &row = kSections[i];
-		if (!row.token[0] || !row.doc[0] || !row.write || !row.concerns) return false;
+		if (!row.token[0] || !row.doc[0] || !row.write || !row.concerns)
+			return false;
 		for (size_t j = i + 1; j < kViewSectionCount; ++j)
-			if (same_text(row.token, kSections[j].token)) return false;
+			if (same_text(row.token, kSections[j].token))
+				return false;
 	}
 	return true;
 }
@@ -399,8 +414,8 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 	JsonValue entry = JsonValue::make_object();
 	entry.set("state",
 			json_string(row.state == ImportPlanRow::State::Selected ? "selected"
-							: found                                ? "found"
-																   : "not_found"));
+							: found									? "found"
+																	: "not_found"));
 	entry.set("name", json_string(row.name));
 	entry.set("kind", json_string(asset_kind_token(row.kind)));
 	if (!row.needed_by.file.empty()) {
@@ -414,13 +429,16 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 			need.set("loader_arg", json_number(double(row.needed_by.loader_arg)));
 		entry.set("needed_by", std::move(need));
 	}
-	if (!found) return entry;
+	if (!found)
+		return entry;
 	entry.set("source", source_to_json(row.source));
 	entry.set("destination", json_string(row.destination));
-	if (!row.made_from.empty()) entry.set("made_from", json_string(row.made_from));
+	if (!row.made_from.empty())
+		entry.set("made_from", json_string(row.made_from));
 	entry.set("found_in", json_string(row.found_in));
 	entry.set("selected", boolean(row.selected));
-	if (!row.problem.empty()) entry.set("problem", json_string(row.problem));
+	if (!row.problem.empty())
+		entry.set("problem", json_string(row.problem));
 	if (!row.rivals.empty()) {
 		JsonValue rivals = JsonValue::make_array();
 		for (const ImportRival &rival : row.rivals) {
@@ -483,7 +501,8 @@ bool view_section_moved(const SessionView &view, ViewSection section, uint64_t s
 	const ConcernSet concerns = view_section_row(section).concerns;
 	for (size_t i = 0; i < kViewConcernCount; ++i) {
 		const ViewConcern concern = static_cast<ViewConcern>(i);
-		if ((concerns & concern_bit(concern)) && view.revisions.stamp(concern) > since) return true;
+		if ((concerns & concern_bit(concern)) && view.revisions.stamp(concern) > since)
+			return true;
 	}
 	return false;
 }
@@ -491,7 +510,8 @@ bool view_section_moved(const SessionView &view, ViewSection section, uint64_t s
 JsonValue operation_status_to_json(const OperationStatus &status) {
 	JsonValue out = JsonValue::make_object();
 	out.set("running", boolean(status.running()));
-	if (!status.running()) return out;
+	if (!status.running())
+		return out;
 	out.set("id", json_number(double(status.id)));
 	out.set("kind", json_string(operation_kind_row(status.kind).token));
 	out.set("label", json_string(status.label));
@@ -512,7 +532,8 @@ JsonValue operation_status_to_json(const OperationStatus &status) {
 }
 
 JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
-	if (outcome.id == 0) return JsonValue::make_null();
+	if (outcome.id == 0)
+		return JsonValue::make_null();
 	JsonValue out = JsonValue::make_object();
 	out.set("id", json_number(double(outcome.id)));
 	out.set("kind", json_string(operation_kind_row(outcome.kind).token));
@@ -547,11 +568,16 @@ JsonValue view_event_to_json(const ViewEvent &event) {
 	JsonValue out = JsonValue::make_object();
 	out.set("seq", json_number(double(event.seq)));
 	out.set("kind", json_string(view_event_kind_token(event.kind)));
-	if (!event.path.empty()) out.set("path", json_string(event.path));
-	if (event.address.row) out.set("address", address_to_json(event.address));
-	if (!event.field.empty()) out.set("field", json_string(event.field));
-	if (event.flag) out.set("flag", boolean(true));
-	if (event.tag) out.set("tag", json_number(double(event.tag)));
+	if (!event.path.empty())
+		out.set("path", json_string(event.path));
+	if (event.address.row)
+		out.set("address", address_to_json(event.address));
+	if (!event.field.empty())
+		out.set("field", json_string(event.field));
+	if (event.flag)
+		out.set("flag", boolean(true));
+	if (event.tag)
+		out.set("tag", json_number(double(event.tag)));
 	return out;
 }
 
@@ -586,7 +612,8 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
-	if (preview.changed) out.set("changed", boolean(true));
+	if (preview.changed)
+		out.set("changed", boolean(true));
 	// The plan's importable rows (the paged list) and the rows not found, apart, in plan order.
 	std::vector<const ImportPlanRow *> rows, not_found;
 	for (const ImportPlanRow &row : plan.rows)

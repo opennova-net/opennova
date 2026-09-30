@@ -33,12 +33,12 @@ enum class RecordBatchForm { Edits, Fields };
 // a label an earlier add or duplicate of the batch gave with `as`); `field` and `value` a set's (a
 // clear's and a write's field; an add's field its `value` sets in the same step; a set_file_value's
 // file-wide field); `kind` an add's record kind token ("window", "action"); `parent` an add's owner
-// (a record, a label, or a row's own identity; none adds a row) and a move's destination; `position`
-// an index in the owner's collection (an add goes at the end, a duplicate right after its record,
-// a move needs one); `coalesce` a set that folds into the one before on its field (typing);
-// `gesture` edits that fold into one undo step until end_edit (a drag); a replace_list's `list` (a
-// collection's kind token: "action", "sound", "items.item") of the record `id` replaced by
-// `records` ([{field: value, ...}], each added at the end with its fields set in the order
+// (a record, a label, or a row's own identity; none adds a row) and a move's destination;
+// `position` an index in the owner's collection (an add goes at the end, a duplicate right after
+// its record, a move needs one); `coalesce` a set that folds into the one before on its field
+// (typing); `gesture` edits that fold into one undo step until end_edit (a drag); a replace_list's
+// `list` (a collection's kind token: "action", "sound", "items.item") of the record `id` replaced
+// by `records` ([{field: value, ...}], each added at the end with its fields set in the order
 // written). Fields: {id, field}. Strict: an unknown op, member, label, identity or kind is refused
 // with the reason, and nothing is read. `names` is the record document the request acts on; with
 // none, an edit naming a record or a kind is refused.

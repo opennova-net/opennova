@@ -105,8 +105,8 @@ struct QueryContext {
 	SessionCore &core;
 };
 
-using QueryHandler = io::JsonValue (*)(const QueryContext &context, const QueryArgs &args,
-		std::string &error);
+using QueryHandler = io::JsonValue (*)(
+		const QueryContext &context, const QueryArgs &args, std::string &error);
 
 // The query table: one row per EditorQueryKind, in the enum's order (static_asserted as the
 // request table is): its token on the wire, its handler, the params it takes, the key of the list
@@ -136,7 +136,7 @@ const char *query_json_token(QueryJson type);
 // of its params, or null for none), its handler run, the answer stamped with `revision`, the
 // counter of the concern the row reads (`any` for the state and the events). Null with `error`
 // naming the query for a name no row has, args it refuses, or a question it cannot answer.
-io::JsonValue run_query(SessionCore &core, std::string_view name, const io::JsonValue &args,
-		std::string &error);
+io::JsonValue run_query(
+		SessionCore &core, std::string_view name, const io::JsonValue &args, std::string &error);
 
 } // namespace opennova::editor

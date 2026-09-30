@@ -96,7 +96,8 @@ NodeId identity_of(const NodeAddress &address) {
 	return address.child ? address.child : address.row;
 }
 
-const char *const kOps = "set, clear, write, add, duplicate, remove, move, set_file_value or replace_list";
+const char *const kOps =
+		"set, clear, write, add, duplicate, remove, move, set_file_value or replace_list";
 
 // {op: replace_list, id, list, records}: the records of `list` that `id` holds removed, then each
 // of `records` added at the end with its fields set in the order written.
@@ -113,7 +114,8 @@ bool read_list(const JsonValue &json, const NodeAddress &holder, Reader &reader,
 	const Document::Collection *collection = nullptr;
 	const std::vector<Document::Collection> collections = document.collections_of(holder);
 	for (const Document::Collection &candidate : collections)
-		if (list->string == document.kind_token(candidate.spec.kind)) collection = &candidate;
+		if (list->string == document.kind_token(candidate.spec.kind))
+			collection = &candidate;
 	if (!collection)
 		return reader.refuse(
 				document.record_name(holder) + " holds no \"" + list->string + "\" list.");
@@ -124,7 +126,8 @@ bool read_list(const JsonValue &json, const NodeAddress &holder, Reader &reader,
 		out.edits.push_back(remove);
 	}
 	for (const JsonValue &record : records->array) {
-		if (!record.is_object()) return reader.refuse("every record is an object of {field: value}.");
+		if (!record.is_object())
+			return reader.refuse("every record is an object of {field: value}.");
 		Edit add;
 		add.operation = EditOperation::Add;
 		add.address = { holder.row, collection->spec.kind, 0 };
@@ -169,25 +172,30 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	const bool file_wide = !replaces_list && edit.operation == EditOperation::SetFileValue;
 	const bool makes = adds || (!replaces_list && edit.operation == EditOperation::Duplicate);
 	const bool sets = !replaces_list && edit.operation == EditOperation::Set;
-	const bool fielded = sets || (!replaces_list && (edit.operation == EditOperation::Clear ||
-													 edit.operation == EditOperation::Write));
+	const bool fielded = sets ||
+			(!replaces_list &&
+					(edit.operation == EditOperation::Clear ||
+							edit.operation == EditOperation::Write));
 	const JsonValue *id = json.get("id");
 	if ((adds || file_wide) && id)
 		return reader.refuse(adds ? "an add names its owner with \"parent\", not \"id\"."
 								  : "a set_file_value names no record.");
 	if (!adds && !file_wide && !id)
 		return reader.refuse("edit \"" + op + "\" names its record with \"id\".");
-	if (id && !record_of(*id, "id", reader, edit.address)) return false;
+	if (id && !record_of(*id, "id", reader, edit.address))
+		return false;
 	if (!replaces_list && (json.get("list") || json.get("records")))
 		return reader.refuse("only a replace_list takes a \"list\" and its \"records\".");
 	if (const JsonValue *gesture = json.get("gesture"); gesture && !whole(*gesture, edit.gesture))
 		return reader.refuse("\"gesture\" must be a whole number.");
 	if (replaces_list) {
-		for (const char *member : { "parent", "kind", "field", "value", "position", "as", "coalesce" })
+		for (const char *member :
+				{ "parent", "kind", "field", "value", "position", "as", "coalesce" })
 			if (json.get(member))
 				return reader.refuse(std::string("a replace_list takes no \"") + member + "\".");
 		const size_t first = out.edits.size();
-		if (!read_list(json, edit.address, reader, out)) return false;
+		if (!read_list(json, edit.address, reader, out))
+			return false;
 		for (size_t i = first; i < out.edits.size(); ++i)
 			out.edits[i].gesture = edit.gesture;
 		return true;
@@ -196,7 +204,8 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		if (!field->is_string() || field->string.empty())
 			return reader.refuse("\"field\" must be a field's id.");
 		if (!fielded && !adds && !file_wide)
-			return reader.refuse("only set, clear, write, add and set_file_value take a \"field\".");
+			return reader.refuse(
+					"only set, clear, write, add and set_file_value take a \"field\".");
 		edit.field = field->string;
 	} else if (fielded || file_wide) {
 		return reader.refuse("edit \"" + op + "\" names its \"field\".");
@@ -233,26 +242,32 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		if (!adds && edit.operation != EditOperation::Move)
 			return reader.refuse("only add and move take a \"parent\".");
 		NodeAddress owner;
-		if (!record_of(*parent, "parent", reader, owner)) return false;
+		if (!record_of(*parent, "parent", reader, owner))
+			return false;
 		// A row named as the owner of an add: the record goes straight into that row.
 		edit.parent = adds && !owner.child ? 0 : owner_identity(owner);
-		if (adds) edit.address.row = owner.row;
+		if (adds)
+			edit.address.row = owner.row;
 	}
 	if (const JsonValue *position = json.get("position")) {
 		uint64_t at = 0;
 		if (!adds && !file_wide && edit.operation != EditOperation::Duplicate &&
 				edit.operation != EditOperation::Move)
-			return reader.refuse("only add, duplicate, move and set_file_value take a \"position\".");
-		if (!whole(*position, at)) return reader.refuse("\"position\" must be a whole number.");
+			return reader.refuse(
+					"only add, duplicate, move and set_file_value take a \"position\".");
+		if (!whole(*position, at))
+			return reader.refuse("\"position\" must be a whole number.");
 		edit.position = size_t(at);
 	} else if (edit.operation == EditOperation::Move) {
 		return reader.refuse("a move names its \"position\".");
 	} else if (edit.operation == EditOperation::Duplicate && !is_batch_made(edit.address.child)) {
 		// Right after the record, as the document stands before the batch.
 		Document::Placement at;
-		if (reader.names->placement(edit.address, at)) edit.position = at.index + 1;
+		if (reader.names->placement(edit.address, at))
+			edit.position = at.index + 1;
 		for (size_t i = 0; !edit.address.child && i < reader.names->rows().size(); ++i)
-			if (reader.names->rows()[i]->id == edit.address.row) edit.position = i + 1;
+			if (reader.names->rows()[i]->id == edit.address.row)
+				edit.position = i + 1;
 	}
 	std::string label;
 	if (const JsonValue *as = json.get("as")) {
@@ -263,7 +278,8 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		label = as->string;
 		reader.labels[label] = Made{ out.edits.size(), edit.address.row, edit.address.kind };
 	}
-	if (makes) out.made_labels.push_back(label);
+	if (makes)
+		out.made_labels.push_back(label);
 	out.edits.push_back(std::move(edit));
 	return true;
 }
@@ -274,14 +290,17 @@ bool read_field(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		reader.error = "\"" + reader.place + "\" must be an object.";
 		return false;
 	}
-	if (!members_known(json, { "id", "field" }, reader.place, reader.error)) return false;
+	if (!members_known(json, { "id", "field" }, reader.place, reader.error))
+		return false;
 	const JsonValue *id = json.get("id");
 	const JsonValue *field = json.get("field");
-	if (!id) return reader.refuse("it names its record with \"id\".");
+	if (!id)
+		return reader.refuse("it names its record with \"id\".");
 	if (!field || !field->is_string() || field->string.empty())
 		return reader.refuse("it names its \"field\", a field's id.");
 	Edit edit;
-	if (!record_of(*id, "id", reader, edit.address)) return false;
+	if (!record_of(*id, "id", reader, edit.address))
+		return false;
 	if (is_batch_made(edit.address.child))
 		return reader.refuse("\"id\" names a record the document has, not a label.");
 	edit.field = field->string;
@@ -302,8 +321,9 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 	reader.names = names;
 	for (size_t i = 0; i < edits.array.size(); ++i) {
 		reader.place = "edits[" + std::to_string(i) + "]";
-		const bool read = form == RecordBatchForm::Fields ? read_field(edits.array[i], reader, batch)
-														  : read_edit(edits.array[i], reader, batch);
+		const bool read = form == RecordBatchForm::Fields
+				? read_field(edits.array[i], reader, batch)
+				: read_edit(edits.array[i], reader, batch);
 		if (!read) {
 			error = reader.error;
 			return false;
@@ -320,7 +340,8 @@ io::JsonValue record_batch_to_json(
 	std::set<size_t> named;
 	for (const Edit &edit : edits)
 		for (const NodeId id : { edit.address.child, edit.parent })
-			if (is_batch_made(id)) named.insert(size_t(id - kBatchMadeBase));
+			if (is_batch_made(id))
+				named.insert(size_t(id - kBatchMadeBase));
 	const auto label = [](size_t index) { return "edit" + std::to_string(index); };
 	const auto name = [&label](NodeId id) {
 		return is_batch_made(id) ? io::json_string(label(size_t(id - kBatchMadeBase)))
@@ -339,8 +360,8 @@ io::JsonValue record_batch_to_json(
 		switch (edit.operation) {
 			case EditOperation::Add:
 			case EditOperation::Paste:
-				entry.set("kind",
-						io::json_string(names ? names->kind_token(edit.address.kind) : ""));
+				entry.set(
+						"kind", io::json_string(names ? names->kind_token(edit.address.kind) : ""));
 				// Into a record, or straight into a row (its identity names it), else a new row.
 				if (edit.parent)
 					entry.set("parent", name(edit.parent));
@@ -371,8 +392,10 @@ io::JsonValue record_batch_to_json(
 			entry.set("position", io::json_number(double(edit.position)));
 		if (edit.operation == EditOperation::Set && edit.coalesce)
 			entry.set("coalesce", JsonValue::make_bool(true));
-		if (edit.gesture) entry.set("gesture", io::json_number(double(edit.gesture)));
-		if (named.count(i)) entry.set("as", io::json_string(label(i)));
+		if (edit.gesture)
+			entry.set("gesture", io::json_number(double(edit.gesture)));
+		if (named.count(i))
+			entry.set("as", io::json_string(label(i)));
 		out.push(std::move(entry));
 	}
 	return out;

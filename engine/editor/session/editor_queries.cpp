@@ -28,16 +28,17 @@ namespace opennova::editor {
 
 namespace {
 
-using io::JsonValue;
 using io::json_number;
 using io::json_string;
+using io::JsonValue;
 
 using K = EditorQueryKind;
 using J = QueryJson;
 
 // --- the params ----------------------------------------------------------------------------------
 
-constexpr const char *kOffsetDoc = "The page's first entry, by its place in the list (0 the first).";
+constexpr const char *kOffsetDoc =
+		"The page's first entry, by its place in the list (0 the first).";
 constexpr const char *kLimitDoc = "How many entries the page holds at most, 1 to 200.";
 constexpr const char *kCursorDoc =
 		"The page's first entry by its absolute index (the last page's next_cursor; 0 the oldest "
@@ -105,8 +106,7 @@ constexpr QueryParam kProblemsParams[] = {
 			"The levels shown, of error, warning and info; every level when left out." },
 	{ "text", J::String, false, nullptr,
 			"Matched without case against the message, file, record, field and code." },
-	{ "scope", J::String, false, "project",
-			"Whose findings: project, active_file or open_files." },
+	{ "scope", J::String, false, "project", "Whose findings: project, active_file or open_files." },
 	{ "fixable", J::Boolean, false, "false", "Only the findings with a fix." },
 	{ "group", J::String, false, "none",
 			"How the rows are grouped: none, file or kind (the code's family)." },
@@ -158,7 +158,8 @@ constexpr QueryParam kMenuTreeParams[] = {
 
 constexpr QueryParam kMenuFindingsParams[] = {
 	{ "path", J::String, false, nullptr, kMenuDoc },
-	{ "severity", J::String, false, nullptr, "Only the rows of this level: error, warning or info." },
+	{ "severity", J::String, false, nullptr,
+			"Only the rows of this level: error, warning or info." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
@@ -175,7 +176,7 @@ constexpr QueryParam kCursorParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
-// --- helpers --------------------------------------------------------------------------------------
+// --- helpers -------------------------------------------------------------------------------------
 
 JsonPage page_of(const QueryArgs &args) {
 	return JsonPage{ args.offset(), args.limit() };
@@ -189,15 +190,18 @@ std::string no_document(const std::string &path) {
 Document *document_of(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const std::string path = args.text("path");
 	Document *document = context.core.documents().document_for(path);
-	if (!document) error = no_document(path);
+	if (!document)
+		error = no_document(path);
 	return document;
 }
 
 // A record of `document` by the identity `args` names, or false with `error`.
-bool record_of(const Document &document, const QueryArgs &args, NodeAddress &out, std::string &error) {
+bool record_of(
+		const Document &document, const QueryArgs &args, NodeAddress &out, std::string &error) {
 	const int64_t id = args.integer("id");
 	out = document.address_of(NodeId(id));
-	if (out.row) return true;
+	if (out.row)
+		return true;
 	error = "no record " + std::to_string(id) + " in " + document.path() + ".";
 	return false;
 }
@@ -222,7 +226,8 @@ JsonValue edges_page(const AssetGraph *graph, const std::vector<const GraphEdge 
 // A page of a list the menu report wrote whole, under `key` (the report's own count kept apart).
 void page_list(JsonValue &answer, const char *key, const JsonPage &page) {
 	JsonValue *list = answer.get(key);
-	if (!list || !list->is_array()) return;
+	if (!list || !list->is_array())
+		return;
 	const size_t total = list->array.size();
 	std::vector<JsonValue> kept(list->array.begin() + std::ptrdiff_t(page.first(total)),
 			list->array.begin() + std::ptrdiff_t(page.last(total)));
@@ -230,7 +235,7 @@ void page_list(JsonValue &answer, const char *key, const JsonPage &page) {
 	set_page(answer, page, total);
 }
 
-// --- the handlers ---------------------------------------------------------------------------------
+// --- the handlers --------------------------------------------------------------------------------
 
 JsonValue answer_state(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
@@ -291,7 +296,8 @@ JsonValue answer_documents(const QueryContext &context, const QueryArgs &args, s
 	const SessionView &view = context.core.view();
 	std::vector<const Document *> open;
 	for (const auto &document : view.documents.open)
-		if (document) open.push_back(document.get());
+		if (document)
+			open.push_back(document.get());
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
@@ -305,7 +311,8 @@ JsonValue answer_documents(const QueryContext &context, const QueryArgs &args, s
 
 JsonValue answer_document(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const Document *document = document_of(context, args, error);
-	if (!document) return JsonValue::make_null();
+	if (!document)
+		return JsonValue::make_null();
 	const JsonPage page = page_of(args);
 	return document_to_json(*document, &page);
 }
@@ -313,14 +320,16 @@ JsonValue answer_document(const QueryContext &context, const QueryArgs &args, st
 JsonValue answer_record(const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const SessionView &view = context.core.view();
 	const Document *document = document_of(context, args, error);
-	if (!document) return JsonValue::make_null();
+	if (!document)
+		return JsonValue::make_null();
 	if (args.has("id") == args.has("symbol")) {
 		error = "it names its record by \"id\" or by \"symbol\", one of them.";
 		return JsonValue::make_null();
 	}
 	NodeAddress address;
 	if (args.has("id")) {
-		if (!record_of(*document, args, address, error)) return JsonValue::make_null();
+		if (!record_of(*document, args, address, error))
+			return JsonValue::make_null();
 	} else {
 		const std::string symbol = args.text("symbol"), scope = args.text("scope");
 		const AssetGraph *graph = view.findings.graph.get();
@@ -332,7 +341,8 @@ JsonValue answer_record(const QueryContext &context, const QueryArgs &args, std:
 	}
 	JsonValue out = record_to_json(*document, address, view);
 	if (out.is_null()) {
-		error = "no record " + std::to_string(identity_of(address)) + " in " + document->path() + ".";
+		error = "no record " + std::to_string(identity_of(address)) + " in " + document->path() +
+				".";
 		return out;
 	}
 	out.set("id", json_number(double(identity_of(address))));
@@ -341,12 +351,13 @@ JsonValue answer_record(const QueryContext &context, const QueryArgs &args, std:
 }
 
 // reference_choices and reference_targets.
-JsonValue answer_reference(const QueryContext &context, const QueryArgs &args, std::string &error,
-		bool choices) {
+JsonValue answer_reference(
+		const QueryContext &context, const QueryArgs &args, std::string &error, bool choices) {
 	const SessionView &view = context.core.view();
 	const Document *document = document_of(context, args, error);
 	NodeAddress address;
-	if (!document || !record_of(*document, args, address, error)) return JsonValue::make_null();
+	if (!document || !record_of(*document, args, address, error))
+		return JsonValue::make_null();
 	const std::string field = args.text("field");
 	JsonValue out = choices
 			? reference_choices_to_json(*document, address, field, view, page_of(args))
@@ -370,7 +381,8 @@ JsonValue answer_reference_targets(
 JsonValue answer_document_search(
 		const QueryContext &context, const QueryArgs &args, std::string &error) {
 	const Document *document = document_of(context, args, error);
-	if (!document) return JsonValue::make_null();
+	if (!document)
+		return JsonValue::make_null();
 	const std::string text = args.text("text");
 	if (text.empty()) {
 		error = "the text to find is empty.";
@@ -378,7 +390,8 @@ JsonValue answer_document_search(
 	}
 	SearchOptions options;
 	options.match_case = args.boolean("match_case");
-	JsonValue out = document_hits_to_json(find_in_document(*document, text, options), page_of(args));
+	JsonValue out =
+			document_hits_to_json(find_in_document(*document, text, options), page_of(args));
 	out.set("document", json_string(document->path()));
 	return out;
 }
@@ -393,9 +406,9 @@ JsonValue answer_problems(const QueryContext &context, const QueryArgs &args, st
 				error = "\"severities\" takes error, warning and info, not \"" + token + "\".";
 				return JsonValue::make_null();
 			}
-			(severity == DiagnosticSeverity::Error		   ? query.errors
-					: severity == DiagnosticSeverity::Warning ? query.warnings
-															  : query.infos) = true;
+			(severity == DiagnosticSeverity::Error					  ? query.errors
+							: severity == DiagnosticSeverity::Warning ? query.warnings
+																	  : query.infos) = true;
 		}
 	}
 	query.text = args.text("text");
@@ -431,14 +444,16 @@ JsonValue answer_users(
 	const std::string path = args.text("path"), kind_token = args.text("kind");
 	std::vector<const GraphEdge *> edges;
 	if (!path.empty()) {
-		if (graph) edges = usages ? graph->usages_of(path) : graph->referrers_of_file(path);
+		if (graph)
+			edges = usages ? graph->usages_of(path) : graph->referrers_of_file(path);
 	} else if (!kind_token.empty() && args.has("name")) {
 		ReferenceKind kind = ReferenceKind::None;
 		if (!reference_kind_from_token(kind_token, kind)) {
 			error = "no reference kind \"" + kind_token + "\".";
 			return JsonValue::make_null();
 		}
-		if (graph) edges = graph->referrers_of(kind, args.text("name"), args.text("scope"));
+		if (graph)
+			edges = graph->referrers_of(kind, args.text("name"), args.text("scope"));
 	} else {
 		error = "it names a file (\"path\"), or a symbol (\"kind\" and \"name\").";
 		return JsonValue::make_null();
@@ -456,7 +471,8 @@ JsonValue answer_usages(const QueryContext &context, const QueryArgs &args, std:
 
 JsonValue answer_missing(const QueryContext &context, const QueryArgs &args, std::string &) {
 	const AssetGraph *graph = context.core.view().findings.graph.get();
-	if (!graph) return edges_page(nullptr, {}, page_of(args), 0);
+	if (!graph)
+		return edges_page(nullptr, {}, page_of(args), 0);
 	// The count is the graph's own, kept as it updates; the page walks the missing edges.
 	return edges_page(graph, graph->missing(), page_of(args), graph->missing_count());
 }
@@ -470,9 +486,11 @@ JsonValue answer_symbols(const QueryContext &context, const QueryArgs &args, std
 			error = "no reference kind \"" + args.text("kind") + "\".";
 			return JsonValue::make_null();
 		}
-		if (graph) symbols = graph->symbols_of_kind(kind);
+		if (graph)
+			symbols = graph->symbols_of_kind(kind);
 	} else if (graph) {
-		graph->for_each_symbol([&symbols](const GraphSymbol &symbol) { symbols.push_back(&symbol); });
+		graph->for_each_symbol(
+				[&symbols](const GraphSymbol &symbol) { symbols.push_back(&symbol); });
 	}
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
@@ -514,11 +532,13 @@ JsonValue answer_menu_tree(const QueryContext &context, const QueryArgs &args, s
 	const uint64_t only = one ? uint64_t(args.integer("screen")) : 0;
 	const JsonPage page = page_of(args);
 	JsonValue *screens = tree.get("screens");
-	if (!screens || !screens->is_array()) return tree;
+	if (!screens || !screens->is_array())
+		return tree;
 	std::vector<JsonValue> kept;
 	for (JsonValue &screen : screens->array) {
 		const JsonValue *id = screen.get("id");
-		if (one && !(id && id->is_number() && uint64_t(id->number) == only)) continue;
+		if (one && !(id && id->is_number() && uint64_t(id->number) == only))
+			continue;
 		page_list(screen, "windows", page);
 		kept.push_back(std::move(screen));
 	}
@@ -548,7 +568,8 @@ JsonValue answer_menu_findings(
 		if (JsonValue *problems = report.get("problems")) {
 			std::vector<JsonValue> matching;
 			for (JsonValue &row : problems->array)
-				if (row.get_string("severity", "") == severity) matching.push_back(std::move(row));
+				if (row.get_string("severity", "") == severity)
+					matching.push_back(std::move(row));
 			problems->array = std::move(matching);
 		}
 	}
@@ -557,8 +578,8 @@ JsonValue answer_menu_findings(
 }
 
 JsonValue answer_menu_render(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return menu_render_to_json(context.core.view(), args.text("path"),
-			NodeId(args.integer("screen")), page_of(args));
+	return menu_render_to_json(
+			context.core.view(), args.text("path"), NodeId(args.integer("screen")), page_of(args));
 }
 
 JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &) {
@@ -579,7 +600,7 @@ JsonValue answer_events(const QueryContext &context, const QueryArgs &args, std:
 
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
-// --- the table ------------------------------------------------------------------------------------
+// --- the table -----------------------------------------------------------------------------------
 
 // A row built up column by column, as the request table's are.
 struct Query {
@@ -596,8 +617,8 @@ struct Query {
 		row.reads = reads;
 		row.doc = doc;
 	}
-	constexpr Query(K kind, const char *token, QueryHandler handler, ViewConcern reads,
-			const char *doc) :
+	constexpr Query(
+			K kind, const char *token, QueryHandler handler, ViewConcern reads, const char *doc) :
 			row() {
 		row.kind = kind;
 		row.token = token;
@@ -703,8 +724,7 @@ constexpr EditorQueryRow kRows[] = {
 			"where no lookup of the game finds it.")
 			.pages("symbols")
 			.row,
-	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams,
-			C::Graph,
+	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams, C::Graph,
 			"A page of the files whose names and the symbols whose names hold the text, without "
 			"case, files first, each with its usages.")
 			.pages("hits")
@@ -768,7 +788,8 @@ static_assert(std::size(kRows) == kEditorQueryKindCount, "every query kind has e
 
 constexpr bool rows_in_order() {
 	for (size_t i = 0; i < kEditorQueryKindCount; ++i)
-		if (kRows[i].kind != static_cast<EditorQueryKind>(i)) return false;
+		if (kRows[i].kind != static_cast<EditorQueryKind>(i))
+			return false;
 	return true;
 }
 static_assert(rows_in_order(), "the query rows follow the enum's order");
@@ -786,19 +807,24 @@ constexpr bool same_text(const char *a, const char *b) {
 constexpr bool rows_named() {
 	for (size_t i = 0; i < kEditorQueryKindCount; ++i) {
 		const EditorQueryRow &row = kRows[i];
-		if (!row.token[0] || !row.handler || !row.doc || !row.doc[0]) return false;
+		if (!row.token[0] || !row.handler || !row.doc || !row.doc[0])
+			return false;
 		for (size_t j = i + 1; j < kEditorQueryKindCount; ++j)
-			if (same_text(row.token, kRows[j].token)) return false;
+			if (same_text(row.token, kRows[j].token))
+				return false;
 		bool limit = false, start = false;
 		for (size_t p = 0; p < row.param_count; ++p) {
 			const QueryParam &param = row.params[p];
-			if (!param.name[0] || !param.doc[0]) return false;
+			if (!param.name[0] || !param.doc[0])
+				return false;
 			for (size_t q = p + 1; q < row.param_count; ++q)
-				if (same_text(param.name, row.params[q].name)) return false;
+				if (same_text(param.name, row.params[q].name))
+					return false;
 			limit = limit || same_text(param.name, "limit");
 			start = start || same_text(param.name, "offset") || same_text(param.name, "cursor");
 		}
-		if ((row.list_key != nullptr) != (limit && start)) return false;
+		if ((row.list_key != nullptr) != (limit && start))
+			return false;
 	}
 	return true;
 }
@@ -809,7 +835,8 @@ static_assert(rows_named(),
 // A param a query takes, by name, or null.
 const QueryParam *param_of(const EditorQueryRow &row, const char *name) {
 	for (size_t i = 0; i < row.param_count; ++i)
-		if (same_text(row.params[i].name, name)) return &row.params[i];
+		if (same_text(row.params[i].name, name))
+			return &row.params[i];
 	return nullptr;
 }
 
@@ -866,8 +893,9 @@ bool check_args(const EditorQueryRow &row, const JsonValue &args, std::string &e
 		}
 		if (!typed) {
 			error = "\"" + member.key + "\" must be " +
-					(param->type == J::Integer ? std::string("a whole number, 0 or more")
-											   : std::string("a ") + query_json_token(param->type)) +
+					(param->type == J::Integer
+									? std::string("a whole number, 0 or more")
+									: std::string("a ") + query_json_token(param->type)) +
 					".";
 			return false;
 		}
@@ -914,7 +942,8 @@ JsonValue fields_of(RequestFieldSet set) {
 	JsonValue out = JsonValue::make_array();
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
-		if (set & field_bit(id)) out.push(json_string(request_field(id).token));
+		if (set & field_bit(id))
+			out.push(json_string(request_field(id).token));
 	}
 	return out;
 }
@@ -954,13 +983,16 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 			item.set("name", json_string(param.name));
 			item.set("type", json_string(query_json_token(param.type)));
 			item.set("required", JsonValue::make_bool(param.required));
-			if (param.default_value) item.set("default", default_to_json(param));
+			if (param.default_value)
+				item.set("default", default_to_json(param));
 			item.set("doc", json_string(param.doc));
 			params.push(std::move(item));
 		}
 		entry.set("params", std::move(params));
-		if (row.list_key) entry.set("list", json_string(row.list_key));
-		entry.set("reads", json_string(row.reads == C::kCount ? "any" : view_concern_token(row.reads)));
+		if (row.list_key)
+			entry.set("list", json_string(row.list_key));
+		entry.set("reads",
+				json_string(row.reads == C::kCount ? "any" : view_concern_token(row.reads)));
 		entry.set("doc", json_string(row.doc));
 		queries.push(std::move(entry));
 	}
@@ -1012,7 +1044,8 @@ bool QueryArgs::has(const char *name) const {
 }
 
 std::string QueryArgs::text(const char *name) const {
-	if (const JsonValue *member = value(name); member && member->is_string()) return member->string;
+	if (const JsonValue *member = value(name); member && member->is_string())
+		return member->string;
 	const QueryParam *param = param_of(row_, name);
 	return param && param->default_value ? std::string(param->default_value) : std::string();
 }
@@ -1025,7 +1058,8 @@ int64_t QueryArgs::integer(const char *name) const {
 }
 
 bool QueryArgs::boolean(const char *name) const {
-	if (const JsonValue *member = value(name); member && member->is_bool()) return member->boolean;
+	if (const JsonValue *member = value(name); member && member->is_bool())
+		return member->boolean;
 	const QueryParam *param = param_of(row_, name);
 	return param && param->default_value && same_text(param->default_value, "true");
 }
@@ -1034,7 +1068,8 @@ std::vector<std::string> QueryArgs::strings(const char *name) const {
 	std::vector<std::string> out;
 	if (const JsonValue *member = value(name); member && member->is_array())
 		for (const JsonValue &item : member->array)
-			if (item.is_string()) out.push_back(item.string);
+			if (item.is_string())
+				out.push_back(item.string);
 	return out;
 }
 
@@ -1092,7 +1127,8 @@ JsonValue run_query(
 	// The revision the answer is of: the concern it reads (the state's: any).
 	const ViewRevisions &revisions = core.view().revisions;
 	answer.set("revision",
-			json_number(double(row.reads == C::kCount ? revisions.any() : revisions.of(row.reads))));
+			json_number(
+					double(row.reads == C::kCount ? revisions.any() : revisions.of(row.reads))));
 	return answer;
 }
 
