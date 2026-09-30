@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor::ui_kit {
 
@@ -171,7 +172,9 @@ bool tooltip_hovered() { return ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhen
 
 void tooltip(const std::string &text) {
 	if (text.empty() || !tooltip_hovered()) return;
-	ImGui::BeginTooltip();
+	// In place of a tooltip set before it this frame, as SetTooltip does: a table's header sets
+	// its own for a label it cut, which BeginTooltip would add this one to.
+	ImGui::BeginTooltipEx(ImGuiTooltipFlags_OverridePrevious, ImGuiWindowFlags_None);
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
 	ImGui::TextUnformatted(text.c_str());
 	ImGui::PopTextWrapPos();

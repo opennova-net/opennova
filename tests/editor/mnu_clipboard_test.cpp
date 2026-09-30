@@ -6,7 +6,9 @@
 // to take it), nor with BACK beside it, nor a list row or the screen; a Paste goes after the
 // primary's window among its siblings (INPART's: CHOICES, the listed window holding it; a list
 // row's: its window), at the end of the screen's root windows for the screen, nothing, or a
-// selection of another screen; and only while the clipboard holds records.
+// selection of another screen; and only while the clipboard holds records. The listed window a
+// record is or that holds it (listed_window: what a Paste goes after, and where the menu view's
+// Add window puts a new one) is one walk for both.
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -127,6 +129,15 @@ int test_rule() {
 	const NodeAddress elsewhere = named(document, "ELSEWHERE");
 	board = menu_clipboard(document, id, elsewhere, {elsewhere}, true);
 	TEST_EXPECT(!board.copy && pastes_at(board, id, 0, SIZE_MAX));
+
+	// The listed window a record is or that holds it: a listed window itself; INPART's, CHOICES;
+	// the ACTION's, BACK; none for the screen, nothing, or another screen's window.
+	TEST_EXPECT(listed_window(document, id, back) == back &&
+	            listed_window(document, id, in_part) == choices &&
+	            listed_window(document, id, action) == back);
+	TEST_EXPECT(!listed_window(document, id, row).child &&
+	            !listed_window(document, id, NodeAddress()).child &&
+	            !listed_window(document, id, elsewhere).child);
 
 	// Nothing on the clipboard: no Paste.
 	board = menu_clipboard(document, id, back, {back}, false);

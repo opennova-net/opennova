@@ -83,17 +83,24 @@ public:
 
 	ProblemsList();
 
-	// What the list keeps its caches by: the view's revision, which moves with everything it
-	// reads (the findings, the files, the documents and the game install a fix looks at).
+	// What the list keeps what it makes by, one key over all it reads of the view: the findings
+	// (the answer, each finding's key, the lines); the active document (the Active file scope)
+	// and the open documents (the Open files scope; a Reload, a Rewrite's unsaved edits); the
+	// project (a key is its project's); the files: the scan, the requirements and the game
+	// install's file names (whether a fix creates a file or imports it); the graph (a Use fix's
+	// rename); the settings (an Import's dependencies). Today the view's revision moves with
+	// each. The answer and the fixes are their caches' (problem_query, problem_fixes), each
+	// kept by what it reads; the list is made again whenever either is made anew as well, so
+	// a line never indexes an answer it was not made from.
 	static uint64_t cache_key(const SessionView &view) { return view.revision; }
 
 	// The query the window's filters set (grouped by kind until one is picked).
 	ProblemQuery &query() { return query_; }
 	// The query's answer: the rows it shows and every finding's counts, whatever it shows.
 	const ProblemAnswer &answer(const SessionView &view) { return answers_.answer(query_, view); }
-	// The answer, and what the list makes of it, made again when the view's cache key, the
-	// query or the folded groups moved: each finding's key, the lines, each group's Fix all and
-	// the summary's.
+	// The answer, and what the list makes of it, made again when the view, its cache key, the
+	// query or the folded groups moved, or the answer or the fixes were made anew: each
+	// finding's key, the lines, each group's Fix all and the summary's.
 	const ProblemAnswer &refresh(const SessionView &view);
 
 	// --- after refresh ----------------------------------------------------------------------
@@ -146,9 +153,10 @@ public:
 
 	// --- the confirmation waiting for Apply -------------------------------------------------
 	void ask(const SessionView &view, Confirmation confirmation);
-	// Follows the view while it shows: proposed again when the view moved, its version moving
-	// when what it shows changed (changed() then says so). False when it belongs to another
-	// project, or none is open: it closes.
+	// Follows the view while it shows: proposed again when the list was made again (refresh:
+	// what it reads of the view moved), its version moving when what it shows changed
+	// (changed() then says so). False when it belongs to another project, or none is open: it
+	// closes.
 	bool follow(const SessionView &view);
 	const Proposal &shown() const { return shown_; }
 	uint64_t version() const { return shown_version_; }
@@ -172,12 +180,16 @@ private:
 	ProblemQuery query_;
 	ProblemQueryCache answers_;
 	ProblemFixCache fixes_;
-	// What refresh() made, kept while its view, cache key and query stand (stale_: a group
-	// folded or opened since).
+	// What refresh() made, kept while its view, cache key and query stand and the answer and
+	// the fixes it read are their caches' still (their generations; stale_: a group folded or
+	// opened since); made_ counts the times it was made.
 	const SessionView *view_ = nullptr;
 	uint64_t key_ = 0;
 	ProblemQuery refreshed_;
+	uint64_t answered_ = 0;
+	uint64_t fixed_ = 0;
 	bool stale_ = true;
+	uint64_t made_ = 0;
 	std::vector<std::string> keys_;
 	std::unordered_map<std::string, size_t> index_;
 	std::vector<Line> lines_;
@@ -190,12 +202,11 @@ private:
 	std::string groups_root_;           // the project they are of
 	FindingRef selected_;
 	size_t selected_index_ = SIZE_MAX;
-	// The confirmation: what it is about, what it shows (proposed again when the view moves;
-	// the version moves when that changes) and the view it was proposed over.
+	// The confirmation: what it is about, what it shows (proposed again when the list is made
+	// again; the version moves when that changes) and the list it was proposed from (made_).
 	Confirmation confirm_;
 	Proposal shown_;
-	const SessionView *shown_view_ = nullptr;
-	uint64_t shown_key_ = 0;
+	uint64_t shown_made_ = 0;
 	uint64_t shown_version_ = 0;
 	bool shown_changed_ = false;
 };

@@ -71,11 +71,18 @@ ProblemsList::ProblemsList() { query_.grouping = ProblemGrouping::Kind; }
 
 const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	const ProblemAnswer &answer = answers_.answer(query_, view);
-	if (!stale_ && view_ == &view && key_ == cache_key(view) && refreshed_ == query_) return answer;
+	const uint64_t answered = answers_.generation();
+	const uint64_t fixed = fixes_.generation(view);
+	if (!stale_ && view_ == &view && key_ == cache_key(view) && refreshed_ == query_ &&
+	    answered_ == answered && fixed_ == fixed)
+		return answer;
 	view_ = &view;
 	key_ = cache_key(view);
 	refreshed_ = query_;
+	answered_ = answered;
+	fixed_ = fixed;
 	stale_ = false;
+	++made_;
 	keys_.clear();
 	index_.clear();
 	std::unordered_map<std::string, size_t> alike;
@@ -217,18 +224,17 @@ ProblemsList::Proposal ProblemsList::propose(const SessionView &view,
 void ProblemsList::ask(const SessionView &view, Confirmation confirmation) {
 	confirm_ = std::move(confirmation);
 	shown_ = propose(view, confirm_);
-	shown_view_ = &view;
-	shown_key_ = cache_key(view);
+	shown_made_ = made_;
 	++shown_version_;
 	shown_changed_ = false;
 }
 
 bool ProblemsList::follow(const SessionView &view) {
 	if (!view.project_open || view.project_root != confirm_.root) return false;
-	if (shown_view_ == &view && shown_key_ == cache_key(view)) return true;
+	refresh(view);
+	if (shown_made_ == made_) return true;
 	Proposal now = propose(view, confirm_);
-	shown_view_ = &view;
-	shown_key_ = cache_key(view);
+	shown_made_ = made_;
 	const auto signatures = [](const Proposal &proposal) {
 		std::vector<std::string> out;
 		for (const EditorRequest &request : proposal.requests) out.push_back(signature(request));

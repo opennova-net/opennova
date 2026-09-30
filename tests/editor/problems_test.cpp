@@ -208,14 +208,17 @@ static int test_query() {
 	TEST_EXPECT(filtered.rows.size() == 4 && filtered.total() == 7 && filtered.groups.size() == 4);
 
 	// The answer kept while the revision and the query stand (a change the revision does not
-	// mark is not seen), asked again when either moves.
+	// mark is not seen), asked again when either moves; each one made counted (its generation,
+	// which a reader of the answer follows).
 	ProblemQueryCache cache;
 	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
+	const uint64_t made = cache.generation();
 	view.diagnostics.pop_back();
-	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7);
+	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 7 && cache.generation() == made);
 	++view.revision;
-	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6);
-	TEST_EXPECT(cache.answer(query, view).rows.size() == 3);
+	TEST_EXPECT(cache.answer(ProblemQuery(), view).rows.size() == 6 &&
+	            cache.generation() == made + 1);
+	TEST_EXPECT(cache.answer(query, view).rows.size() == 3 && cache.generation() == made + 2);
 	return 0;
 }
 
@@ -469,7 +472,8 @@ static int test_rewrite_unserializable() {
 
 // The fixes kept while the view's revision stands (a Use fix plans a rename; the window and
 // the editor MCP ask again and again): asked again, the same answer, even when the view
-// changed without its revision moving; asked after the revision moves, the fixes of now.
+// changed without its revision moving; asked after the revision moves, the fixes of now, the
+// cache's generation (which a reader of the fixes follows) moving once.
 static int test_fix_cache() {
 	SessionView view;
 	view.project_open = true;
@@ -477,14 +481,15 @@ static int test_fix_cache() {
 	view.diagnostics = {finding(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/menu_style.mns"),
 	                    finding(DiagnosticSeverity::Warning, "menu.duplicate_window", "Two windows.", "menus/a.mnu")};
 	ProblemFixCache cache;
+	const uint64_t started = cache.generation(view);
 	const std::vector<ProblemFix> *first = &cache.fixes(view, 0);
 	TEST_EXPECT(first->size() == 1 && (*first)[0].label == "Rewrite menu_style.mns");
 	TEST_EXPECT(cache.fixes(view, 1).empty() && cache.fixes(view, 7).empty());
 	TEST_EXPECT(&cache.fixes(view, 0) == first);
 	view.diagnostics[0].code = "menu.test"; // unmarked: still the answer kept
-	TEST_EXPECT(cache.fixes(view, 0).size() == 1);
+	TEST_EXPECT(cache.fixes(view, 0).size() == 1 && cache.generation(view) == started);
 	++view.revision;
-	TEST_EXPECT(cache.fixes(view, 0).empty());
+	TEST_EXPECT(cache.fixes(view, 0).empty() && cache.generation(view) == started + 1);
 	return 0;
 }
 
@@ -1047,8 +1052,10 @@ static int test_locations_and_fixes() {
 }
 
 // A view's findings by file and by record: a row's are its own and every record's it holds, a
-// nested record's its own; a file with none has none; made again when the revision moves (not
-// before), and for another view.
+// nested record's its own; a file with none has none; made again when the revision moves, the
+// findings are another count or elsewhere in memory, and for another view (a finding changed in
+// place, unmarked, is not seen); asked while the findings are fewer than it names, the ones
+// past their end are left out.
 static int test_findings_index() {
 	SessionView v;
 	v.revision = 1;
@@ -1071,13 +1078,28 @@ static int test_findings_index() {
 	TEST_EXPECT(index.of_record("a.mnu", 5, 7) == std::vector<size_t>({2}));
 	TEST_EXPECT(index.of_record("a.mnu", 6, 0) == std::vector<size_t>({5}));
 	TEST_EXPECT(index.of_record("a.mnu", 9, 0).empty());
-	// Kept while the view stands; made again once its revision moves, or for another view.
-	v.diagnostics.push_back(on("c.mnu", 1, 0, "later"));
+	// Kept while the view and its findings stand; made again once the revision moves, the
+	// findings are another count or elsewhere in memory, or for another view.
+	v.diagnostics[3].asset = "c.mnu"; // in place, unmarked
 	index.follow(v);
-	TEST_EXPECT(index.of_file("c.mnu").empty());
+	TEST_EXPECT(index.of_file("b.mnu") == std::vector<size_t>({3}) &&
+	            index.of_file("c.mnu").empty());
+	v.diagnostics[3].asset = "b.mnu";
+	v.diagnostics.push_back(on("c.mnu", 1, 0, "later")); // unmarked, but one more
+	index.follow(v);
+	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
 	++v.revision;
 	index.follow(v);
 	TEST_EXPECT(index.of_file("c.mnu") == std::vector<size_t>({6}));
+	// Two findings left, asked before the index follows: what it names past them is left out.
+	v.diagnostics.resize(2);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
+	            index.of_file("c.mnu").empty());
+	TEST_EXPECT(index.of_record("a.mnu", 5, 0) == std::vector<size_t>({1}) &&
+	            index.of_record("a.mnu", 5, 7).empty() && index.of_record("a.mnu", 6, 0).empty());
+	index.follow(v);
+	TEST_EXPECT(index.of_file("a.mnu") == std::vector<size_t>({1}) &&
+	            index.of_file("b.mnu").empty());
 	SessionView other = v;
 	other.diagnostics.clear();
 	index.follow(other);

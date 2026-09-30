@@ -31,4 +31,11 @@ struct MenuClipboard {
 MenuClipboard menu_clipboard(const MnuDocument &document, NodeId screen, const NodeAddress &primary,
                              const std::vector<NodeAddress> &selected, bool clipboard_full);
 
+// The window the tree lists that `record` is or that holds it, on the screen row `screen`: the
+// record itself when it is a window that the screen or windows alone hold, else the deepest
+// window holding it above the first part on its way (none for the screen, a record of another
+// screen, or one the document does not have). A Paste goes after it; the menu view's Add window
+// puts a new window inside it.
+NodeAddress listed_window(const MnuDocument &document, NodeId screen, const NodeAddress &record);
+
 } // namespace opennova::editor

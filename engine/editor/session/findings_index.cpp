@@ -3,34 +3,43 @@
 namespace opennova::editor {
 
 void FindingsIndex::follow(const SessionView &view) {
-	if (made_ && view_ == &view && key_ == cache_key(view)) return;
+	const std::vector<Diagnostic> &findings = view.diagnostics;
+	if (made_ && view_ == &view && key_ == cache_key(view) && count_ == findings.size() &&
+	    data_ == findings.data())
+		return;
 	made_ = true;
 	view_ = &view;
 	key_ = cache_key(view);
+	count_ = findings.size();
+	data_ = findings.data();
 	files_.clear();
-	rows_.clear();
-	for (size_t i = 0; i < view.diagnostics.size(); ++i) {
-		const Diagnostic &d = view.diagnostics[i];
+	for (size_t i = 0; i < findings.size(); ++i) {
+		const Diagnostic &d = findings[i];
 		if (d.asset.empty()) continue;
-		files_[d.asset].push_back(i);
-		if (d.row_id) rows_[{d.asset, d.row_id}].push_back(i);
+		File &file = files_[d.asset];
+		file.findings.push_back(i);
+		if (d.row_id) file.rows[d.row_id].push_back(i);
 	}
 }
 
-const std::vector<size_t> &FindingsIndex::of_file(const std::string &file) const {
-	static const std::vector<size_t> none;
+std::vector<size_t> FindingsIndex::of_file(const std::string &file) const {
+	std::vector<size_t> out;
 	const auto found = files_.find(file);
-	return found != files_.end() ? found->second : none;
+	if (found == files_.end() || !view_) return out;
+	for (const size_t i : found->second.findings)
+		if (i < view_->diagnostics.size()) out.push_back(i);
+	return out;
 }
 
 std::vector<size_t> FindingsIndex::of_record(const std::string &file, NodeId row,
                                              NodeId child) const {
-	const auto found = rows_.find({file, row});
-	if (found == rows_.end()) return {};
-	if (!child || !view_) return found->second;
 	std::vector<size_t> out;
-	for (const size_t i : found->second)
-		if (i < view_->diagnostics.size() && view_->diagnostics[i].child_id == child)
+	const auto found = files_.find(file);
+	if (found == files_.end() || !view_) return out;
+	const auto on_row = found->second.rows.find(row);
+	if (on_row == found->second.rows.end()) return out;
+	for (const size_t i : on_row->second)
+		if (i < view_->diagnostics.size() && (!child || view_->diagnostics[i].child_id == child))
 			out.push_back(i);
 	return out;
 }

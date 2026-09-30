@@ -73,12 +73,16 @@ std::string problem_family_title(const std::string &code);
 class ProblemQueryCache {
 public:
 	const ProblemAnswer &answer(const ProblemQuery &query, const SessionView &view);
+	// How many answers it has made: what a reader made of the answer (the Problems list's
+	// lines, which index its groups and rows) is made again when this moves.
+	uint64_t generation() const { return generation_; }
 
 private:
 	const SessionView *view_ = nullptr;
 	uint64_t revision_ = 0;
 	ProblemQuery query_;
 	ProblemAnswer answer_;
+	uint64_t generation_ = 0;
 };
 
 // Where a finding takes Problems: a project file the scan lists. One the editor opens is

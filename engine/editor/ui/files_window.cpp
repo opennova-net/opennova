@@ -115,9 +115,7 @@ void FilesWindow::refresh(const SessionView &view) {
 	view_ = &view;
 	key_ = cache_key(view);
 	folders_.assign(1, Folder());
-	compared_.clear();
-	for (const AssetEntry &entry : view.scan.entries)
-		compared_.push_back(normalized_logical_name(entry.relative_path));
+	compared_.clear(); // made again by matching(), once a filter is set
 	matches_made_ = false;
 	std::map<std::string, size_t> index;
 	for (size_t i = 0; i < view.scan.entries.size(); ++i) {
@@ -162,8 +160,13 @@ const std::vector<size_t> &FilesWindow::matching(const SessionView &view) {
 	matches_made_ = true;
 	matched_ = filter_;
 	matches_.clear();
+	if (compared_.size() != view.scan.entries.size()) {
+		compared_.clear();
+		for (const AssetEntry &entry : view.scan.entries)
+			compared_.push_back(normalized_logical_name(entry.relative_path));
+	}
 	const std::string wanted = normalized_logical_name(filter_);
-	for (size_t i = 0; i < view.scan.entries.size() && i < compared_.size(); ++i)
+	for (size_t i = 0; i < compared_.size(); ++i)
 		if (compared_[i].find(wanted) != std::string::npos) matches_.push_back(i);
 	return matches_;
 }

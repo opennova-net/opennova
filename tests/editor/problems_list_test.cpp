@@ -3,7 +3,9 @@
 // folded the first time it shows; each finding known by what it is about, so a press on a fix
 // survives a validation that reorders the findings (the one before it gone, the release on its
 // fix still counts, one on the finding that slid into its place does not) and the finding
-// selected stays selected; the fold rules (notes alone fold on first sight and open again when
+// selected stays selected; a fix known by its request too, so a release on a fix that changed
+// since the press (the game data gained the file: a Create become an Import) counts for
+// nothing; the fold rules (notes alone fold on first sight and open again when
 // a warning joins, unless the user folded them; another project starts over); what a Fix all,
 // the summary's Fix alls and a Use fix say and raise, a missing texture's placeholders in one
 // line, no Rewrite for a file that does not serialize; a confirmation waiting for Apply
@@ -210,6 +212,43 @@ int test_keys() {
 	TEST_EXPECT(list.selected() == 3 && v.diagnostics[list.selected()].row_id == 11);
 	list.toggle_selected(v, 3); // clicked again: folded back
 	TEST_EXPECT(list.selected() == SIZE_MAX);
+	return 0;
+}
+
+// A fix that changes while the findings stand: the game data gains the font a finding names,
+// so its first fix, a Create, becomes an Import. A fix's id holds its request, so it moves
+// with it: a release on the Import of a press on the Create counts for nothing, while a new
+// click on the Import takes it.
+int test_fix_changes() {
+	SessionView v = problems_view();
+	Diagnostic font = finding(DiagnosticSeverity::Error, "reference.missing",
+	                          "Kilo: the font is missing.", "menus/a.mnu", "font.name");
+	font.reference = ReferenceKind::Font;
+	font.target = "Custom.fnt";
+	v.diagnostics.push_back(font);
+	const size_t kilo = v.diagnostics.size() - 1;
+	ProblemsList list;
+	list.refresh(v);
+	const std::string key = list.key(kilo);
+	const ProblemFix create = list.fixes(v, kilo).front();
+	TEST_EXPECT(create.label == "Create Custom.fnt" &&
+	            create.request.kind == EditorRequestKind::CreateFile);
+	const std::string pressed = list.fix_id(v, kilo, create);
+	ProblemsList::PressLatch latch;
+	TEST_EXPECT(!latch.released_on(pressed, true, false, false)); // pressed on the Create
+
+	v.retail_files = {"Custom.fnt", "gametext.bin"};
+	++v.revision;
+	list.refresh(v);
+	const ProblemFix import = list.fixes(v, kilo).front();
+	TEST_EXPECT(import.request.kind == EditorRequestKind::PreviewRetailImport &&
+	            import.request.names == Words({"Custom.fnt"}));
+	// The same finding, another request: another id (the Create's own id stands).
+	const std::string now = list.fix_id(v, kilo, import);
+	TEST_EXPECT(list.key(kilo) == key && list.fix_id(v, kilo, create) == pressed && now != pressed);
+	TEST_EXPECT(!latch.released_on(now, false, true, true)); // released on the Import: nothing
+	TEST_EXPECT(!latch.released_on(now, true, false, false)); // a new press on it
+	TEST_EXPECT(latch.released_on(now, false, true, true));   // and its release: applied
 	return 0;
 }
 
@@ -437,6 +476,7 @@ int test_fixes_lazy() {
 int main() {
 	if (test_lines() != 0) return 1;
 	if (test_keys() != 0) return 1;
+	if (test_fix_changes() != 0) return 1;
 	if (test_folding() != 0) return 1;
 	if (test_proposals() != 0) return 1;
 	if (test_confirmation() != 0) return 1;

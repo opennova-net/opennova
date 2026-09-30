@@ -86,7 +86,9 @@ bool fitted_button(const std::string &label, const char *id, float width);
 // when one is given, else the whole text when it was cut.
 void clipped_text(const std::string &text, const std::string &tip = std::string());
 // The tooltip of the item just drawn (a disabled one too), wrapped: a finding's message and
-// a fix's detail run long. None for "". Every window's hover text goes through it.
+// a fix's detail run long. None for "". It shows in place of any tooltip set before it in the
+// frame (as ImGui::SetTooltip does: a table's header sets its own for a label it cut), so an
+// item shows one. Every window's hover text goes through it.
 void tooltip(const std::string &text);
 // Whether the item just drawn shows its tooltip now: hovered, a disabled one too.
 bool tooltip_hovered();

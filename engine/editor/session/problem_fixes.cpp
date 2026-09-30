@@ -428,6 +428,7 @@ const ProblemFixIndex &ProblemFixCache::follow(const SessionView &view) {
 		view_ = &view;
 		revision_ = view.revision;
 		index_ = std::make_unique<ProblemFixIndex>(view);
+		++generation_;
 	}
 	return *index_;
 }

@@ -161,14 +161,9 @@ void MenuView::draw_windows(EditorHost &host, const MnuDocument &document, const
 	const NodeAddress &selection = view.selection;
 	const bool here = selection.row == screen.id;
 	const RecordTree::Entry *selected = here && selection.kind == kWindow ? tree_.find(selection.child) : nullptr;
-	// The window a new one goes into: the selected window, or the one holding the selected
-	// record, else the first root window.
-	NodeId holder = selected ? selected->address.child : 0;
-	if (here && !holder && selection.child) {
-		const std::vector<NodeAddress> owners = document.ancestors(selection);
-		for (auto owner = owners.rbegin(); owner != owners.rend() && !holder; ++owner)
-			if (owner->kind == kWindow && tree_.find(owner->child)) holder = owner->child;
-	}
+	// The window a new one goes into: the listed window that is the selected record or holds
+	// it (the one a Paste goes after), else the first root window.
+	const NodeId holder = here ? listed_window(document, screen.id, selection).child : 0;
 	if (selection != revealed_) {
 		revealed_ = selection;
 		reveal_.clear();
