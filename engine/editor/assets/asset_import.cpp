@@ -155,14 +155,14 @@ void report_textures_left(const std::vector<Output> &outputs, const AssetScan &e
 			if (edge.kind != ReferenceKind::Texture) continue;
 			const auto exists = [&](const std::string &name) {
 				const AssetEntry *held = existing.find(name);
-				if (held && file_serves_reference(held->kind, edge.kind, edge.material_type)) return true;
+				if (held && file_serves_reference(held->kind, edge.kind, edge.loader_arg)) return true;
 				for (const Output &other : outputs)
 					if (normalized_logical_name(other.name) == normalized_logical_name(name) &&
-					    file_serves_reference(other.kind, edge.kind, edge.material_type))
+					    file_serves_reference(other.kind, edge.kind, edge.loader_arg))
 						return true;
 				return false;
 			};
-			const std::vector<std::string> candidates = reference_file_candidates(edge.kind, edge.value, edge.material_type, exists);
+			const std::vector<std::string> candidates = reference_file_candidates(edge.kind, edge.value, edge.loader_arg, exists);
 			if (candidates.empty() || std::any_of(candidates.begin(), candidates.end(), exists)) continue;
 			if (!told.insert(normalized_logical_name(edge.value)).second) continue;
 			Diagnostic d = make_diagnostic(
@@ -175,7 +175,7 @@ void report_textures_left(const std::vector<Output> &outputs, const AssetScan &e
 			// What it is about, as the graph's missing reference says it: its fixes read it.
 			d.reference = edge.kind;
 			d.target = edge.value;
-			d.material_type = edge.material_type;
+			d.loader_arg = edge.loader_arg;
 			out.push_back(std::move(d));
 		}
 	}

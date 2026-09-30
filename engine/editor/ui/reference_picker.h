@@ -35,13 +35,13 @@ public:
 	// it). A fix the footer offers is raised through the host. `others`: the names of what the
 	// value may name instead are offered too (the kind's also_offers: a menu's stylesheet
 	// variables); a stylesheet's own value names its file alone.
-	bool draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldSchema &field,
+	bool draw(EditorHost &host, const Document &document, const NodeAddress &record, const FieldUse &field,
 	          const Value &value, bool compact, std::string &picked, bool others = true);
 	// A Files row dropped on the item just drawn (a reference field's value): true when the file is
-	// one a reference of the field's kind loads (file_serves_reference, by the field's row type),
+	// one a reference of the field's kind loads (file_serves_reference, by the field's loader_arg),
 	// `picked` its logical name. While a row is dragged over an item that does not fit, nothing
 	// is highlighted and nothing happens on release.
-	static bool accept_file(const SessionView &view, const FieldSchema &field, std::string &picked);
+	static bool accept_file(const SessionView &view, const FieldUse &field, std::string &picked);
 	// How many times a popup's list was made (the graph's choices, the missing value's finding and
 	// its fixes): once per opening while what it reads stands (ListKey), never for a change of
 	// anything else (a line of Output, a build's step).
@@ -87,7 +87,7 @@ private:
 		std::vector<ProblemFix> fixes;
 	};
 	void refresh(Popup &popup, const SessionView &view, const Document &document, const NodeAddress &record,
-	             const FieldSchema &field, const Value &value, bool others);
+	             const FieldUse &field, const Value &value, bool others);
 	bool draw_popup(EditorHost &host, Popup &popup, std::string &picked);
 	// The popups of documents no longer open forgotten, once per change of which are open.
 	void prune(const SessionView &view);

@@ -349,7 +349,7 @@ int test_proposals() {
 	                          "Golf: the texture 'skin.tga'.", "models/tank.3di", "name");
 	skin.reference = ReferenceKind::Texture;
 	skin.target = "skin.tga";
-	skin.material_type = 0;
+	skin.loader_arg = 0;
 	Diagnostic puff = finding(DiagnosticSeverity::Error, "reference.missing",
 	                          "Hotel: the texture 'puff.tga'.", "fx.ptl", "graphic1");
 	puff.reference = ReferenceKind::Texture;

@@ -48,11 +48,8 @@ void quiet_text(const std::string &text, const std::string &tip = std::string())
 // A colour swatch over the value, read and written as the game's AARRGGBB word (the
 // Inspector's HexArgb swatch).
 void color_cell(EditorHost &host, const Document &document, const NodeAddress &address, const std::string &value) {
-	FieldSchema argb;
-	argb.type = FieldType::Text;
-	argb.color = FieldColor::HexArgb;
 	Value picked = value;
-	const field_widgets::Edited change = field_widgets::swatch(argb, picked);
+	const field_widgets::Edited change = field_widgets::swatch(FieldColor::HexArgb, picked);
 	if (change.changed) set(host, document, address, "value", std::move(picked)); // coalesced: one undo step per drag
 	if (change.finished) window_requests::end_edit(host, document.path());
 }
@@ -208,7 +205,7 @@ void StylesView::draw(EditorHost &host, const MnsDocument &document) {
 			if (use.colour) {
 				color_cell(host, document, line, value);
 			} else if (use.picks) {
-				const FieldSchema &file = use.file;
+				const FieldUse &file = use.file;
 				if (picker_.draw(host, document, line, file, Value(value), false, picked, false))
 					set(host, document, line, "value", picked, false);
 			}

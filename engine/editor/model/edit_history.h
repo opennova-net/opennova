@@ -35,6 +35,15 @@ class EditHistory {
 public:
 	EditHistory(std::vector<std::shared_ptr<const Node>> &rows, std::shared_ptr<const FileState> &state)
 	    : rows_(rows), state_(state) {}
+	// The journal another keeps, as it stands, over another document's row list and file-wide
+	// state (a snapshot's: Document::snapshot).
+	EditHistory(const EditHistory &other, std::vector<std::shared_ptr<const Node>> &rows,
+			std::shared_ptr<const FileState> &state)
+			: rows_(rows), state_(state), history_(other.history_), cursor_(other.cursor_),
+			  revision_(other.revision_), saved_revision_(other.saved_revision_),
+			  next_revision_(other.next_revision_), coalesce_key_(other.coalesce_key_) {}
+	EditHistory(const EditHistory &) = delete;
+	EditHistory &operator=(const EditHistory &) = delete;
 
 	void reset();
 	// Apply the change forward and record it (truncating any redo branch).

@@ -74,14 +74,16 @@ int check_self_search(const Document &document) {
 	std::string text;
 	const auto first = [&](const NodeAddress &address) {
 		for (const FieldSchema &schema : document.fields(address.kind)) {
-			const FieldSchema applied = document.field_on(address, schema);
+			const FieldUse applied = document.field_on(address, schema);
 			Value value;
-			if (applied.optional && !document.present(address, applied.id)) continue;
-			if (applied.applies == Applicability::Ignored || !document.get(address, applied.id, value)) continue;
-			const std::string shown = field_text(applied, value);
+			if (schema.optional && !document.present(address, schema.id)) continue;
+			if (applied.applies == Applicability::Ignored || !document.get(address, schema.id, value)) continue;
+			// As the find shows it: a record's own choice by its name (Document::choices_on).
+			std::vector<FieldChoice> offered;
+			const std::string shown = field_text(schema, document.choices_on(address, applied, offered), value);
 			if (shown.size() < 3 || shown.find('\n') != std::string::npos) continue;
 			record = address;
-			field = applied;
+			field = schema;
 			text = shown;
 			return true;
 		}

@@ -308,10 +308,12 @@ static int written_units() {
 	TEST_EXPECT(items.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	const NodeKind kItem = node_kind(DefRecordKind::Item);
 	const NodeAddress buggy{items.rows()[0]->id, kItem, 0};
-	auto schema = [&](const Document &document, const NodeAddress &address, const char *id) {
+	// A field of the record's kind, as its type's table declares it.
+	auto schema = [&](const Document &document, const NodeAddress &address, const char *id) -> const FieldSchema & {
+		static const FieldSchema none;
 		for (const FieldSchema &f : document.fields(address.kind))
-			if (f.id == id) return document.field_on(address, f);
-		return FieldSchema();
+			if (f.id == id) return f;
+		return none;
 	};
 	Value value;
 	TEST_EXPECT(items.get(buggy, "player_speed", value) && std::get<int64_t>(value) == 30);
@@ -329,10 +331,13 @@ static int written_units() {
 	const uint64_t at_45 = items.revision();
 	TEST_EXPECT(items.apply(field(buggy, "player_speed", int64_t(45)), error) && items.revision() == at_45);
 	TEST_EXPECT(items.apply(field(buggy, "max_slope", int64_t(35)), error) && items.revision() == at_45);
-	// The registry's ids name the mask's bits.
-	const FieldSchema spawn = schema(items, buggy, "vehicle_spawn_mask");
-	TEST_EXPECT(spawn.flags && spawn.choices.size() == 2 && spawn.choices[0].name == "8" && spawn.choices[0].value == 1 &&
-	            spawn.choices[1].name == "4" && spawn.choices[1].value == 2);
+	// The registry's ids name the mask's bits: the item's own choices (Document::record_choices),
+	// none in the table.
+	const FieldUse spawn = items.field_on(buggy, schema(items, buggy, "vehicle_spawn_mask"));
+	std::vector<FieldChoice> own;
+	const std::vector<FieldChoice> &bits = items.choices_on(buggy, spawn, own);
+	TEST_EXPECT(spawn.schema->flags && spawn.own_choices && spawn.schema->choices.empty() && bits.size() == 2 &&
+	            bits[0].name == "8" && bits[0].value == 1 && bits[1].name == "4" && bits[1].value == 2);
 	const FieldSchema pieces = schema(items, buggy, "husk_sub_part_types[0]");
 	TEST_EXPECT(pieces.choices.size() == 13 && pieces.choices[1].name == "WHEEL" && pieces.token == "husk_sub_part_types");
 
@@ -396,10 +401,12 @@ static int written_units() {
 static int witnessed_enums() {
 	editor_test::TempProjectDir dir("opennova_catalog_enums_test");
 	using Table = std::vector<std::pair<int64_t, const char *>>;
-	auto schema = [](const Document &document, const NodeAddress &address, const char *id) {
+	// A field of the record's kind, as its type's table declares it.
+	auto schema = [](const Document &document, const NodeAddress &address, const char *id) -> const FieldSchema & {
+		static const FieldSchema none;
 		for (const FieldSchema &f : document.fields(address.kind))
-			if (f.id == id) return document.field_on(address, f);
-		return FieldSchema();
+			if (f.id == id) return f;
+		return none;
 	};
 	auto pins = [](const FieldSchema &field, const Table &table, bool open) {
 		if (field.choices.size() != table.size() || field.open_choices != open || field.flags) return false;

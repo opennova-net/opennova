@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -16,8 +17,8 @@ namespace opennova::editor {
 // inside a document also carries the record it concerns (`record`, `row_id`,
 // `child_id`, `record_kind`) so Problems can open and select it. A finding about a
 // required file or a reference carries what it is about (`role`, `target`, `reference`,
-// `scope`, a model texture's `material_type`), so a fix and a filter read it rather than
-// the message.
+// `scope`, and `loader_arg`, what the reference's loader picks the file by), so a fix and a
+// filter read it rather than the message.
 enum class DiagnosticSeverity { Info, Warning, Error };
 
 struct Diagnostic {
@@ -34,9 +35,9 @@ struct Diagnostic {
 	std::string target; // the file or symbol name the finding is about, as the game looks it up
 	ReferenceKind reference = ReferenceKind::None; // a missing reference's kind
 	std::string scope;  // a missing reference's scope (AssetGraph's: a string id's table and section)
-	// A missing model texture's row type (GraphEdge::material_type), by which its loader picks
-	// the file; -1 for any other finding.
-	int material_type = -1;
+	// What a missing reference's loader picks the file by (GraphEdge::loader_arg: a model's
+	// texture row's type); -1 for any other finding.
+	int32_t loader_arg = -1;
 };
 
 // The same finding, every member alike (the session's Findings concern moves only when the
@@ -46,7 +47,7 @@ inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
 			a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
 			a.role == b.role && a.target == b.target && a.reference == b.reference &&
-			a.scope == b.scope && a.material_type == b.material_type;
+			a.scope == b.scope && a.loader_arg == b.loader_arg;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }
 

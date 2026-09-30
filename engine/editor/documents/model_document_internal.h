@@ -43,6 +43,9 @@ constexpr uint8_t kTextureSlot = 7;
 
 const ModelPlaces &places_of(const Node &row);
 bool place_of(const Node &row, NodeId id, ModelPlace &out);
+// Every identity's place in a row, made again: when the row is given its identities and after a
+// structural edit of a clone, before it commits.
+void index_places(Node &row);
 // The native record an address names, as the property table's record (a model row's own
 // address: its header); empty when the row does not hold it.
 threedi::ThreediSchemaRecord record_of(Node &row, const NodeAddress &address);

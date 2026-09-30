@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -42,8 +43,10 @@ enum class NameSpelling {
 };
 
 // The file names a reference loads, in the order the game probes them, for a kind whose loader
-// picks by more than its extensions (reference_file_candidates says how each does).
-using ReferenceFileNames = std::vector<std::string> (*)(const std::string &name, int material_type,
+// picks by more than its extensions (reference_file_candidates says how each does). `loader_arg`
+// is what the reference's field gives its loader besides the name (FieldUse::loader_arg), which
+// the row reads its own way (a texture: a model's texture row's type); -1 for none.
+using ReferenceFileNames = std::vector<std::string> (*)(const std::string &name, int32_t loader_arg,
                                                         const std::function<bool(const std::string &)> &exists);
 // What a finding about a reference nothing resolves says after "<who> names <phrase> '<value>'":
 // why, and what the game does instead.

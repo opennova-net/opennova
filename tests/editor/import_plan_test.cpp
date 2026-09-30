@@ -256,7 +256,7 @@ static int test_plan_scene() {
 	const ImportPlanRow *skin = row_named(plan, "SPINNER.TGA");
 	TEST_EXPECT(skin && skin->state == State::Found && skin->found_in == "the folder " + scene &&
 	            skin->needed_by.file == "spinner.3di" && skin->needed_by.field == "name" &&
-	            skin->needed_by.reference == ReferenceKind::Texture && skin->needed_by.material_type == 0);
+	            skin->needed_by.reference == ReferenceKind::Texture && skin->needed_by.loader_arg == 0);
 	const ImportPlanRow *glow = row_named(plan, "glow.tga");
 	TEST_EXPECT(glow && glow->state == State::NotFound && glow->needed_by.file == "spinner.3di");
 	// The .dds beside it: a diffuse row loads it.
@@ -475,14 +475,14 @@ static int test_plan_missing_lookups() {
 	const ImportPlan alone = project.plan({{a + "/glow.o3d", {}}});
 	const ImportPlanRow *missing = row_named(alone, "glow.tga");
 	TEST_EXPECT(alone.rows.size() == 2 && missing && missing->state == State::NotFound &&
-	            missing->needed_by.material_type == 0);
+	            missing->needed_by.loader_arg == 0);
 	TEST_EXPECT(editor_test::write_text(b + "/b.mnu", screen("B", window("STATIC", "GLOW", image("glow.dds")))) &&
 	            editor_test::write_text(b + "/glow.dds", "dds"));
 	const ImportPlan both = project.plan({{a + "/glow.o3d", {}}, {b + "/b.mnu", {}}});
 	const ImportPlanRow *dds = row_named(both, "glow.dds");
 	const ImportPlanRow *still = row_named(both, "glow.tga");
 	TEST_EXPECT(dds && dds->state == State::Found && still && still->state == State::NotFound &&
-	            still->needed_by.material_type == 1 && both.rows.size() == 4);
+	            still->needed_by.loader_arg == 1 && both.rows.size() == 4);
 	return 0;
 }
 

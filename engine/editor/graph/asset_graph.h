@@ -50,13 +50,15 @@ struct GraphEdge {
 	// On a style variable edge: what the variable's value must name there (a font, a menu
 	// texture), None where it stands for a colour.
 	ReferenceKind through = ReferenceKind::None;
-	// On a model's texture row: the row's type, by which its loader picks the one file the
-	// name loads (FieldSchema::material_type, reference_file_candidates); -1 elsewhere.
-	int material_type = -1;
+	// What the reference's loader picks the one file the name loads by, as its kind's row reads
+	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type); -1 for
+	// none.
+	int32_t loader_arg = -1;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on
-// sets FieldSchema::defines (refined by Document::refine_symbol), or a native file's name.
+// says it defines one (FieldUse::defines; what the type's lookup makes of it,
+// Document::refine_symbol), or a native file's name.
 struct GraphSymbol {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string name;    // normalized
@@ -82,6 +84,9 @@ struct GraphSymbol {
 	bool inert = false;
 	// Why no lookup finds it, in a few words (the picker's, the find's), when it is inert.
 	std::string inert_reason;
+	// The line of its file it is defined on, where its type knows it (a stylesheet variable's
+	// first line); 0 for none.
+	size_t line = 0;
 };
 
 // A name a reference may be given (the picker's rows, AssetGraph::choices): what a pick sets
@@ -170,12 +175,12 @@ public:
 
 	// Where a name of `kind` resolves. `file_out` receives the project-relative path of
 	// the file it names or the file defining the symbol. A file resolves to the file its
-	// kind's loader reads (reference_file_candidates), a model's texture row by its
-	// `material_type`.
+	// kind's loader reads (reference_file_candidates, by `loader_arg`: a model's texture
+	// row's type).
 	ReferenceStatus resolve(ReferenceKind kind, const std::string &name, const std::string &scope = std::string(),
-	                        std::string *file_out = nullptr, int material_type = -1) const;
+	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
-	// texture's rule reads its case), in its scope, by its material type.
+	// texture's rule reads its case), in its scope, by its loader's argument.
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
@@ -191,15 +196,15 @@ public:
 	// 0x552500]; null when neither defines it where the game reads.
 	const GraphSymbol *style_binding(const std::string &name) const;
 	// The names a reference of `kind` in `scope` may be given (the pickers), each with where it
-	// is defined and what the reference would then be (resolve, by `material_type` for a
-	// model's texture row): the project's files its loader can read; the symbols of the kind,
+	// is defined and what the reference would then be (resolve, by `loader_arg`: a model's
+	// texture row's type): the project's files its loader can read; the symbols of the kind,
 	// only those the scope matches where the kind's picker narrows (scope_matches: a string id's
 	// table and section, the screens of a SCREEN ACTION's file, the windows of the acting
 	// window's screen, the points of the item's model; a scope of none, every one), each name once, as the first definition a lookup finds; then, marked
 	// inert with the reason, the names defined only where no lookup finds them; a style
 	// variable as its %NAME%, the definition the game reads.
 	std::vector<ReferenceChoice> choices(ReferenceKind kind, const std::string &scope = std::string(),
-	                                     int material_type = -1) const;
+	                                     int32_t loader_arg = -1) const;
 
 	// Every verifiable edge whose target is missing, and the same as findings
 	// ("reference.missing": an error, or a warning for what the game tolerates: a style
@@ -290,8 +295,8 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 // The file names a reference of a file kind to `name` loads, in the order the game probes
 // them: the file is the first of them `exists` has (the graph asks the project, as the
 // kind; a fix the game install; the import plan each place it looks). A menu texture and a
-// model's texture row (`material_type` >= 0) name the one file their loader opens, picked
-// by what `exists` has: a menu texture by its extension, a .tga the files lack loading its
+// model's texture row (`loader_arg` >= 0, its type) name the one file their loader opens,
+// picked by what `exists` has: a menu texture by its extension, a .tga the files lack loading its
 // .dds (menu::menu_texture_source); a texture row by the row's type, as the renderer's
 // loaders pick (renderer/material_texture.h; a loose file never first, the project's files
 // being packed as the game mounts them), none when that loader opens no file. A font names
@@ -301,19 +306,20 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 // Any other kind names the name as written, then with each extension the kind's loader
 // appends. None for a symbol, an unverified kind or an empty name. Each rule is the kind's row
 // (reference_kinds: its file_names, else its extensions).
-std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int material_type,
+std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int32_t loader_arg,
                                                    const std::function<bool(const std::string &)> &exists);
 // Whether a project file, of the kind the scan gives it, can be what a reference of `kind`
 // loads: a file of the reference's file kind, and for a model's chunk row (runtime types 16
-// to 18) one the scan could not type by its name too, since that loader reads the name as
-// written as a chunk container whatever it is called (the scan reads no such file's bytes).
-bool file_serves_reference(AssetKind file, ReferenceKind kind, int material_type);
+// to 18, a texture row's loader_arg) one the scan could not type by its name too, since that
+// loader reads the name as written as a chunk container whatever it is called (the scan reads
+// no such file's bytes).
+bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_arg);
 
-// The reference a field's value makes (graph/extractors.cpp): the kind the graph resolves
-// it in (a def's game-text kinds become string ids in their table and section), the name
-// and the scope. False when the value references nothing (empty, NONE, NULL, a literal
-// where a style variable could stand).
-bool reference_target(const FieldSchema &field, const Value &value, ReferenceKind &kind, std::string &name,
+// The reference a field's value makes (graph/extractors.cpp), the field as it applies to its
+// record: the kind the graph resolves it in (a def's game-text kinds become string ids in
+// their table and section), the name and the scope. False when the value references nothing
+// (empty, NONE, NULL, a literal where a style variable could stand).
+bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &kind, std::string &name,
                       std::string &scope);
 // Where "Go to" on a use goes: the record of the edge's file that makes it (its locator, the
 // field shown), opened when the editor edits the file's kind, else the file shown in Files.
@@ -325,7 +331,7 @@ ReferenceTarget file_target(const std::string &file, const SessionView &view);
 
 // What a document references and defines, through its schema: every field's reference as it
 // applies to its record (Document::field_on), and a symbol for every field field_on says
-// defines one, as the type refines it (Document::refine_symbol).
+// defines one, with what the type's lookup makes of it (Document::refine_symbol).
 void extract_from_document(const Document &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
 // loader decodes them): a document type's through its document (Document::load_bytes), a

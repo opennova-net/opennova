@@ -52,12 +52,12 @@ int64_t whole(const Value &value) {
 }
 
 // Whether a colour field shows its swatch for this value (a HexArgb one names no %VAR%).
-bool shows_swatch(const FieldSchema &field, const Value &value) {
-	if (field.color == FieldColor::HexArgb) {
+bool shows_swatch(FieldColor color, const Value &value) {
+	if (color == FieldColor::HexArgb) {
 		const auto *text = std::get_if<std::string>(&value);
 		return text && !mns::is_variable_reference(*text);
 	}
-	return field.color == FieldColor::PackedRgb && std::holds_alternative<int64_t>(value);
+	return color == FieldColor::PackedRgb && std::holds_alternative<int64_t>(value);
 }
 
 // A text field's box: several lines where the field runs over them (not in a table cell),
@@ -106,8 +106,9 @@ bool number_bounds(const FieldSchema &field, double &lo, double &hi) {
 // A typed token as the field takes it: a known one as the table spells it, else a text as
 // typed (the box holds no more than the field does), a number of the field's own type when
 // the whole of it reads as one within the field's range (false otherwise).
-bool typed_value(const FieldSchema &field, const std::string &token, Value &out) {
-	for (const FieldChoice &choice : field.choices)
+bool typed_value(const FieldSchema &field, const std::vector<FieldChoice> &choices,
+		const std::string &token, Value &out) {
+	for (const FieldChoice &choice : choices)
 		if (strutil::iequals(token, choice.name)) {
 			out = choice_value(field, choice);
 			return true;
@@ -186,16 +187,17 @@ Edited number(const FieldSchema &field, Value &value, bool unit) {
 	return out;
 }
 
-Edited choice(const FieldSchema &field, Value &value, bool mixed) {
+Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices, Value &value,
+		bool mixed) {
 	Edited out;
 	out.coalesce = false;
-	const FieldChoice *current = mixed ? nullptr : choice_of(field, value);
-	const std::string shown = mixed ? std::string("(mixed)") : current ? choice_title(*current) : shown_value(field, value);
+	const FieldChoice *current = mixed ? nullptr : choice_of(choices, value);
+	const std::string shown = mixed ? std::string("(mixed)") : current ? choice_title(*current) : shown_value(field, choices, value);
 	if (ImGui::BeginCombo("##value", shown.c_str(), ImGuiComboFlags_HeightLarge)) {
 		// One list is open at a time: the box starts empty each time one opens, as long as the
 		// field it types for holds.
 		static std::vector<char> typed;
-		const bool narrowed = field.open_choices || field.choices.size() > kFilterFrom;
+		const bool narrowed = field.open_choices || choices.size() > kFilterFrom;
 		bool enter = false;
 		if (ImGui::IsWindowAppearing() || typed.size() != typed_capacity(field)) {
 			typed.assign(typed_capacity(field), '\0');
@@ -213,15 +215,15 @@ Edited choice(const FieldSchema &field, Value &value, bool mixed) {
 			ImGui::CloseCurrentPopup();
 		};
 		std::vector<const FieldChoice *> listed;
-		for (const FieldChoice &option : field.choices)
+		for (const FieldChoice &option : choices)
 			if (token.empty() || window_requests::matches(choice_title(option), token.c_str()) ||
 			    window_requests::matches(option.name, token.c_str()))
 				listed.push_back(&option);
 		// An open field's typed value, the first line while no choice is it.
-		const bool known = std::any_of(field.choices.begin(), field.choices.end(),
+		const bool known = std::any_of(choices.begin(), choices.end(),
 		                               [&](const FieldChoice &option) { return strutil::iequals(token, option.name); });
 		Value typed_as;
-		const bool typable = field.open_choices && !token.empty() && typed_value(field, token, typed_as);
+		const bool typable = field.open_choices && !token.empty() && typed_value(field, choices, token, typed_as);
 		if (typable && !known) {
 			if (ImGui::Selectable(("Use \"" + token + "\"").c_str()) || enter) take(typed_as);
 			ui_kit::tooltip("Written as typed: the file takes a value the list does not know.");
@@ -231,7 +233,7 @@ Edited choice(const FieldSchema &field, Value &value, bool mixed) {
 		// Each choice under its place in the field's list: two of one name (two kinds of boat) are
 		// two items.
 		for (const FieldChoice *option : listed) {
-			ImGui::PushID(static_cast<int>(option - field.choices.data()));
+			ImGui::PushID(static_cast<int>(option - choices.data()));
 			if (ImGui::Selectable(choice_title(*option).c_str(), current == option) && !out.changed)
 				take(choice_value(field, *option));
 			if (!option->label.empty())
@@ -247,10 +249,10 @@ Edited choice(const FieldSchema &field, Value &value, bool mixed) {
 
 float swatch_width() { return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x; }
 
-Edited swatch(const FieldSchema &field, Value &value) {
+Edited swatch(FieldColor color, Value &value) {
 	Edited out;
-	if (!shows_swatch(field, value)) return out;
-	if (field.color == FieldColor::HexArgb) {
+	if (!shows_swatch(color, value)) return out;
+	if (color == FieldColor::HexArgb) {
 		const uint32_t word = mnu::color_value(std::get<std::string>(value));
 		float rgba[4] = {float((word >> 16) & 0xFF) / 255.0f, float((word >> 8) & 0xFF) / 255.0f,
 		                 float(word & 0xFF) / 255.0f, float((word >> 24) & 0xFF) / 255.0f};
@@ -287,8 +289,10 @@ Edited channel_swatch(std::vector<Value> &values) {
 	return out;
 }
 
-Edited value(const FieldSchema &field, Value &value, bool compact, bool mixed) {
-	if (is_yes_no(field)) {
+Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Value &value,
+		bool compact, bool mixed) {
+	const FieldSchema &schema = *field.schema;
+	if (is_yes_no(schema)) {
 		Edited out;
 		out.coalesce = false;
 		bool on = std::get<int64_t>(value) != 0;
@@ -298,52 +302,57 @@ Edited value(const FieldSchema &field, Value &value, bool compact, bool mixed) {
 		}
 		return out;
 	}
-	if (!field.choices.empty()) return choice(field, value, mixed);
+	if (!choices.empty()) return choice(schema, choices, value, mixed);
 	// A colour's swatch first, its value in what is left of the width.
 	float width = ImGui::CalcItemWidth();
 	Edited picked;
-	if (shows_swatch(field, value)) {
-		picked = swatch(field, value);
+	if (shows_swatch(field.color, value)) {
+		picked = swatch(field.color, value);
 		ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
 		width -= swatch_width();
 	}
 	ImGui::SetNextItemWidth(std::max(1.0f, width));
-	const Edited typed = field.type == FieldType::Text ? text(field, value, compact, mixed) : number(field, value, !compact);
+	const Edited typed = schema.type == FieldType::Text ? text(schema, value, compact, mixed)
+	                                                    : number(schema, value, !compact);
 	return picked.changed || picked.finished ? picked : typed;
 }
 
-Edited group(const std::vector<FieldSchema> &fields, std::vector<Value> &values, size_t &changed,
-             const std::vector<bool> &mixed) {
+Edited group(const std::vector<FieldUse> &fields,
+		const std::vector<const std::vector<FieldChoice> *> &choices, std::vector<Value> &values,
+		size_t &changed, const std::vector<bool> &mixed) {
 	Edited out;
 	changed = SIZE_MAX;
-	if (fields.empty() || values.size() != fields.size()) return out;
+	if (fields.empty() || values.size() != fields.size() || choices.size() != fields.size())
+		return out;
 	const ImGuiStyle &style = ImGui::GetStyle();
 	float width = ImGui::CalcItemWidth();
-	const bool channels = fields.size() == 3 && std::all_of(fields.begin(), fields.end(), [](const FieldSchema &field) {
+	const bool channels = fields.size() == 3 && std::all_of(fields.begin(), fields.end(), [](const FieldUse &field) {
 		                      return field.color == FieldColor::Channel;
 	                      });
 	if (channels) {
-		ImGui::BeginDisabled(std::any_of(fields.begin(), fields.end(), [](const FieldSchema &f) { return f.read_only; }));
+		ImGui::BeginDisabled(std::any_of(fields.begin(), fields.end(), [](const FieldUse &f) { return f.read_only; }));
 		out = channel_swatch(values);
 		ImGui::EndDisabled();
 		ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
 		width -= swatch_width();
 	}
 	// One unit after the row when every member has it.
-	const std::string &unit = fields.front().unit;
-	const bool one_unit = !unit.empty() && std::all_of(fields.begin(), fields.end(), [&](const FieldSchema &field) {
-		return field.unit == unit;
+	const std::string &unit = fields.front().schema->unit;
+	const bool one_unit = !unit.empty() && std::all_of(fields.begin(), fields.end(), [&](const FieldUse &field) {
+		return field.schema->unit == unit;
 	});
 	if (one_unit) width -= style.ItemInnerSpacing.x + ui_kit::text_width(unit.c_str());
 	const float count = float(fields.size());
 	const float cell = std::max(1.0f, (width - style.ItemInnerSpacing.x * (count - 1.0f)) / count);
 	for (size_t i = 0; i < fields.size(); ++i) {
+		const FieldSchema &schema = *fields[i].schema;
 		if (i) ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-		ImGui::PushID(fields[i].id.c_str());
+		ImGui::PushID(schema.id.c_str());
 		ImGui::BeginDisabled(fields[i].read_only);
 		ImGui::SetNextItemWidth(cell);
-		const Edited one = value(fields[i], values[i], true, i < mixed.size() && mixed[i]);
-		ui_kit::tooltip_lazy([&] { return field_title(fields[i]) + "\n" + details(fields[i]); });
+		const Edited one =
+				value(fields[i], *choices[i], values[i], true, i < mixed.size() && mixed[i]);
+		ui_kit::tooltip_lazy([&] { return field_title(schema) + "\n" + details(schema); });
 		ImGui::EndDisabled();
 		ImGui::PopID();
 		if (one.changed) {

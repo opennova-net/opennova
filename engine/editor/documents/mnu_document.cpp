@@ -584,18 +584,22 @@ NodeKind menu_kind(const std::string &token) { return kind_of(token.c_str()); }
 MenuScreen::MenuScreen() { kind = kScreen; }
 
 // The clone shares the places (immutable, and right for the clone until a structural edit
-// or new identities forget them).
+// or new identities make them again).
 std::shared_ptr<Node> MenuScreen::clone() const { return std::make_shared<MenuScreen>(*this); }
 
-// The callback may rewrite the identities (a duplicated row takes fresh ones), so the
-// places, keyed by identity, are forgotten first.
+// The callback may rewrite the identities (a new or duplicated row takes fresh ones), so the
+// places, keyed by identity, are made again after it.
 void MenuScreen::for_each_identity(const std::function<void(NodeId &)> &fn) {
-	forget_places();
 	for (RecordIds &root : roots) editor::for_each_identity(root, fn);
+	index_places();
 }
 
 const MenuScreen::Places &MenuScreen::places() const {
-	if (places_) return *places_;
+	static const Places none;
+	return places_ ? *places_ : none;
+}
+
+void MenuScreen::index_places() {
 	auto built = std::make_shared<Places>();
 	std::vector<Step> path;
 	std::function<void(const RecordIds &)> visit = [&](const RecordIds &ids) {
@@ -612,7 +616,6 @@ const MenuScreen::Places &MenuScreen::places() const {
 		visit(roots[i]);
 	}
 	places_ = built;
-	return *places_;
 }
 
 bool is_menu_kind(AssetKind kind) { return kind == AssetKind::Menu; }
@@ -682,12 +685,12 @@ const std::vector<FieldSchema> &MnuDocument::fields(NodeKind kind) const {
 	return fields_of(kinds()[size_t(kind)].shape);
 }
 
-FieldSchema MnuDocument::field_on(const NodeAddress &address, const FieldSchema &field) const {
-	FieldSchema out = field;
+void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const {
+	const FieldSchema &field = *out.schema;
 	// A screen's NAME is looked up in its file, a window's on its screen (lookup_names).
 	if (out.defines == ReferenceKind::MenuScreen) out.scope = menu_screen_scope(Document::path());
 	Located at;
-	if (!locate(*this, address, at)) return out;
+	if (!locate(*this, address, at)) return;
 	const std::string path = at.context.prefix.empty() ? field.id : at.context.prefix + "." + field.id;
 	SchemaApplies applies = mnu::schema_applies_both(at.context.applies, mnu::schema_reads(at.context.window->type, path));
 	if (at.record.shape == SchemaShape::Action)
@@ -719,10 +722,9 @@ FieldSchema MnuDocument::field_on(const NodeAddress &address, const FieldSchema 
 	if (at.record.shape == SchemaShape::Part) out.defines = ReferenceKind::None;
 	if (out.defines == ReferenceKind::MenuWindow)
 		out.scope = menu_window_scope(Document::path(), screen_of(*row(address.row)).screen.name);
-	return out;
 }
 
-void MnuDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const {
+void MnuDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	if (lookups_.revision != revision() || !lookups_.made) {
 		lookups_.made = true;
 		lookups_.revision = revision();
@@ -733,12 +735,12 @@ void MnuDocument::refine_symbol(const NodeAddress &address, GraphSymbol &symbol)
 	}
 	const auto unfound = lookups_.unfound.find(address.child ? address.child : address.row);
 	if (unfound == lookups_.unfound.end()) return;
-	symbol.inert = true;
+	facts.inert = true;
 	switch (unfound->second) {
-	case MenuLookupName::Found::LaterScreen: symbol.inert_reason = "a later screen of the file has its NAME, which the lookup finds"; break;
-	case MenuLookupName::Found::EarlierWindow: symbol.inert_reason = "an earlier window of its screen has its NAME, which the lookup finds"; break;
-	case MenuLookupName::Found::UnderNameless: symbol.inert_reason = "a window above it has no NAME, where the lookup's search stops"; break;
-	case MenuLookupName::Found::ShadowedScreen: symbol.inert_reason = "its screen is shadowed by a later screen of the same NAME"; break;
+	case MenuLookupName::Found::LaterScreen: facts.inert_reason = "a later screen of the file has its NAME, which the lookup finds"; break;
+	case MenuLookupName::Found::EarlierWindow: facts.inert_reason = "an earlier window of its screen has its NAME, which the lookup finds"; break;
+	case MenuLookupName::Found::UnderNameless: facts.inert_reason = "a window above it has no NAME, where the lookup's search stops"; break;
+	case MenuLookupName::Found::ShadowedScreen: facts.inert_reason = "its screen is shadowed by a later screen of the same NAME"; break;
 	case MenuLookupName::Found::Yes: break;
 	}
 }
@@ -1118,7 +1120,7 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 		}
 		insert_ids(*ids, position, made, allocate);
 		added = (*ids)[position].id;
-		screen.forget_places();
+		screen.index_places();
 		return true;
 	}
 	Located at;
@@ -1137,14 +1139,14 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 		if (!mnu::schema_list_insert(at.owner, source_list, position, &copy, error)) return false;
 		insert_ids(source_ids, position, mnu::schema_list_at(at.owner, source_list, position), allocate);
 		added = source_ids[position].id;
-		screen.forget_places();
+		screen.index_places();
 		return true;
 	}
 	case EditOperation::Remove:
 		if (at.list == kRoots && screen.screen.roots.size() == 1) { error = "A screen keeps at least one root window."; return false; }
 		mnu::schema_list_erase(at.owner, source_list, at.index);
 		source_ids.erase(source_ids.begin() + static_cast<std::ptrdiff_t>(at.index));
-		screen.forget_places();
+		screen.index_places();
 		return true;
 	case EditOperation::Move: {
 		// The destination is checked before anything moves: a screen keeps a root window, a
@@ -1168,12 +1170,12 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 		RecordIds moved_ids = std::move(source_ids[at.index]);
 		mnu::schema_list_erase(at.owner, source_list, at.index);
 		source_ids.erase(source_ids.begin() + static_cast<std::ptrdiff_t>(at.index));
-		screen.forget_places();
+		screen.index_places();
 		if (!owner_list(edit.parent, edit.address.kind, destination, destination_ids, destination_list)) return false;
 		const size_t position = std::min(edit.position, mnu::schema_list_size(destination, destination_list));
 		if (!mnu::schema_list_insert(destination, destination_list, position, &moved, error)) return false;
 		destination_ids->insert(destination_ids->begin() + static_cast<std::ptrdiff_t>(position), std::move(moved_ids));
-		screen.forget_places();
+		screen.index_places();
 		return true;
 	}
 	default:
@@ -1224,7 +1226,7 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 		added.push_back((*ids)[position].id);
 		++position;
 	}
-	screen.forget_places();
+	screen.index_places();
 	return true;
 }
 

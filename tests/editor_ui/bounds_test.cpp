@@ -237,10 +237,10 @@ struct Sweep {
 		Document::Placement at;
 		if (document->collections_of(owner).empty() && document->placement(owner, at)) owner = at.owner;
 		for (const InspectorSection &section : plan_inspector(*document, view.selection, owner, ""))
-			for (const FieldSchema &field : section.fields) {
-				if (field.reference == ReferenceKind::None || field.type != FieldType::Text) continue;
-				if (field.optional && !document->present(view.selection, field.id)) continue;
-				ui.activate(item_id(Ui::window_id("Inspector"), {section.key.c_str(), "fields", field.id.c_str(), "Pick"}));
+			for (const FieldUse &field : section.fields) {
+				if (field.reference == ReferenceKind::None || field.schema->type != FieldType::Text) continue;
+				if (field.schema->optional && !document->present(view.selection, field.schema->id)) continue;
+				ui.activate(item_id(Ui::window_id("Inspector"), {section.key.c_str(), "fields", field.schema->id.c_str(), "Pick"}));
 				ui.frames(2);
 				return GImGui->OpenPopupStack.Size > 0;
 			}

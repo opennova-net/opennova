@@ -39,14 +39,14 @@ bool same_edge(const GraphEdge &a, const GraphEdge &b) {
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.target == b.target && a.scope == b.scope &&
 			a.rewritable == b.rewritable && a.through == b.through &&
-			a.material_type == b.material_type;
+			a.loader_arg == b.loader_arg;
 }
 
 bool same_symbol(const GraphSymbol &a, const GraphSymbol &b) {
 	return a.kind == b.kind && a.name == b.name && a.display == b.display && a.value == b.value &&
 			a.file == b.file && a.record == b.record && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.scope == b.scope &&
-			a.inert == b.inert && a.inert_reason == b.inert_reason;
+			a.inert == b.inert && a.inert_reason == b.inert_reason && a.line == b.line;
 }
 
 // What one file references and defines, read again, is what it was.
@@ -68,25 +68,25 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 	return menu_screen_scope(menu_file) + "/" + upper(screen);
 }
 
-std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int material_type,
+std::vector<std::string> reference_file_candidates(ReferenceKind kind, const std::string &name, int32_t loader_arg,
                                                    const std::function<bool(const std::string &)> &exists) {
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution != ReferenceResolution::File || name.empty()) return {};
-	if (row.file_names) return row.file_names(name, material_type, exists);
+	if (row.file_names) return row.file_names(name, loader_arg, exists);
 	std::vector<std::string> names{name};
 	if (row.extensions)
 		for (const char *const *extension = row.extensions; *extension; ++extension) names.push_back(name + *extension);
 	return names;
 }
 
-bool file_serves_reference(AssetKind file, ReferenceKind kind, int material_type) {
+bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_arg) {
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution != ReferenceResolution::File) return false;
 	if (file == row.file) return true;
-	if (file != AssetKind::Unknown || kind != ReferenceKind::Texture || material_type < 0) return false;
+	if (file != AssetKind::Unknown || kind != ReferenceKind::Texture || loader_arg < 0) return false;
 	// A chunk row reads its name as a chunk container whatever the name (a chunk reader for
 	// any name, renderer::material_texture_source).
-	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(material_type));
+	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(loader_arg));
 	return renderer::material_texture_source(std::string(), type, {}).reader == renderer::MaterialTextureReader::Chunk;
 }
 
@@ -291,11 +291,11 @@ std::string AssetGraph::resolve_style(const std::string &value) const {
 }
 
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
-	return resolve(edge.kind, edge.value, edge.scope, file_out, edge.material_type);
+	return resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
 }
 
 ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name, const std::string &scope,
-                                    std::string *file_out, int material_type) const {
+                                    std::string *file_out, int32_t loader_arg) const {
 	if (file_out) file_out->clear();
 	if (kind == ReferenceKind::None) return ReferenceStatus::NotAReference;
 	if (name.empty()) return ReferenceStatus::NotAReference;
@@ -333,13 +333,13 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 	const std::string resolved = resolve_style(name);
 	if (is_style_reference(resolved)) return ReferenceStatus::Missing;
 	// The first name the kind's loader reads that the project has as a file it can load.
-	const auto loadable = [this, kind, material_type](const std::string &file) -> const FileRow * {
+	const auto loadable = [this, kind, loader_arg](const std::string &file) -> const FileRow * {
 		const auto found = files_.find(key(file));
-		if (found == files_.end() || !file_serves_reference(found->second.kind, kind, material_type)) return nullptr;
+		if (found == files_.end() || !file_serves_reference(found->second.kind, kind, loader_arg)) return nullptr;
 		return &found->second;
 	};
 	const auto exists = [&loadable](const std::string &file) { return loadable(file) != nullptr; };
-	for (const std::string &candidate : reference_file_candidates(kind, resolved, material_type, exists)) {
+	for (const std::string &candidate : reference_file_candidates(kind, resolved, loader_arg, exists)) {
 		const FileRow *found = loadable(candidate);
 		if (!found) continue;
 		if (file_out) *file_out = found->path;
@@ -360,17 +360,17 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 	return nullptr;
 }
 
-std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::string &scope, int material_type) const {
+std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::string &scope, int32_t loader_arg) const {
 	std::vector<ReferenceChoice> out;
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution == ReferenceResolution::File) {
 		for (const auto &entry : files_) {
-			if (!file_serves_reference(entry.second.kind, kind, material_type)) continue;
+			if (!file_serves_reference(entry.second.kind, kind, loader_arg)) continue;
 			ReferenceChoice choice;
 			choice.name = entry.second.logical_name;
 			choice.kind = kind;
 			choice.file = entry.second.path;
-			choice.status = resolve(kind, choice.name, scope, nullptr, material_type);
+			choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
 			out.push_back(std::move(choice));
 		}
 		return out;
@@ -386,7 +386,7 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 		choice.kind = kind;
 		choice.file = symbol.file;
 		choice.record = symbol.record;
-		choice.status = resolve(kind, choice.name, scope, nullptr, material_type);
+		choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
 		choice.inert = symbol.inert;
 		choice.reason = symbol.inert_reason;
 		out.push_back(std::move(choice));
@@ -566,7 +566,7 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	d.reference = edge.kind;
 	d.target = row.resolution == ReferenceResolution::File ? resolve_style(edge.value) : edge.value;
 	d.scope = edge.scope;
-	d.material_type = edge.material_type;
+	d.loader_arg = edge.loader_arg;
 	return d;
 }
 

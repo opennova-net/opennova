@@ -30,6 +30,7 @@
 // and the places it looks, and writes nothing.
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -83,15 +84,15 @@ private:
 
 // A reference that wants a file: the file naming it (its logical name), the record in it and
 // the field, what kind of file it names and the name as the loader is handed it (a style
-// variable's value where one stands; its case matters to a model texture's rule), and a model
-// texture row's type.
+// variable's value where one stands; its case matters to a model texture's rule), and what the
+// reference's loader picks the file by (GraphEdge::loader_arg: a model texture row's type).
 struct ImportNeed {
 	std::string file;
 	std::string record;
 	std::string field;
 	ReferenceKind reference = ReferenceKind::None;
 	std::string name;
-	int material_type = -1;
+	int32_t loader_arg = -1;
 };
 
 // Another place with a file for a reference the planned file serves, which the plan's order

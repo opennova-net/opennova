@@ -45,16 +45,19 @@ public:
 	std::vector<KindSpec> top_kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
-	// A string's key defines its string id in "TABLE.BIN/Section" (the table's file name, the
-	// section as written).
-	FieldSchema field_on(const NodeAddress &address, const FieldSchema &field) const override;
 	// The ids of a section a first section of the same name shadows are inert.
-	void refine_symbol(const NodeAddress &address, GraphSymbol &symbol) const override;
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
+	std::unique_ptr<Document> snapshot() const override {
+		return std::make_unique<StringsDocument>(*this);
+	}
 	// The table as the engine reads it, rebuilt from the rows.
 	rtxt::File table() const;
 
 protected:
+	// A string's key defines its string id in "TABLE.BIN/Section" (the table's file name, the
+	// section as written).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
