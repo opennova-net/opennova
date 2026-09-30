@@ -873,7 +873,8 @@ constexpr VerbRow kRows[] = {
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install, 1000 files at most; an .o3d's textures come only with\n"
 	     "--with-dependencies; --dry-run prints the plan and writes nothing (no import pass\n"
-	     "either) (--json: the import_preview query, the plan)")
+	     "either; --install still sets the install) (--json: the import_preview query, the\n"
+	     "plan)")
 	        .takes(kImportOptions)
 	        .checked_by(check_import)
 	        .answers(Q::ImportPreview)
