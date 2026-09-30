@@ -166,7 +166,7 @@ static int test_blank_startup() {
 	TEST_EXPECT(render_findings(view, "menu.render.text_truncated").size() == 1 &&
 	            render_findings(view, "menu.render.color_transparent").size() == 1);
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	for (const Diagnostic &d : view.last_build.diagnostics)
 		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code.c_str(), d.message.c_str());
 	TEST_EXPECT(view.has_build && view.last_build.ok);

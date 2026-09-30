@@ -152,8 +152,7 @@ std::string make_project_id() {
 	return buf;
 }
 
-bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
-                    ProjectDocument &out, Diagnostic &error) {
+bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error) {
 	const std::string code = strutil::to_lower(target_game);
 	if (gameprofile::gameprofile_by_code(code.c_str()) == nullptr)
 		return fail(error, "project.target_game.unknown", "Unknown target game \"" + target_game + "\".");
@@ -161,6 +160,14 @@ bool create_project(const std::string &root, const std::string &title, const std
 	std::error_code ec;
 	if (fs::exists(paths.project_file, ec))
 		return fail(error, "project.exists", "There is already a project at " + paths.root + ".");
+	return true;
+}
+
+bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
+                    ProjectDocument &out, Diagnostic &error) {
+	if (!can_create_project(root, target_game, error)) return false;
+	const std::string code = strutil::to_lower(target_game);
+	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::string io_error;
 	if (!ensure_directory(paths.root, io_error) || !ensure_project_cache_dir(paths, io_error))
 		return fail(error, "project.write", io_error);

@@ -360,7 +360,7 @@ static int test_validation() {
 	TEST_EXPECT(evaluated.success && !evaluated.hangs && evaluated.sheet.get("B") == "3");
 	TEST_EXPECT(opennova::mns::Document::parse(written).evaluate().sheet.variables == evaluated.sheet.variables);
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	for (const Diagnostic &d : view.last_build.diagnostics)
 		if (d.severity == DiagnosticSeverity::Error)
 			std::fprintf(stderr, "build: %s %s %s\n", d.code.c_str(), d.asset.c_str(), d.message.c_str());

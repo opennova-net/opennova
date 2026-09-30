@@ -4,7 +4,8 @@ extends GutTest
 ## editor-enabled GDExtension variant is what a source run loads, the typed seam
 ## creates a project, fills its checklist, builds it, and Play starts the game on the
 ## build (the Godot binary at this checkout, headless and self-quitting) through the
-## real process seam, whose exit the session notices.
+## real process seam, whose exit the session notices. Build and Play are requests, as the
+## windows raise them, and the session's operation (S13 A1) runs across pumps.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 
@@ -39,12 +40,46 @@ func after_each() -> void:
 	_dirs.clear()
 
 
+# A request through the wire seam, as the editor MCP raises it: its answer.
+func _request(request: Dictionary) -> Dictionary:
+	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify(request)))
+	return answer if answer is Dictionary else {}
+
+
+# `request` raised, then the session pumped until the operation it started or joined ends (a
+# build steps across pumps, S13 A1): false when the request was refused or waits on the
+# unsaved-changes prompt, nothing run.
+func _run_operation(request: Dictionary) -> bool:
+	var outcome: Dictionary = _request(request).get("outcome", {})
+	if not bool(outcome.get("done", false)):
+		return false
+	var id := int(outcome.get("operation", 0))
+	var deadline := Time.get_ticks_msec() + 120000
+	while Time.get_ticks_msec() < deadline:
+		var state: Variant = JSON.parse_string(_app.get_operation_json())
+		if not (state is Dictionary) or int((state as Dictionary).get("operation", {}).get("id", 0)) != id:
+			break
+		_app.pump()
+	return true
+
+
+# Build: true when the build it ran (or joined) landed good.
+func _build() -> bool:
+	return _run_operation({"kind": "build"}) and _app.is_last_build_ok()
+
+
+# Play: the build first, then the game on it; true when the game started.
+func _play() -> bool:
+	_run_operation({"kind": "play"})
+	return _app.get_play_state() == "running"
+
+
 # Play starts the game only on Windows (godot/src/authoring/child_process.h): elsewhere
 # it refuses and says so, and a Play leg has no running game to drive.
 func _play_refused_off_windows() -> bool:
 	if OS.get_name() == "Windows":
 		return false
-	assert_false(_app.play(), "Play refuses off Windows")
+	assert_false(_play(), "Play refuses off Windows")
 	pending("Play is Windows-only (godot/src/authoring/child_process.h)")
 	return true
 
@@ -73,9 +108,9 @@ func test_new_project_fills_builds_and_plays() -> void:
 	assert_eq(_app.get_required_missing(), _app.get_required_total(), "a new project has every required file missing")
 	assert_eq(_app.get_recent_projects(), PackedStringArray([root]))
 
-	assert_false(_app.build(), "a build is refused while required files are missing")
+	assert_false(_build(), "a build is refused while required files are missing")
 	assert_eq(_app.create_missing_files(), 0, "Create all missing leaves nothing missing")
-	assert_true(_app.build())
+	assert_true(_build())
 	var build_dir: String = _app.get_last_build_dir()
 	assert_true(FileAccess.file_exists(build_dir.path_join("localres.pff")), build_dir)
 	# A new project's only problems are notes: the optional files it lacks and the starter
@@ -97,7 +132,7 @@ func test_new_project_fills_builds_and_plays() -> void:
 	if _play_refused_off_windows():
 		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--quit-after", "10"]))
-	assert_true(_app.play(), "\n".join(_app.get_output_lines()))
+	assert_true(_play(), "\n".join(_app.get_output_lines()))
 	assert_eq(_app.get_play_state(), "running")
 	var waited_ms := 0
 	while _app.get_play_state() != "stopped" and waited_ms < 60000:
@@ -114,6 +149,31 @@ func test_new_project_fills_builds_and_plays() -> void:
 	assert_false(_app.is_project_open())
 	assert_true(_app.open_project(root))
 	assert_eq(_app.get_required_missing(), 0)
+
+
+## A switch that fails leaves the open project open, and new_project and open_project answer
+## whether the project asked for is the one open afterwards (S13 A1: a new project's folder is
+## checked, and another project read, before the open one closes).
+func test_failed_switch_keeps_the_project() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor switch %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	var root := dir.path_join("Kept")
+	assert_true(_app.new_project(root, "Kept"))
+	assert_false(_app.new_project(root, "Again"), "a project is there already")
+	assert_true(_app.is_project_open())
+	assert_eq(_app.get_project_root(), root)
+	assert_eq(_app.get_project_title(), "Kept")
+	var empty := dir.path_join("Empty")
+	assert_eq(DirAccess.make_dir_recursive_absolute(empty), OK)
+	assert_false(_app.open_project(empty), "no project there")
+	assert_eq(_app.get_project_root(), root)
+	var other := dir.path_join("Other")
+	assert_true(_app.new_project(other, "Other"))
+	assert_eq(_app.get_project_root(), other)
+	assert_true(_app.open_project(root))
+	assert_eq(_app.get_project_title(), "Kept")
 
 
 ## A second document type through the same seam: a string table gains a section and a
@@ -399,11 +459,11 @@ func test_john_smith_menu_reaches_the_play_child() -> void:
 	assert_eq(items.size(), 1)
 	if items.size() == 1:
 		assert_eq(_app.get_field(items[0], "text"), "One")
-	assert_true(_app.build(), "\n".join(_app.get_output_lines()))
+	assert_true(_build(), "\n".join(_app.get_output_lines()))
 	if _play_refused_off_windows():
 		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
-	assert_true(_app.play(), "\n".join(_app.get_output_lines()))
+	assert_true(_play(), "\n".join(_app.get_output_lines()))
 	var client: RefCounted = null
 	var deadline := Time.get_ticks_msec() + 30000
 	while Time.get_ticks_msec() < deadline:
@@ -482,17 +542,17 @@ func test_catalog_edits_reach_the_play_child() -> void:
 	var item_id: int = _app.get_field(row, "id")
 	assert_true(_app.set_field(row, "display_name", "Catalog marker"))
 	assert_true(_app.is_document_dirty())
-	assert_false(_app.build(), "unsaved catalog edits make Build wait on the unsaved prompt")
+	assert_false(_build(), "unsaved catalog edits make Build wait on the unsaved prompt")
 	assert_true(_app.has_unsaved_prompt())
 	_app.resolve_unsaved(0) # Save: the edited catalogs, then the build
 	assert_false(_app.has_unsaved_prompt())
 	assert_false(_app.is_document_dirty())
-	assert_true(_app.build(), "\n".join(_app.get_output_lines()))
+	assert_true(_build(), "\n".join(_app.get_output_lines()))
 	var built_root: String = _app.get_last_build_dir()
 	if _play_refused_off_windows():
 		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
-	assert_true(_app.play(), "\n".join(_app.get_output_lines()))
+	assert_true(_play(), "\n".join(_app.get_output_lines()))
 	var client: RefCounted = null
 	var deadline := Time.get_ticks_msec() + 30000
 	while Time.get_ticks_msec() < deadline:

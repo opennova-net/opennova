@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include <editor/ui/editor_host.h>
 #include <runtime/devtools/imgui_pass.h>
@@ -24,7 +25,7 @@ public:
 
 private:
 	EditorHost &host_;
-	size_t lines_seen_ = 0;
+	uint64_t lines_seen_ = 0; // the absolute index after the newest line drawn (OutputLog)
 };
 
 } // namespace opennova::editor

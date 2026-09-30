@@ -16,7 +16,7 @@ so a `play start` here hands its `mcp_port` straight to `game_mcp.py --port`.
         {"path": "C:/art/arial.fnt", "native": true}]'   # the rows kept (state's import rows' sources)
     python scripts/mcp/editor_mcp.py call editor_document '{"op": "open", "path": "main.mnu"}'
     python scripts/mcp/editor_mcp.py problems --severity error --group kind --fixable
-    python scripts/mcp/editor_mcp.py build
+    python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py references main.mnu  # what it names, who names it
     python scripts/mcp/editor_mcp.py rename logo.tga logo2.tga
     python scripts/mcp/editor_mcp.py menu-preview              # the previewed screen's widgets
@@ -228,15 +228,60 @@ def cmd_request(args: argparse.Namespace) -> int:
     # `ok` only says the request parsed; the outcome says whether it happened.
     outcome = payload.get("structuredContent", {}).get("outcome", {})
     if outcome and not outcome.get("done", False):
-        if outcome.get("unsaved_prompt"):
-            print("not done: it waits on unsaved changes (`state` names the files); answer with "
-                  "`request resolve_unsaved --unsaved-choice save|discard|cancel` (build and play take "
-                  "save or cancel)", file=sys.stderr)
-        for finding in outcome.get("findings", []):
-            print(f"not done: {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}",
-                  file=sys.stderr)
+        print_not_done(outcome)
         return EXIT_TOOL_ERROR
     return EXIT_OK
+
+
+def print_not_done(outcome: dict) -> None:
+    """Why a request's outcome is not done: the unsaved-changes prompt it waits on, or its findings."""
+    if outcome.get("unsaved_prompt"):
+        print("not done: it waits on unsaved changes (`state` names the files); answer with "
+              "`request resolve_unsaved --unsaved-choice save|discard|cancel` (build and play take "
+              "save or cancel)", file=sys.stderr)
+    for finding in outcome.get("findings", []):
+        print(f"not done: {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}",
+              file=sys.stderr)
+
+
+# A light editor_state: no output lines, no import rows, no file list.
+LIGHT_STATE = {"output_limit": 0, "import_limit": 0, "files_limit": 0}
+
+
+def progress_line(operation: dict) -> str:
+    """The running operation as the editor's menu bar says it, with what it works on."""
+    done, total = operation.get("done", 0), operation.get("total", 0)
+    amount = (f"{done * 100 // total}%" if operation.get("unit") == "bytes" else f"{done}/{total}") if total else ""
+    return " ".join(part for part in (operation.get("kind", ""), amount, operation.get("label", "")) if part)
+
+
+def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, dict]:
+    """Raise `kind` (build, play) and wait on the operation its outcome names, polling editor_state
+    while the editor steps it frame by frame (its progress on stderr): the outcome, and what the
+    operation came to (last_operation; {} when it was not the one to end, or none ran)."""
+    payload = client.call("editor_request", {"kind": kind}, timeout=60)
+    if payload.get("isError"):
+        raise GameMcpError(EXIT_TOOL_ERROR, f"editor_request {kind} failed: {text_of(payload)}")
+    outcome = payload.get("structuredContent", {}).get("outcome", {})
+    if not outcome.get("done", False):
+        return outcome, {}
+    operation = outcome.get("operation", 0)
+    deadline = time.monotonic() + timeout
+    shown = ""
+    while True:
+        state = client.structured("editor_state", LIGHT_STATE)
+        running = state.get("operation") or {}
+        if not operation or not running.get("running") or running.get("id") != operation:
+            last = state.get("last_operation") or {}
+            return outcome, last if last.get("id") == operation else {}
+        line = progress_line(running)
+        if line != shown:
+            print(line, file=sys.stderr)
+            shown = line
+        if time.monotonic() >= deadline:
+            raise GameMcpError(EXIT_TOOL_ERROR, f"the {kind}'s operation {operation} did not end within {timeout:.0f} s "
+                                                f"(`request cancel_operation` stops it)")
+        time.sleep(0.2)
 
 
 def cmd_problems(args: argparse.Namespace) -> int:
@@ -512,17 +557,45 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
-    payload = client_of(args).call("editor_build", {}, timeout=args.timeout)
-    emit_payload(payload, args)
-    return EXIT_TOOL_ERROR if payload.get("isError") else EXIT_OK
+    client = client_of(args)
+    outcome, ended = raise_and_wait(client, "build", args.timeout)
+    if not outcome.get("done", False):
+        print_not_done(outcome)
+        return EXIT_TOOL_ERROR
+    build = client.structured("editor_state", LIGHT_STATE).get("build", {})
+    build["operation"] = ended
+    ok = ended.get("end") == "done" and bool(build.get("ok"))
+    if args.json:
+        print(json.dumps(build, indent=2))
+    elif ok:
+        print(f"built {build.get('dir', '')}" + (" (unchanged)" if build.get("reused_existing") else ""))
+    else:
+        print(f"build {ended.get('end', 'cancelled')}")
+        for finding in ended.get("findings", []) or build.get("diagnostics", []):
+            print(f"  {finding.get('severity', '')} {finding.get('code', '')}: {finding.get('message', '')}")
+    return EXIT_OK if ok else EXIT_TOOL_ERROR
 
 
 def cmd_play(args: argparse.Namespace) -> int:
-    payload = client_of(args).call("editor_play", {"op": args.op}, timeout=args.timeout)
-    if payload.get("isError"):
-        print(text_of(payload))
-        return EXIT_TOOL_ERROR
-    block = payload.get("structuredContent", {})
+    client = client_of(args)
+    if args.op == "start":
+        # Play builds first: its build's operation is waited on as `build` waits, then the play
+        # block read (the game started on the poll the build landed).
+        outcome, ended = raise_and_wait(client, "play", args.timeout)
+        if not outcome.get("done", False):
+            print_not_done(outcome)
+            return EXIT_TOOL_ERROR
+        block = client.structured("editor_state", LIGHT_STATE).get("play", {})
+        if block.get("state") != "running":
+            print(f"play did not start: the build {ended.get('end', 'cancelled')}, or the launch refused "
+                  f"(`problems`, `state`'s output)")
+            return EXIT_TOOL_ERROR
+    else:
+        payload = client.call("editor_play", {"op": args.op}, timeout=args.timeout)
+        if payload.get("isError"):
+            print(text_of(payload))
+            return EXIT_TOOL_ERROR
+        block = payload.get("structuredContent", {})
     if args.json:
         print(json.dumps(block, indent=2))
     else:
@@ -773,13 +846,13 @@ def build_parser() -> argparse.ArgumentParser:
     menu.add_argument("--timeout", type=float, default=300.0)
     menu.set_defaults(func=cmd_menu)
 
-    build = commands.add_parser("build", help="editor_build: pack the project and wait")
+    build = commands.add_parser("build", help="build the project and wait on its operation (progress on stderr)")
     add_endpoint_options(build)
-    build.add_argument("--json", action="store_true", help="print the raw result payload")
+    build.add_argument("--json", action="store_true", help="print the build block, with the operation, as JSON")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
 
-    play = commands.add_parser("play", help="editor_play: start, stop or read the running game")
+    play = commands.add_parser("play", help="start (build, waiting on its operation, then run), stop or read the game")
     add_endpoint_options(play)
     play.add_argument("op", choices=("start", "stop", "state"))
     play.add_argument("--json", action="store_true", help="print the play block as JSON")

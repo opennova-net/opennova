@@ -6,6 +6,7 @@
 #ifdef _WIN32
 #include <windows.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #endif
@@ -67,6 +68,31 @@ std::wstring native_path(std::string path) {
 
 bool has_exited(HANDLE handle) {
 	return WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
+}
+
+std::string from_wide(const std::wstring &wide) {
+	if (wide.empty()) {
+		return std::string();
+	}
+	const int needed = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0,
+			nullptr, nullptr);
+	if (needed <= 0) {
+		return std::string();
+	}
+	std::string out(static_cast<size_t>(needed), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), out.data(), needed, nullptr,
+			nullptr);
+	return out;
+}
+
+// The process's creation time as the OS keeps it (a FILETIME's 100 ns count), in decimal: equal
+// for one process, different for another that later takes its pid. "" when it cannot be read.
+std::string creation_stamp(HANDLE handle) {
+	FILETIME created{}, exited{}, kernel{}, user{};
+	if (GetProcessTimes(handle, &created, &exited, &kernel, &user) == 0) {
+		return std::string();
+	}
+	return std::to_string((static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime);
 }
 
 // The child's top-level windows get WM_CLOSE: the game's orderly quit path.
@@ -219,6 +245,61 @@ void ChildProcessPlatform::release(int64_t pid) {
 	children_.erase(it);
 #else
 	(void)pid;
+#endif
+}
+
+bool ChildProcessPlatform::process_identity(int64_t pid, opennova::editor::ProcessIdentity &out) {
+#ifdef _WIN32
+	std::lock_guard<std::mutex> lock(mutex_);
+	const auto it = children_.find(pid);
+	if (it == children_.end()) {
+		return false;
+	}
+	HANDLE handle = static_cast<HANDLE>(it->second);
+	std::wstring image(MAX_PATH * 4, L'\0');
+	DWORD length = static_cast<DWORD>(image.size());
+	if (QueryFullProcessImageNameW(handle, 0, image.data(), &length) != 0) {
+		image.resize(length);
+		std::string path = from_wide(image);
+		std::replace(path.begin(), path.end(), '\\', '/');
+		out.image = path;
+	}
+	out.created = creation_stamp(handle);
+	return !out.created.empty();
+#else
+	(void)pid;
+	(void)out;
+	return false;
+#endif
+}
+
+opennova::editor::ProcessLiveness ChildProcessPlatform::process_liveness(int64_t pid, const std::string &created) {
+	using opennova::editor::ProcessLiveness;
+#ifdef _WIN32
+	if (pid <= 0) {
+		return ProcessLiveness::Unknown;
+	}
+	HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+	if (handle == nullptr) {
+		// No process of that id is Dead; one that will not be opened may be the game: Unknown.
+		return GetLastError() == ERROR_INVALID_PARAMETER ? ProcessLiveness::Dead : ProcessLiveness::Unknown;
+	}
+	ProcessLiveness state = ProcessLiveness::Unknown;
+	DWORD code = 0;
+	if (GetExitCodeProcess(handle, &code) != 0 && code != STILL_ACTIVE) {
+		state = ProcessLiveness::Dead; // it has exited (a handle someone holds keeps it listed)
+	} else if (!created.empty()) {
+		const std::string now = creation_stamp(handle);
+		if (!now.empty()) {
+			state = now == created ? ProcessLiveness::Alive : ProcessLiveness::Dead;
+		}
+	}
+	CloseHandle(handle);
+	return state;
+#else
+	(void)pid;
+	(void)created;
+	return ProcessLiveness::Unknown;
 #endif
 }
 

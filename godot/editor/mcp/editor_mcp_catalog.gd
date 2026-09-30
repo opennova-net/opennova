@@ -94,6 +94,11 @@ static func definitions() -> Array[McpToolDef]:
 			+ "the requirements checklist with every row, the open documents, the "
 			+ "selection (the primary and every selected record) and the clipboard's size, the "
 			+ "file show_in_files last asked Files to show (reveal_file: path, serial, rename), the "
+			+ "operation that runs (operation: running, and while one does its id, kind (build), label "
+			+ "(what it works on), done and total in its unit (bytes), cancellable, and reads and "
+			+ "writes (of files, documents, project, slot: a request that writes what it reads or "
+			+ "writes, or reads what it writes, waits for it)) and what the last one came "
+			+ "to (last_operation: id, kind, end (done, failed, cancelled), findings), the last "
 			+ "build, Play (state, pid, the running game's mcp_port (0 when no game with an "
 			+ "endpoint runs), exit_code (the code the last game exited with on its own, null "
 			+ "when none; nonzero is a play.crashed problem), the runtime the settings name as "
@@ -108,7 +113,9 @@ static func definitions() -> Array[McpToolDef]:
 			+ "not_found_count), then not_followed, truncated, its diagnostics, changed when an import "
 			+ "found the files changed; import_dependencies, the editor's setting; the project's "
 			+ "imported sources), the problem counts, the recent projects and a page of the output "
-			+ "lines (output_cursor / output_limit; next_cursor continues).",
+			+ "lines by absolute index (output_cursor / output_limit: first is the oldest line held, "
+			+ "next one past the newest, and next_cursor continues without a line skipped or "
+			+ "repeated while the log drops its oldest past 2000).",
 			{
 				"output_cursor": {"type": "integer", "minimum": 0, "default": 0},
 				"output_limit": {"type": "integer", "minimum": 0, "maximum": PAGE_MAX, "default": PAGE_MAX},
@@ -144,7 +151,9 @@ static func definitions() -> Array[McpToolDef]:
 			+ "import.texture_not_imported), cancel_import, "
 			+ "create_missing {names=[the requirement roles whose files to make "
 			+ "from scratch; none makes nothing; a file there already is refused, never overwritten]}, "
-			+ "build, play, stop_play, create_file {path, text=kind token} (made from the name's "
+			+ "build, play, stop_play, cancel_operation (the running operation, a build, stopped between "
+			+ "two steps, its staging removed and a Play waiting on it dropped), create_file {path, "
+			+ "text=kind token} (made from the name's "
 			+ "requirement factory, else its kind's; a kind the editor does not edit, a font, is made "
 			+ "and not opened; a texture is the checkerboard the game draws for a missing texture, in "
 			+ "the format its name asks for: .tga or .mdt TGA, .pcx PCX, .dds DDS, another name "
@@ -178,8 +187,16 @@ static func definitions() -> Array[McpToolDef]:
 			+ "their sources carry retail: true), reveal_path {path}, clear_output (empties "
 			+ "the output lines, as Output's Clear does), quit. A "
 			+ "problem's fixes (editor_problems) are requests of these kinds. The pickers "
-			+ "are refused: pass paths directly. build and play return at once; editor_state "
-			+ "shows the build stepping (editor_build waits instead). Closing or reloading a "
+			+ "are refused: pass paths directly. build and play return at once, their outcome naming "
+			+ "the build's operation; editor_state's operation shows it stepping (editor_build and "
+			+ "editor_play wait instead), and a build or a play while one packs joins it. While an "
+			+ "operation runs, a request that conflicts with what it reads or writes is refused with an "
+			+ "operation.busy warning (a save, an import, a rename, a create while a build packs; an "
+			+ "edit, an open or an import's preview goes on), and new_project, open_project, "
+			+ "close_project and quit cancel it as they commit, once their own checks pass (a switch "
+			+ "that fails keeps it; refused when it cannot be cancelled) and the unsaved-changes "
+			+ "prompt, when one holds them, is answered: a build or play with unsaved edits asks about "
+			+ "them rather than join. Closing or reloading a "
 			+ "file with unsaved edits, a project switch, quit, build and play, an import that "
 			+ "replaces a file with unsaved edits and a rename or assign that rewrites one (or "
 			+ "renames it) wait on the unsaved-changes prompt: editor_state's unsaved_prompt names "
@@ -191,7 +208,8 @@ static func definitions() -> Array[McpToolDef]:
 			+ "(the answer waits again), and an answer with no prompt open is refused. ok says the "
 			+ "request parsed; outcome says what it came to: done "
 			+ "(false when it was refused, did not finish, or waits on the prompt), "
-			+ "unsaved_prompt and the findings it reported.",
+			+ "unsaved_prompt, operation (the one it started or joined, 0 for none) and the findings it "
+			+ "reported.",
 			{
 				"kind": {"type": "string"},
 				"path": {"type": "string"},
@@ -316,17 +334,21 @@ static func definitions() -> Array[McpToolDef]:
 				"limit": {"type": "integer", "minimum": 1, "maximum": PAGE_MAX, "default": PAGE_DEFAULT},
 			}, [], false),
 		McpToolDef.make("editor_build",
-			"Pack the project to an immutable build directory and wait for it: refused while "
-			+ "required files are missing; with unsaved documents it waits on the unsaved-changes "
-			+ "prompt (editor_request resolve_unsaved save writes them and builds). Returns the "
-			+ "build block (ok, dir, archives, diagnostics).",
+			"Pack the project to an immutable build directory and wait for it: the build runs as "
+			+ "the editor's operation, stepped frame by frame (editor_state answers the while), a "
+			+ "build running already joined; refused while required files are missing; with unsaved "
+			+ "documents it waits on the unsaved-changes prompt (editor_request resolve_unsaved save "
+			+ "writes them and builds). Returns the build block (ok, dir, archives, diagnostics) with "
+			+ "the operation it waited on (id, end, findings).",
 			{}, [], true, BUILD_TIMEOUT_MS),
 		McpToolDef.make("editor_play",
 			"op=start: build, then run the game on the build (the runtime beside the editor, "
-			+ "or this Godot binary in a source run) with its own MCP endpoint; the reply "
-			+ "carries mcp_port, which game_state / game_menu / game_probe on that port drive "
-			+ "(with unsaved documents it waits on the unsaved-changes prompt, as editor_build does). "
-			+ "op=stop ends the game and waits; op=state reads the play block.",
+			+ "or this Godot binary in a source run) with its own MCP endpoint, waiting for the "
+			+ "build's operation as editor_build does (a build running already is joined, the game "
+			+ "starting when it lands); the reply carries mcp_port, which game_state / game_menu / "
+			+ "game_probe on that port drive (with unsaved documents it waits on the unsaved-changes "
+			+ "prompt, as editor_build does). op=stop ends the game and waits; op=state reads the play "
+			+ "block.",
 			{
 				"op": {"type": "string", "enum": PLAY_OPS},
 			}, ["op"], true, BUILD_TIMEOUT_MS),

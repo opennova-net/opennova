@@ -3,6 +3,8 @@
 #include <editor/assets/asset_import.h>
 #include <editor/model/document.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/output_log.h>
+#include <editor/session/session_operation.h>
 #include <editor/session/session_revisions.h>
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +19,7 @@
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
-#include <editor/project_build/build_session.h>
+#include <editor/project_build/build_run.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/play_session.h>
 
@@ -120,10 +122,16 @@ struct SessionView {
 	// The project's current findings (scan + requirements) followed by the last action's.
 	std::vector<Diagnostic> diagnostics;
 
-	bool build_running = false;
-	size_t build_done = 0;
-	size_t build_total = 0;
-	std::string build_step;
+	// The operation that runs (a build: its progress, what it works on, whether it can be
+	// cancelled, what it reads and writes; id 0 when none), and what the last one came to (id 0
+	// before the first ends).
+	OperationStatus operation;
+	OperationOutcome last_operation;
+	// Whether the session's busy gate takes a request of `kind` now: not busy_refuses over the
+	// running operation (request_kinds.h). Every window enables a menu item or a button that
+	// raises a request of `kind` by it, so a control is enabled exactly when the session would
+	// take its request.
+	bool allows(EditorRequestKind kind) const;
 	bool has_build = false;
 	BuildReport last_build;
 
@@ -207,7 +215,7 @@ struct SessionView {
 	// their normalized form; empty when no install is set or it mounts nothing.
 	std::vector<std::string> retail_files;
 
-	std::vector<std::string> output; // the build log and the running game's log, oldest first
+	OutputLog output; // what the editor said and the running game's log, oldest first
 	std::vector<std::string> recent_projects;
 	std::string status; // the last thing that happened, one line
 };

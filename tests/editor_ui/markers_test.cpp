@@ -568,7 +568,8 @@ void test_output_window() {
 	ui.focus("Output");
 	ui.away();
 	CHECK(logged_frame(ui).find("Nothing yet.") != std::string::npos, "empty: nothing yet");
-	v.output = {"Opened Output.", "error: A broken thing.", "warning: A doubtful thing.", "game: a line"};
+	for (const char *line : {"Opened Output.", "error: A broken thing.", "warning: A doubtful thing.", "game: a line"})
+		v.output.append(line);
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(logged_frame(ui).find("Nothing yet.") == std::string::npos, "lines: no empty state");
@@ -607,7 +608,7 @@ void test_output_follows() {
 	v.project_open = true;
 	v.project_root = "C:/mods/Output";
 	v.document.title = "Output";
-	for (int i = 0; i < 200; ++i) v.output.push_back("line " + std::to_string(i));
+	for (int i = 0; i < 200; ++i) v.output.append("line " + std::to_string(i));
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);
 	ui.windows.set_view(&v);
@@ -618,7 +619,7 @@ void test_output_follows() {
 	CHECK(lines && lines->ScrollMax.y > 0.0f && lines->Scroll.y == lines->ScrollMax.y, "opened at the newest line");
 	if (!lines) return;
 	const float before = lines->ScrollMax.y;
-	for (int i = 0; i < 20; ++i) v.output.push_back("more " + std::to_string(i));
+	for (int i = 0; i < 20; ++i) v.output.append("more " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->ScrollMax.y > before && lines->Scroll.y == lines->ScrollMax.y, "new lines followed");
@@ -626,10 +627,22 @@ void test_output_follows() {
 	ImGui::SetScrollY(lines, 0.0f);
 	ui.frames(2);
 	CHECK(lines->Scroll.y == 0.0f, "scrolled up");
-	for (int i = 0; i < 20; ++i) v.output.push_back("later " + std::to_string(i));
+	for (int i = 0; i < 20; ++i) v.output.append("later " + std::to_string(i));
 	v.revisions.touch(ViewConcern::Output);
 	ui.frames(3);
 	CHECK(lines->Scroll.y == 0.0f && lines->ScrollMax.y > before, "scrolled up: kept where it was");
+	// At the log's cap the count of lines stands while they move on: the newest is followed still.
+	ImGui::SetScrollY(lines, lines->ScrollMax.y);
+	for (size_t i = v.output.size(); i < OutputLog::kMaxLines; ++i) v.output.append("filler " + std::to_string(i));
+	v.revisions.touch(ViewConcern::Output);
+	ui.frames(3);
+	CHECK(v.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "at the cap: at the newest line");
+	ImGui::SetScrollY(lines, lines->ScrollMax.y - 1.0f);
+	ui.frames(1);
+	for (int i = 0; i < 20; ++i) v.output.append("past the cap " + std::to_string(i));
+	v.revisions.touch(ViewConcern::Output);
+	ui.frames(3);
+	CHECK(v.output.size() == OutputLog::kMaxLines && lines->Scroll.y == lines->ScrollMax.y, "past the cap: followed");
 	CHECK(ui.drain().empty(), "raising nothing");
 }
 

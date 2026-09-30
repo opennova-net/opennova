@@ -57,21 +57,23 @@ public:
 	void set_play_engine_args(const PackedStringArray &p_args) { play_engine_args_ = p_args; }
 	PackedStringArray get_play_engine_args() const { return play_engine_args_; }
 
-	// The typed seam: what the windows ask for, callable the same way from GDScript.
+	// The typed seam: what the windows ask for, callable the same way from GDScript. Open answers
+	// whether the project at `p_dir` is the one open afterwards (a switch that failed, or that an
+	// operation refused, leaves the project open before it open); New, whether it made that
+	// project too.
 	bool new_project(const String &p_dir, const String &p_title);
 	bool open_project(const String &p_dir);
 	void close_project();
 	// Creates every missing required file (the roles of the unmet rows); returns how many
 	// required files are still unmet afterwards.
 	int create_missing_files();
-	// Runs a build to its end; true when the build is good. False, with nothing built, while
-	// the build waits on the unsaved-changes prompt (resolve_unsaved).
-	bool build();
-	// Builds, then starts the game on the build; true when the game started.
-	bool play();
 	void stop_play();
-	// One session poll (what _process does each frame).
+	// One session poll (what _process does each frame): a build or a Play raised through
+	// request_json steps across the polls, never blocking the frame, and its operation shows it.
 	void pump();
+	// How much a poll steps the running operation: `p_ms` milliseconds of steps of `p_step_bytes`
+	// bytes each (0 ms: one step per poll). A test slows a build to read it mid-way.
+	void set_poll_budget(int p_ms, int64_t p_step_bytes);
 
 
 	// The document seam (ADR 0046 d9), one family for every document type: the active
@@ -136,9 +138,12 @@ public:
 	// session_revisions.h)}; the pickers are
 	// refused (they need a person), reveal_path and quit are served here. get_outcome_json
 	// is what the last request came to (a typed seam call's included): {done,
-	// unsaved_prompt, findings}.
+	// unsaved_prompt, operation, findings}.
 	String request_json(const String &p_json);
 	String get_outcome_json() const;
+	// The running operation and what the last one came to, as the view JSON has them
+	// ({operation, last_operation}): what editor_build and editor_play wait on, frame by frame.
+	String get_operation_json() const;
 	// The view (session_view_to_json): a page of the output lines and of the import dialog's lists.
 	String get_view_json(int p_output_cursor = 0, int p_output_limit = 200, int p_import_offset = 0,
 			int p_import_limit = 200) const;
@@ -276,6 +281,7 @@ protected:
 
 private:
 	void ensure_session();
+	bool project_open_at(const std::string &p_dir) const;
 	void drain_requests();
 	void serve(const opennova::editor::EditorRequest &p_request);
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);

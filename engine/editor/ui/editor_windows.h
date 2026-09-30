@@ -63,8 +63,13 @@ public:
 	// The shell's answer to a PickDirectory / PickFile request (an empty path = cancelled):
 	// a folder for a new project fills the new-project form, a project to open opens, the
 	// game install folder and the runtime fill the project settings' fields (while the
-	// dialog that asked is open on the project open now).
+	// dialog that asked is open on the project open now), a file to import is planned as
+	// deliver_picks plans several.
 	void deliver_pick(PickPurpose purpose, const std::string &path);
+	// The shell's answer to a PickFile request that picks several files (none = cancelled): the
+	// files to import planned in the import dialog (a PreviewImport raised like any window's
+	// request), with the files they need when the editor's setting says so.
+	void deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths);
 
 	// The shell's offscreen menu renderer for the Preview window's menu pane (null = no
 	// picture), and its model renderer for the model pane.

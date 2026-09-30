@@ -100,22 +100,27 @@ add_library(opennova_editor STATIC
     # (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
     # requirements — the manifest rows evaluated against the project
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan and the one managed child over the platform seam
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/play_lease.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10),
     # what Problems shows of its findings and offers to do about them, and the findings by
     # file and record
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/findings_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_view.cpp
 )
 

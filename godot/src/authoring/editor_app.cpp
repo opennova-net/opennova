@@ -34,7 +34,6 @@ using opennova::editor::EditorRequest;
 using opennova::editor::EditorRequestKind;
 using opennova::editor::PickPurpose;
 using opennova::editor::PlayLauncher;
-using opennova::editor::PlayState;
 using opennova::editor::ProjectSession;
 using opennova::editor::SessionView;
 
@@ -84,6 +83,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("end_edit"), &EditorApp::end_edit);
 	ClassDB::bind_method(D_METHOD("request_json", "json"), &EditorApp::request_json);
 	ClassDB::bind_method(D_METHOD("get_outcome_json"), &EditorApp::get_outcome_json);
+	ClassDB::bind_method(D_METHOD("get_operation_json"), &EditorApp::get_operation_json);
 	ClassDB::bind_method(D_METHOD("get_view_json", "output_cursor", "output_limit", "import_offset", "import_limit"),
 			&EditorApp::get_view_json, DEFVAL(0), DEFVAL(200), DEFVAL(0), DEFVAL(200));
 	ClassDB::bind_method(D_METHOD("get_document_json", "path", "with_rows"), &EditorApp::get_document_json);
@@ -133,10 +133,9 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("open_project", "dir"), &EditorApp::open_project);
 	ClassDB::bind_method(D_METHOD("close_project"), &EditorApp::close_project);
 	ClassDB::bind_method(D_METHOD("create_missing_files"), &EditorApp::create_missing_files);
-	ClassDB::bind_method(D_METHOD("build"), &EditorApp::build);
-	ClassDB::bind_method(D_METHOD("play"), &EditorApp::play);
 	ClassDB::bind_method(D_METHOD("stop_play"), &EditorApp::stop_play);
 	ClassDB::bind_method(D_METHOD("pump"), &EditorApp::pump);
+	ClassDB::bind_method(D_METHOD("set_poll_budget", "ms", "step_bytes"), &EditorApp::set_poll_budget);
 	ClassDB::bind_method(D_METHOD("is_project_open"), &EditorApp::is_project_open);
 	ClassDB::bind_method(D_METHOD("get_project_title"), &EditorApp::get_project_title);
 	ClassDB::bind_method(D_METHOD("get_project_root"), &EditorApp::get_project_root);
@@ -336,6 +335,11 @@ void EditorApp::pump() {
 	if (session_->view().quit_requested) get_tree()->quit(0);
 }
 
+void EditorApp::set_poll_budget(int p_ms, int64_t p_step_bytes) {
+	ensure_session();
+	session_->set_poll_budget({std::max(p_ms, 0), uint64_t(std::max<int64_t>(p_step_bytes, 1))});
+}
+
 void EditorApp::apply_window_title() {
 	// The editor's own window: a test's EditorApp is not the scene the OS window shows.
 	if (!is_inside_tree() || get_tree()->get_current_scene() != this) return;
@@ -426,11 +430,13 @@ void EditorApp::_on_dir_selected(const String &p_dir) {
 }
 
 void EditorApp::_on_files_selected(const PackedStringArray &p_files) {
-	ensure_session();
-	EditorRequest request = opennova::editor::make_request(EditorRequestKind::PreviewImport);
-	for (int i = 0; i < p_files.size(); ++i) request.paths.push_back(opennova::to_std(p_files[i]));
-	request.flag = session_->view().import_dependencies; // the editor's setting: with the files they need
-	session_->handle(request);
+#if OPENNOVA_EDITOR_UI
+	// Through the windows' request path, as every other picker result: drained with the frame's
+	// requests, never handled from the dialog's signal.
+	std::vector<std::string> paths;
+	for (int i = 0; i < p_files.size(); ++i) paths.push_back(opennova::to_std(p_files[i]));
+	windows_->deliver_picks(pending_pick_, paths);
+#endif
 	pending_pick_ = PickPurpose::None;
 }
 
@@ -460,17 +466,27 @@ int EditorApp::allocate_mcp_port() {
 
 // --- the typed seam --------------------------------------------------------------
 
+// Whether the project at `dir` is the one open now: a switch that failed or was refused leaves
+// the project that was open before it open (or none).
+bool EditorApp::project_open_at(const std::string &p_dir) const {
+	return session_->project_open() &&
+			session_->view().project_root == opennova::editor::ProjectPaths::for_root(p_dir).root;
+}
+
 bool EditorApp::new_project(const String &p_dir, const String &p_title) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::NewProject, opennova::to_std(p_dir),
-			opennova::to_std(p_title)));
-	return session_->project_open();
+	const std::string dir = opennova::to_std(p_dir);
+	session_->handle(opennova::editor::make_request(EditorRequestKind::NewProject, dir, opennova::to_std(p_title)));
+	// Made and opened: the request went through (a folder that holds a project already refuses
+	// it, the open project's own among them) and the project it made is the one open.
+	return session_->outcome().done() && project_open_at(dir);
 }
 
 bool EditorApp::open_project(const String &p_dir) {
 	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenProject, opennova::to_std(p_dir)));
-	return session_->project_open();
+	const std::string dir = opennova::to_std(p_dir);
+	session_->handle(opennova::editor::make_request(EditorRequestKind::OpenProject, dir));
+	return project_open_at(dir);
 }
 
 void EditorApp::close_project() {
@@ -484,24 +500,6 @@ int EditorApp::create_missing_files() {
 	request.names = opennova::editor::unmet_required_roles(session_->view().requirements);
 	session_->handle(request);
 	return get_required_missing();
-}
-
-bool EditorApp::build() {
-	ensure_session();
-	session_->handle(opennova::editor::make_request(EditorRequestKind::Build));
-	// Waiting on the unsaved prompt, or refused: no build ran (the last one's result is
-	// not this request's).
-	if (!session_->outcome().done()) return false;
-	session_->finish_build();
-	return is_last_build_ok();
-}
-
-bool EditorApp::play() {
-	ensure_session();
-	session_->set_launcher(make_launcher(session_->view().play_retail ? 0 : allocate_mcp_port()));
-	session_->handle(opennova::editor::make_request(EditorRequestKind::Play));
-	session_->finish_build();
-	return session_->view().play_state == PlayState::Running;
 }
 
 void EditorApp::stop_play() {
@@ -899,6 +897,15 @@ String EditorApp::request_json(const String &p_json) {
 
 String EditorApp::get_outcome_json() const {
 	return json_text(opennova::editor::action_outcome_to_json(session_ ? session_->outcome() : opennova::editor::ActionOutcome()));
+}
+
+String EditorApp::get_operation_json() const {
+	opennova::io::JsonValue answer = opennova::io::JsonValue::make_object();
+	const SessionView empty;
+	const SessionView &view = session_ ? session_->view() : empty;
+	answer.set("operation", opennova::editor::operation_status_to_json(view.operation));
+	answer.set("last_operation", opennova::editor::operation_outcome_to_json(view.last_operation));
+	return json_text(answer);
 }
 
 String EditorApp::get_view_json(int p_output_cursor, int p_output_limit, int p_import_offset, int p_import_limit) const {

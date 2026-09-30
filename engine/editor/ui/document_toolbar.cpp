@@ -6,14 +6,17 @@
 
 namespace opennova::editor {
 
+// Each tool enabled while the busy gate takes its request too (SessionView::allows).
 void draw_document_toolbar(EditorHost &host, const Document &document) {
+	const SessionView &view = host.view();
 	ui_kit::WrapRow row;
-	if (ui_kit::tool(row, "Reload", true, "Read the file again (asks first when it has unsaved changes)."))
+	if (ui_kit::tool(row, "Reload", view.allows(EditorRequestKind::ReloadDocument),
+	                 "Read the file again (asks first when it has unsaved changes)."))
 		host.request(make_request(EditorRequestKind::ReloadDocument, document.path()));
-	if (ui_kit::tool(row, "Undo", document.can_undo(),
+	if (ui_kit::tool(row, "Undo", document.can_undo() && view.allows(EditorRequestKind::Undo),
 	                 document.can_undo() ? "Undo the last change to this file (Ctrl+Z)." : "Nothing to undo in this file."))
 		host.request(make_request(EditorRequestKind::Undo, document.path()));
-	if (ui_kit::tool(row, "Redo", document.can_redo(),
+	if (ui_kit::tool(row, "Redo", document.can_redo() && view.allows(EditorRequestKind::Redo),
 	                 document.can_redo() ? "Redo what Undo took back (Ctrl+Y)." : "Nothing to redo in this file."))
 		host.request(make_request(EditorRequestKind::Redo, document.path()));
 	if (document.blocked())

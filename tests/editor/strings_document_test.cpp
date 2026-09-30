@@ -228,7 +228,7 @@ int validation_and_session() {
 	// Build waits on the unsaved prompt over the edited table; cancelled, nothing is built.
 	session.handle(make_request(EditorRequestKind::Build));
 	TEST_EXPECT(view.unsaved_prompt.open && view.unsaved_prompt.action == EditorRequestKind::Build &&
-	            view.unsaved_prompt.files == std::vector<std::string>{document->path()} && !session.build_running());
+	            view.unsaved_prompt.files == std::vector<std::string>{document->path()} && !session.view().operation.running());
 	EditorRequest cancel = make_request(EditorRequestKind::ResolveUnsaved);
 	cancel.unsaved_choice = UnsavedChoice::Cancel;
 	session.handle(cancel);
@@ -240,7 +240,7 @@ int validation_and_session() {
 	session.handle(make_request(EditorRequestKind::SaveAll));
 	TEST_EXPECT(!document->dirty());
 	session.handle(make_request(EditorRequestKind::Build));
-	session.finish_build();
+	session.run_operations();
 	TEST_EXPECT(view.last_build.ok);
 	// Reopen from disk: the section and the key survive; Go to finds the key by the locator of
 	// the symbol the key defines.

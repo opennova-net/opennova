@@ -64,7 +64,7 @@ void RenameDialog::draw(EditorHost &host) {
 	if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
 	ImGui::SetNextItemWidth(em * 24.0f);
 	const bool enter = ImGui::InputText("##name", name_, sizeof(name_), ImGuiInputTextFlags_EnterReturnsTrue);
-	if (asked_ != name_) {
+	if (asked_ != name_ && view.allows(EditorRequestKind::PreviewRename)) {
 		asked_ = name_;
 		host.request(preview(path_, locator_, field_, asked_, false));
 	}
@@ -93,12 +93,16 @@ void RenameDialog::draw(EditorHost &host) {
 		}
 	}
 	ImGui::EndChild();
-	ImGui::BeginDisabled(!ready);
+	// A rename rewrites the project's files: while an operation holds them (a build packing them),
+	// the busy gate refuses it, and Rename waits with it (SessionView::allows).
+	const bool allowed = view.allows(EditorRequestKind::RenameSymbol);
+	ImGui::BeginDisabled(!ready || !allowed);
 	const bool rename = ImGui::Button("Rename");
 	ImGui::EndDisabled();
-	ui_kit::tooltip(ready ? "Rewrites every file listed on disk. It cannot be undone with Undo."
-	                      : "Waits for a new name the rename can take (the reasons are listed).");
-	if ((rename || enter) && ready) {
+	ui_kit::tooltip(!allowed ? "A rename rewrites the project's files: it waits for the running operation."
+	                : ready  ? "Rewrites every file listed on disk. It cannot be undone with Undo."
+	                         : "Waits for a new name the rename can take (the reasons are listed).");
+	if ((rename || enter) && ready && allowed) {
 		EditorRequest request = preview(path_, locator_, field_, asked_, false);
 		request.kind = EditorRequestKind::RenameSymbol;
 		host.request(std::move(request));

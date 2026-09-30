@@ -79,6 +79,11 @@ bool save_project_document(const std::string &project_file, const ProjectDocumen
 // A fresh random UUID (version 4 text form).
 std::string make_project_id();
 
+// Whether a project could be made at `root` for `target_game` (a gameprofile code): the
+// directory must not already hold a project file. Nothing is written; create_project asks the
+// same first.
+bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error);
+
 // Create a project at `root`: the directory (created if missing) must not already hold a
 // project file. Writes `project.opennova` and the self-ignoring cache directory, returns
 // the new document. `target_game` must be a gameprofile code.

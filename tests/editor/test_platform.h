@@ -2,8 +2,10 @@
 // The process seams the editor's tests run a ProjectSession or a PlaySession over (ADR 0046
 // d8), one home for every test: NoProcess starts nothing (a session a test drives never
 // plays; the tries are counted), and FakePlatform is a pretend OS: children numbered from
-// `next_pid`, a clock only a wait moves, the code each child a test ends exited with, and a
-// log of every call ("spawn 500", "terminate 500", "kill 500", "release 500").
+// `next_pid`, a clock only a wait moves, the code each child a test ends exited with, each
+// child's identity (the plan's executable, "created <pid>"), how process_liveness answers for a
+// game it does not hold (a Play lease's) and the creation time each such ask named, and a log of
+// every call ("spawn 500", "terminate 500", "kill 500", "release 500").
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -39,6 +41,10 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 	bool terminate_exits = true;
 	std::vector<int64_t> running;
 	std::map<int64_t, uint32_t> codes; // the code each exited child ended with
+	// How process_liveness answers for a game this platform does not hold (one an earlier editor
+	// started), by pid: Dead for any it does not list; and the creation time each ask named.
+	std::map<int64_t, opennova::editor::ProcessLiveness> elsewhere;
+	std::map<int64_t, std::string> asked_created;
 	std::vector<std::string> log;
 	opennova::editor::LaunchPlan last_plan;
 	int spawns = 0;
@@ -56,6 +62,16 @@ struct FakePlatform : opennova::editor::ProcessPlatform {
 		for (const int64_t p : running)
 			if (p == pid) return true;
 		return false;
+	}
+	bool process_identity(int64_t pid, opennova::editor::ProcessIdentity &out) override {
+		out.image = last_plan.executable;
+		out.created = "created " + std::to_string(pid);
+		return true;
+	}
+	opennova::editor::ProcessLiveness process_liveness(int64_t pid, const std::string &created) override {
+		asked_created[pid] = created;
+		const auto found = elsewhere.find(pid);
+		return found == elsewhere.end() ? opennova::editor::ProcessLiveness::Dead : found->second;
 	}
 	bool terminate(int64_t pid) override {
 		log.push_back("terminate " + std::to_string(pid));

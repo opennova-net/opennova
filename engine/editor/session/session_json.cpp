@@ -44,6 +44,7 @@ constexpr Token<EditorRequestKind> kKindTokens[] = {
 	{EditorRequestKind::Build, "build"},
 	{EditorRequestKind::Play, "play"},
 	{EditorRequestKind::StopPlay, "stop_play"},
+	{EditorRequestKind::CancelOperation, "cancel_operation"},
 	{EditorRequestKind::CreateFile, "create_file"},
 	{EditorRequestKind::OpenDocument, "open_document"},
 	{EditorRequestKind::ShowInFiles, "show_in_files"},
@@ -726,6 +727,38 @@ JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
 	JsonValue out = JsonValue::make_object();
 	out.set("done", boolean(outcome.done()));
 	out.set("unsaved_prompt", boolean(outcome.unsaved_prompt));
+	out.set("operation", json_number(double(outcome.operation)));
+	out.set("findings", diagnostics_to_json(outcome.findings));
+	return out;
+}
+
+JsonValue operation_status_to_json(const OperationStatus &status) {
+	JsonValue out = JsonValue::make_object();
+	out.set("running", boolean(status.running()));
+	if (!status.running()) return out;
+	out.set("id", json_number(double(status.id)));
+	out.set("kind", json_string(operation_kind_row(status.kind).token));
+	out.set("label", json_string(status.label));
+	out.set("done", json_number(double(status.done)));
+	out.set("total", json_number(double(status.total)));
+	out.set("unit", json_string(operation_unit_token(status.unit)));
+	out.set("cancellable", boolean(status.cancellable));
+	// What it reads and writes: a request that writes either, or reads what it writes, waits.
+	JsonValue reads = JsonValue::make_array();
+	for (const char *token : holds_tokens(status.reads)) reads.push(json_string(token));
+	out.set("reads", std::move(reads));
+	JsonValue writes = JsonValue::make_array();
+	for (const char *token : holds_tokens(status.writes)) writes.push(json_string(token));
+	out.set("writes", std::move(writes));
+	return out;
+}
+
+JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
+	if (outcome.id == 0) return JsonValue::make_null();
+	JsonValue out = JsonValue::make_object();
+	out.set("id", json_number(double(outcome.id)));
+	out.set("kind", json_string(operation_kind_row(outcome.kind).token));
+	out.set("end", json_string(operation_end_token(outcome.end)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
 	return out;
 }
@@ -847,7 +880,10 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	JsonValue selected = JsonValue::make_array();
 	for (const NodeAddress &address : view.selected) selected.push(address_to_json(address));
 	out.set("selected", std::move(selected));
-	if (!view.reveal_field.empty()) out.set("reveal_field", json_string(view.reveal_field));
+	if (!view.reveal_field.empty()) {
+		out.set("reveal_field", json_string(view.reveal_field));
+		out.set("reveal_serial", json_number(double(view.reveal_serial)));
+	}
 	if (!view.reveal_file.empty()) {
 		JsonValue reveal = JsonValue::make_object();
 		reveal.set("path", json_string(view.reveal_file));
@@ -857,11 +893,11 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	}
 	out.set("clipboard_bytes", json_number(double(view.clipboard.size())));
 
+	// The operation that runs (a build stepping) and what the last one came to; the build block
+	// is the last build's.
+	out.set("operation", operation_status_to_json(view.operation));
+	out.set("last_operation", operation_outcome_to_json(view.last_operation));
 	JsonValue build = JsonValue::make_object();
-	build.set("running", boolean(view.build_running));
-	build.set("done", json_number(double(view.build_done)));
-	build.set("total", json_number(double(view.build_total)));
-	build.set("step", json_string(view.build_step));
 	build.set("has_build", boolean(view.has_build));
 	if (view.has_build) {
 		build.set("ok", boolean(view.last_build.ok));
@@ -1017,15 +1053,20 @@ JsonValue session_view_to_json(const SessionView &view, const SessionJsonOptions
 	}
 	out.set("graph", std::move(graph));
 
+	// A page of the output lines by absolute index (OutputLog): `first` is the oldest line held,
+	// `next` one past the newest; a cursor below `first` missed the lines dropped since, one past
+	// `next` waits for lines to come.
 	JsonValue output = JsonValue::make_object();
-	const size_t total = view.output.size();
-	const size_t first = std::min(options.output_cursor, total);
-	const size_t last = std::min(first + options.output_limit, total);
-	output.set("total", json_number(double(total)));
-	output.set("cursor", json_number(double(first)));
+	const uint64_t first = view.output.first_index();
+	const uint64_t next = view.output.next_index();
+	const uint64_t cursor = std::min<uint64_t>(std::max<uint64_t>(options.output_cursor, first), next);
+	const uint64_t last = std::min<uint64_t>(cursor + options.output_limit, next);
+	output.set("first", json_number(double(first)));
+	output.set("next", json_number(double(next)));
+	output.set("cursor", json_number(double(cursor)));
 	output.set("next_cursor", json_number(double(last)));
 	JsonValue lines = JsonValue::make_array();
-	for (size_t i = first; i < last; ++i) lines.push(json_string(view.output[i]));
+	for (uint64_t i = cursor; i < last; ++i) lines.push(json_string(view.output.at(i)));
 	output.set("lines", std::move(lines));
 	out.set("output", std::move(output));
 	return out;

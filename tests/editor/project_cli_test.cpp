@@ -18,7 +18,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
-#include <editor/project_build/build_session.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/project_session.h>
 #include <formats/pff/pff.h>
 

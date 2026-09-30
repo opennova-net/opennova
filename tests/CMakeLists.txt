@@ -616,6 +616,13 @@ target_link_libraries(pff_unit_test PRIVATE opennova_formats)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# The resumable PFF writer (S13 A1): byte for byte the pre-stream writer's archives at write
+# budgets of 1, 7 and the whole, through the single-call forms too.
+add_executable(pff_stream_writer_test pff/pff_stream_writer_test.cpp)
+target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
+target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
+
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
@@ -3613,6 +3620,14 @@ target_link_libraries(editor_session_test PRIVATE opennova_editor)
 target_include_directories(editor_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session COMMAND editor_session_test)
 
+# The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
+# cancelled between two steps, finished once; the busy gate's four answers over a real build
+# (refused, joined, superseded as the table says, cancelled first); edits during a build.
+add_executable(editor_session_operation_test editor/editor_session_operation_test.cpp)
+target_link_libraries(editor_session_operation_test PRIVATE opennova_editor)
+target_include_directories(editor_session_operation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session_operation COMMAND editor_session_operation_test)
+
 # The session's wire form (the editor MCP): request tokens both ways, the view, a
 # document and a record as JSON over a real session.
 add_executable(editor_session_json_test editor/session_json_test.cpp)
@@ -3767,19 +3782,20 @@ opennova_add_mixed_test(editor_import COMMAND editor_import_test)
 # bounds_test.cpp's; the field controls (S12 D4) field_widgets_test.cpp's; the reference
 # picker (S12 D7: each field's own filter, the keys, a Files row dropped on a value, a missing
 # value's fixes) reference_picker_test.cpp's; find (S12 D8: the Document window's find bar, Find
-# in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; all
-# share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; every
+# control that raises a request enabled exactly when the busy gate takes it (S13 A1) gate_test.cpp's;
+# all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
     add_executable(editor_ui_test editor_ui/editor_windows_test.cpp editor_ui/workspace_test.cpp
                                   editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
-                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp)
+                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
-                                  menu inspector preview styles problems)
+                                  menu inspector preview styles problems gate)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
