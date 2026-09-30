@@ -74,10 +74,25 @@ public:
 
 	// --- the request being served ----------------------------------------------------------
 
-	// A request from outside begins: its outcome starts empty, and what is reported until it ends
-	// is its outcome's. It ends before its validation (handle()).
-	void begin_request();
-	void end_request() { in_request_ = false; }
+	// The request from outside being served, for as long as the scope lives (handle(), before its
+	// validation): its outcome starts empty, and what is reported meanwhile is its outcome's. No
+	// part enters handle(); a request that reaches it while one is served (a device's or a
+	// source's callback) asserts in a debug build and is served inside the outer one, its findings
+	// the outer outcome's, which it neither empties nor ends. Leaving the scope, however it is
+	// left, ends only the request it began.
+	class RequestScope {
+	public:
+		explicit RequestScope(SessionCore &core);
+		~RequestScope();
+		RequestScope(const RequestScope &) = delete;
+		RequestScope &operator=(const RequestScope &) = delete;
+		// True for the request from outside, false for one served inside it.
+		bool outermost() const { return outermost_; }
+
+	private:
+		SessionCore &core_;
+		bool outermost_;
+	};
 	const ActionOutcome &outcome() const { return outcome_; }
 	ActionOutcome &outcome() { return outcome_; }
 

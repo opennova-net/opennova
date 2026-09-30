@@ -1,6 +1,7 @@
 #include <editor/session/session_core.h>
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <optional>
 #include <utility>
@@ -49,9 +50,15 @@ void SessionCore::start() {
 	touch(ViewConcern::Output);
 }
 
-void SessionCore::begin_request() {
-	outcome_ = ActionOutcome();
-	in_request_ = true;
+SessionCore::RequestScope::RequestScope(SessionCore &core) : core_(core), outermost_(!core.in_request_) {
+	assert(outermost_ && "a request entered the session while another was served");
+	if (!outermost_) return;
+	core_.outcome_ = ActionOutcome();
+	core_.in_request_ = true;
+}
+
+SessionCore::RequestScope::~RequestScope() {
+	if (outermost_) core_.in_request_ = false;
 }
 
 void SessionCore::note(std::string line) {

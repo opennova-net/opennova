@@ -1,6 +1,7 @@
 #include <editor/session/problems_service.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 
 #include <base/io/json.h>
@@ -47,11 +48,15 @@ void ProblemsService::compose(bool keep_reported) {
 	         play_findings_, open, build_findings_},
 	        *graph_, validation_cache_, *render_check_, *assets_);
 	document_findings_ = std::move(findings.documents);
+	// The findings kept after the composed rows, each as often as it was reported (two refusals of
+	// the same edit are two rows, as they were); one the composition makes too is its row alone.
+	const size_t composed = findings.rows.size();
 	if (keep_reported)
-		for (const Reported &reported : reported_)
-			if (reported.kept &&
-			    std::find(findings.rows.begin(), findings.rows.end(), reported.finding) == findings.rows.end())
+		for (const Reported &reported : reported_) {
+			const auto composed_end = findings.rows.begin() + static_cast<std::ptrdiff_t>(composed);
+			if (reported.kept && std::find(findings.rows.begin(), composed_end, reported.finding) == composed_end)
 				findings.rows.push_back(reported.finding);
+		}
 	reported_.clear();
 	if (findings.rows != view_.diagnostics) {
 		view_.diagnostics = std::move(findings.rows);

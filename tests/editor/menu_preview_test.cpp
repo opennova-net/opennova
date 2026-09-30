@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -218,6 +219,17 @@ static int test_headless_preview() {
 		session.handle(make_request(EditorRequestKind::Undo, menu->path()));
 		TEST_EXPECT(!menu->dirty());
 		TEST_EXPECT(device.pump(view) == MenuPreviewAction::Configure);
+
+		// Refused by the session, an operation holding the documents (S13 A2: the drag and the
+		// arrange answer what the request came to, never the last edit's flag): each answers
+		// false, the menu as it was.
+		const uint64_t held = menu->revision();
+		TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+		const MenuPreviewSnapshot holding = menu_preview_snapshot(view, device.model, &device.compiler, &device.state);
+		TEST_EXPECT(!menu_preview_drag(session, holding, title.child, LayoutHandle::Move, 13, 5, true));
+		TEST_EXPECT(!menu_preview_arrange(session, holding, {title.child, exit.child}, ArrangeOp::AlignLeft));
+		TEST_EXPECT(menu->revision() == held && !menu->dirty());
+		session.run_operations();
 	}
 
 	// An unsaved stylesheet edit shows (the open document stands in for its file), while the

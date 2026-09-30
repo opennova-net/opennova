@@ -74,11 +74,14 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
-	impl_->core.begin_request();
-	const bool served = impl_->dispatch(request);
-	impl_->core.end_request();
+	bool served = false, outermost = false;
+	{
+		const SessionCore::RequestScope scope(impl_->core);
+		outermost = scope.outermost();
+		served = impl_->dispatch(request);
+	}
 	// A request from outside returns validated, unless a pump holds validation for its poll.
-	if (!impl_->problems.held()) impl_->problems.validate_pending();
+	if (outermost && !impl_->problems.held()) impl_->problems.validate_pending();
 	return served;
 }
 
@@ -91,7 +94,9 @@ const ActionOutcome &ProjectSession::outcome() const {
 }
 
 bool ProjectSession::last_edit_ok() const {
-	return impl_->documents.last_edit_ok();
+	// A request the gate refused, or one whose document was not open, never reached its edit: the
+	// flag its edit would have set is the last edit's, so the outcome answers first.
+	return impl_->core.outcome().done() && impl_->documents.last_edit_ok();
 }
 
 uint64_t ProjectSession::handle_entries() const {

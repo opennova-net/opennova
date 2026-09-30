@@ -34,6 +34,18 @@ void PlayController::set_launcher_source(PlayLauncherSource source) {
 	core_.touch(ViewConcern::Preferences);
 }
 
+// The launcher the view shows, the port a spawn asked for left out, and the runtime it resolves to:
+// Preferences moves when either changed.
+void PlayController::follow_launcher(const PlayLauncher &launcher) {
+	launcher_ = launcher;
+	launcher_.mcp_port = 0;
+	const std::string runtime = resolve_runtime_executable();
+	if (view_.source_run == launcher_.source_run && view_.runtime_executable == runtime) return;
+	view_.source_run = launcher_.source_run;
+	view_.runtime_executable = runtime;
+	core_.touch(ViewConcern::Preferences);
+}
+
 std::string PlayController::resolve_runtime_executable() const {
 	if (launcher_.source_run) return launcher_.executable;
 	if (!core_.local().runtime_executable.empty()) return core_.local().runtime_executable;
@@ -78,6 +90,12 @@ void PlayController::start() {
 	if (view_.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
 	boot_project_ = view_.project_root;
 	const bool play_retail = core_.preferences().values().play_retail;
+	// What Play launches, asked of its source now that the build has landed: one answer, which the
+	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
+	// options) with the port of the game's MCP endpoint allocated now (none for the game install,
+	// which has no endpoint); the view's runtime follows it.
+	const PlayLauncher launcher = source_ ? source_(!play_retail) : launcher_;
+	follow_launcher(launcher);
 	if (play_retail) {
 		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, plan, error)) {
 			core_.report(error);
@@ -96,9 +114,6 @@ void PlayController::start() {
 			core_.touch(ViewConcern::Output);
 			return;
 		}
-		// The launcher as its source says it now, the build landed: the port of the game's MCP
-		// endpoint is allocated at spawn time, never while the build packs.
-		const PlayLauncher launcher = source_ ? source_(true) : launcher_;
 		plan = launcher.source_run
 		               ? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
 		                                         view_.document.target_game, launcher.mcp_port, std::string(),

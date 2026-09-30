@@ -55,8 +55,10 @@ public:
 	void hold_validation();
 	// What the last request handled from outside came to (reset by the next one).
 	const ActionOutcome &outcome() const;
-	// True when the last EditRecord, Copy, Cut, Paste or Duplicate went through (a Move that left
-	// a record where it is included: it changed nothing, and nothing was wrong).
+	// True when the last request, an EditRecord, Copy, Cut, Paste or Duplicate, went through: its
+	// outcome done and its edit applied (a Move that left a record where it is included: it changed
+	// nothing, and nothing was wrong). False for one refused before its edit ran (an operation
+	// holding the documents, a document not open).
 	bool last_edit_ok() const;
 	// How many requests handle() has taken: a test's count that the parts' compositions (a
 	// rename's close and reload, the unsaved prompt's answer) never enter it.

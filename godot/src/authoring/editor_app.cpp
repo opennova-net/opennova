@@ -600,11 +600,13 @@ Variant to_variant(const Value &value) {
 }
 
 // True when the request on the active document went through (a Move that leaves a
-// record where it is included: nothing was wrong, nothing changed).
+// record where it is included: nothing was wrong, nothing changed); false for one the session
+// refused before its edit ran (an operation holding the documents), whose edit flag is the last
+// edit's.
 bool edited(ProjectSession &session, Document &document, EditorRequest request) {
 	request.path = document.path();
 	session.handle(request);
-	return session.last_edit_ok();
+	return session.outcome().done() && session.last_edit_ok();
 }
 
 // A record's identity as the seam names it: the nested record's, else the row's.

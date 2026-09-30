@@ -671,6 +671,39 @@ static int test_settings_parts_weighed() {
 	return 0;
 }
 
+// An edit the gate refuses never reaches its document (an operation holds the documents): the
+// request's outcome is not done and last_edit_ok() answers false, not the flag the edit before it
+// left (S13 A2: the typed seam's add_record had answered the previous add's identity), and the
+// document is as it was; once the operation ends the same edit goes through.
+static int test_refused_edit_is_no_edit() {
+	editor_test::TempProjectDir dir("opennova_editor_operation_refused_edit");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Refused"));
+	editor_test::create_missing_files(session);
+	session.handle(make_request(EditorRequestKind::OpenDocument, "gametext.bin"));
+	Document *table = session.document_for("gametext.bin");
+	TEST_EXPECT(table != nullptr);
+	if (!table) return 1;
+	EditorRequest add = make_request(EditorRequestKind::EditRecord, table->path());
+	add.edit.operation = EditOperation::Add;
+	add.edit.address = {0, table->kind_from_name("section"), 0};
+	session.handle(add);
+	TEST_EXPECT(session.outcome().done() && session.last_edit_ok());
+	const NodeId added = table->last_added();
+	const uint64_t revision = table->revision();
+	TEST_EXPECT(added != 0);
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	session.handle(add);
+	TEST_EXPECT(refused_busy(session) && !session.outcome().done() && !session.last_edit_ok());
+	TEST_EXPECT(table->revision() == revision && table->last_added() == added);
+	session.run_operations();
+	session.handle(add);
+	TEST_EXPECT(session.outcome().done() && session.last_edit_ok() && table->last_added() != added);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_slot_steps_and_finishes();
@@ -681,6 +714,7 @@ int main() {
 	failures += test_uncancellable_operation();
 	failures += test_import_plan_superseded();
 	failures += test_settings_parts_weighed();
+	failures += test_refused_edit_is_no_edit();
 	if (failures == 0) std::printf("editor_session_operation: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

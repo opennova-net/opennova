@@ -1013,16 +1013,19 @@ static int test_validation_cost() {
 	TEST_EXPECT(has_code(v.diagnostics, "catalog.item_type"));
 	// A finding reported inside the burst lands after the validation the burst left due: reporting
 	// it validates nothing (S13 A2), the poll runs that validation once and keeps the finding after
-	// the rows it composes.
+	// the rows it composes, as often as it was reported (the same edit refused twice, two rows).
 	passes = stats.passes;
 	session.hold_validation();
 	set("type", int64_t(4));
 	set("no_such_field", int64_t(1));
+	set("no_such_field", int64_t(1));
 	TEST_EXPECT(stats.passes == passes);
 	TEST_EXPECT(!v.diagnostics.empty() && v.diagnostics.back().code == "document.value");
+	TEST_EXPECT(count_code(v.diagnostics, "document.value") == 2);
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1);
 	TEST_EXPECT(!v.diagnostics.empty() && v.diagnostics.back().code == "document.value");
+	TEST_EXPECT(count_code(v.diagnostics, "document.value") == 2);
 	TEST_EXPECT(!has_code(v.diagnostics, "catalog.item_type"));
 	// A Move to where the record already is changes nothing: nothing to validate.
 	passes = stats.passes;
@@ -2957,8 +2960,75 @@ static int test_mcp_port_allocated_at_spawn() {
 	return 0;
 }
 
+// Play launches from one answer of the launcher source, asked when the game is spawned (S13 A2):
+// the executable, whether the run drives the source checkout, its Godot options and the port all
+// come from it, and the view's runtime follows it, whatever the source answered when it was set.
+static int test_play_launches_one_answer() {
+	editor_test::TempProjectDir dir("opennova_editor_session_one_launcher");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Launcher"));
+	editor_test::create_missing_files(session);
+	const std::string first = dir.file("runtime/first.exe"), second = dir.file("runtime/second.exe");
+	TEST_EXPECT(editor_test::write_text(first, "MZ") && editor_test::write_text(second, "MZ"));
+	std::string executable = first;
+	std::vector<std::string> args = {"--first"};
+	session.set_launcher_source([&](bool with_mcp_port) {
+		PlayLauncher launcher;
+		launcher.executable = executable;
+		launcher.engine_args = args;
+		if (with_mcp_port) launcher.mcp_port = 9200;
+		return launcher;
+	});
+	TEST_EXPECT(v.runtime_executable == first);
+	// What the source answers changes before the game starts: the game is launched from the
+	// answer it gives then, all of it, and the view shows that runtime.
+	executable = second;
+	args = {"--second"};
+	const uint64_t preferences_before = v.revisions.of(ViewConcern::Preferences);
+	session.handle(make_request(EditorRequestKind::Play));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && platform.last_plan.executable == second && !platform.last_plan.args.empty() &&
+	            platform.last_plan.args[0] == "--second" && platform.last_plan.mcp_port == 9200);
+	TEST_EXPECT(v.runtime_executable == second && v.revisions.of(ViewConcern::Preferences) > preferences_before);
+	return 0;
+}
+
+#ifdef NDEBUG
+// A request that reaches the session while another is served (a device's callback: here the process
+// seam's can_spawn, asked by a Play) is served inside it (S13 A2; a debug build asserts instead): it
+// neither empties nor ends the outer request's outcome, whose later findings are still its own.
+static int test_reentry_keeps_the_outer_outcome() {
+	struct Reentrant : editor_test::NoProcess {
+		ProjectSession *session = nullptr;
+		bool can_spawn() const override {
+			if (session) session->handle(make_request(EditorRequestKind::ClearOutput));
+			return false;
+		}
+	};
+	editor_test::TempProjectDir dir("opennova_editor_session_reentry");
+	Reentrant platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(make_request(EditorRequestKind::NewProject, dir.file("project"), "Reentry"));
+	platform.session = &session;
+	const uint64_t before = session.handle_entries();
+	session.handle(make_request(EditorRequestKind::Play));
+	platform.session = nullptr;
+	TEST_EXPECT(session.handle_entries() == before + 2);
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.unsupported"));
+	return 0;
+}
+#endif
+
 int main() {
 	int failures = 0;
+	failures += test_play_launches_one_answer();
+#ifdef NDEBUG
+	failures += test_reentry_keeps_the_outer_outcome();
+#endif
 	failures += test_handle_entered_once();
 	failures += test_mcp_port_allocated_at_spawn();
 	failures += test_play_then_close();

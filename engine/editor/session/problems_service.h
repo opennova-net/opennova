@@ -27,8 +27,10 @@ struct SessionView;
 // Play's own findings; the last build's own; the open documents' own). The findings a request
 // reports are an input of their own (add_reported), shown after the composed rows, so reporting a
 // finding never validates: the validation an edit had left due when it was reported keeps it (it
-// ran first, when report() validated), and a later one drops it. It keeps the Problems query and
-// the fixes the editor MCP asks for (problems_json), each until what it reads moves.
+// ran first, when report() validated), and a later one drops it. A kept finding is compared with
+// the composed rows alone: one the composition makes too is shown once, and a finding reported
+// twice is two rows. It keeps the Problems query and the fixes the editor MCP asks for
+// (problems_json), each until what it reads moves.
 class ProblemsService {
 public:
 	explicit ProblemsService(SessionCore &core);

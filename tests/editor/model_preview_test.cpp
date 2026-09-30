@@ -406,6 +406,15 @@ static int test_handles() {
 	model.follow(view);
 	dragged = find_overlay(model.overlays(), ModelOverlayKind::UserPoint, 0);
 	TEST_EXPECT(dragged && near(dragged->at.x, point->at.x, 1e-3) && near(dragged->at.y, point->at.y, 1e-3));
+
+	// Refused by the session, an operation holding the documents (S13 A2): the drag answers false
+	// (it had answered true whatever the session made of it), the model as it was.
+	const uint64_t held = document->revision();
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	TEST_EXPECT(!model_preview_drag(session, model_preview_snapshot(view, model, true), record.child, ModelHandle::Place,
+	                                px + 20.0f, py, 0.0f));
+	TEST_EXPECT(document->revision() == held);
+	session.run_operations();
 	return 0;
 }
 

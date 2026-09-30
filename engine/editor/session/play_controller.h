@@ -28,8 +28,9 @@ public:
 	PlayController &operator=(const PlayController &) = delete;
 
 	// What Play launches, from the embedder: asked once now for what the view shows (the runtime,
-	// whether the run drives the source checkout), and again with a port each time the game is
-	// spawned.
+	// whether the run drives the source checkout), and again each time the game is spawned, with a
+	// port unless the game install runs; the game is launched from that one answer, and the view's
+	// runtime follows it.
 	void set_launcher_source(PlayLauncherSource source);
 	// The runtime Play launches, resolved (the source run's binary, the project's local setting,
 	// the editor's, else the one packaged beside the editor; "" when none).
@@ -53,6 +54,7 @@ public:
 	std::string running_build_dir() const { return play_.running_build_dir(); }
 
 private:
+	void follow_launcher(const PlayLauncher &launcher);
 	void tail_game_log();
 	void absorb_boot_report(const std::string &line);
 	void absorb_exit();
