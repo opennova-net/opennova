@@ -74,7 +74,7 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(false, request.out_dir);
+		core.start_build(false, request.out_dir, request.rehash);
 }
 void serve_play(SessionCore &core, const EditorRequest &) {
 	if (core.view().project.open)
@@ -356,9 +356,9 @@ constexpr RequestKindRow kRows[] = {
 			"The project packed into a build under out_dir (taken from the project's folder when "
 			"relative; left out, the project's .opennova/build/play; refused inside the project "
 			"but in its cache or its export folder, build.out_dir_in_project), an operation (the "
-			"outcome names it); a build running already serves it, where it packs. Unsaved edits "
-			"wait on the prompt first.")
-			.takes(request_params({}, { F::OutDir }))
+			"outcome names it); a build running already serves it, where it packs. rehash: every "
+			"file read again, the build cache set aside. Unsaved edits wait on the prompt first.")
+			.takes(request_params({}, { F::OutDir, F::Rehash }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Build", "Save all and build")
 			.acts_on_saved()

@@ -457,7 +457,7 @@ void FilesWindow::draw_file_menu(const SessionView &view, const AssetEntry &entr
 	if (ImGui::MenuItem("Show in folder", nullptr, false, reveals) && reveals)
 		workspace_.request(request::reveal_path((fs::path(view.project.root) / entry.relative_path).generic_string()));
 	const bool reimports = view.allows(EditorRequestKind::Reimport);
-	const bool source = entry.kind == AssetKind::ImageSource;
+	const bool source = entry.kind == AssetKind::ImportSource;
 	if (source && ImGui::MenuItem("Import again", nullptr, false, reimports) && reimports)
 		workspace_.request(request::reimport(entry.relative_path, true));
 	ImGui::EndPopup();

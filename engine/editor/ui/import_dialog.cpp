@@ -169,9 +169,9 @@ void ImportDialog::draw(Workspace &workspace) {
 	                        : !allowed         ? "An import writes the project's files: it waits for the running operation."
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
-		std::vector<ImportSource> imports;
+		std::vector<ImportChoice> imports;
 		for (size_t i = 0; i < checked_.size(); ++i) {
-			const ImportSource &source = preview.plan->rows[i].source;
+			const ImportChoice &source = preview.plan->rows[i].source;
 			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
 				imports.push_back(source);
 		}
@@ -206,7 +206,7 @@ void ImportDialog::take(const DialogsView::ImportPreview &preview) {
 // checked in it.
 void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	EditorRequest request = request::plan_import({}, preview.with_dependencies);
-	for (const ImportSource &root : preview.roots)
+	for (const ImportChoice &root : preview.roots)
 		if (std::find(preview.choices.begin(), preview.choices.end(), root) == preview.choices.end())
 			request.imports.push_back(root);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
@@ -216,7 +216,7 @@ void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview
 
 // A listing's files to choose from, with a filter: each change plans the import again.
 void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportPreview &preview) {
-	const ImportSource &first = preview.choices.front();
+	const ImportChoice &first = preview.choices.front();
 	const std::string from =
 	        first.install ? std::string("the game data") : "the archive " + basename_of(first.path);
 	ImGui::TextWrapped("Choose the files to import from %s:", from.c_str());
@@ -253,7 +253,7 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	clipper.Begin(static_cast<int>(visible.size()));
 	while (clipper.Step()) for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
 		const size_t index = visible[static_cast<size_t>(row)];
-		const ImportSource &source = preview.choices[index];
+		const ImportChoice &source = preview.choices[index];
 		ImGui::PushID(static_cast<int>(index));
 		ImGui::TableNextRow();
 		ImGui::TableNextColumn();

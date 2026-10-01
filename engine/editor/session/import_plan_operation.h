@@ -5,7 +5,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/assets/import_source.h>
+#include <editor/assets/import_choice.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
@@ -34,7 +34,7 @@ public:
 	// session outlives the operation.
 	ImportPlanOperation(ProblemsService &problems, const ProjectPaths &paths, const ProjectDocument &document,
 			const AssetGraph &graph, const std::vector<std::shared_ptr<const DocumentBase>> &open,
-			std::vector<ImportSource> roots, bool with_dependencies, std::string install);
+			std::vector<ImportChoice> roots, bool with_dependencies, std::string install);
 
 	OperationKind kind() const override { return OperationKind::ImportPlan; }
 	bool step(const StepBudget &budget) override;
@@ -55,7 +55,7 @@ private:
 	ProjectDocument document_;
 	const AssetGraph &graph_;
 	const std::vector<std::shared_ptr<const DocumentBase>> &open_;
-	std::vector<ImportSource> roots_;
+	std::vector<ImportChoice> roots_;
 	bool with_dependencies_ = false;
 	std::string install_;
 	ProjectScan walk_;

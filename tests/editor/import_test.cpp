@@ -4,7 +4,9 @@
 // with the importer's defaults, outputs under the cache, nothing redone for an
 // unchanged source, a changed source or a missing output imported again, a bad option
 // a finding); the scan listing the outputs as project files the graph resolves and the
-// build packs while the source itself is never packed; the sidecar's lifetime (no file
+// build packs while the source itself is never packed; S13 A8's import of many inputs (a
+// test's importer reading two files through its ImportContext, imported again when either
+// changes and not when neither does) and the image importer's TGA output; the sidecar's lifetime (no file
 // time in it, a record that does not parse kept as written, a rename taking it and the
 // outputs along, a record without its source listing nothing: S9c); and the game
 // install as an import source, the effective file copied in and a requirement
@@ -30,6 +32,8 @@
 #include <editor/graph/project_validation.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/assets/project_scan.h>
+#include <editor/import/import_pass.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/import/png_decode.h>
@@ -43,6 +47,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/pff/pff.h>
+#include <formats/tga/tga.h>
 #include <formats/threedi/threedi_3di3.h>
 
 #include "common/retail_paths.h"
@@ -252,7 +257,7 @@ static int test_import_pass() {
 	const AssetEntry *produced = view.project.scan->find("logo.pcx");
 	TEST_EXPECT(produced && produced->imported_from == "art/logo.png" && produced->kind == AssetKind::Texture);
 	const AssetEntry *source = view.project.scan->find("logo.png");
-	TEST_EXPECT(source && source->kind == AssetKind::ImageSource);
+	TEST_EXPECT(source && source->kind == AssetKind::ImportSource);
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo") ==
 			ReferenceStatus::Present);
 	// A menu names the output by its own file; the source is not packed, so a menu
@@ -287,7 +292,7 @@ static int test_import_pass() {
 	// One source by name; an unknown option is a finding and the source stays not ok.
 	run = run_imports(paths, *view.project.document, true, "logo.png");
 	TEST_EXPECT(run.reimported == 1);
-	sidecar.options["format"] = "tga";
+	sidecar.options["format"] = "bmp";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", sidecar, error));
 	run = run_imports(paths, *view.project.document, true);
 	TEST_EXPECT(run.reimported == 0 && !run.sources[0].ok && !run.diagnostics.empty() && run.diagnostics[0].code() == "import.option");
@@ -309,7 +314,7 @@ static int test_import_pass() {
 	// import pass, whose findings ride the scan).
 	ImportSidecar current;
 	TEST_EXPECT(load_import_sidecar(root + "/art/logo.png.import", current, error));
-	current.options["format"] = "tga";
+	current.options["format"] = "bmp";
 	TEST_EXPECT(save_import_sidecar(root + "/art/logo.png.import", current, error));
 	const ActionOutcome failed = editor_test::handle_to_end(session, reimport);
 	TEST_EXPECT(!failed.done() && count_code(failed.findings, "import.option") == 1);
@@ -359,6 +364,254 @@ static int test_import_pass() {
 	return 0;
 }
 
+namespace {
+
+// A test's importer of many inputs (S13 A8): a `.duo` source names the files it joins, a line each
+// (its folder's paths), and its one output, `<stem>.txt`, holds their bytes one after another. Its
+// runs are counted.
+int duo_runs = 0;
+
+bool run_duo(ImportContext &context, ImportProduct &out) {
+	++duo_runs;
+	const std::string listing(context.source().begin(), context.source().end());
+	ImportOutput output;
+	output.name = fs::path(context.source_name()).stem().generic_string() + ".txt";
+	size_t start = 0;
+	while (start < listing.size()) {
+		size_t end = listing.find('\n', start);
+		if (end == std::string::npos) end = listing.size();
+		const std::string line = listing.substr(start, end - start);
+		start = end + 1;
+		if (line.empty()) continue;
+		std::vector<uint8_t> bytes;
+		if (!context.read(line, bytes)) return false;
+		output.bytes.insert(output.bytes.end(), bytes.begin(), bytes.end());
+	}
+	out.outputs.push_back(std::move(output));
+	return true;
+}
+
+const std::vector<Importer> &duo_table() {
+	static const std::vector<Importer> table = [] {
+		Importer duo;
+		duo.id = "duo";
+		duo.version = 1;
+		duo.extensions = {".duo"};
+		duo.run = run_duo;
+		return std::vector<Importer>{duo};
+	}();
+	return table;
+}
+
+} // namespace
+
+// S13 A8: one import of many inputs (ImportContext). A source and the files its importer reads
+// through its context are recorded, the files' paths in its import record (`inputs`, each from its
+// folder) and the hashes of what was read in the machine-local import cache (so an input's edit
+// changes no committed record), so the pass imports again when either input (or the source)
+// changes, and when neither does reads neither: the cache vouches for an input while its size and
+// last write hold, so one written a while ago and rewritten under the same size and time is not read
+// (the import cache's rule, a source's before). One written within the settle window
+// (io::kFileStampSettle) is never vouched for: rewritten under the stamp it had, it is read and
+// imported again. An input no longer named stops counting; one gone, or one outside the project,
+// fails the import with import.input.
+static int test_import_inputs() {
+	editor_test::TempProjectDir dir("opennova_editor_import_inputs");
+	const std::string root = dir.file("project");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Inputs", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	TEST_EXPECT(editor_test::write_text(root + "/art/pair.duo", "left.txt\nsub/right.txt\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/art/left.txt", "L") && editor_test::write_text(root + "/art/sub/right.txt", "R"));
+	ImportSidecar record;
+	record.importer = "duo";
+	record.version = 1;
+	TEST_EXPECT(save_import_sidecar(root + "/art/pair.duo.import", record, error));
+	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::hours(1))); // written a while ago
+	const auto pass = [&]() {
+		ImportPass walk(paths, doc, false, std::string(), duo_table());
+		while (!walk.step(kWholeWalkStep)) {
+		}
+		return walk.take();
+	};
+	const auto output = [&](const ImportRunResult &run) {
+		return run.sources.size() == 1 && run.sources[0].outputs.size() == 1 ? read_text(root + "/" + run.sources[0].outputs[0])
+		                                                                      : std::string();
+	};
+	const auto hash_of = [](const std::string &text) {
+		return io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size());
+	};
+	duo_runs = 0;
+	ImportRunResult run = pass();
+	TEST_EXPECT(run.reimported == 1 && duo_runs == 1 && run.sources.size() == 1 && run.sources[0].ok);
+	TEST_EXPECT(run.sources[0].inputs == std::vector<std::string>({"art/left.txt", "art/sub/right.txt"}));
+	TEST_EXPECT(output(run) == "LR");
+	TEST_EXPECT(load_import_sidecar(root + "/art/pair.duo.import", record, error));
+	TEST_EXPECT(record.inputs == std::vector<std::string>({"left.txt", "sub/right.txt"}));
+	const std::string record_text = read_text(root + "/art/pair.duo.import");
+	const std::string cache_text = read_text(paths.import_cache_file);
+	TEST_EXPECT(record_text.find("\"inputs\"") != std::string::npos);
+	for (const char *content : {"L", "R"}) {
+		TEST_EXPECT(record_text.find(io::hex64(hash_of(content))) == std::string::npos);
+		TEST_EXPECT(cache_text.find(io::hex64(hash_of(content))) != std::string::npos);
+	}
+
+	// Neither input changed: nothing imported. One rewritten under the size and the last write it
+	// had: the cache vouches for it, so it is not read and nothing is imported either.
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 1 && output(run) == "LR");
+	const fs::file_time_type written = fs::last_write_time(root + "/art/left.txt");
+	TEST_EXPECT(editor_test::write_text(root + "/art/left.txt", "X"));
+	fs::last_write_time(root + "/art/left.txt", written);
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 1);
+	// The first input changes: imported again; then the second.
+	TEST_EXPECT(editor_test::write_text(root + "/art/left.txt", "LL"));
+	run = pass();
+	TEST_EXPECT(run.reimported == 1 && duo_runs == 2 && output(run) == "LLR");
+	TEST_EXPECT(editor_test::write_text(root + "/art/sub/right.txt", "RRR"));
+	run = pass();
+	TEST_EXPECT(run.reimported == 1 && duo_runs == 3 && output(run) == "LLRRR");
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 3);
+	// A file whose last write is within the settle window of a pass (here a minute ahead, as a file
+	// system clock that stood still would leave it) is never vouched for: rewritten under the size
+	// and the last write it had, it is still read and imported again.
+	const fs::file_time_type ahead = fs::file_time_type::clock::now() + std::chrono::minutes(1);
+	fs::last_write_time(root + "/art/sub/right.txt", ahead);
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 3);
+	TEST_EXPECT(editor_test::write_text(root + "/art/sub/right.txt", "QQQ"));
+	fs::last_write_time(root + "/art/sub/right.txt", ahead);
+	run = pass();
+	TEST_EXPECT(run.reimported == 1 && duo_runs == 4 && output(run) == "LLQQQ");
+	// The source names one input now: imported again, its record listing that one; the other then
+	// changes without an import.
+	TEST_EXPECT(editor_test::write_text(root + "/art/pair.duo", "left.txt\n"));
+	run = pass();
+	TEST_EXPECT(run.reimported == 1 && duo_runs == 5 && output(run) == "LL");
+	TEST_EXPECT(run.sources[0].inputs == std::vector<std::string>({"art/left.txt"}));
+	TEST_EXPECT(editor_test::write_text(root + "/art/sub/right.txt", "R"));
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 5);
+	// An input gone fails the import (the record and the outputs kept as they were).
+	fs::remove(root + "/art/left.txt");
+	run = pass();
+	TEST_EXPECT(run.reimported == 0 && duo_runs == 6 && !run.sources[0].ok && count_code(run.diagnostics, "import.input") == 1);
+	TEST_EXPECT(!run.diagnostics.empty() && run.diagnostics[0].asset == "art/pair.duo");
+	// One outside the project is no input.
+	TEST_EXPECT(editor_test::write_text(dir.file("outside.txt"), "O"));
+	TEST_EXPECT(editor_test::write_text(root + "/art/pair.duo", "../../outside.txt\n"));
+	run = pass();
+	TEST_EXPECT(!run.sources[0].ok && count_code(run.diagnostics, "import.input") == 1);
+	return 0;
+}
+
+// S13 A8: the image importer's TGA output (`format tga`): the 32-bit TGA formats/tga writes of the
+// decoded PNG, named after the source, its alpha kept (no import.alpha_dropped), the PCX the PCX
+// output made removed, the scan listing it as a texture the build packs; back to PCX the alpha is
+// dropped, and said.
+static int test_image_tga_output() {
+	editor_test::TempProjectDir dir("opennova_editor_import_tga");
+	const std::string root = dir.file("project");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Targa", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	PngSpec spec;
+	spec.width = 3;
+	spec.height = 2;
+	for (uint32_t y = 0; y < 2; ++y) {
+		spec.rows.push_back(0);
+		for (uint32_t x = 0; x < 3; ++x)
+			for (const uint32_t channel : {x * 80, y * 120, 33u, 64u + x * 60}) spec.rows.push_back(uint8_t(channel));
+	}
+	const std::vector<uint8_t> png = make_png(spec);
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", png) && mark_for_import(root + "/art/glow.png"));
+	ImportRunResult run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && count_code(run.diagnostics, "import.alpha_dropped") == 1);
+	TEST_EXPECT(run.sources.size() == 1 && run.sources[0].outputs.size() == 1);
+	const std::string pcx = run.sources.empty() || run.sources[0].outputs.empty() ? std::string() : run.sources[0].outputs[0];
+	TEST_EXPECT(fs::path(pcx).filename() == "glow.pcx" && fs::is_regular_file(root + "/" + pcx));
+
+	ImportSidecar record;
+	TEST_EXPECT(load_import_sidecar(root + "/art/glow.png.import", record, error));
+	record.options["format"] = "tga";
+	TEST_EXPECT(save_import_sidecar(root + "/art/glow.png.import", record, error));
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && count_code(run.diagnostics, "import.alpha_dropped") == 0 && run.sources[0].ok);
+	TEST_EXPECT(run.sources[0].outputs.size() == 1);
+	const std::string tga = run.sources[0].outputs.empty() ? std::string() : run.sources[0].outputs[0];
+	TEST_EXPECT(fs::path(tga).filename() == "glow.tga" && !fs::exists(root + "/" + pcx));
+	RgbaImage decoded;
+	std::string message;
+	TEST_EXPECT(decode_png(png, decoded, message));
+	std::vector<uint8_t> expected, written;
+	TEST_EXPECT(opennova::tga::tga_write_rgba32(decoded.pixels.data(), 3, 2, expected, message));
+	TEST_EXPECT(read_file_bytes(root + "/" + tga, written, message) && written == expected);
+	const AssetScan scan = scan_project_assets(paths, doc);
+	TEST_EXPECT(scan.find("glow.tga") && scan.find("glow.tga")->kind == AssetKind::Texture &&
+	            scan.find("glow.tga")->imported_from == "art/glow.png");
+	TEST_EXPECT(scan.find("glow.png") && scan.find("glow.png")->kind == AssetKind::ImportSource);
+	TEST_EXPECT(load_import_sidecar(root + "/art/glow.png.import", record, error) &&
+	            record.outputs == std::vector<std::string>{"glow.tga"});
+	record.options["format"] = "pcx";
+	TEST_EXPECT(save_import_sidecar(root + "/art/glow.png.import", record, error));
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && count_code(run.diagnostics, "import.alpha_dropped") == 1 &&
+	            !fs::exists(root + "/" + tga) && fs::is_regular_file(root + "/" + pcx));
+	return 0;
+}
+
+// S13 A8: an output is named after its source's stem, or after it with an underscore and a suffix
+// of its own where an importer makes several (a particle layout's frames, a terrain's colour
+// tiles), and follows a rename of the source either way; any other keeps its name.
+static int test_renamed_import_outputs() {
+	TEST_EXPECT(renamed_import_output("logo.pcx", "logo.png", "brand.png") == "brand.pcx");
+	TEST_EXPECT(renamed_import_output("LOGO.pcx", "logo.png", "brand.png") == "brand.pcx");
+	TEST_EXPECT(renamed_import_output("smoke_01.tga", "smoke.png", "fire.png") == "fire_01.tga");
+	TEST_EXPECT(renamed_import_output("Smoke_02.TGA", "smoke.png", "fire.png") == "fire_02.TGA");
+	TEST_EXPECT(renamed_import_output("smokey.tga", "smoke.png", "fire.png") == "smokey.tga");
+	TEST_EXPECT(renamed_import_output("smoke_.tga", "smoke.png", "fire.png") == "smoke_.tga");
+	TEST_EXPECT(renamed_import_output("other.tga", "smoke.png", "fire.png") == "other.tga");
+	return 0;
+}
+
+// S13 A8: a project folder some 218 characters long, its own files short of Windows' MAX_PATH
+// (260 characters), its import's outputs under .opennova/imported/ past it: the output is written,
+// found by the next pass (which imports nothing) and listed by the scan, every call on it taking the
+// system path (system_path).
+static int test_deep_root_import() {
+	editor_test::TempProjectDir dir("opennova_editor_import_deep");
+	std::string root = dir.root();
+	while (root.size() + 1 < 218) root += "/" + std::string(std::min<size_t>(60, 218 - root.size() - 1), 'd');
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Deep", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	PngSpec spec;
+	spec.width = 1;
+	spec.height = 1;
+	spec.rows = {0, 200, 100, 50, 255};
+	TEST_EXPECT(editor_test::write_bytes(root + "/art/glow.png", make_png(spec)) && mark_for_import(root + "/art/glow.png"));
+	ImportRunResult run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 1 && run.sources.size() == 1 && run.sources[0].ok && run.sources[0].outputs.size() == 1);
+	const std::string output = run.sources.empty() || run.sources[0].outputs.empty() ? std::string()
+	                                                                                 : root + "/" + run.sources[0].outputs[0];
+	std::error_code ec;
+	TEST_EXPECT(output.size() > 259 && fs::is_regular_file(system_path(output), ec));
+	std::printf("editor_import: a project folder %zu characters long, its import's output at %zu\n", root.size(),
+	            output.size());
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.reimported == 0 && run.sources.size() == 1 && run.sources[0].ok);
+	const AssetScan scan = scan_project_assets(paths, doc);
+	TEST_EXPECT(scan.find("glow.pcx") && scan.find("glow.pcx")->imported_from == "art/glow.png" &&
+	            scan.find("glow.pcx")->size_bytes > 0);
+	TEST_EXPECT(count_code(scan.diagnostics, "import.output_missing") == 0);
+	return 0;
+}
+
 // The sidecar's lifetime (S9c): it holds nothing a checkout changes (a touched source
 // leaves its bytes alone, new content changes its hash) while the machine-local import
 // cache holds the size and the time; a record that does not parse is never replaced;
@@ -378,6 +631,9 @@ static int test_import_lifetime() {
 	const std::string sidecar_path = source + ".import";
 	TEST_EXPECT(editor_test::write_bytes(source, gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(source));
+	// Written a while ago, so the cache keeps it by its stamp (S13 A8: a file written within the
+	// settle window is read by every pass until it settles).
+	TEST_EXPECT(editor_test::backdate(source, std::chrono::hours(2)));
 	editor_test::handle_to_end(session, request::rescan());
 	const std::string first = read_text(sidecar_path);
 	TEST_EXPECT(!first.empty() && first.find("modified") == std::string::npos && first.find("size") == std::string::npos);
@@ -404,8 +660,10 @@ static int test_import_lifetime() {
 		TEST_EXPECT(io::json_parse(read_text(paths.import_cache_file), cache, message) && cache.is_object());
 		const int schema = cache.get_int("schema_version", -1);
 		cache.set("schema_version", io::JsonValue::make_number(schema - 1));
-		if (io::JsonValue *sources = cache.get("sources"))
-			for (io::JsonValue &item : sources->array) item.set("hash", io::JsonValue::make_string(io::hex64(1)));
+		io::JsonValue *files = cache.get("files");
+		TEST_EXPECT(files && files->is_array() && !files->array.empty());
+		if (files)
+			for (io::JsonValue &item : files->array) item.set("hash", io::JsonValue::make_string(io::hex64(1)));
 		TEST_EXPECT(editor_test::write_text(paths.import_cache_file, io::json_write(cache)));
 		editor_test::handle_to_end(session, request::rescan());
 		TEST_EXPECT(view.project.imports->size() == 1 && read_text(sidecar_path) == first);
@@ -532,7 +790,7 @@ static int test_retail_source() {
 	TEST_EXPECT(
 			view.project.retail_files.size() == 4); // the archive itself is not an importable file
 	std::vector<Diagnostic> diagnostics;
-	const std::vector<ImportSource> sources = list_retail_import_sources(retail, *view.project.document, diagnostics);
+	const std::vector<ImportChoice> sources = list_retail_import_choices(retail, *view.project.document, diagnostics);
 	TEST_EXPECT(diagnostics.empty() && sources.size() == 4 && sources[0].install && sources[0].path == retail);
 	// The whole list to choose from, none chosen: nothing planned yet.
 	editor_test::handle_to_end(session, request::preview_install_import());
@@ -547,7 +805,7 @@ static int test_retail_source() {
 	for (const RequirementRow &candidate : view.project.requirements->rows) if (candidate.name == "gametext.bin") row = &candidate;
 	TEST_EXPECT(row && row->state == RequirementState::Missing);
 	EditorRequest choose = request::of(EditorRequestKind::PlanImport);
-	ImportSource source;
+	ImportChoice source;
 	source.path = retail;
 	source.entry = "gametext.bin";
 	source.install = true;
@@ -577,7 +835,7 @@ static int test_retail_source() {
 	import.imports.clear();
 	source.entry = "splash.png";
 	import.imports.push_back(source);
-	ImportSource member;
+	ImportChoice member;
 	member.path = retail + "/resource.pff";
 	member.entry = "icon.png";
 	import.imports.push_back(member);
@@ -688,6 +946,10 @@ int main(int argc, char **argv) {
 	failures += test_png_decode();
 	failures += test_quantize();
 	failures += test_import_pass();
+	failures += test_import_inputs();
+	failures += test_image_tga_output();
+	failures += test_renamed_import_outputs();
+	failures += test_deep_root_import();
 	failures += test_import_lifetime();
 	failures += test_retail_source();
 	failures += test_scene_imports();
