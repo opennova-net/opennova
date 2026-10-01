@@ -1142,6 +1142,19 @@ struct TeamAssign {
 bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
                         size_t &consumed);
 
+// S2C 0x51 TEAM-CHANGE CONFIRM — `[i16 index]` then the 0x50 body
+// `[u16 handle][u8 team][u16 netId][u8 animSlot]`: one entry of the host's
+// team-change list, the reply to a C2S 0x29 {index}. The handler reads every
+// field with a zero default (a short body still dispatches, handle 0
+// included), so this decoder never fails; it reports whether the whole 8-byte
+// body arrived. [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — the reads
+// @0x431bc4..0x431c11; the writer NetPacket_WriteEntityPacket @0x506BB0]
+struct TeamChangeConfirm {
+	uint16_t index = 0;   // the list index the C2S 0x29 asked for
+	TeamAssign assign;    // the entry's 0x50 record; a short tail reads zero
+};
+bool decode_team_change_confirm(const uint8_t *body, size_t len, TeamChangeConfirm &out);
+
 // ===========================================================================
 // C2S 0x0C — per-entity client-to-host packet. Outer body starts with a 5-byte
 // sub-header `[u16 handle][u16 itemTypeId][u8 sub_op]` written by

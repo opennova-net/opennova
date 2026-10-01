@@ -167,6 +167,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::TEAM_CHANGE_CONFIRM: // one team-change list entry (0x51)
+		apply_team_change_confirm(body);
+		break;
 	case s2c::VISIBLE_PLAYERS:
 		apply_visible_players(body);
 		break;

@@ -253,6 +253,10 @@ public:
 	//  (NetId), the MinimapSlot_HasEntity fallback @0x431b4d..0x431b77, the
 	//  CharacterEntity rebind @0x431b8c..0x431b91]
 	void apply_player_identity(uint16_t handle, uint16_t net_id, uint8_t anim_slot);
+	// S2C 0x51: one entry of the host's team-change list (the C2S 0x29
+	// continuation is the connection's).
+	// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0]
+	void apply_team_change_confirm(const std::vector<uint8_t> &body);
 
 	const ClientState &state() const { return state_; }
 	ClientState &state() { return state_; }

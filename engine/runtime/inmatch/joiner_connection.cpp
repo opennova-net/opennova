@@ -1200,6 +1200,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// reducer-only and loopback tests still passed.
 		// [orig: g_NPMsgInfoClient @0x82AE28]
 		out.inbound_reducer.emplace_back(m.tag, m.payload);
+		on_list_walk_page(m, periodic_replies);
 
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
 		// ensures a 0x39 before a same-packet 0x5A still sees the prior class.

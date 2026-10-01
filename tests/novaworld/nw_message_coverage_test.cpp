@@ -1990,6 +1990,30 @@ int check_squad_and_waypoint_legs() {
 	return 0;
 }
 
+// S2C 0x51 — one team-change list entry: [i16 index] + the 0x50 body. Every
+// field zero-fills and a short read does not advance, so a 3-byte body reads
+// its third byte as the team; the handle defaults to 0.
+// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0]
+int check_S_51_team_change_confirm() {
+	TeamAssign assign;
+	assign.entity_handle = 0x0004;
+	assign.team = 2;
+	assign.net_id = 0x8402;
+	assign.anim_slot = 7;
+	const std::vector<uint8_t> wire = encode_team_change_confirm(3, assign);
+	EXPECT(wire.size() == 8);
+	TeamChangeConfirm out;
+	EXPECT(decode_team_change_confirm(wire.data(), wire.size(), out));
+	EXPECT(out.index == 3 && out.assign.entity_handle == 0x0004 && out.assign.team == 2 &&
+	       out.assign.net_id == 0x8402 && out.assign.anim_slot == 7);
+	const uint8_t shorty[3] = {5, 0, 9};
+	EXPECT(!decode_team_change_confirm(shorty, sizeof(shorty), out));
+	EXPECT(out.index == 5 && out.assign.entity_handle == 0 && out.assign.team == 9 &&
+	       out.assign.net_id == 0 && out.assign.anim_slot == 0);
+	cover('S', 0x51);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -2190,6 +2214,7 @@ int main() {
 	if (check_emote_pair()) return 1;
 	if (check_squad_and_waypoint_legs()) return 1;
 	if (check_radio_call_request()) return 1;
+	if (check_S_51_team_change_confirm()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

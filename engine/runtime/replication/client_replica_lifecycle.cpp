@@ -238,4 +238,25 @@ void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_
 	state_.mark_changed();
 }
 
+// One team-change list entry: the addressed slot takes the entry's team off
+// the authority, and a player its identity pair, the 0x50 record's fields
+// without the 0x50 handler's slot-table, loadout and refresh legs.
+// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — the handle gates
+//  @0x431c1a..0x431c49, Team @0x431c6d (!is_authority), the C2S 0x29
+//  {index + 1} @0x431c88..0x431c99, the player gate @0x431ca5, NetId
+//  @0x431cad with the MinimapSlot_HasEntity fallback @0x431cb4..0x431cde,
+//  CharacterEntity @0x431cfc, animSlot @0x431cff]
+void ClientReplicaPipeline::apply_team_change_confirm(const std::vector<uint8_t> &body) {
+	TeamChangeConfirm entry;
+	if (!decode_team_change_confirm(body.data(), body.size(), entry)) ++malformed_bodies_;
+	const uint16_t handle = entry.assign.entity_handle;
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount ||
+			static_cast<std::size_t>(h.slot()) >= world::retail_pool_capacity(h.pool()))
+		return;
+	if (!authority_recipient_) apply_team_assign(handle, entry.assign.team);
+	if (is_player_entity(handle))
+		apply_player_identity(handle, entry.assign.net_id, entry.assign.anim_slot);
+}
+
 } // namespace opennova::replication

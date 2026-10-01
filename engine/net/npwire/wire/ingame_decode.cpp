@@ -1073,6 +1073,32 @@ bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
 	return true;
 }
 
+// S2C 0x51 team-change confirm: every field zero-fills and a short read does
+// not advance, so a later narrower field still reads what remains; the handle
+// defaults to 0, not the 0xFFFF sentinel. [orig: NapiNPClientMsg_HandlePlayerSpawn
+// @0x431BB0 — index @0x431bca, handle @0x431bdd, team @0x431bed, NetId
+// @0x431bfc, animSlot @0x431c11]
+bool decode_team_change_confirm(const uint8_t *body, size_t len, TeamChangeConfirm &out) {
+	out = TeamChangeConfirm{};
+	size_t at = 0;
+	const auto u16 = [&]() -> uint16_t {
+		if (at + 2 > len) return uint16_t{0};
+		const uint16_t v = static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
+		at += 2;
+		return v;
+	};
+	const auto u8 = [&]() -> uint8_t {
+		if (at + 1 > len) return uint8_t{0};
+		return body[at++];
+	};
+	out.index = u16();
+	out.assign.entity_handle = u16();
+	out.assign.team = u8();
+	out.assign.net_id = u16();
+	out.assign.anim_slot = u8();
+	return len >= 8;
+}
+
 // ===========================================================================
 // Uncharacterized-tag bodies (D-NET-73 / D-NET-74). Field maps: docs
 // §5.28-§5.33. Witnessed in Jointops.exe.kong.i64 this pass; see ingame_decode.h

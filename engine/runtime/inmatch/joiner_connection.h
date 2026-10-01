@@ -702,6 +702,10 @@ private:
 	void apply_self_spawn(uint16_t handle, bool has_body, uint32_t owner,
 			uint16_t flags, const SelfSpawn &spawn, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	// The paged host lists a client walks with its own C2S reply
+	// (joiner_connection_walks.cpp): the team-change list's S2C 0x51 -> C2S 0x29
+	// {index + 1}. The pages' entity folds are the replica pipeline's.
+	void on_list_walk_page(const ProtocolMessage &m, std::vector<ProtocolMessage> &replies);
 	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
 	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.
 	void on_server_goodbye(const std::vector<uint8_t> &body, PollResult &out);
