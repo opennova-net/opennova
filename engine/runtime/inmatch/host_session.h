@@ -116,6 +116,12 @@ struct HostConfig {
 	// game type) + the §6.9 rule globals + the §5.1 reactive-reply config (mission / player / spawn).
 	GameConfig config;
 	SocketMode socket_mode = SocketMode::Lan; // Lan (real socket) / Socketless (SP in-process loopback)
+	// The network type the host runs under: NovaWorld for a host the NovaWorld menu's session
+	// hosts (the menu's SetNetworkType(1) stands through the match; its host leg is
+	// ConnectOrHost's, net/novaworld/connect_or_host.h), Lan otherwise
+	// [orig: UI_ProcessLANSessionStateMachine @0x558e85..0x558e8c -> CNapiNetwork_SetNetworkType @0x4c4a50;
+	//  UI_HandleHostSessionStart @0x556d00 leaves the type alone for connect type 1].
+	NetworkType network_type = NetworkType::Lan;
 	// Nonzero values are deterministic overrides for golden/tests. Zero asks the production helper
 	// to mint the volatile retail startup value.
 	uint32_t host_key = 0;

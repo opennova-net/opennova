@@ -30,7 +30,9 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -46,6 +48,11 @@ uint64_t now_ms() {
 	return static_cast<uint64_t>(
 		duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
 }
+
+// How long a dropped connection's lobby identity waits for its reconnect: the NOVAWORLDUDP
+// connection's own reap window (CS field 0). Service policy.
+// [orig: CNapiGameSession_InitNPConnection @0x4d3e1f (240000)]
+constexpr uint64_t kParkedLobbyTtlMs = 240000;
 
 // "0x41"-style signature for the unknown tracker. Width follows the value so
 // a 1-byte opcode reads "0x41" and a wider tag reads "0x0123".
@@ -211,6 +218,7 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 		std::lock_guard<std::mutex> lock(lobby_states_mu_);
 		lobby_peers_.clear();
 		lobby_states_.clear();
+		parked_lobby_states_.clear();
 	}
 
 	jo_peers_.clear();
@@ -292,6 +300,13 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 		if (it == lobby_states_.end()) return;
 		was_hosting = it->second.lobby.hosting;
 		rid = it->second.lobby.rid;
+		// Park the identity for the connection's reconnect (see parked_lobby_states_).
+		const uint64_t now = now_ms();
+		for (auto park = parked_lobby_states_.begin(); park != parked_lobby_states_.end();) {
+			park = now - park->second.parked_ms > kParkedLobbyTtlMs ? parked_lobby_states_.erase(park)
+			                                                       : std::next(park);
+		}
+		parked_lobby_states_[peer] = ParkedLobbyState{it->second.client_ci, it->second.lobby, now};
 		if (was_hosting) {
 			std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
 			            peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
@@ -544,6 +559,24 @@ void NwUdpListener::run_loop() {
 			// fresh key set and fresh sequence frontier.
 			erase_lobby_state(peer, "reauth");
 
+			// A re-join that counted a disconnect takes back the identity its dropped
+			// connection parked; any other join from the address discards it.
+			std::optional<LobbyState> resumed_lobby;
+			{
+				std::lock_guard<std::mutex> lk(lobby_states_mu_);
+				const auto park = parked_lobby_states_.find(peer);
+				if (park != parked_lobby_states_.end()) {
+					if (static_cast<int32_t>(auth.dcnt) > 0 && park->second.client_ci == auth.ci &&
+					    now_ms() - park->second.parked_ms <= kParkedLobbyTtlMs) {
+						resumed_lobby = park->second.lobby;
+					}
+					parked_lobby_states_.erase(park);
+				}
+			}
+			// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — RCNT = the client's + 1 when DCNT > 0]
+			const uint32_t rcnt =
+					static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
+
 			const std::string server_scrk = make_dev_scrk();
 			const std::string nwuid = make_dev_nwuid();
 			// auth.scrk is the CLIENT-generated session key — store it for
@@ -574,6 +607,7 @@ void NwUdpListener::run_loop() {
 			                                     /*novaworld_name=*/"NWServer",
 			                                     /*novaworld_web_url=*/web_domain_,
 			                                     /*nwuid=*/nwuid);
+			reply.rcnt = rcnt; // [orig: SendSessionInit @0x62125d]
 			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
 			                                 server_auth_to_bytes(reply));
 			{
@@ -582,6 +616,14 @@ void NwUdpListener::run_loop() {
 				state.client_ci = auth.ci;
 				state.client_ck = auth.ck;
 				state.server_sk = server_sk;
+				state.dcnt = auth.dcnt;
+				state.rcnt = rcnt;
+				if (resumed_lobby) {
+					// The identity comes back unhosted: the re-host's ClientHostRequest
+					// (CurrentlyHosting=1) re-registers it under the kept RID / GSID.
+					state.lobby = std::move(*resumed_lobby);
+					state.lobby.hosting = false;
+				}
 				state.client_auth_body = body;
 				state.server_scrk = server_scrk;
 				state.server_auth_datagram = packet;

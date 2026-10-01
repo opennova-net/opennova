@@ -7,7 +7,8 @@
 
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
-#include "network/novaworld_host.h"
+#include "network/novaworld_client.h"
+#include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
@@ -24,8 +25,8 @@ constexpr const char *kSignalJoinAdmissionReady = "join_admission_ready";
 constexpr const char *kSignalJoinDeployPickRequired = "join_deploy_pick_required";
 constexpr const char *kSignalSessionLost = "session_lost";
 // HostSessionOptions.channel for the NovaWorld browser/lobby: the LAN channel
-// never reads or manufactures NovaWorld service configuration; the NovaWorld
-// channel supplies the gate.
+// never reads or manufactures NovaWorld service configuration; a NovaWorld host
+// is hosted by the NovaWorld session the shell hands over.
 constexpr const char *kChannelNovaWorld = "NovaWorld";
 
 int64_t now_ms() {
@@ -477,14 +478,15 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 		p_opts->set_player_name(pending_host_->get_player_name());
 		p_opts->set_max_players(pending_host_->get_max_players());
 		p_opts->set_channel(pending_host_->get_channel());
-		if (pending_host_->get_channel() == kChannelNovaWorld) {
-			p_opts->set_nw_gate_host(pending_host_->get_nw_gate_host());
-			p_opts->set_nw_gate_port(pending_host_->get_nw_gate_port());
-			p_opts->set_region_index(pending_host_->get_region_index());
-			if (!pending_host_->get_advertise().is_empty()) {
-				p_opts->set_advertise(pending_host_->get_advertise());
-			}
-		}
+		// The NovaWorld menu's host keeps the NovaWorld network type through the
+		// match: its session is already hosting (the service's host verify
+		// lands before the mission starts) and rides in with the load.
+		NovaWorldClient *client = nw_client();
+		pending_host_->set_network_type(
+				pending_host_->get_channel() == kChannelNovaWorld && client != nullptr &&
+								client->is_hosting()
+						? opennova::inmatch::NetworkType::NovaWorld
+						: opennova::inmatch::NetworkType::Lan);
 	} else if (pending_join_.is_valid()) {
 		p_opts->set_join_target(pending_join_);
 		p_opts->set_net_transport("lan-join");
@@ -503,22 +505,49 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 }
 
 void SessionDrive::on_runtime_started(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name) {
-	maybe_start_nw_host(p_opts, p_bms_name);
+	(void)p_bms_name;
+	bind_nw_host(p_opts);
 }
 
 void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 	update_joiner_admission_signals();
-	// Keep the gate registration's roster current: one PlayerList slot per
-	// admitted joiner (the host itself is slot 0, added at registration).
-	NovaWorldHost *host = nw_host();
-	if (host != nullptr && p_runtime != nullptr) {
-		Ref<Simulation> sim = p_runtime->get_sim();
-		if (sim.is_valid()) {
-			sync_nw_host_roster(host, sim);
-			// The TimeLeft column reads the live round clock at every refresh.
-			host->set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
-		}
+	Ref<Simulation> sim = p_runtime != nullptr ? p_runtime->get_sim() : Ref<Simulation>();
+	if (sim.is_null()) {
+		return;
 	}
+	// A hosting NovaWorld session follows the hosted match: one PlayerList slot
+	// per admitted player, the live round clock the TimeLeft column reads at
+	// every refresh, and the session's GSID as the in-match host's 0x81 SUS1
+	// (cleared when its connection tears down, re-supplied by a re-host).
+	NovaWorldClient *client = nw_client();
+	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
+		NwuHostRole &host = client->host_role();
+		sync_nw_host_roster(host, sim);
+		host.set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
+		sim->set_novaworld_registration(host.gsid(), host.app_id());
+	}
+	sync_nwu_session(sim);
+}
+
+void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
+	NwuLobbySession::MatchFacts facts;
+	bool node = false;
+	if (NovaWorldClient *client = nw_client()) {
+		facts = client->nwu_match_facts();
+		node = true;
+	}
+	if (!nwu_feed_live_) {
+		if (!node || (facts.role != opennova::ClientSession::kSessionRoleHosting &&
+						facts.role != opennova::ClientSession::kSessionRolePlaying)) {
+			return;
+		}
+		nwu_feed_live_ = true;
+	}
+	if (!node) {
+		facts = NwuLobbySession::MatchFacts{};
+		facts.in_use = true;
+	}
+	p_sim->set_nwu_session(facts.in_use, facts.flags, facts.role, facts.exit_reason);
 }
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
@@ -529,8 +558,8 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 // does not decrypt, so they ride as the retail-shaped empty string and "0".
 // The ClientPlayerEnterRequest is NOT sent from here: the in-match host's
 // join-phase watchdog announces a validating joiner itself (the hook bound in
-// on_nw_host_registered), before the player is ever added to this roster.
-void SessionDrive::sync_nw_host_roster(NovaWorldHost *p_host, const Ref<Simulation> &p_sim) {
+// bind_nw_host), before the player is ever added to this roster.
+void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
 	std::map<int, std::string> live;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
 		const std::string signature = opennova::to_std(slot.player_name) + "|" +
@@ -540,12 +569,17 @@ void SessionDrive::sync_nw_host_roster(NovaWorldHost *p_host, const Ref<Simulati
 		if (sent != nw_roster_sent_.end() && sent->second == signature) {
 			continue;
 		}
-		p_host->set_player_slot(slot.slot, slot.player_name, slot.ip_and_port, String(),
-				slot.team, "0");
+		opennova::HostPlayerSlot player;
+		player.slot = slot.slot;
+		player.player_name = opennova::to_std(slot.player_name);
+		player.ip_and_port = opennova::to_std(slot.ip_and_port);
+		player.team = opennova::to_std(slot.team);
+		player.type = "0";
+		p_host.set_player_slot(player);
 	}
 	for (const auto &sent : nw_roster_sent_) {
 		if (live.count(sent.first) == 0) {
-			p_host->clear_player_slot(sent.first);
+			p_host.clear_player_slot(sent.first);
 		}
 	}
 	nw_roster_sent_ = std::move(live);
@@ -555,122 +589,152 @@ void SessionDrive::reset() {
 	cancel_join_preload();
 	policy_->reset();
 	clear_pending_session();
-	stop_nw_host(/*p_from_host_signal=*/false);
+	stop_nw_client();
+	nwu_feed_live_ = false;
 }
 
-void SessionDrive::stop_nw_host(bool p_from_host_signal) {
+void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
+	if (p_client == nullptr) {
+		return;
+	}
+	if (nw_client() != p_client) {
+		stop_nw_client();
+	}
+	Node *parent = p_client->get_parent();
+	if (parent != world_) {
+		if (parent != nullptr) {
+			parent->remove_child(p_client);
+		}
+		world_->add_child(p_client);
+	}
+	nw_client_id_ = ObjectID(p_client->get_instance_id());
+	// A hosting session's service traffic reaches the in-match host.
+	const Callable command = callable_mp(world_, &GameWorld::on_nw_host_server_command);
+	if (!p_client->is_connected("server_command", command)) {
+		p_client->connect("server_command", command);
+	}
+	const Callable enter = callable_mp(world_, &GameWorld::on_nw_host_player_enter_result);
+	if (!p_client->is_connected("player_enter_result", enter)) {
+		p_client->connect("player_enter_result", enter);
+	}
+}
+
+// A normal exit back to the NovaWorld menu keeps the session: the world lets go
+// of the node (the hosted match's hooks unbound) and the shell re-enters the
+// menu with it, whose re-entry stops the hosting and the play (the post-mission
+// router's keep, engine: inmatch/mission_exit.h).
+NovaWorldClient *SessionDrive::release_nw_client() {
+	NovaWorldClient *client = nw_client();
+	unbind_nw_host();
+	nw_client_id_ = ObjectID();
+	nwu_feed_live_ = false;
+	if (client == nullptr) {
+		return nullptr;
+	}
+	const Callable command = callable_mp(world_, &GameWorld::on_nw_host_server_command);
+	if (client->is_connected("server_command", command)) {
+		client->disconnect("server_command", command);
+	}
+	const Callable enter = callable_mp(world_, &GameWorld::on_nw_host_player_enter_result);
+	if (client->is_connected("player_enter_result", enter)) {
+		client->disconnect("player_enter_result", enter);
+	}
+	if (client->get_parent() == world_) {
+		world_->remove_child(client);
+	}
+	return client;
+}
+
+Ref<PostMissionRoute> SessionDrive::post_mission_route(int p_reason) const {
+	// The NovaWorld network type rides an adopted NovaWorld session: a NovaWorld
+	// join or a NovaWorld host.
+	const opennova::inmatch::PostMissionRoute route =
+			opennova::inmatch::route_mission_exit(p_reason, nw_client() != nullptr);
+	Ref<Simulation> sim = world_->get_sim();
+	Ref<PostMissionRoute> out;
+	out.instantiate();
+	out->set_keep_session(route.keep_session);
+	out->set_error(route.error != opennova::inmatch::PostMissionError::None);
+	out->set_error_key(String(opennova::inmatch::post_mission_error_key(route.error)));
+	if (route.error == opennova::inmatch::PostMissionError::DisconnectReason && sim.is_valid()) {
+		out->set_error_text(sim->get_session_loss_reason());
+	}
+	return out;
+}
+
+NovaWorldClient *SessionDrive::nw_client() const {
+	return Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(nw_client_id_));
+}
+
+// A session the shell did not take back goes with the match: stop() leaves the
+// play or the hosting (ClientStopPlaying / ClientStopHosting while still in
+// them) and says goodbye.
+void SessionDrive::stop_nw_client() {
+	NovaWorldClient *client = nw_client();
+	unbind_nw_host();
+	if (client != nullptr) {
+		client->stop();
+		client->queue_free();
+	}
+	nw_client_id_ = ObjectID();
+}
+
+// The hosting session meets its match once the runtime is live: the GSID and
+// AppId the in-match host advertises, the join-ticket arm, and the host's own
+// player in the roster (Server_PlayerAdd adds the local player like any other,
+// its endpoint the bound game port).
+void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
+	NovaWorldClient *client = nw_client();
+	MissionRoot *runtime = world_->get_runtime();
+	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
+	if (client == nullptr || !client->is_hosting() || sim.is_null() || !sim->is_host_listening()) {
+		return;
+	}
+	NwuHostRole &host = client->host_role();
+	nw_host_bound_ = true;
+	sim->set_novaworld_registration(host.gsid(), host.app_id());
+	// A service that asked for join tickets arms the in-match host's join-phase
+	// watchdog: it announces each validating joiner through this hook and holds
+	// the player until on_nw_host_player_enter_result answers. The hook resolves
+	// the session node by identity on every call, so it stays safe after the
+	// node is gone; unbind_nw_host() clears it on teardown.
+	if (host.requires_join_ticket()) {
+		const ObjectID client_id = nw_client_id_;
+		sim->set_novaworld_join_tickets(true,
+				[client_id](uint32_t p_connection_id, uint32_t p_ip_packed, uint16_t p_port,
+						const String &p_join_ticket) {
+					NovaWorldClient *live = Object::cast_to<NovaWorldClient>(
+							ObjectDB::get_instance(client_id));
+					if (live != nullptr) {
+						live->host_role().request_player_enter(p_connection_id, p_ip_packed,
+								p_port, opennova::to_std(p_join_ticket));
+					}
+				});
+	}
+	if (p_opts.is_valid() && p_opts->get_host_session().is_valid() &&
+			p_opts->get_host_session()->get_serve_and_play()) {
+		opennova::HostPlayerSlot self;
+		self.slot = 0;
+		self.player_name = opennova::to_std(p_opts->get_player_name());
+		self.ip_and_port = ":" + std::to_string(sim->get_host_listen_port());
+		self.team = "0";
+		self.type = "0";
+		host.set_player_slot(self);
+	}
+}
+
+void SessionDrive::unbind_nw_host() {
+	if (!nw_host_bound_) {
+		return;
+	}
+	nw_host_bound_ = false;
+	nw_roster_sent_.clear();
 	// The in-match host stops advertising the GSID and stops announcing joiners
-	// to a service it no longer hosts on; the hook goes first so nothing can call
-	// into a registration that is being torn down.
+	// to a session it is leaving.
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
 		sim->set_novaworld_registration(String(), 0);
-	}
-	// Gate registration teardown: tells the gate to drop the host row
-	// (ClientStopHosting). From inside one of the node's own signals the stop is
-	// deferred, so the node finishes draining its notices on a live session.
-	NovaWorldHost *host = nw_host();
-	if (host != nullptr) {
-		if (p_from_host_signal) {
-			host->call_deferred("stop");
-		} else {
-			host->stop();
-		}
-		host->queue_free();
-	}
-	nw_host_id_ = ObjectID();
-	nw_roster_sent_.clear();
-}
-
-NovaWorldHost *SessionDrive::nw_host() const {
-	return Object::cast_to<NovaWorldHost>(ObjectDB::get_instance(nw_host_id_));
-}
-
-// Register a browsable listen host with the NovaWorld gate (F1, ADR 0010).
-// The host-direction sibling of the joiner's NovaWorldClient: it runs the NWU
-// lobby handshake to the gate, then ClientHostRequest + ClientHostUpdate
-// heartbeats so the host shows in /api/hosts + the retail server browser.
-// Gated so it only fires for a real LAN listen server WITH a gate configured
-// -- single-player, joiners, and pure-LAN play (no nw_gate_host) all skip it,
-// unchanged.
-void SessionDrive::maybe_start_nw_host(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name) {
-	if (!GATE_REGISTRATION_ARMED) {
-		return;
-	}
-	if (p_opts->get_net_transport() != "lan") {
-		return;
-	}
-	// Register only when the explicit NovaWorld host flow supplied a gate. The
-	// in-match wire is shared, but the LAN menu path never reads or
-	// manufactures service configuration.
-	const String gate_host = p_opts->get_nw_gate_host();
-	if (gate_host.is_empty()) {
-		if (p_opts->get_channel() == kChannelNovaWorld) {
-			UtilityFunctions::push_warning(
-					"SessionDrive: NovaWorld host requested but no gate address (nw_gate_host) -- gate registration skipped; host is LAN-reachable only");
-		}
-		return; // no gate configured -> pure LAN, nothing to register with
-	}
-	MissionRoot *runtime = world_->get_runtime();
-	Ref<Simulation> sim = runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
-	if (sim.is_null() || !sim->is_host_listening()) {
-		return; // the listen socket never came up; nothing reachable to advertise
-	}
-	NovaWorldHost *host = memnew(NovaWorldHost);
-	world_->add_child(host);
-	nw_host_id_ = ObjectID(host->get_instance_id());
-	host->set_host(gate_host);
-	host->set_gate_port(p_opts->get_nw_gate_port());
-	host->set_server_name(p_opts->get_server_name());
-	host->set_mission_name(p_bms_name.get_basename());
-	host->set_max_players(p_opts->get_max_players());
-	// The actually-bound game port the joiner will dial (not the requested
-	// bind_port).
-	host->set_game_port(sim->get_host_listen_port());
-	host->set_region_index(p_opts->get_region_index());
-	host->set_player_name(p_opts->get_player_name());
-	if (!p_opts->get_advertise().is_empty()) {
-		host->set_advertise_ip(p_opts->get_advertise());
-	}
-	host->connect("registered", callable_mp(world_, &GameWorld::on_nw_host_registered));
-	host->connect("error_occurred", callable_mp(world_, &GameWorld::on_nw_host_error));
-	host->connect("server_command", callable_mp(world_, &GameWorld::on_nw_host_server_command));
-	host->connect("player_enter_result",
-			callable_mp(world_, &GameWorld::on_nw_host_player_enter_result));
-	host->start();
-}
-
-void SessionDrive::on_nw_host_registered() {
-	UtilityFunctions::print_verbose(
-			"SessionDrive: listen host registered with the NovaWorld gate (browsable)");
-	NovaWorldHost *host = nw_host();
-	Ref<Simulation> sim = world_->get_sim();
-	if (host == nullptr || sim.is_null()) {
-		return;
-	}
-	// The GSID the service's ServerHostResult carried becomes the in-match host's
-	// 0x81 SUS1 from here on (a pure-LAN host keeps it empty), and the
-	// registration's AppId the status page's session key.
-	sim->set_novaworld_registration(host->get_gsid(), host->get_app_id());
-	// A service that asked for join tickets arms the in-match host's join-phase
-	// watchdog: it announces each validating joiner through this hook and holds
-	// the player until on_nw_host_player_enter_result answers. The hook resolves
-	// the registration node by identity on every call, so it stays safe after the
-	// node is freed; stop_nw_host() unbinds it on teardown.
-	if (host->get_host_requires_join_ticket()) {
-		const ObjectID host_id = nw_host_id_;
-		sim->set_novaworld_join_tickets(true,
-				[host_id](uint32_t p_connection_id, uint32_t p_ip_packed, uint16_t p_port,
-						const String &p_join_ticket) {
-					NovaWorldHost *live = Object::cast_to<NovaWorldHost>(
-							ObjectDB::get_instance(host_id));
-					if (live != nullptr) {
-						live->request_player_enter(static_cast<int64_t>(p_connection_id),
-								static_cast<int64_t>(p_ip_packed), static_cast<int>(p_port),
-								p_join_ticket);
-					}
-				});
 	}
 }
 
@@ -687,19 +751,20 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 				"SessionDrive: NovaWorld ServerCommand '%s%s' was not executed", p_verb, p_target));
 		return;
 	}
+	NovaWorldClient *client = nw_client();
 	if (result.stop_hosting) {
-		// The service punted the host's own slot: the host leaves NovaWorld
-		// hosting (the gate drops the row); the match itself keeps running.
-		stop_nw_host(/*p_from_host_signal=*/true);
+		// The service punted the host's own slot: the session leaves NovaWorld
+		// hosting (ClientStopHosting, the word back to verified), and the
+		// NovaWorld exit ends the match on its next 62-frame block.
+		if (client != nullptr) {
+			client->stop_hosting();
+		}
 		return;
 	}
-	if (result.config_changed) {
-		// The changed columns ride the registration's next refresh as its dirty delta.
-		NovaWorldHost *host = nw_host();
-		if (host != nullptr) {
-			host->set_server_name(result.server_name);
-			host->set_server_message(result.server_message);
-		}
+	if (result.config_changed && client != nullptr) {
+		// The changed columns ride the session's next refresh as its dirty delta.
+		client->host_role().set_server_name(opennova::to_std(result.server_name));
+		client->host_role().set_server_message(opennova::to_std(result.server_message));
 	}
 }
 
@@ -719,6 +784,3 @@ void SessionDrive::on_nw_host_player_enter_result(int64_t p_connection_id, int p
 	}
 }
 
-void SessionDrive::on_nw_host_error(const String &p_message) {
-	UtilityFunctions::push_warning(vformat("SessionDrive: NovaWorld host registration error: %s", p_message));
-}

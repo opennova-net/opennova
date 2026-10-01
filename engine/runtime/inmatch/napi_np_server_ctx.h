@@ -197,6 +197,15 @@ struct NapiNPServerCtx {
 	// indicators [orig: CNetQuality_UpdateMetrics's tail @0x4c585a..0x4c58b0 ->
 	// CNetQuality_SetLevel(&g_NetQuality, level) @0x52659b].
 	int32_t net_quality_level = 0;
+	// The NovaWorld UDP (NWU) session the authority's NovaWorld registration
+	// runs, as the shell reports it each tick: in use (dword_B5FD2C) and its
+	// hosting/playing word (session+0x128, dword_B60108). The 62-frame block's
+	// NovaWorld exit reads them beside transport_mode, and stores
+	// g_MissionExitReason 12 here; so does the session's own punt handler.
+	// [orig: Game_ProcessMainFrame @0x52655d..0x52657c]
+	bool nwu_in_use = false;
+	int32_t nwu_session_role = 0;
+	int32_t mission_exit_reason = 0;
 	// The server protocol's link-error callbacks since the host role last
 	// drained them (kNetQualityLinkError* bits): a joiner's 0x44 resend list
 	// that named a sequence, our 0x84 missing-sequence request that named one.

@@ -15,6 +15,7 @@
 // echo, the 0x43/0x83 framing), this test fails.
 
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/npwire/session_hello.h>
@@ -27,9 +28,11 @@
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -124,6 +127,9 @@ struct MiniServer {
 	std::string client_scrk;               // learned from ClientAuth
 	uint32_t client_ck = 0;
 	uint32_t last_client_hk = 0;           // captured for the echo assertion
+	uint32_t last_dcnt = 0;                // the last 0x42's DCNT / RCNT
+	uint32_t last_rcnt = 0;
+	uint32_t auths = 0;                    // ClientAuths answered
 	// Retail protocol packets are 1-based in both directions; sequence zero is the
 	// no-packet/force-send sentinel and never crosses the contiguous admission gate.
 	uint32_t next_seq = 1;
@@ -227,10 +233,18 @@ struct MiniServer {
 			last_client_hk = auth.hk;
 			client_ck = auth.ck;
 			client_scrk = auth.scrk;
+			last_dcnt = auth.dcnt;
+			last_rcnt = auth.rcnt;
+			++auths;
+			// Every ClientAuth is a fresh server connection: its own sequencing.
+			next_seq = 1;
+			last_client_seq = 0;
 			ServerAuth reply = build_server_auth(auth, 0x7F000001u, 5000,
 			                                     server_sk, server_scrk,
 			                                     "NWServer", "http://127.0.0.1:8080",
 			                                     nwuid);
+			// [orig: HandleClientJoin @0x62c28d..0x62c2a3; SendSessionInit @0x62125d]
+			reply.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
 			return server_encode_outbound(SESSION_OPCODE_SERVER_AUTH,
 			                              server_auth_to_bytes(reply));
 		}
@@ -294,6 +308,33 @@ bool bring_up(MiniServer &server, ClientSession &client) {
 	return client.is_verified();
 }
 
+// The teardown's burst: `count` identical 0x46 datagrams whose body is `body` (the receiver's
+// key and the latched record). [orig: TeardownActiveConnection @0x6253ef..0x625424]
+bool is_goodbye_burst(const std::vector<std::vector<uint8_t>> &out,
+                      const std::vector<uint8_t> &body, size_t count = 4) {
+	if (out.size() != count) return false;
+	for (const auto &dg : out) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> decoded;
+		if (!server_decode_inbound(dg, opcode, decoded) || opcode != SESSION_OPCODE_CLIENT_GOODBYE ||
+		    decoded != body) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// The datagrams of `out` with the given opcode.
+size_t count_opcode(const std::vector<std::vector<uint8_t>> &out, uint8_t want) {
+	size_t n = 0;
+	for (const auto &dg : out) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (server_decode_inbound(dg, opcode, body) && opcode == want) ++n;
+	}
+	return n;
+}
+
 // The peer-side session closes: S2C 0x86 ServerGoodBye keyed by the client's CK
 // and the inner H:0x03 connection description. Both latch the peer's record
 // (the tag becomes last_error), close the session, and the client's own 0x46
@@ -320,8 +361,10 @@ void test_peer_disconnect_legs() {
 		const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
 				server_goodbye_to_bytes(cfg.client_key, punt));
 		out.clear();
-		expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) && out.empty(),
-		       "0x86 keyed to our CK is handled without a reply");
+		expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) &&
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, punt)),
+		       "0x86 keyed to our CK tears the connection down: the 0x46 burst echoes the record");
+		expect(client.disconnect_count() == 1, "the teardown counts one disconnect (DCNT)");
 		expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 		       "0x86 closes the session as a peer disconnect");
 		expect(client.last_error() == "NP.S:PT:STOP", "0x86: the DDSTR tag is the error");
@@ -351,8 +394,9 @@ void test_peer_disconnect_legs() {
 				static_cast<uint8_t>(0x80u | PROTOCOL_MSG_FLAG_LEN8)));
 		const auto datagram = server.wrap(std::move(messages));
 		std::vector<std::vector<uint8_t>> out;
-		expect(client.handle_datagram(datagram.data(), datagram.size(), out) && out.empty(),
-		       "H:0x03 is terminal: no ack follows it");
+		expect(client.handle_datagram(datagram.data(), datagram.size(), out) &&
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, description)),
+		       "H:0x03 is terminal: the teardown's 0x46 burst and no ack follow it");
 		expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 		       "H:0x03 closes the session as a peer disconnect");
 		expect(client.last_error() == "NP.S:PT:MSGCRE" && client.disconnect_event().dpc == 4 &&
@@ -418,11 +462,12 @@ void test_send_interval_pump() {
 	client.set_clock_ms(static_cast<uint32_t>(cs.timeout_ms) + 1);
 	pumped.clear();
 	client.pump_send_intervals(pumped);
-	expect(pumped.empty(), "the reap sends nothing");
 	expect(client.state() == ClientSession::State::Closed && !client.disconnected_by_peer(),
 	       "the reap closes the session as a LOCAL disconnect");
 	expect(client.last_error() == "NP.C:PT:CLNTTMOUT", "the reap tag is NP.C:PT:CLNTTMOUT");
 	const DisconnectEvent &reap = client.disconnect_event();
+	expect(is_goodbye_burst(pumped, client_goodbye_to_bytes(server.server_sk, reap)),
+	       "the reap tears the connection down: the 0x46 burst carries the CLNTTMOUT record");
 	expect(reap.ds == 2 && reap.dc == 3 && reap.dp1 == static_cast<uint32_t>(cs.timeout_ms) + 1 &&
 	               reap.dp2 == static_cast<uint32_t>(cs.timeout_ms),
 	       "the reap record carries {2, 3, elapsed, timeout}");
@@ -454,11 +499,15 @@ void test_leave_novaworld() {
 	leave.fields.push_back(str_field("MsgParam2", "0"));
 	const auto datagram = server.push(leave);
 	std::vector<std::vector<uint8_t>> out;
-	expect(client.handle_datagram(datagram.data(), datagram.size(), out) && out.empty(),
-	       "the punt is terminal: no ack follows it");
+	expect(client.handle_datagram(datagram.data(), datagram.size(), out) &&
+	               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk)),
+	       "the punt is terminal: RequestDisconnect's 0x46 burst (nothing latched) and no ack");
+	expect(!client.reconnecting(), "the punt disarms the reconnect (the word is 0)");
 	expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 	       "the punt closes the session as a peer disconnect");
 	expect(client.mission_exit_reason() == 12, "the punt sets exit reason 12");
+	expect(client.session_flags() == 0u && client.session_role() == ClientSession::kSessionRoleNone,
+	       "the punt drops the state flags and the hosting/playing word to 0");
 	const auto notices = client.take_notices();
 	if (expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::LeaveNovaWorld,
 	           "one LeaveNovaWorld notice")) {
@@ -466,6 +515,52 @@ void test_leave_novaworld() {
 		               notices[0].fields.msg_param1 == 7,
 		       "the punt notice carries the Success/MsgCode/MsgParam triple");
 	}
+}
+
+// The session words the match reads (D-NET-220): the flags word the state setter keeps per
+// state, and the hosting/playing word. A fresh connect is state 1 with the word 0; the verify
+// marks it 1, the play verify 3; a peer close drops the state to 0 but leaves the word; the
+// local reset drops both.
+// [orig: CGameSession_SetState @0x4ce140; InitNPConnection @0x4d40d0..0x4d412c,
+//  InitPlayerConnection @0x4d43e3; HandleConnectVerifyResponse @0x4d5920..0x4d5940;
+//  HandleVerifyResponse @0x4d1f35..0x4d1f53; CNapiGameSession_OnDisconnect @0x4cfb68;
+//  ResetToDisconnected @0x4d08fc..0x4d0927]
+void test_session_words() {
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000035u;
+	cfg.client_key = 0x35353535u;
+	{
+		ClientSession fresh(cfg);
+		(void)fresh.start();
+		expect(fresh.session_flags() == 0x1u && fresh.session_role() == ClientSession::kSessionRoleNone,
+		       "start(): state 1 holds flag bit 1, the word 0");
+	}
+	MiniServer server;
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "words: session reaches Verified")) return;
+	expect(client.session_flags() == 0x1Au && client.session_role() == ClientSession::kSessionRoleVerified,
+	       "verified: state 4 holds 0x1A (bits 2 and 8), the word 1");
+	const auto d_play = client.build_play_request(
+			make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0));
+	expect(client.session_flags() == 0x9Au, "the play request: state 7 holds 0x9A");
+	const auto s_play = server.respond(d_play);
+	std::vector<std::vector<uint8_t>> out;
+	expect(client.handle_datagram(s_play.data(), s_play.size(), out) &&
+	               client.session_flags() == 0x10Au &&
+	               client.session_role() == ClientSession::kSessionRolePlaying,
+	       "playing: state 8 holds 0x10A, the word 3");
+	const DisconnectEvent punt = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, punt));
+	out.clear();
+	expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) &&
+	               client.state() == ClientSession::State::Closed,
+	       "the peer's goodbye closes the session");
+	expect(client.session_flags() == 0u && client.session_role() == ClientSession::kSessionRolePlaying,
+	       "a peer close drops the state flags but leaves the playing word");
+	(void)client.build_goodbye();
+	expect(client.session_role() == ClientSession::kSessionRoleNone,
+	       "the local reset drops the word to 0");
 }
 
 // Parse-side roundtrip for the new client-direction parsers, independent of
@@ -687,15 +782,464 @@ void test_play_uses_current_http_cookies() {
 	               !var_has(reset_cookies, "PCID"), "cleared HTTP cookies cannot leak into another play request");
 }
 
+// One named param of a container ("" when absent).
+std::string field_of(const NapiMessage &m, const char *name) {
+	for (const auto &f : m.fields)
+		if (f.name == name) return field_to_string(f);
+	return std::string();
+}
+
+// Feed every datagram of `in` to the server and every reply back to the client; the client's
+// replies to those land in `out`.
+void exchange(MiniServer &server, ClientSession &client,
+              const std::vector<std::vector<uint8_t>> &in,
+              std::vector<std::vector<uint8_t>> &out) {
+	for (const auto &dg : in) {
+		const auto reply = server.respond(dg);
+		if (!reply.empty()) client.handle_datagram(reply.data(), reply.size(), out);
+	}
+}
+
+// Deterministic re-join keys for the reconnect tests.
+void inject_reconnect_keys(ClientSession::Config &cfg, uint32_t first_key) {
+	auto next = std::make_shared<uint32_t>(first_key);
+	cfg.next_client_key = [next]() { return (*next)++; };
+	auto scrks = std::make_shared<int>(0);
+	cfg.next_scrk = [scrks]() {
+		return std::string("RECONNECTSCRK") + std::to_string((*scrks)++) +
+		       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	};
+}
+
+// The reconnect's wire trailer: DCNT/RCNT after SCRK on the 0x42, RCNT after RPN on the 0x82,
+// each only when nonzero, so a first join's bytes are unchanged.
+// [orig: SendClientJoin @0x62033d..0x62037f; SendSessionInit @0x62125d]
+void test_reconnect_wire() {
+	ClientSession::Config cfg;
+	ClientAuth auth = make_client_auth(cfg, cfg.co, 0x1234ABCDu, "SCRK");
+	const std::vector<uint8_t> first = client_auth_to_bytes(auth);
+	auth.dcnt = 1;
+	auth.rcnt = 3;
+	const std::vector<uint8_t> rejoin = client_auth_to_bytes(auth);
+	expect(rejoin.size() == first.size() + 2 * (5 + 2 + 4) &&
+	               std::equal(first.begin(), first.end(), rejoin.begin()),
+	       "a re-join's 0x42 is the first join's bytes plus the DCNT/RCNT trailer");
+	ClientAuth parsed;
+	expect(parse_client_auth(rejoin.data(), rejoin.size(), parsed) && parsed.dcnt == 1 &&
+	               parsed.rcnt == 3,
+	       "the 0x42's DCNT/RCNT round-trip");
+	ServerAuth sa = build_server_auth(auth, 0x7F000001u, 5000, 0xAABBCCDDu, "SERVERSCRK");
+	const std::vector<uint8_t> plain = server_auth_to_bytes(sa);
+	sa.rcnt = 4;
+	const std::vector<uint8_t> echoed = server_auth_to_bytes(sa);
+	ServerAuth parsed_sa;
+	expect(echoed.size() == plain.size() + 5 + 2 + 4 &&
+	               parse_server_auth(echoed.data(), echoed.size(), parsed_sa) && parsed_sa.rcnt == 4,
+	       "the 0x82 carries RCNT after RPN only when nonzero");
+}
+
+// Run the reconnect's probe until its 0x41 goes out: the clock steps 1 ms at a time from
+// `from`; returns the step the 0x41 rode (0 on none within `limit`).
+uint32_t pump_until_probe(ClientSession &client, uint32_t from, uint32_t limit,
+                          std::vector<std::vector<uint8_t>> &out) {
+	for (uint32_t t = from; t < from + limit; ++t) {
+		client.set_clock_ms(t);
+		std::vector<std::vector<uint8_t>> pumped;
+		client.pump_send_intervals(pumped);
+		if (count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0) {
+			out = std::move(pumped);
+			return t;
+		}
+	}
+	return 0;
+}
+
+// The reconnect's schedule: armed by the word, the first probe window opens one pump after the
+// 1000 ms first delay, the same-CI 0x41 rides every 3000 ms inside its 10000 ms window, and the
+// gap between windows starts at 1000 ms and grows by 1000 ms up to 60000 ms; it never gives up.
+// [orig: TeardownActiveConnection @0x6254f7..0x625525; PumpEnumeratorAndSend @0x6290c0;
+//  PumpStateMachine @0x629487..0x6296cb; InitNPConnection @0x4d4098..0x4d40bc]
+void test_reconnect_schedule() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000036u;
+	cfg.client_key = 0x36363636u;
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "schedule: session reaches Verified")) return;
+	expect(client.reconnect_armed() && !client.reconnecting(),
+	       "a verified session is armed (word 1) but connected");
+
+	// The reap at T0 tears the connection down; the first window opens past T0 + 1000.
+	const uint32_t t0 = 240001;
+	client.set_clock_ms(t0);
+	std::vector<std::vector<uint8_t>> out;
+	client.pump_send_intervals(out);
+	expect(client.reconnecting() && client.disconnect_count() == 1, "the reap starts the reconnect");
+	expect(client.retransmit_stage_datagram().empty(),
+	       "the owner's stage retransmit stands down while reconnecting");
+
+	// Long enough for the gap to reach its 60000 ms cap (sixty windows).
+	const uint32_t span = 2700000;
+	std::vector<uint32_t> probes;
+	size_t stray = 0;
+	for (uint32_t t = t0 + 1; t <= t0 + span; ++t) {
+		client.set_clock_ms(t);
+		out.clear();
+		client.pump_send_intervals(out);
+		if (out.empty()) continue;
+		if (count_opcode(out, SESSION_OPCODE_CLIENT_HELLO) == 1 && out.size() == 1) probes.push_back(t);
+		else ++stray;
+	}
+	expect(stray == 0, "the probe pump sends nothing but the 0x41");
+	// Window 1 opens at T0 + 1001 (past next = T0 + 1000); its 0x41s ride from the next pump.
+	if (expect(probes.size() >= 8, "probe windows keep coming")) {
+		expect(probes[0] == t0 + 1002, "the first 0x41 rides the pump after the window opens");
+		expect(probes[1] == t0 + 1002 + 3001 && probes[2] == t0 + 1002 + 6002 &&
+		               probes[3] == t0 + 1002 + 9003,
+		       "the 0x41 repeats every > 3000 ms inside the window");
+		// The window (opened at T0 + 1001) closes past T0 + 11001; the gap (1000) runs from
+		// there, then the next window opens one pump later and its first 0x41 the pump after.
+		expect(probes[4] == (t0 + 11002) + 1000 + 1 + 1, "window 2 follows the 1000 ms gap");
+	}
+	// The gaps between windows: the first 0x41 of each window, minus the end of the last.
+	std::vector<uint32_t> firsts;
+	for (size_t i = 0; i < probes.size(); ++i) {
+		// Inside a window the 0x41s are exactly 3001 ms apart; a window's first is not.
+		if (i == 0 || probes[i] - probes[i - 1] != 3001) firsts.push_back(probes[i]);
+	}
+	bool grows = true;
+	for (size_t i = 1; i < firsts.size(); ++i) {
+		// window i-1 opened at firsts[i-1] - 1 and closed at open + 10001; the gap is then
+		// 1000 * i capped at 60000, and the next window opens one pump past it.
+		const uint32_t close = (firsts[i - 1] - 1) + 10001;
+		const uint32_t gap = std::min<uint32_t>(1000u * static_cast<uint32_t>(i), 60000u);
+		if (firsts[i] != close + gap + 2) grows = false;
+	}
+	expect(firsts.size() >= 20 && grows, "the gap grows 1000 ms a window from 1000 ms");
+	bool capped = false;
+	for (size_t i = 1; i < firsts.size(); ++i) {
+		if (firsts[i] - ((firsts[i - 1] - 1) + 10001) == 60002u) capped = true;
+	}
+	expect(capped, "the gap stops growing at 60000 ms");
+	expect(client.reconnecting(), "the reconnect never gives up on its own");
+
+	// The local reset disarms it.
+	(void)client.build_goodbye();
+	expect(!client.reconnecting(), "the local reset disarms the reconnect");
+	out.clear();
+	expect(pump_until_probe(client, t0 + span + 1, 200000, out) == 0, "a disarmed session never re-probes");
+}
+
+// A joiner's reconnect: the word stays 3 across the drop, the re-join carries DCNT/RCNT with a
+// fresh CK and SCRK, the service's 0x82 echoes RCNT, and the re-verify replays the play request
+// (CurrentlyPlaying=1, the same PlaySetup). The GSID/NWUID/web domain the connection fed clear on
+// the drop. [orig: HandleConnectVerifyResponse @0x4d5998..0x4d599e; StartPlayingSession @0x4d45e0;
+//  CNapiGameSession_OnDisconnect @0x4cfaa0]
+void test_reconnect_replay() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000037u;
+	cfg.client_key = 0x37373737u;
+	cfg.cookie_vars = []() {
+		return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+	};
+	inject_reconnect_keys(cfg, 0x51515100u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "replay: session reaches Verified")) return;
+	const auto setup = make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0);
+	std::vector<std::vector<uint8_t>> out;
+	exchange(server, client, {client.build_play_request(setup)}, out);
+	expect(client.session_role() == ClientSession::kSessionRolePlaying, "replay: playing (word 3)");
+	expect(!client.server_nwuid().empty() && client.server_web_domain() != "???",
+	       "replay: the 0x82 fed the NWUID and the web domain");
+
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, stop));
+	out.clear();
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	expect(client.reconnecting() && client.session_role() == ClientSession::kSessionRolePlaying,
+	       "replay: the drop keeps the playing word and arms the reconnect");
+	expect(client.server_nwuid().empty() && client.server_web_domain() == "???" &&
+	               client.play_state() == ClientSession::PlayState::Idle,
+	       "replay: the disconnect callback clears the NWUID, the web domain and the play leg");
+
+	uint32_t t = 1;
+	if (!expect(pump_until_probe(client, t, 5000, out) != 0, "replay: the probe goes out")) return;
+	std::vector<std::vector<uint8_t>> joined;
+	exchange(server, client, out, joined);
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
+	            "replay: the ServerHello re-joins with one 0x42")) return;
+	expect(client.client_key() == 0x51515100u && client.client_scrk().rfind("RECONNECTSCRK0", 0) == 0,
+	       "replay: the re-join mints a fresh CK and SCRK");
+	const uint32_t auths_before = server.auths;
+	std::vector<std::vector<uint8_t>> up;
+	exchange(server, client, joined, up);
+	expect(server.auths == auths_before + 1 && server.last_dcnt == 1 && server.last_rcnt == 0,
+	       "replay: the 0x42 carries DCNT 1 and no RCNT");
+	expect(client.state() == ClientSession::State::Verifying && !client.reconnecting() &&
+	               client.reconnect_count() == 1,
+	       "replay: the 0x82 brings the connection up and its RCNT (1) is kept");
+	expect(client.server_nwuid() == server.nwuid, "replay: the reconnect's 0x82 re-supplies the NWUID");
+	up.clear();
+	client.process_periodic_update(up);
+	std::vector<std::vector<uint8_t>> verify;
+	exchange(server, client, up, verify);                      // ClientConnected -> StartVerify
+	std::vector<std::vector<uint8_t>> replay;
+	exchange(server, client, verify, replay);                  // verify -> ServerVerifyResult
+	const auto notices = client.take_notices();
+	bool replayed = false;
+	for (const auto &n : notices) if (n.kind == ClientSession::Notice::Kind::Replay) replayed = true;
+	expect(replayed && client.play_state() == ClientSession::PlayState::Requested,
+	       "replay: the re-verify re-sends the play request itself (a Replay notice)");
+	std::vector<NapiMessage> containers;
+	if (expect(replay.size() == 1 && decode_client_containers(replay[0], client.client_scrk(), containers) &&
+	                   containers.size() == 1 && containers[0].name == "ClientPlayRequest",
+	           "replay: one ClientPlayRequest goes out")) {
+		std::string currently;
+		for (const auto &f : containers[0].fields)
+			if (f.name == "CurrentlyPlaying") currently = field_to_string(f);
+		expect(currently == "1", "replay: CurrentlyPlaying is 1");
+	}
+	std::vector<std::vector<uint8_t>> done;
+	exchange(server, client, replay, done);
+	expect(client.play_state() == ClientSession::PlayState::Playing &&
+	               client.session_role() == ClientSession::kSessionRolePlaying &&
+	               client.session_flags() == 0x10Au,
+	       "replay: the replayed play verifies (state 8, word 3)");
+	expect(var_value(server.lobby.play_state["PlaySetup"], "IpAddress") == "127.0.0.1",
+	       "replay: the replay carries the stored PlaySetup");
+}
+
+// A host's reconnect: the re-verify counts ReconnectCounter up and re-sends ClientHostRequest
+// with CurrentlyHosting=1 and every session-owned list (HostSetup, the merged Host list, the
+// PlayerList), and the service's ServerHostResult re-supplies the GSID the drop cleared.
+// [orig: HandleConnectVerifyResponse @0x4d5961..0x4d5978; InitHeapsAndSerializeCounter
+//  @0x4ce300; SendHostRequest @0x4d3700; OnDisconnect's GSID clear @0x4cfc3b..0x4cfc54]
+void test_reconnect_rehost() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000038u;
+	cfg.client_key = 0x38383838u;
+	inject_reconnect_keys(cfg, 0x52525200u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "rehost: session reaches Verified")) return;
+	HostRegistration reg;
+	reg.server_name = "Rehost Srv";
+	reg.app_id = 2468;
+	const auto request = client.build_host_request(reg, 0);
+	std::vector<NapiMessage> containers;
+	if (expect(decode_client_containers(request, client.client_scrk(), containers) && containers.size() == 1,
+	           "rehost: the fresh host request decodes")) {
+		const NapiMessage &setup = containers[0].children[1];
+		expect(!setup.children.empty() &&
+		               field_of(setup.children.back(), "VarName") == "ReconnectCounter" &&
+		               field_of(setup.children.back(), "VarValue") == "0",
+		       "rehost: a fresh HostSetup ends with ReconnectCounter 0");
+	}
+	std::vector<std::vector<uint8_t>> out;
+	exchange(server, client, {request}, out);
+	const std::string gsid = client.host_gsid();
+	expect(!gsid.empty() && client.session_role() == ClientSession::kSessionRoleHosting,
+	       "rehost: registered (word 2) with a GSID");
+	HostPlayerSlot joiner;
+	joiner.slot = 1;
+	joiner.player_name = "Joiner";
+	joiner.ip_and_port = "10.0.0.9:32768";
+	joiner.team = "1";
+	joiner.type = "8";
+	exchange(server, client, {client.build_host_player_added(joiner)}, out);
+	exchange(server, client, {client.build_host_update({{0, "Players", "2"}, {0, "MissionName", "ASH_G11A"}}, {})},
+	         out);
+
+	// The connection drops (the reap); the GSID the in-match SUS1 publishes clears with it.
+	client.set_clock_ms(240001);
+	out.clear();
+	client.pump_send_intervals(out);
+	expect(client.host_gsid().empty() && client.session_role() == ClientSession::kSessionRoleHosting &&
+	               client.host_state() == ClientSession::HostState::Idle,
+	       "rehost: the drop clears the GSID and the host leg, the hosting word stays");
+	if (!expect(pump_until_probe(client, 240002, 5000, out) != 0, "rehost: the probe goes out")) return;
+	std::vector<std::vector<uint8_t>> joined, up, verify, rehost;
+	exchange(server, client, out, joined);
+	exchange(server, client, joined, up);
+	expect(server.last_dcnt == 1, "rehost: the re-join counts the disconnect");
+	up.clear();
+	client.process_periodic_update(up);
+	exchange(server, client, up, verify);
+	exchange(server, client, verify, rehost);
+	expect(client.host_reconnect_counter() == 1 && client.host_state() == ClientSession::HostState::Requested,
+	       "rehost: the re-verify counts ReconnectCounter up and re-requests hosting");
+	containers.clear();
+	if (expect(rehost.size() == 1 && decode_client_containers(rehost[0], client.client_scrk(), containers) &&
+	                   containers.size() == 1 && containers[0].name == "ClientHostRequest",
+	           "rehost: one ClientHostRequest goes out")) {
+		const NapiMessage &req = containers[0];
+		expect(field_of(req, "CurrentlyHosting") == "1", "rehost: CurrentlyHosting is 1");
+		const NapiMessage &setup = req.children[1];
+		expect(field_of(setup.children.back(), "VarValue") == "1",
+		       "rehost: HostSetup's ReconnectCounter is 1");
+		bool mission = false;
+		for (const auto &v : req.children[2].children)
+			if (field_of(v, "VarName") == "MissionName") mission = true;
+		expect(mission, "rehost: the Host list carries the merged update vars");
+		int joiner_vars = 0;
+		for (const auto &v : req.children[3].children)
+			if (field_of(v, "VarFNum") == "1") ++joiner_vars;
+		expect(joiner_vars == 5, "rehost: the PlayerList carries the joiner's five vars");
+	}
+	std::vector<std::vector<uint8_t>> done;
+	exchange(server, client, rehost, done);
+	expect(client.host_state() == ClientSession::HostState::Established && client.host_gsid() == gsid,
+	       "rehost: the ServerHostResult re-supplies the GSID");
+}
+
+// The re-join's 0x42 leg: re-sent every > 3000 ms until 20000 ms from the ServerHello, which
+// drops back to the down state; the schedule's next window opens past hello + 1000 + 20000.
+// [orig: PumpStateMachine case 3 @0x629508..0x629595; Nwu_HandleServerHello @0x627ea1..0x627eb3]
+void test_reconnect_join_timeout() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000039u;
+	cfg.client_key = 0x39393939u;
+	inject_reconnect_keys(cfg, 0x53535300u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "join timeout: session reaches Verified")) return;
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, stop));
+	std::vector<std::vector<uint8_t>> out;
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	const uint32_t probe_at = pump_until_probe(client, 1, 5000, out);
+	if (!expect(probe_at != 0, "join timeout: the probe goes out")) return;
+	const auto hello = server.respond(out[0]);
+	std::vector<std::vector<uint8_t>> joined;
+	client.handle_datagram(hello.data(), hello.size(), joined);   // the ServerHello at probe_at
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
+	            "join timeout: the ServerHello sends the first 0x42")) return;
+	std::vector<uint32_t> resends;
+	uint32_t closed_at = 0;
+	uint32_t reprobe_at = 0;
+	for (uint32_t t = probe_at + 1; t <= probe_at + 25000; ++t) {
+		client.set_clock_ms(t);
+		std::vector<std::vector<uint8_t>> pumped;
+		client.pump_send_intervals(pumped);
+		if (count_opcode(pumped, SESSION_OPCODE_CLIENT_AUTH) != 0) resends.push_back(t);
+		if (reprobe_at == 0 && count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0) reprobe_at = t;
+		if (closed_at == 0 && client.state() == ClientSession::State::Closed) closed_at = t;
+	}
+	expect(resends.size() == 6 && resends[0] == probe_at + 3001 && resends[5] == probe_at + 6 * 3001,
+	       "join timeout: the 0x42 re-sends every > 3000 ms");
+	expect(closed_at == probe_at + 20001, "join timeout: the leg gives up past 20000 ms");
+	expect(reprobe_at == probe_at + 21002 && client.reconnecting(),
+	       "join timeout: probing resumes past hello + 1000 + 20000");
+}
+
+// A verified lobby session (word 1) reconnects too, and its re-verify re-requests nothing.
+// [orig: HandleConnectVerifyResponse @0x4d5928..0x4d599e — a word of 1 takes neither branch]
+void test_reconnect_verified_word() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Au;
+	cfg.client_key = 0x3A3A3A3Au;
+	inject_reconnect_keys(cfg, 0x54545400u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "verified word: session reaches Verified")) return;
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, stop));
+	std::vector<std::vector<uint8_t>> out;
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	if (!expect(pump_until_probe(client, 1, 5000, out) != 0, "verified word: the probe goes out")) return;
+	std::vector<std::vector<uint8_t>> joined, up, verify, after;
+	exchange(server, client, out, joined);
+	exchange(server, client, joined, up);
+	up.clear();
+	client.process_periodic_update(up);
+	exchange(server, client, up, verify);
+	exchange(server, client, verify, after);
+	expect(client.is_verified() && client.session_role() == ClientSession::kSessionRoleVerified &&
+	               client.take_notices().empty(),
+	       "verified word: the re-verify lands verified and re-requests nothing");
+	expect(count_opcode(after, SESSION_OPCODE_PROTOCOL_MESSAGE) <= 1,
+	       "verified word: at most the ack follows the re-verify");
+}
+
+// Leaving the hosting while the connection is down (the NovaWorld menu's re-entry after a
+// match whose connection dropped): no statement goes out, but the word steps back to verified,
+// so the reconnect re-verifies without re-hosting a row no match backs.
+// [orig: CGameSession_StopHosting @0x4d0e60 — the word step @0x4d0e89..0x4d0e9e sits outside
+//  the state 5/6 gate]
+void test_stop_hosting_while_reconnecting() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Bu;
+	cfg.client_key = 0x3B3B3B3Bu;
+	inject_reconnect_keys(cfg, 0x55555500u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "stop while down: session reaches Verified")) return;
+	HostRegistration reg;
+	reg.server_name = "Down Srv";
+	reg.app_id = 1357;
+	std::vector<std::vector<uint8_t>> out;
+	exchange(server, client, {client.build_host_request(reg, 0)}, out);
+	if (!expect(client.session_role() == ClientSession::kSessionRoleHosting,
+	            "stop while down: hosting (word 2)"))
+		return;
+	client.set_clock_ms(240001);
+	out.clear();
+	client.pump_send_intervals(out);
+	if (!expect(client.reconnecting(), "stop while down: the reap leaves it reconnecting")) return;
+	expect(client.build_stop_hosting().empty(), "stop while down: no statement from state 0");
+	expect(client.session_role() == ClientSession::kSessionRoleVerified && client.reconnect_armed(),
+	       "stop while down: the word steps back to verified, the reconnect stays armed");
+	expect(client.build_stop_playing().empty() &&
+	               client.session_role() == ClientSession::kSessionRoleVerified,
+	       "stop while down: a stop-playing leaves a verified word alone");
+}
+
+// The NovaWorld menu's hosting leg ahead of its request: a session not set up (NWEC01), one
+// outside states 4..8 (NWEC49), a missing gate reply or lobby name (NWEC50), else the request
+// ships; MaxPlayers clamps to 1..64, 1..65 for a dedicated host.
+// [orig: CNapiGameSession_ConnectOrHost @0x4d4f10]
+void test_host_leg_gates() {
+	const std::string lobby = "jop_2_consumer";
+	expect(std::string(host_leg_refusal(false, 0x1Au, true, lobby)) == "NWEC01",
+	       "host leg: a session not set up keeps the preset tag");
+	expect(std::string(host_leg_refusal(true, 0x02u, true, lobby)) == NWEC_WRONG_SESSION_STATE,
+	       "host leg: states 2/3 (no flag 8) refuse with NWEC49");
+	expect(std::string(host_leg_refusal(true, 0x01u, true, lobby)) == NWEC_WRONG_SESSION_STATE,
+	       "host leg: state 1 refuses with NWEC49");
+	expect(std::string(host_leg_refusal(true, 0x1Au, false, lobby)) == NWEC_HOST_GATE_NOT_OK,
+	       "host leg: no gate reply refuses with NWEC50");
+	expect(std::string(host_leg_refusal(true, 0x1Au, true, "")) == NWEC_HOST_GATE_NOT_OK,
+	       "host leg: no lobby name refuses with NWEC50");
+	expect(host_leg_refusal(true, 0x1Au, true, lobby) == nullptr &&
+	               host_leg_refusal(true, 0x10Au, true, lobby) == nullptr,
+	       "host leg: a verified (or playing) session sends its request");
+	expect(host_leg_max_players(0, false) == 1 && host_leg_max_players(80, false) == 64 &&
+	               host_leg_max_players(80, true) == 65 && host_leg_max_players(16, false) == 16,
+	       "host leg: MaxPlayers clamps to 1..64 / 1..65 dedicated");
+}
+
 } // namespace
 
 int main() {
+	test_host_leg_gates();
+	test_stop_hosting_while_reconnecting();
 	test_play_uses_current_http_cookies();
 	test_parser_roundtrip();
 	test_client_correlates_handshake_echoes();
 	test_peer_disconnect_legs();
 	test_send_interval_pump();
 	test_leave_novaworld();
+	test_session_words();
+	test_reconnect_wire();
+	test_reconnect_schedule();
+	test_reconnect_replay();
+	test_reconnect_rehost();
+	test_reconnect_join_timeout();
+	test_reconnect_verified_word();
 
 	MiniServer server;
 	ClientSession::Config cfg;
@@ -927,6 +1471,9 @@ int main() {
 	{
 		expect(client.host_state() == ClientSession::HostState::Established,
 		       "ServerHostResult Success -> host leg Established");
+		expect(client.session_role() == ClientSession::kSessionRoleHosting &&
+		               client.session_flags() == 0x4Au,
+		       "hosting: the word 2, state 6 holds 0x4A");
 		expect(client.host_result().success == 1 && client.host_result().msg_param2 == 17,
 		       "host_result() carries the Success/MsgParam quartet");
 		expect(!server.lobby.gsid.empty() && client.host_gsid() == server.lobby.gsid,
@@ -1058,6 +1605,9 @@ int main() {
 		       "ServerStopHosting is acked (header-only)");
 		expect(client.host_state() == ClientSession::HostState::Idle,
 		       "ServerStopHosting returns the host leg to Idle");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified &&
+		               client.session_flags() == 0x1Au,
+		       "ServerStopHosting: the word back to 1, state 4 holds 0x1A");
 		const auto notices = client.take_notices();
 		if (expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::StopHosting,
 		           "one StopHosting notice")) {
@@ -1112,6 +1662,8 @@ int main() {
 		const auto d_stop_play = client.build_stop_playing();
 		expect(!d_stop_play.empty() && client.play_state() == ClientSession::PlayState::Idle,
 		       "ClientStopPlaying returns the play leg to Idle");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified,
+		       "ClientStopPlaying steps the playing word back to 1");
 		expect(server.respond(d_stop_play).empty(), "ClientStopPlaying draws no reply");
 		expect(client.mission_exit_reason() == 0, "a local stop sets no exit reason");
 	}
@@ -1138,6 +1690,8 @@ int main() {
 		expect(client.play_state() == ClientSession::PlayState::Idle &&
 		               client.mission_exit_reason() == 12,
 		       "ServerStopPlaying: play leg Idle, exit reason 12");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified,
+		       "ServerStopPlaying: the word back to 1");
 		const auto notices = client.take_notices();
 		expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::StopPlaying &&
 		               notices[0].fields.msg_code == 2001,

@@ -39,7 +39,8 @@ void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported);
 // [orig: Server_TickUpdate @0x51DE79..0x51DF4A; g_WeaponBroadcastSlotCursor]
 void Server_EmitQualityResends(NapiNPServerCtx &ctx, const world::World &world);
 
-// The host CNetQuality SEND window: every 62 frames while in session, sample
+// The host CNetQuality SEND window: every 62 frames while in session, first the
+// NovaWorld exit (inmatch/novaworld_link.h, onto ctx.mission_exit_reason), then sample
 // frame-rate pressure (the main loop's FR counter, ctx.stats_avg_fps), the mean of
 // every eligible slot's ping ring averaged over those slots, and the summed
 // loss counters (unmodeled: 0), then publish the folded 0..255 quality as the

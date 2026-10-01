@@ -208,6 +208,15 @@ public:
 	// the wire-header world load; S2C 0x7B supplies the mission identity).
 	// Returns the same codes as load_mission.
 	int load_mission_as_joiner(const Ref<JoinTarget> &p_target);
+	// The NovaWorld session (a NovaWorldClient), handed over by the shell with
+	// a NovaWorld join or host: the world keeps it playing or hosting through
+	// the match (SessionDrive::adopt_nw_client). A normal exit back to the
+	// NovaWorld menu takes it back out, still connected (null when none);
+	// otherwise it goes down with the world.
+	void adopt_novaworld_client(Node *p_client);
+	Node *release_novaworld_client();
+	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
+	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
 	// Load an in-memory mission through the shared world pipeline. This is
 	// retained as a focused engine-test/tool seam; normal game launches always
 	// use a saved .bms through load_mission() or load_loose_mission().
@@ -523,8 +532,6 @@ public:
 	void on_runtime_simulation_restarted();
 	void on_wire_node_spawned(ObjectModel *p_node, int p_kind, int p_item_id);
 	void on_frame_stats_capture_changed(bool p_active);
-	void on_nw_host_registered();
-	void on_nw_host_error(const String &p_message);
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
 	void on_nw_host_player_enter_result(int64_t p_connection_id, int p_success, int p_msg_code,
