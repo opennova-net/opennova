@@ -82,7 +82,7 @@ divergences in its §8 catalog):
 Every networking report should include:
 
 - Target path: OpenNova host, retail host, OpenNova joiner, retail joiner, or
-  dedicated/headless host.
+  Serve Only (dedicated) host.
 - Evidence: test names, capture names, decoded packet tags, IDA addresses, or
   source lines.
 - Verdict: matching, divergent, unknown, blocked, or docs-only.

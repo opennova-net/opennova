@@ -56,11 +56,7 @@ WindowType parse_type_string(const std::string &s) {
 // Parse integer with fallback.
 int parse_int(const std::string &s, int fallback = 0) {
   if (s.empty()) return fallback;
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return fallback;
-  }
+  return opennova::strutil::parse_int(s).value_or(fallback);
 }
 
 // Get text content from a child element by tag name.

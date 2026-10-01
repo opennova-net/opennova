@@ -41,11 +41,10 @@ void claim_lanes(LaneBatch &batch) noexcept {
 
 class LanePool {
 public:
-	LanePool() {
-		const std::size_t hardware = std::max<unsigned>(std::thread::hardware_concurrency(), 2u);
+	explicit LanePool(std::size_t threads) {
 		try {
-			threads_.reserve(hardware - 1);
-			for (std::size_t index = 0; index + 1 < hardware; ++index)
+			threads_.reserve(threads);
+			for (std::size_t index = 0; index < threads; ++index)
 				threads_.emplace_back([this]() { worker_loop(); });
 		} catch (...) {
 		}
@@ -116,11 +115,11 @@ private:
 std::mutex g_pool_mutex;
 std::weak_ptr<LanePool> g_pool;
 
-std::shared_ptr<LanePool> acquire_pool() {
+std::shared_ptr<LanePool> acquire_pool(std::size_t threads) {
 	std::lock_guard<std::mutex> lock(g_pool_mutex);
 	std::shared_ptr<LanePool> pool = g_pool.lock();
 	if (pool == nullptr) {
-		pool = std::make_shared<LanePool>();
+		pool = std::make_shared<LanePool>(threads);
 		g_pool = pool;
 	}
 	return pool;
@@ -128,9 +127,13 @@ std::shared_ptr<LanePool> acquire_pool() {
 
 } // namespace
 
-RowStripePoolLease retain_row_stripe_pool() {
+std::size_t row_stripe_hardware_threads() noexcept {
+	return std::max<unsigned>(std::thread::hardware_concurrency(), 2u) - 1;
+}
+
+RowStripePoolLease retain_row_stripe_pool(std::size_t threads) {
 	try {
-		return acquire_pool();
+		return acquire_pool(threads);
 	} catch (...) {
 		return nullptr;
 	}
@@ -142,7 +145,7 @@ void run_lanes_on_pool(std::size_t lanes, void (*invoke)(const void *, std::size
 		const void *context) noexcept {
 	std::shared_ptr<LanePool> pool;
 	try {
-		pool = acquire_pool();
+		pool = acquire_pool(row_stripe_hardware_threads());
 	} catch (...) {
 	}
 	if (pool == nullptr) {
@@ -156,14 +159,16 @@ void run_lanes_on_pool(std::size_t lanes, void (*invoke)(const void *, std::size
 
 // --- the page-composition worker --------------------------------------------
 
-std::size_t TerrainTileCompositionWorker::worker_count() noexcept {
-	const std::size_t hardware = std::thread::hardware_concurrency();
-	return std::clamp<std::size_t>(hardware / 2, 2, 8);
+TerrainTileCompositionWorker::Threads TerrainTileCompositionWorker::Threads::for_hardware() noexcept {
+	Threads threads;
+	threads.page_workers = std::clamp<std::size_t>(std::thread::hardware_concurrency() / 2, 2, 8);
+	threads.lane_threads = row_stripe_hardware_threads();
+	return threads;
 }
 
-TerrainTileCompositionWorker::TerrainTileCompositionWorker()
-		: lane_pool_(retain_row_stripe_pool()) {
-	const std::size_t count = worker_count();
+TerrainTileCompositionWorker::TerrainTileCompositionWorker(Threads threads)
+		: lane_pool_(retain_row_stripe_pool(threads.lane_threads)) {
+	const std::size_t count = std::max<std::size_t>(threads.page_workers, 1);
 	workers_.reserve(count);
 	for (std::size_t index = 0; index < count; ++index)
 		workers_.emplace_back([this]() { worker_loop(); });

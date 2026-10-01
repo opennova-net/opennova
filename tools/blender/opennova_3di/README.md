@@ -303,10 +303,10 @@ Culling, the Math node, the render method and Emission.
   `.3di`, the collision LOD (whose meshes also become the bullet faces; 0 = the
   most detailed), Generate bullet faces, Mesh part (a skinned model), Mount on,
   Add LOD, Add Part from Selection or Add Animation Rig (a static model),
-  Number Parts and Deform with Rig of (a model with its own rig), Export Model,
-  and its Animations box. Export All Models writes every model, and Export All
-  Animations every rig's clip set.
-- **Dope Sheet sidebar > Action > OpenNova** on a rig playing an Action: its
+  Number Parts (a model with its own rig) and Deform with Rig of (a skinned
+  one), Export Model, and its Animations box. Export All Models writes every
+  model, and Export All Animations every rig's clip set.
+- **Dope Sheet sidebar > Action > OpenNova 3DI** on a rig playing an Action: its
   rows, Manual Frame Range, Cyclic and Clip rate, its event trigger markers
   and Add Event Trigger, Assign Weapon Action and the timing markers of the
   actions it answers, and a closed Raw section with flag bit 3.

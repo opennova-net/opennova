@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<!--
+	The web build's page (ADR 0049): Godot 4.6.1's default full-size shell
+	(misc/dist/html/full-size.html, MIT, Copyright (c) 2014-present Godot Engine
+	contributors) plus OpenNova's staging module, which copies the site's
+	bundled assets/ into the in-memory filesystem before the engine starts and
+	serves PLAY RETAIL's folder picker (godot/game/resource_index/web_retail_picker.gd).
+	The Web export preset names this file as its custom HTML shell; Godot fills
+	the $GODOT_* placeholders at export.
+-->
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>$GODOT_PROJECT_NAME</title>
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: white;
+	background-color: black;
+	overflow: hidden;
+	touch-action: none;
+	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status, #status-splash, #status-progress {
+	position: absolute;
+	left: 0;
+	right: 0;
+}
+
+#status, #status-splash {
+	top: 0;
+	bottom: 0;
+}
+
+#status {
+	background-color: $GODOT_SPLASH_COLOR;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	visibility: hidden;
+}
+
+#status-splash {
+	max-height: 100%;
+	max-width: 100%;
+	margin: auto;
+}
+
+#status-splash.show-image--false {
+	display: none;
+}
+
+#status-splash.fullsize--true {
+	height: 100%;
+	width: 100%;
+	object-fit: contain;
+}
+
+#status-splash.use-filter--false {
+	image-rendering: pixelated;
+}
+
+#status-progress, #status-notice {
+	display: none;
+}
+
+#status-progress {
+	bottom: 10%;
+	width: 50%;
+	margin: 0 auto;
+}
+
+#status-about {
+	position: absolute;
+	bottom: 4%;
+	left: 0;
+	right: 0;
+	text-align: center;
+	color: #9aa3b5;
+	font-size: 0.85rem;
+	line-height: 1.4;
+	padding: 0 1rem;
+}
+
+#status-notice {
+	background-color: #5b3943;
+	border-radius: 0.5rem;
+	border: 1px solid #9b3943;
+	color: #e0e0e0;
+	line-height: 1.3;
+	margin: 0 2rem;
+	overflow: hidden;
+	padding: 1rem;
+	text-align: center;
+	z-index: 1;
+}
+
+#retail {
+	position: absolute;
+	inset: 0;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	background-color: rgba(8, 9, 12, 0.72);
+	z-index: 2;
+}
+
+#retail.open {
+	display: flex;
+}
+
+#retail-box {
+	width: min(34rem, calc(100% - 2rem));
+	background-color: #151821;
+	border: 1px solid #3a4152;
+	border-radius: 0.5rem;
+	padding: 1.25rem 1.5rem;
+	color: #e0e4ec;
+	line-height: 1.45;
+}
+
+#retail-box h1 {
+	font-size: 1.15rem;
+	margin: 0 0 0.75rem;
+}
+
+#retail-box p {
+	margin: 0 0 0.75rem;
+	font-size: 0.95rem;
+}
+
+#retail-state {
+	min-height: 1.4em;
+	color: #9aa3b5;
+	font-size: 0.9rem;
+}
+
+#retail-state.error {
+	color: #f08a8a;
+}
+
+#retail-bar {
+	width: 100%;
+	display: none;
+	margin: 0.25rem 0 0.75rem;
+}
+
+#retail-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	justify-content: flex-end;
+	margin-top: 0.5rem;
+}
+
+#retail-buttons button {
+	font: inherit;
+	font-size: 0.95rem;
+	padding: 0.45rem 0.9rem;
+	border-radius: 0.3rem;
+	border: 1px solid #4a5366;
+	background-color: #232837;
+	color: #e0e4ec;
+	cursor: pointer;
+}
+
+#retail-buttons button.primary {
+	background-color: #2f5aa8;
+	border-color: #3d6cc4;
+}
+
+#retail-buttons button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+		</style>
+		$GODOT_HEAD_INCLUDE
+	</head>
+	<body>
+		<canvas id="canvas">
+			Your browser does not support the canvas tag.
+		</canvas>
+
+		<noscript>
+			Your browser does not support JavaScript.
+		</noscript>
+
+		<div id="status">
+			<img id="status-splash" class="$GODOT_SPLASH_CLASSES" src="$GODOT_SPLASH" alt="">
+			<progress id="status-progress"></progress>
+			<div id="status-notice"></div>
+			<div id="status-about">
+				OpenNova is an open-source reimplementation of NovaLogic's engine for
+				Joint Operations and newer titles. It is pre-1.0 and experimental.
+			</div>
+		</div>
+
+		<div id="retail" role="dialog" aria-modal="true" aria-labelledby="retail-title">
+			<div id="retail-box">
+				<h1 id="retail-title">Play from your own install</h1>
+				<p>
+					Choose the folder your Joint Operations game is installed in
+					(the one that holds resource.pff). Your browser reads the files
+					on this computer; nothing is uploaded.
+				</p>
+				<progress id="retail-bar"></progress>
+				<div id="retail-state"></div>
+				<div id="retail-buttons">
+					<button id="retail-cancel" type="button">Cancel</button>
+					<button id="retail-saved" type="button" hidden>Use saved folder</button>
+					<button id="retail-choose" type="button" class="primary">Choose folder</button>
+				</div>
+				<input id="retail-input" type="file" webkitdirectory multiple hidden>
+			</div>
+		</div>
+
+		<script>
+// OpenNova's staging module (ADR 0049). The engine code is portable C++ that
+// opens real paths, so everything it reads must sit in the Emscripten
+// filesystem: the site's bundled assets/ go in before the engine starts
+// (Godot's own preloader), a picked retail folder while it runs (copyToFS).
+// Neither can be read lazily: a synchronous read of a browser file needs a
+// worker, and the engine reads from its main thread.
+window.opennovaStage = (function () {
+	'use strict';
+
+	// Where boot_root_mount.gd mounts the bundled assets (keep in step).
+	const BUNDLED_DIR = '/opennova/assets';
+	// Each pick stages under its own directory; the shell discards a pick
+	// that does not mount.
+	const RETAIL_ROOT = '/retail';
+	// Files an install carries that the engine never opens: executables and
+	// installers (DirectX's CABs, PunkBuster), videos (Bink is out of scope),
+	// the extras' music and pictures, documents, logs and the like.
+	const SKIPPED_EXTENSIONS = new Set([
+		'exe', 'dll', 'cab', 'msi', 'wiz', 'reg', 'vdf', 'lnk', 'url', 'ico',
+		'bik', 'avi', 'mpg', 'wmv', 'mp3', 'jpg', 'bmp',
+		'pdf', 'chm', 'htm', 'html', 'rtf', 'doc', 'log', 'dmp', 'tmp',
+	]);
+	// The staged copy lives in the tab's memory beside the engine's own heap.
+	const MAX_STAGED_BYTES = 3.5 * 1024 * 1024 * 1024;
+
+	let engine = null;
+	let pickSerial = 0;
+	let pending = null; // the GDScript callback of the open dialog
+	let busy = false;
+	let savedHandle = null;
+
+	const dialog = document.getElementById('retail');
+	const bar = document.getElementById('retail-bar');
+	const state = document.getElementById('retail-state');
+	const buttons = {
+		cancel: document.getElementById('retail-cancel'),
+		saved: document.getElementById('retail-saved'),
+		choose: document.getElementById('retail-choose'),
+	};
+	const input = document.getElementById('retail-input');
+
+	function formatBytes(bytes) {
+		if (bytes >= 1024 * 1024 * 1024) {
+			return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+		}
+		return `${Math.max(1, Math.round(bytes / (1024 * 1024)))} MB`;
+	}
+
+	function setState(text, isError) {
+		state.textContent = text;
+		state.classList.toggle('error', !!isError);
+	}
+
+	function setBusy(value) {
+		busy = value;
+		buttons.choose.disabled = value;
+		buttons.saved.disabled = value;
+		buttons.cancel.disabled = value;
+		bar.style.display = value ? 'block' : 'none';
+	}
+
+	function finish(path) {
+		dialog.classList.remove('open');
+		setBusy(false);
+		const done = pending;
+		pending = null;
+		if (done) {
+			done(path);
+		}
+		const canvas = document.getElementById('canvas');
+		if (canvas) {
+			canvas.focus();
+		}
+	}
+
+	// --- the folder the browser remembers (File System Access API) ---------
+
+	function openDb() {
+		return new Promise((resolve, reject) => {
+			const request = indexedDB.open('opennova-stage', 1);
+			request.onupgradeneeded = () => request.result.createObjectStore('handles');
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => reject(request.error);
+		});
+	}
+
+	async function loadSavedHandle() {
+		try {
+			const db = await openDb();
+			return await new Promise((resolve) => {
+				const request = db.transaction('handles').objectStore('handles').get('retail');
+				request.onsuccess = () => resolve(request.result || null);
+				request.onerror = () => resolve(null);
+			});
+		} catch (e) {
+			return null;
+		}
+	}
+
+	async function saveHandle(handle) {
+		try {
+			const db = await openDb();
+			db.transaction('handles', 'readwrite').objectStore('handles').put(handle, 'retail');
+		} catch (e) {
+			console.warn('opennovaStage: could not remember the folder', e);
+		}
+	}
+
+	async function* walkHandle(dir, prefix) {
+		for await (const [name, entry] of dir.entries()) {
+			const rel = prefix ? `${prefix}/${name}` : name;
+			if (entry.kind === 'directory') {
+				yield* walkHandle(entry, rel);
+			} else {
+				yield { rel, file: await entry.getFile() };
+			}
+		}
+	}
+
+	async function filesFromHandle(handle) {
+		const files = [];
+		for await (const item of walkHandle(handle, '')) {
+			files.push(item);
+		}
+		return files;
+	}
+
+	// <input webkitdirectory> names every file "<picked folder>/<path>".
+	function filesFromInput(fileList) {
+		return Array.from(fileList, (file) => {
+			const rel = file.webkitRelativePath || file.name;
+			const slash = rel.indexOf('/');
+			return { rel: slash >= 0 ? rel.slice(slash + 1) : rel, file };
+		});
+	}
+
+	// --- staging --------------------------------------------------------------
+
+	function wanted(item) {
+		const dot = item.rel.lastIndexOf('.');
+		const ext = dot >= 0 ? item.rel.slice(dot + 1).toLowerCase() : '';
+		return !SKIPPED_EXTENSIONS.has(ext);
+	}
+
+	async function stage(all) {
+		const files = all.filter(wanted);
+		const total = files.reduce((sum, item) => sum + item.file.size, 0);
+		if (files.length === 0) {
+			setState('That folder holds no game files.', true);
+			return null;
+		}
+		if (total > MAX_STAGED_BYTES) {
+			setState(`That folder holds ${formatBytes(total)} of files, more than a browser tab can hold. `
+				+ 'Choose the game folder itself, not a folder above it.', true);
+			return null;
+		}
+		pickSerial += 1;
+		const dest = `${RETAIL_ROOT}/${pickSerial}`;
+		let copied = 0;
+		bar.max = total || 1;
+		for (let index = 0; index < files.length; index += 1) {
+			const item = files[index];
+			setState(`Reading ${index + 1} of ${files.length} files (${formatBytes(copied)} of ${formatBytes(total)})`);
+			engine.copyToFS(`${dest}/${item.rel}`, await item.file.arrayBuffer());
+			copied += item.file.size;
+			bar.value = copied;
+		}
+		return dest;
+	}
+
+	async function run(collect) {
+		if (busy) {
+			return;
+		}
+		setBusy(true);
+		setState('Looking at the folder...');
+		try {
+			const files = await collect();
+			if (files === null) {
+				setBusy(false);
+				setState('');
+				return;
+			}
+			const dest = await stage(files);
+			if (dest === null) {
+				setBusy(false);
+				return;
+			}
+			finish(dest);
+		} catch (e) {
+			console.error('opennovaStage:', e);
+			setBusy(false);
+			setState(e && e.name === 'NotAllowedError'
+				? 'The browser did not allow reading that folder.'
+				: `Could not read that folder: ${e && e.message ? e.message : e}`, true);
+		}
+	}
+
+	buttons.choose.addEventListener('click', () => {
+		if (typeof window.showDirectoryPicker !== 'function') {
+			input.value = '';
+			input.click();
+			return;
+		}
+		run(async () => {
+			let handle;
+			try {
+				handle = await window.showDirectoryPicker({ id: 'opennova-retail', mode: 'read' });
+			} catch (e) {
+				if (e && e.name === 'AbortError') {
+					return null;
+				}
+				throw e;
+			}
+			savedHandle = handle;
+			saveHandle(handle);
+			return filesFromHandle(handle);
+		});
+	});
+
+	buttons.saved.addEventListener('click', () => {
+		run(async () => {
+			if ((await savedHandle.requestPermission({ mode: 'read' })) !== 'granted') {
+				return null;
+			}
+			return filesFromHandle(savedHandle);
+		});
+	});
+
+	input.addEventListener('change', () => {
+		if (input.files && input.files.length > 0) {
+			run(async () => filesFromInput(input.files));
+		}
+	});
+
+	buttons.cancel.addEventListener('click', () => {
+		if (!busy) {
+			finish('');
+		}
+	});
+
+	return {
+		// Queue the site's bundled assets/ (assets/manifest.json, written at
+		// packaging) for the engine's filesystem; call before startGame.
+		preloadBundled: async function (target) {
+			engine = target;
+			const response = await fetch('assets/manifest.json', { cache: 'no-cache' });
+			if (!response.ok) {
+				throw new Error(`The bundled asset list is missing (${response.status}).`);
+			}
+			const manifest = await response.json();
+			await Promise.all(manifest.files.map((name) => target.preloadFile(
+				`assets/${encodeURI(name)}`, `${BUNDLED_DIR}/${name}`)));
+		},
+
+		// PLAY RETAIL (web_retail_picker.gd): show the dialog; `done` gets the
+		// staged directory, or '' when the player cancels.
+		pickRetail: function (done) {
+			if (pending !== null) {
+				return;
+			}
+			pending = done;
+			setBusy(false);
+			setState('');
+			buttons.saved.hidden = true;
+			dialog.classList.add('open');
+			loadSavedHandle().then((handle) => {
+				savedHandle = handle;
+				if (handle !== null && pending !== null) {
+					buttons.saved.textContent = `Use ${handle.name}`;
+					buttons.saved.hidden = false;
+				}
+			});
+		},
+	};
+}());
+		</script>
+		<script src="$GODOT_URL"></script>
+		<script>
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const statusOverlay = document.getElementById('status');
+	const statusProgress = document.getElementById('status-progress');
+	const statusNotice = document.getElementById('status-notice');
+
+	let initializing = true;
+	let statusMode = '';
+
+	function setStatusMode(mode) {
+		if (statusMode === mode || !initializing) {
+			return;
+		}
+		if (mode === 'hidden') {
+			statusOverlay.remove();
+			initializing = false;
+			return;
+		}
+		statusOverlay.style.visibility = 'visible';
+		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
+		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
+		statusMode = mode;
+	}
+
+	function setStatusNotice(text) {
+		while (statusNotice.lastChild) {
+			statusNotice.removeChild(statusNotice.lastChild);
+		}
+		const lines = text.split('\n');
+		lines.forEach((line) => {
+			statusNotice.appendChild(document.createTextNode(line));
+			statusNotice.appendChild(document.createElement('br'));
+		});
+	}
+
+	function displayFailureNotice(err) {
+		console.error(err);
+		if (err instanceof Error) {
+			setStatusNotice(err.message);
+		} else if (typeof err === 'string') {
+			setStatusNotice(err);
+		} else {
+			setStatusNotice('An unknown error occurred.');
+		}
+		setStatusMode('notice');
+		initializing = false;
+	}
+
+	// The threaded build needs a cross-origin isolated page (the server's
+	// COOP/COEP headers) for SharedArrayBuffer.
+	const missing = Engine.getMissingFeatures({
+		threads: GODOT_THREADS_ENABLED,
+	});
+
+	if (missing.length !== 0) {
+		const missingMsg = 'Error\nThe following features OpenNova needs in the browser are missing:\n';
+		displayFailureNotice(missingMsg + missing.join('\n'));
+	} else {
+		setStatusMode('progress');
+		window.opennovaStage.preloadBundled(engine).then(() => engine.startGame({
+			'onProgress': function (current, total) {
+				if (current > 0 && total > 0) {
+					statusProgress.value = current;
+					statusProgress.max = total;
+				} else {
+					statusProgress.removeAttribute('value');
+					statusProgress.removeAttribute('max');
+				}
+			},
+		})).then(() => {
+			setStatusMode('hidden');
+		}, displayFailureNotice);
+	}
+}());
+		</script>
+	</body>
+</html>

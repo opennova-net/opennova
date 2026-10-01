@@ -38,7 +38,7 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
 ```bash
 python scripts/mcp/game_mcp.py tools                       # the catalog
 python scripts/mcp/game_mcp.py state                       # game_state
-python scripts/mcp/game_mcp.py call game_debug '{"op":"invoke","action":"teleport_local_player","args":{"position":[x,y,z],"yaw_deg":90}}'
+python scripts/mcp/game_mcp.py call game_debug '{"op":"invoke","id":"teleport_local_player","args":{"position":[x,y,z],"yaw_deg":90},"confirm_authority":true}'
 python scripts/mcp/game_mcp.py screenshot --out build/shot.png
 python scripts/mcp/game_mcp.py entities --watch --interval 1 --out build/entities.jsonl
 python scripts/mcp/game_mcp.py logs
@@ -46,7 +46,8 @@ python scripts/mcp/game_mcp.py logs
 
 `game_debug` drives the typed `DebugControlTable` (the C++ table F3 shares;
 engine rows end in `Simulation`/`EntityCommands`, device rows in the shell;
-ADR 0043 d12); entity
+ADR 0043 d12); `op=invoke`/`set` name the row by `id`, and host-only or
+confirmation-gated rows (teleport, the entity edits) need `"confirm_authority":true`; entity
 mutations take the `ai_index` from `game_entities` rows with `editable: true`.
 
 ## 3. Probe

@@ -50,8 +50,8 @@ Registration is exactly ONE edit in `engine/formats/CMakeLists.txt`:
    `# <name> — <what the format holds>` + one
    `${CMAKE_CURRENT_SOURCE_DIR}/<name>/<file>.cpp` line per TU.
 
-The group already carries C++17, POSITION_INDEPENDENT_CODE, and a PUBLIC
-link to `opennova_io` — add nothing else; no include-list edit exists any
+The group already carries C++17, POSITION_INDEPENDENT_CODE, and PUBLIC
+links to `opennova_io` and `opennova_crt` — add nothing else; no include-list edit exists any
 more (the pre-flatten `include/<prefix>/` + `src/` split and the per-lib
 PUBLIC include entries are gone).
 
@@ -75,12 +75,15 @@ FFI wrapper. One thing still matters:
 - Small representative samples ARE committed, and every file under `fixtures/`
   is one of the three classes `fixtures/README.md` defines: MINTED (written by
   a `tests/fixtures/minimal_*_gen.cpp` generator through our own writer and
-  byte-compared by that generator's ctest), AUTHORED (text we wrote) or KEEP
-  (a small retail-interop file listed with its reason in
-  `scripts/lint/fixture_allowlist.json`). Prefer minting; a KEEP entry needs a
-  reason. `fixtures/**` is LFS via `.gitattributes` and capped at 2 MiB per
-  file — after `git add`, verify with `git lfs status` that the files staged
-  as LFS objects, then run `python scripts/lint/fixture_lint.py --report`
+  byte-compared by that generator's ctest), AUTHORED (text we wrote, with a row
+  in `scripts/lint/fixture_allowlist.json`) or KEEP (the retail-interop wire
+  captures, allowed only under `fixtures/novaworld/`). Prefer minting; a retail
+  file a test needs comes from the reference fixture set
+  (`retail::reference_fixture`), never the tree. Binary fixtures are LFS via
+  `.gitattributes` `fixtures/**`, plain-text ones are plain git blobs (a new
+  text extension gets its carve-out there in the same change), and every file
+  is capped at 2 MiB — after `git add`, verify with `git lfs status` that the
+  binaries staged as LFS objects, then run `python scripts/lint/fixture_lint.py --report`
   (CI runs it `--enforce --require-pulled`).
 - Bulk retail corpora are NEVER committed (copyright). Gate a sweep test on one
   of the two machine roots through `tests/common/retail_paths.h`
@@ -105,7 +108,8 @@ No test framework: plain `main()` with `TEST_EXPECT` from
 (see `tests/dbf/dbf_roundtrip_test.cpp`). Minimum: parse test + byte-exact
 roundtrip against the committed fixture. Wire into `tests/CMakeLists.txt`
 following the dbf block — one executable per test, link `opennova_formats`,
-`add_test(NAME <name>_roundtrip ...)`.
+`add_test(NAME <name>_roundtrip ...)` (dbf's carries a retail leg, so it uses
+`opennova_add_mixed_test`; its `minimal_dbf_gen` is the minted-fixture exemplar).
 
 Run loop:
 
@@ -125,16 +129,19 @@ Run loop:
   never reads retail data); a script that needs retail data lives under
   `godot/tests/retail/` instead. Run it via the `gut` skill.
 - Format libraries remain independent of authoring workspaces, inspectors,
-  project surfaces, and import flows; see ADR 0045.
+  project surfaces, and import flows: nothing under `formats/` includes or
+  links the editor group (ADR 0046 decision 3, which superseded ADR 0045's
+  editor provisions).
 
 ## 6. Extracting an existing parser out of runtime/ (the ADR 0030 recipe)
 
 When a format already exists inside a runtime lib and passes the step-0 gate:
 
 1. `git mv` the format's headers and TUs into `engine/formats/<name>/`
-   (flat). Decide the prefix per step 1's rule — keeping a shared prefix
-   with disjoint sets means ZERO consumer include churn; renaming is right
-   only when the includer count is trivial.
+   (flat). The prefix follows step 1's rule, so every consumer's
+   `<runtime/...>` include of a moved header becomes `<formats/<name>/...>`
+   in the same change (ADR 0030 decision 4); a domain split across the
+   groups keeps disjoint header sets (`formats/mission` vs `runtime/mission`).
 2. Two source-list edits: add the block in
    `engine/formats/CMakeLists.txt`; remove the lines (and any per-source
    property entries, e.g. the terrain FP-flag list) from
@@ -158,5 +165,4 @@ When a format already exists inside a runtime lib and passes the step-0 gate:
 - `ctest --test-dir build -C Release` fully green including the new tests;
   roundtrip byte-exact on the fixture.
 - Both CMake roots build (`bash scripts/build.sh` exercises both).
-- `engine/CLAUDE.md`'s `formats/` list updated with the new lib.
 - New domain vocabulary added to `CONTEXT.md` only if a term needed pinning.

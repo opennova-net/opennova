@@ -14,6 +14,7 @@
 #include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <base/io/hash.h>
 
@@ -74,10 +75,25 @@ uint64_t page_output_hash(
 	return hash;
 }
 
+// The web build's pthread pool is fixed when the page loads (the Web export
+// preset's threads/emscripten_pool_size), and a thread the pool cannot serve
+// never starts while this frame blocks in wait_idle(); so the web composes on
+// a small fixed budget the pool is sized for, and the desktop on the hardware.
+opennova::terrain::TerrainTileCompositionWorker::Threads composition_threads() {
+	if (OS::get_singleton()->has_feature("web")) {
+		opennova::terrain::TerrainTileCompositionWorker::Threads web;
+		web.page_workers = 2;
+		web.lane_threads = 2;
+		return web;
+	}
+	return opennova::terrain::TerrainTileCompositionWorker::Threads::for_hardware();
+}
+
 } // namespace
 
 TerrainTileCacheDevice::TerrainTileCacheDevice() :
-		async_(std::make_unique<opennova::terrain::TerrainTileCompositionWorker>()) {}
+		async_(std::make_unique<opennova::terrain::TerrainTileCompositionWorker>(
+				composition_threads())) {}
 
 TerrainTileCacheDevice::~TerrainTileCacheDevice() = default;
 
@@ -687,7 +703,7 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	diagnostics["active_jobs"] = static_cast<int64_t>(
 			async_->current_epoch_active_jobs());
 	diagnostics["worker_count"] = static_cast<int64_t>(
-			opennova::terrain::TerrainTileCompositionWorker::worker_count());
+			async_->worker_count());
 	diagnostics["frame_capacity_fallbacks"] =
 			static_cast<int64_t>(frame_capacity_fallbacks_);
 	diagnostics["frame_shadow_alpha_changed_bytes"] =

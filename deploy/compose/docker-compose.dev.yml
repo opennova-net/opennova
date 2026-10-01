@@ -64,3 +64,9 @@ services:
       - "5173:5173"
     environment:
       VITE_API_TARGET: http://novaworld:8080
+
+  # The web build straight from its own nginx (the dev portal is Vite, which
+  # does no game.<domain> routing): http://localhost:8090.
+  game:
+    ports:
+      - "8090:8090"

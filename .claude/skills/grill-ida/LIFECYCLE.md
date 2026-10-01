@@ -40,8 +40,9 @@ IDB annotations), so resumption is a read problem, not a recovery problem:
 When the reimpl is fixed after a `divergent` verdict, don't re-grill the system:
 
 1. Re-pull the original at the cited address and re-check **only the axis that diverged**.
-2. If it now matches: land the flip via a `re-doc` pass — the record's divergence entry gains
-   `— resolution: fixed in <commit>` (the `D-<DOMAIN>-n` id is never renumbered), the
+2. If it now matches: land the flip via a `re-doc` pass — the record's divergence entry is
+   marked `FIXED` with its date and PR, the open ledger row retires to a dated closure line in
+   `docs/divergence-ledger.md` (the `D-<DOMAIN>-n` id is never renumbered), the
    `docs/correspondence.md` row flips `divergent → matching`, and the code↔doc D-ID sync is
    re-checked.
 3. Deliberate deviations don't flip: the row stays `divergent`; the record cites the ADR or

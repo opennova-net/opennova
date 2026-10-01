@@ -9,7 +9,8 @@ The Game viewport and Stats window start open; the other inspection windows
 open through the Windows menu (grouped World / Simulation / Render / Network /
 Tools, ImGui's demo under Help) or a world pick. Dear ImGui, the pass and the
 windows compile only with `OPENNOVA_DEVTOOLS`, which is off for release
-GDExtensions. The frame-stats board remains available in every flavour.
+GDExtensions and the web build. The frame-stats board remains available in
+every flavour.
 
 What is here:
 

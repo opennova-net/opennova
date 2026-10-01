@@ -79,6 +79,7 @@ var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
 var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
+var _web_retail_picking := false  # the web page's picker is open (ADR 0049)
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion: PlayerInfoMenuCompanion  # drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
@@ -669,6 +670,12 @@ func _enter_bundled_menu() -> bool:
 ## goes straight to the picker. Public so lifecycle tests drive the same leg
 ## the button does.
 func play_retail() -> bool:
+	# The web build's staged install lives only as long as the tab, so there
+	# is nothing saved to mount: the page's own dialog offers the folder the
+	# browser remembers (ADR 0049).
+	if OS.has_feature("web"):
+		request_retail_dir()
+		return false
 	var saved := ResourceDirSettings.get_retail_dir()
 	if not saved.is_empty():
 		if enter_retail_dir(saved):
@@ -685,7 +692,8 @@ func enter_retail_dir(dir: String) -> bool:
 	var root := BootRootMount.mount(dir, false)
 	if root == null:
 		return false
-	ResourceDirSettings.set_retail_dir(dir)
+	if not OS.has_feature("web"):
+		ResourceDirSettings.set_retail_dir(dir)
 	_root = root
 	return _enter_menu(root.get_root_dir())
 
@@ -694,6 +702,9 @@ func enter_retail_dir(dir: String) -> bool:
 ## Headless runs and an already-open picker skip it.
 func request_retail_dir() -> void:
 	if GameRuntimeRoot.is_headless() or _retail_picker != null:
+		return
+	if OS.has_feature("web"):
+		_request_web_retail_dir()
 		return
 	var picker := FileDialog.new()
 	picker.file_mode = FileDialog.FILE_MODE_OPEN_DIR
@@ -710,10 +721,23 @@ func request_retail_dir() -> void:
 	picker.popup_centered_ratio(0.6)
 
 
+# The browser has no native folder dialog: the page stages the picked install
+# into its in-memory filesystem and answers with the mount path (ADR 0049).
+func _request_web_retail_dir() -> void:
+	if _web_retail_picking:
+		return
+	_web_retail_picking = WebRetailPicker.request(func(dir: String) -> void:
+		_web_retail_picking = false
+		if not dir.is_empty():
+			_on_retail_dir_selected(dir))
+
+
 func _on_retail_dir_selected(dir: String) -> void:
 	_close_retail_picker()
 	if enter_retail_dir(dir):
 		return
+	if OS.has_feature("web"):
+		WebRetailPicker.discard(dir)
 	var notice := AcceptDialog.new()
 	notice.title = "OpenNova"
 	notice.dialog_text = ("No Joint Operations game data was found in\n%s\n\n"
@@ -1243,7 +1267,11 @@ func _teardown_world_to_menu() -> void:
 	get_tree().quit(1)
 
 
-func _on_exit_to_desktop() -> void: request_quit()
+# A browser tab cannot be quit from inside: stopping the engine would only
+# leave a frozen canvas, so the web build ignores EXIT (ADR 0049).
+func _on_exit_to_desktop() -> void:
+	if not OS.has_feature("web"):
+		request_quit()
 
 
 ## Keep the public adapter callback while the capture module owns mutation.

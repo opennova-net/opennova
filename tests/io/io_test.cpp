@@ -2,6 +2,7 @@
 // cursors, LSB-first bit streams, and the ASCII string helpers.
 
 #include <atomic>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -199,6 +200,39 @@ static int test_strutil()
     TEST_EXPECT(strutil::iless("ab", "abc"));
     TEST_EXPECT(strutil::ends_with_icase("terrain.TRN", ".trn"));
     TEST_EXPECT(!strutil::ends_with_icase(".trn", "terrain.trn"));
+    return 0;
+}
+
+// parse_int / parse_ulong / parse_float accept exactly what std::stoi /
+// stoul / stof accept and fail exactly where those throw.
+static int test_strutil_parse_numbers()
+{
+    TEST_EXPECT(strutil::parse_int("42") == 42);
+    TEST_EXPECT(strutil::parse_int("  -17") == -17);
+    TEST_EXPECT(strutil::parse_int("+8") == 8);
+    TEST_EXPECT(strutil::parse_int("12abc") == 12);
+    TEST_EXPECT(strutil::parse_int("2147483647") == 2147483647);
+    TEST_EXPECT(strutil::parse_int("-2147483648") == INT_MIN);
+    TEST_EXPECT(!strutil::parse_int(""));
+    TEST_EXPECT(!strutil::parse_int("   "));
+    TEST_EXPECT(!strutil::parse_int("abc"));
+    TEST_EXPECT(!strutil::parse_int("-"));
+    TEST_EXPECT(!strutil::parse_int("2147483648"));
+    TEST_EXPECT(!strutil::parse_int("-2147483649"));
+    TEST_EXPECT(!strutil::parse_int("99999999999999999999"));
+    TEST_EXPECT(strutil::parse_int("0x10") == 0);
+
+    TEST_EXPECT(strutil::parse_ulong("ff8000", 16) == 0xff8000ul);
+    TEST_EXPECT(strutil::parse_ulong("FFffFFzz", 16) == 0xfffffful);
+    TEST_EXPECT(!strutil::parse_ulong("zz", 16));
+    TEST_EXPECT(!strutil::parse_ulong("", 16));
+    TEST_EXPECT(!strutil::parse_ulong("fffffffffffffffffffff", 16));
+
+    TEST_EXPECT(strutil::parse_float("1.5") == 1.5f);
+    TEST_EXPECT(strutil::parse_float(" -0.25x") == -0.25f);
+    TEST_EXPECT(!strutil::parse_float("x1.5"));
+    TEST_EXPECT(!strutil::parse_float(""));
+    TEST_EXPECT(!strutil::parse_float("1e999"));
     return 0;
 }
 
@@ -470,6 +504,7 @@ int main()
     if (test_bit_stream_fields()) return 1;
     if (test_bit_stream_unaligned_golden()) return 1;
     if (test_strutil()) return 1;
+    if (test_strutil_parse_numbers()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
     if (test_byte_reader_cstr_and_skip_if_available()) return 1;
