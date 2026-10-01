@@ -185,7 +185,8 @@ std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(conn.client_ck, record));
 	// `n = clamp(recv_max_per_tick, 0, 32)` sends while each SendTo succeeds
 	// [orig: TeardownActiveConnection @0x6253ef..0x625424].
-	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
+	return std::vector<std::vector<uint8_t>>(
+			disconnect_burst_count(conn.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
 // The one player/session teardown path shared by keyed goodbye, receive timeout, pending

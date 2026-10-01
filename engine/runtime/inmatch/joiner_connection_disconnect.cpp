@@ -208,7 +208,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
 	std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_GOODBYE,
 			client_goodbye_to_bytes(conn_.server_sk, last_disconnect_event_));
-	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
+	return std::vector<std::vector<uint8_t>>(
+			disconnect_burst_count(conn_.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
 // [orig: Nwu_HandleServerGoodbye @0x624310 -> Nwu_HandleDisconnect(type 2) @0x623CE0]: the

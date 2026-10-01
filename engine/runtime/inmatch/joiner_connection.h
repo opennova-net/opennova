@@ -256,12 +256,28 @@ public:
 		std::size_t framed_count = 0;
 		bool frame_failed = false;
 	};
+	// The one-argument forms frame under this connection's packet ceiling: cs_dir0 field 13
+	// (the template's 1300, overlaid by the host's 0x82 and its 0x2000 CS update, the
+	// negotiated mpmaxpacketsize) [orig: BuildOutgoingPackets @0x628436, min 26 @0x628446].
 	FrameMessagesResult frame_messages_detailed(
-			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_bytes = 1300);
+			const std::vector<ProtocolMessage> &messages) {
+		return frame_messages_detailed(messages, packet_ceiling_bytes());
+	}
+	FrameMessagesResult frame_messages_detailed(
+			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes);
 	std::vector<std::vector<uint8_t>> frame_messages(
-			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_bytes = 1300);
+			const std::vector<ProtocolMessage> &messages) {
+		return frame_messages(messages, packet_ceiling_bytes());
+	}
+	std::vector<std::vector<uint8_t>> frame_messages(
+			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes);
+	// cs_dir0 field 13 as a byte count; a negative stored value reads as BuildOutgoingPackets'
+	// signed compare does, below its 26-byte floor.
+	std::size_t packet_ceiling_bytes() const {
+		return conn_.timeouts.max_packet_bytes < 26
+				? std::size_t{26}
+				: static_cast<std::size_t>(conn_.timeouts.max_packet_bytes);
+	}
 
 	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
 	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
@@ -456,7 +472,7 @@ public:
 		return last_disconnect_event_;
 	}
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
-	// block at acceptance (CS field 0 = timeout_ms, field 11 = msg_out_max).
+	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
 	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }
 
 	// Inbound-gap diagnostics: how many future S2C packets are queued behind an

@@ -24,10 +24,43 @@ namespace opennova::inmatch {
 //  cs_dir1 @0x4caa81/@0x4cab20 and cs_dir0 @0x4cab54/@0x4cabf0; consumers
 //  CNapiNPConnection_PumpStateMachine @0x62934c (state 1) / @0x6295a2 (state 5),
 //  NapiNPMessage_Create @0x628048]
+//
+// The struct also carries the other cs_dir0 slots a connection's own pumps read,
+// at their JOINTOPERATIONS template values: a joiner overlays them from the
+// host's 0x82 CS block and from later H:0x00 CS updates
+// (apply_session_cs_field). Each slot's consumer:
+//   1  recv_max_per_tick       the teardown's disconnect-packet burst
+//                              [orig: TeardownActiveConnection @0x6253ef]
+//   4  idle_send_interval_ms   PumpSendIntervals' EMPTY leg [orig: @0x629041]
+//   5  active_send_interval_ms PumpSendIntervals' ACTIVE leg [orig: @0x628ff1]
+//   13 max_packet_bytes        BuildOutgoingPackets' packet ceiling [orig: @0x628436]
+// [orig: CNapiNetwork_Init @0x4cab60 (4), @0x4cab88 (30000), @0x4cab98 (10000),
+//  @0x4cab3c (mpmaxpacketsize, 1300 by default); the field map is NapiCSConfig at
+//  conn+0x17C (cs_dir0)]
 struct SessionTimeoutConfig {
-	int32_t timeout_ms = 120000;
-	int32_t msg_out_max = 0x4B0;
+	int32_t timeout_ms = 120000;              // CS field 0
+	int32_t recv_max_per_tick = 4;            // CS field 1
+	int32_t idle_send_interval_ms = 30000;    // CS field 4
+	int32_t active_send_interval_ms = 10000;  // CS field 5
+	int32_t msg_out_max = 0x4B0;              // CS field 11
+	int32_t max_packet_bytes = 1300;          // CS field 13
 };
+
+// Store one CS slot the way CNapiNPConnection_HandleCSConfigUpdate and
+// NapiNP_HandleServerJoinResponse store it into cs_dir0: the raw dword,
+// whatever its value. Slots this struct does not carry have no consumer here.
+// [orig: HandleCSConfigUpdate @0x6219c8; HandleServerJoinResponse @0x629b63]
+inline void apply_session_cs_field(SessionTimeoutConfig &cfg, uint32_t slot, int32_t value) {
+	switch (slot) {
+	case 0: cfg.timeout_ms = value; break;
+	case 1: cfg.recv_max_per_tick = value; break;
+	case 4: cfg.idle_send_interval_ms = value; break;
+	case 5: cfg.active_send_interval_ms = value; break;
+	case 11: cfg.msg_out_max = value; break;
+	case 13: cfg.max_packet_bytes = value; break;
+	default: break;
+	}
+}
 
 // The override file's CWD-relative name; retail resolves it with FindFirstFileA
 // on the bare name and reads it with _lopen (a PFF entry is NOT visible to it).

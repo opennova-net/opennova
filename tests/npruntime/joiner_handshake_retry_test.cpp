@@ -9,6 +9,7 @@
 #include "host_test_setup.h"
 
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
@@ -198,6 +199,99 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
 }
 
+// D-NET-232: the joiner runs on its cs_dir0 block, overlaid by the host's 0x82 CS TLVs and by
+// later H:0x00 CS updates: field 13 is its packet ceiling, field 5 the active-send interval,
+// field 4 the empty one. A host whose mpmaxpacketsize is 576 advertises 576 in the 0x82; a later
+// update (a retail host's 0x2000 negotiation, plus fields 4/5 here) moves them again.
+// [orig: NapiNP_HandleServerJoinResponse @0x629b4c..0x629b75 / @0x629d72; CNapiNPConnection_
+//  HandleCSConfigUpdate @0x6219c8; BuildOutgoingPackets @0x628436; PumpSendIntervals
+//  @0x628ff1 (active) / @0x629041 (empty); NapiNPServer_HandleNewConnection @0x4c81bd]
+bool run_cs_block_drives_the_joiner_ceiling_and_intervals() {
+	const PeerAddr peer{0x0100007Fu, 32771};
+	inmatch::NapiNPServerCtx host;
+	inmatch::GameConfig config;
+	config.max_packet_size = 576;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E114u, nullptr, config);
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("CsJoiner", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> hello = joiner.start();
+	const inmatch::HandleResult hello_reply = inmatch::handle_server_datagram(
+			host, peer, hello.data(), hello.size(), 0);
+	if (!expect(hello_reply.outbound.size() == 1, "host answers the ClientHello")) return false;
+	const inmatch::JoinerConnection::PollResult auth = joiner.handle_datagram(
+			hello_reply.outbound[0].data(), hello_reply.outbound[0].size());
+	if (!expect(auth.outbound.size() == 1 && is_opcode(auth.outbound[0], SESSION_OPCODE_CLIENT_AUTH),
+			"ServerHello sends ClientAuth")) {
+		return false;
+	}
+	const inmatch::HandleResult accept = inmatch::handle_server_datagram(
+			host, peer, auth.outbound[0].data(), auth.outbound[0].size(), 1);
+	if (!expect(!accept.outbound.empty() &&
+				is_opcode(accept.outbound[0], SESSION_OPCODE_SERVER_AUTH),
+			"host accepts the join")) {
+		return false;
+	}
+	joiner.handle_datagram(accept.outbound[0].data(), accept.outbound[0].size());
+	if (!expect(joiner.session_timeouts().max_packet_bytes == 576 &&
+				joiner.packet_ceiling_bytes() == 576,
+			"the 0x82's CS field 13 becomes the joiner's packet ceiling")) {
+		return false;
+	}
+
+	// A cs_dir0 update (direction byte nonzero): field 4 = 5000, field 5 = 3000, field 13 = 400.
+	std::vector<uint8_t> update{0x01, 0x30, 0x20, 0x00, 0x00};
+	for (uint32_t value : {5000u, 3000u, 400u}) {
+		for (int shift = 0; shift < 32; shift += 8)
+			update.push_back(static_cast<uint8_t>(value >> shift));
+	}
+	inmatch::NapiNPConnection *node = nullptr;
+	for (inmatch::NapiNPConnection &c : host.np_protocol.connection_list)
+		if (c.peer == peer) node = &c;
+	if (!expect(node != nullptr, "host holds the joiner's node")) return false;
+	// Skip the host's retained settings packet: the update rides the next sequence, so the
+	// joiner queues it; deliver the settings first, then the update, in order.
+	if (!expect(accept.outbound.size() == 2, "the 0x82 is followed by the settings packet"))
+		return false;
+	joiner.handle_datagram(accept.outbound[1].data(), accept.outbound[1].size());
+	std::vector<uint8_t> update_packet;
+	if (!expect(inmatch::frame_in_match_s2c_batch(host, peer,
+				{make_protocol_message(0x00, update,
+						PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8)},
+				update_packet),
+			"host frames the CS update")) {
+		return false;
+	}
+	joiner.handle_datagram(update_packet.data(), update_packet.size());
+	const inmatch::SessionTimeoutConfig &cs = joiner.session_timeouts();
+	if (!expect(cs.idle_send_interval_ms == 5000 && cs.active_send_interval_ms == 3000 &&
+				cs.max_packet_bytes == 400,
+			"a cs_dir0 update stores fields 4, 5 and 13")) {
+		return false;
+	}
+
+	// Field 13: three 300-byte records no longer share one packet.
+	std::vector<ProtocolMessage> records;
+	for (uint8_t i = 0; i < 3; ++i)
+		records.push_back(make_protocol_message(0x34, std::vector<uint8_t>(300, i)));
+	const std::vector<std::vector<uint8_t>> framed = joiner.frame_messages(records);
+	bool within = !framed.empty();
+	for (const std::vector<uint8_t> &datagram : framed) within = within && datagram.size() <= 400;
+	if (!expect(framed.size() == 3 && within,
+			"C2S packets obey the dictated 400-byte ceiling")) {
+		return false;
+	}
+
+	// Field 5: with those records retained, the active probe waits MORE than 3000 ms.
+	joiner.pump(0); // flushes any owed ACK
+	now_ms = 3000;
+	if (!expect(joiner.pump(0).empty(), "no active probe at exactly 3000 ms")) return false;
+	now_ms = 3001;
+	const std::vector<std::vector<uint8_t>> probe = joiner.pump(0);
+	return expect(probe.size() == 1 && is_opcode(probe[0], SESSION_OPCODE_PROTOCOL_MESSAGE),
+			"the active probe follows the dictated 3000 ms interval");
+}
+
 bool run_client_active_probe_recovers_join() {
 	// The JOINTOPERATIONS template's active_send_interval_ms [orig: CNapiNetwork_Init @0x4ca4a0].
 	constexpr uint64_t kRetailActiveSendIntervalMs = 10000;
@@ -241,6 +335,11 @@ bool run_client_active_probe_recovers_join() {
 			client_auth, 0x7F000001u, 32769, kServerKey, server_scrk,
 			"", "", "", false);
 	server_auth.mi = 3;
+	// A GAME host's 0x82 carries the JOINTOPERATIONS block (build_server_auth defaults to the
+	// NOVAWORLDUDP service's), and the joiner now runs its send intervals on it.
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init @0x4ca4a0]
+	server_auth.client_cs = jointoperations_cs_fields();
+	server_auth.server_cs = jointoperations_cs_fields();
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
 	const inmatch::JoinerConnection::PollResult auth_result = joiner.handle_datagram(
@@ -486,6 +585,7 @@ int main() {
 	if (!run_idle_keepalive_survives_a_quiet_session()) return 1;
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
+	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;
 	std::printf("OK\n");

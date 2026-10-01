@@ -66,14 +66,16 @@ inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
 // [orig: CNapiNetwork_Init @0x4caa81/@0x4cab54]
 inline constexpr uint32_t JO_GAME_SESSION_TIMEOUT_MS = 120000;
 
-// cs_dir0.recv_max_per_tick (CS field 1) = 4 for the JOINTOPERATIONS template; the teardown of an
-// active connection sends its disconnect packet up to this many times, clamped to [0, 32].
+// The teardown of an active connection sends its disconnect packet cs_dir0.recv_max_per_tick
+// (CS field 1; 4 on the JOINTOPERATIONS template) times, clamped to [0, 32]; the first send
+// goes whatever the count, so a count of 0 still sends one.
 // [orig: CNapiNetwork_Init @0x4cab60; CNapiNPConnection_TeardownActiveConnection @0x6253C0 —
-//  the clamp @0x6253ef..0x625403 and the send loop @0x625406..0x625424 (state 1),
-//  @0x62549e..0x6254d3 (state 5)]
-inline constexpr uint32_t JO_GAME_SESSION_RECV_MAX_PER_TICK = 4;
-inline constexpr std::size_t disconnect_burst_count() {
-	return JO_GAME_SESSION_RECV_MAX_PER_TICK > 32u ? 32u : JO_GAME_SESSION_RECV_MAX_PER_TICK;
+//  the clamp @0x6253ef..0x625403, the first send @0x625406 and the loop @0x625412..0x625424
+//  (state 1), @0x62549e..0x6254d3 (state 5)]
+inline constexpr std::size_t disconnect_burst_count(int32_t recv_max_per_tick) {
+	const int32_t clamped =
+			recv_max_per_tick > 32 ? 32 : (recv_max_per_tick < 0 ? 0 : recv_max_per_tick);
+	return clamped < 1 ? std::size_t{1} : static_cast<std::size_t>(clamped);
 }
 
 // A negative cs_dir msg_out_max (the `_NSTMOUT.TXT` NEVER form) is unbounded: NapiNPMessage_Create

@@ -52,26 +52,19 @@ constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
 constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
 constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
-// Established-session active-send probe interval: the JOINTOPERATIONS connection template's
-// cs_dir0/cs_dir1.active_send_interval_ms (idle 30000). While reliable records remain retained, a
-// sender with nothing else to send waits strictly more than this, then mints a header-only
-// sequence so the peer's ordinary 0x44/0x84 machinery requests the lost semantic packet.
-// [orig: CNapiNetwork_Init @0x4ca4a0 stores @0x4caac5/@0x4cab98 -> read by
-// CNapiNPConnection_PumpSendIntervals @0x628FD0]
-constexpr uint64_t kSessionActiveSendIntervalMilliseconds = 10000;
-
-// The connection template's EMPTY send interval, the third leg of retail's send pump: with
-// NOTHING queued to send and NOTHING retained, the pump still mints a packet once this
-// elapses, so the peer's connection timeout never fires on a quiet client. This is the
-// keepalive that carries a client parked at the deploy pick, killed, or simply idle — the
-// peer reaps at cs_dir0.timeout_ms = 120000 from the same initializer, so a client without
-// this leg is dropped after ~2 minutes of silence.
-// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 — the empty_interval leg
-//  @0x629041..0x629067 (`!static_payload_max && !retained && now - last_send > interval`
-//  -> force_send -> BuildOutgoingPackets); the value is
-//  cs_dir0/cs_dir1.idle_send_interval_ms = 30000, CNapiNetwork_Init @0x4ca4a0 stores
-//  @0x4caab5/@0x4cab88; the reaping timeout_ms = 120000 is stored @0x4caa81/@0x4cab54]
-constexpr uint64_t kSessionIdleSendIntervalMilliseconds = 30000;
+// The established session's two send-interval legs read this connection's cs_dir0 (CS fields 5
+// and 4; 10000 / 30000 on the JOINTOPERATIONS template, overlaid by the host's 0x82 and H:0x00
+// CS updates), each disabled by a negative value:
+//   ACTIVE (field 5): while reliable records remain retained, a sender with nothing else to send
+//   waits strictly more than the interval, then mints a header-only sequence so the peer's
+//   ordinary 0x44/0x84 machinery requests the lost semantic packet.
+//   EMPTY (field 4): with NOTHING queued and NOTHING retained the pump still mints a packet once
+//   the interval elapses, so the peer's connection timeout never fires on a quiet client — the
+//   keepalive that carries a client parked at the deploy pick, killed, or simply idle.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 — the active leg @0x628ff1..0x629017,
+//  the empty leg @0x629041..0x629067 (-> force_send -> BuildOutgoingPackets); CNapiNetwork_Init
+//  @0x4ca4a0 stores 10000 @0x4caac5/@0x4cab98 and 30000 @0x4caab5/@0x4cab88; the reaping
+//  timeout_ms = 120000 is stored @0x4caa81/@0x4cab54]
 
 uint64_t steady_milliseconds() {
 	using namespace std::chrono;
@@ -792,17 +785,15 @@ void JoinerConnection::on_server_auth(
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
 	                              // client-ack so the host stamps it into our 0x0C ownerConnectionId]
 	// The host's CS block overlays this connection's cs_dir0 template: CLIENT-direction
-	// (byte 1) entries land in cs_dir0, the block PumpStateMachine's reap and
-	// NapiNPMessage_Create's pool bound read, so a host `_NSTMOUT.TXT` override (or a
-	// NEVER -1) reaches us as CS field 0 / field 11. Fields the 0x82 omits keep the template.
+	// (byte 1) entries land in cs_dir0, the block this connection's pumps read — the reap
+	// (field 0), the teardown burst (1), the empty and active send intervals (4, 5), the
+	// pool bound (11) and the packet ceiling (13) — so a host `_NSTMOUT.TXT` override (or a
+	// NEVER -1) or its `mpmaxpacketsize` reaches us. Fields the 0x82 omits keep the template.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 — the template seed @0x6299ae, the
 	//  CS overlay @0x629b4c..0x629b75, the copy onto the connection @0x629d72/@0x629d89]
-	for (const CsField &field : sa.client_cs) {
-		if (field.field_index == 0)
-			conn_.timeouts.timeout_ms = static_cast<int32_t>(field.value);
-		else if (field.field_index == 11)
-			conn_.timeouts.msg_out_max = static_cast<int32_t>(field.value);
-	}
+	for (const CsField &field : sa.client_cs)
+		apply_session_cs_field(conn_.timeouts, field.field_index,
+				static_cast<int32_t>(field.value));
 	conn_.seq.outbound_message_limit = outbound_message_limit_for(conn_.timeouts.msg_out_max);
 	phase_ = Phase::Driving;
 	// State-5 entry initializes the reap clock: the 120 s window runs from the accepted
@@ -1074,13 +1065,26 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	// explicit unknown state because OpenNova and retail may send the initial
 	// 0x5A grants before 0x0F, either in this packet or an earlier packet.
 	for (const ProtocolMessage &m : messages) {
-		// CS field 3 (the send holdoff) of a cs_dir0 update.
+		// A cs_dir0 update stores every slot it carries: field 3 (the send holdoff) for
+		// ClientRuntime's gate, the rest onto this connection's cs_dir0 — a retail host's
+		// 0x2000 update is the negotiated packet ceiling (field 13).
+		// [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940, the cs_dir0 store
+		//  @0x6219c8; the host senders NapiNPServer_UpdateHoldoffTicks @0x4c5f5e (mask 8),
+		//  NapiNPServer_HandleNewConnection @0x4c81bd (mask 0x2000)]
 		if (is_cs_config_update(m)) {
 			const CsConfigUpdate settings =
 					decode_cs_config_update(m.payload.data(), m.payload.size());
-			if (settings.to_dir0 && (settings.written & (1u << 3)) != 0) {
-				out.send_holdoff_set = true;
-				out.send_holdoff = static_cast<uint32_t>(settings.value[3]);
+			if (settings.to_dir0) {
+				if ((settings.written & (1u << 3)) != 0) {
+					out.send_holdoff_set = true;
+					out.send_holdoff = static_cast<uint32_t>(settings.value[3]);
+				}
+				for (uint32_t slot = 0; slot < static_cast<uint32_t>(kCsConfigSlots); ++slot) {
+					if ((settings.written & (1u << slot)) != 0)
+						apply_session_cs_field(conn_.timeouts, slot, settings.value[slot]);
+				}
+				conn_.seq.outbound_message_limit =
+						outbound_message_limit_for(conn_.timeouts.msg_out_max);
 			}
 		}
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE && m.tag == s2c::WEAPON_LOADOUT) {
@@ -2223,9 +2227,10 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			// deploy pick, dead with the uplink gate shut, or idle) transmits nothing
 			// and a stock host drops it at its 120 s connection timeout.
 			const uint64_t now_ms = monotonic_milliseconds_();
-			if (conn_.server_sk != 0 && session_last_send_ms_ != 0 &&
+			const int32_t idle_interval = conn_.timeouts.idle_send_interval_ms;
+			if (idle_interval >= 0 && conn_.server_sk != 0 && session_last_send_ms_ != 0 &&
 			    now_ms >= session_last_send_ms_ &&
-			    now_ms - session_last_send_ms_ > kSessionIdleSendIntervalMilliseconds) {
+			    now_ms - session_last_send_ms_ > static_cast<uint64_t>(idle_interval)) {
 				out.push_back(frame_session({}));
 			}
 		} else {
@@ -2233,8 +2238,10 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			if (!session_send_clock_armed_) {
 				session_last_send_ms_ = now_ms;
 				session_send_clock_armed_ = true;
-			} else if (now_ms >= session_last_send_ms_ &&
-			           now_ms - session_last_send_ms_ > kSessionActiveSendIntervalMilliseconds) {
+			} else if (conn_.timeouts.active_send_interval_ms >= 0 &&
+			           now_ms >= session_last_send_ms_ &&
+			           now_ms - session_last_send_ms_ >
+			                   static_cast<uint64_t>(conn_.timeouts.active_send_interval_ms)) {
 				out.push_back(frame_session({}));
 			}
 		}
