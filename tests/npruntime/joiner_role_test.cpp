@@ -494,7 +494,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 				w::EntityHandle{self_handle}, vh, 1), "authority confirms driver")) return false;
 	}
 	// NovaWorld dictates a 12-tick uplink period. Add six ticks each way
-	// (~194 ms RTT at 62 Hz); only newly emitted controls reach the authority.
+	// (a 192 ms round trip: 12 ticks of 16 ms); only newly emitted controls reach the authority.
 	// Re-sending the last observed packet every tick would hide a pacing bug.
 	const int period = internet_conditions ? 12 : 4;
 	const int delay = internet_conditions ? 6 : 0;
