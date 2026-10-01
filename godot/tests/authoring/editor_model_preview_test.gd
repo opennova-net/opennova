@@ -13,10 +13,24 @@ extends GutTest
 ## the model an item pairs with it; the selected row's clip poses the device's skeleton at
 ## the clip clock's tick. S13 V5: the model viewport's envelope; each model its own viewport and
 ## device; the Shell's device cache holds four, the least recently used given up, and a viewport
-## given a device again makes its picture again, its camera kept.
+## given a device again makes its picture again, its camera kept. S13 V6: the device builds its
+## picture over frames (its textures, its meshes, the scene, the pose), so a viewport reads `loading`
+## before `ready` and every test awaits `ready` after what builds again; a JO-sized model loads over
+## several frames within the build budget, the last picture kept until the scene unit swaps the new
+## one in, one unit a frame at a budget of 0.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+## The JO-sized model (S13 V6), as large as the 967 the game ships come near their 99th percentile
+## (six levels, 4,304 triangles at the first and 10,409 in all, 16 materials, 29 texture rows, 18
+## textures): the materials (a texture each, every third a detail texture too), the parts, the quads
+## across each part's sheet at the first level (halved at each level after), the levels, the
+## textures' side in pixels.
+const LARGE_MATERIALS := 16
+const LARGE_PARTS := 12
+const LARGE_CELLS := 16
+const LARGE_LEVELS := 5
+const LARGE_SIDE := 256
 const ARMORY := "res://../fixtures/threedi/synth/armory.3di"
 const ROCKING := "res://../fixtures/threedi/synth/house_lod0_sine_rotx.3di"
 const SKINNED := "res://../fixtures/threedi/o3d/skinned.o3d"
@@ -135,10 +149,11 @@ func _overlays(preview: Dictionary, kind: String) -> Array:
 	return rows
 
 
-## The model's viewport ready, a frame at a time (its device takes what it asks at each pump).
+## The model's viewport ready, a frame at a time (its device takes what it asks at each pump and
+## builds its picture over the frames, S13 V6: `loading` until it is built).
 func _await_ready() -> Dictionary:
 	var preview := _preview()
-	for _frame in 8:
+	for _frame in 600:
 		if String(preview.get("status", "")) == "ready":
 			break
 		await get_tree().process_frame
@@ -225,6 +240,11 @@ func test_preview_draws_the_open_model() -> void:
 	assert_true(_seam.set_field(light, "start.r", 12))
 	preview = _preview()
 	assert_eq(int(preview.get("builds", 0)), 2)
+	# Built over the frames that follow (S13 V6): loading first, the scene swapped in once built.
+	assert_eq(String(preview.get("status", "")), "loading", str(preview))
+	preview = await _await_ready()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	assert_eq(int(preview.get("device", {}).get("build", {}).get("generation", 0)), 2)
 	assert_ne(model.get_scene_build_serial(), serial, "a light's edit builds the scene again")
 
 	# The options: a level held and one of the model's registers (armory's FLICKER) on it.
@@ -257,6 +277,7 @@ func test_markers_ride_the_parts_the_device_draws() -> void:
 		return
 	assert_true(_new_project_with(ROCKING, "house.3di"))
 	assert_true(_seam.open_document("models/house.3di"))
+	assert_eq(String((await _await_ready()).get("status", "")), "ready")
 	# The ground point moved off the axis the part turns about.
 	var point := _first_child("user_point")
 	assert_gt(point, 0)
@@ -400,3 +421,161 @@ func test_the_device_cache_holds_four() -> void:
 	assert_almost_eq(float(again.get("camera", {}).get("yaw", 0.0)), 1.25, 0.001, "the camera it kept")
 	assert_almost_eq(float(again.get("camera", {}).get("distance", 0.0)), 12.0, 0.001)
 	assert_not_null(_app.get_model_preview_model(), "a device of its own again")
+
+
+## A 32-bit TGA `side` pixels square (its pixels one colour): a texture the game decodes itself.
+func _write_tga(path: String, side: int) -> void:
+	var image := Image.create(side, side, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.45, 0.55, 0.35, 1.0))
+	var header := PackedByteArray([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		side & 0xFF, side >> 8, side & 0xFF, side >> 8, 32, 8])
+	var out := FileAccess.open(path, FileAccess.WRITE)
+	out.store_buffer(header)
+	out.store_buffer(image.get_data())
+	out.close()
+
+
+## A sheet of `cells` x `cells` quads at x = `x` facing +x (mission axes: y left, z up), two metres
+## square, as a strip's vertices and triangles (counter-clockwise about its normal).
+func _sheet(lines: PackedStringArray, x: float, cells: int) -> void:
+	for row in cells + 1:
+		for column in cells + 1:
+			var u := float(column) / cells
+			var v := float(row) / cells
+			lines.append("v %.4f %.4f %.4f 1 0 0 %.4f %.4f" % [x, -1.0 + 2.0 * u, 2.0 * v, u, 1.0 - v])
+	for row in cells:
+		for column in cells:
+			var a := row * (cells + 1) + column
+			var b := a + 1
+			var c := a + cells + 2
+			var d := a + cells + 1
+			lines.append("t %d %d %d" % [a, b, c])
+			lines.append("t %d %d %d" % [a, c, d])
+
+
+## A JO-sized model's source written into `dir` as the Blender add-on writes a scene (an .o3d), its
+## textures beside it: `materials` materials, each with a diffuse texture and every third a detail
+## texture too (32-bit TGAs `side` pixels square); `levels` levels of `parts` parts, a part a sheet
+## of `cells` x `cells` quads at the first level, half as many across at each level after; a light
+## and a user point. Answers the textures' file names.
+func _write_large_model(dir: String, stem: String, materials: int, parts: int, cells: int, levels: int,
+		side: int) -> PackedStringArray:
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	var textures := PackedStringArray()
+	var lines := PackedStringArray(["o3d 1", "model %s" % stem.to_upper()])
+	for index in materials:
+		var detail := index % 3 == 2
+		lines.append("material %s" % ("FF_MT_OP" if detail else "FF_ST_OP"))
+		var diffuse := "%s%02d.tga" % [stem, index]
+		lines.append("texture %s 1 0 0 0" % diffuse)
+		textures.append(diffuse)
+		if detail:
+			var second := "%s%02dd.tga" % [stem, index]
+			lines.append("texture %s 2 0 0 0" % second)
+			textures.append(second)
+	for level in levels:
+		# The level drawn past a threshold that halves at each level, the last at any distance.
+		lines.append("lod %d bldg" % (0 if level == levels - 1 else 400 >> level))
+		for part in parts:
+			lines.append("part 0 %d 0 0" % (part * 3))
+			lines.append("strip %d 0" % (part % materials))
+			_sheet(lines, float(part * 3), maxi(cells >> level, 1))
+	lines.append("light 0 1 0 1.5 0 4 0 0 0 255 200 150 255 200 150 0")
+	lines.append("userpoint top 0 0 3 0 0 1 0 71")
+	var out := FileAccess.open(dir.path_join(stem + ".o3d"), FileAccess.WRITE)
+	out.store_string("\n".join(lines) + "\n")
+	out.close()
+	for texture in textures:
+		_write_tga(dir.path_join(texture), side)
+	return textures
+
+
+## S13 V6: a JO-sized model builds over frames. Opened, its viewport is `loading` at once (the build
+## begun, its units planned: textures, meshes, the scene, the pose), its progress never going back,
+## then `ready`; at the editor's build budget each frame's units take no more than the budget and one
+## unit's cost (measured, asserted loosely: the longest frame within the budget plus the longest unit
+## and a millisecond). At a budget of 0 each frame runs one unit, so the build takes as many frames
+## as it has units; until its scene unit the device's ObjectModel holds the last scene (the last
+## picture kept, nothing half built in it); a light's edit at a unit begins the next generation anew.
+func test_a_large_model_builds_over_frames() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor model preview large %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir.path_join("project"), "Large Game"))
+	var source := dir.path_join("source")
+	var textures := _write_large_model(source, "jolarge", LARGE_MATERIALS, LARGE_PARTS, LARGE_CELLS, LARGE_LEVELS,
+			LARGE_SIDE)
+	var imports: Array = [{"path": source.path_join("jolarge.o3d")}]
+	for texture in textures:
+		imports.append({"path": source.path_join(texture)})
+	var imported: Dictionary = _seam.request({"kind": "import_files", "imports": imports})
+	assert_true(bool(imported.get("ok", false)), str(imported))
+	assert_true(_seam.settle(), "the import steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("models/jolarge.3di"))
+
+	# The editor's budget: loading at once, its progress rising, then ready.
+	var budget_ms: int = _app.get_build_budget_ms()
+	assert_gt(budget_ms, 0)
+	var preview := _preview()
+	assert_eq(String(preview.get("status", "")), "loading", str(preview))
+	var total := int(preview.get("progress", {}).get("total", 0))
+	assert_gt(total, textures.size(), "a unit a texture, then the meshes, the scene and the pose")
+	var done := 0
+	var frames := 0
+	while String(preview.get("status", "")) == "loading" and frames < 600:
+		var now := int(preview.get("progress", {}).get("done", 0))
+		assert_true(now >= done, "the progress never goes back")
+		done = now
+		await get_tree().process_frame
+		frames += 1
+		preview = _preview()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	var build: Dictionary = preview.get("device", {}).get("build", {})
+	gut.p("the JO-sized model at %d ms a frame: %d frames awaited, its build %s" % [budget_ms, frames, str(build)])
+	assert_eq(int(build.get("done", 0)), total, str(build))
+	assert_gt(int(build.get("frames", 0)), 0, str(build))
+	var frame_us := int(build.get("frame_us", 0))
+	var unit_us := int(build.get("unit_us", 0))
+	assert_lte(frame_us, budget_ms * 1000 + unit_us + 1000,
+			"no frame's units past the budget by more than one unit: %s" % str(build))
+	var model: ObjectModel = _app.get_model_preview_model()
+	assert_not_null(model)
+	assert_not_null(model.get_object_data(), "the device holds the model")
+
+	# A budget of 0: one unit a frame. Until the scene unit the ObjectModel holds the last scene.
+	_app.set_build_budget_ms(0)
+	var serial: int = model.get_scene_build_serial()
+	var light := _first_child("light")
+	assert_gt(light, 0)
+	assert_true(_seam.set_field(light, "start.r", 12))
+	preview = _preview()
+	assert_eq(String(preview.get("status", "")), "loading", str(preview))
+	assert_eq(int(preview.get("builds", 0)), 2)
+	done = 0
+	for _frame in 3:
+		await get_tree().process_frame
+		preview = _preview()
+		var now := int(preview.get("progress", {}).get("done", 0))
+		assert_true(now - done <= 1, "one unit a frame: %d after %d" % [now, done])
+		done = now
+		assert_eq(String(preview.get("progress", {}).get("label", "")), "textures", str(preview))
+		assert_eq(model.get_scene_build_serial(), serial, "the last scene kept while the textures decode")
+	assert_gt(done, 1, "a unit each frame")
+	# Another edit while it builds: the next generation begun anew from its first unit.
+	assert_true(_seam.set_field(light, "start.r", 13))
+	preview = _preview()
+	assert_eq(int(preview.get("builds", 0)), 3)
+	assert_eq(int(preview.get("device", {}).get("build", {}).get("generation", 0)), 3)
+	assert_eq(int(preview.get("progress", {}).get("done", -1)), 0, "begun anew")
+	frames = 0
+	while String(preview.get("status", "")) == "loading" and frames < total + 10:
+		await get_tree().process_frame
+		frames += 1
+		preview = _preview()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	build = preview.get("device", {}).get("build", {})
+	gut.p("the JO-sized model at 0 ms a frame: %d frames awaited, its build %s" % [frames, str(build)])
+	assert_eq(int(build.get("frames", 0)), total, "one unit a frame, as many frames as units: %s" % str(build))
+	assert_eq(int(build.get("generation", 0)), 3, str(build))
+	assert_ne(model.get_scene_build_serial(), serial, "the scene built again once its unit ran")

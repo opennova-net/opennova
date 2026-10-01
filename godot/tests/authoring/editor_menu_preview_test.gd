@@ -12,7 +12,9 @@ extends GutTest
 ## several selected windows move, align and change their drawing order in one undo step
 ## each (S9k2). A TABLE draws through the device (its rows' cells, a SUBST image, a clip rect)
 ## where the viewport's own compile places it; a device given up (its menu closed) retires its
-## SubViewport, freed at the next frame, and the menu opened again gets a device of its own.
+## SubViewport, freed at the next frame, and the menu opened again gets a device of its own. S13 V6:
+## a screen whose texture the device does not keep yet is configured over the frames (`loading`, the
+## texture a unit, then the configure), and configured again as it is taken once it keeps it.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -47,6 +49,18 @@ func after_each() -> void:
 func _preview() -> Dictionary:
 	var parsed: Variant = JSON.parse_string(String(_app.get_menu_preview_json()))
 	return parsed if parsed is Dictionary else {}
+
+
+## The menu's viewport ready, a frame at a time (S13 V6: a screen whose textures the device does not
+## keep yet is configured over the frames, `loading` until then).
+func _await_ready() -> Dictionary:
+	var preview := _preview()
+	for _frame in 600:
+		if String(preview.get("status", "")) != "loading":
+			break
+		await get_tree().process_frame
+		preview = _preview()
+	return preview
 
 
 func _widget(preview: Dictionary, name: String) -> Dictionary:
@@ -332,9 +346,21 @@ func test_a_table_draws_through_the_device() -> void:
 	var table: int = _seam.find_record("LIST")
 	assert_gt(table, 0)
 	assert_true(_seam.select_record(table))
+	# S13 V6: chk.tga is not decoded yet, so the screen is configured over the frames: the texture a
+	# unit, then the configure (two units).
 	var preview := _preview()
+	assert_eq(String(preview.get("status", "")), "loading", str(preview))
+	assert_eq(int(preview.get("progress", {}).get("total", 0)), 2, str(preview))
+	preview = await _await_ready()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	assert_eq(int(preview.get("device", {}).get("build", {}).get("total", 0)), 2, str(preview))
 	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "TBL")
+	# Its texture kept, the screen configured again (an option) is configured as it is taken.
+	assert_true(_app.set_menu_preview_options({"show_hidden": true}))
+	preview = _preview()
+	assert_eq(String(preview.get("status", "")), "ready", "configured whole: %s" % str(preview))
+	assert_eq(int(preview.get("device", {}).get("build", {}).get("total", 0)), 1, str(preview))
+	assert_true(_app.set_menu_preview_options({"show_hidden": false}))
 	var frame: Object = _app.get_menu_preview_frame()
 	assert_not_null(frame, "the device's frame")
 	if frame == null:

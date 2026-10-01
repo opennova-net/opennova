@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/tcp_server.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -60,6 +61,8 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_json", "name", "args"), &EditorApp::query_json, DEFVAL("{}"));
 	ClassDB::bind_method(D_METHOD("pump"), &EditorApp::pump);
 	ClassDB::bind_method(D_METHOD("set_poll_budget", "ms", "step_bytes"), &EditorApp::set_poll_budget);
+	ClassDB::bind_method(D_METHOD("set_build_budget_ms", "ms"), &EditorApp::set_build_budget_ms);
+	ClassDB::bind_method(D_METHOD("get_build_budget_ms"), &EditorApp::get_build_budget_ms);
 	ClassDB::bind_method(D_METHOD("get_menu_preview_json"), &EditorApp::get_menu_preview_json);
 	ClassDB::bind_method(D_METHOD("menu_preview_hit_json", "x", "y"), &EditorApp::menu_preview_hit_json);
 	ClassDB::bind_method(D_METHOD("set_menu_preview_options", "options"), &EditorApp::set_menu_preview_options);
@@ -246,10 +249,16 @@ void EditorApp::_process(double p_delta) {
 	pump();
 	// The one model runtime-frame driver in the editor (menu_shell.gd's for the game's menus): the
 	// preview clock runs, and the viewports' part animations, flipbooks, generators and clips run on
-	// it, whether a canvas draws them or not (pump() synced the devices).
+	// it, whether a canvas draws them or not (pump() synced the devices). Then the devices' builds a
+	// unit further (S13 V6): at least one unit of each build in flight, the next while the frame's
+	// build budget lasts.
 	if (devices_) {
 		session_->advance(p_delta);
 		devices_->tick(session_->viewports());
+		const uint64_t start = Time::get_singleton()->get_ticks_usec();
+		const uint64_t budget = uint64_t(build_budget_ms_) * 1000;
+		devices_->step(session_->viewports(),
+				[start, budget] { return Time::get_singleton()->get_ticks_usec() - start < budget; });
 		ObjectModel::advance_awake_frame(p_delta);
 	}
 }
