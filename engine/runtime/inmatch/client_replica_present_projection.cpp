@@ -45,10 +45,13 @@ void project_client_replica_present_row(
 
 	row[world::PF_TYPE_ID] = static_cast<float>(entity.type_id);
 	row[world::PF_WIRE_HANDLE] = static_cast<float>(entity.handle);
-	// The decoded groundEntity link, for the on-entity footstep slot. 0xFFFF
+	// The groundEntity/mount link the on-entity footstep slot reads (the seat
+	// wins over the ground link, as the authority rows publish it); 0xFFFF
 	// (no link) publishes as -1 so presentation reads one sentinel.
-	row[world::PF_CARRIER_HANDLE] = entity.carrier_handle != 0xFFFFu
-			? static_cast<float>(entity.carrier_handle)
+	const uint16_t ground_link = entity.carrier_handle != 0xFFFFu
+			? entity.carrier_handle : entity.resolved_ground;
+	row[world::PF_CARRIER_HANDLE] = ground_link != 0xFFFFu
+			? static_cast<float>(ground_link)
 			: -1.0f;
 	if (entity.cls == EntityClass::Player) {
 		// A player's wire net_id IS its packed character id (entity+0x15C).

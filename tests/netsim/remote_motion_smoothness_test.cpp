@@ -989,6 +989,96 @@ bool run_player_root_motion_dead_reckons() {
 	return ok;
 }
 
+// A player standing on a building (a roof, a bridge, a deck) streams its
+// groundEntity as the compact carrier with seat bone 0. Retail lifts the
+// carrier-local sample to world, STAGES it like a free record and attaches
+// nothing (bone 0 detaches), so the row keeps its chase, root motion and
+// footsteps; groundEntity takes the carrier [orig: NetPacket_SerializePlayerState
+// @0x4c10d4 -> LABEL_123 stage, Entity_TryAttachOrDetach @0x436610 bone-0
+// detach, the +0x28 store @0x4c1353]. A non-zero bone is a seat: the row rides
+// the carrier attach and its channel disarms.
+bool run_player_on_ground_carrier_keeps_chasing() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	WalkSource src;
+	view.set_root_motion_source(&src);
+	const uint16_t handle = 0x0043;
+	const uint16_t building = 0x2005; // a pool-2 static
+	seed_row(view, handle, kPlayerType);
+	seed_row(view, building, 0x044C);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	const int32_t bx = 90 << 16, by = 20 << 16, bz = -52 << 16;
+	{
+		ns::ClientEntityState *b = view.state().find(building);
+		b->x = bx;
+		b->y = by;
+		b->z = bz;
+		b->heading_bam = 0;
+	}
+	// Records every 8 ticks, the sample building-local (identity rotation).
+	const auto grounded_frame = [&](int32_t true_x, uint8_t bone) {
+		nw::FrameUpdate fu = player_frame(handle, ax, ay, az, true_x);
+		nw::FrameUpdateRecord &r = fu.records[0];
+		r.player.carrier_handle = building;
+		r.player.vehicle_bone = bone;
+		r.player.pos_x_compressed = nw::network_compress_fixedpoint(true_x - bx);
+		r.player.pos_y_compressed = nw::network_compress_fixedpoint(ay - by);
+		r.player.pos_z_compressed = nw::network_compress_fixedpoint(az - bz);
+		r.player.anim_state_id = opennova::world::anim_state::kWalkForward;
+		r.player.yaw_byte = 0; // local heading; the carrier's is 0
+		return fu;
+	};
+	const int32_t step_fx = 4096;
+	std::vector<int32_t> presented;
+	bool ok = true;
+	for (int t = 0; t < 32 + 64; ++t) {
+		const int32_t true_x = ax + step_fx * t;
+		nw::FrameUpdate fu = (t % 8 == 0) ? grounded_frame(true_x, 0) : header_only_frame();
+		if (t % 8 != 0) { fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az; }
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		if (t == 0) view.state().find(handle)->rm_adm_id = 0;
+		if (t % 8 == 0) {
+			const ns::ClientEntityState *row = view.state().find(handle);
+			ok &= expect(row->carrier_handle == 0xFFFF,
+			             "a bone-0 carrier is no seat: the row is not carried");
+			ok &= expect(row->resolved_ground == building,
+			             "the record's carrier lands in the ground link");
+			const auto lifted = [](int32_t local, int32_t origin) {
+				return origin + nw::network_decompress_fixedpoint(
+						nw::network_compress_fixedpoint(local));
+			};
+			ok &= expect(row->net_smooth_target[0] == lifted(true_x - bx, bx) &&
+			                     row->net_smooth_target[1] == lifted(ay - by, by) &&
+			                     row->net_smooth_target[2] == lifted(az - bz, bz),
+			             "the carrier-local sample stages its world target");
+		}
+		view.tick_remote_motion(0xFFFF);
+		presented.push_back(view.state().find(handle)->x);
+	}
+	int32_t max_step = 0, min_step = INT32_MAX;
+	for (int t = 32; t < 96; ++t) {
+		const int32_t d = presented[t] - presented[t - 1];
+		max_step = std::max(max_step, d);
+		min_step = std::min(min_step, d);
+	}
+	const ns::ClientEntityState *es = view.state().find(handle);
+	std::fprintf(stderr, "[ground-carrier] steps [%d..%d] true=%d state=%d\n",
+	             min_step, max_step, step_fx, int(es->rm_state));
+	ok &= expect(min_step >= step_fx - 1024 && max_step <= 2 * step_fx + 512,
+	             "the grounded row glides between records (no record-rate jumps)");
+	ok &= expect(es->rm_state == opennova::world::anim_state::kWalkForward,
+	             "the grounded row's sim channel stays armed (footsteps scan it)");
+
+	// The same sample with a seat bone is a mount: carried, channel disarmed.
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(grounded_frame(ax + step_fx * 96, 3)));
+	es = view.state().find(handle);
+	ok &= expect(es->carrier_handle == building && es->mount_bone == 3,
+	             "a non-zero bone is a seat: the row rides the carrier");
+	ok &= expect(es->rm_state == -1, "a seated row's channel disarms");
+	return ok;
+}
+
 // The starved idle force [orig: @0x4B465D — g_AnimStateFlagsTable bit0]: a
 // movement state parked past the 512-progress cap must fall to idle 43, or
 // the root motion walks the starved row forever.
@@ -1240,6 +1330,7 @@ int main() {
 	ok &= run_reset_bottom_state_keeps_raw_vertical_root();
 	ok &= run_leg_chase_exact_half_turn_matches_x86_abs();
 	ok &= run_player_root_motion_dead_reckons();
+	ok &= run_player_on_ground_carrier_keeps_chasing();
 	ok &= run_starved_row_forces_idle();
 	ok &= run_self_row_gets_no_root_add();
 	ok &= run_root_rotation_follows_heading();
