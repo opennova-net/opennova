@@ -90,7 +90,7 @@ public:
 
 	ScriptViewStatus view_status() const { return reason_; }
 	// The text as the control holds it (as of the last follow).
-	const ShownText &shown() const { return shown_; }
+	const ShownText &shown_text() const { return shown_; }
 	// Whether the document takes an edit (as of the last follow), and why not ("" when it does).
 	bool editable() const { return editable_; }
 	const std::string &read_only() const { return read_only_; }

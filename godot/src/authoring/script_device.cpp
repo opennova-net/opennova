@@ -175,7 +175,7 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 		// The document read, read again or first shown: its text anew, the caret kept on its line where
 		// the text has it (a reload), the marks and the highlights set again.
 		const int line = edit->get_caret_line(), column = edit->get_caret_column();
-		edit->set_text(to_string(script.shown().text()));
+		edit->set_text(to_string(script.shown_text().text()));
 		edit->clear_undo_history();
 		edit->set_caret_line(std::min(line, std::max(edit->get_line_count() - 1, 0)), false);
 		edit->set_caret_column(column, false);
@@ -202,7 +202,7 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 	// The document's text is the truth: the control takes it again where it holds another (an edit of
 	// another client's, an undo, a refused edit of its own). A burst going on ends with it.
 	if (action != opennova::editor::ViewportAction::Rebuild && (control_moved_ || action == opennova::editor::ViewportAction::Update))
-		if (take_text_(script.shown().text()) && burst_.open() && !ending_) {
+		if (take_text_(script.shown_text().text()) && burst_.open() && !ending_) {
 			ending_ = true;
 			edit->defer([this] { end_burst_(); });
 		}

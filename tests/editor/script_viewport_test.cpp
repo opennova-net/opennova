@@ -24,6 +24,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/script_type.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/canvas_half.h>
 #include <editor/preview/script_viewport.h>
 #include <editor/preview/shown_text.h>
 #include <editor/preview/text_burst.h>
@@ -122,6 +123,9 @@ struct DiffCase {
 };
 
 int test_span_diff() {
+	// A text of code points beyond ASCII, written as numbers (MSVC with no /utf-8 widens a \u escape of a
+	// char32_t literal through the narrow code page).
+	const std::u32string accented{U'a', char32_t(0xE9), char32_t(0x20AC), U'b', U'\n'};
 	const DiffCase cases[] = {
 		{"an insert", AssetKind::Script, "ab\r\ncd\r\n", U"abX\ncd\n", 3, span(1, 3, 0), "X", "abX\r\ncd\r\n"},
 		{"a delete", AssetKind::Script, "ab\r\ncd\r\n", U"a\ncd\n", 1, span(1, 2, 1), "", "a\r\ncd\r\n"},
@@ -142,8 +146,8 @@ int test_span_diff() {
 		{"a CR alone kept where the control cannot show it", AssetKind::Text, std::string("a\rb\r\nc"), U"aXb\nc", 2,
 		 span(1, 3, 0), "X", std::string("a\rXb\r\nc")},
 		{"a NUL kept", AssetKind::Text, std::string("a\0b", 3), U"aYb", 2, span(1, 3, 0), "Y", std::string("a\0Yb", 4)},
-		{"a code-page character stored as its byte", AssetKind::Script, "ab\r\n", U"aé€b\n", 3, span(1, 2, 0),
-		 "\xE9\x80", "a\xE9\x80" "b\r\n"},
+		{"a code-page character stored as its byte", AssetKind::Script, "ab\r\n", accented, 3, span(1, 2, 0), "\xE9\x80",
+		 "a\xE9\x80" "b\r\n"},
 	};
 	size_t planned = 0, undone = 0;
 	for (const DiffCase &c : cases) {
@@ -154,8 +158,20 @@ int test_span_diff() {
 		std::string error;
 		if (!ShownText(*document).edit(c.control, c.caret, edit, error) || !same_span(edit.span, c.span) ||
 		    edit.text != c.inserted) {
-			std::fprintf(stderr, "%s: planned %zu:%zu+%zu \"%s\" (%s)\n", c.name, edit.span.line, edit.span.column,
-			             edit.span.length, edit.text.c_str(), error.c_str());
+			const auto hex_of = [](const std::string &text) {
+				std::string out;
+				for (const char byte : text) {
+					char hex[4];
+					std::snprintf(hex, sizeof(hex), "%02X", static_cast<unsigned char>(byte));
+					out += hex;
+				}
+				return out;
+			};
+			std::string points;
+			for (const char32_t cp : c.control) points += std::to_string(uint32_t(cp)) + " ";
+			std::fprintf(stderr, "%s: planned %zu:%zu+%zu, bytes %s, wanted %s, control %s(%s)\n", c.name, edit.span.line,
+			             edit.span.column, edit.span.length, hex_of(edit.text).c_str(), hex_of(c.inserted).c_str(),
+			             points.c_str(), error.c_str());
 			return 1;
 		}
 		++planned;
@@ -177,7 +193,8 @@ int test_span_diff() {
 	std::string error;
 	TEST_EXPECT(ShownText(*text_of(*same)).edit(U"ab\ncd\n", 0, none, error) && none.empty());
 	// A character the code page has no byte for refuses the edit whole.
-	TEST_EXPECT(!ShownText(*text_of(*same)).edit(U"a≠b\ncd\n", 2, none, error) && none.empty() &&
+	const std::u32string unstorable{U'a', char32_t(0x2260), U'b', U'\n', U'c', U'd', U'\n'};
+	TEST_EXPECT(!ShownText(*text_of(*same)).edit(unstorable, 2, none, error) && none.empty() &&
 	            error.find("U+2260") != std::string::npos);
 	std::printf("span diff: %zu edits planned, applied and undone byte for byte (%zu)\n", planned, undone);
 	TEST_EXPECT(planned == 13 && undone == 13);
@@ -402,12 +419,12 @@ int test_session() {
 	TEST_EXPECT(device && device->since(0) == std::vector<ViewportAction>{ViewportAction::Rebuild});
 	const TextDocument *document = text_of(*rig.session.document_base_for(rig.script));
 	TEST_EXPECT(document && viewport->status() == ViewportStatus::Ready && viewport->editable() &&
-	            viewport->shown().text() == ShownText(*document).text() && viewport->highlights().size() == 14 &&
+	            viewport->shown_text().text() == ShownText(*document).text() && viewport->highlights().size() == 14 &&
 	            viewport->marks().empty());
-	// A keystroke burst from the control: " )" typed after FX_Buildup, then "X", one token; then a
+	// A keystroke burst from the control: " )" typed after FX_Buildup, then a space, one token; then a
 	// keystroke on line 1, a burst of its own (the first ended: its EndEdit before it).
 	const std::string original = document->text();
-	std::u32string control = viewport->shown().text();
+	std::u32string control = viewport->shown_text().text();
 	size_t at = ShownText::offset_of(control, 2, 18);
 	control.insert(at, U" )");
 	editor_test::Gathered out;
@@ -420,13 +437,14 @@ int test_session() {
 	TEST_EXPECT(first && same_span(first->span, span(3, 19, 0)) && first->text == " )");
 	TEST_EXPECT(editor_test::serve(rig.session, out.requests) && document->line(3) == "\tfxrain FX_Buildup )");
 	rig.pump();
-	TEST_EXPECT(device->last() == ViewportAction::Update && viewport->shown().text() == control);
-	control.insert(at + 2, U"X");
+	TEST_EXPECT(device->last() == ViewportAction::Update && viewport->shown_text().text() == control);
+	control.insert(at + 2, U" ");
 	out.requests.clear();
 	TEST_EXPECT(viewport->edit(editor_test::viewport_context(rig.session, *viewport), control, at + 3, 1.2, burst, out, error));
 	TEST_EXPECT(out.requests.size() == 1 && out.requests[0].edits[0].gesture == burst.token() &&
 	            editor_test::serve(rig.session, out.requests));
 	const uint64_t first_token = burst.token();
+	const std::string first_line(document->line(1));
 	control.insert(0, U";");
 	out.requests.clear();
 	TEST_EXPECT(viewport->edit(editor_test::viewport_context(rig.session, *viewport), control, 1, 1.4, burst, out, error));
@@ -446,11 +464,11 @@ int test_session() {
 	const size_t taken = device->taken.size();
 	editor_test::handle_to_end(rig.session, request::undo(rig.script));
 	rig.pump();
-	TEST_EXPECT(document->line(1).substr(0, 1) != ";");
-	TEST_EXPECT(document->line(3) == "\tfxrain FX_Buildup )X" && device->since(taken) == std::vector<ViewportAction>{ViewportAction::Update});
+	TEST_EXPECT(document->line(1) == first_line);
+	TEST_EXPECT(document->line(3) == "\tfxrain FX_Buildup ) " && device->since(taken) == std::vector<ViewportAction>{ViewportAction::Update});
 	editor_test::handle_to_end(rig.session, request::undo(rig.script));
 	rig.pump();
-	TEST_EXPECT(document->text() == original && viewport->shown().text() == ShownText(*document).text());
+	TEST_EXPECT(document->text() == original && viewport->shown_text().text() == ShownText(*document).text());
 	TEST_EXPECT(viewport->marks().empty());
 	// A reload: a Rebuild.
 	const size_t before_reload = device->taken.size();
@@ -500,7 +518,7 @@ int test_session() {
 	rig.devices.sync(rig.session);
 	TEST_EXPECT(!viewport->editable() && !viewport->read_only().empty() && device->last() == ViewportAction::Update);
 	out.requests.clear();
-	TEST_EXPECT(!viewport->edit(editor_test::viewport_context(rig.session, *viewport), U"x" + viewport->shown().text(), 1, 3.0,
+	TEST_EXPECT(!viewport->edit(editor_test::viewport_context(rig.session, *viewport), U"x" + viewport->shown_text().text(), 1, 3.0,
 	                            burst, out, error) &&
 	            out.requests.empty());
 	rig.pump();
@@ -511,7 +529,7 @@ int test_session() {
 	const ScriptViewport *credits = rig.viewport("menus/nlist.kda");
 	TEST_EXPECT(credits && rig.device("menus/nlist.kda") && credits->status() == ViewportStatus::Ready && !credits->editable() &&
 	            !credits->read_only().empty());
-	TEST_EXPECT(!credits->edit(editor_test::viewport_context(rig.session, *credits), U"x" + credits->shown().text(), 1, 4.0, burst,
+	TEST_EXPECT(!credits->edit(editor_test::viewport_context(rig.session, *credits), U"x" + credits->shown_text().text(), 1, 4.0, burst,
 	                           out, error) &&
 	            out.requests.empty());
 	// Closed: its viewport gone, its device dropped at the next sync.

@@ -533,6 +533,105 @@ void test_main_viewport_held() {
 	ui.away();
 }
 
+// S13 V10: a text's script view with the workspace's devices (the Shell's pump before each frame
+// making the device its Main view asks for, as the headless cache pins the active document's): the
+// device placed in the rest of the tab below the toolbar, as wide as the tab's content and as tall as
+// what the toolbar leaves, where the view's cursor stands, raising nothing; a popup open over the tab:
+// the device not placed, the lines drawn in its place.
+void test_script_view_device() {
+	const std::string repo = test_paths_repo_root(__FILE__);
+	std::shared_ptr<DocumentBase> made = document_type_for(AssetKind::Script)->make();
+	Diagnostic error;
+	CHECK(made->load_bytes(test_io::read_file(repo + "/fixtures/wac/text_document.wac"), "text_document.wac",
+	                       AssetKind::Script, "jo", error),
+	      "the script loads");
+	const std::shared_ptr<const DocumentBase> document = made;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, document);
+	HandViewports shell;
+	shell.bind(workspace.seeded);
+	shell.viewports->track(workspace.seeded); // its Main view's viewport, made as its document is open
+	workspace.source = &shell.devices.cache;
+	std::unique_ptr<DocumentView> view = make_view(*document);
+	auto *script = dynamic_cast<ScriptView *>(view.get());
+	CHECK(script != nullptr, "a script's view is the script view");
+	if (!script) return;
+	for (int i = 0; i < 3; ++i) {
+		shell.devices.sync(*shell.viewports, workspace.seeded);
+		view_frame(workspace, *view, *document, 640.0f);
+		view->end_frame(workspace);
+	}
+	const auto *viewport = static_cast<const ScriptViewport *>(shell.find(document->path(), ViewportKind::Script));
+	const DrawnDevice *device = shell.device(document->path(), ViewportKind::Script);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0 && script->device_drawn(),
+	      "the script device drawn in the tab");
+	CHECK(workspace.requests.empty(), "placing the device raises nothing");
+	if (!device) return;
+	const ImGuiWindow *tab = ImGui::FindWindowByName("Tab");
+	CHECK(tab && device->origin.y > tab->Pos.y + ImGui::GetFrameHeight() && device->width >= 600 &&
+	              float(device->origin.y + float(device->height)) <= tab->Pos.y + tab->Size.y,
+	      "the device in the rest of the tab below the toolbar");
+	CHECK(device->last.canvas_sized && device->last.clip_right > device->last.clip_left, "its rect, sized by the view, clipped");
+	// One frame of the tab: Dear ImGui's implicit window first brought over it in the display order where
+	// asked, a window drawn after it over its rect where asked.
+	const auto frame = [&](bool implicit_front, bool over) {
+		shell.devices.sync(*shell.viewports, workspace.seeded);
+		ImGui::NewFrame();
+		if (implicit_front) ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("Debug##Default"));
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(640.0f, 560.0f));
+		ImGui::Begin("Tab", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+		view->draw(workspace, *document);
+		ImGui::End();
+		if (over) {
+			ImGui::SetNextWindowPos(ImVec2(100.0f, 200.0f));
+			ImGui::SetNextWindowSize(ImVec2(240.0f, 120.0f));
+			ImGui::Begin("Over", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			ImGui::TextUnformatted("a window over the tab");
+			ImGui::End();
+		}
+		ImGui::Render();
+		view->end_frame(workspace);
+	};
+	// Dear ImGui's implicit window over the tab (begun every frame, drawn only where something is written
+	// to it, which nothing is): no cover, the device placed.
+	const ImGuiWindow *implicit = ImGui::FindWindowByName("Debug##Default");
+	CHECK(implicit && implicit->IsFallbackWindow && tab && implicit->Rect().Overlaps(tab->Rect()),
+	      "Dear ImGui's implicit window, where the tab is");
+	int placed = device->draws;
+	frame(true, false);
+	CHECK(GImGui->Windows.back() == implicit && device->draws == placed + 1 && script->device_drawn(),
+	      "the implicit window last in the display order: the device placed all the same");
+	// A window over the tab, begun after it: the device not placed from the frame after it first drew;
+	// gone, placed again once a frame has not drawn it.
+	for (int i = 0; i < 3; ++i) frame(false, true);
+	CHECK(!script->device_drawn() && script->lines().lines_drawn() > 0, "a window over the tab: the lines drawn");
+	frame(false, false);
+	frame(false, false);
+	placed = device->draws;
+	frame(false, false);
+	CHECK(script->device_drawn() && device->draws == placed + 1, "the window gone: the device placed again");
+	// A popup over the tab: the device not placed, the lines in its place.
+	const int draws = device->draws;
+	shell.devices.sync(*shell.viewports, workspace.seeded);
+	ImGui::NewFrame();
+	ImGui::OpenPopup("covering");
+	if (ImGui::BeginPopup("covering")) {
+		ImGui::TextUnformatted("a menu");
+		ImGui::EndPopup();
+	}
+	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowSize(ImVec2(640.0f, 560.0f));
+	ImGui::Begin("Tab", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+	view->draw(workspace, *document);
+	ImGui::End();
+	ImGui::Render();
+	CHECK(device->draws == draws && !script->device_drawn() && script->lines().lines_drawn() > 0,
+	      "a popup open: the lines drawn, the device not placed");
+	std::printf("script view: its device drawn %d times, a popup's frame the lines\n", draws);
+}
+
 // A text of many lines is a list clipped to what shows (a log of a frame draws every line: Dear
 // ImGui's clipper draws all while it logs); a reveal scrolls the line it names into sight; its
 // markers are made once per change of the findings or the text, never for a frame.
@@ -583,6 +682,7 @@ void test_long_text() {
 int main() {
 	editor_ui_test::test_every_view();
 	editor_ui_test::test_long_text();
+	editor_ui_test::test_script_view_device();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
 	editor_ui_test::test_main_viewport_view();
