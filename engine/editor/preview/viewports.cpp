@@ -136,56 +136,44 @@ void Viewports::device_report(
 	if (ViewportModel *model = find(path, kind)) model->device_report(report);
 }
 
+bool Viewports::addressed_(const SessionView &view, const std::string &path, ViewportKind named,
+		std::string &at, ViewportKind &kind, std::string &error) const {
+	// No path: the active document, as every pathless read and edit names it (ADR 0046 S13 A5).
+	at = path.empty() ? view.documents.active : path;
+	const DocumentBase *document = at.empty() ? nullptr : open_at(view, at);
+	if (!document) {
+		error = at.empty() ? std::string("No document is open.") : "No document is open at " + at + ".";
+		return false;
+	}
+	const DocumentTypeId type = type_of(*document);
+	kind = named == ViewportKind::kCount ? default_viewport_kind(type) : named;
+	if (kind == ViewportKind::kCount) {
+		error = at + " shows in no viewport (" + viewport_shown_types() + " does).";
+		return false;
+	}
+	if (!viewport_kind_shows(kind, type)) {
+		error = at + " does not show in a " + viewport_kind_token(kind) + " viewport.";
+		return false;
+	}
+	return true;
+}
+
 bool Viewports::set(const SessionView &view, const std::string &path, const io::JsonValue &json,
 		std::string &error) {
 	if (!json.is_object()) {
 		error = "A viewport's change is a JSON object.";
 		return false;
 	}
-	ViewportKind kind = ViewportKind::kCount;
-	if (const io::JsonValue *named = json.get("kind")) {
-		if (!named->is_string() || !viewport_kind_from_token(named->string, kind)) {
+	ViewportKind named = ViewportKind::kCount;
+	if (const io::JsonValue *token = json.get("kind")) {
+		if (!token->is_string() || !viewport_kind_from_token(token->string, named)) {
 			error = "\"kind\" names a viewport kind (menu, model).";
 			return false;
 		}
 	}
-	// No path: the kind's Preview target, the document the Preview window shows.
-	std::string at = path;
-	if (at.empty()) {
-		if (kind == ViewportKind::kCount) {
-			error = "set_viewport names its document (path), or the kind whose Preview it changes.";
-			return false;
-		}
-		at = view.documents.previews[kind].path;
-		if (at.empty()) {
-			error = std::string("The Preview shows no ") + viewport_kind_token(kind) +
-					": name the document (path).";
-			return false;
-		}
-	}
-	const DocumentBase *document = open_at(view, at);
-	if (!document) {
-		error = "No document is open at " + at + ".";
-		return false;
-	}
-	const DocumentTypeId type = type_of(*document);
-	if (kind == ViewportKind::kCount) {
-		// The one kind that shows the document.
-		size_t showing = 0;
-		for (size_t i = 0; i < kViewportKindCount; ++i) {
-			if (!viewport_kind_shows(static_cast<ViewportKind>(i), type)) continue;
-			kind = static_cast<ViewportKind>(i);
-			++showing;
-		}
-		if (showing != 1) {
-			error = showing ? at + " shows in several viewports: name the kind."
-							: at + " shows in no viewport.";
-			return false;
-		}
-	} else if (!viewport_kind_shows(kind, type)) {
-		error = at + " does not show in a " + viewport_kind_token(kind) + " viewport.";
-		return false;
-	}
+	std::string at;
+	ViewportKind kind = ViewportKind::kCount;
+	if (!addressed_(view, path, named, at, kind, error)) return false;
 	// The viewport the change is for, made only once the change applies to it (a refused change makes
 	// none).
 	if (ViewportModel *held = find(at, kind)) return held->apply(json, clock_, error);
@@ -195,6 +183,19 @@ bool Viewports::set(const SessionView &view, const std::string &path, const io::
 	slot.model = std::move(made);
 	slots_.push_back(std::move(slot));
 	return true;
+}
+
+ViewportModel *Viewports::resolve(
+		const SessionView &view, const std::string &path, ViewportKind named, std::string &error) {
+	std::string at;
+	ViewportKind kind = ViewportKind::kCount;
+	if (!addressed_(view, path, named, at, kind, error)) return nullptr;
+	ensure(at, kind);
+	return follow_one(view, at, kind);
+}
+
+bool Viewports::set_clock(const io::JsonValue &json, std::string &error) {
+	return set_preview_clock(json, clock_, error);
 }
 
 } // namespace opennova::editor

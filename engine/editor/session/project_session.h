@@ -64,8 +64,9 @@ public:
 	// is read once before the document opens (RequestNames::unresolved), so a request refused as it
 	// is read opens nothing, and again in the document once open. The answer: {ok (it read),
 	// served, error?, outcome (action_outcome_to_json: what it came to, with the records its edits
-	// made, `added`, and for an edit_record `made`, each label its batch gave to the record it
-	// named), status, view_revision (the view's clock after it)}. A shell row is not served here:
+	// made, `added`, for an edit_record `made`, each label its batch gave to the record it named,
+	// and for an edit_in_viewport's drag `gesture`, the gesture its batch carried), status,
+	// view_revision (the view's clock after it)}. A shell row is not served here:
 	// `shell`, when given, receives it (served false) for the shell to serve; the pickers need a
 	// person and are refused by their kind before their fields are read.
 	io::JsonValue handle_json(const io::JsonValue &json, EditorRequest *shell = nullptr);

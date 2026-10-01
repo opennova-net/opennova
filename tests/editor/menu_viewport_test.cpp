@@ -78,8 +78,12 @@ struct Rig {
 	const MenuViewport *viewport() {
 		return static_cast<const MenuViewport *>(session.viewports().find(path(), ViewportKind::Menu));
 	}
-	JsonValue json() { return viewport_to_json(view(), viewport(), ViewportKind::Menu, JsonPage()); }
-	ViewportContext context(float snap = 0.0f) { return editor_test::viewport_context(session, *viewport(), snap); }
+	// Its envelope; none kept, the kind's over no document (editor_test::empty_viewport_json).
+	JsonValue json() {
+		return viewport() ? viewport_to_json(view(), *viewport(), JsonPage())
+						  : editor_test::empty_viewport_json(view(), ViewportKind::Menu);
+	}
+	ViewportContext context(float snap = 0.0f) { return viewport_context(session.view(), *viewport(), snap); }
 	size_t configures() { return viewport() ? viewport()->configures() : 0; }
 };
 
@@ -115,7 +119,7 @@ static int test_headless_viewport() {
 	{
 		SessionView unselected = view;
 		unselected.documents.previews[ViewportKind::Menu] = PreviewTarget();
-		TEST_EXPECT(viewport_to_json(unselected, nullptr, ViewportKind::Menu, JsonPage()).get_string("reason", "") ==
+		TEST_EXPECT(editor_test::empty_viewport_json(unselected, ViewportKind::Menu).get_string("reason", "") ==
 				"no_screen");
 	}
 

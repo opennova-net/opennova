@@ -35,9 +35,10 @@ func setup(editor_app: Node, port: int) -> Error:
 			+ "what the editor holds (the files, a document and its records, the problems, the asset "
 			+ "graph, a menu's tree, the output, the operation, the catalog of every request and "
 			+ "query); editor_request raises any typed request by kind (open, edit records in the "
-			+ "batch form, save, import, rename); editor_build packs the project; editor_play runs "
-			+ "the game on the build and reports the game's own MCP port, which game_* tools then "
-			+ "drive.")
+			+ "batch form, save, import, rename); editor_viewport reads a document's viewport (a "
+			+ "menu's screen, a model) and drags or commands through it; editor_build packs the "
+			+ "project; editor_play runs the game on the build and reports the game's own MCP port, "
+			+ "which game_* tools then drive.")
 	server.context_factory = _make_context
 	server.log_sink = _on_server_log
 	add_child(server)
