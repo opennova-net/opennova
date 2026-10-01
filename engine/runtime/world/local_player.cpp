@@ -487,6 +487,10 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
 		// the clear @0x4df904/@0x4df909].
 		move_order = w::pack_player_body_input(input_flags.flags, input);
+		// A direction key in the packed word drops the raw binocular toggle:
+		// moving lowers the binoculars for good, not just while the key is
+		// down [orig: @0x4df4b2 -> `mov g_BinocularsToggle, 0` @0x4df4c2].
+		if (move_order.direction_bits != 0) view.binoculars_requested = false;
 		if (w::Entity *entity = world.registry.get(p->handle))
 			entity->analog_throttle = input.analog_throttle;
 		input_flags.clear_after_pack();

@@ -2247,6 +2247,40 @@ void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
     CHECK(independent.w.prng16_state == World::kMissionPrng16Seed);
 }
 
+// A direction key in the packed word drops the raw binocular toggle: the
+// view lowers and stays down after the key releases. Between a joiner's send
+// boundaries nothing is packed, so the toggle survives until the boundary
+// pack reads the held key. [orig: Player_PackInputStateToEntity @0x4df4b2 --
+// `mov g_BinocularsToggle, 0` @0x4df4c2 when the F/B/L/R word is nonzero;
+// Player_UpdatePerFrame @0x4de37b re-derives the raised pose from it]
+void test_pack_drops_the_binocular_toggle_on_movement() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    CHECK(local_player_binoculars_toggle(f.w, f.player.weapon, f.player.view,
+            f.player.view_tracker));
+    CHECK(f.player.view.binoculars_requested);
+    // Looking around and leaning are not movement.
+    f.player.set_view_keys(false, false, false, true, false);
+    f.player.set_movement_keys(false, false, false, false, true, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.view.binoculars_requested);
+    f.player.set_view_keys(false, false, false, false, false);
+    // A joiner between boundaries: the held key accumulates, nothing packs.
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.view.binoculars_requested);
+    // The boundary pack sees the key and drops the toggle; releasing the key
+    // does not bring the binoculars back.
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.binoculars_requested);
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.binoculars_requested);
+    CHECK(!f.player.view.binoculars_raised);
+}
+
 void test_scoped_aim_body_input_camera_and_fired_round() {
     ScopedAimFixture f;
     WeaponInstallData data;
@@ -2464,6 +2498,7 @@ int main() {
     test_scoped_aim_original_sequences();
     test_scoped_aim_gates_and_independent_stance_resets();
     test_scoped_aim_body_input_camera_and_fired_round();
+    test_pack_drops_the_binocular_toggle_on_movement();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {
