@@ -222,7 +222,7 @@ bool run_soak(const SoakCase &soak) {
 	inmatch::HostConfig host_cfg;
 	host_cfg.config.server_name = "OpenNova Soak";
 	host_cfg.config.max_players = 16;
-	// A NovaWorld host's dictated period: one send boundary every 12 ticks (~194 ms).
+	// A NovaWorld host's dictated period: one send boundary every 12 ticks of 16 ms (192 ms).
 	constexpr uint32_t kHoldoffTicks = 12;
 	host_cfg.config.send_holdoff_ticks = kHoldoffTicks;
 	host_cfg.socket_mode = inmatch::SocketMode::Lan;
