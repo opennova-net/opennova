@@ -22,7 +22,8 @@ extends GutTest
 ## model's textures, meshes, scene and pose; a menu screen's textures not decoded yet, then its
 ## configure), so a viewport reads `loading` before `ready` and the tests await `ready` after what
 ## builds again; a JO-sized model loads over several frames within the build budget, the last scene
-## kept until its scene unit, one unit a frame at a budget of 0.
+## kept until its scene unit, one unit a frame at a budget of 0, a level held swapped in place; two
+## builds at once share the frame's budget.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -1014,7 +1015,8 @@ func _import_large_model(dir: String, stem: String) -> int:
 ## takes it (the build begun, its units planned: textures, meshes, the scene, the pose), its progress
 ## never going back, then `ready`; at the editor's build budget each frame's units take no more than
 ## the budget and one unit's cost (measured, asserted loosely: the longest frame within the budget
-## plus the longest unit and a millisecond). At a budget of 0 each frame runs one unit, so the
+## plus the longest unit and a millisecond). A level held once it is built swaps the kept level's rows
+## in place, the scene not built again (the review). At a budget of 0 each frame runs one unit, so the
 ## build takes as many frames as it has units; until its scene unit the device's ObjectModel holds
 ## the last scene (the last picture kept, nothing half built in it); a light's edit at a unit begins
 ## the next generation anew, its progress at 0.
@@ -1059,9 +1061,20 @@ func test_a_large_model_builds_over_frames() -> void:
 		return
 	assert_not_null(model.get_object_data(), "the device holds the model")
 
+	# A level held: its rows swapped in, every level kept (the build made them all), the scene not
+	# built again and nothing asked of the device but an Update.
+	var serial: int = model.get_scene_build_serial()
+	assert_true(_change({"options": {"lod": 3}}))
+	assert_eq(model.get_active_lod(), 3)
+	assert_eq(model.get_scene_build_serial(), serial, "a level swapped in place, the scene not built again")
+	preview = _state()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	assert_eq(int(preview.get("builds", 0)), 1, "a level held builds nothing")
+	assert_true(_change({"options": {"lod": "auto"}}))
+
 	# A budget of 0: one unit a frame. Until the scene unit the ObjectModel holds the last scene.
 	_app.build_budget_ms = 0
-	var serial: int = model.get_scene_build_serial()
+	serial = model.get_scene_build_serial()
 	var light := _first_child("light")
 	assert_gt(light, 0)
 	assert_true(_seam.set_field(light, "start.r", 12))
@@ -1079,12 +1092,14 @@ func test_a_large_model_builds_over_frames() -> void:
 		assert_eq(String(preview.get("progress", {}).get("label", "")), "textures", str(preview))
 		assert_eq(model.get_scene_build_serial(), serial, "the last scene kept while the textures decode")
 	assert_gt(done, 1, "a unit each frame")
-	# Another edit while it builds: the next generation begun anew from its first unit.
+	# Another edit while it builds: the next generation begun anew from its first unit, its progress
+	# the newer generation's (A1's never goes back within one).
 	assert_true(_seam.set_field(light, "start.r", 13))
 	_app.pump()
 	preview = _state()
 	assert_eq(int(preview.get("builds", 0)), 3)
 	assert_eq(int(preview.get("device", {}).get("build", {}).get("generation", 0)), 3)
+	assert_eq(int(preview.get("progress", {}).get("generation", 0)), 3, str(preview))
 	assert_eq(int(preview.get("progress", {}).get("done", -1)), 0, "begun anew")
 	frames = 0
 	while String(preview.get("status", "")) == "loading" and frames < total + 10:
@@ -1097,3 +1112,106 @@ func test_a_large_model_builds_over_frames() -> void:
 	assert_eq(int(build.get("frames", 0)), total, "one unit a frame, as many frames as units: %s" % str(build))
 	assert_eq(int(build.get("generation", 0)), 3, str(build))
 	assert_ne(model.get_scene_build_serial(), serial, "the scene built again once its unit ran")
+
+
+## A screen of `count` windows, each drawing its own texture (tex<n>.tga): a screen whose first
+## show decodes them, a unit each (S13 V6).
+func _textured_menu(count: int) -> String:
+	var windows := ""
+	for index in count:
+		windows += ("\t\t<WINDOW type=\"static\" name=\"IMG%d\">\n" % index
+				+ "\t\t\t<APPEARANCE type=\"image\" state=\"default\">tex%d.tga</APPEARANCE>\n" % index
+				+ "\t\t\t<POSITION><LEFT>%d</LEFT><TOP>0</TOP></POSITION>\n" % (index * 40)
+				+ "\t\t</WINDOW>\n")
+	return ("<SCREEN>\n\t<NAME>TEX</NAME>\n\t<WINDOW type=\"window\" name=\"ROOT\">\n"
+			+ "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\n"
+			+ "\t\t<APPEARANCE type=\"color\" state=\"default\">FF203040</APPEARANCE>\n"
+			+ windows + "\t</WINDOW>\n</SCREEN>\n")
+
+
+## The units the builds of the viewports over `paths` ran so far (each one's done), and whether one
+## of them still loads.
+func _units(paths: Array) -> Dictionary:
+	var done := 0
+	var loading := false
+	var spent := 0
+	var longest := 0
+	for path: String in paths:
+		var state := _state(path)
+		var build: Dictionary = state.get("device", {}).get("build", {})
+		done += int(build.get("done", 0))
+		spent += int(build.get("total_us", 0))
+		longest = maxi(longest, int(build.get("unit_us", 0)))
+		loading = loading or String(state.get("status", "")) == "loading"
+	return {"done": done, "loading": loading, "spent": spent, "longest": longest}
+
+
+## S13 V6 (the review): two devices building at once share the frame's budget, the most recently
+## used one's first. At a budget of 0 the frame runs one unit in all (the menu's and the model's
+## builds, summed, a unit further each frame, never two); at the editor's budget no frame's units,
+## both builds' together, run past the budget by more than the longest unit and a millisecond
+## (measured, asserted loosely).
+func test_two_builds_share_the_frame() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor viewport two builds %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir.path_join("project"), "Two Builds Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	_import_large_model(dir, "jotwo")
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("tex.mnu"), _textured_menu(6).to_utf8_buffer())
+	for index in 6:
+		_write(root.path_join("tex%d.tga" % index), _tga(32))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	var paths := ["tex.mnu", "models/jotwo.3di"]
+
+	# A budget of 0: both opened, both building, one unit a frame between them.
+	var budget_ms: int = _app.build_budget_ms
+	_app.build_budget_ms = 0
+	for path: String in paths:
+		assert_true(_seam.open_document(path))
+		_app.pump()
+	for path: String in paths:
+		var state := _state(path)
+		assert_eq(String(state.get("status", "")), "loading", str(state))
+	var units := _units(paths)
+	var last := int(units["done"])
+	var frames := 0
+	while bool(units["loading"]) and frames < 600:
+		await get_tree().process_frame
+		frames += 1
+		units = _units(paths)
+		assert_eq(int(units["done"]) - last, 1, "one unit a frame in all (frame %d)" % frames)
+		last = int(units["done"])
+	assert_false(bool(units["loading"]), "both built")
+	for path: String in paths:
+		assert_eq(String(_state(path).get("status", "")), "ready", path)
+
+	# The editor's budget: both closed and opened again (devices of their own, the menu's textures not
+	# decoded on its new frame), both building; each frame's units, both builds' together, within the
+	# budget and the longest unit.
+	_app.build_budget_ms = budget_ms
+	for path: String in paths:
+		assert_true(_seam.done({"kind": "close_document", "path": path}))
+	_app.pump()
+	for path: String in paths:
+		assert_true(_seam.open_document(path))
+		_app.pump()
+	units = _units(paths)
+	assert_true(bool(units["loading"]), "built again over the frames")
+	var spent := int(units["spent"])
+	var longest_frame := 0
+	frames = 0
+	while bool(units["loading"]) and frames < 600:
+		await get_tree().process_frame
+		frames += 1
+		units = _units(paths)
+		longest_frame = maxi(longest_frame, int(units["spent"]) - spent)
+		spent = int(units["spent"])
+	assert_false(bool(units["loading"]), "both built")
+	gut.p("two builds at %d ms a frame: %d frames, the longest frame's units %d us, the longest unit %d us"
+			% [budget_ms, frames, longest_frame, int(units["longest"])])
+	assert_lte(longest_frame, budget_ms * 1000 + int(units["longest"]) + 1000,
+			"the frame's units, both builds', past the budget by no more than one unit")
