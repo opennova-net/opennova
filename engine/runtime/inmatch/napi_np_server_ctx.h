@@ -331,20 +331,14 @@ struct NapiNPServerCtx {
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
-	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /
-	// make_dev_nwuid). For golden 0x82 byte-parity these must be reproducible, so the default
-	// leaves `forced` false (random, exactly as retail) and a golden test seed-injects the captured
-	// values — mirroring the P1 SessionStartup "pass in, don't sample" determinism approach.
+	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_random_session_u32). For golden
+	// 0x82 byte-parity these must be reproducible, so the default leaves `forced` false (random,
+	// exactly as retail) and a golden test seed-injects the captured values — mirroring the P1
+	// SessionStartup "pass in, don't sample" determinism approach.
 	struct ServerKeyMint {
 		bool forced = false;       // false => mint randomly (retail behavior)
 		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
 		uint32_t server_sk = 0;    // forced ServerAuth.sk
-		std::string nwuid;         // forced ServerAuth nwuid (60-char hex)
-		std::string novaworld_name = "NWServer";
-		// Bare host:port — the retail client prefixes "http://" itself
-		// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1627
-		//  sprintf(url, "http://%s", domain)].
-		std::string novaworld_web_url = "127.0.0.1:8080";
 	};
 	ServerKeyMint server_key_mint;
 

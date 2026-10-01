@@ -2503,6 +2503,40 @@ bool run_reconnect_counters_echo_rcnt() {
 	return true;
 }
 
+// A game host's 0x82 carries no CU on either network type. SendSessionInit writes only the
+// connection's type-3 vars; a host stores the 0x42's CUs under their own type 1/2, and only a
+// client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is the
+// NovaWorld service's 0x82: Jointops.exe never writes those names, and their one reader sits on
+// the NWU session. [orig: CNapiNPConnection_SendSessionInit @0x621104 (type 3 only);
+//  NapiNPProtocol_HandleClientJoin @0x62c043 (stored as sent, types 1/2);
+//  NapiNP_HandleServerJoinResponse @0x629ddf (the only type-3 create);
+//  CNapiGameSession_OnNovaWorldConnected @0x4d15c3 (the only reader)]
+bool run_game_host_server_auth_carries_no_cu() {
+	uint16_t port = 30950;
+	for (const inmatch::NetworkType type : {inmatch::NetworkType::Lan, inmatch::NetworkType::NovaWorld}) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+		ctx.transport_mode = type;
+		const PeerAddr peer{0x0100007Fu, port++};
+		const ClientAuth auth = make_valid_client_auth(1, 0x13572468u, kHostKey, "NoCuJoiner",
+				"NOCUSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGH");
+		const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!r.outbound.empty() &&
+		                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa) &&
+		                    sa.cr == 1u,
+		            "the join draws an accepting 0x82")) return false;
+		if (!expect(sa.cu.empty(), type == inmatch::NetworkType::NovaWorld
+		                    ? "a NovaWorld game host's 0x82 carries no CU"
+		                    : "a LAN game host's 0x82 carries no CU")) return false;
+	}
+	return true;
+}
+
 // The join leg enforces capacity. A dedicated host with max_players == 2 admits two joiners; the third
 // 0x42 is rejected. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max]
 // ClientAuth JSP is the submitted side/squad password; TR is the signed team
@@ -3620,6 +3654,7 @@ int main(int argc, char **argv) {
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
+	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;
