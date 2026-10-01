@@ -528,7 +528,7 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 	return false;
 }
 
-// (next_entity_id used to be forward-declared here; it now comes from mission_records.h.)
+// (next_entity_id is bms_edit.h's.)
 
 bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
                     const MisItemTypeResolver &resolve_item_type, bms::File &file,

@@ -515,6 +515,22 @@ inline int32_t to_fixed_16_16(float v) {
     return static_cast<int32_t>(v * 65536.0f);
 }
 
+// The same conversion from a double, which holds every 16.16 value exactly (a float keeps 24 bits, so
+// a position past 256 mission units loses its low bits on the way through one): what an editor's
+// number in mission units is written by, so a value read as fixed / 65536 writes back the same word.
+inline int32_t to_fixed_16_16(double v) {
+    constexpr double kMax = 2147483647.0 / 65536.0;
+    constexpr double kMin = -32768.0;
+    if (std::isnan(v)) {
+        v = 0.0;
+    } else if (v > kMax) {
+        v = kMax;
+    } else if (v < kMin) {
+        v = kMin;
+    }
+    return static_cast<int32_t>(v * 65536.0);
+}
+
 // [orig editor: dfx2med.exe. Every offset CONFIRMED byte-exact by the packer Med_PackEntityRecord @0x44c8e0
 //  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer Med_WriteMisFile @0x454630
 //  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)

@@ -1,6 +1,6 @@
-// The item / weapon / ammo writers (ADR 0046 S5): every writer reparses its own output
-// through the witnessed parser and compares the modeled fields, so a snippet that
-// writes at all writes faithfully. Pinned here: minted records with nested
+// The item / weapon / ammo writers (ADR 0046 S5) and the powerup writer (S13 D10): every
+// writer reparses its own output through the witnessed parser and compares the modeled
+// fields, so a snippet that writes at all writes faithfully. Pinned here: minted records with nested
 // collections, aliases and defaults round-trip; input the game ignores (an unknown
 // key, an `attrib:` token outside the chain, a husk piece token the loop skips, an
 // action block a later one of its name replaces, whatever it holds) is reported and
@@ -8,7 +8,9 @@
 // write; a name whose closing quote is missing reads to the end of the line as the
 // retail tokenizer reads it, and a weapon or action name needs no quotes and ends its
 // keyword at a comma or a quote as at a space; and, with a JO install configured, the
-// three retail catalogs parse with zero blocking findings and write back. The numbers an
+// three retail catalogs and the retail powerup.def parse with zero blocking findings and
+// write back, the powerup table's canonical form a fixed point (written, parsed, written
+// again: the same bytes and the same rows). The numbers an
 // editor shows in the units the file writes them (def_authored_get / def_authored_set, ADR
 // 0046 S12 D5) read as the saved line's arguments, and a set of what one shows leaves its
 // record byte for byte as it was, directly and after another number went through the line,
@@ -59,6 +61,12 @@ Outcome run(const char *family, const std::vector<uint8_t> &bytes) {
 		out.count = file.count;
 		out.written = def_write_weapons(file);
 		def_free_weapons(&file);
+	} else if (std::strcmp(family, "powerup.def") == 0) {
+		DefPowerupFile file{};
+		def_parse_powerup_memory(bytes.data(), bytes.size(), &file, &out.diagnostics);
+		out.count = file.count;
+		out.written = def_write_powerup(file);
+		def_free_powerup(&file);
 	} else {
 		DefAmmoFile file{};
 		def_parse_ammo_memory(bytes.data(), bytes.size(), &file, &out.diagnostics);
@@ -103,6 +111,43 @@ int refused(const char *family, const char *text) {
 		return 1;
 	}
 	return 0;
+}
+
+// powerup.def (S13 D10): every key the row parser stores, both action blocks, the ammo rows, the
+// `auto` delay, and a file the row parser cuts at CR LF alone; the canonical form is a fixed point
+// (written, parsed, written again: the same text, the same rows).
+const char *const kPowerupTable =
+        "// Powerup definitions\r\n"
+        "powerup \"PU_MED\"\r\nrespawn_time 30\r\nmax_respawns 3\r\nhp -1\r\nmana 5\r\nweapon WPN_TEST\r\n"
+        "ammo AT_TEST -1\r\nammo AT_TWO 3\r\n"
+        "action pickup\r\nfunction powerup_med\r\nanim pick\r\nsoundset SND_PICK\r\nsoundsetend SND_DONE\r\n"
+        "particle FX_PICK\r\nparticleuserpoint FX00\r\ntexttoken TT_PICK\r\ndelaystart auto\r\ndelayend 10\r\n"
+        "action_value 7\r\nend\r\n"
+        "action respawn\r\nparticle FX_BACK\r\nend\r\nend\r\n"
+        "powerup \"PU_ALL\"\r\nweapon all\r\nallammo\r\nend\r\n";
+
+int powerup_table() {
+	int failures = clean("powerup.def", kPowerupTable);
+	const Outcome first = run("powerup.def", kPowerupTable);
+	const Outcome second = run("powerup.def", first.written.text.c_str());
+	if (first.count != 2 || !second.written.ok() || second.written.text != first.written.text || second.count != 2) {
+		std::printf("FAIL powerup.def is no fixed point:\n%s\n%s\n", first.written.text.c_str(),
+		            second.written.text.c_str());
+		++failures;
+	}
+	// An unknown key, an action of another name and a line outside a block are ignored, as the game
+	// ignores them [orig: PowerUpDef_ParseProperty @0x44328C "unrecognized token", @0x443056 "Invalid
+	// for powerup", the block test @0x44302C]; saving drops them.
+	const Outcome dropped = run("powerup.def", "stray 1\r\npowerup \"PU\"\r\nshine 2\r\naction drop\r\nhp 4\r\nend\r\n");
+	if (dropped.blocking() || dropped.ignored() != 3 || !dropped.written.ok() ||
+	    dropped.written.text.find("shine") != std::string::npos ||
+	    dropped.written.text.find("\thp 4\r\n") == std::string::npos) {
+		std::printf("FAIL powerup.def ignored input: %zu ignored\n%s\n", dropped.ignored(), dropped.written.text.c_str());
+		++failures;
+	}
+	// A block the file never closes is no row the game registers (it registers at `end`): blocking.
+	failures += refused("powerup.def", "powerup \"Open\"\r\nhp 5\r\n");
+	return failures;
 }
 
 int ignored_input() {
@@ -658,6 +703,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	failures += ignored_input();
+	failures += powerup_table();
 	failures += tokenizer_rules();
 	failures += authored_units();
 	{
@@ -703,6 +749,23 @@ int main(int argc, char **argv) {
 			// Every number the Inspector shows in written units reads back from the line
 			// the saved file writes, and a set of it leaves the record as it was.
 			failures += authored_catalog(family, bytes, true);
+		}
+		// The powerup table opens with nothing blocking and writes; its canonical form written again
+		// is the same text (the writer compares the rows it parses back).
+		std::vector<uint8_t> powerup;
+		if (!vfs.read_file("powerup.def", powerup)) { std::printf("Cannot read powerup.def\n"); return 1; }
+		const Outcome first = run("powerup.def", powerup);
+		const Outcome second = run("powerup.def", first.written.text.c_str());
+		std::printf("powerup.def: %zu records, %zu ignored line(s), %s\n", first.count, first.ignored(),
+		            first.written.ok() ? "written" : "REFUSED");
+		if (first.blocking() || !first.written.ok() || first.count == 0 || !second.written.ok() ||
+		    second.written.text != first.written.text || second.count != first.count || !second.diagnostics.empty()) {
+			for (const auto &d : first.diagnostics)
+				if (d.blocks()) std::printf("  BLOCKING line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+			for (const auto &d : first.written.diagnostics)
+				std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+			std::printf("FAIL retail powerup.def is no fixed point\n");
+			++failures;
 		}
 	}
 	return failures ? 1 : 0;

@@ -4107,6 +4107,25 @@ target_link_libraries(editor_model_table_test PRIVATE opennova_editor)
 target_include_directories(editor_model_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_table COMMAND editor_model_table_test)
 
+# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10): a mission's records as
+# rows of the one table shape over the format's field rows and bms_edit's typed structure; the rules,
+# the editor's ranges, the lists and the chains over the synthetic dense mission, and (a SKIP-LEG
+# without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
+add_executable(editor_mission_table_test editor/mission_table_test.cpp)
+target_link_libraries(editor_mission_table_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_table COMMAND editor_mission_table_test)
+
+# The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
+# catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
+# choice, the labelled field, the record handle and the list ops over a file of each; the cost of a
+# keystroke in a def catalog (one field's row resolved); and (a SKIP-LEG without OPENNOVA_JO_DIR)
+# the game's powerup.def opened as the catalog's rows, written as its canonical writer writes it.
+add_executable(editor_table_shape_test editor/table_shape_test.cpp)
+target_link_libraries(editor_table_shape_test PRIVATE opennova_editor)
+target_include_directories(editor_table_shape_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_table_shape COMMAND editor_table_shape_test)
+
 add_executable(editor_model_document_test editor/model_document_test.cpp)
 target_link_libraries(editor_model_document_test PRIVATE opennova_editor)
 target_include_directories(editor_model_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

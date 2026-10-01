@@ -263,8 +263,8 @@ std::string exit_screen(const char *name, const char *action) {
 	       action + "\n    </WINDOW>\n  </WINDOW>\n</SCREEN>\n";
 }
 
-// A file of every registered type's kinds: the repo's fixtures, a weapon and an ammo table
-// written here (the def fixture is an item table) with a record, a nested record and the
+// A file of every registered type's kinds: the repo's fixtures, a weapon, an ammo and a powerup
+// table written here (the def fixture is an item table) with a record, a nested record and the
 // written-unit, choice and reference fields the catalog shows, and a menu of two screens that
 // each name a window EXIT.
 std::vector<Fixture> fixtures(const std::string &repo) {
@@ -277,6 +277,12 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	                    "action \"FIRE\"\ndelayend 2\nend\nend\n")},
 	        {AssetKind::AmmoDefs, "ammo.def",
 	         text_bytes("ammo AT_CONTRACT\nmax_age 1.5\nvelocity 900\nturnrate_maxyaw 45\nlight_move 3 255 120 20\nend\n")},
+	        // The worked example of a def family added as rows (S13 D10): a powerup with its ammo rows
+	        // and both action blocks, the file's line ends CR LF as its reader cuts them.
+	        {AssetKind::PowerupDefs, "powerup.def",
+	         text_bytes("powerup \"PU_CONTRACT\"\r\nrespawn_time 30\r\nmax_respawns 2\r\nhp -1\r\nweapon WPN_CONTRACT\r\n"
+	                    "ammo AT_CONTRACT 2\r\naction pickup\r\nfunction powerup_med\r\nsoundset SND_PICK\r\n"
+	                    "delayend 10\r\nend\r\naction respawn\r\nparticle FX_BACK\r\nend\r\nend\r\n")},
 	        {AssetKind::Strings, "synth_game.bin", file("rtxt/synth_game.bin")},
 	        {AssetKind::Menu, "all_widgets.mnu", file("mnu/all_widgets.mnu")},
 	        {AssetKind::Menu, "two_screens.mnu",

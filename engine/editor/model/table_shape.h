@@ -5,8 +5,8 @@
 // catalog's items, a model's materials, a mission's entities); the type describes them to the core
 // through rows of tables, one table per type, one kind of record per row of it:
 //
-//   the record handle  a native record and the kind it is (RecordHandle): what a field reads and
-//                      writes and a list holds;
+//   the record handle  a native record, the kind it is and the row's record it lies in
+//                      (RecordHandle): what a field reads and writes and a list holds;
 //   the value          how one field reads and writes a record, in the units its file writes it, and
 //                      whether the file writes it (FieldValue);
 //   the choice         the values a field takes by name (ChoiceRow, as constexpr data; FieldChoice);
@@ -52,6 +52,11 @@ namespace opennova::editor {
 struct RecordHandle {
 	NodeKind kind = -1;
 	void *data = nullptr;
+	// The native record of the row the record lies in (the top of its trail), which a list whose records
+	// lie in the row's own tables reads: a mission event's triggers are a range of the file's trigger
+	// table. A type whose lists need it gives it to its row's handle and carries it into the handles its
+	// ops make (vector_list always does); null where none does.
+	void *top = nullptr;
 	explicit operator bool() const { return data != nullptr; }
 	template <class T> T &as() const { return *static_cast<T *>(data); }
 };
@@ -285,7 +290,7 @@ ListOps vector_list(NodeKind kind, std::vector<Record> &(*list)(Owner &owner),
 	ops.size = [list](const RecordHandle &owner) { return list(owner.as<Owner>()).size(); };
 	ops.at = [list, kind](const RecordHandle &owner, size_t index) {
 		std::vector<Record> &records = list(owner.as<Owner>());
-		return index < records.size() ? RecordHandle{kind, &records[index]} : RecordHandle{};
+		return index < records.size() ? RecordHandle{kind, &records[index], owner.top} : RecordHandle{};
 	};
 	ops.insert = [list, kind, fresh](const RecordHandle &owner, size_t index, const DetachedRecord *record,
 	                                 std::string &error) {
