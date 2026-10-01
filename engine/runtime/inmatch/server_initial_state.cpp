@@ -434,10 +434,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			break;
 		}
 		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner owner-ID match) [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0]
-			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
-			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
+			// The same records for every recipient: each player's flags word carries its own
+			// entity's bit0 (deploy screen / spectating), not a recipient marker (D-NET-136).
 			const opennova::OrganicSpawnBatch full =
-					opennova::replication::build_pool0_organic_batch(*ctx.world, conn.link.owned_entity);
+					opennova::replication::build_pool0_organic_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x0C, full.records.size(),
 			                                initial_state_page_limits::pool0_organics(),
 			                                [&](std::size_t off, std::size_t cnt) {

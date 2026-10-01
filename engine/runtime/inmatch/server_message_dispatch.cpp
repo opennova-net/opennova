@@ -2312,7 +2312,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (static_cast<size_t>(h.slot()) < world->registry.pool_capacity(pool)) {
 						FullEntitySpawnRecord frec;
 						if (const world::Entity *e = world->registry.get(h)) {
-							frec = replication::build_full_entity_spawn(*e, conn.link.owned_entity);
+							frec = replication::build_full_entity_spawn(*e);
 						} else {
 							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
 						}

@@ -67,10 +67,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 // (90 - yaw)*kBamPerDegree, the same convention snapshot_of / decode_* use (D-NET-86).
 
 // pool-0 organics (AI infantry + players) -> S2C 0x0C [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0].
-// `recipient_own` is the handle of THIS recipient's owned player entity: its 0x0C record gets minimap_flags
-// bit 0x01 (the "recipient's own player" marker), every OTHER player gets 0x0100 — the per-recipient split a
-// same-map retail capture confirmed (2026-07-01). Pass an invalid handle for a recipient-agnostic batch.
-OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own = {});
+// The batch is the same for every recipient: a player's flags word carries its own entity's bit0
+// (on the deploy screen or spectating), never a per-recipient marker (D-NET-136).
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w);
 // pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940].
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
 // pool-2 static structures -> S2C 0x10 [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
@@ -89,8 +88,7 @@ Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 // docs/net/novaworld-net-re.md D-NET-133.
 // [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180 →
 // NetPacket_SerializeObjectToBuffer @0x504d10]
-FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
-                                              world::EntityHandle recipient_own = {});
+FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e);
 
 // Host-side receive-apply of a decoded C2S 0x0C extended (type-10) player uplink to a
 // REMOTE PEER entity — the host-side mover [orig: NetPacket_SerializePlayerState case 4

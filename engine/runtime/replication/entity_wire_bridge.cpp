@@ -311,23 +311,21 @@ namespace {
 // original serializers [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 writes
 // *(u16)(entity+36); NetPacket_SerializeObjectToBuffer @0x504d10 likewise]. bit 0x100 =
 // player/minimap-register (set for EVERY player so the client's handler re-resolves the model
-// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01: WITNESSED to be PER-ENTITY host
-// state, not per-recipient — Server_PlayerAdd @0x51cbc0 sets `entity+36 |= 1` once at add time
-// (@0x51d0da, gated on add_event+108 = NapiNPPlayer+0x37, remote adds only; the host's LOCAL
-// player takes the early-return path @0x51cc31 and never gets it), and the serializer copies
-// entity+36 verbatim with no recipient-conditional logic, so retail cannot vary this bit per
-// recipient. The same-map ASH_I5A capture (0x0101 on the joiner's record, 0x0100 on the host's)
-// is fully explained by remote-vs-local add. Our per-recipient computation below is wire-
-// identical for a host+1-joiner session but DIVERGES for >=3 players (retail would send 0x0101
-// for OTHER remote players too) — kept until the NapiNPPlayer+0x37 gate semantics is witnessed;
-// docs/net/novaworld-net-re.md (D-NET-136). Carry the movement/spawn gate (0x02) through while
-// the entity is still spawning [orig: entity+36 bit 1].
-uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient_own) {
-	uint16_t flags = 0x0100u | static_cast<uint16_t>(
-            (e.flags | e.engine_flags) & world::kEntityFlagParachute);
-	if (recipient_own.valid() && e.handle == recipient_own) flags |= 0x01u;
-	if ((e.flags & 0x2u) != 0) flags |= 0x2u;
-	return flags;
+// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 is PER-ENTITY host state, the same
+// for every recipient (the serializer copies entity+36 verbatim): it marks a player still on its
+// deploy screen or spectating. Every player is born 0x101 [orig: Entity_SpawnFromAnimSlotProperty
+// @0x43c433/@0x43c508]; the join clears bit0 for a non-spectator [orig: Server_OnPlayerJoin
+// @0x51a7da] and a spectator add sets it [orig: Server_PlayerAdd @0x51d0da, gated on
+// NapiNPPlayer+0x37 = the joiner's JSR join var, the PRE_GAME_MENU SPECTATE box:
+// UI_PreGameMenuStateMachine @0x568bf0 -> UI_JoinSelectedSession @0x569c77, parsed
+// @0x4c7604, latched @0x512e60 / @0x4c81ff]; and every 0x0A the host writes for a player clears
+// that player's own bit0, then sets it again while it spectates or its deploy screen holds
+// [orig: NetPacket_WritePlayerState @0x4ff6d0, @0x4ff7a1, @0x4ff7b8]. The host keeps that bit on
+// the entity (server_spawn.cpp), so the record reads it from there (D-NET-136). Carry the
+// movement/spawn gate (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
+uint16_t player_wire_flags(const world::Entity &e) {
+	return static_cast<uint16_t>(0x0100u |
+			((e.flags | e.engine_flags) & world::kEntityFlagParachute) | (e.flags & 0x3u));
 }
 
 // entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
@@ -365,7 +363,7 @@ uint16_t player_wire_net_id(const world::Entity &e) {
 	return e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e);
 }
 
-OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own) {
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
@@ -388,7 +386,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		// Player-record wire rules (flags/minimap net_id/playerClass) are shared with the
 		// S2C 0x18 repair record — see the witness comments on the helpers above.
 		rec.minimap_flags =
-				(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e, recipient_own) : 0;
+				(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e) : 0;
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
@@ -412,8 +410,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 	return batch;
 }
 
-FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
-                                              world::EntityHandle recipient_own) {
+FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	FullEntitySpawnRecord rec;
 	rec.slot_id = e.handle.packed;
 	// Both fields are dereferenced from entity+0x20 ItemDef. A null def writes zero for each,
@@ -424,7 +421,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	rec.item_type = e.has_item_def ? e.item_type : 0;
 	rec.team = e.team;
 	rec.minimap_flags =
-			(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e, recipient_own) : 0;
+			(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e) : 0;
 	rec.entity_flags = e.owner_connection_id;
 	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
 	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required

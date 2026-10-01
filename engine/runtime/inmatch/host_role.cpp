@@ -470,8 +470,7 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		view.apply(0x0D, opennova::encode_pool_spawn_batch(
 				replication::build_pool1_spawn_batch(kernel.world)));
 		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				replication::build_pool0_organic_batch(
-						kernel.world, kernel.world.cached.local_player)));
+				replication::build_pool0_organic_batch(kernel.world)));
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
 				replication::build_pool3_marker_batch(kernel.world)));
 		inmatch::Server_RearmMinimapInitialScan(state.host_owner.ctx);
