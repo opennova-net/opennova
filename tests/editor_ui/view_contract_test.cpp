@@ -13,12 +13,17 @@
 // is sent is held until it draws and taken as it does; a MainViewport row's type is one a Main-role
 // viewport kind shows (S13 V5). Two open documents of a type get a view each, whose filters are their
 // own. A string table's cell being edited keeps the keyboard, and ends its edit, scrolled out of
-// sight. S13 D9: every text type's view draws its lines (its first line that is not blank shows),
-// has no main viewport, and a RevealText it is sent marks its line; a text of many thousand lines
-// draws only those in sight, the line a reveal names among them. The MainViewport role's view (no
-// type plays it yet) draws its outline beside the viewport, whose canvas fills the rest of the tab
+// sight. S13 D9, V10: every text type's row plays the MainViewport role with a view of its own (the
+// script view), whose Main view is the script device (ViewportKind::Script); where no device draws
+// (no devices here) it draws the lines (its first line that is not blank shows), and a RevealText
+// it is sent marks its line; a text of many thousand lines draws only those in sight, the line a
+// reveal names among them. With the workspace's devices, the script view places its device in the
+// rest of the tab below its toolbar (the rect it reserves, the picture where its cursor stands),
+// raising nothing, and draws the lines instead while a popup lies over the tab. The MainViewport
+// role's outline view draws its outline beside the viewport, whose canvas fills the rest of the tab
 // through the workspace's device; in the Document window while an operation holds the documents,
 // its outline is held back and its canvas is not (a drag orbits its camera).
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -33,9 +38,11 @@
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/session/session_operation.h>
+#include <editor/preview/script_viewport.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/main_viewport_view.h>
+#include <editor/ui/script_view.h>
 #include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
 #include "editor_ui_test_support.h"
@@ -162,7 +169,7 @@ std::string first_title(const DocumentBase &document) {
 void test_every_view() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::vector<Fixture> files = fixtures(repo);
-	size_t types = 0, views = 0, frames = 0;
+	size_t types = 0, views = 0, frames = 0, main_rows = 0, scripts = 0;
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id) {
 		const DocumentTypeId type_id = static_cast<DocumentTypeId>(id);
 		const DocumentType *type = document_type(type_id);
@@ -171,11 +178,12 @@ void test_every_view() {
 		      "every document type has its view's row, an outline or a make");
 		if (!type || !row) continue;
 		// A MainViewport row's type is one a Main-role viewport kind shows, the tab's viewport, with
-		// the outline beside it.
+		// the outline beside it or in a view of its own (a text's script view).
 		if (row->role == DocumentViewRole::MainViewport) {
 			const ViewportKind main = main_viewport_kind(type_id);
-			CHECK(main != ViewportKind::kCount && viewport_kind_row(main).role == ViewportRole::Main && row->outline,
-			      (std::string(type->name) + ": its MainViewport row's Main-role kind and outline").c_str());
+			CHECK(main != ViewportKind::kCount && viewport_kind_row(main).role == ViewportRole::Main,
+			      (std::string(type->name) + ": its MainViewport row's Main-role kind").c_str());
+			++main_rows;
 		}
 		size_t drawn = 0;
 		for (const Fixture &fixture : files) {
@@ -213,13 +221,11 @@ void test_every_view() {
 			const std::string shown = view_frame(workspace, *view, *document, 520.0f, true);
 			CHECK(!title.empty() && shown.find(title.substr(0, 8)) != std::string::npos,
 			      (where + ": the view draws its document (" + title + ")").c_str());
-			// A view that draws its records or its text has no main viewport; the frame it is asked in
-			// draws nothing.
-			if (row->role != DocumentViewRole::MainViewport) {
-				ImGui::NewFrame();
-				CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport").c_str());
-				ImGui::Render();
-			}
+			// A view that draws its records has no main viewport, nor does a text's where no device draws
+			// it (the workspace here has none); the frame it is asked in draws nothing.
+			ImGui::NewFrame();
+			CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport drawn").c_str());
+			ImGui::Render();
 			// A RevealRecord held until the view draws, taken as it draws.
 			ViewEvent reveal;
 			reveal.kind = ViewEventKind::RevealRecord;
@@ -230,25 +236,30 @@ void test_every_view() {
 			draw_frames(workspace, *view, *document, 520.0f, 1);
 			CHECK(view->held_events() == 0 && workspace.requests.empty(),
 			      (where + ": taken as the view draws, nothing raised").c_str());
-			// A text's view: a RevealText marks its line as it is taken.
-			if (row->role == DocumentViewRole::Text) {
-				auto *text_view = dynamic_cast<TextView *>(view.get());
-				CHECK(text_view != nullptr, (where + ": a text type's view is the text view").c_str());
+			// A text's view: the script view, its lines drawn where no device draws, a RevealText marking
+			// its line as it is taken.
+			if (text_of(*document)) {
+				auto *script = dynamic_cast<ScriptView *>(view.get());
+				CHECK(script != nullptr && row->role == DocumentViewRole::MainViewport && row->make,
+				      (where + ": a text type's view is the script view").c_str());
 				ViewEvent go;
 				go.kind = ViewEventKind::RevealText;
 				go.path = document->path();
 				go.locator = "2:1";
 				view->receive(go);
 				draw_frames(workspace, *view, *document, 520.0f, 1);
-				CHECK(text_view && text_view->marked_line() == 2 && view->held_events() == 0,
+				CHECK(script && script->lines().marked_line() == 2 && view->held_events() == 0 && !script->device_drawn(),
 				      (where + ": a RevealText marks its line").c_str());
+				scripts += script ? 1 : 0;
 			}
 		}
 		CHECK(drawn > 0, (std::string(type->name) + ": the contract has a file of its type").c_str());
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	std::printf("%zu document types, %zu views over their files, %zu frames drawn\n", types, views, frames);
+	CHECK(main_rows == 5 && scripts == 5, "every text type's row the Main role's, its view the script view");
+	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
+	            frames, scripts);
 }
 
 // Two open catalogs in the Document window: a view each, whose filter (its model's) is its own (the
@@ -523,6 +534,171 @@ void test_main_viewport_held() {
 	ui.away();
 }
 
+// S13 V10: a text's script view with the workspace's devices (the Shell's pump before each frame
+// making the device its Main view asks for, as the headless cache pins the active document's): the
+// device placed in the rest of the tab below the toolbar, as wide as the tab's content and as tall as
+// what the toolbar leaves, where the view's cursor stands, raising nothing; a popup open over the tab:
+// the device not placed, the lines drawn in its place.
+void test_script_view_device() {
+	const std::string repo = test_paths_repo_root(__FILE__);
+	std::shared_ptr<DocumentBase> made = document_type_for(AssetKind::Script)->make();
+	Diagnostic error;
+	CHECK(made->load_bytes(test_io::read_file(repo + "/fixtures/wac/text_document.wac"), "text_document.wac",
+	                       AssetKind::Script, "jo", error),
+	      "the script loads");
+	const std::shared_ptr<const DocumentBase> document = made;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, document);
+	HandViewports shell;
+	shell.bind(workspace.seeded);
+	shell.viewports->track(workspace.seeded); // its Main view's viewport, made as its document is open
+	workspace.source = &shell.devices.cache;
+	std::unique_ptr<DocumentView> view = make_view(*document);
+	auto *script = dynamic_cast<ScriptView *>(view.get());
+	CHECK(script != nullptr, "a script's view is the script view");
+	if (!script) return;
+	for (int i = 0; i < 3; ++i) {
+		shell.devices.sync(*shell.viewports, workspace.seeded);
+		view_frame(workspace, *view, *document, 640.0f);
+		view->end_frame(workspace);
+	}
+	const auto *viewport = static_cast<const ScriptViewport *>(shell.find(document->path(), ViewportKind::Script));
+	const DrawnDevice *device = shell.device(document->path(), ViewportKind::Script);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0 && script->device_drawn(),
+	      "the script device drawn in the tab");
+	CHECK(workspace.requests.empty(), "placing the device raises nothing");
+	if (!device) return;
+	const ImGuiWindow *tab = ImGui::FindWindowByName("Tab");
+	CHECK(tab && device->origin.y > tab->Pos.y + ImGui::GetFrameHeight() && device->width >= 600 &&
+	              float(device->origin.y + float(device->height)) <= tab->Pos.y + tab->Size.y,
+	      "the device in the rest of the tab below the toolbar");
+	CHECK(device->last.canvas_sized && device->last.clip_right > device->last.clip_left, "its rect, sized by the view, clipped");
+	// One frame of the tab, at `tab_y`: Dear ImGui's implicit window first brought over it in the display
+	// order where asked; another window drawn before it whose item holds the input where asked (made the
+	// active item where asked, kept alive each frame: as a slider held by the keys or a field typed in that
+	// lets nothing overlap it); a window drawn after it over its rect where asked.
+	struct Frame {
+		bool implicit_front = false;
+		bool field = false;
+		bool focus_field = false;
+		bool over = false;
+		float tab_y = 0.0f;
+	};
+
+	const auto frame = [&](const Frame &f) {
+		shell.devices.sync(*shell.viewports, workspace.seeded);
+		ImGui::NewFrame();
+		if (f.implicit_front) ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("Debug##Default"));
+		if (f.field) {
+			ImGui::SetNextWindowPos(ImVec2(700.0f, 0.0f));
+			ImGui::SetNextWindowSize(ImVec2(240.0f, 80.0f));
+			ImGui::Begin("Field", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			const ImGuiID held = ImGui::GetID("##held");
+			if (f.focus_field) ImGui::SetActiveID(held, ImGui::GetCurrentWindow());
+			ImGui::KeepAliveID(held);
+			ImGui::End();
+		}
+		ImGui::SetNextWindowPos(ImVec2(0.0f, f.tab_y));
+		ImGui::SetNextWindowSize(ImVec2(640.0f, 560.0f));
+		ImGui::Begin("Tab", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+		view->draw(workspace, *document);
+		ImGui::End();
+		if (f.over) {
+			ImGui::SetNextWindowPos(ImVec2(100.0f, 200.0f));
+			ImGui::SetNextWindowSize(ImVec2(240.0f, 120.0f));
+			ImGui::Begin("Over", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			ImGui::TextUnformatted("a window over the tab");
+			ImGui::End();
+		}
+		ImGui::Render();
+		view->end_frame(workspace);
+	};
+	Frame implicit_front;
+	implicit_front.implicit_front = true;
+	Frame over;
+	over.over = true;
+	const Frame plain;
+	// Dear ImGui's implicit window over the tab (begun every frame, drawn only where something is written
+	// to it, which nothing is): no cover, the device placed.
+	const ImGuiWindow *implicit = ImGui::FindWindowByName("Debug##Default");
+	CHECK(implicit && implicit->IsFallbackWindow && tab && implicit->Rect().Overlaps(tab->Rect()),
+	      "Dear ImGui's implicit window, where the tab is");
+	int placed = device->draws;
+	frame(implicit_front);
+	CHECK(GImGui->Windows.back() == implicit && device->draws == placed + 1 && script->device_drawn(),
+	      "the implicit window last in the display order: the device placed all the same");
+	// A window over the tab, begun after it: the device not placed from the frame after it first drew;
+	// gone, placed again once a frame has not drawn it.
+	for (int i = 0; i < 3; ++i) frame(over);
+	CHECK(!script->device_drawn() && script->lines().lines_drawn() > 0, "a window over the tab: the lines drawn");
+	frame(plain);
+	frame(plain);
+	placed = device->draws;
+	frame(plain);
+	CHECK(script->device_drawn() && device->draws == placed + 1, "the window gone: the device placed again");
+	// A window begun after the tab is known only once begun: the frame's end looks again and hides the
+	// device the same frame (a picture with no room), the lines coming the frame after.
+	placed = device->draws;
+	frame(over);
+	CHECK(!script->device_drawn() && device->draws == placed + 2 && device->last.width == 0 && device->last.height == 0,
+	      "a window begun after the tab over its rect: the device hidden the frame it first drew");
+	frame(plain);
+	frame(plain);
+	CHECK(script->device_drawn(), "that window gone: the device placed again");
+	// Another window's item holding the input (the active item, overlapping nothing): the pointer over
+	// the device's rect is let through all the same (the next frame's WantCaptureMouse none), so the
+	// press that ends the other item's hold reaches the control rather than Dear ImGui.
+	Frame field;
+	field.field = true;
+	field.focus_field = true;
+	frame(field);
+	field.focus_field = false;
+	for (int i = 0; i < 3; ++i) frame(field);
+	CHECK(GImGui->ActiveId != 0 && !GImGui->ActiveIdAllowOverlap, "another window's item holds the input");
+	ImGui::GetIO().AddMousePosEvent(float(device->origin.x) + 40.0f, float(device->origin.y) + 40.0f);
+	frame(field);
+	frame(field);
+	CHECK(GImGui->ActiveId != 0 && !ImGui::GetIO().WantCaptureMouse,
+	      "the pointer over the device's rect while another item holds the input: let through to the control");
+	ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+	frame(plain);
+	frame(plain);
+	// The toolbar's tips above their tools, never over the device's rect (a Control draws over every
+	// tip): the tab lower down, the pointer over its first tool (Reload).
+	Frame lower;
+	lower.tab_y = 120.0f;
+	frame(lower);
+	const ImGuiWindow *lowered = ImGui::FindWindowByName("Tab");
+	const ImVec2 reload = lowered ? lowered->DC.CursorStartPos : ImVec2(0.0f, 0.0f);
+	ImGui::GetIO().AddMousePosEvent(reload.x + 6.0f, reload.y + 6.0f);
+	for (int i = 0; i < 3; ++i) frame(lower);
+	const ImGuiWindow *tip = ImGui::FindWindowByName("##Tooltip_00");
+	CHECK(tip && tip->Active && tip->Rect().Max.y <= reload.y + 0.5f && tip->Rect().Max.y <= float(device->origin.y) &&
+	              script->device_drawn(),
+	      "the Reload tool's tip above it, clear of the device placed under it");
+	ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+	frame(plain);
+	frame(plain);	// A popup over the tab: the device not placed, the lines in its place.
+	const int draws = device->draws;
+	shell.devices.sync(*shell.viewports, workspace.seeded);
+	ImGui::NewFrame();
+	ImGui::OpenPopup("covering");
+	if (ImGui::BeginPopup("covering")) {
+		ImGui::TextUnformatted("a menu");
+		ImGui::EndPopup();
+	}
+	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowSize(ImVec2(640.0f, 560.0f));
+	ImGui::Begin("Tab", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+	view->draw(workspace, *document);
+	ImGui::End();
+	ImGui::Render();
+	CHECK(device->draws == draws && !script->device_drawn() && script->lines().lines_drawn() > 0,
+	      "a popup open: the lines drawn, the device not placed");
+	std::printf("script view: its device drawn %d times, a popup's frame the lines\n", draws);
+}
+
 // A text of many lines is a list clipped to what shows (a log of a frame draws every line: Dear
 // ImGui's clipper draws all while it logs); a reveal scrolls the line it names into sight; its
 // markers are made once per change of the findings or the text, never for a frame.
@@ -534,9 +710,10 @@ void test_long_text() {
 	CHECK(loaded->load_bytes(text_bytes(text), "long.txt", AssetKind::Text, "jo", error), "the text loads");
 	const std::shared_ptr<const DocumentBase> document = loaded;
 	std::unique_ptr<DocumentView> view = make_view(*document);
-	auto *text_view = dynamic_cast<TextView *>(view.get());
-	CHECK(text_view != nullptr, "a text's view");
-	if (!text_view) return;
+	auto *script = dynamic_cast<ScriptView *>(view.get());
+	CHECK(script != nullptr, "a text's view");
+	if (!script) return;
+	TextView *text_view = &script->lines();
 	NullBackend backend;
 	TestWorkspace workspace;
 	seed(workspace.seeded, document);
@@ -572,6 +749,7 @@ void test_long_text() {
 int main() {
 	editor_ui_test::test_every_view();
 	editor_ui_test::test_long_text();
+	editor_ui_test::test_script_view_device();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
 	editor_ui_test::test_main_viewport_view();

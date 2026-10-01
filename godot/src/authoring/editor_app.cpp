@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <runtime/devtools/imgui_pass.h>
+
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
@@ -60,6 +62,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
+	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
 
 	ClassDB::bind_method(D_METHOD("set_settings_path", "path"), &EditorApp::set_settings_path);
 	ClassDB::bind_method(D_METHOD("get_settings_path"), &EditorApp::get_settings_path);
@@ -132,14 +135,22 @@ void EditorApp::_ready() {
 	ImGuiPassNode::_ready();
 	// The session pumps whether or not the workspace draws (headless tests, the smoke).
 	set_process(true);
-	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel
-	// (authoring/viewport_devices), drawn only by a viewport's canvas; headless runs keep them too
-	// (the MCP, the tests read what they placed), each Preview-role kind's target given one, where the
-	// workspace gives one only to the kind the Preview window shows (its views ask for the rest as they
-	// draw). A device given up retires its SubViewport here, freed at the next frame.
+	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel, or are a
+	// Control placed over the canvas's rect (the script device's CodeEdit, S13 V10)
+	// (authoring/viewport_devices), drawn only by a viewport's view; headless runs keep them too (the
+	// MCP, the tests read what they placed), each Preview-role kind's target and the active document's
+	// Main view given one, where the workspace gives one only to the kind the Preview window shows (its
+	// views ask for the rest as they draw). A device given up retires its SubViewport here, freed at the
+	// next frame; a Control device's requests (the script device's edits) are served at once, those it
+	// raises inside a pump (its burst's EndEdit as it is given up) at the next pump's start, and its
+	// notices (an edit it refused) are on the status line.
 	devices_ = std::make_unique<opennova::editor::ViewportDeviceCache>([this](ViewportKind p_kind) {
 		return make_viewport_device(*this, p_kind,
-				[this](SubViewport *p_viewport) { retired_.push_back(p_viewport->get_instance_id()); });
+				[this](SubViewport *p_viewport) { retired_.push_back(p_viewport->get_instance_id()); },
+				ViewportDeviceSink{
+						[this](const EditorRequest &p_request) { serve_device_request_(p_request); },
+						[this](const EditorRequest &p_request) { queue_device_request_(p_request); },
+						[this](const std::string &p_text) { post_device_notice_(p_text); } });
 	});
 	devices_->set_pin_all_targets(!is_available());
 	if (is_available()) {
@@ -257,8 +268,10 @@ void EditorApp::after_layout(uint64_t, bool, int64_t) {
 
 void EditorApp::pump() {
 	ensure_session();
-	// The windows' requests of this frame (a burst of keystrokes, a drag), then the poll, whose
+	// What the devices raised inside the last pump (a burst's EndEdit as its device was given up),
+	// then the windows' requests of this frame (a burst of keystrokes, a drag), then the poll, whose
 	// budget steps the validation they left due first (S13 A3: no request runs it).
+	serve_queued_device_requests_();
 	drain_requests();
 	session_->poll();
 	// The devices follow their viewports: the Preview's targets given one, each taking what its
@@ -290,6 +303,44 @@ void EditorApp::drain_requests() {
 			serve(request);
 		}
 	}
+#endif
+}
+
+// A device's request (the script device's span edits and its keystroke burst's end, S13 V10), served
+// at once: the device raises it from the control's deferred signals, outside the pump and its sync.
+void EditorApp::serve_device_request_(const EditorRequest &p_request) {
+	if (!session_) return;
+	if (!session_->handle(p_request)) serve(p_request);
+}
+
+// A device's request raised inside a pump, where it is not served (a device given up as the devices
+// sync, with its burst open: its EndEdit): kept for the start of the next pump.
+void EditorApp::queue_device_request_(const EditorRequest &p_request) {
+	queued_device_requests_.push_back(p_request);
+}
+
+void EditorApp::serve_queued_device_requests_() {
+	std::vector<EditorRequest> queued;
+	queued.swap(queued_device_requests_);
+	for (const EditorRequest &request : queued) serve_device_request_(request);
+}
+
+// A device's notice (an edit the script device refused: a character the game's code page has no byte
+// for) where the person sees it: the pass's status line in the menu bar, an error for a few seconds
+// and kept in its history under the pointer.
+void EditorApp::post_device_notice_(const std::string &p_text) {
+#if OPENNOVA_EDITOR_UI
+	windows_->pass().post_status(p_text, opennova::devtools::StatusLevel::Error);
+#else
+	(void)p_text;
+#endif
+}
+
+String EditorApp::get_status_text() const {
+#if OPENNOVA_EDITOR_UI
+	return String::utf8(windows_->pass().status_text());
+#else
+	return String();
 #endif
 }
 

@@ -23,7 +23,8 @@ struct ViewportContext;
 // options, its camera, the clock, the size its device draws at), an EditRecord batch for a drag, a
 // SelectRecord for a click. One per (document, kind), made from the kind's row of ui/viewport_views:
 // the Preview window's for its targets (a Preview-role viewport), and a Main-role document view's
-// (ui/document_views' MainViewport role: the mission's 3D view). The viewport is the view's, read
+// (ui/document_views' MainViewport role: a text's script device, whose view has no canvas since its
+// Control owns the input, S13 V10; the mission's 3D view, to come). The viewport is the view's, read
 // const (DocumentsView::viewports); one the session keeps none of yet (its device made at the next
 // pump) shows its kind's message.
 class ViewportView {
@@ -37,8 +38,9 @@ public:
 	void draw(Workspace &workspace, const std::string &path);
 	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw this
 	// frame (another viewport shown, the window closed or hidden, nothing to show) ends its gesture,
-	// its end raised once for the document it began in.
-	void end_frame(Workspace &workspace);
+	// its end raised once for the document it began in. A kind with no canvas has its own to say (the
+	// script view's: its device hidden where a window begun after it lies over it).
+	virtual void end_frame(Workspace &workspace);
 
 protected:
 	ViewportView(ViewportKind kind);

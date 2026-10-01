@@ -375,6 +375,9 @@ if(OPENNOVA_EDITOR)
         authoring/editor_app.cpp
         authoring/menu_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/script_device.cpp
+        authoring/script_edit.cpp
+        authoring/script_highlighter.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp
     )

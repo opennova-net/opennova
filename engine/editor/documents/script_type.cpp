@@ -169,6 +169,27 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 	}
 }
 
+void script_highlights(const TextDocument &document, std::vector<TextHighlight> &out) {
+	const std::shared_ptr<const wac::Program> program = compiled(document);
+	const size_t first = out.size();
+	for (const wac::WordUse &word : program->word_uses) {
+		if (word.source != 0 || word.length == 0 || word.offset + word.length > document.text().size()) continue;
+		TextHighlight highlight;
+		switch (word.kind) {
+		case wac::WordUse::Kind::Keyword: highlight.kind = TextHighlightKind::Keyword; break;
+		case wac::WordUse::Kind::Command: highlight.kind = TextHighlightKind::Command; break;
+		case wac::WordUse::Kind::Operand: highlight.kind = TextHighlightKind::Operand; break;
+		}
+		highlight.span = document.span_at(word.offset, word.length);
+		out.push_back(highlight);
+	}
+	// In the text's order (the compiler reads it forward, but a word it took again after a lookahead
+	// is noted where it took it).
+	std::stable_sort(out.begin() + std::ptrdiff_t(first), out.end(), [](const TextHighlight &a, const TextHighlight &b) {
+		return a.span.line != b.span.line ? a.span.line < b.span.line : a.span.column < b.span.column;
+	});
+}
+
 const FindingCodeRow &finding_code(ScriptFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
 }

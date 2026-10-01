@@ -3972,6 +3972,20 @@ target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_viewport COMMAND editor_viewport_test)
 
+# The script device's portable half (S13 V10, editor/preview/script_viewport, shown_text,
+# text_burst): ViewportKind::Script in the kinds' table, the Main role of every text type; the span
+# diff from a control's text, minimal and byte-exact against the TextDocument (an insert, a delete,
+# a replace across lines, CR LF kept, a paste of several lines, a lone CR and a NUL kept, a code
+# page's character stored, one it has none for refused); the keystroke burst; the gutter marks
+# from the findings; the compiler's words highlighted; through a real session, a burst served as one
+# undo step, the follow's actions, a Go to's span selected, a document held read only and the busy
+# gate, the envelope and a SetViewport; and the install's scripts (OPENNOVA_JO_DIR) as the retail
+# leg: their highlights tokens of their lines, their shown text's lines the documents'.
+add_executable(editor_script_viewport_test editor/script_viewport_test.cpp)
+target_link_libraries(editor_script_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_script_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_script_viewport COMMAND editor_script_viewport_test)
+
 # Edits in a viewport over the wire (S13 V7: edit_in_viewport through a session's JSON requests): its
 # refusals, a drag one batch over the selection, a command one request; the wire's gestures (a
 # snapped gesture where a canvas's lands, refused and forged tokens, interleaving, what ends one,

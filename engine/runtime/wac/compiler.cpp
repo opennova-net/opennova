@@ -333,6 +333,17 @@ private:
 		const size_t skipped = prefix < f.token_length ? prefix : f.token_length;
 		prog_.catalog_lookups.push_back({kind, std::string(token_view(f).substr(skipped)), f.source,
 				f.token_start + skipped, f.token_length - skipped, found, f.decl_mode != 0});
+		if (f.decl_mode == 0) note_word(f, WordUse::Kind::Operand);
+	}
+
+	// The current token read as a word of the language: a keyword, a command it names or an operand
+	// it looked up (tooling metadata: Program::word_uses), once however often the loop takes the
+	// token again.
+	void note_word(const File &f, WordUse::Kind kind) {
+		if (!prog_.word_uses.empty() && prog_.word_uses.back().source == f.source &&
+				prog_.word_uses.back().offset == f.token_start)
+			return;
+		prog_.word_uses.push_back({kind, f.source, f.token_start, f.token_length});
 	}
 
 	// [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
@@ -655,12 +666,15 @@ private:
 			}
 			if (h == kHashBang || h == kHashNot) {
 				// [orig: @0x4F3B7F..0x4F3BA0, @0x4F3F1A]
+				if (h == kHashNot) note_word(f, WordUse::Kind::Keyword);
 				if (f.negate != 0) error(f, f.line, "Unexpected NOT");
 				else f.negate = 0x80;
 				return true;
 			}
 			for (const BinaryOperator &op : kBinaryOperators) {
 				if (op.hash != h) continue;
+				if (h == hash4('A', 'N', 'D', ';') || h == hash4('O', 'R', ';', ';'))
+					note_word(f, WordUse::Kind::Keyword);
 				if (f.pending_op != 0 || f.negate != 0) {
 					error(f, f.line, op.unexpected);
 				} else {
@@ -885,14 +899,17 @@ private:
 	// [orig: Script_Compile @0x4F4053..0x4F50E7] True when the token is a keyword.
 	bool keyword(File &f, uint32_t h) {
 		if (h == kHashCheat) {
+			note_word(f, WordUse::Kind::Keyword);
 			f.decl_mode = 2;
 			return true;
 		}
 		if (h == kHashVar) {
+			note_word(f, WordUse::Kind::Keyword);
 			f.decl_mode = 1;
 			return true;
 		}
 		if (h == kHashRun) {
+			note_word(f, WordUse::Kind::Keyword);
 			f.run_pending = true;
 			return true;
 		}
@@ -902,6 +919,9 @@ private:
 				h == kHashDoRnd || h == kHashNext || h == kHashGloop || h == kHashPloop ||
 				h == kHashOpenBracket;
 		if (!drains) return false;
+		// A word the hash names (a bracket is no word), the keyword whether or not the drain then
+		// abandons it.
+		if (h != kHashOpenBracket) note_word(f, WordUse::Kind::Keyword);
 		if (drain_abandons(f)) return true;
 		if (h == kHashIf) {
 			// The new block's type waits for THEN. [orig: @0x4F498F..0x4F4A57]
@@ -981,6 +1001,8 @@ private:
 			error(f, f.line, "Unknown '" + std::string(token_view(f)) + "'");
 			return;
 		}
+		// The token names the command, but for a value the compiler loads (its token "load" now).
+		if (!(value && !assign_next)) note_word(f, WordUse::Kind::Command);
 		const CommandDef &def = wac_commands()[index];
 		f.params_pending = 0;
 		for (int param = 3; param >= 0; --param) {

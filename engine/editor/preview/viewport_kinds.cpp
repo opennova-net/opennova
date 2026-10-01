@@ -8,6 +8,7 @@
 #include <editor/model/document.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/model_viewport.h>
+#include <editor/preview/script_viewport.h>
 #include <editor/session/view/documents_view.h>
 
 namespace opennova::editor {
@@ -28,6 +29,15 @@ constexpr ViewportFeed kModelFeeds[] = {
 	{ T::Animation, true },
 	{ T::AnimationMap, true },
 };
+// The script device's (S13 V10): every text type (S13 D9), its text as it stands, the Document tab's
+// main view.
+constexpr ViewportFeed kScriptFeeds[] = {
+	{ T::Script, true },
+	{ T::MusicScript, true },
+	{ T::Credits, true },
+	{ T::Shader, true },
+	{ T::Text, true },
+};
 
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8).
@@ -36,6 +46,8 @@ constexpr ViewportKindRow kRows[] = {
 			MenuViewport::make },
 	{ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
 			ModelViewport::make },
+	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
+			ScriptViewport::make, false },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

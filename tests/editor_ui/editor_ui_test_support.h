@@ -433,13 +433,17 @@ struct DrawnDevice final : ViewportDevice {
 	std::vector<ViewportAction> taken;
 	void draw(const ViewportPicture &picture) override {
 		drawn = true;
+		last = picture;
+		++draws;
+		// A picture with no room is no picture, whatever the device draws: the script device hides on it,
+		// the script view drawing one at a frame's end (outside any window) where a window begun after
+		// its tab lies over the device's rect. Its origin and size stay what the last real one made.
+		if (picture.width <= 0 || picture.height <= 0) return;
 		const ImVec2 cursor = ImGui::GetCursorScreenPos();
 		origin = ImVec2(picture.x, picture.y);
 		CHECK(cursor.x == picture.x && cursor.y == picture.y, "the picture where the canvas's cursor stands");
 		width = picture.width;
 		height = picture.height;
-		last = picture;
-		++draws;
 		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(picture.width), float(picture.height)));
 	}
 	// Its size as the Shell's device reports it: the one a canvas drew it at since the last pump, else

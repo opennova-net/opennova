@@ -47,6 +47,11 @@ std::vector<Diagnostic> validate_script_file(const DocumentBase &document);
 // MissionText_GetStringByKeyOrGameText @ 0x51ECD0]: until the graph scopes that lookup, a key's use
 // is not one a rename rewrites).
 void script_references(const TextDocument &document, std::vector<TextReference> &out);
+// The words of the WAC language in the text, each at its span, as the compiler read them
+// (wac::Program::word_uses, ADR 0046 S13 V10): its keywords, the commands of its table it emitted,
+// and the operands it looked a name up for (their whole token, the prefix with the name), in the
+// text's order; read from the same compile as the findings and the references.
+void script_highlights(const TextDocument &document, std::vector<TextHighlight> &out);
 
 enum class ScriptFinding {
 	Compile,    // a report of the WAC compiler

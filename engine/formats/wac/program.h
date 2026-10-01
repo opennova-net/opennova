@@ -55,6 +55,22 @@ struct CatalogLookup {
     bool declaration = false;
 };
 
+// A word the compiler read as one of its language's, where it stood (tooling metadata the VM and
+// the listing never read, as CatalogLookup is; the editor's script device colours them, ADR 0046
+// S13 V10): a keyword of the block, declaration and expression syntax (IF, THEN, ELSE, ELSEIF, END
+// and its family, ENTER, LEAVE, DOSEQ, DORND, NEXT, GLOOP, PLOOP, VAR, CHEAT, RUN, NOT, AND, OR),
+// recognized as the compiler recognizes it (the hash of the token's first four bytes); the name of
+// a command of the table (an action or a condition) it emitted; or an operand it looked a name up
+// in a catalog for (an effect, a sound set, an ammo, a text key: its whole token, the prefix with
+// the name; never a declared name checked as new). `offset` and `length` are the token's bytes in
+// its source, as written.
+struct WordUse {
+    enum class Kind : uint8_t { Keyword, Command, Operand };
+    Kind kind = Kind::Keyword;
+    uint32_t source = 0; // Program::source_names index
+    size_t offset = 0, length = 0;
+};
+
 struct InstructionSource {
     uint32_t word = 0;
     uint32_t source_index = 0;
@@ -88,6 +104,7 @@ struct Program {
     std::vector<TextToken> text_tokens;
     std::vector<OperandSymbol> operand_symbols;
     std::vector<CatalogLookup> catalog_lookups; // in the order the compiler made them
+    std::vector<WordUse> word_uses;             // in the order the compiler read them
     // Effect handles are stable 1-based integers, separate from text-pool offsets.
     // The presentation consumer resolves these names in its mounted effect scene.
     std::vector<std::string> effect_names;

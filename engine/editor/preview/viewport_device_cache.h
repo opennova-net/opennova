@@ -34,10 +34,12 @@ public:
 	ViewportDeviceCache(const ViewportDeviceCache &) = delete;
 	ViewportDeviceCache &operator=(const ViewportDeviceCache &) = delete;
 
-	// Which Preview targets each sync gives a device: every Preview-role kind's (true, the default:
-	// a headless Shell, a test, where no window draws to ask), or only the one of the kind the
-	// Preview window shows (false, the workspace: DocumentsView::preview_shown, so a kind it does not
-	// show holds no device until a view asks for one as it draws, a Main viewport's on show).
+	// Which Preview targets each sync gives a device: every Preview-role kind's and the active
+	// document's Main-role viewport (true, the default: a headless Shell, a test, where no window
+	// draws to ask, given a device for what the workspace would show: S13 V10's script device of the
+	// active text document among them), or only the one of the kind the Preview window shows (false,
+	// the workspace: DocumentsView::preview_shown, so a kind it does not show holds no device until a
+	// view asks for one as it draws, a Main viewport's on show).
 	void set_pin_all_targets(bool all) { pin_all_ = all; }
 	// One pump (the Shell's, after the session's poll): a device whose viewport went (its document
 	// closed) or is not the one it was attached to (the document closed and opened again between two

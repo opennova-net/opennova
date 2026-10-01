@@ -28,6 +28,7 @@ int rank(DiagnosticSeverity severity) {
 
 void TextView::rebind(const DocumentBase &document) {
 	(void)document;
+	events_.take(); // the events held name the old lines
 	marked_ = 0;
 	scroll_ = false;
 	markers_valid_ = false;
@@ -56,25 +57,29 @@ void TextView::follow_markers(const SessionView &view, const DocumentBase &docum
 	}
 }
 
-void TextView::draw(Workspace &workspace, const DocumentBase &base) {
+void TextView::draw_toolbar(Workspace &workspace, const TextDocument &document) {
+	// A text held read only is a file its text form cannot carry as it is (a shipped music script's
+	// message handler), nothing to correct: each issue says what. The tools' tips above them: the tab's
+	// rest is the script device's rect, a Control over which a tip below a tool would be drawn under.
+	const ui_kit::TipsAbove above;
+	draw_document_toolbar(workspace, document,
+			"Read only: the editor shows this file's text and cannot write the file back as it is.");
+	for (const SourceIssue &issue : document.issues())
+		if (issue.blocks) ImGui::TextWrapped("%s", issue.message.c_str());
+}
+
+void TextView::draw_lines(Workspace &workspace, const TextDocument &text) {
 	// A RevealText taken: its line marked and scrolled to (a RevealRecord names no record here).
-	for (const ViewEvent &event : take_events()) {
+	for (const ViewEvent &event : events_.take()) {
 		size_t line = 0, column = 0;
 		if (event.kind == ViewEventKind::RevealText && TextDocument::read_locator(event.locator, line, column)) {
 			marked_ = line;
 			scroll_ = true;
 		}
 	}
-	const TextDocument *document = text_of(base);
-	if (!document) return ui_kit::empty_state("This file holds no text to show.");
+	const TextDocument *document = &text;
 	const SessionView &view = workspace.view();
 	follow_markers(view, *document);
-	// A text held read only is a file its text form cannot carry as it is (a shipped music script's
-	// message handler), nothing to correct: each issue says what.
-	draw_document_toolbar(workspace, *document,
-			"Read only: the editor shows this file's text and cannot write the file back as it is.");
-	for (const SourceIssue &issue : document->issues())
-		if (issue.blocks) ImGui::TextWrapped("%s", issue.message.c_str());
 	const std::string lines = std::to_string(document->line_count()) +
 			" lines, read only here: an edit is a span the editor MCP sends.";
 	ui_kit::empty_state(lines.c_str());

@@ -9,6 +9,9 @@ namespace opennova::editor::ui_kit {
 
 namespace {
 
+// Whether a TipsAbove lives: Dear ImGui is single threaded, one frame is drawn at a time.
+bool g_tips_above = false;
+
 const char *severity_word(DiagnosticSeverity severity) {
 	switch (severity) {
 	case DiagnosticSeverity::Info: return "Info";
@@ -173,12 +176,32 @@ void clipped_text(const std::string &text, const std::string &tip) {
 
 bool tooltip_hovered() { return ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled); }
 
+TipsAbove::TipsAbove() : before_(g_tips_above) { g_tips_above = true; }
+
+TipsAbove::~TipsAbove() { g_tips_above = before_; }
+
 void tooltip(const std::string &text) {
 	if (text.empty() || !tooltip_hovered()) return;
+	const float wrap = ImGui::GetFontSize() * 40.0f;
+	if (g_tips_above) {
+		// Above the item, its bottom edge on the item's top edge (a hair clear of it) and its left on
+		// the item's, held within the window's viewport; where the room above the item does not hold
+		// it, Dear ImGui places it by the pointer as it places any tooltip.
+		const ImGuiStyle &style = ImGui::GetStyle();
+		const ImVec2 size = ImGui::CalcTextSize(text.c_str(), nullptr, false, wrap);
+		const float width = size.x + style.WindowPadding.x * 2.0f, height = size.y + style.WindowPadding.y * 2.0f;
+		const ImGuiViewport *viewport = ImGui::GetWindowViewport();
+		const ImVec2 item = ImGui::GetItemRectMin();
+		const float bottom = item.y - 2.0f;
+		if (bottom - height >= viewport->Pos.y) {
+			const float left = std::min(item.x, viewport->Pos.x + viewport->Size.x - width);
+			ImGui::SetNextWindowPos(ImVec2(std::max(left, viewport->Pos.x), bottom), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+		}
+	}
 	// In place of a tooltip set before it this frame, as SetTooltip does: a table's header sets
 	// its own for a label it cut, which BeginTooltip would add this one to.
 	ImGui::BeginTooltipEx(ImGuiTooltipFlags_OverridePrevious, ImGuiWindowFlags_None);
-	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
+	ImGui::PushTextWrapPos(wrap);
 	ImGui::TextUnformatted(text.c_str());
 	ImGui::PopTextWrapPos();
 	ImGui::EndTooltip();
@@ -275,6 +298,39 @@ void empty_state(const char *text, const char *hint) {
 	ImGui::TextWrapped("%s", text);
 	if (hint) ImGui::TextWrapped("%s", hint);
 	ImGui::PopStyleColor();
+}
+
+Cover cover_of(float left, float top, float right, float bottom) {
+	return Cover{ ImGui::GetCurrentWindowRead()->RootWindow->ID, left, top, right, bottom };
+}
+
+bool covered(const Cover &cover) {
+	if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return true;
+	const ImGuiContext &g = *GImGui;
+	const ImGuiWindow *own = ImGui::FindWindowByID(cover.window);
+	if (!own) return false;
+	const ImRect rect(cover.left, cover.top, cover.right, cover.bottom);
+	// The windows are in display order, back to front: those after the rect's window's root are over
+	// it, drawn this frame (begun already, or drawn the last frame and begun after this one). A tooltip
+	// is left aside, and so are Dear ImGui's implicit window (begun every frame, drawn only where
+	// something is written to it, which nothing is) and the dock space's own windows: its host stays
+	// behind everything, and the windows docked in it tile its room, never over one another.
+	bool above = false;
+	for (const ImGuiWindow *window : g.Windows) {
+		if (window == own) {
+			above = true;
+			continue;
+		}
+		if (!above || window->IsFallbackWindow || !(window->Active || window->WasActive) || window->Hidden ||
+				window->RootWindow == own)
+			continue;
+		if (window->Flags & (ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_DockNodeHost | ImGuiWindowFlags_NoBringToFrontOnFocus))
+			continue;
+		if (window->DockIsActive && window->RootWindowDockTree == own->RootWindowDockTree) continue;
+		if (window->Viewport != own->Viewport) continue;
+		if (window->Rect().Overlaps(rect)) return true;
+	}
+	return false;
 }
 
 } // namespace opennova::editor::ui_kit

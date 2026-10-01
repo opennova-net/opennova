@@ -45,6 +45,17 @@ struct TextReference {
 	bool rewritable = true;
 };
 
+// A run of a text its game reader reads as a word of its language (ADR 0046 S13 V10), what the
+// script device colours: from the type's port of that reader alone (DocumentType::highlights), so
+// nothing is coloured that the reader does not know. A script's: the WAC compiler's keywords (its
+// block, declaration and expression words), the commands of its table, and the operands it looks a
+// name up for (FX_, SS_, AMMO_, TT_ and the slots of those kinds), each its whole token as written.
+enum class TextHighlightKind : uint8_t { Keyword, Command, Operand };
+struct TextHighlight {
+	TextHighlightKind kind = TextHighlightKind::Keyword;
+	TextSpan span;
+};
+
 // How a type's game reader ends a line, which is how Save writes a line's end (ADR 0046 S13 D9).
 // AsWritten: the file is written as its text holds it. CrLf: the reader ends a line at CR LF alone
 // (a credits file's ConfigFile reader), so an LF alone, which the editor's lines end at, is written

@@ -39,7 +39,10 @@ public:
 	// After every change of the view (SessionCore::touch): a viewport for each kind's Preview
 	// target (view.documents.previews), made as a target first names it, and for each open document
 	// a Main-role kind shows (its tab's); a viewport whose document closed (or is open as a type its
-	// kind does not show) gone, its state with it.
+	// kind does not show) gone, its state with it. Then each view event posted since the last track or
+	// follow handed to the viewports of its document (ViewportModel::receive, S13 V10: a RevealText's
+	// place for a script device), a viewport made for a document the event's request opened among
+	// them; each event once.
 	void track(const SessionView &view);
 	// The viewport of `kind` over the document at `path`, made at the kind's defaults when there
 	// is none (kept until the document closes).
@@ -106,6 +109,8 @@ private:
 	};
 	Slot *slot_(const std::string &path, ViewportKind kind);
 	void follow_(const SessionView &view, Slot &slot);
+	// The view events posted since the last hand-out, each to the viewports of its document.
+	void dispatch_(const SessionView &view);
 	// The document a set or a resolve names (`path`, "" the active one; open, else `error`) and the
 	// kind it addresses (`named`, else default_viewport_kind; one that shows it, else `error`).
 	bool addressed_(const SessionView &view, const std::string &path, ViewportKind named, std::string &at,
@@ -114,6 +119,7 @@ private:
 	std::vector<Slot> slots_;
 	PreviewClock clock_;
 	std::function<void()> on_derived_change_;
+	uint64_t next_event_ = 0; // the first event seq not handed out yet
 };
 
 } // namespace opennova::editor

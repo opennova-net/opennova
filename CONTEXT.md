@@ -630,17 +630,18 @@ table, one view per open document, which keeps its filter, its order and what it
 long as the document is open. Most types show their records as an outline (a tree of the rows and
 what they hold, a list of the rows, or master and detail: the rows beside the selected row's
 records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
-menu's screens and windows), or a Main-role viewport filling the tab with the outline and the
-Inspector beside it (the mission's 3D view, to come). The selected record's fields are the
-Inspector's, whatever the type.
+menu's screens and windows), or a Main-role viewport filling the tab: a text's script device, or the
+mission's 3D view to come with the outline and the Inspector beside it. The selected record's fields
+are the Inspector's, whatever the type.
 _Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
 generic form beside it)
 
 **Viewport**:
-One document's picture as the game would draw it, of one kind (a menu's screen, a model, and the
-mission's 3D view to come), kept by the session while the document is open: one per document and
-kind. Its role is Preview (shown by the Preview window while its document is the last of its
-kind made active) or Main (the Document tab's view, with the outline and the Inspector beside it);
+One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
+its script device, and the mission's 3D view to come), kept by the session while the document is
+open: one per document and kind. Its role is Preview (shown by the Preview window while its document
+is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
+picture with the outline and the Inspector beside it);
 a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission's
 3D view and its map are one Main and one Preview). Its state (the size its device draws at where no
 canvas sizes the picture, the kind's options and camera) changes by a SetViewport request, every
@@ -652,18 +653,33 @@ files its picture read and its state into what its device does next (make the pi
 the state again, drop it, or nothing), a picture the game could not read kept so until the document
 changes, and, for a kind that holds for a gesture (the model's scene), a picture made again held
 while a gesture is open in its document over one the device holds. Its device is the Shell's (an
-offscreen Godot viewport for one document and kind, four kept, the least recently used not drawn
-since the last pump given up and its viewport keeping its state), drawn only by the viewport's
-canvas, which owns the pointer and the keys and sizes the picture it draws. A device may make a
-picture over several of the Shell's frames, a little each frame (a model: its textures, its meshes,
-then its scene and its pose; a menu's screen shown the first time: its textures, then the screen);
-the viewport is loading meanwhile, its canvas drawing the last picture the device made, never a
-half-made one, and a change that asks for the picture again begins it anew. Headless, it answers as
-its envelope (JSON, the `viewport` query), and a client drags and commands through it as its canvas
-would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it moves, a
-command one request).
+offscreen Godot viewport for one document and kind, or a Godot control placed over the tab, the
+script device; four kept, the least recently used not drawn since the last pump given up and its
+viewport keeping its state), drawn only by the viewport's canvas, which owns the pointer and the keys
+and sizes the picture it draws (a control owns them itself in the rect the canvas reserves). A device
+may make a picture over several of the Shell's frames, a little each frame (a model: its textures,
+its meshes, then its scene and its pose; a menu's screen shown the first time: its textures, then the
+screen); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
+never a half-made one, and a change that asks for the picture again begins it anew. Headless, it
+answers as its envelope (JSON, the `viewport` query), and a client drags and commands through it as
+its canvas would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it
+moves, a command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
+
+**Script device**:
+A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
+a Godot code editor placed over its Document tab, which owns the pointer and the keys there and
+shows the document's text as it stands (the text is the document's: an undo, a reload or another
+client's edit comes back into the control). What is typed goes to the document as spans replaced,
+each run of typing one gesture and one undo step, Undo and Redo the editor's and never the
+control's; the findings are marks in its gutter, their messages on hover; a script's words the WAC
+compiler knows (its keywords, commands and operands) are coloured, nothing else; a Go to or a
+Problems row selects its place. A file its text form cannot carry shows read only, and so does every
+text while an operation holds the documents. Where no window draws it (headless) or something is
+drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
+_Avoid_: script editor (the whole editor), code view, text view (the lines shown read only where no
+device draws), CodeEdit (the Godot control behind it)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
