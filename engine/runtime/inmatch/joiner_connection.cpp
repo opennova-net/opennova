@@ -30,12 +30,27 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Pre-session Hello/Auth retransmit cadence. The golden captures prove these handshake packets
-// retransmit at about one second; the exact retail handshake timer is still ungrilled. The
-// connection template does not govern pre-session sends, and the 1000-ms CS value this previously
-// cited belongs to the NOVAWORLDUDP service template (@0x4d3e60), so this stays a capture-pinned
-// policy value until the handshake timer xref is witnessed.
-constexpr uint64_t kHandshakeRetryMilliseconds = 1000;
+// The 0x41 ClientHello leg's retransmit cadence. A retail game join sends no 0x41 at all: it
+// joins from the browse row, whose session record already holds the 0x81, and goes straight to
+// the connect state below. Our joiner has no browse row, so its Hello leg stands in for the
+// browse probe of that one host; this stays a capture-pinned policy value (about one second).
+constexpr uint64_t kClientHelloRetryMilliseconds = 1000;
+
+// The connect state (retail state 3) of a JO game join: the 0x42 ClientJoin is re-sent once
+// MORE than 2000 ms passed since the last send, and the join fails once MORE than 30000 ms passed
+// since the state was entered, latching connect error 2, whose text is gameerr
+// "MPNetConnectCodes" NCC002. A ServerAuth (state 5) ends both.
+// [orig: CNapiNetwork_StartClientConnection @0x4ca160 stores conn+0x5B0 = 2000 @0x4ca2ab and
+//  +0x5B4 = 30000 @0x4ca2bb (CNapiGameSession_CreateSession @0x4c9c27 stores the same pair);
+//  CNapiNPConnection_InitFromSession @0x626320 enters state 3, stamping the start +0x5E0
+//  @0x62648a and the last send +0x5E4 = now - 2000 @0x626499; CNapiNPConnection_PumpStateMachine
+//  case 3: `now - start > +0x5B4` @0x62951c -> +0x5F0 = 2 @0x629525, state 4 @0x629564; else
+//  `now - last > +0x5B0` @0x629588 -> last = now @0x62958f, SendClientJoin @0x629595;
+//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba60, read by
+//  CNapiNetwork_GetDisconnectReasonString @0x4c703d]
+constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
+constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;
+constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 // Established-session active-send probe interval: the JOINTOPERATIONS connection template's
 // cs_dir0/cs_dir1.active_send_interval_ms (idle 30000). While reliable records remain retained, a
@@ -302,6 +317,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	conn_.seq = make_jo_game_session_sequencing();
 	handshake_retry_clock_armed_ = false;
 	handshake_last_send_ms_ = 0;
+	client_join_start_ms_ = 0;
 	post_auth_stage_ = PostAuthStage::Inactive;
 	goodbye_sent_ = false;
 	session_last_send_ms_ = 0;
@@ -714,6 +730,8 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	phase_ = Phase::Auth;
 	handshake_retry_datagram_ = build_client_auth();
 	handshake_last_send_ms_ = monotonic_milliseconds_();
+	// The connect state's start: its 30000 ms window runs from here [orig: @0x62648a].
+	client_join_start_ms_ = handshake_last_send_ms_;
 	handshake_retry_clock_armed_ = true;
 	out.outbound.push_back(handshake_retry_datagram_);
 }
@@ -2161,11 +2179,31 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		// caller that installs a pending leg without going through those builders.
 		if (!handshake_retry_clock_armed_) {
 			handshake_last_send_ms_ = now_ms;
+			client_join_start_ms_ = now_ms;
 			handshake_retry_clock_armed_ = true;
 			return out;
 		}
+		if (phase_ == Phase::Auth) {
+			// The connect state: the window test runs ahead of the resend test
+			// [orig: PumpStateMachine case 3 @0x62951c, then @0x629588].
+			if (now_ms >= client_join_start_ms_ &&
+			    now_ms - client_join_start_ms_ > kClientJoinTimeoutMilliseconds) {
+				last_join_reject_.set = true;
+				last_join_reject_.jfc = kConnectErrorJoinTimeout;
+				last_join_reject_.jfp = 0;
+				last_join_reject_.jfs.clear();
+				fail("The host did not answer the join request (NCC002)");
+				return out;
+			}
+			if (now_ms >= handshake_last_send_ms_ &&
+			    now_ms - handshake_last_send_ms_ > kClientJoinRetryMilliseconds) {
+				handshake_last_send_ms_ = now_ms;
+				out.push_back(handshake_retry_datagram_);
+			}
+			return out;
+		}
 		if (now_ms >= handshake_last_send_ms_ &&
-		    now_ms - handshake_last_send_ms_ >= kHandshakeRetryMilliseconds) {
+		    now_ms - handshake_last_send_ms_ >= kClientHelloRetryMilliseconds) {
 			handshake_last_send_ms_ = now_ms;
 			out.push_back(handshake_retry_datagram_);
 		}

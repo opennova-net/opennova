@@ -194,8 +194,10 @@ public:
 	// any surfaced 0x0A bodies + whether this datagram learned H.
 	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
-	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram on retail's active
-	// send interval measured by the monotonic wall clock (independent of render/simulation cadence).
+	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram, measured by the
+	// monotonic wall clock (independent of render/simulation cadence): the 0x41 every 1000 ms, the
+	// 0x42 once more than 2000 ms passed, failing the join with connect error 2 (NCC002) once the
+	// 0x42 leg has waited more than 30000 ms.
 	// Once Driving, flush deferred ACKs, the active-interval header-only probes, and the held C2S
 	// 0x0A after local world readiness. Semantic admission transitions are emitted reactively from
 	// handle_datagram(); the 0x44 missing-sequence request belongs to finish_receive_pump().
@@ -756,6 +758,8 @@ private:
 	MonotonicMilliseconds monotonic_milliseconds_;
 	std::vector<uint8_t> handshake_retry_datagram_;
 	uint64_t handshake_last_send_ms_ = 0;
+	// When the 0x42 connect state began (the ServerHello): its 30000 ms window's start.
+	uint64_t client_join_start_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
 	// Wall-clock stamp of the last IN-ORDER admitted 0x83 (a zero-message keepalive counts;
 	// duplicates, futures, 0x84 resend lists and every other opcode do not) or of a

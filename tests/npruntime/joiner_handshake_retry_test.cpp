@@ -59,9 +59,11 @@ bool is_resend_request(const std::vector<uint8_t> &datagram, uint8_t expected_op
 }
 
 bool run_dropped_hello_and_auth_recover() {
-	// Capture-pinned pre-session Hello/Auth retransmit cadence (the retail handshake timer xref
-	// is still ungrilled) — deliberately NOT the 10000-ms session active-send interval.
+	// The capture-pinned 0x41 retransmit cadence — deliberately NOT the 10000-ms session
+	// active-send interval — and retail's connect-state 0x42 cadence: re-sent once MORE than
+	// 2000 ms passed [orig: StartClientConnection @0x4ca2ab; PumpStateMachine @0x629588].
 	constexpr uint64_t kHandshakeRetryMs = 1000;
+	constexpr uint64_t kClientJoinRetryMs = 2000;
 	const PeerAddr peer{0x0100007Fu, 32769};
 
 	inmatch::NapiNPServerCtx host;
@@ -116,16 +118,16 @@ bool run_dropped_hello_and_auth_recover() {
 	}
 	const std::vector<uint8_t> first_auth = auth_out[0];
 
-	now_ms = 2 * kHandshakeRetryMs - 1;
+	now_ms = kHandshakeRetryMs + kClientJoinRetryMs;
 	if (!expect(client.Client_ProcessNetworkFrame(1).empty(),
-			"ClientAuth is not retried before the active-send interval")) {
+			"ClientAuth is not retried until MORE than 2000 ms passed")) {
 		return false;
 	}
-	now_ms = 2 * kHandshakeRetryMs;
+	now_ms = kHandshakeRetryMs + kClientJoinRetryMs + 1;
 	const std::vector<std::vector<uint8_t>> auth_retry =
 			client.Client_ProcessNetworkFrame(1);
 	if (!expect(auth_retry.size() == 1 && auth_retry[0] == first_auth,
-			"dropped ClientAuth retries byte-identically at the interval")) {
+			"dropped ClientAuth retries byte-identically past 2000 ms")) {
 		return false;
 	}
 
@@ -150,6 +152,50 @@ bool run_dropped_hello_and_auth_recover() {
 		}
 	}
 	return true;
+}
+
+// A host that answers the ServerHello but never the 0x42 fails the join after retail's 30000 ms
+// connect window with connect error 2 (NCC002), the 0x42 having been re-sent every 2000+ ms.
+// [orig: StartClientConnection @0x4ca2ab/@0x4ca2bb; InitFromSession @0x62648a; PumpStateMachine
+//  case 3 @0x62951c (timeout, +0x5F0 = 2 @0x629525) / @0x629588 (resend); NCC002 @0x82ba60]
+bool run_unanswered_client_join_fails_after_30000_ms() {
+	const PeerAddr peer{0x0100007Fu, 32770};
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E113u);
+	uint64_t now_ms = 5000;
+	inmatch::ClientRuntime client("TimeoutJoiner", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> hello = client.start();
+	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
+			host, peer, hello.data(), hello.size(), 0);
+	if (!expect(hello_result.outbound.size() == 1, "host answers the ClientHello")) return false;
+	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
+	const std::vector<std::vector<uint8_t>> auth = client.Client_ProcessNetworkFrame(1);
+	if (!expect(auth.size() == 1 && is_opcode(auth[0], SESSION_OPCODE_CLIENT_AUTH),
+			"ServerHello sends the first ClientAuth")) {
+		return false;
+	}
+	// Every 0x42 is lost: the connect state re-sends past each 2000 ms gap until the window.
+	const uint64_t start = now_ms;
+	std::size_t resends = 0;
+	for (now_ms = start + 1; now_ms <= start + 30000; now_ms += 1) {
+		for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+			if (is_opcode(datagram, SESSION_OPCODE_CLIENT_AUTH)) ++resends;
+		}
+	}
+	if (!expect(resends == 14, "the 0x42 is re-sent fourteen times in the 30000 ms window"))
+		return false;
+	if (!expect(client.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				!client.last_join_reject().set,
+			"the join is still connecting at exactly 30000 ms")) {
+		return false;
+	}
+	now_ms = start + 30001;
+	const std::vector<std::vector<uint8_t>> expired = client.Client_ProcessNetworkFrame(1);
+	return expect(expired.empty() &&
+				client.phase() == inmatch::JoinerConnection::Phase::Error &&
+				client.last_join_reject().set && client.last_join_reject().jfc == 2,
+			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
 }
 
 bool run_client_active_probe_recovers_join() {
@@ -439,6 +485,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 int main() {
 	if (!run_idle_keepalive_survives_a_quiet_session()) return 1;
 	if (!run_dropped_hello_and_auth_recover()) return 1;
+	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;
 	std::printf("OK\n");
