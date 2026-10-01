@@ -595,6 +595,10 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.quality = conn.reply.client_quality;
 		ctx.squad_leader = conn.squad_leader; // +100576 (field 0x0040)
 		ctx.fireteam = conn.fireteam;         // +100577 (field 0x0080)
+		// Field 0x1000: the spectator latch of a slot past its load, the
+		// loading byte being the port's incomplete initial-state burst
+		// [orig: NetPacket_SerializePlayerSync0x46 @0x506199..0x5061bc].
+		ctx.spectator_in_game = conn.link.spectator && is_in_match(conn) ? 1 : 0;
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
 				ctx.team = e->team;

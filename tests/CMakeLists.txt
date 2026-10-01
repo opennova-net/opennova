@@ -3315,6 +3315,11 @@ add_executable(npruntime_door_relay_test npruntime/door_relay_test.cpp)
 target_link_libraries(npruntime_door_relay_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_door_relay COMMAND npruntime_door_relay_test)
 
+# D-NET-127: the host's S2C 0x46 per-field values (the 0x1000 spectator byte).
+add_executable(npruntime_player_sync_fields_test npruntime/player_sync_fields_test.cpp)
+target_link_libraries(npruntime_player_sync_fields_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_sync_fields COMMAND npruntime_player_sync_fields_test)
+
 # D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
 # connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
 add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)

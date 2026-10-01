@@ -740,7 +740,7 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasVehicleScore)
 		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
-		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
+		w.u8(ctx.spectator_in_game); // spectator in game [orig: slot+4 && slot+100567 && !slot+100579 @0x506197..0x5061cc]
 	if (field_flags & kPlayerSyncHasSquad)
 		w.u8(ctx.squad_leader); // the squad leader [orig: slot+100576, seeded 0xFF by Server_PlayerAdd @0x51cf0a]
 	if (field_flags & kPlayerSyncHasSide)
