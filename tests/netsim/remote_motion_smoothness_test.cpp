@@ -1307,7 +1307,8 @@ bool run_root_transition_blends() {
 // The death/respawn lifecycle: a dead record on a live row PARKS its byte and
 // zeroes Health; the next mover tick's death edge commits the parked state and
 // latches Flags bit 2, so the channel plays the death clip and the corpse's
-// walk root blends out instead of walking on; the respawn re-arms fresh.
+// walk root blends out instead of walking on; the respawn keeps the death
+// state until the next record, whose state blends in out of the death clip.
 // [orig: park @0x4c10f5; the edge Entity_UpdateInfantryPlayerBody
 // @0x4b4bf1..0x4b4cdb; AnimMap_UpdateDualChannels @0x4B41C9 at the top of
 // the next pass]
@@ -1366,12 +1367,22 @@ bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(alive));
 	view.tick_remote_motion(0xFFFF);
 	const ns::ClientEntityState *re = view.state().find(handle);
-	ok &= expect(re->rm_state == opennova::world::anim_state::kWalkForward &&
-	                     re->rm_blend_weight >= 1.0f,
-	             "the respawned row re-arms fresh (no blend out of the "
-	             "pre-death primary)");
+	// The respawn record snaps the body to its spawn point but commits no
+	// state: the death clip stays current until the next record arbitrates it
+	// [orig: @0x4c1109..0x4c114a -> @0x4c11b4; Entity_ResetToSpawnState's
+	// Flags & 2 gate @0x4b96ed].
+	ok &= expect(re->net_anim_current == opennova::world::anim_state::kDeathFire &&
+	                     re->rm_state == opennova::world::anim_state::kDeathFire,
+	             "the respawn record keeps the death state current");
 	ok &= expect((re->rm_entity_flags & 0x2u) == 0u && !re->net_health_zero,
 	             "the respawn clears the dead latch and raises Health");
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(alive));
+	view.tick_remote_motion(0xFFFF);
+	re = view.state().find(handle);
+	ok &= expect(re->rm_state == opennova::world::anim_state::kWalkForward &&
+	                     re->rm_prev_state == opennova::world::anim_state::kDeathFire &&
+	                     re->rm_blend_weight < 1.0f,
+	             "the next record's state blends in out of the death clip");
 	return ok;
 }
 

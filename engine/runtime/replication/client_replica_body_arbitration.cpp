@@ -36,8 +36,22 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		}
 		return;
 	}
-	// The respawn edge and a row's first-ever record take the spawn-leg
-	// direct commit [orig: @0x4c110f..0x4c1151 / @0x4c05b8..0x4c063b].
+	// A player's respawn leg commits nothing: it snaps the pose and resets the
+	// body while the dead bit is still set, so Entity_ResetToSpawnState only
+	// clears pending (its 44/153 reset is gated on !(Flags & 2)), and the leg
+	// jumps past the arbitration. The death state stays current until the
+	// next record arbitrates it away [orig: @0x4c1109..0x4c114a ->
+	// @0x4c11b4, the local player's jump @0x4c1151 -> @0x4c11ac;
+	// Entity_ResetToSpawnState pending = 0, the
+	// Flags & 2 gate @0x4b96ed..0x4b96f7].
+	if (respawned_this_record && is_player) {
+		es.net_anim_pending = 0;
+		es.net_anim_pending_boundary = -1;
+		return;
+	}
+	// The org1 respawn leg and a row's first-ever record take the spawn-leg
+	// direct commit [orig: @0x4c05b8..0x4c063b, current = the wire state at
+	// LABEL_58 @0x4c063b].
 	if (respawned_this_record || es.net_anim_current < 0) {
 		direct_commit();
 		return;

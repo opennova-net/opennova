@@ -1253,16 +1253,27 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
 		// row (bit0/carried) never root-ticks, so its channel is DISARMED —
 		// presentation falls back to the per-record wire anim byte exactly as
-		// retail applies it [orig: @0x4c1153] (the seat clips dispatch); the
-		// respawn edge re-arms fresh so the resume never blends out of the
-		// pre-death primary. A dead row is not frozen: its mover runs and the
-		// death edge commits the death clip to the channel. (The one-shot
-		// phase seed rides the arbitration's direct-commit leg — net_anim_ratio.)
+		// retail applies it [orig: @0x4c1153] (the seat clips dispatch). A
+		// dead row is not frozen: its mover runs and the death edge commits
+		// the death clip to the channel. The respawn edge keeps the channel
+		// (the next state blends out of the death clip) and resets what
+		// Entity_ResetToSpawnState resets on the row: the leg and body yaws
+		// re-seed to the new heading, and the velocities zero
+		// [orig: @0x4b962c velocityX/Y + slideDecay = 0; @0x4b968c..0x4b96b0
+		// bodyHeading and the four leg yaws = Yaw]. (The one-shot phase seed
+		// rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
 			const bool row_frozen =
 					(has_state_flags && (state_flags & 0x01u) != 0u) ||
 					es.carrier_handle != wire_handle::kInvalid;
-			if (row_frozen || respawned_this_record) row_channel_disarm(es);
+			if (row_frozen) {
+				row_channel_disarm(es);
+			} else if (respawned_this_record) {
+				es.rm_leg_seeded = false;
+				es.rm_vel_xy[0] = 0;
+				es.rm_vel_xy[1] = 0;
+				es.rm_vel_z = 0;
+			}
 		}
 		// A free-standing record clears any retained seat-local pose — the
 		// relation is cleared before every record (D-NET-195); carrier-local
