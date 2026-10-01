@@ -646,23 +646,25 @@ canvas sizes the picture, the kind's options and camera) changes by a SetViewpor
 change a person or a client makes; three changes alone are derived by its follow instead (a menu's
 held window following the selection, a model framed when another model first shows, the preview
 clock sought when the clip the selection plays changes or a clip event is selected), and nothing
-else moves it between two follows. It follows its document, the files its picture read and its
-state into what its device does next (make the picture again, apply the state again, drop it, or
-nothing), a picture the game could not read kept so until the document changes. Its device is the
-Shell's (an offscreen Godot viewport for one document and kind, four kept, the least recently used
-not drawn since the last pump given up and its viewport keeping its state), drawn only by the
-viewport's canvas, which owns the pointer and the keys and sizes the picture it draws. Headless, it
-answers as its envelope (JSON).
+else moves it between two follows. It follows its document (what its change set says changed),
+the files its picture read and its state into what its device does next (make the picture again,
+apply the state again, drop it, or nothing), a picture the game could not read kept so until the
+document changes, and a picture made again held while a gesture is open in its document. Its
+device is the Shell's (an offscreen Godot viewport for one document and kind, four kept, the least
+recently used not drawn since the last pump given up and its viewport keeping its state), drawn
+only by the viewport's canvas, which owns the pointer and the keys and sizes the picture it draws.
+Headless, it answers as its envelope (JSON).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
-its milliseconds, a clip by its game ticks, and later a particle effect, a menu's animations and an
-environment's time of day. It runs while it plays, at its rate, as the Shell's frames pass; a
-SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it follows (a clip
-newly chosen starts at tick 0, a clip event selected holds the clock on the tick the clip first
-samples it).
+its milliseconds, a clip by its game ticks, a menu's animations (an edit box's caret blinking, a
+marquee's credits rolling) by its milliseconds as the menu's frame clock, drawn again and never
+configured again, and later a particle effect and an environment's time of day. It runs while it
+plays, at its rate, as the Shell's frames pass; a SetViewport plays, pauses, sets its rate or seeks
+it, and a viewport seeks it as it follows (a clip newly chosen starts at tick 0, a clip event
+selected holds the clock on the tick the clip first samples it).
 _Avoid_: clip clock (the model preview's own, which it replaced), game clock (a running match's),
 tick (the game's 62 Hz step, which it counts)
 
@@ -831,7 +833,11 @@ The edits one continuous action on a canvas makes (a drag of a handle, an arrow 
 over several entities): they carry one token and fold into one undo step over every row they
 change (each row's version before the gesture and its latest after) until it ends (let go, or the
 canvas stops drawing it: one end, for the document it began in); a batch of it that adds, removes
-or moves a row is a step of its own and ends it. The Problems wait for the end.
+or moves a row is a step of its own and ends it. The open gesture is the view's (its document and
+its token). The Problems wait for the end, and so does a viewport's picture of its document made
+again: the device keeps its last picture while the viewport's outlines and markers follow each
+edit, and makes the picture once when the gesture ends; a change only the state shows (a model's
+user point moved) applies meanwhile.
 _Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
 
 **Batch**:
@@ -851,6 +857,10 @@ in, in the words of its kind: a record document's rows added, removed and change
 moved among one another and whether the file-wide state changed; a text document's spans (each run
 of text that changed, a removal a span of no length); a raster's regions later. When the document
 cannot say (it was read again, or its history no longer holds that state), everything changed.
+What keeps something made of a document follows it: a viewport makes its picture again only for a
+change of what the picture reads (a menu's screen, not another screen of the menu; a model's drawn
+tables, not its user points, which its markers alone show), an outline makes again only a changed
+row's lines and re-orders the rest, and the selection asks only about the rows that changed.
 _Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
 
 **Text document**:
