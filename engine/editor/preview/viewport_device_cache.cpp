@@ -76,7 +76,8 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 	for (const Want &want : wanted_)
 		if (viewports.find(want.path, want.kind)) use_(viewports, want.path, want.kind);
 	wanted_.clear();
-	// Every viewport with a device follows, and each device takes what its viewport asks.
+	// Every viewport with a device follows, and each device takes what its viewport asks, then says
+	// where its build stands.
 	viewports.follow(view);
 	for (Slot &slot : slots_) {
 		const ViewportModel *model = viewports.find(slot.path, slot.kind);
@@ -84,6 +85,7 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 		const ViewportAction action = viewports.take_action(slot.path, slot.kind);
 		ViewportDeviceReport report;
 		slot.device->take(action, *model, view, viewports.clock(), report);
+		report.build = slot.device->build();
 		viewports.device_report(slot.path, slot.kind, report);
 	}
 }
@@ -92,6 +94,20 @@ void ViewportDeviceCache::tick(const Viewports &viewports) {
 	for (Slot &slot : slots_)
 		if (const ViewportModel *model = viewports.find(slot.path, slot.kind))
 			slot.device->tick(*model, viewports.clock());
+}
+
+void ViewportDeviceCache::step(Viewports &viewports, const std::function<bool()> &more) {
+	for (Slot &slot : slots_) {
+		const ViewportModel *model = viewports.find(slot.path, slot.kind);
+		if (!model) continue;
+		// At least one unit of a build in flight each frame; the next ones while the budget lasts.
+		bool stepped = false;
+		while (slot.device->step(*model, viewports.clock())) {
+			stepped = true;
+			if (!more || !more()) break;
+		}
+		if (stepped) viewports.device_build(slot.path, slot.kind, slot.device->build());
+	}
 }
 
 ViewportDevice *ViewportDeviceCache::device(const std::string &path, ViewportKind kind) {

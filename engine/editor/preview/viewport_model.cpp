@@ -97,6 +97,7 @@ const char *viewport_status_token(ViewportStatus status) {
 	case ViewportStatus::Empty: return "empty";
 	case ViewportStatus::Failed: return "failed";
 	case ViewportStatus::Ready: return "ready";
+	case ViewportStatus::Loading: return "loading";
 	}
 	return "empty";
 }
@@ -127,6 +128,38 @@ bool ViewportModel::current(const ViewportInput &input) const {
 			input.document->identity() == shown_identity_ &&
 			input.document->load_generation() == shown_load_ &&
 			input.document->revision() == shown_revision_;
+}
+
+ViewportStatus ViewportModel::picture_status() const {
+	const ViewportStatus shown = status();
+	if (shown != ViewportStatus::Ready || !attached_) return shown;
+	if (build_.loading) return ViewportStatus::Loading;
+	return build_.failed ? ViewportStatus::Failed : ViewportStatus::Ready;
+}
+
+const char *ViewportModel::picture_reason() const {
+	if (status() != ViewportStatus::Ready) return reason();
+	switch (picture_status()) {
+	case ViewportStatus::Loading: return "loading";
+	case ViewportStatus::Failed: return "build_failed";
+	default: return reason();
+	}
+}
+
+std::string ViewportModel::picture_message() const {
+	if (status() != ViewportStatus::Ready) return message();
+	switch (picture_status()) {
+	case ViewportStatus::Loading: {
+		const OperationProgress &progress = build_.progress;
+		std::string line = "Building the picture: " + std::to_string(progress.done) + " of " +
+				std::to_string(progress.total);
+		if (!progress.label.empty()) line += " (" + progress.label + ")";
+		return line + ".";
+	}
+	case ViewportStatus::Failed:
+		return build_.message.empty() ? std::string("The picture did not build.") : build_.message;
+	default: return message();
+	}
 }
 
 io::JsonValue ViewportModel::notes_json(const ViewportInput &) const {
@@ -204,8 +237,11 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 
 ViewportAction ViewportModel::take_action() {
 	if (!attached_) return ViewportAction::Keep;
-	const ViewportAction action = pending_;
+	ViewportAction action = pending_;
 	pending_ = ViewportAction::Keep;
+	// An Update applies to a picture the device built: one it builds applies the state as its build
+	// ends (folded), and a failed build left no picture of the newest generation to apply it to.
+	if (action == ViewportAction::Update && (build_.loading || build_.failed)) action = ViewportAction::Keep;
 	if (action == ViewportAction::Rebuild) {
 		++builds_;
 		holds_ = true;
@@ -218,6 +254,7 @@ ViewportAction ViewportModel::take_action() {
 void ViewportModel::attach() {
 	attached_ = true;
 	holds_ = false;
+	build_ = ViewportBuildReport();
 	// The device holds nothing yet: its first action makes the picture, if there is one.
 	pending_ = status() == ViewportStatus::Ready ? ViewportAction::Rebuild : ViewportAction::Keep;
 }
@@ -225,15 +262,23 @@ void ViewportModel::attach() {
 void ViewportModel::detach() {
 	attached_ = false;
 	holds_ = false;
+	build_ = ViewportBuildReport();
 	pending_ = ViewportAction::Keep;
 	shown_size_ = ViewportState();
 	canvas_sized_ = false;
 }
 
-void ViewportModel::device_report(const ViewportDeviceReport &report) {
+bool ViewportModel::device_report(const ViewportDeviceReport &report) {
 	shown_size_ = ViewportState{ report.width, report.height };
 	canvas_sized_ = report.canvas_sized;
 	report_(report);
+	return device_build(report.build);
+}
+
+bool ViewportModel::device_build(const ViewportBuildReport &build) {
+	const bool moved = !build_.reads_same(build);
+	build_ = build;
+	return moved;
 }
 
 } // namespace opennova::editor

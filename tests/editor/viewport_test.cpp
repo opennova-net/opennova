@@ -9,7 +9,10 @@
 // again. The envelope and its pages. A SetViewport, a drag and a command through a real session, the
 // refused answering false. One undo step per gesture through a real session: a menu drag of four
 // samples, a drag of three selected windows moving all three, a gesture its canvas ends by not
-// drawing, a model marker's drag (two selected markers moving as one).
+// drawing, a model marker's drag (two selected markers moving as one). S13 V6: devices that build
+// their pictures over frames (loading, then ready; a newer Rebuild cancelling one by generation; an
+// Update folded into a build; a Clear and a failure mid-build; the frame's budget), and the follow's
+// comparison of a file a build read between two follows.
 
 #include <climits>
 #include <cmath>
@@ -748,10 +751,17 @@ static int test_envelope() {
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
 	const JsonValue whole = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
-	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "revision",
-				 "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock", "body",
-				 "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
+	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "progress",
+				 "revision", "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock",
+				 "body", "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
 		TEST_EXPECT(whole.get(key) != nullptr);
+	// Its device's build (S13 V6): a device that makes its picture whole as it takes it reports none,
+	// and no progress shows.
+	TEST_EXPECT(whole.get("progress")->is_null() && whole.get("device")->get("build") &&
+			!whole.get("device")->get("build")->get_bool("loading", true));
+	for (const char *key :
+			{ "generation", "loading", "failed", "done", "total", "frames", "frame_us", "unit_us", "total_us" })
+		TEST_EXPECT(whole.get("device")->get("build")->get(key) != nullptr);
 	// Stamped with the view's clock at which what it reads last moved: a SetViewport moves it.
 	TEST_EXPECT(whole.get_number("view_revision", -1) == double(view.revisions.stamp_of(kViewportConcerns)) &&
 			whole.get_number("view_revision", 0) > 0.0);
@@ -1086,6 +1096,225 @@ static int test_gestures() {
 	return 0;
 }
 
+// S13 V6: devices that build their pictures over the Shell's frames, a unit a step (FakeDevice with
+// `units`), through a real session. A build of four units: its viewport loading for three frames
+// (the envelope's status, reason and progress, nothing of it drawn), ready after the fourth, one
+// Rebuild across its frames, each unit moving the Viewports concern and built frames moving nothing; a
+// Rebuild while one runs dropping it and beginning the newer generation from its first unit, the last
+// picture drawn until it ends; an Update while one runs folded into it (never taken, the build ending
+// with the state as it then is), one after it taken; a Clear while one runs dropping it with the
+// picture; a failure at a unit keeping the last picture (failed, its message), nothing asked again and
+// an Update folded until the document moves; the frame's budget (two units a frame), and two builds in
+// one frame each running a unit.
+static int test_builds() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_builds");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	devices.units = 4;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Builds"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	const std::string path = "models/armory.3di";
+	session.handle(request::open_document(path));
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for(path));
+	const auto *model = viewport_of<ModelViewport>(session, path, ViewportKind::Model);
+	TEST_EXPECT(document && document->model_row() && model);
+	if (!document || !document->model_row() || !model) return 1;
+	const ModelRow &row = *document->model_row();
+	TEST_EXPECT(!row.ids.lists[kModelLights].empty());
+	if (row.ids.lists[kModelLights].empty()) return 1;
+	const NodeAddress light{ row.id, node_kind(ModelKind::Light), row.ids.lists[kModelLights][0].id };
+	const auto envelope = [&] { return viewport_to_json(view, model, ViewportKind::Model, JsonPage()); };
+	const auto moves = [&] { return view.revisions.of(ViewConcern::Viewports); };
+	const auto count = [](const std::vector<ViewportAction> &actions, ViewportAction action) {
+		size_t n = 0;
+		for (const ViewportAction taken : actions) n += taken == action ? 1 : 0;
+		return n;
+	};
+
+	// Loading for three frames, a unit a frame, nothing of it drawn; ready after the fourth, the
+	// picture of generation 1 drawn. One Rebuild across the build's frames.
+	for (uint64_t frame = 1; frame <= 4; ++frame) {
+		const uint64_t at = moves();
+		devices.frame(session);
+		const FakeDevice *held = devices.held(path, ViewportKind::Model);
+		TEST_EXPECT(held != nullptr);
+		if (!held) return 1;
+		const JsonValue json = envelope();
+		TEST_EXPECT(moves() > at && model->status() == ViewportStatus::Ready);
+		if (frame < 4) {
+			TEST_EXPECT(model->picture_status() == ViewportStatus::Loading && json.get_string("status", "") == "loading" &&
+					json.get_string("reason", "") == "loading");
+			const JsonValue *progress = json.get("progress");
+			TEST_EXPECT(progress && progress->get_number("done", -1) == double(frame) &&
+					progress->get_number("total", -1) == 4.0 && progress->get_string("unit", "") == "steps" &&
+					progress->get_string("label", "") == "units");
+			TEST_EXPECT(held->shown == 0 && json.get("device")->get("build")->get_bool("loading", false));
+		} else {
+			TEST_EXPECT(model->picture_status() == ViewportStatus::Ready && json.get_string("status", "") == "ready" &&
+					json.get_string("reason", "") == "ready" && json.get("progress")->is_null() && held->shown == 1);
+			const JsonValue &build = *json.get("device")->get("build");
+			TEST_EXPECT(build.get_number("generation", 0) == 1.0 && !build.get_bool("loading", true) &&
+					build.get_number("done", 0) == 4.0 && build.get_number("total", 0) == 4.0);
+		}
+		TEST_EXPECT(model->builds() == 1 && count(held->taken, ViewportAction::Rebuild) == 1);
+	}
+	FakeDevice *device = devices.held(path, ViewportKind::Model);
+	if (!device) return 1;
+	// Built: frames with nothing asked step nothing and move nothing.
+	uint64_t at = moves();
+	const int steps = device->steps;
+	devices.frame(session);
+	devices.frame(session);
+	TEST_EXPECT(moves() == at && device->steps == steps && device->last() == ViewportAction::Keep);
+
+	// A Rebuild while one runs (a light's colour, which the scene draws, at its second unit):
+	// generation 2's build dropped and generation 3's begun from its first unit, the picture of
+	// generation 1 drawn until it ends, generation 2's never.
+	set(session, *document, light, "start.r", int64_t(12));
+	devices.frame(session);
+	devices.frame(session);
+	TEST_EXPECT(model->builds() == 2 && device->built.generation == 2 && device->built.progress.done == 2 &&
+			device->shown == 1);
+	device->taken_building.clear();
+	set(session, *document, light, "start.r", int64_t(13));
+	devices.frame(session);
+	TEST_EXPECT(model->builds() == 3 && device->built.generation == 3 && device->built.progress.done == 1 &&
+			device->shown == 1 && model->picture_status() == ViewportStatus::Loading);
+	TEST_EXPECT(count(device->taken_building, ViewportAction::Rebuild) == 1);
+	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	TEST_EXPECT(device->shown == 3 && model->picture_status() == ViewportStatus::Ready &&
+			count(device->taken, ViewportAction::Rebuild) == 3);
+	TEST_EXPECT(envelope().get("device")->get("build")->get_number("generation", 0) == 3.0 &&
+			envelope().get_number("builds", 0) == 3.0);
+
+	// An Update while one runs (a level held): folded into it, taken neither while it runs nor after;
+	// the build ends with the level as it then is. One after the build ends is taken.
+	device->taken_building.clear();
+	set(session, *document, light, "start.r", int64_t(14));
+	devices.frame(session);
+	session.handle(request::set_viewport(path, R"({"options": {"lod": 0}})"));
+	TEST_EXPECT(session.outcome().done());
+	for (int frame = 0; frame < 4; ++frame) devices.frame(session);
+	TEST_EXPECT(device->shown == 4 && device->ended_lod == 0 && model->options().lod == 0);
+	TEST_EXPECT(count(device->taken_building, ViewportAction::Update) == 0 && count(device->taken, ViewportAction::Update) == 0);
+	session.handle(request::set_viewport(path, R"({"options": {"lod": "auto"}})"));
+	size_t from = device->taken.size();
+	devices.frame(session);
+	TEST_EXPECT(device->since(from) == (Actions{ ViewportAction::Update }) && model->builds() == 4);
+
+	// A failure at the second unit: the last picture kept (generation 4's), the envelope failed with
+	// the device's message; nothing asked again while nothing moves and an Update folded (no picture
+	// of the newest generation to apply it to); the document moved, the next generation's picture.
+	device->fail_at = 2;
+	set(session, *document, light, "start.r", int64_t(15));
+	devices.frame(session);
+	devices.frame(session);
+	const JsonValue failed = envelope();
+	TEST_EXPECT(model->picture_status() == ViewportStatus::Failed && model->status() == ViewportStatus::Ready &&
+			device->shown == 4);
+	TEST_EXPECT(failed.get_string("status", "") == "failed" && failed.get_string("reason", "") == "build_failed" &&
+			failed.get_string("message", "") == "Unit 2 failed." && failed.get("progress")->is_null() &&
+			failed.get("device")->get("build")->get_bool("failed", false));
+	from = device->taken.size();
+	session.handle(request::set_viewport(path, R"({"options": {"lod": 0}})"));
+	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	TEST_EXPECT(device->since(from).empty() && model->builds() == 5 && device->steps == steps + 12);
+	device->fail_at = 0;
+	set(session, *document, light, "start.r", int64_t(16));
+	for (int frame = 0; frame < 4; ++frame) devices.frame(session);
+	TEST_EXPECT(device->shown == 6 && model->picture_status() == ViewportStatus::Ready && device->ended_lod == 0);
+
+	// The frame's budget: two units a frame, a build of four drawn after its second frame.
+	set(session, *document, light, "start.r", int64_t(17));
+	devices.frame(session, 2);
+	TEST_EXPECT(device->built.progress.done == 2 && device->shown == 6);
+	devices.frame(session, 2);
+	TEST_EXPECT(device->shown == 7 && model->picture_status() == ViewportStatus::Ready);
+
+	// A Clear while one runs: the menu's device (three units a build) building after an edit, the menu
+	// made one the game could not read: the build dropped with the picture; undone, the next
+	// generation's picture. Two builds in one frame (the model's beside it) each run a unit, the
+	// budget spent by the first.
+	devices.units = 3;
+	session.handle(request::open_document("main.mnu"));
+	Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string menu_path = menu->path();
+	const auto *shown_menu = viewport_of<MenuViewport>(session, menu_path, ViewportKind::Menu);
+	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	FakeDevice *menu_device = devices.held(menu_path, ViewportKind::Menu);
+	TEST_EXPECT(menu_device && shown_menu && menu_device->shown == 1 &&
+			shown_menu->picture_status() == ViewportStatus::Ready);
+	if (!menu_device || !shown_menu) return 1;
+	const NodeAddress title = named(*menu, "TITLE"), exit = named(*menu, "EXIT");
+	set(session, *menu, title, "position.left", int64_t(8));
+	set(session, *document, light, "start.r", int64_t(18));
+	devices.frame(session);
+	TEST_EXPECT(menu_device->built.loading && menu_device->built.progress.done == 1 && device->built.loading &&
+			device->built.progress.done == 1);
+	menu_device->taken_building.clear();
+	set(session, *menu, exit, "string.justify", std::string("CEN\"TER"));
+	devices.frame(session);
+	TEST_EXPECT(menu_device->taken_building == (Actions{ ViewportAction::Clear }) && !menu_device->built.loading &&
+			menu_device->shown == 0);
+	TEST_EXPECT(shown_menu->status() == ViewportStatus::Failed && shown_menu->picture_status() == ViewportStatus::Failed);
+	session.handle(request::undo(menu->path()));
+	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	TEST_EXPECT(menu_device->shown == shown_menu->builds() && shown_menu->builds() == 3 &&
+			shown_menu->picture_status() == ViewportStatus::Ready);
+	std::printf("test_builds passed\n");
+	return 0;
+}
+
+// S13 V6: a file the device read after the follow last compared the stamps (a build's unit, between
+// two pumps) is compared at the next follow, though the files' generation stands: one written again
+// after its read and before its report is seen; a file read again adds nothing to compare.
+static int test_follow_reads() {
+	struct Stamps final : opennova::FileSource {
+		std::vector<std::pair<std::string, uint64_t>> stamps;
+		bool read(const std::string &, std::vector<uint8_t> &) const override { return false; }
+		uint64_t stamp(const std::string &name) const override {
+			for (const auto &entry : stamps)
+				if (entry.first == name) return entry.second;
+			return 0;
+		}
+	};
+	Stamps files;
+	files.stamps.push_back({ "wall.tga", 1 });
+	const PreviewFollow::Key key;
+	PreviewFollow follow;
+	follow.show(key, 7);
+	follow.built(FileStamps());
+	TEST_EXPECT(follow.follow(key, false, files, 7) == PreviewFollow::Found::Same);
+	// The texture read at stamp 1 by a unit, then written again (2), the generation moving to 8 before
+	// the device reported its read: compared once reported, though the generation stands at 8.
+	files.stamps[0].second = 2;
+	TEST_EXPECT(follow.follow(key, false, files, 8) == PreviewFollow::Found::Same);
+	FileStamps read;
+	read.note("wall.tga", 1);
+	follow.read(read);
+	TEST_EXPECT(follow.files_moved(files, 8));
+	TEST_EXPECT(follow.follow(key, false, files, 8) == PreviewFollow::Found::Files);
+	// Made again over the file as it stands: read at 2, compared once, then nothing until it moves.
+	follow.built(FileStamps());
+	read.clear();
+	read.note("wall.tga", 2);
+	follow.read(read);
+	TEST_EXPECT(follow.follow(key, false, files, 8) == PreviewFollow::Found::Same);
+	follow.read(read);
+	TEST_EXPECT(!follow.files_moved(files, 8) && follow.follow(key, false, files, 8) == PreviewFollow::Found::Same);
+	std::printf("test_follow_reads passed\n");
+	return 0;
+}
+
 int main() {
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);
@@ -1096,6 +1325,8 @@ int main() {
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_requests() == 0);
 	TEST_EXPECT(test_gestures() == 0);
+	TEST_EXPECT(test_builds() == 0);
+	TEST_EXPECT(test_follow_reads() == 0);
 	std::printf("editor_viewport: all tests passed\n");
 	return 0;
 }

@@ -16,6 +16,7 @@ namespace opennova::editor {
 
 class ViewportModel;
 struct SessionView;
+struct ViewportBuildReport;
 struct ViewportDeviceReport;
 
 // The session's viewports (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one per (document, kind), a
@@ -56,11 +57,15 @@ public:
 	// none is kept.
 	ViewportModel *follow_one(const SessionView &view, const std::string &path, ViewportKind kind);
 	// The device's half (ViewportDeviceCache): attached and detached (ViewportModel::attach), its
-	// action taken, its report given.
+	// action taken, its report given at each pump, and its build after each frame's steps (S13 V6). A
+	// device's build that moved (begun, a unit further, built, failed) moves the view's Viewports
+	// concern as a derived change does (set_on_derived_change): the envelope's status and progress
+	// read it.
 	void attach(const std::string &path, ViewportKind kind);
 	void detach(const std::string &path, ViewportKind kind);
 	ViewportAction take_action(const std::string &path, ViewportKind kind);
 	void device_report(const std::string &path, ViewportKind kind, const ViewportDeviceReport &report);
+	void device_build(const std::string &path, ViewportKind kind, const ViewportBuildReport &build);
 
 	// A SetViewport (request_kinds.cpp): the viewport of the kind `json` names ("kind", optional
 	// where one kind shows the document) over the document open at `path` (""; the kind's Preview
@@ -74,8 +79,8 @@ public:
 	void advance(double seconds) { clock_.advance(seconds); }
 	const PreviewClock &clock() const { return clock_; }
 	// Told when a follow derived a change of a viewport's state or the clock (viewport_model.h
-	// ViewportState: a held window, a framing, a clip's clock sought): the session moves its
-	// Viewports concern.
+	// ViewportState: a held window, a framing, a clip's clock sought), or a device's build moved (S13
+	// V6): the session moves its Viewports concern.
 	void set_on_derived_change(std::function<void()> notify) { on_derived_change_ = std::move(notify); }
 
 private:

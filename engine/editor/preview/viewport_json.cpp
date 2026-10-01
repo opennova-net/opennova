@@ -31,10 +31,23 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	out.set("kind", json_string(viewport_kind_token(model.kind())));
 	out.set("path", json_string(model.path()));
 	out.set("as_saved", JsonValue::make_bool(model.row().as_saved));
-	out.set("status", json_string(viewport_status_token(model.status())));
-	out.set("reason", json_string(model.reason()));
-	out.set("message", json_string(model.message()));
+	const ViewportStatus status = model.picture_status();
+	out.set("status", json_string(viewport_status_token(status)));
+	out.set("reason", json_string(model.picture_reason()));
+	out.set("message", json_string(model.picture_message()));
 	out.set("detail", json_string(model.detail()));
+	// While its device builds the picture over the frames (S13 V6), how far, as an operation's
+	// progress reads (view_json's operation: done of total in its unit, what it works on).
+	JsonValue progress = JsonValue::make_null();
+	if (status == ViewportStatus::Loading) {
+		const OperationProgress &units = model.build().progress;
+		progress = JsonValue::make_object();
+		progress.set("done", json_number(double(units.done)));
+		progress.set("total", json_number(double(units.total)));
+		progress.set("unit", json_string(operation_unit_token(units.unit)));
+		progress.set("label", json_string(units.label));
+	}
+	out.set("progress", std::move(progress));
 	out.set("revision", json_number(double(document ? document->revision() : 0)));
 	out.set("shown_revision", json_number(double(model.shown_revision())));
 	out.set("current", JsonValue::make_bool(model.current(input)));
@@ -46,6 +59,20 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	device.set("width", json_number(size.width));
 	device.set("height", json_number(size.height));
 	device.set("canvas_sized", JsonValue::make_bool(model.canvas_sized()));
+	// Its build (S13 V6): the generation it builds or built (`builds` the newest asked), and what the
+	// last one cost on the Shell's frames.
+	const ViewportBuildReport &built = model.build();
+	JsonValue build = JsonValue::make_object();
+	build.set("generation", json_number(double(built.generation)));
+	build.set("loading", JsonValue::make_bool(built.loading));
+	build.set("failed", JsonValue::make_bool(built.failed));
+	build.set("done", json_number(double(built.progress.done)));
+	build.set("total", json_number(double(built.progress.total)));
+	build.set("frames", json_number(double(built.frames)));
+	build.set("frame_us", json_number(double(built.frame_us)));
+	build.set("unit_us", json_number(double(built.unit_us)));
+	build.set("total_us", json_number(double(built.total_us)));
+	device.set("build", std::move(build));
 	out.set("device", std::move(device));
 	out.set("options", model.options_json());
 	out.set("camera", model.camera_json());

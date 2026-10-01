@@ -9,6 +9,7 @@
 #include <editor/model/node.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/preview_clock.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_kinds.h>
 
@@ -16,17 +17,17 @@ namespace opennova::editor {
 
 class CanvasHalf;
 class DocumentBase;
-class ViewportDevice;
 struct SessionView;
-struct ViewportDeviceReport;
 
 // What a viewport shows (ADR 0046 S13 V5): a picture of its document (Ready); nothing, there being
 // nothing to show (Empty: no project, no document of its kind, no screen selected, an animation no
 // model plays); or nothing, the game being unable to read what it should show (Failed: a document
 // that cannot be written, a screen missing from what it writes, a model that does not read back).
-// The kind's reason says which.
-enum class ViewportStatus : uint8_t { Empty, Failed, Ready };
-// "empty", "failed", "ready".
+// The kind's reason says which. Its picture is Loading too (S13 V6) while its device builds the
+// picture over the Shell's frames, the last picture drawn meanwhile (picture_status, never a kind's
+// status()), and Failed when its device could not build it.
+enum class ViewportStatus : uint8_t { Empty, Failed, Ready, Loading };
+// "empty", "failed", "ready", "loading".
 const char *viewport_status_token(ViewportStatus status);
 
 // The JSON text of a SetViewport that changes one member of a viewport of `kind`: {"kind": its
@@ -201,8 +202,19 @@ public:
 
 	bool attached() const { return attached_; }
 	// How many times its device was told to make its picture again (an edit that changes only what
-	// the overlays show is not one).
+	// the overlays show is not one): the build generation (S13 V6), which the device builds as it takes
+	// the Rebuild, so a newer one cancels a build in flight by its generation.
 	uint64_t builds() const { return builds_; }
+	// Its device's build as the device last said (S13 V6; none without a device): the generation it
+	// builds or built, whether it builds over the frames (loading) or failed, its progress.
+	const ViewportBuildReport &build() const { return build_; }
+	// What its picture is now, its envelope's status (S13 V6): the kind's status, but Loading while its
+	// device builds the picture (the last one drawn meanwhile) and Failed when its device's build
+	// failed (build().message why), each only where the kind's status is Ready.
+	ViewportStatus picture_status() const;
+	// picture_status()'s reason token (the kind's, or "loading", or "build_failed") and its sentence.
+	const char *picture_reason() const;
+	std::string picture_message() const;
 
 	// --- the session's (Viewports) ------------------------------------------------------------------
 
@@ -217,16 +229,24 @@ public:
 	// a menu at its Device size).
 	bool apply(const io::JsonValue &json, PreviewClock &clock, std::string &error);
 	// What its device does now (Keep: nothing; Keep while no device is attached), then Keep until a
-	// follow says otherwise.
+	// follow says otherwise. A Rebuild is the next build generation (builds() moves with it, once per
+	// Rebuild taken: never a second Rebuild for one generation). An Update applies to a picture its
+	// device built (S13 V6): while the device builds one, the Update is folded into that build, which
+	// applies the state as it ends, and after its build failed there is no picture of the newest
+	// generation to apply it to (Keep: what the next Rebuild builds applies it).
 	ViewportAction take_action();
 	// A device is attached: it holds nothing yet, so its first action makes the picture (Rebuild,
 	// when there is one to show); its state is kept. Detached (given up for another, ADR 0046 S13 V5:
 	// the device cache's least recently used): nothing pending, its state kept for the next.
 	void attach();
 	void detach();
-	// What the device read as it made its picture (its textures), where it placed what it drew, and
-	// the size its picture is now.
-	void device_report(const ViewportDeviceReport &report);
+	// What the device read as it made its picture (its textures), where it placed what it drew, the
+	// size its picture is now and its build; true when the build moved as the envelope reads it
+	// (ViewportBuildReport::reads_same: begun over the frames, a unit further, built, failed; S13 V6,
+	// the view's Viewports concern moves with it).
+	bool device_report(const ViewportDeviceReport &report);
+	// The device's build after a frame's steps (S13 V6): true when it moved, as device_report says.
+	bool device_build(const ViewportBuildReport &build);
 
 protected:
 	ViewportModel(ViewportKind kind, std::string path, ViewportState state);
@@ -261,6 +281,7 @@ private:
 	bool attached_ = false;
 	bool holds_ = false; // the attached device holds a picture
 	uint64_t builds_ = 0;
+	ViewportBuildReport build_; // the attached device's build, as it last said
 	uint64_t state_serial_ = 0;
 	ViewportState shown_size_; // the device's picture, as it last reported it (0 x 0: none yet)
 	bool canvas_sized_ = false;

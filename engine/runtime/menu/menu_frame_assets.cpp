@@ -198,6 +198,16 @@ bool MenuFrameAssets::texture_loads(const std::string &name, const FileSource &f
 	return load_texture_(name, files, decoder, key, &entry) == LoadResult::Loaded;
 }
 
+// What load_texture_ would read for the name, kept or not: the dispatch's file at its stamp now.
+bool MenuFrameAssets::texture_kept(const std::string &name, const FileSource &files) const {
+	if (name.empty()) return true;
+	const MenuTextureSource source =
+	        menu_texture_source(name, [&files](const std::string &file) { return files.stamp(file) != 0; });
+	if (!strutil::iequals(source.file, name) && source.format == MenuTextureFormat::None) return true;
+	const uint64_t stamp = files.stamp(source.file);
+	return stamp == 0 || textures_.count(kept_key(source.file, stamp)) != 0;
+}
+
 void MenuFrameAssets::sweep_(MenuTextureDecoder &decoder) {
 	for (auto it = textures_.begin(); it != textures_.end();) {
 		if (it->second.used + 1 < generation_) {
