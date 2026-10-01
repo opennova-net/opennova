@@ -181,3 +181,29 @@ func test_team_choice_without_password_keeps_credentials_absent() -> void:
 		assert_not_null(prompt.find_child("TeamChoice", true, false))
 		assert_null(prompt.find_child("JoinPassword", true, false))
 	assert_eq(target.team_request, -1, "automatic is the default")
+
+
+# The NovaWorld lobby session survives the panel at the in-match handoff
+# (D-NET-220): the controller holds the panel's client until the joiner load
+# takes it, and an abandoned join (the role prompt cancelled) leaves the play
+# and frees it.
+func test_abandoned_novaworld_join_frees_the_held_session() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	controller.open_novaworld_panel()
+	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+	assert_not_null(panel, "the NovaWorld panel opens")
+	if panel == null:
+		return
+	var client := panel.client_for_test()
+	panel.join_in_match_requested.emit(_target(JoinTarget.FLAG_ALLOW_SPECTATORS))
+	assert_eq(client.get_parent(), controller,
+			"the panel's session moves to the controller instead of dying with the panel")
+	var prompt := layer.get_node_or_null("JoinRolePrompt")
+	assert_not_null(prompt, "the spectator host still asks for the join role")
+	if prompt == null:
+		return
+	(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
+	await wait_frames(2)
+	assert_false(is_instance_valid(client), "an abandoned join frees the held session")

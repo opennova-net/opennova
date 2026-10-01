@@ -208,6 +208,10 @@ public:
 	// the wire-header world load; S2C 0x7B supplies the mission identity).
 	// Returns the same codes as load_mission.
 	int load_mission_as_joiner(const Ref<JoinTarget> &p_target);
+	// The NovaWorld joiner's lobby session (a NovaWorldClient), handed over at
+	// the in-match handoff: the world keeps it playing through the match and
+	// tears it down with the world (SessionDrive::adopt_nw_client).
+	void adopt_novaworld_client(Node *p_client);
 	// Load an in-memory mission through the shared world pipeline. This is
 	// retained as a focused engine-test/tool seam; normal game launches always
 	// use a saved .bms through load_mission() or load_loose_mission().

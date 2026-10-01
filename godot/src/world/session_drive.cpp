@@ -7,6 +7,7 @@
 
 #include "mission/mission_data.h"
 #include "mission/mission_root.h"
+#include "network/novaworld_client.h"
 #include "network/novaworld_host.h"
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
@@ -478,6 +479,12 @@ void SessionDrive::stage_runtime_options(const Ref<MissionSetupOptions> &p_opts)
 		p_opts->set_max_players(pending_host_->get_max_players());
 		p_opts->set_channel(pending_host_->get_channel());
 		if (pending_host_->get_channel() == kChannelNovaWorld) {
+			// A NovaWorld host is one the service registers: its network type
+			// rides the gate registration's arming (HostConfig::network_type).
+			pending_host_->set_network_type(
+					GATE_REGISTRATION_ARMED && !pending_host_->get_nw_gate_host().is_empty()
+							? opennova::inmatch::NetworkType::NovaWorld
+							: opennova::inmatch::NetworkType::Lan);
 			p_opts->set_nw_gate_host(pending_host_->get_nw_gate_host());
 			p_opts->set_nw_gate_port(pending_host_->get_nw_gate_port());
 			p_opts->set_region_index(pending_host_->get_region_index());
@@ -519,6 +526,34 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 			host->set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
 		}
 	}
+	if (p_runtime != nullptr) {
+		Ref<Simulation> sim = p_runtime->get_sim();
+		if (sim.is_valid()) sync_nwu_session(sim);
+	}
+}
+
+void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
+	NwuLobbySession::MatchFacts facts;
+	bool node = false;
+	if (NovaWorldClient *client = nw_client()) {
+		facts = client->nwu_match_facts();
+		node = true;
+	} else if (NovaWorldHost *host = nw_host()) {
+		facts = host->nwu_match_facts();
+		node = true;
+	}
+	if (!nwu_feed_live_) {
+		if (!node || (facts.role != opennova::ClientSession::kSessionRoleHosting &&
+						facts.role != opennova::ClientSession::kSessionRolePlaying)) {
+			return;
+		}
+		nwu_feed_live_ = true;
+	}
+	if (!node) {
+		facts = NwuLobbySession::MatchFacts{};
+		facts.in_use = true;
+	}
+	p_sim->set_nwu_session(facts.in_use, facts.flags, facts.role, facts.exit_reason);
 }
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
@@ -556,6 +591,40 @@ void SessionDrive::reset() {
 	policy_->reset();
 	clear_pending_session();
 	stop_nw_host(/*p_from_host_signal=*/false);
+	stop_nw_client();
+	nwu_feed_live_ = false;
+}
+
+void SessionDrive::adopt_nw_client(NovaWorldClient *p_client) {
+	if (p_client == nullptr) {
+		return;
+	}
+	if (nw_client() != p_client) {
+		stop_nw_client();
+	}
+	Node *parent = p_client->get_parent();
+	if (parent != world_) {
+		if (parent != nullptr) {
+			parent->remove_child(p_client);
+		}
+		world_->add_child(p_client);
+	}
+	nw_client_id_ = ObjectID(p_client->get_instance_id());
+}
+
+NovaWorldClient *SessionDrive::nw_client() const {
+	return Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(nw_client_id_));
+}
+
+// The joiner's NovaWorld session goes with the match: stop() leaves the play
+// (ClientStopPlaying while it is still playing) and says goodbye.
+void SessionDrive::stop_nw_client() {
+	NovaWorldClient *client = nw_client();
+	if (client != nullptr) {
+		client->stop();
+		client->queue_free();
+	}
+	nw_client_id_ = ObjectID();
 }
 
 void SessionDrive::stop_nw_host(bool p_from_host_signal) {
@@ -689,7 +758,8 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 	}
 	if (result.stop_hosting) {
 		// The service punted the host's own slot: the host leaves NovaWorld
-		// hosting (the gate drops the row); the match itself keeps running.
+		// hosting (the gate drops the row), and with its registration gone the
+		// NovaWorld exit ends the match on its next 62-frame block.
 		stop_nw_host(/*p_from_host_signal=*/true);
 		return;
 	}

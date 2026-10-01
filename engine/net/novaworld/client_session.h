@@ -301,6 +301,27 @@ public:
 	std::vector<Notice> take_notices();
 	// g_MissionExitReason = 12 once a ServerStopPlaying / ServerLeaveNovaWorld landed.
 	int mission_exit_reason() const { return mission_exit_reason_; }
+
+	// ---- the session words the match reads ----------------------------------
+	// The capability flags word (session+0x120; its low byte is byte_B60100), kept by the
+	// state setter's per-state clear/set table: bit 1 in state 1, bit 2 in states 2..8, bits 2
+	// and 8 together in states 4..8 (the HUD's NovaWorld N tests both). A peer close, the reap
+	// or a punt drops the state to 0 and clears it.
+	// [orig: CGameSession_SetState @0x4ce140 — the clears @0x4ce183..0x4ce1bc, the sets
+	//  @0x4ce1f3..0x4ce288; CNapiGameSession_OnDisconnect @0x4cfaa0 -> SetState(0) @0x4cfb68]
+	uint32_t session_flags() const { return session_flags_; }
+	// The hosting/playing word (session+0x128, dword_B60108). Only the verify replies, the stop
+	// legs, the punt and the local reset write it; a peer close or the reap leaves it as it was.
+	// [orig: the writers HandleConnectVerifyResponse @0x4d5800, HandleHostVerifyResponse
+	//  @0x4d59d0, HandleVerifyResponse @0x4d1e00, HandleServerMessage @0x4d1c50,
+	//  HandleServerDisconnectMsg @0x4d1fa0, HandlePuntNotification @0x4d20b0,
+	//  CGameSession_StopHosting @0x4d0e60, CGameSession_StopPlaying @0x4d0ec0,
+	//  ResetToDisconnected @0x4d0890; the reader Game_ProcessMainFrame @0x52656d]
+	static constexpr int32_t kSessionRoleNone = 0;
+	static constexpr int32_t kSessionRoleVerified = 1;
+	static constexpr int32_t kSessionRoleHosting = 2;
+	static constexpr int32_t kSessionRolePlaying = 3;
+	int32_t session_role() const { return session_role_; }
 	// The peer's / reap's latched disconnect record once the session Closed on it.
 	bool disconnected_by_peer() const { return disconnected_by_peer_; }
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
@@ -351,7 +372,9 @@ private:
 	                               std::vector<std::vector<uint8_t>> &out);
 	void apply_cs_config_update(const ProtocolMessage &pm);
 	void latch_disconnect(const DisconnectEvent &event);
-	void set_lobby_state(int state); // the CGameSession_SetState mirror (GLSVSS arming)
+	// The connection's teardown callback: Closed, and the session state back to 0.
+	void on_disconnected();
+	void set_lobby_state(int state); // the CGameSession_SetState mirror (flags, GLSVSS arming)
 	void fail(std::string reason);
 
 	Config cfg_;
@@ -389,7 +412,9 @@ private:
 	bool receive_clock_armed_ = false;   // state-5 entry (the accepted 0x82)
 	uint32_t glsvss_deadline_ms_ = 0;    // session+579 (0 = disarmed)
 	uint32_t glsvss_poll_ms_ = 0;        // session+578
-	int lobby_state_ = 0;                // the CGameSession state (4/5/6/7/8) for GLSVSS arming
+	int lobby_state_ = 0;                // the CGameSession state (session+0x11C)
+	uint32_t session_flags_ = 0;         // session+0x120
+	int32_t session_role_ = kSessionRoleNone; // session+0x128
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]

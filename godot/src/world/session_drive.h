@@ -21,6 +21,7 @@ namespace godot {
 
 class GameWorld;
 class MissionRoot;
+class NovaWorldClient;
 class NovaWorldHost;
 
 // The drive between a typed session request and an admitted world -- the
@@ -122,9 +123,14 @@ public:
 	void observe_tick(MissionRoot *p_runtime);
 	// One teardown for everything this drive staged or stood up, called from
 	// the world's unload(): the preload sim/root, the policy's windows +
-	// notification latches, the typed request staging, and the gate
-	// registration.
+	// notification latches, the typed request staging, the gate registration
+	// and the joiner's NovaWorld session.
 	void reset();
+	// The NovaWorld joiner's lobby session, handed over by the shell at the
+	// in-match handoff: retail keeps the NWU session playing through the match
+	// (the N icon's input, the NovaWorld exit), so the node moves under the
+	// world and lives until reset() leaves the play and the session.
+	void adopt_nw_client(NovaWorldClient *p_client);
 
 	// The bound signal targets of the gate registration (the world forwards).
 	void on_nw_host_registered();
@@ -163,10 +169,21 @@ private:
 	// The gate registration's teardown (ClientStopHosting + the node), with the
 	// in-match host's NovaWorld state -- the GSID it advertises, the join-ticket
 	// arm and its request hook -- cleared first. reset() and a service punt of
-	// the host's own slot both end here; the match itself keeps running.
+	// the host's own slot both end here (the latter then ends the match through
+	// the NovaWorld exit, sync_nwu_session).
 	// `p_from_host_signal` defers the node's stop when the caller is one of the
 	// registration node's own signal handlers.
 	void stop_nw_host(bool p_from_host_signal);
+	NovaWorldClient *nw_client() const;
+	void stop_nw_client();
+	// Hand the match the NovaWorld session's facts once a tick (the joiner's
+	// adopted client or the host's registration). The feed starts at the
+	// session's first hosting/playing word: the joiner is already playing at
+	// the handoff, and retail starts a NovaWorld host's mission only after its
+	// host verify, where this host registers after its mission starts. A node
+	// gone mid-match reads as a reset session (the word 0, the gate's NWU
+	// address still known), which the 62-frame block exits on.
+	void sync_nwu_session(const Ref<Simulation> &p_sim);
 
 	GameWorld *world_ = nullptr;
 	// The native session policy: windows, latches, edge ordering, reason text.
@@ -177,6 +194,10 @@ private:
 	// play. Fed the admitted-joiner roster from observe_tick(), torn down in
 	// reset(). A child node of the world, held by identity.
 	ObjectID nw_host_id_;
+	// The adopted NovaWorldClient (the joiner's NWU session), held by identity.
+	ObjectID nw_client_id_;
+	// Set once the feed starts (sync_nwu_session); cleared by reset().
+	bool nwu_feed_live_ = false;
 	// The roster slots last mirrored onto the gate registration: slot -> the
 	// per-slot signature (name|ip:port|team), so only a changed slot re-sends.
 	std::map<int, std::string> nw_roster_sent_;

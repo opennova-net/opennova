@@ -93,6 +93,27 @@ public:
 	bool session_verified() const { return session_ && session_->is_verified(); }
 	// The parsed gate response (the GLSVSS trio and the auth codes ride it).
 	const opennova::GateResponse &gate_response() const { return gate_response_; }
+	// What a match reads of this session (Simulation::set_nwu_session): the gate
+	// named an NWU address (GateResponse::udp_novaworld, retail's dword_B5FD2C),
+	// and the session's flags word, hosting/playing word and own mission-exit
+	// store (ClientSession; all 0 once the session is dropped). The first is the
+	// gate response's, so it outlives a closed session as retail's global does.
+	struct MatchFacts {
+		bool in_use = false;
+		uint32_t flags = 0;
+		int32_t role = 0;
+		int32_t exit_reason = 0;
+	};
+	MatchFacts match_facts() const {
+		MatchFacts out;
+		out.in_use = !gate_response_.udp_novaworld.empty();
+		if (session_) {
+			out.flags = session_->session_flags();
+			out.role = session_->session_role();
+			out.exit_reason = session_->mission_exit_reason();
+		}
+		return out;
+	}
 
 	uint32_t client_index() const { return client_index_; }
 	uint32_t client_key() const { return client_key_; }

@@ -170,6 +170,7 @@ Ref<HostSessionOptions> HostSessionOptions::duplicate_options() const {
 	copy->nw_gate_port_ = nw_gate_port_;
 	copy->region_index_ = region_index_;
 	copy->advertise_ = advertise_;
+	copy->network_type_ = network_type_;
 	return copy;
 }
 

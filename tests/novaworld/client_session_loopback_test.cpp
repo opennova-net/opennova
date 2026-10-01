@@ -459,6 +459,8 @@ void test_leave_novaworld() {
 	expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 	       "the punt closes the session as a peer disconnect");
 	expect(client.mission_exit_reason() == 12, "the punt sets exit reason 12");
+	expect(client.session_flags() == 0u && client.session_role() == ClientSession::kSessionRoleNone,
+	       "the punt drops the state flags and the hosting/playing word to 0");
 	const auto notices = client.take_notices();
 	if (expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::LeaveNovaWorld,
 	           "one LeaveNovaWorld notice")) {
@@ -466,6 +468,52 @@ void test_leave_novaworld() {
 		               notices[0].fields.msg_param1 == 7,
 		       "the punt notice carries the Success/MsgCode/MsgParam triple");
 	}
+}
+
+// The session words the match reads (D-NET-220): the flags word the state setter keeps per
+// state, and the hosting/playing word. A fresh connect is state 1 with the word 0; the verify
+// marks it 1, the play verify 3; a peer close drops the state to 0 but leaves the word; the
+// local reset drops both.
+// [orig: CGameSession_SetState @0x4ce140; InitNPConnection @0x4d40d0..0x4d412c,
+//  InitPlayerConnection @0x4d43e3; HandleConnectVerifyResponse @0x4d5920..0x4d5940;
+//  HandleVerifyResponse @0x4d1f35..0x4d1f53; CNapiGameSession_OnDisconnect @0x4cfb68;
+//  ResetToDisconnected @0x4d08fc..0x4d0927]
+void test_session_words() {
+	ClientSession::Config cfg;
+	cfg.client_index = 0x00000035u;
+	cfg.client_key = 0x35353535u;
+	{
+		ClientSession fresh(cfg);
+		(void)fresh.start();
+		expect(fresh.session_flags() == 0x1u && fresh.session_role() == ClientSession::kSessionRoleNone,
+		       "start(): state 1 holds flag bit 1, the word 0");
+	}
+	MiniServer server;
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "words: session reaches Verified")) return;
+	expect(client.session_flags() == 0x1Au && client.session_role() == ClientSession::kSessionRoleVerified,
+	       "verified: state 4 holds 0x1A (bits 2 and 8), the word 1");
+	const auto d_play = client.build_play_request(
+			make_play_setup_vars("OpenNova Host", "127.0.0.1", "32768", "28", 0));
+	expect(client.session_flags() == 0x9Au, "the play request: state 7 holds 0x9A");
+	const auto s_play = server.respond(d_play);
+	std::vector<std::vector<uint8_t>> out;
+	expect(client.handle_datagram(s_play.data(), s_play.size(), out) &&
+	               client.session_flags() == 0x10Au &&
+	               client.session_role() == ClientSession::kSessionRolePlaying,
+	       "playing: state 8 holds 0x10A, the word 3");
+	const DisconnectEvent punt = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, punt));
+	out.clear();
+	expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) &&
+	               client.state() == ClientSession::State::Closed,
+	       "the peer's goodbye closes the session");
+	expect(client.session_flags() == 0u && client.session_role() == ClientSession::kSessionRolePlaying,
+	       "a peer close drops the state flags but leaves the playing word");
+	(void)client.build_goodbye();
+	expect(client.session_role() == ClientSession::kSessionRoleNone,
+	       "the local reset drops the word to 0");
 }
 
 // Parse-side roundtrip for the new client-direction parsers, independent of
@@ -696,6 +744,7 @@ int main() {
 	test_peer_disconnect_legs();
 	test_send_interval_pump();
 	test_leave_novaworld();
+	test_session_words();
 
 	MiniServer server;
 	ClientSession::Config cfg;
@@ -927,6 +976,9 @@ int main() {
 	{
 		expect(client.host_state() == ClientSession::HostState::Established,
 		       "ServerHostResult Success -> host leg Established");
+		expect(client.session_role() == ClientSession::kSessionRoleHosting &&
+		               client.session_flags() == 0x4Au,
+		       "hosting: the word 2, state 6 holds 0x4A");
 		expect(client.host_result().success == 1 && client.host_result().msg_param2 == 17,
 		       "host_result() carries the Success/MsgParam quartet");
 		expect(!server.lobby.gsid.empty() && client.host_gsid() == server.lobby.gsid,
@@ -1058,6 +1110,9 @@ int main() {
 		       "ServerStopHosting is acked (header-only)");
 		expect(client.host_state() == ClientSession::HostState::Idle,
 		       "ServerStopHosting returns the host leg to Idle");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified &&
+		               client.session_flags() == 0x1Au,
+		       "ServerStopHosting: the word back to 1, state 4 holds 0x1A");
 		const auto notices = client.take_notices();
 		if (expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::StopHosting,
 		           "one StopHosting notice")) {
@@ -1112,6 +1167,8 @@ int main() {
 		const auto d_stop_play = client.build_stop_playing();
 		expect(!d_stop_play.empty() && client.play_state() == ClientSession::PlayState::Idle,
 		       "ClientStopPlaying returns the play leg to Idle");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified,
+		       "ClientStopPlaying steps the playing word back to 1");
 		expect(server.respond(d_stop_play).empty(), "ClientStopPlaying draws no reply");
 		expect(client.mission_exit_reason() == 0, "a local stop sets no exit reason");
 	}
@@ -1138,6 +1195,8 @@ int main() {
 		expect(client.play_state() == ClientSession::PlayState::Idle &&
 		               client.mission_exit_reason() == 12,
 		       "ServerStopPlaying: play leg Idle, exit reason 12");
+		expect(client.session_role() == ClientSession::kSessionRoleVerified,
+		       "ServerStopPlaying: the word back to 1");
 		const auto notices = client.take_notices();
 		expect(notices.size() == 1 && notices[0].kind == ClientSession::Notice::Kind::StopPlaying &&
 		               notices[0].fields.msg_code == 2001,

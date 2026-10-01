@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "network/net_session_policy.h"
+#include "network/novaworld_client.h"
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
 
@@ -188,6 +189,10 @@ int GameWorld::load_mission_as_host(const Ref<HostSessionOptions> &p_options) {
 
 int GameWorld::load_mission_as_joiner(const Ref<JoinTarget> &p_target) {
 	return drive_.load_as_joiner(p_target);
+}
+
+void GameWorld::adopt_novaworld_client(Node *p_client) {
+	drive_.adopt_nw_client(Object::cast_to<NovaWorldClient>(p_client));
 }
 
 bool GameWorld::cancel_join_preload() {
@@ -648,6 +653,7 @@ void GameWorld::_bind_methods() {
 			&GameWorld::load_loose_mission, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("load_mission_as_host", "options"), &GameWorld::load_mission_as_host);
 	ClassDB::bind_method(D_METHOD("load_mission_as_joiner", "target"), &GameWorld::load_mission_as_joiner);
+	ClassDB::bind_method(D_METHOD("adopt_novaworld_client", "client"), &GameWorld::adopt_novaworld_client);
 	ClassDB::bind_method(D_METHOD("load_mission_data", "mission", "bms_name", "dir"),
 			&GameWorld::load_mission_data, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("cancel_join_preload"), &GameWorld::cancel_join_preload);

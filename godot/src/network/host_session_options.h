@@ -9,6 +9,7 @@
 
 #include <net/npwire/net_ports.h>
 #include <runtime/inmatch/game_config.h>
+#include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
 
 namespace godot {
 
@@ -39,6 +40,7 @@ class HostSessionOptions : public RefCounted {
 	int nw_gate_port_ = opennova::kNovaWorldGatePort;
 	int region_index_ = 0;
 	String advertise_;
+	opennova::inmatch::NetworkType network_type_ = opennova::inmatch::NetworkType::Lan;
 
 protected:
 	static void _bind_methods();
@@ -171,6 +173,11 @@ public:
 	// Explicit advertised-IP override for the gate row.
 	String get_advertise() const { return advertise_; }
 	void set_advertise(const String &p_advertise) { advertise_ = p_advertise; }
+	// The host's network type (HostConfig::network_type): NovaWorld only for a
+	// host the world registers with the NovaWorld gate. Set by the world's
+	// host entry, not a GDScript field.
+	opennova::inmatch::NetworkType network_type() const { return network_type_; }
+	void set_network_type(opennova::inmatch::NetworkType p_type) { network_type_ = p_type; }
 
 	// The MCP status boundary's JSON shape (one key per live-session field;
 	// the request-only fields above stay out of it).

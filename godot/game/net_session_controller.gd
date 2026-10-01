@@ -18,6 +18,9 @@ var _novaworld_panel: NovaWorldPanel
 var _menu_visible_before_novaworld := false
 var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
+# The NovaWorld lobby session a resolved join hands over, held from the panel's
+# dismissal until the joiner load takes it (or the join is abandoned).
+var _novaworld_client: NovaWorldClient
 var _join_role_prompt: Control
 var _join_role_password: LineEdit
 var _join_server_password: LineEdit
@@ -35,6 +38,7 @@ const NOVAWORLD_PANEL_SCENE := preload("res://game/novaworld_panel.tscn")
 func _exit_tree() -> void:
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
+	_release_novaworld_client()
 
 
 func setup(shell: MainGame, world: GameWorld, menu_shell: MenuShell, panel_layer: Node) -> void:
@@ -187,6 +191,9 @@ func _start_lan_join(target: JoinTarget) -> void:
 		target.player_name = resolve_player_callsign()
 	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
 			target.game_type, "")
+	if _novaworld_client != null:
+		_world.adopt_novaworld_client(_novaworld_client)
+		_novaworld_client = null
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
@@ -407,6 +414,7 @@ func _choose_join_role(role: int) -> void:
 
 func _cancel_join_role_choice() -> void:
 	_dismiss_join_role_prompt()
+	_release_novaworld_client()
 	if _menu_shell != null:
 		_menu_shell.show_menu()
 
@@ -519,8 +527,26 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 # through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
+	_hold_novaworld_client(_novaworld_panel.release_client())
 	_dismiss_novaworld_panel()
 	join_lan_server(target)
+
+
+# The play the service admitted stays up through the match: the client waits
+# here (alive, still pumping) until the joiner load hands it to the world.
+func _hold_novaworld_client(client: NovaWorldClient) -> void:
+	_release_novaworld_client()
+	_novaworld_client = client
+	if client != null:
+		add_child(client)
+
+
+# An abandoned NovaWorld join leaves its play and the session.
+func _release_novaworld_client() -> void:
+	if _novaworld_client != null:
+		_novaworld_client.stop()
+		_novaworld_client.queue_free()
+	_novaworld_client = null
 
 
 # A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the

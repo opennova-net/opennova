@@ -79,6 +79,8 @@ opennova::inmatch::HostBringup Simulation::host_bringup() {
 	bringup.host_cfg.config = host_config;
 	bringup.host_cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	bringup.host_cfg.serve_and_play = serve_and_play;
+	bringup.host_cfg.network_type =
+			is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.
@@ -288,6 +290,30 @@ void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id) 
 	}
 }
 
+// The NovaWorld link both roles read: the network type is the role's own (the
+// authority's transport_mode, the joiner's join record), the NWU session facts
+// the shell's NovaWorld session node's. The authority's 62-frame block reads
+// them off its context, the joiner's off its client runtime; either one's NWU
+// exit store (a stop-playing or a punt) lands beside them.
+void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role,
+		int32_t p_exit_reason) {
+	opennova::hud::NovaWorldLinkFacts facts;
+	facts.nwu_in_use = p_in_use;
+	facts.nwu_session_flags = static_cast<uint8_t>(p_flags & 0xFFu);
+	facts.nwu_session_role = p_role;
+	opennova::inmatch::NapiNPServerCtx *ctx = is_joiner() ? nullptr : host_ctx();
+	if (ctx != nullptr) {
+		facts.novaworld = ctx->transport_mode == opennova::inmatch::NetworkType::NovaWorld;
+		ctx->nwu_in_use = p_in_use;
+		ctx->nwu_session_role = p_role;
+		if (p_exit_reason != 0) ctx->mission_exit_reason = p_exit_reason;
+	} else {
+		facts.novaworld = net_.join_network_type == opennova::inmatch::NetworkType::NovaWorld;
+		if (runtime_ != nullptr && p_exit_reason != 0) runtime_->set_mission_exit_reason(p_exit_reason);
+	}
+	if (runtime_ != nullptr) runtime_->set_novaworld_link(facts);
+}
+
 std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 	std::vector<HostPeerSlot> out;
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
@@ -368,6 +394,7 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 	// score tables, PCID) survive; every user-facing field lands from the record.
 	opennova::inmatch::GameConfig config = net_.host_session_config;
 	net_.host_bind_port = static_cast<uint16_t>(std::clamp(p_options->get_bind_port(), 0, 0xFFFF));
+	net_.host_network_type = p_options->network_type();
 	config.server_name = in.server_name;
 	config.mission_name = in.mission_name;
 	config.mission_file = in.mission_file;

@@ -22,6 +22,7 @@
 
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -4473,6 +4474,55 @@ bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 	return expect(fold(0, false) == 3, "an unmeasured rate samples the ceiling 255 -> level 3");
 }
 
+// The NovaWorld exit leads the joiner's 62-frame block (D-NET-220): a NovaWorld
+// network type with its NWU session in use exits the mission with reason 12 once
+// the session's hosting/playing word holds neither 2 nor 3; a playing or hosting
+// word, a LAN join and an unused session never do, and the session's own exit
+// store (a stop-playing or a punt) lands as is. JoinerRole reports it as a lost
+// session [orig: Game_ProcessMainFrame @0x52655d..0x52657c].
+bool run_novaworld_exit_on_a_joiner() {
+	const auto run = [](const hud::NovaWorldLinkFacts &nw, uint32_t frames) {
+		inmatch::ClientRuntime client("NovaWorldExit", [] { return uint64_t{100000}; });
+		client.seed_session(0x10203040u, 1u, "CLIENT-NWU-EXIT-SCRK", "SERVER-NWU-EXIT-SCRK",
+		                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+		                    0, 0x00100000u, /*replay_mode=*/false);
+		client.set_novaworld_link(nw);
+		for (uint32_t tick = 1; tick <= frames; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+		return client.mission_exit_reason();
+	};
+	hud::NovaWorldLinkFacts verified;
+	verified.novaworld = true;
+	verified.nwu_in_use = true;
+	verified.nwu_session_flags = 0x1A;
+	verified.nwu_session_role = 1;
+	if (!expect(run(verified, 61) == 0, "the exit waits for the 62-frame block"))
+		return false;
+	if (!expect(run(verified, 62) == inmatch::kMissionExitNovaWorld,
+			"a verified-only word exits with 12 on the block"))
+		return false;
+	hud::NovaWorldLinkFacts playing = verified;
+	playing.nwu_session_flags = 0x0A;
+	playing.nwu_session_role = 3;
+	if (!expect(run(playing, 62 * 3) == 0, "a playing word holds the match"))
+		return false;
+	hud::NovaWorldLinkFacts hosting = verified;
+	hosting.nwu_session_role = 2;
+	if (!expect(run(hosting, 62 * 3) == 0, "a hosting word holds the match"))
+		return false;
+	hud::NovaWorldLinkFacts lan = verified;
+	lan.novaworld = false;
+	if (!expect(run(lan, 62 * 3) == 0, "a LAN join never takes the NovaWorld exit"))
+		return false;
+	hud::NovaWorldLinkFacts unused = verified;
+	unused.nwu_in_use = false;
+	if (!expect(run(unused, 62 * 3) == 0, "an unused NWU session never takes it"))
+		return false;
+	inmatch::ClientRuntime stored("NovaWorldExitStore", [] { return uint64_t{100000}; });
+	stored.set_mission_exit_reason(inmatch::kMissionExitNovaWorld);
+	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNovaWorld,
+			"the NWU session's own exit store lands as is");
+}
+
 bool run_direct_uplink_framing_is_transient() {
 	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
 	inmatch::JoinerConnection joiner("DirectUplink");
@@ -6596,6 +6646,7 @@ int main() {
 	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
+	                run_novaworld_exit_on_a_joiner() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

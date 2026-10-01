@@ -113,7 +113,13 @@ std::vector<uint8_t> ClientSession::start() {
 	state_ = State::Hello;
 	host_state_ = HostState::Idle;
 	play_state_ = PlayState::Idle;
+	// A fresh connect: the state, its flags and the hosting/playing word back to 0, then the
+	// connection start's state 1 [orig: CNapiGameSession_InitNPConnection @0x4d40d0..0x4d412c;
+	//  CNapiGameSession_InitPlayerConnection @0x4d43e3].
 	lobby_state_ = 0;
+	session_flags_ = 0;
+	session_role_ = kSessionRoleNone;
+	set_lobby_state(1);
 	server_hk_ = 0;
 	server_sk_ = 0;
 	server_scrk_.clear();
@@ -409,7 +415,16 @@ void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body) {
 	last_receive_ms_ = clock_ms_;
 	latch_disconnect(event);
 	disconnected_by_peer_ = true;
+	on_disconnected();
+}
+
+// Every connection teardown (the peer's goodbye or description record, the reap) runs the
+// session's disconnect callback, which drops the session to state 0 and leaves the
+// hosting/playing word alone [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 ->
+// conn+0xC4 = CNapiGameSession_OnDisconnect @0x4cfaa0 -> SetState(0) @0x4cfb68].
+void ClientSession::on_disconnected() {
 	state_ = State::Closed;
+	set_lobby_state(0);
 }
 
 void ClientSession::latch_disconnect(const DisconnectEvent &event) {
@@ -420,11 +435,38 @@ void ClientSession::latch_disconnect(const DisconnectEvent &event) {
 	last_error_ = event.ddstr.empty() ? event.dstr : event.ddstr;
 }
 
-// [orig: CGameSession_SetState @0x4ce140 — case 4 arms the GLSVSS deadline from GLSVSSRIMS
-//  (from any state) or GLSVSSAGRMS (returning from state 8) when a request string is set]
+// [orig: CGameSession_SetState @0x4ce140 — a no-op on the current state @0x4ce165; the
+//  leaving state's flag clear @0x4ce17c..0x4ce1bc, the entered state's set
+//  @0x4ce1ea..0x4ce288 (state 0 zeroes the word); case 4 arms the GLSVSS deadline from
+//  GLSVSSRIMS (from any state) or GLSVSSAGRMS (returning from state 8) when a request
+//  string is set]
 void ClientSession::set_lobby_state(int state) {
+	if (state == lobby_state_) return;
 	const int previous = lobby_state_;
+	switch (previous) {
+	case 1: session_flags_ &= ~0x1u; break;
+	case 2:
+	case 3: session_flags_ &= ~0x2u; break;
+	case 4: session_flags_ &= ~0x1Au; break;
+	case 5: session_flags_ &= ~0x3Au; break;
+	case 6: session_flags_ &= ~0x4Au; break;
+	case 7: session_flags_ &= ~0x9Au; break;
+	case 8: session_flags_ &= ~0x10Au; break;
+	default: break;
+	}
 	lobby_state_ = state;
+	switch (state) {
+	case 0: session_flags_ = 0; break;
+	case 1: session_flags_ |= 0x1u; break;
+	case 2:
+	case 3: session_flags_ |= 0x2u; break;
+	case 4: session_flags_ |= 0x1Au; break;
+	case 5: session_flags_ |= 0x3Au; break;
+	case 6: session_flags_ |= 0x4Au; break;
+	case 7: session_flags_ |= 0x9Au; break;
+	case 8: session_flags_ |= 0x10Au; break;
+	default: break;
+	}
 	if (state != 4) return;
 	if (cfg_.glsvss_request.empty()) return;
 	const int32_t interval = previous == 8 ? cfg_.glsvss_agrms_ms : cfg_.glsvss_rims_ms;
@@ -474,7 +516,7 @@ void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) 
 		if (elapsed > static_cast<uint32_t>(cs_.timeout_ms)) {
 			latch_disconnect(make_disconnect_event(2, 3, elapsed,
 					static_cast<uint32_t>(cs_.timeout_ms), "", 0, "NP.C:PT:CLNTTMOUT"));
-			state_ = State::Closed;
+			on_disconnected();
 			return;
 		}
 	}
@@ -527,7 +569,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
 			latch_disconnect(event);
 			disconnected_by_peer_ = true;
-			state_ = State::Closed;
+			on_disconnected();
 			return;
 		}
 		if (pm.flags.settings_update) {
@@ -600,7 +642,15 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			sess_id_string_ = sess;
 			state_ = State::Verified;
 			set_lobby_state(4);
+			// A first verify marks the session verified; a word already hosting or playing
+			// is the reconnect, which retail re-requests (StartHostingSession(1) /
+			// StartPlayingSession(1) @0x4d5961..0x4d599e). This session has no reconnect
+			// leg, so the word stands. [orig: @0x4d5920..0x4d5940]
+			if (session_role_ == kSessionRoleNone) session_role_ = kSessionRoleVerified;
 		} else {
+			// The rejection drops the word and the state to 0 [orig: @0x4d58ac..0x4d58de].
+			session_role_ = kSessionRoleNone;
+			set_lobby_state(0);
 			fail("ServerVerifyResult rejected (Success=" + success + ")");
 		}
 		return;
@@ -621,9 +671,15 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			host_gsid_ = gsid != host_commands.end() ? copy_capped(gsid->second, 128) : std::string();
 			host_state_ = HostState::Established;
 			set_lobby_state(6);
+			// [orig: @0x4d5c17..0x4d5c40 — any word 0..3 becomes 2]
+			if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
+				session_role_ = kSessionRoleHosting;
 		} else {
 			host_state_ = HostState::Failed;
 			set_lobby_state(4);
+			// [orig: @0x4d5ae7..0x4d5b27 — any word 0..3 becomes 1]
+			if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
+				session_role_ = kSessionRoleVerified;
 		}
 		notices_.push_back(std::move(notice));
 		return;
@@ -637,9 +693,14 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		if (play_result_.success) {
 			play_state_ = PlayState::Playing;
 			set_lobby_state(8);
+			// [orig: @0x4d1f35..0x4d1f53 — an unsigned word <= 2 becomes 3]
+			if (static_cast<uint32_t>(session_role_) <= 2u) session_role_ = kSessionRolePlaying;
 		} else {
 			play_state_ = PlayState::Failed;
 			set_lobby_state(4);
+			// [orig: @0x4d1eee..0x4d1f13 — any word 0..3 becomes 1]
+			if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
+				session_role_ = kSessionRoleVerified;
 		}
 		notices_.push_back(std::move(notice));
 		return;
@@ -654,6 +715,9 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		host_result_ = notice.fields;
 		host_state_ = HostState::Idle;
 		set_lobby_state(4);
+		// [orig: @0x4d1d29..0x4d1d4f — any word 0..3 becomes 1]
+		if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
+			session_role_ = kSessionRoleVerified;
 		notices_.push_back(std::move(notice));
 		return;
 	}
@@ -666,6 +730,9 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		play_result_ = notice.fields;
 		play_state_ = PlayState::Idle;
 		set_lobby_state(4);
+		// [orig: @0x4d2057..0x4d207c — any word 0..3 becomes 1]
+		if (session_role_ >= kSessionRoleNone && session_role_ <= kSessionRolePlaying)
+			session_role_ = kSessionRoleVerified;
 		mission_exit_reason_ = 12;
 		notices_.push_back(std::move(notice));
 		return;
@@ -679,6 +746,8 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		host_state_ = HostState::Idle;
 		play_state_ = PlayState::Idle;
 		set_lobby_state(0);
+		// [orig: @0x4d21cd..0x4d21ec — a word 1..3 becomes 0]
+		session_role_ = kSessionRoleNone;
 		mission_exit_reason_ = 12;
 		disconnected_by_peer_ = true;
 		state_ = State::Closed;
@@ -776,6 +845,8 @@ std::vector<uint8_t> ClientSession::build_stop_hosting() {
 	if (host_state_ != HostState::Requested && host_state_ != HostState::Established) return {};
 	host_state_ = HostState::Idle;
 	set_lobby_state(4);
+	// A hosting word steps back to verified [orig: @0x4d0e89..0x4d0e9e].
+	if (session_role_ == kSessionRoleHosting) session_role_ = kSessionRoleVerified;
 	return build_lobby_message(make_client_stop_hosting());
 }
 
@@ -791,10 +862,13 @@ std::vector<uint8_t> ClientSession::build_play_request(const std::vector<ClientV
 }
 
 std::vector<uint8_t> ClientSession::build_stop_playing() {
-	// [orig: CGameSession_StopPlaying @0x4d0ec0 — states 7/8 back to 4 + the statement]
+	// [orig: CGameSession_StopPlaying @0x4d0ec0 — states 7/8 back to 4 + the statement; the
+	//  NovaWorld menu re-entered after a match runs it, UI_ProcessLANSessionStateMachine @0x558e80]
 	if (play_state_ != PlayState::Requested && play_state_ != PlayState::Playing) return {};
 	play_state_ = PlayState::Idle;
 	set_lobby_state(4);
+	// A playing word steps back to verified [orig: @0x4d0ee9..0x4d0efe].
+	if (session_role_ == kSessionRolePlaying) session_role_ = kSessionRoleVerified;
 	return build_lobby_message(make_client_stop_playing());
 }
 
@@ -823,6 +897,9 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 			? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 			: client_goodbye_to_bytes(server_sk_);
 	state_ = State::Closed;
+	// The reset drops the state and the hosting/playing word to 0 [orig: @0x4d08fc..0x4d0927].
+	set_lobby_state(0);
+	session_role_ = kSessionRoleNone;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }
 

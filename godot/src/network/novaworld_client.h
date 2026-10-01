@@ -90,6 +90,9 @@ public:
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
 	bool is_authenticated() const { return authenticated_; }
+	// The NWU session as the joined match reads it (C++ only): the shell keeps
+	// this node alive through the match (SessionDrive::adopt_nw_client).
+	NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.
 	Ref<NovaWorldGateInfo> get_server_info() const;

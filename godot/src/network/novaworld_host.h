@@ -157,6 +157,8 @@ public:
 	// request_player_enter and holds it until player_enter_result. False before
 	// registration and on a service that does not ask for tickets.
 	bool get_host_requires_join_ticket() const;
+	// The registration's NWU session as the hosted match reads it (C++ only).
+	NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
 	// ClientPlayerEnterRequest for a joiner the in-match host is validating: its
 	// ConnectionId (dcb), its game endpoint (the inet_addr dword + port) and the
 	// JOINTICKET its join carried (empty when the KV had none). The service answers

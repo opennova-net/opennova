@@ -505,6 +505,8 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	// BANDWIDTH command's target [orig: g_EntitySendBudget @0xC8FC50]).
 	replication::set_entity_send_budget(
 			static_cast<int>(cfg.config.entity_send_budget));
+	// The network type leads the bring-up [orig: Game_HostMultiplayerSession @0x4a6609..0x4a6614].
+	owner.ctx.transport_mode = cfg.network_type;
 	// Select the witnessed §5.0 table row: serve-and-play is mode 3 (host + local client);
 	// dedicated/headless is mode 1 (host only, no dcb-2 loopback player).
 	set_connection_mode(

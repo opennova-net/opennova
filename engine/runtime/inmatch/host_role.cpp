@@ -15,6 +15,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -362,6 +363,13 @@ void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_
 
 bool HostRole::session_lost(SessionError &error) const {
 	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The NovaWorld session's end exits the mission on either host kind.
+	if (ctx.mission_exit_reason != 0) {
+		error = {SessionErrorCode::SessionLost,
+				"the NovaWorld session ended (mission exit " +
+						std::to_string(ctx.mission_exit_reason) + ")"};
+		return true;
+	}
 	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;
 	if (!ctx.round_end_announced || ctx.round_end_linger_ticks != 0 ||
 			ctx.is_in_session != 0)

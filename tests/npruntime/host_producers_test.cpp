@@ -21,6 +21,7 @@
 #include <runtime/inmatch/server_chat.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/server_net_quality.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -306,6 +307,34 @@ bool check_host_quality_window() {
 	inmatch::Server_SampleHostNetQuality(cold.ctx);
 	return expect(cold.ctx.host_network_quality == 255 / 5,
 			"an unmeasured frame rate samples the ceiling 255");
+}
+
+// The NovaWorld exit leads the host's 62-frame block too (D-NET-220): a
+// NovaWorld host whose registration's NWU session is in use exits with 12 once
+// the word holds neither 2 nor 3, and HostRole reports it on either host kind
+// [orig: Game_ProcessMainFrame @0x52655d..0x52657c].
+bool check_host_novaworld_exit() {
+	const auto sample = [](inmatch::NetworkType type, bool in_use, int32_t role, bool in_session) {
+		HostFixture f(1);
+		f.ctx.transport_mode = type;
+		f.ctx.nwu_in_use = in_use;
+		f.ctx.nwu_session_role = role;
+		f.ctx.is_in_session = in_session ? 1 : 0;
+		f.ctx.net_quality_sample_countdown = 1;
+		inmatch::Server_SampleHostNetQuality(f.ctx);
+		return f.ctx.mission_exit_reason;
+	};
+	using NT = inmatch::NetworkType;
+	if (!expect(sample(NT::NovaWorld, true, 2, true) == 0, "a hosting word holds the match"))
+		return false;
+	if (!expect(sample(NT::NovaWorld, true, 1, true) == inmatch::kMissionExitNovaWorld,
+			"a stopped registration (word 1) exits with 12"))
+		return false;
+	if (!expect(sample(NT::NovaWorld, true, 0, false) == 0, "outside a session the block skips it"))
+		return false;
+	if (!expect(sample(NT::Lan, true, 0, true) == 0, "a LAN host never takes it"))
+		return false;
+	return expect(sample(NT::NovaWorld, false, 0, true) == 0, "nor an unused NWU session");
 }
 
 // --------------------------------------------------------------------------
@@ -1387,6 +1416,7 @@ int main() {
 	ok = check_ping_dispatch_return_leg() && ok;
 	ok = check_client_quality_store_and_resend() && ok;
 	ok = check_host_quality_window() && ok;
+	ok = check_host_novaworld_exit() && ok;
 	ok = check_chat_helpers() && ok;
 	ok = check_chat_routing() && ok;
 	ok = check_loaded_model_reply_stamp() && ok;

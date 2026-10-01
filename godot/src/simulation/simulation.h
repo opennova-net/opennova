@@ -1035,10 +1035,11 @@ public:
 	int get_host_peer_count() const;   // joiners in handshake or admitted
 	// The gate registration's GSID (0x81 SUS1) and AppId (the status page's key); LAN: empty / 0.
 	void set_novaworld_registration(const String &p_gsid, int p_app_id);
-	// The admitted remote joiners as the NovaWorld host's PlayerList sees them
-	// (Server_PlayerAdd's five per-slot vars): one entry per server-side
-	// connection past player admission, keyed by its roster slot. The host's own
-	// slot is not listed (the gate binding adds itself at registration).
+	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
+	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
+	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
+	// The admitted remote joiners as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's
+	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
 	struct HostPeerSlot {
 		int slot = 0;
 		String player_name;
@@ -1192,8 +1193,7 @@ public:
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character/integrity data.
 	void set_app_id(const String &p_token);
-	// The joiner's network type (JoinTarget::NetworkType): what retail stores
-	// as g_NapiNPCtx.transport_mode from the menu's connect type on the join.
+	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.transport_mode).
 	void set_join_network_type(int p_type);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates

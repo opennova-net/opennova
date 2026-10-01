@@ -229,11 +229,13 @@ void NovaWorldClient::start() {
 void NovaWorldClient::stop() {
 	if (lobby_.session() && lobby_.sockets_open()) {
 		// A play in flight is cancelled the retail way (ClientStopPlaying, the
-		// ConnectOrHost escape/timeout leg), then the session leaves.
-		if (play_in_flight_) {
-			lobby_.send(lobby_.session()->build_stop_playing());
-			play_in_flight_ = false;
-		}
+		// ConnectOrHost escape/timeout leg), and an established play leaves the
+		// same way the NovaWorld menu's re-entry after a match leaves it
+		// (ClientSession::build_stop_playing, empty outside states 7/8); then the
+		// session goes.
+		const std::vector<uint8_t> stop_playing = lobby_.session()->build_stop_playing();
+		if (!stop_playing.empty()) lobby_.send(stop_playing);
+		play_in_flight_ = false;
 		if (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO ||
 		    state_ == STATE_SESSION_JOIN || state_ == STATE_JOINING ||
 		    state_ == STATE_IN_GAME_HELLO) {

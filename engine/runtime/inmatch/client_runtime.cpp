@@ -1,5 +1,6 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/inmatch/novaworld_link.h> // the NovaWorld exit
 
 #include <net/npwire/wire_handle.h>
 #include <net/npwire/ingame_encode.h>
@@ -616,6 +617,11 @@ void ClientRuntime::update_net_quality() {
 	if (--quality_update_countdown_ > 0) return;
 	quality_update_countdown_ = 62;
 	if (joiner_ == nullptr || !joiner_->in_session()) return;
+	// The NovaWorld exit leads the block [orig: @0x52655d..0x52657c].
+	if (novaworld_session_ended(novaworld_link_.novaworld, novaworld_link_.nwu_in_use,
+				novaworld_link_.nwu_session_role)) {
+		mission_exit_reason_ = kMissionExitNovaWorld;
+	}
 	const bool held = !deployed_ || !authoritative_spawn_released_ ||
 			view_.state().preround_delay_seconds != 0;
 	if (held) {

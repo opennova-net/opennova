@@ -773,6 +773,17 @@ func _populate_missions() -> void:
 
 ## The wired client event source. Tests leave it unstarted and emit signals
 ## through the same boundary used by the live client.
+## Hand the lobby session over at the in-match handoff: retail keeps the
+## NovaWorld session playing through the match, so the client leaves the panel
+## (which is dismissed next) instead of dying with it. Null when none is held.
+func release_client() -> NovaWorldClient:
+	var client := _client
+	_client = null
+	if client != null and client.get_parent() == self:
+		remove_child(client)
+	return client
+
+
 func client_for_test() -> NovaWorldClient:
 	return _client
 
