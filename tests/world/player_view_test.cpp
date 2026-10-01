@@ -495,13 +495,20 @@ void test_binoculars_effective_state_and_fov() {
     CHECK(v.binoculars_view_active);
     CHECK(player_view_fov_h_deg(v, 80 << 16, false, false, 1) == kBinocularCameraFovHDeg);
 
-    // Movement suppresses both derived states without consuming the request;
-    // releasing movement restores them.
-    CHECK(!player_view_move_input(v, true, 0));
+    // A direction bit in the frame's input word suppresses both derived states
+    // without consuming the request (the input pack's toggle drop is the local
+    // player's leg); a word without one restores them. The movement-held latch
+    // plays no part. [orig: Player_UpdatePerFrame `test byte ptr g_InputFlags,
+    // 1Eh` @0x4de3ae]
+    v.movement_input = true;
     player_view_update_effective_modes(v, true, false);
     CHECK(v.binoculars_requested);
     CHECK(!v.binoculars_raised);
     CHECK(!v.binoculars_view_active);
+    v.movement_input = false;
+    CHECK(!player_view_move_input(v, true, 0));
+    player_view_update_effective_modes(v, true, false);
+    CHECK(v.binoculars_raised && v.binoculars_view_active);
     CHECK(!player_view_move_input(v, false, 0));
     player_view_update_effective_modes(v, true, false);
     CHECK(v.binoculars_raised && v.binoculars_view_active);

@@ -79,23 +79,13 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	// C2S 0x1D apply semantics [orig: @0x501c60]).
 	input.crouch = stance_latch_ == 1;
 	input.prone = stance_latch_ == 2;
-	// The movement-held latch and the unscope-on-move [orig:
-	// Player_PackInputStateToEntity @0x4df450 — any of the four direction keys
-	// sets g_MovementKeyHeld (blocks scope-UP on Scoped weapons @0x4df29c)
-	// and, while SETTLED at scope on a Scoped (flags 1) weapon, routes through
-	// Player_ToggleWeaponScope @0x4df4c9..0x4df4ec = the full unscope. The
-	// toggle's ForceScoped pin (@0x4df12d) keeps pinned sights raised].
-	// Retail runs these legs inside the pack from the accumulated word; here
-	// they still read this frame's held keys, which matches only while the
-	// pack runs every frame (host, single player, a holdoff-1 joiner).
-	const bool move_held = forward || back || left || right;
-	if (w::player_view_move_input(view, move_held,
-				weapon.active ? weapon.def.flags : 0) &&
-			(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
-		if (w::local_player_set_scope(world, weapon, view,
-					*w::active_local_weapon_slot(world, weapon), false))
-			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
-	}
+	// The binocular suppression reads the input word as this frame's fold will
+	// leave it, so the raised pose drops on the frame a direction key goes
+	// down. The movement-held latch and the unscope-on-move are the pack's
+	// (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
+	//  `test byte ptr g_InputFlags, 1Eh` @0x4de3ae, ahead of the pack]
+	view.movement_input =
+			(input_flags.folded(w::player_input_flags(input, false)) & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
 }
 
@@ -468,7 +458,6 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	w::screen_flash_decay(view.flash);
 	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
-	w::local_player_view_refresh(&world, view);
 	// Look-up/down key bindings are refused while the AbsorbPitch seat
 	// flag answers (an OnlyScoped weapon only once promoted).
 	// [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
@@ -480,6 +469,11 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
 	//  Input_HandleActionBinding_0 @0x4e0420]
 	input_flags.fold(w::player_input_flags(input, absorb));
+	// The per-frame binocular refresh reads that folded word, ahead of the
+	// pack [orig: Client_ProcessNetworkFrame -> Player_UpdatePerFrame @0x42c18e,
+	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
+	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
+	w::local_player_view_refresh(&world, view);
 	if (pack_input) {
 		// The pack: the accumulated word onto MoveOrder, then the word is
 		// saved as the previous pack's and cleared. The analog throttle is
@@ -487,10 +481,25 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
 		// the clear @0x4df904/@0x4df909].
 		move_order = w::pack_player_body_input(input_flags.flags, input);
-		// A direction key in the packed word drops the raw binocular toggle:
-		// moving lowers the binoculars for good, not just while the key is
-		// down [orig: @0x4df4b2 -> `mov g_BinocularsToggle, 0` @0x4df4c2].
-		if (move_order.direction_bits != 0) view.binoculars_requested = false;
+		// The packed word's direction bits drive the movement legs: the
+		// movement-held latch (it refuses scope-UP on a Scoped weapon
+		// @0x4df29c), the drop of the raw binocular toggle (moving lowers the
+		// binoculars for good), and, while SETTLED at scope on a Scoped
+		// (flags 1) weapon, the full unscope through the toggle -- the
+		// ForceScoped pin (@0x4df12d) keeps pinned sights raised -- else the
+		// hip-fire camera legs. A joiner runs them once per send boundary.
+		// [orig: Player_PackInputStateToEntity @0x4df4b2..0x4df63b --
+		//  g_MovementKeyHeld @0x4df4bb / @0x4df4f9, `mov g_BinocularsToggle, 0`
+		//  @0x4df4c2, Player_ToggleWeaponScope @0x4df4c9..0x4df4ec, the
+		//  entitySlotPtr legs @0x4df500..0x4df63b]
+		const bool direction = move_order.direction_bits != 0;
+		if (direction) view.binoculars_requested = false;
+		if (w::player_view_move_input(view, direction, weapon.active ? weapon.def.flags : 0) &&
+				(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
+			if (w::local_player_set_scope(world, weapon, view,
+						*w::active_local_weapon_slot(world, weapon), false))
+				w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
+		}
 		if (w::Entity *entity = world.registry.get(p->handle))
 			entity->analog_throttle = input.analog_throttle;
 		input_flags.clear_after_pack();

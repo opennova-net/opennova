@@ -445,7 +445,7 @@ void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool rou
     // Raw intent survives every temporary suppression. Third person only
     // suppresses the optical view: remote observers still see the raised pose.
     v.binoculars_raised =
-        v.binoculars_requested && alive && !round_ended && !v.move_held;
+        v.binoculars_requested && alive && !round_ended && !v.movement_input;
     v.binoculars_view_active = v.binoculars_raised && !v.third_person;
 }
 

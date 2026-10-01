@@ -94,12 +94,11 @@ public:
     //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick]
     PlayerBodyInput move_order;
     // One frame of movement keys: stores the keys plus the sim-owned stance
-    // latch onto `input`, runs the witnessed movement-held unscope (while
-    // SETTLED at scope on a Scoped weapon, any direction key routes through
-    // the full unscope; the ForceScoped pin keeps pinned sights raised), and
-    // refreshes the view aggregates. [orig: Player_PackInputStateToEntity
-    // @0x4df450 — g_MovementKeyHeld @0x4df29c; the unscope route
-    // @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
+    // latch onto `input` and refreshes the view aggregates, whose binocular
+    // suppression reads the input word this frame's fold will leave. The
+    // movement-held latch and the unscope-on-move belong to the pack
+    // (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
+    // `test byte ptr g_InputFlags, 1Eh` @0x4de3ae]
     void set_movement_keys(bool forward, bool back, bool left, bool right,
             bool lean_left, bool lean_right, bool jump);
     // The zero-step keys [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0]: the
@@ -181,7 +180,9 @@ public:
     // The frame's input onto the local player's body before the logic tick
     // (the view-flag stamps ride along); no local player = no-op. The held
     // keys fold into `input_flags` every frame; `pack_input` runs the pack
-    // (the word into `move_order`, then the clear), which retail runs only
+    // (the word into `move_order` and its movement legs -- the movement-held
+    // latch, the binocular toggle drop, the unscope-on-move and the hip-fire
+    // camera legs -- then the clear), which retail runs only
     // inside the client network frame's send block -- every frame for the
     // host and single player, every send-holdoff period for a joiner. The
     // persisted `move_order` reaches the body every frame either way.

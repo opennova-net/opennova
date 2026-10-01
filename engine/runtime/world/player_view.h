@@ -408,7 +408,15 @@ struct PlayerViewState {
     PlayerViewPose weapon_ads_pose;
     PlayerViewBiasInterp weapon_pose_interp;
     bool weapon_pose_bound = false; // fpCameraInterp.entitySlotPtr + its non-null Def
-    bool move_held = false;       // [orig: the movement-held latch g_MovementKeyHeld @ 0xB7653B]
+    // The movement-held latch: written by the input pack only, from the packed
+    // word's direction bits, so a joiner's latches once per send boundary.
+    // [orig: g_MovementKeyHeld @ 0xB7653B; Player_PackInputStateToEntity
+    //  @0x4df4bb / @0x4df4f9]
+    bool move_held = false;
+    // The frame's input word holds a direction bit: what the binocular
+    // suppression reads, every frame, ahead of the pack. [orig:
+    //  Player_UpdatePerFrame `test byte ptr g_InputFlags, 1Eh` @0x4de3ae]
+    bool movement_input = false;
     // THE CAMERA MODE, two words. `third_person_selected` is the user's
     // preference — the chase byte the view actions write, 1 from the session
     // reset on [orig: g_CameraThirdPersonSelected @ 0xA860DF — set to 1 by
@@ -659,9 +667,11 @@ void player_view_binocular_sway_offset(float unit_random,
                                        float &pitch_offset_deg);
 
 // Recompute the binocular body pose and first-person view. The raised pose is
-// suppressed by movement, death, and round end, but survives third person;
-// the optical view additionally requires first person. [orig: per-frame
-// binocular state update around g_BinocularsViewActive..g_MovementKeyHeld]
+// suppressed by a direction bit in the frame's input word, death, and round
+// end, but survives third person; the optical view additionally requires
+// first person. [orig: Player_UpdatePerFrame @0x4de37b..0x4de3c8 -- Health
+// @0x4de38d, g_SpawnSuccessGate @0x4de39e, `g_InputFlags & 0x1E` @0x4de3ae,
+// g_CameraMode == 1 @0x4de3bf]
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
 
 // Toggle NVG and return its new active state. Gain is independent of the

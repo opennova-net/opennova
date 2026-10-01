@@ -581,12 +581,12 @@ void test_binocular_sway_seeds_once_per_activation() {
 
     // Movement suppresses the optical view. Rendering that state clears the
     // latch; the next rendered activation, not the release tick, draws again.
-    v.move_held = true;
+    v.movement_input = true;
     tick();
     CHECK(!v.binoculars_view_active);
     player.present_view_frame();
     CHECK(!t.binocular_sway_latched);
-    v.move_held = false;
+    v.movement_input = false;
     tick();
     CHECK(lw.w.prng16_state == expected);
     player.present_view_frame();
@@ -724,7 +724,7 @@ void test_tip_events_from_scope_nvg_and_binoculars() {
         local_player_view_tick(&lw.w, v, t, s);
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
         // Raised while the view cannot come up (the player moving): the fade.
-        v.move_held = true;
+        v.movement_input = true;
         CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
         local_player_view_tick(&lw.w, v, t, s);
         CHECK(!v.binoculars_view_active);
@@ -2281,6 +2281,43 @@ void test_pack_drops_the_binocular_toggle_on_movement() {
     CHECK(!f.player.view.binoculars_raised);
 }
 
+// The movement-held latch and the unscope-on-move run inside the pack, from
+// the packed word: a joiner between send boundaries keeps its settled scope
+// with a direction key down, and the boundary pack latches g_MovementKeyHeld
+// and routes the unscope; a release clears the latch at the next pack. The
+// binocular suppression instead reads the frame's input word, so it holds
+// from the frame the key goes down. [orig: Player_PackInputStateToEntity
+// @0x4df4b2..0x4df4f9 -- latch @0x4df4bb / @0x4df4f9, the unscope route
+// @0x4df4c9..0x4df4ec; Player_UpdatePerFrame `test byte ptr g_InputFlags, 1Eh`
+// @0x4de3ae]
+void test_pack_owns_the_movement_latch_and_unscope() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    CHECK(f.player.view.scope_settled);
+    CHECK(!f.player.view.move_held);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.view.scope_settled);
+    CHECK(!f.player.view.move_held);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.scope_settled);
+    CHECK(f.player.view.move_held);
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.move_held);
+
+    ScopedAimFixture b;
+    b.player.weapon.def.flags = 0;
+    b.player.view.scope_engaged = false;
+    b.player.view.scope_settled = false;
+    CHECK(local_player_binoculars_toggle(b.w, b.player.weapon, b.player.view,
+            b.player.view_tracker));
+    CHECK(b.player.view.binoculars_raised);
+    b.player.set_movement_keys(false, true, false, false, false, false, false);
+    CHECK(!b.player.view.binoculars_raised);
+    CHECK(b.player.view.binoculars_requested);
+}
+
 void test_scoped_aim_body_input_camera_and_fired_round() {
     ScopedAimFixture f;
     WeaponInstallData data;
@@ -2499,6 +2536,7 @@ int main() {
     test_scoped_aim_gates_and_independent_stance_resets();
     test_scoped_aim_body_input_camera_and_fired_round();
     test_pack_drops_the_binocular_toggle_on_movement();
+    test_pack_owns_the_movement_latch_and_unscope();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {

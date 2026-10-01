@@ -57,6 +57,11 @@ enum InputFlag : uint32_t {
     kInputFlagLeanRight = 0x4000, // case 147 [orig: @0x4e10c8]
     kInputFlagFreeLook = 0x8000,  // case 176 [orig: @0x4e0cd5]
 };
+// The four direction keys' bits -- what the pack collapses to the F/B/L/R word and
+// the per-frame binocular suppression tests [orig: @0x4df48e..0x4df4a5;
+// Player_UpdatePerFrame `test byte ptr g_InputFlags, 1Eh` @0x4de3ae].
+inline constexpr uint32_t kInputFlagDirectionMask =
+    kInputFlagForward | kInputFlagBack | kInputFlagLeft | kInputFlagRight;
 
 // The bits this frame's held keys OR into the word. The look-up/down handlers refuse while
 // the AbsorbPitch seat flag answers, so those bits never enter the word [orig: cases 154/155
@@ -76,6 +81,8 @@ struct PlayerInputFlags {
     uint32_t prev = 0;  // g_InputFlagsPrev @0xB3B72C
 
     void fold(uint32_t held) { flags = (flags & ~prev) | held; }
+    // The word this frame's fold will leave, without folding.
+    uint32_t folded(uint32_t held) const { return (flags & ~prev) | held; }
     void clear_after_pack() {
         prev = flags;
         flags = 0;
