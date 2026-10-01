@@ -318,7 +318,8 @@ namespace {
 // @0x51a7da] and a spectator add sets it [orig: Server_PlayerAdd @0x51d0da, gated on
 // NapiNPPlayer+0x37 = the joiner's JSR join var, the PRE_GAME_MENU SPECTATE box:
 // UI_PreGameMenuStateMachine @0x568bf0 -> UI_JoinSelectedSession @0x569c77, parsed
-// @0x4c7604, latched @0x512e60 / @0x4c81ff]; and every 0x0A the host writes for a player clears
+// @0x4c7604, latched @0x512e60 / @0x4c81ff; the host's own player binds through the
+// local branch @0x51cc31 and never reaches the stamp]; and every 0x0A the host writes for a player clears
 // that player's own bit0, then sets it again while it spectates or its deploy screen holds
 // [orig: NetPacket_WritePlayerState @0x4ff6d0, @0x4ff7a1, @0x4ff7b8]. The host keeps that bit on
 // the entity (server_spawn.cpp), so the record reads it from there (D-NET-136). Carry the

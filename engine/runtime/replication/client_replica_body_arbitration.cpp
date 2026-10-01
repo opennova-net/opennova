@@ -26,7 +26,9 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		// [orig: @0x4c10f1 / @0x4c0509]; the fold stores the park. A dead
 		// record on an already-dead row stores current and clears pending, and
 		// no phase seed: the dead leg jumps past the +0x377 store
-		// [orig: @0x4c1015..0x4c1021 -> @0x4c11d7; infantry @0x4c0635].
+		// [orig: @0x4c1015..0x4c1021 -> @0x4c11d7; infantry @0x4c0635]. The
+		// row-dead test is the entity's own Flags & 2 [orig: @0x4c100b;
+		// infantry @0x4c04f9].
 		if (row_was_dead) {
 			es.net_anim_current = static_cast<int16_t>(decoded);
 			es.net_anim_pending = 0;
