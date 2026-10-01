@@ -164,6 +164,13 @@ static int test_new_status_validate() {
 	TEST_EXPECT(run({"build", root}) == 0);
 	TEST_EXPECT(run({"build", root, "--out", dir.file("elsewhere")}) == 0);
 	TEST_EXPECT(std::filesystem::is_regular_file(dir.file("elsewhere") + "/last_good.json"));
+	// S13 A8: the line says what the build read and linked as --json does; --rehash reads every file.
+	{
+		std::string built;
+		TEST_EXPECT(run_capture(dir.file("built.txt"), {"build", root, "--out", dir.file("rehashed"), "--rehash"}, built) == 0);
+		TEST_EXPECT(built.find("built ") != std::string::npos && built.find(" of them linked, ") != std::string::npos &&
+		            built.find(" file(s) hashed)") != std::string::npos);
+	}
 
 	// Generic native file import uses the same core and requires explicit replacement.
 	TEST_EXPECT(run({"import", root}) == 2);

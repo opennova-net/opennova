@@ -567,7 +567,7 @@ static int test_location() {
 		asset.kind = kind;
 		return asset;
 	};
-	editor_test::own(view.project.scan).entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImageSource),
+	editor_test::own(view.project.scan).entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImportSource),
 	                     entry("Arial14b.fnt", "fonts/Arial14b.fnt", AssetKind::Font)};
 	editor_test::own(view.project.scan).index();
 	Diagnostic required = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");

@@ -20,7 +20,8 @@ enum class AssetKind {
 	AnimationMap,   // .adm
 	FaceAnimation,  // .grm (a character's facial texture meshes and gesture offsets)
 	AiProfile,      // .aip
-	Texture,        // .tga .pcx .dds .mdt, and a model's material chunk container by its content
+	Texture,        // .tga .pcx .dds .mdt .png
+	MaterialChunk,  // a model's material chunk container, by its content under a name no rule types
 	Font,           // .fnt
 	Strings,        // RTXT .bin
 	MusicScript,    // SCR0 .bin
@@ -52,13 +53,17 @@ enum class AssetKind {
 	PowerupDefs,    // powerup.def
 	OtherDefs,      // any other .def
 	StringTableCoo, // .coo (the NovaWorld UI string table)
+	NovaWorldScreen, // .mnx (a NovaWorld screen's markup, loose in the install)
 	Video,          // .bik
 	PlayerSave,     // .sav
 	Shader,         // .fx
 	Config,         // .cfg .ini .ssc .cd
 	Score,          // score.ini (the scoring table per game type)
 	Text,           // .txt
-	ImageSource,    // .png: a source the image importer turns into a texture (never packed itself)
+	// A file the project imports, whatever its name: an importer's source with its import record
+	// beside it (a .png the image importer turns into a texture), which the scan gives this kind;
+	// never packed itself, its outputs are.
+	ImportSource,
 	kCount,         // the number of kinds, not a kind
 };
 

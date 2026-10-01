@@ -47,7 +47,7 @@ constexpr RequestField kFields[] = {
 			"choose "
 			"from." },
 	{ F::Imports, "imports", J::Objects,
-			"Import sources, {path, entry?, install?, native?}, each as the view's import rows "
+			"Files chosen to import, {path, entry?, install?, native?}, each as the view's import rows "
 			"carry it "
 			"(install: the path is the game install; native: a loose file copied as the game's "
 			"own)." },
@@ -113,6 +113,8 @@ constexpr RequestField kFields[] = {
 			"The project opens with its import pass, the sources that changed imported first "
 			"(true when left out); false: it opens on its files as they are, scanned and checked, "
 			"no source imported (a dry run's read, a project made in a folder that holds sources)." },
+	{ F::Rehash, "rehash", J::Boolean,
+			"A build reads every file again, the build cache's hashes set aside (and kept afresh)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

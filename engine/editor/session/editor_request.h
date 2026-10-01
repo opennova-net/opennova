@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/assets/import_source.h>
+#include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
 
@@ -200,8 +200,8 @@ struct EditorRequest {
 	std::vector<std::string> roles;
 	std::vector<std::string> names;
 	std::vector<std::string> paths;
-	// Import sources, as the view's import rows carry them.
-	std::vector<ImportSource> imports;
+	// The files chosen to import (ImportChoice), as the view's import rows carry them.
+	std::vector<ImportChoice> imports;
 	// A batch over any rows of one document, one undo step.
 	std::vector<Edit> edits;
 	// A record by its address; the records a selection takes with it (SelectRecord); where a Paste
@@ -231,6 +231,8 @@ struct EditorRequest {
 	bool ask_name = false;
 	bool open_first = false;
 	bool import_pass = true;
+	// A build reads every file again, the build cache set aside (S13 A8).
+	bool rehash = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -247,7 +249,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
-			a.open_first == b.open_first && a.import_pass == b.import_pass;
+			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

@@ -154,6 +154,8 @@ JsonValue run_section(const SessionView &view) {
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
 	out.set("command_line", json_string(activity.play_command_line));
+	out.set("run_dir", json_string(activity.play_run_dir));
+	out.set("log_file", json_string(activity.play_log_file));
 	out.set("exited_on_its_own", boolean(activity.play_exited_on_its_own));
 	out.set("exit_code",
 			activity.play_exit_code >= 0 ? json_number(double(activity.play_exit_code))
@@ -196,6 +198,7 @@ JsonValue import_section(const SessionView &view) {
 		entry.set("importer", json_string(source.importer));
 		entry.set("ok", boolean(source.ok));
 		entry.set("reimported", boolean(source.reimported));
+		entry.set("inputs", strings_to_json(source.inputs));
 		entry.set("outputs", strings_to_json(source.outputs));
 		imported.push(std::move(entry));
 	}
@@ -358,12 +361,14 @@ constexpr ViewSectionRow kSections[] = {
 			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
-			"the files it reported missing at boot, and what Play runs (the game install, in it or "
-			"not, the runtime)." },
+			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
+			"the build directory), the files it reported missing at boot, and what Play runs (the "
+			"game install, in it or not, the runtime)." },
 	{ S::Import, "import", concern_set({ C::Dialogs, C::Preferences, C::Files }), import_section,
 			"The import dialog in short (open, with_dependencies, its lists' counts; the "
 			"import_preview query pages its plan), the editor's import setting, the project's "
-			"imported sources and the game install's file count." },
+			"import sources (each with the other files its import read, inputs, and the files it "
+			"made, outputs) and the game install's file count." },
 	{ S::Dialogs, "dialogs", concern_set({ C::Dialogs }), dialogs_section,
 			"The unsaved-changes prompt (what waits, the files it lists, whether Discard is "
 			"offered), the last rename's plan (rename_preview: its sites before and after, its "
@@ -416,8 +421,8 @@ constexpr bool sections_named() {
 static_assert(sections_named(),
 		"each view section has a token of its own, a writer, its concerns and a doc");
 
-JsonValue source_to_json(const ImportSource &source) {
-	return import_source_to_json(source);
+JsonValue source_to_json(const ImportChoice &source) {
+	return import_choice_to_json(source);
 }
 
 // One row of the import plan as the dialog shows it.
@@ -577,7 +582,10 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("reused_existing", boolean(report.reused_existing));
 		build.set("archives_written", json_number(double(report.archives_written.size())));
 		build.set("archives_reused", json_number(double(report.archives_reused.size())));
+		build.set("archives_linked", json_number(double(report.archives_linked.size())));
 		build.set("loose_written", json_number(double(report.loose_written.size())));
+		build.set("files_hashed", json_number(double(report.files_hashed)));
+		build.set("bytes_hashed", json_number(double(report.bytes_hashed)));
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
 	}
 	out.set("build", std::move(build));
@@ -647,10 +655,10 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));
 	out.set("rows", std::move(planned));
-	const auto sources_page = [&page](const std::vector<ImportSource> &sources) {
+	const auto sources_page = [&page](const std::vector<ImportChoice> &sources) {
 		JsonValue list = JsonValue::make_array();
 		for (size_t i = page.first(sources.size()); i < page.last(sources.size()); ++i)
-			list.push(import_source_to_json(sources[i]));
+			list.push(import_choice_to_json(sources[i]));
 		return list;
 	};
 	out.set("choice_count", json_number(double(preview.choices.size())));

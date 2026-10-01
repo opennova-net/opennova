@@ -151,7 +151,7 @@ static int test_plan_archive() {
 	                                {"tex.pcx", "pcx"},
 	                                {"other.txt", "text"}}));
 	const auto before = snapshot(project.dir.path);
-	ImportSource member;
+	ImportChoice member;
 	member.path = archive;
 	member.entry = "first.mnu";
 	const ImportPlan plan = project.plan({member});
@@ -222,7 +222,7 @@ static int test_plan_game_install() {
 	const ImportPlanRow *alone = row_named(folder_only, "logo.tga");
 	TEST_EXPECT(lost && lost->state == State::NotFound && lost->kind == AssetKind::Font && alone && alone->rivals.empty());
 	// A source of the install: what it names is looked for in the install, no competition.
-	ImportSource retail;
+	ImportChoice retail;
 	retail.path = install;
 	retail.entry = "retail.mnu";
 	retail.install = true;
@@ -296,7 +296,7 @@ static int test_plan_cycle_and_cap() {
 	TEST_EXPECT(capped.truncated && taken == 2 && capped.rows.size() == 2);
 	// The cap binds the selection too, followed or not: three fonts, room for two.
 	TEST_EXPECT(editor_test::write_text(art + "/fc.fnt", "fnt"));
-	const std::vector<ImportSource> fonts = {{art + "/fa.fnt", {}}, {art + "/fb.fnt", {}}, {art + "/fc.fnt", {}}};
+	const std::vector<ImportChoice> fonts = {{art + "/fa.fnt", {}}, {art + "/fb.fnt", {}}, {art + "/fc.fnt", {}}};
 	for (const bool follow : {true, false}) {
 		const ImportPlan roots = project.plan(fonts, follow, std::string(), 2);
 		TEST_EXPECT(roots.truncated && roots.rows.size() == 2 && roots.rows[1].name == "fb.fnt");
@@ -432,10 +432,11 @@ static int test_plan_competition() {
 	return 0;
 }
 
-// A model's .mdt normal map and its chunk row's file are textures to the plan (the chunk
-// file by its bytes, whatever its name: renderer::load_material_chunk): found beside the
-// model, a file of the name that holds no chunk not found; from a game install they import
-// as textures, the project's graph resolves both rows, and the build packs both.
+// A model's .mdt normal map is a texture to the plan and its chunk row's file a material chunk
+// (by its bytes, whatever its name: renderer::load_material_chunk; a texture before S13 A8): found
+// beside the model, a file of the name that holds no chunk not found; from a game install they
+// import, the scan types the chunk file by its chunk headers, the project's graph resolves both
+// rows, and the build packs both (a file of no kind the game knows it would leave out).
 static int test_plan_material_sources() {
 	Project project("opennova_editor_plan_material_sources");
 	const std::string relief = "o3d 1\nmodel RELIEF\nmaterial FF_ST_OP\ntexture ready.mdt 3 4\ntexture field.nq8 1 16\n"
@@ -450,7 +451,7 @@ static int test_plan_material_sources() {
 	const ImportPlanRow *field = row_named(beside, "field.nq8");
 	const ImportPlanRow *other = row_named(beside, "other.nq8");
 	TEST_EXPECT(ready && ready->state == State::Found && ready->kind == AssetKind::Texture && ready->problem.empty());
-	TEST_EXPECT(field && field->state == State::Found && field->kind == AssetKind::Texture && field->problem.empty());
+	TEST_EXPECT(field && field->state == State::Found && field->kind == AssetKind::MaterialChunk && field->problem.empty());
 	TEST_EXPECT(other && other->state == State::NotFound && beside.rows.size() == 4);
 
 	const std::string install = project.dir.file("install");
@@ -461,7 +462,8 @@ static int test_plan_material_sources() {
 	const ImportPlan plan = project.plan({{bare + "/relief.o3d", {}}}, true, install);
 	for (const char *name : {"ready.mdt", "field.nq8"}) {
 		const ImportPlanRow *row = row_named(plan, name);
-		TEST_EXPECT(row && row->state == State::Found && row->found_in == "the game install" && row->kind == AssetKind::Texture);
+		TEST_EXPECT(row && row->state == State::Found && row->found_in == "the game install" &&
+		            row->kind == (std::string(name) == "ready.mdt" ? AssetKind::Texture : AssetKind::MaterialChunk));
 	}
 	const std::string root = project.root();
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
@@ -469,6 +471,8 @@ static int test_plan_material_sources() {
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	const SessionView &view = project.view();
+	// Once imported, the scan types the chunk file by its chunk headers (S13 A8): a material chunk.
+	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::MaterialChunk);
 	size_t resolved = 0;
 	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di"))
 		if ((edge->value == "ready.mdt" || edge->value == "field.nq8") && view.findings.graph->resolve(*edge) == ReferenceStatus::Present)

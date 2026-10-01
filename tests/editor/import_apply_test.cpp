@@ -12,7 +12,9 @@
 // by its cap holds a converter's files whole or not at all; the unsaved guard reads the plan the
 // dialog shows (S13 A3); and, with a packed game install (OPENNOVA_JO_DIR), a retail menu and
 // its stylesheet imported with the files they need, against what is known of them without the
-// planner.
+// planner, then built, one texture changed and built again (S13 A8: one file read, one archive
+// written).
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -28,6 +30,8 @@
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -74,7 +78,7 @@ ActionOutcome preview(ProjectSession &session, const std::vector<std::string> &p
 
 // Import of `imports` (the rows kept): what the request and its operation came to (S13 A3: the
 // import's write refuses or fails once the request that started it is done).
-ActionOutcome import(ProjectSession &session, const std::vector<ImportSource> &imports, bool replace = false) {
+ActionOutcome import(ProjectSession &session, const std::vector<ImportChoice> &imports, bool replace = false) {
 	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
 	request.imports = imports;
 	request.replace = replace;
@@ -143,7 +147,7 @@ static int test_apply_closure() {
 	const ImportNotFollowed *screens = not_followed(plan, ReferenceKind::MenuScreen);
 	TEST_EXPECT(screens && screens->count == 1 && screens->first == "a.mnu" && plan.not_followed.size() == 1);
 
-	const std::vector<ImportSource> kept = selected_sources(plan);
+	const std::vector<ImportChoice> kept = selected_sources(plan);
 	TEST_EXPECT(kept.size() == 5);
 	const ActionOutcome imported = import(project.session, kept);
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
@@ -173,8 +177,8 @@ static int test_apply_unchecked() {
 	const std::string art = closure_folder(project.dir);
 	const SessionView &view = project.view();
 	preview(project.session, {art + "/a.mnu"});
-	std::vector<ImportSource> kept;
-	for (const ImportSource &source : selected_sources(*view.dialogs.import_preview.plan))
+	std::vector<ImportChoice> kept;
+	for (const ImportChoice &source : selected_sources(*view.dialogs.import_preview.plan))
 		if (source.path != art + "/LOGO.TGA") kept.push_back(source);
 	TEST_EXPECT(kept.size() == 4);
 	const ActionOutcome imported = import(project.session, kept);
@@ -196,7 +200,7 @@ static int test_apply_changed() {
 	const std::string root = project.root();
 	const SessionView &view = project.view();
 	preview(project.session, {art + "/a.mnu"});
-	const std::vector<ImportSource> shown = selected_sources(*view.dialogs.import_preview.plan);
+	const std::vector<ImportChoice> shown = selected_sources(*view.dialogs.import_preview.plan);
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga") +
 	                                                                                     go_to("b.mnu", "B")) +
 	                                                                    window("STATIC", "KEEP", image("new.tga")))));
@@ -226,7 +230,7 @@ static int test_apply_changed() {
 	TEST_EXPECT(editor_test::write_text(more + "/c.mnu", screen("C", window("STATIC", "GO", font("fc")))) &&
 	            editor_test::write_text(more + "/fc.fnt", "fnt"));
 	preview(project.session, {more + "/c.mnu"});
-	const std::vector<ImportSource> with_font = selected_sources(*view.dialogs.import_preview.plan);
+	const std::vector<ImportChoice> with_font = selected_sources(*view.dialogs.import_preview.plan);
 	TEST_EXPECT(with_font.size() == 2);
 	std::error_code ec;
 	fs::remove(more + "/fc.fnt", ec);
@@ -318,7 +322,7 @@ static int test_apply_reads_the_disk() {
 	const SessionView &view = project.view();
 	preview(project.session, {art + "/a.mnu"});
 	TEST_EXPECT(view.dialogs.import_preview.plan->rows.size() == 1 && view.dialogs.import_preview.plan->rows[0].name == "a.mnu");
-	const std::vector<ImportSource> shown = selected_sources(*view.dialogs.import_preview.plan);
+	const std::vector<ImportChoice> shown = selected_sources(*view.dialogs.import_preview.plan);
 	std::error_code ec;
 	fs::remove(root + "/fonts/arial99.fnt", ec); // outside the editor: no rescan
 	TEST_EXPECT(!ec && view.project.scan->find("arial99.fnt"));
@@ -366,7 +370,7 @@ static int test_apply_guard_reads_the_shown_plan() {
 	const ImportPlanRow *row = row_named(*view.dialogs.import_preview.plan, "items.def");
 	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected &&
 	            row->destination == "defs/items.def");
-	const std::vector<ImportSource> shown = selected_sources(*view.dialogs.import_preview.plan);
+	const std::vector<ImportChoice> shown = selected_sources(*view.dialogs.import_preview.plan);
 	std::error_code ec;
 	fs::remove(loose, ec);
 	TEST_EXPECT(!ec);
@@ -507,7 +511,7 @@ static int test_apply_cap_keeps_groups() {
 	project.session.run_operations();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(plan.truncated && plan.rows.size() == 999 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
-	std::vector<ImportSource> every;
+	std::vector<ImportChoice> every;
 	for (const std::string &path : paths) every.push_back({path, {}});
 	const auto before = snapshot(root);
 	const ActionOutcome unplanned = import(project.session, every);
@@ -590,6 +594,44 @@ static int test_apply_retail_menu() {
 	}
 	std::printf("editor_import retail: %zu files imported, %zu references to files resolved\n", plan.rows.size(), references);
 	TEST_EXPECT(references > 0);
+
+	// S13 A8: the imported project built (the required files the import did not bring made), every
+	// file read once; built again with one imported texture's bytes changed, that file alone read,
+	// resource.pff written and the two other archives linked from the last build; a third time with
+	// nothing changed, the same build and no file read. The project's files are dated a while ago (a
+	// file written within the settle window is read by every build until it settles).
+	editor_test::create_missing_files(project.session);
+	TEST_EXPECT(editor_test::backdate_tree(project.root(), std::chrono::hours(1)));
+	const ProjectPaths paths = ProjectPaths::for_root(project.root());
+	const std::string out = project.dir.file("builds");
+	const auto build = [&]() {
+		return run_build(plan_build(paths, *view.project.scan, *view.project.requirements, {}), out);
+	};
+	const BuildReport first = build();
+	for (const Diagnostic &d : first.diagnostics) std::printf("editor_import retail build: %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(first.ok && first.files_hashed > plan.rows.size());
+	std::string texture;
+	for (const ImportPlanRow &row : plan.rows)
+		if (texture.empty() && row.kind == AssetKind::Texture) texture = project.root() + "/" + row.destination;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(!texture.empty() && read_file_bytes(texture, bytes, error) && bytes.size() > 64);
+	if (bytes.size() > 64) bytes.back() ^= 0x01; // a pixel's byte: the file reads as it did
+	TEST_EXPECT(write_file_atomic(texture, bytes.data(), bytes.size(), error) &&
+	            editor_test::backdate(texture, std::chrono::minutes(50)));
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	const BuildReport second = build();
+	TEST_EXPECT(second.ok && second.build_id != first.build_id && second.files_hashed == 1);
+	TEST_EXPECT(second.archives_written == std::vector<std::string>{"resource.pff"} &&
+	            second.archives_linked == std::vector<std::string>({"language.pff", "localres.pff"}));
+	const BuildReport third = build();
+	TEST_EXPECT(third.ok && third.reused_existing && third.files_hashed == 0);
+	std::printf("editor_import retail: built %zu files (%llu bytes); one texture changed: %zu file read (%llu bytes), "
+	            "%zu archive written, %zu linked; unchanged: %zu read\n",
+	            first.files_hashed, static_cast<unsigned long long>(first.bytes_hashed), second.files_hashed,
+	            static_cast<unsigned long long>(second.bytes_hashed), second.archives_written.size(),
+	            second.archives_linked.size(), third.files_hashed);
 	return 0;
 }
 

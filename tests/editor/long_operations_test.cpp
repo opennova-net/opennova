@@ -300,7 +300,7 @@ static int test_project_scan_steps() {
 	}
 	const AssetScan imports = scan_project_assets(ProjectPaths::for_root(roots.back()), document_of(roots.back()));
 	const AssetEntry *logo = imports.find("logo.png"), *pcx = imports.find("logo.pcx"), *plain = imports.find("plain.png");
-	TEST_EXPECT(logo && logo->kind == AssetKind::ImageSource && pcx && pcx->imported_from == "art/logo.png" && plain &&
+	TEST_EXPECT(logo && logo->kind == AssetKind::ImportSource && pcx && pcx->imported_from == "art/logo.png" && plain &&
 	            plain->kind == AssetKind::Texture);
 	TEST_EXPECT(std::any_of(imports.diagnostics.begin(), imports.diagnostics.end(),
 	                        [](const Diagnostic &d) { return d.code() == "import.orphan_record"; }));
@@ -749,7 +749,7 @@ static int test_stale_import_refused() {
 	            v.dialogs.import_preview.open && v.dialogs.import_preview.plan->rows.empty());
 	s.session.run_operations();
 	TEST_EXPECT(v.dialogs.import_preview.plan->rows.size() == 2);
-	std::vector<ImportSource> shown;
+	std::vector<ImportChoice> shown;
 	for (const ImportPlanRow &row : v.dialogs.import_preview.plan->rows)
 		if (row.selected) shown.push_back(row.source);
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", menu("two.tga")));

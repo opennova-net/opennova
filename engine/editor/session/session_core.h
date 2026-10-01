@@ -207,8 +207,9 @@ public:
 
 	// The build as an operation (BuildOperation), `then_play` when a Play waits on it; each build a
 	// directory under `out_dir` ("" the project's .opennova/build/play; a relative one taken from
-	// the project's folder; one inside the project but in its cache or its export folder refused).
-	void start_build(bool then_play, const std::string &out_dir = std::string());
+	// the project's folder; one inside the project but in its cache or its export folder refused);
+	// `rehash`, every file read again, the build cache set aside (BuildPlan::rehash).
+	void start_build(bool then_play, const std::string &out_dir = std::string(), bool rehash = false);
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
 	// the game started on it when a Play waits and it is good.
 	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, bool then_play);

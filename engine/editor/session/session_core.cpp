@@ -663,7 +663,7 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(bool then_play, const std::string &out_dir) {
+void SessionCore::start_build(bool then_play, const std::string &out_dir, bool rehash) {
 	if (then_play && play().refused()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
@@ -691,8 +691,9 @@ void SessionCore::start_build(bool then_play, const std::string &out_dir) {
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	const BuildPlan plan =
+	BuildPlan plan =
 			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
+	plan.rehash = rehash;
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot
@@ -700,11 +701,11 @@ void SessionCore::start_build(bool then_play, const std::string &out_dir) {
 	// lives in the session's slot, so the session outlives every call.
 	ProtectedDirs protected_dirs = play().protected_dirs(output_root);
 	// The build lands under the cache by default, which keeps itself out of the modder's
-	// repository; a cache that cannot be made fails the build's own first step, which says why.
-	if (out_dir.empty()) {
-		std::string cache_error;
-		ensure_project_cache_dir(paths_, cache_error);
-	}
+	// repository, and keeps its hash cache there wherever it lands (BuildPlan::hash_cache); a cache
+	// that cannot be made fails the build's own first step when it lands there, which says why, and
+	// otherwise only leaves every file to be hashed.
+	std::string cache_error;
+	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
 	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, then_play));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
@@ -735,7 +736,8 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		} else {
 			note("Built " + shown_path(result.build_dir, paths_.root) + " (" + std::to_string(result.archives_written.size()) +
 			     " archive(s) written, " + std::to_string(result.archives_reused.size()) + " reused, " +
-			     std::to_string(result.loose_written.size()) + " loose file(s))");
+			     std::to_string(result.loose_written.size()) + " loose file(s); " + std::to_string(result.files_hashed) +
+			     " file(s) hashed)");
 			view_.activity.status = "Build finished.";
 		}
 	} else {

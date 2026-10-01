@@ -60,7 +60,8 @@ void test_runtime_launch_flags_parse() {
          "--lan-join", "192.168.10.120:32770", "--lan-port", "32768", "--LAN-GAMETYPE",
          "0x10020", "--lan-mode", "3", "--lan-max-players", "16", "--callsign", "Host",
          "--spectator", "--spectator-password", " watch me ", "--integrity-profile",
-         "retail", "--capture-pcap", "C:/cap/s.pcapng", "--mcp-port", "8975"});
+         "retail", "--capture-pcap", "C:/cap/s.pcapng", "--mcp-port", "8975", "--Working-Dir",
+         " C:/p/.opennova/run/1 "});
     CHECK(f.mission == "00TRa.bms");
     CHECK(f.lan_host == "ASH_I5A.BMS");
     CHECK(f.lan_join == "192.168.10.120:32770");
@@ -74,9 +75,12 @@ void test_runtime_launch_flags_parse() {
     CHECK(f.integrity_profile == "retail");
     CHECK(f.capture_pcap == "C:/cap/s.pcapng");
     CHECK(f.mcp_port == 8975);
+    // The directory a source run was started in (ADR 0046 S13 A8: the editor's run directory).
+    CHECK(f.working_dir == "C:/p/.opennova/run/1");
     // Absent flags read their sentinels.
     const LaunchFlags none = parse_launch_flags({"game.exe"});
     CHECK(none.mission.empty() && none.lan_host.empty() && none.lan_join.empty());
+    CHECK(none.working_dir.empty() && parse_launch_flags({"--working-dir"}).working_dir.empty());
     CHECK(none.lan_port == 0 && none.lan_gametype == -1 && none.lan_mode == 0);
     CHECK(none.lan_max_players == 0 && none.mcp_port == 0);
     CHECK(!none.spectator && none.spectator_password.empty());

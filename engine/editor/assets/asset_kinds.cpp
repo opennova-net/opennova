@@ -17,8 +17,10 @@ constexpr const char *kAiProfile[] = {".aip", nullptr};
 // A model's normal map made ahead is an .mdt: a TGA the object loader decodes as it does a
 // .tga [orig: Texture_LoadByNameWithChannel @ 0x58B66F..0x58B6E6; Texture_LoadAndRegister @
 // 0x58B80E..0x58B881], no DDS sibling taken for it [orig: Texture_LoadAsNormalMap @ 0x58C480]
-// (renderer::material_texture_source).
-constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", nullptr};
+// (renderer::material_texture_source). A PNG is one too: retail's menu loader decodes it [orig:
+// CTextureManager_LoadOrFindTexture @ 0x654980 -> load_png_from_file @ 0x6654d0], so one with no
+// import record packs as it is (one with its record is an ImportSource: scan_project_assets).
+constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", ".png", nullptr};
 constexpr const char *kRawBin[] = {".bin", nullptr};
 constexpr const char *kMapProject[] = {".npj", ".npz", nullptr};
 constexpr const char *kTerrainPolyData[] = {".cpt", nullptr};
@@ -28,13 +30,13 @@ constexpr const char *kDialogBank[] = {".dbf", nullptr};
 constexpr const char *kScript[] = {".wac", nullptr};
 constexpr const char *kOtherDefs[] = {".def", nullptr};
 constexpr const char *kStringTableCoo[] = {".coo", nullptr};
+constexpr const char *kNovaWorldScreen[] = {".mnx", nullptr};
 constexpr const char *kVideo[] = {".bik", nullptr};
 constexpr const char *kPlayerSave[] = {".sav", nullptr};
 constexpr const char *kShader[] = {".fx", nullptr};
 // assets.cd is read before any archive mounts, as game.cfg is (docs/required-resources.md).
 constexpr const char *kConfig[] = {".cfg", ".ini", ".ssc", ".cd", nullptr};
 constexpr const char *kText[] = {".txt", nullptr};
-constexpr const char *kImageSource[] = {".png", nullptr};
 
 // A row built up column by column, so each row names only what it sets; the slot is always
 // stated.
@@ -67,12 +69,6 @@ struct Kind {
 		out.row.document = type;
 		return out;
 	}
-	// An importer's source: its outputs pack, never the source.
-	constexpr Kind source() const {
-		Kind out = *this;
-		out.row.import_source = true;
-		return out;
-	}
 	constexpr Kind names_files() const {
 		Kind out = *this;
 		out.row.names_files = true;
@@ -101,9 +97,9 @@ struct Kind {
 };
 
 constexpr AssetKindRow kRows[] = {
-	// A file of no kind the game knows packs into resource.pff with the art (S13 A8 stops
-	// packing it).
-	Kind(AssetKind::Unknown, "unknown", "Unknown file", ArchiveSlot::Resource).row,
+	// A file of no kind the game knows: the game never asks for one, so the build leaves it out
+	// (S13 A8; it packed into resource.pff with the art before).
+	Kind(AssetKind::Unknown, "unknown", "Unknown file", ArchiveSlot::None).row,
 	Kind(AssetKind::Archive, "archive", "Archive", ArchiveSlot::None).extensions(kArchive).row,
 	Kind(AssetKind::Model, "model", "Model", ArchiveSlot::Resource)
 	        .runtime("object_model")
@@ -134,6 +130,11 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kTexture)
 	        .new_name("newtexture.tga")
 	        .row,
+	// No name gives it: a model's chunk row reads the file it names as a chunk container whatever
+	// the name [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590] (renderer::load_material_chunk),
+	// so a file no rule types by its name is one when its bytes hold one (classify_asset, the scan's
+	// peek at its chunk headers); it packs with the art.
+	Kind(AssetKind::MaterialChunk, "material_chunk", "Material chunk", ArchiveSlot::Resource).row,
 	Kind(AssetKind::Font, "font", "Font", ArchiveSlot::Localres)
 	        .runtime("font")
 	        .folder("fonts")
@@ -298,6 +299,13 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kStringTableCoo)
 	        .folder("strings")
 	        .row,
+	// The NovaWorld screens' markup the game reads loose from its folder, where retail ships them:
+	// the error page [orig: "nw_error.mnx" @ 0x558449] and the login's start page, whose STARTUPURL
+	// the gate substitutes (docs/net/novaworld-net-re.md D-NET-31) (S13 A8: no kind before, so the
+	// build left them out).
+	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Loose)
+	        .extensions(kNovaWorldScreen)
+	        .row,
 	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose).extensions(kVideo).row,
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
 	        .extensions(kPlayerSave)
@@ -319,12 +327,10 @@ constexpr AssetKindRow kRows[] = {
 	        .extensions(kText)
 	        .edited_by(DocumentTypeId::Text)
 	        .row,
-	// A PNG is a source only while its import record is there (scan_project_assets): its outputs,
-	// named after it, land in resource.pff as textures.
-	Kind(AssetKind::ImageSource, "image_source", "Image source", ArchiveSlot::None)
-	        .extensions(kImageSource)
-	        .source()
-	        .row,
+	// No name gives it: the scan gives it to a file an importer converts while its import record
+	// is there (scan_project_assets), whatever the file's name would make it (a .png a texture).
+	// Its outputs, named after it, pack by their own kinds; it never packs.
+	Kind(AssetKind::ImportSource, "import_source", "Import source", ArchiveSlot::None).row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -364,16 +370,20 @@ constexpr bool new_name_fits(const AssetKindRow &row) {
 }
 
 // One row per kind, at the kind's own index; no two rows share a token, a runtime token, a file
-// name or an extension (a name gives one kind); an import source packs nowhere, and every other
-// kind but an archive somewhere; a kind is edited by a type the registry has; a new file's name
-// ends with one of the kind's extensions where it lists them.
+// name or an extension (a name gives one kind); an archive, an import source and a file of no
+// kind the game knows pack nowhere, every other kind somewhere; no name gives an import source or
+// a material chunk (the scan does, by a record beside the file or by its bytes); a kind is edited
+// by a type the registry has; a new file's name ends with one of the kind's extensions where it
+// lists them.
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKindRow &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
-		const bool packs_nowhere =
-		        row.archive_slot == ArchiveSlot::None && row.kind != AssetKind::Archive;
-		if (row.import_source != packs_nowhere) return false;
+		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
+		                      row.kind == AssetKind::Unknown;
+		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
+		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
+		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
 		if (!row.folder || !row.new_name || !new_name_fits(row)) return false;
 		for (size_t j = 0; j < i; ++j) {
@@ -435,7 +445,8 @@ bool asset_kind_packed(AssetKind kind) {
 }
 
 bool archive_name_limit_binds(AssetKind kind) {
-	return asset_kind_row(kind).archive_slot != ArchiveSlot::Loose;
+	const ArchiveSlot slot = asset_kind_row(kind).archive_slot;
+	return kind == AssetKind::ImportSource || (slot != ArchiveSlot::Loose && slot != ArchiveSlot::None);
 }
 
 } // namespace opennova::editor

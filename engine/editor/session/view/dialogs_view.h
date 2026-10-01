@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/assets/import_source.h>
+#include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/value.h>
 #include <editor/session/editor_request.h>
@@ -46,8 +46,8 @@ struct DialogsView {
 	struct ImportPreview {
 		ImportPreview(); // the plan made, empty
 		bool open = false;
-		std::vector<ImportSource> choices;
-		std::vector<ImportSource> roots;
+		std::vector<ImportChoice> choices;
+		std::vector<ImportChoice> roots;
 		bool with_dependencies = false;
 		std::shared_ptr<const ImportPlan> plan;
 		bool changed = false;

@@ -78,7 +78,7 @@ inline EditorRequest preview_import(std::vector<std::string> paths, bool with_de
 	request.with_dependencies = with_dependencies;
 	return request;
 }
-inline EditorRequest plan_import(std::vector<ImportSource> imports, bool with_dependencies) {
+inline EditorRequest plan_import(std::vector<ImportChoice> imports, bool with_dependencies) {
 	EditorRequest request = of(EditorRequestKind::PlanImport);
 	request.imports = std::move(imports);
 	request.with_dependencies = with_dependencies;
@@ -89,7 +89,7 @@ inline EditorRequest set_import_dependencies(bool with_dependencies) {
 	request.with_dependencies = with_dependencies;
 	return request;
 }
-inline EditorRequest import_files(std::vector<ImportSource> imports, bool replace = false) {
+inline EditorRequest import_files(std::vector<ImportChoice> imports, bool replace = false) {
 	EditorRequest request = of(EditorRequestKind::ImportFiles);
 	request.imports = std::move(imports);
 	request.replace = replace;
@@ -116,10 +116,12 @@ inline EditorRequest preview_install_import(
 
 // --- the build and Play ------------------------------------------------------------------------
 
-// The project packed into a build under `out_dir` ("" the project's .opennova/build/play).
-inline EditorRequest build(std::string out_dir = std::string()) {
+// The project packed into a build under `out_dir` ("" the project's .opennova/build/play); with
+// `rehash`, every file read again, the build cache set aside.
+inline EditorRequest build(std::string out_dir = std::string(), bool rehash = false) {
 	EditorRequest request = of(EditorRequestKind::Build);
 	request.out_dir = std::move(out_dir);
+	request.rehash = rehash;
 	return request;
 }
 inline EditorRequest play() {

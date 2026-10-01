@@ -546,7 +546,7 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	preview.with_dependencies = true;
 	const std::string menu = "menu" + stretch + ".mnu";
 	const std::string found_in = "the folder " + folder;
-	const auto row = [&](State state, const std::string &name, AssetKind kind, const ImportSource &source,
+	const auto row = [&](State state, const std::string &name, AssetKind kind, const ImportChoice &source,
 	                     const std::string &destination) {
 		ImportPlanRow out;
 		out.state = state;
@@ -558,9 +558,9 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 		out.found_in = state == State::NotFound ? std::string() : found_in;
 		return out;
 	};
-	const ImportSource chosen{folder + "/" + menu, "", false, false};
-	const ImportSource clips{folder + "/walk.o3a", "", false, false};
-	const auto beside = [&folder](const std::string &name) { return ImportSource{folder + "/" + name, "", false, true}; };
+	const ImportChoice chosen{folder + "/" + menu, "", false, false};
+	const ImportChoice clips{folder + "/walk.o3a", "", false, false};
+	const auto beside = [&folder](const std::string &name) { return ImportChoice{folder + "/" + name, "", false, true}; };
 	preview.roots = {chosen, clips};
 	ImportPlanRow table = row(State::Selected, "CHECK.adm", AssetKind::AnimationMap, clips, "anims/CHECK.adm");
 	ImportPlanRow clip = row(State::Selected, "walk.bad", AssetKind::Animation, clips, "anims/walk.bad");
@@ -573,7 +573,7 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	rival.source = {"C:/Games/Joint Operations", "ARIAL99.FNT", true, false};
 	rival.differs = true;
 	font.rivals = {rival};
-	ImportPlanRow gone = row(State::NotFound, "gone" + stretch + ".tga", AssetKind::Texture, ImportSource(), std::string());
+	ImportPlanRow gone = row(State::NotFound, "gone" + stretch + ".tga", AssetKind::Texture, ImportChoice(), std::string());
 	gone.needed_by = {menu, "MAIN/KEEP/Appearance 1", "value", ReferenceKind::MenuTexture, "gone" + stretch + ".tga", -1};
 	ImportPlanRow logo = row(State::Found, "logo.tga", AssetKind::Texture, beside("logo.tga"), "logo.tga");
 	logo.needed_by = {menu, "MAIN/LOGO/Appearance 1", "value", ReferenceKind::MenuTexture, "logo.tga", -1};

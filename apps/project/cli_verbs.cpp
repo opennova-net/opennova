@@ -717,7 +717,7 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// --out is a path on the command line, taken from where the command runs (the request's
 	// out_dir, relative, would be taken from the project's folder).
 	const std::string out = from_here(args.value("--out"));
-	const JsonValue outcome = send(cli, editor::request::build(out));
+	const JsonValue outcome = send(cli, editor::request::build(out, args.has("--rehash")));
 	JsonValue answer;
 	if (!answer_of(cli, row, answer)) return 2;
 	const JsonValue &operation = at(answer, "operation");
@@ -747,9 +747,12 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	if (build.get_bool("reused_existing", false))
 		std::fprintf(cli.out, "unchanged: %s\n", dir.c_str());
 	else
-		std::fprintf(cli.out, "built %s (%zu archive(s) written, %zu reused, %zu loose file(s))\n", dir.c_str(),
-		             count_at(build, "archives_written"), count_at(build, "archives_reused"),
-		             count_at(build, "loose_written"));
+		std::fprintf(cli.out,
+		             "built %s (%zu archive(s) written, %zu reused, %zu of them linked, %zu loose file(s); "
+		             "%zu file(s) hashed)\n",
+		             dir.c_str(), count_at(build, "archives_written"), count_at(build, "archives_reused"),
+		             count_at(build, "archives_linked"), count_at(build, "loose_written"),
+		             count_at(build, "files_hashed"));
 	std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
 	return 0;
 }
@@ -1004,7 +1007,7 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--with-dependencies" },
 	                                     { "--dry-run" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
-constexpr CliOption kBuildOptions[] = { { "--out", "a directory" } };
+constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
 using V = CliVerb;
 
@@ -1058,11 +1061,11 @@ constexpr VerbRow kRows[] = {
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\"]}")
 	        .row,
-	Verb(V::Build, "build", "<dir> [--out <dir>]", kBuildRequests, kDir, run_build,
+	Verb(V::Build, "build", "<dir> [--out <dir>] [--rehash]", kBuildRequests, kDir, run_build,
 	     "pack the project into a game directory the runtime boots (default:\n"
 	     "<dir>/.opennova/build/play/<build-id>; --out from where the command runs, refused\n"
-	     "inside the project but in its cache or export folder) (--json: the state query's\n"
-	     "import and operation)")
+	     "inside the project but in its cache or export folder); --rehash reads every file\n"
+	     "again, the build cache set aside (--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

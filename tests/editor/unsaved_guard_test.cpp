@@ -85,7 +85,7 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		fs::create_directories(fs::path(loose).parent_path(), ec);
 		fs::copy_file(saved, loose, fs::copy_options::overwrite_existing, ec);
 		std::vector<Diagnostic> diagnostics;
-		request.imports = list_import_sources({loose}, diagnostics);
+		request.imports = list_import_choices({loose}, diagnostics);
 		request.replace = true; // replace the project's file of the name
 		break;
 	}

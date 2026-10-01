@@ -13,7 +13,6 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
-#include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
@@ -156,15 +155,6 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		                         : problem == FileNameProblem::Path ? CoreFinding::RenamePath
 		                                                            : CoreFinding::RenameName;
 		plan.refusals.push_back(refusal(code, message, asset->relative_path));
-	} else if (archive_name_limit_binds(asset->kind) &&
-			!logical_name_fits_archive(new_name)) {
-		// check_project_file_name takes Unknown for a kind not decided yet (an import before its
-		// bytes are read); this file's is decided, none the game knows, and the build packs it all
-		// the same (route_asset), so the archives' name limit binds it as any packed kind's.
-		plan.refusals.push_back(refusal(CoreFinding::RenameName,
-				"'" + new_name +
-						"' does not fit the game's archives: names are up to 16 characters.",
-				asset->relative_path));
 	} else if (extension_of(new_name) != extension_of(asset->logical_name)) {
 		plan.refusals.push_back(refusal(CoreFinding::RenameKind, "Keep the extension: a file's kind comes from it.", asset->relative_path));
 	} else if (const AssetEntry *taken = scan.find(new_name); taken && taken != asset) {
@@ -868,6 +858,16 @@ void RenameTransaction::commit_file_rename() {
 		fs::copy_file(old_path, new_path, ec);
 		if (ec) {
 			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + ec.message(), plan.path));
+			return;
+		}
+		// A copy keeps the last write of the file it came from, so a cache that knows a file by its
+		// size and last write (the build's, the import's) would take it for the file that held the
+		// name before (two of a size swapping names): it is dated now (S13 A8).
+		std::string dated;
+		if (!refresh_last_write(new_path.generic_string(), dated)) {
+			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + dated, plan.path));
+			std::error_code ignored;
+			fs::remove(new_path, ignored);
 			return;
 		}
 		// The import record travels with its source (a stray record already at the new
