@@ -357,11 +357,21 @@ struct ClientEntityState {
 	// a non-idle (flags bit0 clear) arrival, queues the record as pending;
 	// everything else commits directly (current = decoded, pending = 0).
 	// Retail's own pending sentinel is 0, ambiguity included. -1 current =
-	// no record arbitrated yet. The wire-dead park (+0x2C0) needs no field:
-	// anim_state_id retains the raw byte and the frozen-row presentation
-	// fallback shows it, which is the parked byte's visible outcome.
+	// no record arbitrated yet.
 	int16_t net_anim_current = -1;
 	int16_t net_anim_pending = 0;
+	// The remote death edge's inputs. A wire-dead record on a live row parks
+	// its anim byte in deathAnimStateId (+0x2C0) and zeroes Health; the S2C
+	// 0x13 parks its word there and zeroes Health too; the mover's death edge
+	// then commits the parked state (or the generic 174, or 175 afloat) on the
+	// next tick and latches Flags bit 2 (rm_entity_flags). An alive player
+	// record raises Health again (the health-class apply), and the respawn
+	// edge clears both [orig: parks @0x4c10f5 / @0x4c0509 / @0x42ebdf; Health
+	// zero @0x4c10fb / @0x4c1027 / @0x4c04e1 / @0x42ebd6; the edges
+	// Entity_UpdateInfantryPlayerBody @0x4b4bf1..0x4b4cdb and
+	// Entity_UpdateInfantryAI @0x4b9c51..0x4b9d3e].
+	int16_t net_death_anim = 0;
+	bool net_health_zero = false;
 	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
 	uint8_t stance_sound_state = 0; // player body entity+0x304
 	uint8_t radio_request = 0; // entity+885, receive event 0x6D

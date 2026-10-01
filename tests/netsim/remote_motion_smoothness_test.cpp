@@ -329,14 +329,16 @@ bool run_respawn_snaps_without_glide() {
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
 	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
 	view.tick_remote_motion(0xFFFF);
-	// Dead record (wire bit1). Position must not move (dead path skips it).
+	// Dead record (wire bit1) 50 m off: it STAGES like any record and the
+	// chase snaps past 2 m [orig: stores @0x4c0fe4..0x4c0ffc ahead of the dead
+	// test @0x4c1005; org2 snap @0x4B431F, no dead gate before it].
+	const int32_t corpse_x = ax + (50 << 16);
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
-	           nw::encode_frame_update(
-	                   player_frame(handle, ax, ay, az, ax + (50 << 16), 0x02)));
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, corpse_x, 0x02)));
 	view.tick_remote_motion(0xFFFF);
 	const int32_t death_x = view.state().find(handle)->x;
-	if (!expect(std::abs(death_x - ax) <= 512,
-	            "a wire-dead record does not move the pose")) return false;
+	if (!expect(std::abs(death_x - corpse_x) <= 4096,
+	            "a wire-dead record stages and the chase snaps to it")) return false;
 	// Respawn 80 m away: the dead->alive edge snaps in one fold.
 	const int32_t spawn_x = ax + (80 << 16);
 	view.apply(nw::s2c::PER_FRAME_UPDATE,
@@ -1258,10 +1260,14 @@ bool run_root_transition_blends() {
 	return ok;
 }
 
-// The freeze/respawn lifecycle (the review-confirmed critical): a dead
-// record DISARMS the channel - presentation falls back to the wire byte,
-// the corpse stops walking, and the respawn re-arms fresh.
-bool run_dead_row_disarms_and_respawn_rearms() {
+// The death/respawn lifecycle: a dead record on a live row PARKS its byte and
+// zeroes Health; the next mover tick's death edge commits the parked state and
+// latches Flags bit 2, so the channel plays the death clip and the corpse's
+// walk root blends out instead of walking on; the respawn re-arms fresh.
+// [orig: park @0x4c10f5; the edge Entity_UpdateInfantryPlayerBody
+// @0x4b4bf1..0x4b4cdb; AnimMap_UpdateDualChannels @0x4B41C9 at the top of
+// the next pass]
+bool run_dead_row_takes_its_death_clip_and_respawn_rearms() {
 	ns::ClientReplicaPipeline view(class_of);
 	view.set_remote_motion_mode(true);
 	WalkSource src;
@@ -1285,13 +1291,30 @@ bool run_dead_row_disarms_and_respawn_rearms() {
 			opennova::world::anim_state::kDeathFire;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
 	const ns::ClientEntityState *es = view.state().find(handle);
-	bool ok = expect(es->rm_state == -1,
-	                 "the dead record disarms the channel (presentation falls "
-	                 "back to the wire death byte)");
-	const int32_t corpse_x = es->x;
-	for (int t = 0; t < 24; ++t) view.tick_remote_motion(0xFFFF);
-	ok &= expect(std::abs(view.state().find(handle)->x - corpse_x) <= 512,
-	             "the corpse never walks by root motion");
+	bool ok = expect(es->rm_state == opennova::world::anim_state::kWalkForward &&
+	                         es->net_death_anim ==
+	                                 opennova::world::anim_state::kDeathFire &&
+	                         es->net_health_zero,
+	                 "the dead record parks its byte on the live row (the channel "
+	                 "plays on)");
+	view.tick_remote_motion(0xFFFF);
+	es = view.state().find(handle);
+	ok &= expect(es->net_anim_current == opennova::world::anim_state::kDeathFire &&
+	                     (es->rm_entity_flags & 0x2u) != 0u && es->net_death_anim == 0,
+	             "the death edge commits the parked state and latches the bit");
+	view.tick_remote_motion(0xFFFF);
+	ok &= expect(view.state().find(handle)->rm_state ==
+	                     opennova::world::anim_state::kDeathFire,
+	             "the channel takes the death clip on the next tick");
+	int32_t last_x = view.state().find(handle)->x;
+	int32_t last_step = 0;
+	for (int t = 0; t < 24; ++t) {
+		view.tick_remote_motion(0xFFFF);
+		last_step = view.state().find(handle)->x - last_x;
+		last_x = view.state().find(handle)->x;
+	}
+	ok &= expect(std::abs(last_step) <= 64,
+	             "the walk root blends out: the corpse stops walking");
 	nw::FrameUpdate alive = player_frame(handle, ax, ay, az, ax + (60 << 16));
 	alive.records[0].player.anim_state_id =
 			opennova::world::anim_state::kWalkForward;
@@ -1303,6 +1326,85 @@ bool run_dead_row_disarms_and_respawn_rearms() {
 	                     re->rm_blend_weight >= 1.0f,
 	             "the respawned row re-arms fresh (no blend out of the "
 	             "pre-death primary)");
+	ok &= expect((re->rm_entity_flags & 0x2u) == 0u && !re->net_health_zero,
+	             "the respawn clears the dead latch and raises Health");
+	return ok;
+}
+
+// A corpse keeps following its own wire records: the host's dying body falls
+// and slides, every dead record stages that pose, and neither body pass tests
+// the dead bit ahead of its chase [orig: player stages @0x4c0fe4..0x4c0ffc
+// before the dead jz @0x4c1005; org2 top gate bit0-only @0x4b411e].
+bool run_corpse_follows_its_records() {
+	ns::ClientReplicaPipeline view(class_of);
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x004A;
+	seed_row(view, handle, kPlayerType);
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	view.apply(nw::s2c::PER_FRAME_UPDATE,
+	           nw::encode_frame_update(player_frame(handle, ax, ay, az, ax)));
+	for (int t = 0; t < 4; ++t) view.tick_remote_motion(0xFFFF);
+	// The body slides 1/16 u per tick while dead; records every 8 ticks.
+	const int32_t slide = 4096;
+	int32_t true_x = ax;
+	for (int t = 0; t < 64; ++t) {
+		true_x += slide;
+		if (t % 8 == 0) {
+			nw::FrameUpdate dead = player_frame(handle, ax, ay, az, true_x, 0x02);
+			dead.records[0].player.anim_state_id =
+					opennova::world::anim_state::kDeathPungi;
+			view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
+		}
+		view.tick_remote_motion(0xFFFF);
+	}
+	const ns::ClientEntityState *es = view.state().find(handle);
+	std::fprintf(stderr, "[corpse] x=%d true=%d\n", es->x, true_x);
+	bool ok = expect(es->x - ax > 32 * slide,
+	                 "the corpse follows its dead records (no freeze at the "
+	                 "first dead record)");
+	ok &= expect(std::abs(es->x - true_x) <= 12 * slide,
+	             "the corpse trails the host's body by under a record gap");
+	ok &= expect(es->net_anim_current == opennova::world::anim_state::kDeathPungi,
+	             "the dead body plays its death state");
+	return ok;
+}
+
+// The S2C 0x13 kill zeroes an organic row's Health and parks its word as the
+// death state; the next mover tick's death edge commits it before any dead
+// compact arrives [orig: NapiNPClientMsg_EntityDeath @0x42ebd6 / @0x42ebdf;
+// Entity_UpdateInfantryAI death edge @0x4b9937..0x4b9d3e].
+bool run_entity_death_parks_the_death_anim() {
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		return type_id == 0x0777 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	const uint16_t handle = 0x0033;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, handle, 0x0777);
+	nw::FrameUpdate fu = header_only_frame();
+	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+	nw::FrameUpdateRecord r;
+	r.handle = handle;
+	r.type_id = 0x0777;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.anim_byte = opennova::world::anim_state::kIdle;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF);
+	const int16_t death = opennova::world::anim_state::kDeathBulletBase + 6;
+	const std::vector<uint8_t> body = {
+			static_cast<uint8_t>(handle & 0xFF), static_cast<uint8_t>(handle >> 8),
+			static_cast<uint8_t>(death & 0xFF), static_cast<uint8_t>(death >> 8)};
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	const ns::ClientEntityState *es = view.state().find(handle);
+	bool ok = expect(es->net_health_zero && es->net_death_anim == death,
+	                 "0x13 zeroes Health and parks the death state");
+	view.tick_remote_motion(0xFFFF);
+	es = view.state().find(handle);
+	ok &= expect(es->net_anim_current == death && (es->rm_entity_flags & 0x2u) != 0u,
+	             "the death edge commits the 0x13 state and latches the bit");
 	return ok;
 }
 
@@ -1336,7 +1438,9 @@ int main() {
 	ok &= run_root_rotation_follows_heading();
 	ok &= run_infantry_root_motion_dead_reckons();
 	ok &= run_root_transition_blends();
-	ok &= run_dead_row_disarms_and_respawn_rearms();
+	ok &= run_dead_row_takes_its_death_clip_and_respawn_rearms();
+	ok &= run_corpse_follows_its_records();
+	ok &= run_entity_death_parks_the_death_anim();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

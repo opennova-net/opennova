@@ -25,6 +25,14 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 	if (ClientEntityState *row = state_.find(handle_packed)) {
 		row->health_word = 0;
 		row->health_known = true;
+		// An organic row's Health reaches zero and the 0x13 word is its
+		// deathAnimStateId (+0x2C0): the mover's death edge takes both on its
+		// next tick (client_state.h net_death_anim) [orig: @0x42ebd6 /
+		// @0x42ebdf; Entity_KillBySlotId Health = 0 @0x42bd33].
+		if (row->cls == EntityClass::Player || row->cls == EntityClass::Infantry) {
+			row->net_health_zero = true;
+			if (!item_state) row->net_death_anim = value;
+		}
 		state_.mark_changed();
 	}
 	EntityDeathEvent death;

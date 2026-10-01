@@ -671,6 +671,12 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// is presentation state, not clip state (a clipless wire state must not
 	// freeze the torso mid-twist).
 	if (es.cls == EntityClass::Player) row_leg_chase(es, key);
+	// The org2 dead tail: a latched-dead body's view yaw follows the leg-chased
+	// body heading every tick (the local player's look is its own motor's)
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d30..0x4b4d4c].
+	if (es.cls == EntityClass::Player && !is_self &&
+			(es.rm_entity_flags & world::kEntityFlagDead) != 0)
+		es.heading_bam = es.rm_body_heading;
 	world::RootMotionFrame frame;
 	bool have = false;
 	if (es.rm_blend_weight >= 1.0f) {
@@ -963,6 +969,26 @@ static void row_chase_step_and_cap(ClientEntityState &es, int16_t progress) {
 	}
 }
 
+// The organic death edge's mover-side halves (client_replica_body_arbitration
+// .cpp replica_death_edge): the gate and latch run at the witnessed point after
+// the chase, ahead of this tick's integrate and resolve, which read the latch
+// (the ledge edge's 0x10A002 mask); the edge's new current state lands after
+// the tail, so the channel takes it on the next tick, as retail's top-of-pass
+// AnimMap update does [orig: AnimMap_UpdateDualChannels @0x4B41C9 precedes
+// the edge @0x4b4bf1].
+static int16_t row_death_edge(ClientEntityState &es) {
+	if (!es.net_health_zero || (es.rm_entity_flags & world::kEntityFlagDead) != 0)
+		return -1;
+	return replica_death_edge(es);
+}
+
+static void commit_death_state(ClientEntityState &es, int16_t state) {
+	if (state < 0) return;
+	es.net_anim_current = state;
+	es.net_anim_pending = 0;
+	es.net_anim_pending_boundary = -1;
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	const uint32_t rm_key = ++rm_tick_counter_;
@@ -1036,12 +1062,13 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 		// [orig: Entity_UpdatePool1Slot calls the mover @0x4B8E53 ungated].
 		if (es.cls != EntityClass::Vehicle && es.state_flags_known &&
 				(es.state_flags & 0x01u) != 0u) continue;
-		// A dead row holds its death pose until the respawn snap (D-NET-66);
-		// vehicles mark the wreck with the dead-pose bit instead of bit 1.
-		const uint8_t dead_bit = es.cls == EntityClass::Vehicle
-				? kVehicleFlagDeadPose
-				: static_cast<uint8_t>(world::kEntityFlagDead);
-		if (es.state_flags_known && (es.state_flags & dead_bit) != 0u) continue;
+		// A vehicle wreck holds its dead-pose snap. A dead ORGANIC keeps its
+		// mover: neither body pass tests Flags & 2 ahead of the chase, so a
+		// corpse follows its own wire records (the host's dying body falls and
+		// slides) and its death clip's root [orig: org2 bit0-only top gate
+		// @0x4b411e; org1 @0x4b9a03].
+		if (es.cls == EntityClass::Vehicle && es.state_flags_known &&
+				(es.state_flags & kVehicleFlagDeadPose) != 0u) continue;
 		// A world-side family mover owns this row's motion (§5.38e B-facet: the
 		// embedding sim stages, predicts, and mirrors back). The freezes above
 		// run first so carried/not-ready/dead rows hold even when flagged.
@@ -1147,7 +1174,9 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				if (es.radio_request_seconds != 0) --es.radio_request_seconds;
 				else es.radio_request = 0;
 			}
+			const int16_t death_state = row_death_edge(es);
 			organic_chase_tail(es, is_self);
+			commit_death_state(es, death_state);
 			break;
 		}
 		case EntityClass::Infantry: {
@@ -1197,7 +1226,9 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				if (step < -69273360) step = -69273360;
 				es.heading_bam = io::bam_add(es.heading_bam, step);
 			}
+			const int16_t death_state = row_death_edge(es);
 			organic_chase_tail(es, is_self);
+			commit_death_state(es, death_state);
 			break;
 		}
 		case EntityClass::Vehicle: {
@@ -1892,9 +1923,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// infantry @0x4C0320 stages +0x234 after the same attach call;
 		// Entity_TryAttachOrDetach @0x436610 detaches on bone 0].
 		bool ground = false;
-		// The free-standing landing gates a ground form shares: the wire-dead
-		// position skip and the respawn live snap.
-		bool skip_land = false;
+		// The free-standing landing's respawn live snap, which a ground form
+		// shares.
 		bool force_live_snap = false;
 		// The child's compact revision after this record: a later record for
 		// the same child in this fold supersedes the sample.
@@ -2234,6 +2264,23 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 					es.anim_channel_ratio,
 					rec.cls == EntityClass::Player, wire_dead, row_was_dead,
 					respawned_this_record);
+			// The death edge's inputs (client_state.h net_death_anim). A dead
+			// record zeroes Health and, on a live row, parks its byte; the
+			// respawn edge clears the latch and raises Health; an alive player
+			// record re-derives Health from its class byte (never zero)
+			// [orig: @0x4c10f5/@0x4c10fb, @0x4c1027, infantry @0x4c04e1/
+			// @0x4c0509; Entity_ResetToSpawnState Flags &= ~2 @0x4b97b0 and
+			// Entity_RaiseHealthToMax @0x4b97b4; Entity_SetHealthFromDifficultyByte
+			// @0x4c11ba, the local floor at 1 @0x4c11ce].
+			if (wire_dead) {
+				es.net_health_zero = true;
+				if (!row_was_dead) es.net_death_anim = es.anim_state_id;
+			} else if (respawned_this_record) {
+				es.rm_entity_flags &= ~world::kEntityFlagDead;
+				es.net_health_zero = false;
+			} else if (rec.cls == EntityClass::Player) {
+				es.net_health_zero = false;
+			}
             // [orig: NetPacket_SerializePlayerState @ 0x4C09C0, stance stores @ 0x4C11D7..0x4C1242]
             // The committed FSM state determines MoveOrder, including when
             // the just-received animation was deferred into the pending slot.
@@ -2249,17 +2296,16 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			++es.compact_revision;
 		}
 		// Root-channel lifecycle at the organic freeze/respawn edges: a frozen
-		// row (dead/bit0/carried) never root-ticks, so its channel is DISARMED
-		// — presentation falls back to the per-record wire anim byte exactly
-		// as retail applies it [orig: @0x4c1153] (the death/seat clips
-		// dispatch); the respawn edge re-arms fresh so the resume never
-		// blends out of the pre-death primary. (The one-shot phase seed now
-		// rides the arbitration's direct-commit leg above — net_anim_ratio.)
+		// row (bit0/carried) never root-ticks, so its channel is DISARMED —
+		// presentation falls back to the per-record wire anim byte exactly as
+		// retail applies it [orig: @0x4c1153] (the seat clips dispatch); the
+		// respawn edge re-arms fresh so the resume never blends out of the
+		// pre-death primary. A dead row is not frozen: its mover runs and the
+		// death edge commits the death clip to the channel. (The one-shot
+		// phase seed rides the arbitration's direct-commit leg — net_anim_ratio.)
 		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
 			const bool row_frozen =
-					(has_state_flags &&
-							(state_flags &
-									(0x01u | world::kEntityFlagDead)) != 0u) ||
+					(has_state_flags && (state_flags & 0x01u) != 0u) ||
 					es.carrier_handle != wire_handle::kInvalid;
 			if (row_frozen || respawned_this_record) row_channel_disarm(es);
 		}
@@ -2288,14 +2334,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		if (ground_carrier != wire_handle::kInvalid) {
 			pending_carrier_poses.push_back(PendingCarrierPose{
 					rec.handle, ground_carrier, cx, cy, cz, ground_local_heading,
-					true, remote_motion_mode_ && wire_dead, force_live_snap,
-					es.compact_revision});
+					true, force_live_snap, es.compact_revision});
 		}
-		if (!skip_pos && !(remote_motion_mode_ && wire_dead)) {
-			// Retail's client read skips the position path entirely for a
-			// wire-dead record [orig: the case-2 dead branch -> LABEL_151, no
-			// position store]; the snap fold keeps its historical apply
-			// (host/SP loopback rows refresh at full rate).
+		if (!skip_pos) {
+			// A wire-dead record stages like any other: the player read stores
+			// the target cluster BEFORE it tests the dead bit, and the infantry
+			// read stages after its dead/respawn legs, so a corpse's records
+			// keep steering its mover [orig: player stores @0x4c0fe4..0x4c0ffc,
+			// the dead test's jz @0x4c1005; infantry @0x4c0689..0x4c06aa].
 			const int32_t wx = fu.anchor_x + network_decompress_fixedpoint(cx);
 			const int32_t wy = fu.anchor_y + network_decompress_fixedpoint(cy);
 			const int32_t wz = fu.anchor_z + network_decompress_fixedpoint(cz);
@@ -2315,7 +2361,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// world sample (heading = carrier + local, the transform's out[3])
 			// is staged and the row's own mover chases it; the deck ride
 			// follows the ground link between records.
-			if (child == nullptr || carrier == nullptr || pending.skip_land ||
+			if (child == nullptr || carrier == nullptr ||
 					child->compact_revision != pending.compact_revision)
 				continue;
 			const WorldPose w = network_transform_local_to_world(
