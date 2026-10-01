@@ -1014,7 +1014,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 			entry.set("choices", std::move(choices));
 		}
 		// Open: any value typed, where the field offers choices, whether or not the record knows
-		// any of its own (a model with no registers).
+		// any of its own (a part index on a model whose LOD 0 has no parts).
 		if (schema.open_choices && (field.own_choices || !schema.choices.empty()))
 			entry.set("open_choices", boolean(true));
 		if (!field.scope.empty() && (field.reference != ReferenceKind::None || field.defines != ReferenceKind::None))

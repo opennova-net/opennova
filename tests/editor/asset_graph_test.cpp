@@ -2824,7 +2824,8 @@ static int test_record_references() {
 				n += edge->scope == of && graph.resolve(*edge) == ReferenceStatus::Present ? 1 : 1000;
 		return n;
 	};
-	TEST_EXPECT(record_edges(file, ReferenceKind::ModelRegister) == 4 && record_edges(file, ReferenceKind::ModelFrame) == 1);
+	TEST_EXPECT(record_edges(file, ReferenceKind::ModelRegister) == 4 &&
+	            record_edges(file, ReferenceKind::ModelFrame) == 1);
 	TEST_EXPECT(graph.symbols_of_kind(ReferenceKind::ModelRegister).size() == 8 &&
 	            graph.symbols_of_kind(ReferenceKind::ModelFrame).size() == 6);
 	for (const GraphEdge *edge : graph.missing())
@@ -2868,7 +2869,8 @@ static int test_record_references() {
 	TEST_EXPECT(model->load(project.file(file), file, AssetKind::Model, "jo", error));
 	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
 	graph.update(project.paths, project.document, project.scan, open);
-	const NodeAddress gunyaw{model->model_row()->id, node_kind(ModelKind::Register), model->model_row()->collections[4][1]};
+	const NodeAddress gunyaw{model->model_row()->id, node_kind(ModelKind::Register),
+	                         model->model_row()->collections[4][1]};
 	Edit remove;
 	remove.operation = EditOperation::Remove;
 	remove.address = gunyaw;
@@ -2912,7 +2914,8 @@ static int test_retail_record_references() {
 	size_t models = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
-		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.document.target_game.c_str()));
+		game.set_scr_policy(
+		        opennova::gameprofile::gameprofile_scr_policy_for_code(project.document.target_game.c_str()));
 		TEST_EXPECT(game.mount_game(install, expansion) && game.has_mounted_archive());
 		for (const opennova::VfsFileLocation &location : game.list_files()) {
 			const std::string &name = location.logical_name;
@@ -2923,7 +2926,8 @@ static int test_retail_record_references() {
 			if (!game.read_file(name, bytes) || bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0)
 				continue; // not a model the game's loader reads either
 			const std::string folder = expansion.empty() ? std::string("base") : expansion;
-			TEST_EXPECT(editor_test::write_bytes(project.file("model/" + folder + "/" + std::to_string(models) + "/" + name), bytes));
+			const std::string placed = "model/" + folder + "/" + std::to_string(models) + "/" + name;
+			TEST_EXPECT(editor_test::write_bytes(project.file(placed), bytes));
 			++models;
 		}
 	}
@@ -2955,7 +2959,8 @@ static int test_retail_record_references() {
 	Seen seen({"model"});
 	const auto step = [&](const char *what) {
 		const GraphUpdate update = graph.update(project.paths, project.document, project.scan, open);
-		const std::string different = fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
+		const std::string different =
+		        fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
 		std::printf("  %s: %zu files patched, %zu edges resolved of %zu%s%s\n", what, graph.stats().files_patched,
 		            graph.stats().edges_resolved, graph.edge_count(),
 		            different.empty() ? "" : "; FAIL, differs from a fresh graph in ", different.c_str());

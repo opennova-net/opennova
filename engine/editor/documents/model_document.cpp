@@ -660,7 +660,7 @@ bool ModelDocument::set_field(Node &node, const NodeAddress &address, const std:
 	}
 	const ModelRow &row = static_cast<const ModelRow &>(node);
 	const RecordPath at = path_in(row, address.child);
-	const bool drawn = at.size() == 1 && at[0].index < row.materials.size() &&
+	const bool drawn = at.size() == 1 && at[0].collection == kMaterials && at[0].index < row.materials.size() &&
 	                   model_document_detail::material_is_drawn(row, row.materials[at[0].index].source);
 	uint32_t flags = 0;
 	const bool known = model_document_detail::shader_flags(tag->c_str(), flags);

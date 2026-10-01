@@ -1,5 +1,6 @@
 #include "inspector_window.h"
 
+#include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/findings_index.h>
@@ -14,7 +15,7 @@
 
 #include <algorithm>
 #include <cfloat>
-#include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 #include <imgui.h>
@@ -269,10 +270,12 @@ bool picks_reference(const FieldUse &field) {
 	return field.schema->type == FieldType::Text ||
 	       reference_row(field.reference).resolution == ReferenceResolution::Record;
 }
-// What a name picked sets the field to: the text, or the index a Record reference's name is.
+// What a name picked sets the field to: the text, or the index a Record reference's name is (a
+// name that is no index stays the text, which the field refuses).
 Value picked_value(const FieldUse &field, const std::string &picked) {
 	if (field.schema->type == FieldType::Text) return picked;
-	return int64_t(std::strtoll(picked.c_str(), nullptr, 10));
+	const std::optional<int> index = strutil::parse_int(picked);
+	return index ? Value(int64_t(*index)) : Value(picked);
 }
 
 // The width a reference's tools take beside its value: Pick (a text's), the widest word and

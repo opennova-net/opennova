@@ -59,11 +59,11 @@
 // type renumbering them in the same step), its removal and each undo giving the bytes back.
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <cstdio>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <typeinfo>
@@ -1192,9 +1192,9 @@ void check_record_references(const DocumentType &type, const Fixture &fixture, D
 			const NodeAddress record = found == set.end() ? NodeAddress() : found->second;
 			out[{edge.address.child ? edge.address.child : edge.address.row, edge.field}] =
 			        record.child ? record.child : record.row;
-			const size_t index = size_t(std::strtoull(edge.value.c_str(), nullptr, 10));
-			if (record.row && index < lowest) {
-				lowest = index;
+			const std::optional<int> index = opennova::strutil::parse_int(edge.value);
+			if (record.row && index && size_t(*index) < lowest) {
+				lowest = size_t(*index);
 				if (first) *first = record;
 			}
 		}

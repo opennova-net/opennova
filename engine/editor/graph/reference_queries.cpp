@@ -1,7 +1,7 @@
 #include <editor/graph/reference_queries.h>
 
 #include <algorithm>
-#include <cstdlib>
+#include <optional>
 
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
@@ -120,10 +120,12 @@ std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const Fi
 		const FieldSchema &schema = *field.schema;
 		out.erase(std::remove_if(out.begin(), out.end(),
 		                         [&](const ReferenceChoice &choice) {
-			                         const int64_t index = std::strtoll(choice.name.c_str(), nullptr, 10);
+			                         const std::optional<int> index = strutil::parse_int(choice.name);
 			                         int64_t named = 0;
-			                         return (schema.ranged && (double(index) < schema.min || double(index) > schema.max)) ||
-			                                !record_index(field.reference, Value(index), named);
+			                         if (!index) return true;
+			                         const double at = double(*index);
+			                         return (schema.ranged && (at < schema.min || at > schema.max)) ||
+			                                !record_index(field.reference, Value(int64_t(*index)), named);
 		                         }),
 		          out.end());
 		return out;

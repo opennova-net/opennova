@@ -472,8 +472,8 @@ int record_references() {
 	for (const GraphEdge &edge : extracted.edges)
 		if (edge.kind == ReferenceKind::ModelRegister || edge.kind == ReferenceKind::ModelFrame) {
 			TEST_EXPECT(edge.scope == "rig.3di" && edge.source == "rig.3di");
-			named[std::string(edge.kind == ReferenceKind::ModelFrame ? "frame " : "") + document.kind_token(edge.address.kind) +
-			      " " + edge.field] = edge.value;
+			const std::string frame = edge.kind == ReferenceKind::ModelFrame ? "frame " : "";
+			named[frame + document.kind_token(edge.address.kind) + " " + edge.field] = edge.value;
 		}
 	TEST_EXPECT(named == (std::map<std::string, std::string>{{"material rgbgen.param", "2"},
 	                                                         {"light param", "3"},
@@ -483,7 +483,8 @@ int record_references() {
 	size_t registers = 0, frames = 0;
 	for (const GraphSymbol &symbol : extracted.symbols) {
 		if (symbol.kind == ReferenceKind::ModelRegister)
-			TEST_EXPECT(symbol.name == std::to_string(registers++) && symbol.scope == "rig.3di" && symbol.field.empty());
+			TEST_EXPECT(symbol.name == std::to_string(registers++) && symbol.scope == "rig.3di" &&
+			            symbol.field.empty());
 		if (symbol.kind == ReferenceKind::ModelFrame) TEST_EXPECT(symbol.name == std::to_string(frames++));
 	}
 	TEST_EXPECT(registers == 4 && frames == 3);
@@ -731,8 +732,8 @@ int field_metadata() {
 		TEST_EXPECT(document->apply(set(panm, "matrix", from), error));
 		const FieldUse matrix = use_of(panm, "matrix");
 		const std::vector<ReferenceChoice> rows = picker(panm, "matrix");
-		TEST_EXPECT(matrix.reference == ReferenceKind::ModelFrame && !matrix.own_choices && !matrix.schema->open_choices &&
-		            schema(panm, "matrix").choices.empty());
+		TEST_EXPECT(matrix.reference == ReferenceKind::ModelFrame && !matrix.own_choices &&
+		            !matrix.schema->open_choices && schema(panm, "matrix").choices.empty());
 		TEST_EXPECT(rows.size() == 2 && rows[0].name == "1" && rows[1].name == "2" &&
 		            rows[1].status == ReferenceStatus::Present && rows[1].file == "house.3di");
 		TEST_EXPECT(document->apply(set(panm, "matrix", int64_t(2)), error));
@@ -744,7 +745,8 @@ int field_metadata() {
 	// registers they number (no record of the model); a light's it swaps through the table it lacks.
 	TEST_EXPECT(document->model_row()->registers.empty());
 	const NodeAddress first_material{model, kMaterial, document->model_row()->collections[1][0]};
-	TEST_EXPECT(document->apply({set(first_material, "rgbgen.style", int64_t(0x71)), set(light, "style", int64_t(0x71))}, error));
+	TEST_EXPECT(document->apply(
+	        {set(first_material, "rgbgen.style", int64_t(0x71)), set(light, "style", int64_t(0x71))}, error));
 	TEST_EXPECT(use_of(first_material, "rgbgen.param").reference == ReferenceKind::None &&
 	            use_of(light, "param").reference == ReferenceKind::ModelRegister);
 	document->undo();
@@ -791,7 +793,8 @@ int field_metadata() {
 	Value value;
 	TEST_EXPECT(radius.read_only && radius.unit == "m" && document->get(header, "max_radius", value) &&
 	            std::get<double>(value) > 0.0);
-	std::printf("metadata: units, components, rows, index choices; the unwitnessed words shown only\n");
+	std::printf("metadata: units, components, rows, part choices and the record pickers; the unwitnessed "
+	            "words shown only\n");
 	return 0;
 }
 

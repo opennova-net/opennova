@@ -1001,7 +1001,8 @@ bool MnuDocument::read(const Node &row, const NodeAddress &address, const std::s
 		return mnu::schema_get(mnu::schema_screen(const_cast<mnu::Screen &>(screen_of(row).screen)), field, out);
 	}
 	Located at;
-	return address.kind != kScreen && locate(*this, screen_of(row), address.child, at) && mnu::schema_get(at.record, field, out);
+	return address.kind != kScreen && locate(*this, screen_of(row), address.child, at) &&
+	       mnu::schema_get(at.record, field, out);
 }
 
 int MnuDocument::window_index(const NodeAddress &address) const {
@@ -1486,7 +1487,10 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 		ids = &screen.roots;
 	} else {
 		Located at;
-		if (!locate(*this, screen, edit.parent, at)) { error = "The record to paste into no longer exists."; return false; }
+		if (!locate(*this, screen, edit.parent, at)) {
+			error = "The record to paste into no longer exists.";
+			return false;
+		}
 		if (!window_list_of(at.record, list)) { error = "Windows go into a window or a screen."; return false; }
 		owner = at.record;
 		ids = &at.ids->lists[list];

@@ -33,7 +33,6 @@
 // base to its rules (a snapshot and a blocked document take no edit, undo or redo, a blocked one
 // no save), holding no records.
 #include <algorithm>
-#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -44,6 +43,7 @@
 #include <variant>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
 #include <editor/model/id_list.h>
@@ -793,8 +793,9 @@ class IndexDocument : public Document {
 public:
 	explicit IndexDocument(bool renumbers = true) : renumbers_(renumbers) {}
 	const std::vector<RecordKindRow> &kinds() const override {
-		static const std::vector<RecordKindRow> table = {
-		        {kBank, "bank", "Bank", "Add bank", true}, {kRegister, "register", "Register"}, {kUser, "user", "User"}};
+		static const std::vector<RecordKindRow> table = {{kBank, "bank", "Bank", "Add bank", true},
+		                                                 {kRegister, "register", "Register"},
+		                                                 {kUser, "user", "User"}};
 		return table;
 	}
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override {
@@ -841,8 +842,8 @@ protected:
 		else return false;
 		return true;
 	}
-	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows, std::shared_ptr<const FileState> &,
-	           std::vector<SourceIssue> &, Diagnostic &error) override {
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
+	           std::shared_ptr<const FileState> &, std::vector<SourceIssue> &, Diagnostic &error) override {
 		std::istringstream in(std::string(bytes.begin(), bytes.end()));
 		std::string tag, word;
 		std::shared_ptr<IndexBank> bank;
@@ -854,8 +855,8 @@ protected:
 			} else if (tag == "R" && bank) {
 				bank->registers.push_back(word);
 				bank->collections[0].push_back(0);
-			} else if (tag == "U" && bank) {
-				bank->users.push_back(std::strtoll(word.c_str(), nullptr, 10));
+			} else if (tag == "U" && bank && opennova::strutil::parse_int(word)) {
+				bank->users.push_back(*opennova::strutil::parse_int(word));
 				bank->collections[1].push_back(0);
 			} else {
 				error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Not a bank.", path());
@@ -1950,7 +1951,8 @@ static int test_record_index() {
 	const Node &alpha = *document.row(fake.alpha.row);
 	const auto path_of = [&](const NodeAddress &record) {
 		std::vector<std::pair<uint32_t, uint32_t>> out;
-		for (const Document::PathStep &step : document.path_in(alpha, record.child)) out.push_back({step.collection, step.index});
+		for (const Document::PathStep &step : document.path_in(alpha, record.child))
+			out.push_back({step.collection, step.index});
 		return out;
 	};
 	using Steps = std::vector<std::pair<uint32_t, uint32_t>>;
@@ -2007,14 +2009,15 @@ static int test_record_index() {
 }
 
 // S13 D8: a collection whose records others of their file name by index (a Record reference: the
-// fake's registers, the ModelRegister reference's collection, which its users name). An edit that moves the collection's records has the type renumber what names them
-// in the same step: a Remove in the middle shifts the later references, its undo giving both back
-// and its redo both again; a Remove of a register a user names is refused, nothing committed; a
-// Move, a Duplicate and an Add at the front renumber; an Add at the end moves no index and asks the
-// type nothing; a batch's later edit names the registers as the renumbering left them; the index
-// counts every register of the file in its order, across rows, so a row moved renumbers too; a type
-// that keeps the base's renumber_references refuses an edit that moves an index; and a type whose
-// schema names no Record kind has no collection to renumber.
+// fake's registers, the ModelRegister reference's collection, which its users name). An edit that
+// moves the collection's records has the type renumber what names them in the same step: a Remove
+// in the middle shifts the later references, its undo giving both back and its redo both again; a
+// Remove of a register a user names is refused, nothing committed; a Move, a Duplicate and an Add
+// at the front renumber; an Add at the end moves no index and asks the type nothing; a batch's
+// later edit names the registers as the renumbering left them; the index counts every register of
+// the file in its order, across rows, so a row moved renumbers too; a type that keeps the base's
+// renumber_references refuses an edit that moves an index; and a type whose schema names no
+// Record kind has no collection to renumber.
 static int test_record_references() {
 	const std::string text = "B one\nR r0\nR r1\nR r2\nR r3\nU 0\nU 2\nU 3\nU 2\n";
 	IndexDocument document;

@@ -583,7 +583,8 @@ int every_list() {
 	// D8): the window's path, then the ITEMS row's list and index.
 	const Document::RecordPath item_path = document.path_in(*document.row(item.row), item.child);
 	const Document::RecordPath back_path = document.path_in(*document.row(back.row), back.child);
-	TEST_EXPECT(!back_path.empty() && item_path.size() == back_path.size() + 1 && item_path[back_path.size()].index == 0);
+	TEST_EXPECT(!back_path.empty() && item_path.size() == back_path.size() + 1 &&
+	            item_path[back_path.size()].index == 0);
 	// ... which a button does not read (flagged, still written).
 	FieldSchema text;
 	for (const FieldSchema &field : document.fields(item.kind))

@@ -20,9 +20,9 @@ struct GraphEdge;
 // reads instead of switching on it. A new namespace (a mission's, a sound's) is one
 // ReferenceKind value and one row here; so is an index into a collection of the same file (S13
 // D8: a mission's entity, waypoint, group, layer or area index, a sound bank's chain tables, a
-// dialog's def id index), a Record row naming the collection by its record kind's token (and the
-// values naming none), which the document core renumbers on an edit that moves the collection's
-// records (Document::renumber_references).
+// dialog bank's def id index), a Record row naming the collection by its record kind's token (and
+// the values naming none), which the document core renumbers on an edit that moves the
+// collection's records (Document::renumber_references).
 
 // Where a name of the kind resolves.
 enum class ReferenceResolution {
