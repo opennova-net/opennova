@@ -35,7 +35,7 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
 
 	for (const AssetEntry &asset : scan.entries) {
-		if (!asset_is_packable(asset)) {
+		if (asset.kind == AssetKind::Archive) {
 			plan.diagnostics.push_back(make_finding(
 			        CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
 			        asset.logical_name + " is an archive; the build packs the project's files itself, so "

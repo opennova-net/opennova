@@ -19,10 +19,6 @@ const char *archive_slot_file_name(ArchiveSlot slot) {
 	return "";
 }
 
-bool asset_is_packable(const AssetEntry &asset) {
-	return asset.kind != AssetKind::Archive;
-}
-
 ArchiveSlot route_asset(const AssetEntry &asset) {
 	return route_asset(asset.kind);
 }

@@ -13,12 +13,12 @@ namespace opennova::editor {
 // "language.pff", "localres.pff", "resource.pff"; "" for Loose and None.
 const char *archive_slot_file_name(ArchiveSlot slot);
 
-// The slot for an asset, which its kind decides (AssetKindRow::archive_slot). An Archive-kind
-// file (a .pff inside the project) has none: the build reports it and leaves it out. An import
-// source has none either: a PNG never packs itself, and its outputs, named after it, land in the
-// resource archive as textures.
+// The slot for an asset, which its kind decides (AssetKindRow::archive_slot). Three kinds have
+// none, so no build packs them (asset_kind_packed): an Archive-kind file (a .pff inside the
+// project), which the build reports and leaves out; an import source, which never packs itself,
+// its outputs, named after it, landing where their own kinds' rows say; and a file of no kind the
+// game knows, which the game never asks for (S13 A8).
 ArchiveSlot route_asset(AssetKind kind);
 ArchiveSlot route_asset(const AssetEntry &asset);
-bool asset_is_packable(const AssetEntry &asset);
 
 } // namespace opennova::editor

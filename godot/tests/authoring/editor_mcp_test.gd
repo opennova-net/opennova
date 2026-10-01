@@ -692,6 +692,10 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_eq(String(play.get("state", "")), "running", str(play))
 	var port := int(play.get("mcp_port", 0))
 	assert_gt(port, 0)
+	# S13 A8: the game runs in a run directory of its own, its log there, the build only read.
+	var run_dir := String(play.get("run_dir", ""))
+	assert_true(run_dir.ends_with("/.opennova/run/1"), str(play))
+	assert_eq(String(play.get("log_file", "")), run_dir.path_join("session.log"), str(play))
 	var game: RefCounted = null
 	var deadline := Time.get_ticks_msec() + 30000
 	while Time.get_ticks_msec() < deadline:
@@ -735,6 +739,9 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_true(bool(last.get("exited_on_its_own", false)), "Exit quits the game")
 	var output := await _output()
 	assert_true(output.contains("The game exited."), output)
+	assert_true(FileAccess.file_exists(run_dir.path_join("session.log")), "the log stays in the run directory")
+	assert_false(FileAccess.file_exists(String(built.get("dir", "")).path_join("session.log")),
+			"nothing is written into the build")
 
 
 ## The stylesheet document (S9i) through the endpoint: menu_style.mns opens as its lines,
@@ -1120,6 +1127,7 @@ func test_png_import_through_the_endpoint() -> void:
 		assert_true(bool(imported[0].get("ok", false)))
 		assert_eq(imported[0].get("outputs", []).size(), 1)
 		assert_true(FileAccess.file_exists(root.path_join(String(imported[0]["outputs"][0]))))
+		assert_eq(imported[0].get("inputs", null), [], "the image importer reads its source alone")
 	assert_true(FileAccess.file_exists(root.path_join("logo.png.import")), "importing writes the record beside the source")
 	var problems := await _query("problems", {"severities": ["error"]})
 	assert_eq(int(problems.get("shown", -1)), 0, str(problems))
@@ -1127,10 +1135,15 @@ func test_png_import_through_the_endpoint() -> void:
 	assert_eq(int(symbols.get("count", -1)), 0)
 	var listed := await _query("files", {"limit": 200})
 	var names: Array[String] = []
+	var kinds := {}
 	for file in listed.get("files", []):
+		kinds[String(file["name"])] = String(file.get("kind", ""))
 		if bool(file.get("editable", false)):
 			names.append(String(file["name"]))
 	assert_does_not_have(names, "logo.png", "a source is not an editable file")
+	# S13 A8: an import source is its own kind while its record is there; a PNG with none, a texture.
+	assert_eq(kinds.get("logo.png", ""), "import_source", str(kinds))
+	assert_eq(kinds.get("plain.png", ""), "texture", str(kinds))
 	var again := await _call("editor_request", {"kind": "reimport", "force": true})
 	assert_true(bool(again.get("ok", false)), str(again))
 	assert_true(String(again.get("status", "")).contains("1 source"), str(again))
