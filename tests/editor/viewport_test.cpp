@@ -221,6 +221,7 @@ static int test_actions() {
 	FakeDevices devices;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Viewport Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 
 	// A menu opened: its viewport made as the Preview's target names it, no device until the Shell's
@@ -275,6 +276,7 @@ static int test_actions() {
 	bytes.push_back('\n');
 	TEST_EXPECT(editor_test::write_bytes(style, bytes));
 	session.handle(request::rescan());
+	session.run_operations();
 	from = device->taken.size();
 	devices.sync(session);
 	TEST_EXPECT(device->since(from) == (Actions{ ViewportAction::Rebuild }) && shown->configures() == 4);
@@ -296,6 +298,7 @@ static int test_actions() {
 	// edit only its overlays show.
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
 	devices.sync(session);
@@ -328,6 +331,7 @@ static int test_actions() {
 	devices.sync(session);
 	TEST_EXPECT(model->reads() == reads + 2 && !document->dirty());
 	session.handle(request::reload_document("models/armory.3di"));
+	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
 	devices.sync(session);
 	TEST_EXPECT(model->reads() == reads + 3 && model->status() == ViewportStatus::Ready);
@@ -369,9 +373,11 @@ static int test_clock() {
 	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Clock Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("main.mnu"));
 	session.handle(request::open_document("models/armory.3di"));
 	session.advance(0.25);
@@ -398,6 +404,7 @@ static int test_two_menus() {
 	FakeDevices devices;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Two Menus"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	devices.sync(session);
@@ -446,6 +453,7 @@ static int test_device_cache() {
 	FakeDevices devices;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Device Cache"));
+	session.run_operations();
 	const std::vector<uint8_t> armory = test_io::read_file(synth("armory.3di"));
 	std::vector<std::string> paths;
 	for (int i = 0; i < 5; ++i) {
@@ -453,6 +461,7 @@ static int test_device_cache() {
 		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/" + paths.back(), armory));
 	}
 	session.handle(request::rescan());
+	session.run_operations();
 	for (size_t i = 0; i < paths.size(); ++i) {
 		session.handle(request::open_document(paths[i]));
 		devices.sync(session);
@@ -507,6 +516,7 @@ static int test_envelope() {
 	FakeDevices devices;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Envelope"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	TEST_EXPECT(viewport_to_json(view, nullptr, ViewportKind::Menu, JsonPage()).get_string("reason", "") == "no_menu");
 	session.handle(request::open_document("main.mnu"));
@@ -551,6 +561,7 @@ static int test_envelope() {
 	// A model's: pixels, its camera with the field of view, its body's level, registers and animation.
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(viewport_to_json(view, nullptr, ViewportKind::Model, JsonPage()).get_string("reason", "") == "no_model");
 	session.handle(request::open_document("models/armory.3di"));
 	devices.sync(session);
@@ -597,6 +608,7 @@ static int test_requests() {
 	ProjectSession session(platform, preferences);
 	FakeDevices devices;
 	session.handle(request::new_project(dir.file("project"), "Requests"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -685,9 +697,11 @@ static int test_gestures() {
 	FakeDevices devices;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Gestures"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("layout.mnu"));
 	Document *menu = session.document_for("layout.mnu");
 	TEST_EXPECT(menu != nullptr);

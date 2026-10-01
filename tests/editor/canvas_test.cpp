@@ -19,8 +19,11 @@
 // (preview/model_canvas) over a real session's model viewport: F frames the selected marker, a
 // click selects a marker's record, a drag of it is one gesture ended once when its canvas is not
 // drawn, a drag elsewhere orbits and the wheel dollies (each a SetViewport of the viewport's camera,
-// which the session applies), and a press ends when the model's document goes. The views' wiring of
-// all this is tests/editor_ui's (the preview and workspace groups).
+// which the session applies), and a press ends when the model's document goes. Held while an
+// operation holds the documents (S13 A3), neither canvas raises an edit: a drag, a resize, the
+// arrows and an Arrange of the menu's, a marker's drag of the model's (it orbits), while a click
+// and Esc still select. The views' wiring of all this is tests/editor_ui's (the preview and
+// workspace groups).
 
 #include <algorithm>
 #include <cmath>
@@ -923,6 +926,45 @@ std::string synth(const char *name) {
 	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
 }
 
+// Held (S13 A3: `editable` false while an operation holds the documents, as the viewport's context
+// says from SessionView::allows): a drag of the selected BOX, a resize at its corner, the arrows and
+// an Arrange raise no edit; a click still selects, and Esc too. Editable again, the drag moves BOX.
+int test_menu_canvas_held() {
+	MenuRig rig;
+	TEST_EXPECT(rig.load(kLayoutMenu, "layout.mnu"));
+	if (!rig.frame.current)
+		return 1;
+	const MnuDocument &document = rig.document;
+	const NodeAddress main = named(document, "MAIN"), box = named(document, "BOX"),
+					  other = named(document, "OTHER");
+	rig.select(box, { box, other });
+	rig.frame.editable = false;
+	std::vector<Request> requests = rig.drag(200.0f, 150.0f, 40.0f, 21.0f);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	requests = rig.drag(300.0f, 200.0f, 13.0f, 7.0f);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	requests = rig.nudge(1, 0);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	menu_canvas_arrange(rig.frame, ArrangeOp::AlignLeft, rig.out);
+	TEST_EXPECT(rig.out.take().empty());
+	requests = rig.click(500.0f, 350.0f);
+	TEST_EXPECT((selections(requests) ==
+			std::vector<std::pair<NodeAddress, CanvasJoin>>{ { other, CanvasJoin::Replace } }) &&
+			count_of(requests, Request::Kind::Edits) == 0);
+	rig.select(box);
+	requests = rig.escape();
+	TEST_EXPECT((selections(requests) ==
+			std::vector<std::pair<NodeAddress, CanvasJoin>>{ { main, CanvasJoin::Replace } }));
+	rig.select(box);
+	rig.frame.editable = true;
+	requests = rig.drag(200.0f, 150.0f, 40.0f, 21.0f);
+	uint64_t gesture = 0;
+	size_t count = 0;
+	const std::vector<Edit> last = batches(requests, gesture, count);
+	TEST_EXPECT(count >= 1 && gesture != 0 && set_value(last, "position.left") == 144);
+	return 0;
+}
+
 int test_model_canvas() {
 	editor_test::TempProjectDir dir("opennova_editor_canvas_model");
 	NoProcess platform;
@@ -930,9 +972,11 @@ int test_model_canvas() {
 	ProjectSession session(platform, preferences);
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Canvas Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(
 			dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));
 	const auto *document =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
@@ -1070,6 +1114,36 @@ int test_model_canvas() {
 	canvas.end_frame(out);
 	TEST_EXPECT(out.take().empty());
 
+	// Held (S13 A3: `editable` false while an operation holds the documents, as the viewport's
+	// context says from SessionView::allows): the same drag of the selected marker takes no handle
+	// and edits nothing; it orbits the camera (a SetViewport of it, which the session applies).
+	{
+		ModelCanvasFrame held = frame;
+		held.editable = false;
+		const float before = follow()->camera().yaw;
+		const auto held_step = [&](const CanvasInput &input) {
+			canvas.follow(held, out);
+			canvas.input(held, input, model_canvas_under(held, input), out);
+		};
+		CanvasInput press = at(x, y);
+		press.keys.alt = true;
+		press.pressed = press.down = true;
+		held_step(press);
+		CanvasInput moved = at(x + 30.0f, y + 10.0f);
+		moved.keys.alt = true;
+		moved.down = true;
+		moved.delta = CanvasPoint{ 30.0f, 10.0f };
+		held_step(moved);
+		moved.down = false;
+		moved.delta = CanvasPoint();
+		held_step(moved);
+		canvas.end_frame(out);
+		const std::vector<Request> orbited = out.take();
+		TEST_EXPECT(count_of(orbited, Request::Kind::Edits) == 0 && serve(orbited) >= 1 &&
+				follow()->camera().yaw != before);
+		frame = frame_of();
+	}
+
 	// A drag away from the markers orbits the camera: a SetViewport of it per sample, no edit and
 	// no selection; the wheel dollies.
 	const float yaw = follow()->camera().yaw, distance = follow()->camera().distance;
@@ -1118,6 +1192,8 @@ int main() {
 	if (test_gesture_machine() != 0)
 		return 1;
 	if (test_menu_canvas() != 0)
+		return 1;
+	if (test_menu_canvas_held() != 0)
 		return 1;
 	if (test_menu_gestures_end() != 0)
 		return 1;

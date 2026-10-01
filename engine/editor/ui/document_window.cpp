@@ -124,8 +124,15 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// RevealRecord events its document was sent as it draws.
 		if (path == view.documents.active) {
 			if (const Document *records = records_of(*document)) draw_find(*records);
-			if (DocumentView *shown_view = view_for(*document)) shown_view->draw(workspace_, *document);
-			else ui_kit::empty_state("The editor has no view of this kind of file.");
+			if (DocumentView *shown_view = view_for(*document)) {
+				// Its record tools and cells are edits: the view held back while an operation
+				// holds the documents (S13 A3), as the session would refuse them.
+				ImGui::BeginDisabled(!view.allows(EditorRequestKind::EditRecord));
+				shown_view->draw(workspace_, *document);
+				ImGui::EndDisabled();
+			} else {
+				ui_kit::empty_state("The editor has no view of this kind of file.");
+			}
 		}
 		ImGui::EndTabItem();
 	}

@@ -164,8 +164,40 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	return renderer::material_texture_source(std::string(), type, {}).reader == renderer::MaterialTextureReader::Chunk;
 }
 
+std::vector<const AssetEntry *> AssetGraph::files_to_read(const AssetScan &scan,
+		const std::vector<std::shared_ptr<const DocumentBase>> &open) const {
+	std::unordered_set<std::string> records;
+	for (const auto &document : open)
+		if (document && records_of(*document)) records.insert(document->path());
+	std::vector<const AssetEntry *> out;
+	for (const AssetEntry &asset : scan.entries) {
+		if (!graph_reads_file(asset.kind, asset.logical_name) || records.count(asset.relative_path)) continue;
+		const uint32_t id = index_.find(asset.relative_path);
+		if (id != GraphIndex::kNone) {
+			const GraphSlot &slot = index_.slot(id);
+			// update() keeps a slot read from this file as it is (reused), whatever else it does.
+			if (slot.logical_name == asset.logical_name && slot.kind == asset.kind && slot.read && !slot.open &&
+					slot.size == asset.size_bytes && slot.modified == asset.modified_ticks)
+				continue;
+		}
+		out.push_back(&asset);
+	}
+	return out;
+}
+
+GraphReading AssetGraph::read_file(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset) {
+	GraphReading reading;
+	reading.logical_name = asset.logical_name;
+	reading.kind = asset.kind;
+	reading.size = asset.size_bytes;
+	reading.modified = asset.modified_ticks;
+	reading.ok = extract_from_asset(paths, project, asset, reading.content, reading.error);
+	return reading;
+}
+
 GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument &project,
-		const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open) {
+		const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open,
+		GraphReadings *read_ahead) {
 	stats_ = GraphStats();
 	Patch patch;
 	// The open record documents stand in for their files (another kind of document reads none).
@@ -232,7 +264,19 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		}
 		Extracted content;
 		Diagnostic error, failure;
-		const bool ok = extract_from_asset(paths, project, asset, content, error);
+		bool ok = false;
+		// A reading made ahead of this update, while the scan lists the file as it was read.
+		const auto ahead = read_ahead ? read_ahead->find(asset.relative_path) : GraphReadings::iterator();
+		if (read_ahead && ahead != read_ahead->end() && ahead->second.logical_name == asset.logical_name &&
+				ahead->second.kind == asset.kind && ahead->second.size == asset.size_bytes &&
+				ahead->second.modified == asset.modified_ticks) {
+			ok = ahead->second.ok;
+			content = std::move(ahead->second.content);
+			error = std::move(ahead->second.error);
+			read_ahead->erase(ahead);
+		} else {
+			ok = extract_from_asset(paths, project, asset, content, error);
+		}
 		if (!ok) {
 			++stats_.files_failed;
 			// A document type's validation reports a file of its kinds that does not load.

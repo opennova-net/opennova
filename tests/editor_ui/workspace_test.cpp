@@ -615,6 +615,7 @@ void test_project_settings() {
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
 	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string armory = v.project.root;
 	Ui ui;
@@ -712,6 +713,7 @@ void test_project_settings() {
 	CHECK(one(ui.drain(), EditorRequestKind::PickFile) != nullptr, "a Browse... pending");
 	CHECK(session.handle(request::new_project(dir.file("Harbor"), "Harbor")) && v.project.root != armory,
 	      "the editor MCP opens another project");
+	session.run_operations();
 	ui.frames(3);
 	CHECK(!modal_open("Project settings") && ui.drain().empty(), "the dialog closes with its project, raising nothing");
 	choose(ui, "File", {"Project settings..."});
@@ -753,6 +755,7 @@ void test_project_settings_two_applies() {
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
 	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	session.run_operations();
 	const SessionView &v = session.view();
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -1787,6 +1790,7 @@ void test_files_tree_kept() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Kept"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	Ui ui;
 	ui.windows.set_view(&session.view());
@@ -1827,6 +1831,7 @@ void test_files_tree_kept() {
 	const std::string readme = session.view().project.root + "/notes/readme.txt";
 	CHECK(editor_test::write_text(readme, "x"), "a file written");
 	session.handle(request::rescan());
+	session.run_operations();
 	ui.frames(2);
 	CHECK(window->rebuilds() > building && logged_frame(ui).find("readme.txt") != std::string::npos,
 	      "a file found anew: the tree made again");

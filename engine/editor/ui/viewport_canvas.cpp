@@ -138,6 +138,10 @@ ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 } // namespace
 
 void CanvasWindowRequests::request(EditorRequest request) {
+	// An edit held back while an operation holds the documents (S13 A3), as the session would refuse
+	// it.
+	if (request.kind == EditorRequestKind::EditRecord && !workspace_.view().allows(EditorRequestKind::EditRecord))
+		return;
 	workspace_.request(std::move(request));
 }
 

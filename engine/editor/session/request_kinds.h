@@ -69,7 +69,6 @@ struct RequestKindRow {
 	bool acts_on_saved = false;
 	bool names_active = false;
 	bool ends_edit_groups = false;
-	bool validates = false;
 	Holds reads = HoldsNothing;
 	Holds writes = HoldsNothing;
 	OnBusy on_busy = OnBusy::Refuse;

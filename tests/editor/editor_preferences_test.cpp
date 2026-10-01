@@ -245,6 +245,7 @@ static int test_session_over_a_store() {
 		TEST_EXPECT(v.project.recent_projects == every_preference().recent_projects && v.project.retail_directory == "D:/Joint Operations" &&
 		            v.project.play_retail && v.project.runtime_setting == "C:/tools/opennova.exe" && !v.project.import_dependencies);
 		session.handle(request::set_import_dependencies(true));
+		session.run_operations();
 		TEST_EXPECT(v.project.import_dependencies && store.preferences().import_dependencies);
 		session.handle(request::forget_recent("C:/games/Armory"));
 		TEST_EXPECT(v.project.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
@@ -255,6 +256,7 @@ static int test_session_over_a_store() {
 		FilePreferencesStore store(path);
 		ProjectSession session(platform, store);
 		session.handle(request::new_project(dir.file("project"), "Stored"));
+		session.run_operations();
 		TEST_EXPECT(session.project_open());
 		Preferences stored;
 		Diagnostic error;
@@ -288,6 +290,7 @@ static int test_session_over_a_store() {
 		TEST_EXPECT(said == 1 && v.project.recent_projects.empty() &&
 				v.project.retail_directory.empty() && !v.project.play_retail);
 		session.handle(request::new_project(dir.file("after"), "After"));
+		session.run_operations();
 		TEST_EXPECT(session.outcome().done());
 		std::string written;
 		TEST_EXPECT(session.project_open() && test_io::read_file_text(path, written) &&

@@ -45,7 +45,9 @@ struct ModelCanvasFrame {
 	int selected = -1;
 	std::vector<ModelOverlay> others;
 	float snap = 0.0f; // a dragged place snaps to this grid, metres (Alt: free)
-	// The session takes an edit now (ViewportContext::editable): no marker's drag otherwise.
+	// Edits may be raised (S13 A3: false while an operation holds the documents, as
+	// SessionView::allows(EditRecord) says; ViewportContext::editable): else no handle is taken, a
+	// press selects or orbits.
 	bool editable = true;
 	const PreviewClock *clock = nullptr; // the clock the markers are posed at
 };

@@ -18,15 +18,14 @@ namespace opennova::editor {
 class SessionCore;
 
 // The long jobs the session runs one at a time, a step at a time, so the window that hosts it
-// keeps drawing (ADR 0046 S13 A1). Build has a body; the other kinds are rows already, so the
-// slices that move them onto the slot add bodies, not shapes.
+// keeps drawing (ADR 0046 S13 A1; every kind with its body since S13 A3).
 enum class OperationKind : uint8_t {
-	Open,        // a project opened: the install's names, the import pass, the scan, the requirements
-	Refresh,     // the files read again: a Rescan, a Reimport, the refresh after an import
-	Build,       // the project packed into an immutable build directory (project_build/build_run.h)
-	ImportPlan,  // an import's plan: the scan, the graph, the install
-	ImportApply, // an import written
-	RenameApply, // a rename's files rewritten
+	Open,        // a project opened: the install's names, the import pass, the scan, the requirements (OpenOperation)
+	Refresh,     // the files read again: a Rescan, a Reimport (RefreshOperation)
+	Build,       // the project packed into an immutable build directory (BuildOperation, project_build/build_run.h)
+	ImportPlan,  // an import's plan: the scan, the graph, the install, the plan (ImportPlanOperation)
+	ImportApply, // an import planned again, written, and the files read again (ImportOperation)
+	RenameApply, // a rename's files rewritten a file at a time, then written (RenameOperation)
 	kCount,
 };
 
@@ -101,8 +100,11 @@ struct PollBudget {
 	uint64_t step_bytes = 0;
 };
 
-// The editor's: a slice of a frame at 60 Hz.
-inline constexpr PollBudget kDefaultPollBudget{10, uint64_t(1) << 20};
+// The editor's: a slice of a frame at 60 Hz, in steps small enough that the clock is read often
+// (a poll ends on the step that passes its milliseconds): 64 KiB of the walks' costs is 16 of a
+// scan's directory entries or a few small files validated, a few milliseconds, where a step of
+// 1 MiB ran a poll on the JO install to 50 to 200 ms (S13 A3 review).
+inline constexpr PollBudget kDefaultPollBudget{10, uint64_t(64) << 10};
 
 enum class OperationUnit : uint8_t { Bytes, Files, Steps };
 const char *operation_unit_token(OperationUnit unit);
@@ -122,12 +124,17 @@ enum class OperationEnd : uint8_t { Done, Failed, Cancelled };
 const char *operation_end_token(OperationEnd end);
 
 // What an operation came to (the view's last_operation): which one, how it ended and the findings
-// it reported.
+// it reported; an import's write also the files it wrote, project-relative, as published (a file
+// the project held with the same bytes is neither), and, after a failure while publishing, those
+// it did not reach, the one that failed first (S13 A7's lists, an import's write being an
+// operation since S13 A3).
 struct OperationOutcome {
 	uint64_t id = 0;
 	OperationKind kind = OperationKind::Build;
 	OperationEnd end = OperationEnd::Done;
 	std::vector<Diagnostic> findings;
+	std::vector<std::string> imported;
+	std::vector<std::string> not_imported;
 };
 
 // The operation that runs, as the view shows it (id 0: none), with what the busy gate weighs a

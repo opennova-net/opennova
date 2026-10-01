@@ -18,6 +18,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/session_operation.h>
 
 namespace opennova::project_cli {
 
@@ -175,14 +176,51 @@ bool has_error(const std::vector<JsonValue> &findings) {
 	return false;
 }
 
-// A request handled and the operation it starts run to its end (a build packs): what it came to
-// (action_outcome_to_json's: done, the operation, the findings).
+// The query `kind` answered with `args` (null for none); null with `error` when it did not answer.
+JsonValue ask(Cli &cli, Q kind, const JsonValue &args, std::string &error) {
+	return cli.session.query(editor::editor_query_row(kind).token, args, error);
+}
+
+// What the operation a request's `outcome` names came to once the operations ran (the operation
+// query's last_operation: id, kind, end, findings, and an import's write's imported and
+// not_imported); null when the request started or joined none.
+JsonValue ended_operation(Cli &cli, const JsonValue &outcome) {
+	const double id = outcome.get_number("operation", 0.0);
+	if (id == 0.0) return JsonValue();
+	std::string error;
+	const JsonValue ended = at(ask(cli, Q::Operation, JsonValue(), error), "last_operation");
+	return ended.get_number("id", -1.0) == id ? ended : JsonValue();
+}
+
+// A request's outcome with what the operation it started came to folded in (S13 A3: opening a
+// project, a refresh, an import's plan and its write and a rename's commit return at once, naming
+// their operation, as a build does): the operation's findings after the request's own, not done
+// unless the operation ended done, and an import's files (`imported`, `not_imported`). A build's
+// is the build verb's to read, with its report (the operation query's build).
+JsonValue settled(const JsonValue &outcome, const JsonValue &ended) {
+	if (!ended.is_object() || ended.get_string("kind", "") == editor::operation_kind_row(editor::OperationKind::Build).token)
+		return outcome;
+	JsonValue out = outcome;
+	JsonValue findings = JsonValue::make_array();
+	for (const JsonValue &finding : items(outcome, "findings")) findings.push(finding);
+	for (const JsonValue &finding : items(ended, "findings")) findings.push(finding);
+	out.set("findings", std::move(findings));
+	if (ended.get_string("end", "") != editor::operation_end_token(editor::OperationEnd::Done))
+		out.set("done", JsonValue::make_bool(false));
+	for (const char *files : { "imported", "not_imported" })
+		if (const JsonValue *list = ended.get(files)) out.set(files, *list);
+	return out;
+}
+
+// A request handled and the operation it starts run to its end (an Open, a refresh, an import, a
+// rename, a build): what it came to (action_outcome_to_json's: done, the operation, the findings),
+// what the operation came to folded in (settled).
 JsonValue handled(Cli &cli, const EditorRequest &request) {
 	assert(names_request(cli.row, request.kind) && "a verb sends only the requests its row names");
 	cli.session.handle(request);
-	JsonValue outcome = editor::action_outcome_to_json(cli.session.outcome());
+	const JsonValue outcome = editor::action_outcome_to_json(cli.session.outcome());
 	cli.session.run_operations();
-	return outcome;
+	return settled(outcome, ended_operation(cli, outcome));
 }
 
 // A request the verb sends: handled, its findings printed on the error stream.
@@ -194,16 +232,23 @@ JsonValue send(Cli &cli, const EditorRequest &request) {
 
 // A request in its wire form, as the editor MCP sends it (ProjectSession::handle_json), the
 // operation it starts run to its end: its answer ({ok, served, error?, outcome, status,
-// view_revision}).
+// view_revision}), its outcome with what the operation came to folded in (settled) and, for a
+// request that started or joined one, that operation (`operation`, as the MCP's editor_request
+// answers with `wait`).
 JsonValue send_json(Cli &cli, const JsonValue &request) {
 	JsonValue answer = cli.session.handle_json(request);
 	cli.session.run_operations();
+	JsonValue ended = ended_operation(cli, at(answer, "outcome"));
+	if (ended.is_object()) {
+		answer.set("outcome", settled(at(answer, "outcome"), ended));
+		answer.set("operation", std::move(ended));
+	}
 	return answer;
 }
 
 // A request the verb makes from what the session answered (an import plan's sources, in the wire
-// form the plan gives them), sent: its outcome, its findings printed; false, said why, when it
-// did not read.
+// form the plan gives them), sent: its outcome, what its operation came to folded in, its findings
+// printed; false, said why, when it did not read.
 bool send_wire(Cli &cli, const JsonValue &request, JsonValue &outcome) {
 	assert(names_wire_request(cli.row, request) && "a verb sends only the requests its row names");
 	const JsonValue answer = send_json(cli, request);
@@ -214,11 +259,6 @@ bool send_wire(Cli &cli, const JsonValue &request, JsonValue &outcome) {
 	outcome = at(answer, "outcome");
 	print_findings(cli.err, outcome);
 	return true;
-}
-
-// The query `kind` answered with `args` (null for none); null with `error` when it did not answer.
-JsonValue ask(Cli &cli, Q kind, const JsonValue &args, std::string &error) {
-	return cli.session.query(editor::editor_query_row(kind).token, args, error);
 }
 
 // A row's query args (null for none).

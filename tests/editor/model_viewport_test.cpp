@@ -128,8 +128,10 @@ static int test_status_and_builds() {
 	TEST_EXPECT(rig.json().get_string("reason", "") == "no_project" && rig.json().get_string("units", "") == "pixels");
 
 	session.handle(request::new_project(dir.file("project"), "Model Viewport Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	rig.pump();
 	TEST_EXPECT(rig.json().get_string("reason", "") == "no_model");
 	TEST_EXPECT(rig.json().get_string("message", "") == "Open a model, a clip or an animation table to preview it.");
@@ -190,10 +192,12 @@ static int test_status_and_builds() {
 	// A texture the device read (or looked for) changes: it builds again.
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(18, 0)));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && rig.builds() == 3);
 	// Changed again in the same follow as a user point's edit (which alone is an Update): it builds.
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(36, 0)));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(document->get(point, "position.x", value));
 	set(session, document->path(), point, "position.x", std::get<double>(value) + 1.0);
 	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && rig.builds() == 4);
@@ -254,9 +258,11 @@ static int test_overlays() {
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Overlay Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
@@ -320,9 +326,11 @@ static int test_handles() {
 	ProjectSession session(platform, preferences);
 	Rig rig{session};
 	session.handle(request::new_project(dir.file("project"), "Handle Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
@@ -530,6 +538,7 @@ static int test_animation() {
 	Rig rig{session};
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Animation Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
@@ -539,11 +548,13 @@ static int test_animation() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("skinned.3di") && view.project.scan->find("SKIN.adm") && view.project.scan->find("walk.bad"));
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 
 	// The table plays on the item's graphic.
 	session.handle(request::open_document("anims/SKIN.adm"));
@@ -600,6 +611,7 @@ static int test_animation() {
 	// No item pairs a table: no rig, until a model is chosen.
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("anims/SKIN.adm"));
 	rig.pump();
 	TEST_EXPECT(model->view_status() == ModelViewStatus::NoRig);
@@ -670,6 +682,7 @@ static int test_runtime_clips() {
 	Rig rig{session};
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Runtime Clips"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
@@ -680,6 +693,7 @@ static int test_runtime_clips() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("SKIN.adm") && view.project.scan->find("STEP.adm") && view.project.scan->find("step.bad"));
 
 	// The walk row edited to "reset" "missing" "walk", not saved; the table plays on the model

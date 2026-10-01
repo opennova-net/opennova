@@ -100,6 +100,7 @@ static int test_headless_viewport() {
 	TEST_EXPECT(!json.get("device")->get_bool("attached", true));
 
 	session.handle(request::new_project(dir.file("project"), "Preview Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	rig.pump();
 	TEST_EXPECT(rig.json().get_string("reason", "") == "no_menu");
@@ -316,6 +317,7 @@ static int test_headless_viewport() {
 	// rescan keeps the unsaved menu open as it is).
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/text/broken.bin", "not a table"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.document_for("main.mnu") == menu && menu->dirty());
 	set(session, *menu, main, "text_rsrc", std::string("broken.bin"));
 	rig.pump();

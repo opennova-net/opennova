@@ -539,7 +539,12 @@ static int test_request_and_query_verbs() {
 	build.set("out_dir", json_string(out));
 	ran = run(scratch, { "request", root, opennova::io::json_write(build) });
 	answer = parsed(ran.out);
-	TEST_EXPECT(ran.code == 0 && answer.get("outcome")->get_number("operation", 0) == 1);
+	// The answer names the build's operation (the project's Open ran before it, an operation too,
+	// S13 A3) and what it came to.
+	const JsonValue *ended = answer.get("operation");
+	TEST_EXPECT(ran.code == 0 && answer.get("outcome")->get_number("operation", 0) != 0 && ended &&
+	            ended->get_number("id", -1) == answer.get("outcome")->get_number("operation", 0) &&
+	            ended->get_string("kind", "") == "build" && ended->get_string("end", "") == "done");
 	TEST_EXPECT(!editor::last_good_build_dir(out).empty());
 	// out_dir inside the project is refused (its files would be the next build's), the cache and the
 	// export folder aside; a relative one is taken from the project's folder.

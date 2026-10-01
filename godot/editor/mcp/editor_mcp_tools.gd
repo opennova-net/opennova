@@ -9,6 +9,9 @@ extends RefCounted
 
 ## How long editor_play op=stop waits for the game to leave.
 const STOP_WAIT_MS := 10_000
+## How long editor_request's `wait` awaits the operation and the validation, unless `wait_ms` says
+## (S13 A3): past it the answer says timed_out, with the operation and the validation as they stand.
+const REQUEST_WAIT_MS := 300_000
 
 var service: EditorMcpService
 var app: Node
@@ -58,9 +61,21 @@ func _tool_editor_query(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	return _answer(name, params)
 
 
-func _tool_editor_request(args: Dictionary, _ctx: McpToolContext) -> Variant:
+## A request raised as the windows raise it. It answers at once, the operation it started or joined
+## named in its outcome (S13 A1, A3: a project opened, a refresh, an import's plan and its write, a
+## rename's commit, a build); `wait` (the tool's, not the request's) awaits that operation's end and
+## the validation the polls step after it (or after an edit: no request runs it), frames passing the
+## while, and answers with what the operation came to (operation: the last_operation block) and the
+## status and view_revision as it left them. `wait_ms` bounds the wait (REQUEST_WAIT_MS): past it the
+## answer says timed_out, its operation the running operation's state and its validation the
+## validation's.
+func _tool_editor_request(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var request := args.duplicate()
 	request.erase("_session_id")
+	var wait := bool(request.get("wait", false))
+	var wait_ms := int(request.get("wait_ms", REQUEST_WAIT_MS))
+	request.erase("wait")
+	request.erase("wait_ms")
 	# Unsorted: a replace_list record's fields are set in the order written, and JSON.stringify
 	# sorts a Dictionary's keys unless told not to.
 	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request, "", false))))
@@ -68,6 +83,24 @@ func _tool_editor_request(args: Dictionary, _ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("The editor returned an invalid answer.")
 	if not bool(answer.get("ok", false)):
 		return McpToolResult.error(String(answer.get("error", "The request was refused.")))
+	var id := int((answer as Dictionary).get("outcome", {}).get("operation", 0))
+	if wait:
+		var deadline := Time.get_ticks_msec() + maxi(wait_ms, 0)
+		var ended := {}
+		if id != 0:
+			ended = await _operation_end(id, ctx, deadline)
+		var settled := (id == 0 or not ended.is_empty()) and await _validation_end(ctx, deadline)
+		if settled:
+			if id != 0:
+				answer["operation"] = ended
+		else:
+			var state := _query("operation")
+			answer["timed_out"] = true
+			answer["operation"] = state.get("operation", {})
+			answer["validation"] = state.get("validation", {})
+		var status := _query("state", {"sections": ["status"]})
+		answer["status"] = String(status.get("status", {}).get("status", answer.get("status", "")))
+		answer["view_revision"] = int(status.get("view_revision", answer.get("view_revision", 0)))
 	return answer
 
 
@@ -403,11 +436,22 @@ func _outcome_error(answer: Variant, what: String) -> McpToolResult:
 	return McpToolResult.error("%s did not go through%s." % [what, reason], findings)
 
 
+## Frames until the validation the polls step has ended (S13 A3: the first one after a project
+## opens, above all), or `deadline` (ticks) passed: true when it ended, the Problems rows the
+## project's then.
+func _validation_end(ctx: McpToolContext, deadline: int) -> bool:
+	while not ctx.cancelled and Time.get_ticks_msec() < deadline:
+		if not bool(_query("operation").get("validation", {}).get("running", false)):
+			return true
+		await ctx.frames(1)
+	return not bool(_query("operation").get("validation", {}).get("running", false))
+
+
 ## Frames until the operation `id` ends, the main thread never held: what it came to (the
-## operation query's last_operation: id, kind, end, findings), or {} when the call is cancelled or
-## another operation's outcome stands in its place.
-func _operation_end(id: int, ctx: McpToolContext) -> Dictionary:
-	while not ctx.cancelled:
+## operation query's last_operation: id, kind, end, findings), or {} when the call is cancelled,
+## `deadline` (ticks, 0 for none) passed, or another operation's outcome stands in its place.
+func _operation_end(id: int, ctx: McpToolContext, deadline := 0) -> Dictionary:
+	while not ctx.cancelled and (deadline == 0 or Time.get_ticks_msec() < deadline):
 		var state := _query("operation")
 		if not state.is_empty():
 			var running: Dictionary = state.get("operation", {})

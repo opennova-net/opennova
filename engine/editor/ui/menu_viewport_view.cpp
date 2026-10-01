@@ -191,13 +191,15 @@ void MenuViewportView::Tools::arrange_items(Workspace &workspace, const MenuCanv
 
 // Ctrl+C / X / V / D copy, cut, paste and duplicate windows while the viewport has the focus, no
 // text box takes the keys and no press is down, as the menu clipboard's rule says (the arrows and
-// Esc are the canvas's, preview/menu_canvas).
+// Esc are the canvas's, preview/menu_canvas); a Copy edits nothing, so only the others wait while an
+// operation holds the documents (S13 A3).
 void MenuViewportView::Tools::keys(
 		Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board, bool pressed) {
 	const ImGuiIO &io = ImGui::GetIO();
 	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
-	if (!focused || pressed || !frame.editable) return;
+	if (!focused || pressed || frame.document->blocked()) return;
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C)) return clipboard(workspace, frame, board, EditorRequestKind::Copy);
+	if (!frame.editable) return;
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X)) return clipboard(workspace, frame, board, EditorRequestKind::Cut);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) return clipboard(workspace, frame, board, EditorRequestKind::Paste);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D))
@@ -262,11 +264,14 @@ void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &mod
 					ImGui::OpenPopup("canvas_menu");
 				}
 				if (ImGui::BeginPopup("canvas_menu")) {
+					// The edits held back while an operation holds the documents (S13 A3); a Copy edits
+					// nothing.
+					const bool readable = !document.blocked();
 					const bool editable_now = frame.editable;
 					const bool copyable = board.copy && editable_now;
 					if (ImGui::MenuItem("Cut", "Ctrl+X", false, copyable))
 						tools_->clipboard(workspace, frame, board, EditorRequestKind::Cut);
-					if (ImGui::MenuItem("Copy", "Ctrl+C", false, copyable))
+					if (ImGui::MenuItem("Copy", "Ctrl+C", false, board.copy && readable))
 						tools_->clipboard(workspace, frame, board, EditorRequestKind::Copy);
 					if (ImGui::MenuItem("Paste", "Ctrl+V", false, editable_now && board.paste))
 						tools_->clipboard(workspace, frame, board, EditorRequestKind::Paste);

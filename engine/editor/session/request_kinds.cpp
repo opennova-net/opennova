@@ -25,6 +25,7 @@ constexpr Holds kNone = HoldsNothing;
 constexpr Holds kFiles = HoldsFiles;
 constexpr Holds kDocuments = HoldsDocuments;
 constexpr Holds kFilesAndDocuments = HoldsFiles | HoldsDocuments;
+constexpr Holds kSlot = HoldsSlot;
 
 // --- the handlers: what serves each session row, through the part it names -----------------------
 
@@ -41,12 +42,13 @@ void serve_forget_recent(SessionCore &core, const EditorRequest &request) {
 	core.forget_recent(request.dir);
 }
 // Only what changed outside the editor is read again: an open document whose file holds what it
-// was read from keeps its records, its history and its selection.
+// was read from keeps its records, its history and its selection; then the project's files, as an
+// operation (RefreshOperation).
 void serve_rescan(SessionCore &core, const EditorRequest &) {
 	if (!core.view().project.open)
 		return;
 	core.documents().reload_changed();
-	core.refresh();
+	core.start_refresh();
 }
 void serve_apply_project_settings(SessionCore &core, const EditorRequest &request) {
 	core.apply_project_settings(request.settings);
@@ -222,19 +224,15 @@ struct Request {
 		out.row.ends_edit_groups = true;
 		return out;
 	}
-	constexpr Request validates() const {
-		Request out = *this;
-		out.row.validates = true;
-		return out;
-	}
 };
 
 // What each request reads and writes: the files when it reads or writes them on disk (the import
 // pass writes them too), the open documents when it reads them or changes what they hold or which
 // are open, everything when it switches or closes the project, and the slot when it starts an
-// operation. A running build reads the files and writes only the slot, so an edit, an open, a
-// selection or an import's preview goes on beside it, and a save, a create, an import or a rename
-// waits.
+// operation (S13 A3: opening a project, a refresh, an import's plan and its write, a rename's
+// commit, a build). A running build reads the files and writes only the slot, so an edit, an open
+// or a selection goes on beside it, and a save, a create, an import (its preview too, whose plan is
+// an operation of its own) or a rename waits.
 constexpr RequestKindRow kRows[] = {
 	Request(K::NewProject, "new_project", serve_new_project,
 			"A project made in dir (its title, else the folder's name; its game, else jo), then "
@@ -242,17 +240,21 @@ constexpr RequestKindRow kRows[] = {
 			"imported); refused, the open project kept, where dir holds a project already or game "
 			"names no game.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::ImportPass }))
-			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
+			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
 			.can_discard()
 			.acts_on_saved()
 			.row,
 	Request(K::OpenProject, "open_project", serve_open_project,
-			"The project in dir opened, its import pass first (import_pass false: on its files as "
-			"they are, no source imported), on game_install for the session alone when given (its "
-			".opennova/local.json kept); one that does not open leaves the open project open.")
+			"The project in dir opened, an operation (the outcome names it: the game install's "
+			"names, its import pass (import_pass false: on its files as they are, no source "
+			"imported), the scan, the requirements; the project is the open one once it ends), on "
+			"game_install for the session alone when given (its .opennova/local.json kept); one "
+			"that does not open leaves the open project open.")
 			.takes(request_params({ F::Dir }, { F::GameInstall, F::ImportPass }))
-			.holds(kNone, kHoldsAll, OnBusy::CancelRunning)
+			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
+			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Open another project", "Save all")
 			.can_discard()
 			.acts_on_saved()
@@ -267,15 +269,16 @@ constexpr RequestKindRow kRows[] = {
 			"The recent project in dir dropped from the editor's list.")
 			.takes(request_params({ F::Dir }))
 			.row,
-	// It reads again the clean documents whose files changed.
+	// It reads again the clean documents whose files changed, then starts the refresh.
 	Request(K::Rescan, "rescan", serve_rescan,
 			"The project's files read again: an open document whose file changed outside the "
 			"editor "
 			"is read again (one with unsaved edits keeps them, document.conflict; one that no "
 			"longer "
 			"reads stays open, document.stale), then the import pass, the scan and the "
-			"requirements.")
-			.holds(kFiles, kFilesAndDocuments)
+			"requirements, an operation (the outcome names it).")
+			.holds(kFiles, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.acts_on_saved()
 			.row,
 	// The settings dialog waits on its answer, so a settings change is never refused whole: each
@@ -291,48 +294,54 @@ constexpr RequestKindRow kRows[] = {
 			"what could not be.")
 			.takes(request_params({ F::Settings }))
 			.row,
-	// An import's preview plans in place today, reading the graph. When S13 A3 makes the plan an
-	// operation (ImportPlan), these rows (and PreviewInstallImport's) start one: they must write
-	// the slot then, as Build and Play do, so none of them runs beside another operation.
+	// An import's plan is an operation (S13 A3, ImportPlan): these rows (and PreviewInstallImport's)
+	// start one, so they write the slot, as Build and Play do, and none of them runs beside another
+	// operation; a new plan takes the place of a running one (Supersede).
 	Request(K::PreviewImport, "preview_import", serve_preview_import,
-			"The import dialog planned over the files on disk paths (a loose file chosen, an "
-			"archive's members listed to choose from), with the files they need, found beside them "
-			"or "
-			"in the game install, when with_dependencies.")
+			"The import dialog on the files on disk paths (a loose file chosen, an archive's members "
+			"listed to choose from), planned with the files they need, found beside them or in the "
+			"game install, when with_dependencies: the plan an operation (the outcome names it), "
+			"which a new plan takes the place of.")
 			.takes(request_params({ F::Paths }, { F::WithDependencies }))
-			.holds(kFiles, kNone, OnBusy::Supersede)
-			.validates()
+			.holds(kFiles, kSlot, OnBusy::Supersede)
+			.ends_edit_groups()
 			.row,
 	Request(K::PlanImport, "plan_import", serve_plan_import,
 			"The import dialog planned again over the files chosen, imports, with the files they "
 			"need "
-			"when with_dependencies (a preview opens when none is).")
+			"when with_dependencies (a preview opens when none is), an operation.")
 			.takes(request_params({ F::Imports }, { F::WithDependencies }))
-			.holds(kFiles, kNone, OnBusy::Supersede)
-			.validates()
+			.holds(kFiles, kSlot, OnBusy::Supersede)
+			.ends_edit_groups()
 			.row,
+	// A preference alone: it holds nothing of the session's. With the import dialog open it plans the
+	// dialog again as a plan_import does, through the gate (a running plan gives way to it).
 	Request(K::SetImportDependencies, "set_import_dependencies", serve_set_import_dependencies,
 			"The editor's setting of whether an import brings the files the chosen ones need "
-			"(with_dependencies), remembered; an open import dialog is planned again with it.")
+			"(with_dependencies), remembered; an open import dialog is planned again with it, as "
+			"plan_import plans it (whatever the setting was).")
 			.takes(request_params({ F::WithDependencies }))
-			.holds(kFiles, kNone, OnBusy::Supersede)
-			.validates()
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
 			"The import dialog's rows kept, imports, copied into the project, every file checked "
 			"and "
-			"staged before any is published (replace: over the project's files of the names); with "
-			"a "
-			"preview open the files are planned again first, and nothing is written when that is "
-			"not "
-			"the plan shown (import.changed).")
+			"staged before any is published (replace: over the project's files of the names), then "
+			"the project's files read again, an operation (the outcome names it; it can be cancelled "
+			"until it writes); with a preview open the files are planned again first, and nothing is "
+			"written when that is not the plan shown (import.changed).")
 			.takes(request_params({ F::Imports }, { F::Replace }))
-			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
 			.acts_on_saved()
-			.validates()
 			.row,
-	Request(K::CancelImport, "cancel_import", serve_cancel_import, "The import dialog closed.").row,
+	// It stops the import's plan or write that runs (Supersede: ImportPlan and ImportApply give way to
+	// it; an import that wrote cannot be cancelled, and refuses it until it ends).
+	Request(K::CancelImport, "cancel_import", serve_cancel_import,
+			"The import dialog closed, its plan stopped when one runs, and an import it raised stopped "
+			"before it writes.")
+			.holds(kNone, kNone, OnBusy::Supersede)
+			.row,
 	Request(K::CreateMissing, "create_missing", serve_create_missing,
 			"The required files roles names made from scratch (none: nothing); a file there since "
 			"the last refresh is refused, never overwritten.")
@@ -438,11 +447,13 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::Path }))
 			.names_active()
 			.row,
+	// It reads the documents as they stand, which an operation writes only as it finishes (in one
+	// poll): it waits for none.
 	Request(K::Copy, "copy", serve_copy,
 			"The selected records of the document at path onto the session's clipboard, as the "
 			"document type's own payload.")
 			.takes(request_params({}, { F::Path }))
-			.holds(kDocuments, kNone)
+			.holds(kNone, kNone)
 			.names_active()
 			.row,
 	Request(K::Cut, "cut", serve_copy,
@@ -503,22 +514,23 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::RenameAsset, "rename_asset", serve_rename_asset,
 			"The project file path renamed to new_name, every reference to it rewritten, or "
 			"refused "
-			"with the reasons; not undoable.")
+			"with the reasons; not undoable. Committed as an operation (the outcome names it: a "
+			"file at a time, then the one step that writes).")
 			.takes(request_params({ F::Path, F::NewName }))
-			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::AssignRequirement, "assign_requirement", serve_assign_requirement,
 			"The requirement role met by renaming the project file path, of the kind it expects, "
 			"to "
 			"the name the engine demands (as rename_asset renames).")
 			.takes(request_params({ F::Role, F::Path }))
-			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::PreviewRename, "preview_rename", serve_preview_rename,
 			"What a rename would do, planned into the view's rename_preview, nothing written: the "
@@ -528,35 +540,36 @@ constexpr RequestKindRow kRows[] = {
 			"dialog opens (an AskRename view event).")
 			.takes(request_params({ F::Path }, { F::Locator, F::Field, F::NewName, F::AskName }))
 			.holds(kFiles, kNone)
-			.validates()
 			.row,
 	Request(K::RenameSymbol, "rename_symbol", serve_rename_symbol,
 			"The name the record at locator of path defines in field renamed everywhere to "
 			"new_name, "
 			"every use that reaches it rewritten on disk, or refused with the reasons; not "
-			"undoable.")
+			"undoable. Committed as an operation (the outcome names it).")
 			.takes(request_params({ F::Path, F::Locator, F::Field, F::NewName }))
-			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename everywhere (defined in %s)",
 					"Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::Reimport, "reimport", serve_reimport,
 			"A refresh whose import pass takes the source path (left out: every source) even when "
 			"it "
-			"is unchanged when force says so; the findings on it are the outcome.")
+			"is unchanged when force says so, an operation (the outcome names it); the findings on "
+			"the source are what the operation came to (last_operation).")
 			.takes(request_params({}, { F::Path, F::Force }))
-			.holds(kFiles, kFiles)
+			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "
 			"every file listed to choose from, with the files they need when with_dependencies "
 			"(their "
-			"sources carry install: true).")
+			"sources carry install: true); planned as preview_import plans.")
 			.takes(request_params({}, { F::Names, F::WithDependencies }))
-			.holds(kFiles, kNone, OnBusy::Supersede)
-			.validates()
+			.holds(kFiles, kSlot, OnBusy::Supersede)
+			.ends_edit_groups()
 			.row,
 	Request(K::ClearOutput, "clear_output", serve_clear_output,
 			"The output lines emptied, as Output's Clear does.")
@@ -628,8 +641,8 @@ constexpr bool rows_named() {
 }
 static_assert(rows_named(), "each request kind has a token of its own and a doc");
 
-// The session serves a row by its handler; a shell row has none, and holds, guards, ends and
-// validates nothing of the session's.
+// The session serves a row by its handler; a shell row has none, and holds, guards and ends
+// nothing of the session's.
 constexpr bool handlers_where_served() {
 	for (const RequestKindRow &row : kRows) {
 		const bool session = row.served_by == ServedBy::Session;
@@ -637,7 +650,7 @@ constexpr bool handlers_where_served() {
 			return false;
 		if (!session &&
 				(row.guard != GuardScope::None || row.acts_on_saved || row.names_active ||
-						row.ends_edit_groups || row.validates || row.reads != kNone ||
+						row.ends_edit_groups || row.reads != kNone ||
 						row.writes != kNone))
 			return false;
 	}
@@ -806,9 +819,6 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 		core.documents().end_edit_groups();
 	if (gate_busy(core, request))
 		return true;
-	// Its plan reads the graph: the validation an edit left due (a held pump's) runs first.
-	if (row.validates)
-		core.problems().validate_pending();
 	if (core.guard().holds(request))
 		return true;
 	row.handler(core, request);

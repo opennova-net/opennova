@@ -43,8 +43,9 @@ struct MenuCanvasFrame {
 	const menu::MenuFrameState *state = nullptr;
 	bool current = false; // the picture shows the document's revision: only then does it map
 	bool snap = true; // a drag snaps its moved edges to kLayoutGrid (Alt: free)
-	// The session takes an edit now (ViewportContext::editable: no operation holds the documents,
-	// S13 A3): a drag, the arrows and an arrange write nothing while it does not.
+	// Edits may be raised (S13 A3: false while an operation holds the documents, as
+	// SessionView::allows(EditRecord) says; ViewportContext::editable): else a press selects (a click,
+	// a marquee) and moves or resizes nothing, and the arrows and an arrange write nothing.
 	bool editable = true;
 	// The compiler's notes on the screen as it stands (the viewport's, null: none).
 	const std::vector<menu::MenuFrameNote> *notes = nullptr;
@@ -117,7 +118,8 @@ std::vector<NodeAddress> menu_marquee_windows(
 // or the screen). False when the selection is not a record of this screen.
 bool menu_canvas_escape(const MenuCanvasFrame &frame, CanvasRequests &out);
 // One arrange of the selected windows (align, distribute, drawing order), one batch; nothing on
-// a stale picture, while the session takes no edit, or when arrange_edits refuses.
+// a stale picture, on a frame that may raise no edit (`editable` false) or when arrange_edits
+// refuses.
 void menu_canvas_arrange(const MenuCanvasFrame &frame, ArrangeOp op, CanvasRequests &out);
 
 // The canvas's gestures on a menu viewport (its CanvasHalf): a press, the drag it becomes and its

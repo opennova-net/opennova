@@ -16,7 +16,7 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
     python scripts/mcp/editor_mcp.py query record --path main.mnu --arg symbol=MAIN
     python scripts/mcp/editor_mcp.py query references --path main.mnu
     python scripts/mcp/editor_mcp.py query output --cursor 0 --limit 50
-    python scripts/mcp/editor_mcp.py request new_project --dir "C:/mods/My Game" --title "My Game"
+    python scripts/mcp/editor_mcp.py request new_project --dir "C:/mods/My Game" --title "My Game" --wait
     python scripts/mcp/editor_mcp.py request create_missing --roles main_menu,gametext
     python scripts/mcp/editor_mcp.py request open_document --path main.mnu
     python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
@@ -143,6 +143,20 @@ def cmd_launch(args: argparse.Namespace) -> int:
             EXIT_LAUNCH_FAILED,
             f"the endpoint on port {port} did not answer within {args.timeout:.0f} s (pid {child.pid} "
             f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
+    if args.open:
+        # --open's project opens as an operation (S13 A3), then validates across frames: waited on,
+        # so the first query after the launch reads the project; a launch whose Open did not end in
+        # time is not one that succeeded.
+        while True:
+            state = client.structured("editor_query", {"query": "operation"})
+            if not (state.get("operation") or {}).get("running") and not (state.get("validation") or {}).get("running"):
+                break
+            if time.monotonic() >= deadline:
+                raise GameMcpError(
+                    EXIT_LAUNCH_FAILED,
+                    f"the project did not open and validate within {args.timeout:.0f} s (pid {child.pid} still "
+                    f"running; stop it with `stop --pid {child.pid}`)")
+            time.sleep(0.2)
     print(f"url={client.url} pid={child.pid} log={stdout_log}"
           + (f" godot_log={log_file}" if log_file else ""))
     return EXIT_OK
@@ -241,15 +255,30 @@ def request_of(args: argparse.Namespace) -> dict:
 
 
 def cmd_request(args: argparse.Namespace) -> int:
-    payload = client_of(args).call("editor_request", request_of(args), timeout=args.timeout)
+    request = request_of(args)
+    if args.wait:
+        # The tool awaits the operation the request starts (an open, a refresh, an import, a rename, a
+        # build) and the validation after it (S13 A3); its answer carries what it came to. Its own
+        # deadline falls before this call's, so a wait that runs out answers timed_out.
+        request["wait"] = True
+        request["wait_ms"] = int(max(args.timeout - 5.0, 1.0) * 1000)
+    payload = client_of(args).call("editor_request", request, timeout=args.timeout)
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
         return EXIT_NOT_READ
     answer = payload.get("structuredContent", {})
     print_json(answer)
-    # `ok` only says the request read; the outcome says whether it happened.
+    # `ok` only says the request read; the outcome says whether it happened, and what the
+    # operation it started came to (when waited on) whether that ended done. A wait that ran out
+    # (timed_out) is not done either.
     outcome = answer.get("outcome", {})
-    return EXIT_OK if not outcome or outcome.get("done", False) else EXIT_NOT_DONE
+    if answer.get("timed_out"):
+        print(f"the wait ran out before the operation and the validation ended (--timeout {args.timeout:.0f} s)",
+              file=sys.stderr)
+        return EXIT_NOT_DONE
+    ended = answer.get("operation") or {}
+    done = not outcome or outcome.get("done", False)
+    return EXIT_OK if done and ended.get("end", "done") == "done" else EXIT_NOT_DONE
 
 
 def progress_line(operation: dict) -> str:
@@ -530,6 +559,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--import-pass", dest="import_pass", choices=switch, default=None,
                          help="open_project, new_project: false opens it on its files as they are, scanned and "
                               "checked, no source imported")
+    request.add_argument("--wait", action="store_true",
+                         help="await the operation the request starts or joins (open_project, new_project, rescan, "
+                              "reimport, the import previews and import_files, the renames, build, play) and the "
+                              "validation after it; the answer's operation says what it came to")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)
 

@@ -83,7 +83,12 @@ func _play_state() -> String:
 
 
 ## One tools/call: the structuredContent, or {"_error": text} when the tool refused.
+## An editor_request waits for the operation it starts (its `wait`, S13 A3: an Open, a refresh, an
+## import, a rename) unless the call says otherwise, as a test that reads the operation mid-way does.
 func _call(name: String, args := {}) -> Dictionary:
+	if name == "editor_request" and not args.has("wait"):
+		args = args.duplicate()
+		args["wait"] = true
 	var envelope: Variant = await _client.call_tool(get_tree(), name, args)
 	assert_true(envelope is Dictionary, "%s answered" % name)
 	if not (envelope is Dictionary):
@@ -110,14 +115,23 @@ func _state(sections: Array) -> Dictionary:
 	return await _call("editor_state", {"sections": sections})
 
 
-## Whether a request's answer says it read and was done.
+## What the operation a request started came to, when the call waited for it ({} for none).
+static func _ended(answer: Dictionary) -> Dictionary:
+	var ended: Variant = answer.get("operation", {})
+	return ended if ended is Dictionary else {}
+
+
+## Whether a request's answer says it read and was done, and the operation it started ended done.
 static func _done(answer: Dictionary) -> bool:
-	return bool(answer.get("ok", false)) and bool(answer.get("outcome", {}).get("done", false))
+	var ended := _ended(answer)
+	return bool(answer.get("ok", false)) and bool(answer.get("outcome", {}).get("done", false)) \
+			and (ended.is_empty() or String(ended.get("end", "")) == "done")
 
 
-## Whether a request's answer names a finding of `code` (it read, and the session reported it).
+## Whether a request's answer names a finding of `code` (it read, and the session reported it:
+## the request's, or the operation's it started).
 static func _found(answer: Dictionary, code: String) -> bool:
-	for finding: Variant in answer.get("outcome", {}).get("findings", []):
+	for finding: Variant in answer.get("outcome", {}).get("findings", []) + _ended(answer).get("findings", []):
 		if finding is Dictionary and String((finding as Dictionary).get("code", "")) == code:
 			return true
 	return false
@@ -236,7 +250,7 @@ func test_build_is_an_operation_the_state_reads_mid_way() -> void:
 	assert_true(bool(made.get("ok", false)), str(made))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	_app.call("set_poll_budget", 0, 8192) # a step of 8 KiB a frame
-	var raised := await _call("editor_request", {"kind": "build"})
+	var raised := await _call("editor_request", {"kind": "build", "wait": false})
 	var outcome: Dictionary = raised.get("outcome", {})
 	assert_true(bool(outcome.get("done", false)), str(raised))
 	var id := int(outcome.get("operation", 0))
