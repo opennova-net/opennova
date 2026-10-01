@@ -273,6 +273,21 @@ public:
 		(void)records;
 		return std::string();
 	}
+	// Whether a payload `copy` made holds rows of the file (paste_rows takes it at the top level,
+	// S13 D7) rather than records to paste into a row (paste_records). The default: never (a type
+	// that copies no rows).
+	virtual bool pastes_rows(const std::string &payload) const {
+		(void)payload;
+		return false;
+	}
+	// The edits that remove `records` as the type removes them (ADR 0046 S14): a Remove of each,
+	// the default, or more where a record cannot go alone (a mission's marker takes the stops that
+	// visit it with it, each removed before it in the same step; a record another names by index
+	// goes only with its namer). False, with `error`, where the type refuses the removal (a record
+	// another record still names: remove that one first). The session asks it of every batch of
+	// Removes before it applies them (a Delete, a Cut).
+	virtual bool removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,
+	                           std::string &error) const;
 
 	// --- derived from the declarations above ---------------------------------------
 	// The collections of the record (or row) `owner` names.
@@ -423,6 +438,18 @@ protected:
 	virtual std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
 	                                        const std::vector<std::shared_ptr<const Node>> &rows,
 	                                        std::string &error);
+	// Where a row goes among the rows (ADR 0046 S14): the position an Add, a Paste at the top level,
+	// a Duplicate or a Move asks (SIZE_MAX: the end), over `rows` as the batch has left them (a Move's
+	// row still among them, which the type passes over), or the one the type's order keeps instead:
+	// a mission writes its rows in bands by kind, so a row goes into its band (an Add "at the end"
+	// lands at the end of its band), and the in-memory order stays the order a reload gives. The
+	// default keeps the position asked.
+	virtual size_t row_position(const Node &row, const std::vector<std::shared_ptr<const Node>> &rows,
+	                            size_t position) const {
+		(void)row;
+		(void)rows;
+		return position;
+	}
 	virtual bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	                       std::string &error) = 0;
 	// An optional field left out of the file (Edit Clear, `present` false) or written again

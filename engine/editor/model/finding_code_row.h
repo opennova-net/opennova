@@ -74,6 +74,7 @@ enum class FindingGroup {
 	MusicScripts,
 	Credits,
 	Shaders,
+	Missions,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);

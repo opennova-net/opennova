@@ -653,13 +653,43 @@ void DocumentSet::repair_selection(const DocumentBase &document, uint64_t load_g
 	view_.documents.selection.repair(*records, known ? &changes : nullptr, owner);
 }
 
+namespace {
+
+// A batch of Removes alone, each naming a record it holds (a Delete, a Cut; never one naming what
+// an earlier edit of its batch made).
+bool removes_only(const std::vector<Edit> &edits) {
+	for (const Edit &edit : edits)
+		if (edit.operation != EditOperation::Remove || is_batch_made(edit.address.row) ||
+		    is_batch_made(edit.address.child))
+			return false;
+	return !edits.empty();
+}
+
+} // namespace
+
 // One EditRecord: a single edit or a batch over any rows, then the selection follows (what
 // the edit made selected, a removed primary's owner) and the validation is left due (or, for a
-// gesture, until it ends).
-bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &edits) {
+// gesture, until it ends). A batch of Removes alone is what the type makes of removing those
+// records (Document::removal_edits, S14: a mission's marker takes the stops that visit it with
+// it), refused as the type refuses it (document.collection), nothing applied.
+bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &requested) {
 	last_edit_ok_ = false;
 	// The selection follows a record document's records (a document of another kind holds none).
 	const Document *records = records_of(document);
+	std::vector<Edit> expanded;
+	const std::vector<Edit> *edits = &requested;
+	if (records && removes_only(requested)) {
+		std::vector<NodeAddress> removed;
+		for (const Edit &edit : requested) removed.push_back(edit.address);
+		std::string why;
+		if (!records->removal_edits(removed, expanded, why)) {
+			core_.refuse_now(CoreFinding::DocumentCollection,
+			                 why.empty() ? std::string("These records cannot be removed.") : why, document.path());
+			return false;
+		}
+		for (Edit &edit : expanded) edit.gesture = requested.front().gesture;
+		edits = &expanded;
+	}
 	NodeAddress owner;
 	Document::Placement at;
 	if (records && document.path() == view_.documents.active &&
@@ -671,14 +701,14 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 	const uint64_t serial = view_.documents.selection.serial;
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
-	if (!document.apply(edits, error)) {
+	if (!document.apply(*edits, error)) {
 		core_.report(error);
 		return false;
 	}
 	last_edit_ok_ = true;
 	bool adds = false;
 	uint64_t gesture = 0;
-	for (const Edit &edit : edits) {
+	for (const Edit &edit : *edits) {
 		adds = adds || edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate ||
 		       edit.operation == EditOperation::Paste;
 		if (!gesture) gesture = edit.gesture;
@@ -748,16 +778,30 @@ void DocumentSet::paste_records(Document &document, const PasteAt &target) {
 	edit.parent = target.parent;
 	edit.position = target.position;
 	edit.value = view_.documents.clipboard;
+	// Rows of the file (a payload the type pastes at the top level, Document::pastes_rows, S14): a
+	// named target's position among the rows; else after the selected record's row (the one
+	// position rule, position_after), or at the end with none selected. The type's order then puts
+	// each row where it goes (Document::row_position).
+	const bool rows = document.pastes_rows(view_.documents.clipboard);
+	if (rows) {
+		edit.address.row = 0;
+		edit.parent = 0;
+	}
 	if (!target.named()) {
-		// No target named: beside the primary record (the one position rule, position_after), or
-		// into the primary row, at its end.
 		const NodeAddress &primary = view_.documents.selection.primary;
-		if (document.path() != view_.documents.active || !primary.row)
-			return core_.refuse_now(CoreFinding::DocumentPaste, "Select where to paste.", document.path());
-		edit.address.row = primary.row;
-		if (!primary.child || !position_after(document, primary, edit.parent, edit.position)) {
-			edit.parent = 0;
+		const bool selected = document.path() == view_.documents.active && primary.row;
+		if (rows) {
 			edit.position = SIZE_MAX;
+			if (selected) position_after(document, {primary.row, primary.kind, 0}, edit.parent, edit.position);
+		} else {
+			// No target named: beside the primary record, or into the primary row, at its end.
+			if (!selected)
+				return core_.refuse_now(CoreFinding::DocumentPaste, "Select where to paste.", document.path());
+			edit.address.row = primary.row;
+			if (!primary.child || !position_after(document, primary, edit.parent, edit.position)) {
+				edit.parent = 0;
+				edit.position = SIZE_MAX;
+			}
 		}
 	}
 	apply_edits(document, {edit});

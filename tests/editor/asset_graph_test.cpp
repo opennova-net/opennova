@@ -235,6 +235,31 @@ static int test_menu_text_scope() {
 	TEST_EXPECT(gametext);
 	add_id(*gametext, add_section(*gametext, "menu"), "GAME_TITLE");
 
+	// A lookup that tries a second scope after its own (GraphEdge::scopes_after, S14: a mission's text
+	// key reads the mission's table, then gametext.bin): the name found in the first scope, else in
+	// the next, else missing; the definition reached the one found, the name reached the value.
+	{
+		const AssetGraph &graph = *view.findings.graph;
+		GraphEdge edge;
+		edge.kind = ReferenceKind::TextId;
+		edge.value = "GAME_TITLE";
+		edge.scope = "MENUTXT.BIN/menu";
+		edge.scopes_after = {"GAMETEXT.BIN/menu"};
+		std::string file;
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == gametext->path());
+		TEST_EXPECT(graph.symbol_reached(edge) && graph.symbol_reached(edge)->file == gametext->path() &&
+		            graph.reached_name(edge) == "GAME_TITLE");
+		edge.value = "TITLE_ID";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == menutxt->path() &&
+		            graph.symbol_reached(edge) && graph.symbol_reached(edge)->file == menutxt->path());
+		edge.value = "STATS_ONLY";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Missing && !graph.symbol_reached(edge));
+		edge.scopes_after = {"GAMETEXT.BIN/menu", "MENUTXT.BIN/Stats"};
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == menutxt->path());
+		edge.value = "NOPE";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Missing && file.empty() && !graph.symbol_reached(edge));
+	}
+
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);

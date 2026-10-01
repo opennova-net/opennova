@@ -519,7 +519,7 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 		                       : "Left out of the file. Tick to write the block again.";
 	}
 	ImGui::AlignTextToFramePadding();
-	field_name(workspace, document, targets, fields, block_switch ? std::string("In the file") : field_title(schema), about,
+	field_name(workspace, document, targets, fields, block_switch ? std::string("In the file") : field_title(field), about,
 	           mixed, field_change(document, targets, fields), left);
 	ImGui::TableNextColumn();
 	// A reference's tools, and a name's Rename..., share the value's line while it keeps a few

@@ -1138,7 +1138,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		const FieldUse field = document.field_on(address, schema);
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id", json_string(schema.id));
-		if (!schema.label.empty()) entry.set("label", json_string(schema.label));
+		// What the record calls it (FieldUse::label: a trigger's parameter by its type), else the
+		// schema's.
+		if (field.label) entry.set("label", json_string(field.label));
+		else if (!schema.label.empty()) entry.set("label", json_string(schema.label));
 		if (!schema.section.empty()) entry.set("section", json_string(schema.section));
 		if (!schema.group.empty()) entry.set("group", json_string(schema.group));
 		entry.set("type", json_string(field_type_token(schema.type)));

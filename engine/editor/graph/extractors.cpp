@@ -286,6 +286,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
 		edge.span = reference.span;
 		edge.fallback = std::move(reference.fallback);
+		edge.scopes_after = std::move(reference.scopes_after);
 		out.edges.push_back(std::move(edge));
 	}
 }
@@ -299,6 +300,9 @@ void extract_from_document(const Document &document, Extracted &out) {
 			return true;
 		});
 	}
+	// The type's references that no field's value is (DocumentType::record_references, S14).
+	if (const DocumentType *type = document_type_for(document.kind()); type && type->record_references)
+		type->record_references(document, out);
 	// The record sets (S13 D8): each record of a collection another record names by index, a symbol
 	// of the Record kind named by its index in the file (Document::record_sets, the file's order),
 	// scoped to the file and defined by no field, its value the record's own name (a register's

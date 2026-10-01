@@ -319,6 +319,9 @@ static int test_columns() {
 	                    "requirement.optional_missing" &&
 	            std::string(finding_group_title(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
 	                    "Optional files");
+	// The mission type's family (S14), its codes "mission.*".
+	TEST_EXPECT(std::string(finding_group_key(FindingGroup::Missions)) == "mission" &&
+	            std::string(finding_group_title(FindingGroup::Missions)) == "Missions");
 	return 0;
 }
 

@@ -466,6 +466,16 @@ bool Document::paste_rows(const Edit &, const std::vector<std::shared_ptr<const 
 	return false;
 }
 
+bool Document::removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out, std::string &) const {
+	for (const NodeAddress &record : records) {
+		Edit edit;
+		edit.operation = EditOperation::Remove;
+		edit.address = record;
+		out.push_back(edit);
+	}
+	return true;
+}
+
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
 	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
@@ -693,7 +703,9 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				if (!edit.field.empty() &&
 				    !set_field(*row, {id, edit.address.kind, 0}, edit.field, edit.value, message))
 					return refuse(C::DocumentValue, said("Unknown field."), edit.field);
-				staged.insert(std::move(row), edit.position);
+				// Where the type's order puts it (row_position: a mission's band).
+				const size_t position = row_position(*row, staged.rows(), edit.position);
+				staged.insert(std::move(row), position);
 				made[i] = {id, id};
 				added.push_back(id);
 				return true;
@@ -701,6 +713,8 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			std::vector<std::shared_ptr<Node>> pasted;
 			if (!paste_rows(edit, staged.rows(), pasted, message))
 				return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
+			// Each pasted row where the type's order puts it, the next after it where that order
+			// keeps the position asked.
 			size_t at = std::min(edit.position, staged.size());
 			for (auto &row : pasted) {
 				const NodeId id = allocate_id();
@@ -708,7 +722,9 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				assign_ids(*row);
 				if (!made[i].id) made[i] = {id, id};
 				added.push_back(id);
-				staged.insert(std::move(row), at++);
+				const size_t position = row_position(*row, staged.rows(), at);
+				staged.insert(std::move(row), position);
+				at = position + 1;
 			}
 			return true;
 		}
@@ -737,15 +753,18 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				assign_ids(*copy);
 				prepare_duplicate(*copy, staged.rows());
 				const NodeId id = copy->id;
-				// Right after the row as the batch has left it, where the edit names no place.
-				const size_t position =
+				// Right after the row as the batch has left it, where the edit names no place; where
+				// the type's order puts it (row_position).
+				const size_t asked =
 				        edit.position == SIZE_MAX ? staged.index_of(row_id) + 1 : edit.position;
+				const size_t position = row_position(*copy, staged.rows(), asked);
 				staged.insert(std::move(copy), position);
 				made[i] = {id, id};
 				added.push_back(id);
 			} else {
-				// A Move that leaves the row where it is changes nothing.
-				staged.move(row_id, edit.position);
+				// A Move that leaves the row where it is changes nothing; the type's order keeps a row
+				// among its own (row_position, the row still among the rows it reads).
+				staged.move(row_id, row_position(*current, staged.rows(), edit.position));
 			}
 			return true;
 		}

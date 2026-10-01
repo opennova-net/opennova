@@ -43,7 +43,8 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
 			a.through == b.through && a.loader_arg == b.loader_arg &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
-			a.span.length == b.span.length && a.fallback == b.fallback;
+			a.span.length == b.span.length && a.fallback == b.fallback &&
+			a.scopes_after == b.scopes_after;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -720,13 +721,10 @@ const GraphSymbol *AssetGraph::style_binding(const std::string &name) const {
 std::string AssetGraph::resolved_target(const GraphEdge &edge) const {
 	switch (reference_row(edge.kind).resolution) {
 	case ReferenceResolution::StyleVariable: return is_style_reference(edge.value) ? style_variable(edge.value) : std::string();
-	case ReferenceResolution::Symbol: {
-		// The name it reaches: its value, else its fallback where only that one is defined.
-		if (!edge.fallback.empty() && !resolve_symbol(edge.kind, edge.value, edge.scope) &&
-				resolve_symbol(edge.kind, edge.fallback, edge.scope))
-			return symbol_name(edge.kind, edge.fallback);
-		return symbol_name(edge.kind, edge.value);
-	}
+	case ReferenceResolution::Symbol:
+		// The name it reaches: its value, else its fallback where only that one is defined (in the
+		// first scope a lookup finds either in).
+		return symbol_name(edge.kind, reached_name(edge));
 	// A record's index, in the file the edge's scope names (the key holds it).
 	case ReferenceResolution::Record: return edge.value;
 	case ReferenceResolution::File:
@@ -742,18 +740,53 @@ std::string AssetGraph::resolve_style(const std::string &value) const {
 	return binding ? binding->value : value;
 }
 
+// The scopes an edge's lookup tries, in order: its own, then each of scopes_after.
+template <class Try> bool each_scope(const GraphEdge &edge, Try try_scope) {
+	if (try_scope(edge.scope)) return true;
+	for (const std::string &scope : edge.scopes_after)
+		if (try_scope(scope)) return true;
+	return false;
+}
+
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
 	const ReferenceStatus status = resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
-	if (status != ReferenceStatus::Missing || edge.fallback.empty()) return status;
-	// The lookup's second name, where the first finds nothing.
-	const ReferenceStatus second =
-			resolve(edge.kind, edge.fallback, edge.scope, file_out, edge.loader_arg);
-	return second == ReferenceStatus::Present ? second : status;
+	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && edge.scopes_after.empty())) return status;
+	// The lookup's second name where the first finds nothing, then each later scope, both names.
+	ReferenceStatus found = status;
+	each_scope(edge, [&](const std::string &scope) {
+		for (const std::string *name : {&edge.value, &edge.fallback}) {
+			if (name->empty() || (name == &edge.value && &scope == &edge.scope)) continue;
+			const ReferenceStatus second = resolve(edge.kind, *name, scope, file_out, edge.loader_arg);
+			if (second != ReferenceStatus::Present) continue;
+			found = second;
+			return true;
+		}
+		return false;
+	});
+	return found;
+}
+
+const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
+	const std::string *reached = &edge.value;
+	each_scope(edge, [&](const std::string &scope) {
+		if (resolve_symbol(edge.kind, edge.value, scope)) return true;
+		if (!edge.fallback.empty() && resolve_symbol(edge.kind, edge.fallback, scope)) {
+			reached = &edge.fallback;
+			return true;
+		}
+		return false;
+	});
+	return *reached;
 }
 
 const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
-	if (const GraphSymbol *found = resolve_symbol(edge.kind, edge.value, edge.scope)) return found;
-	return edge.fallback.empty() ? nullptr : resolve_symbol(edge.kind, edge.fallback, edge.scope);
+	const GraphSymbol *found = nullptr;
+	each_scope(edge, [&](const std::string &scope) {
+		found = resolve_symbol(edge.kind, edge.value, scope);
+		if (!found && !edge.fallback.empty()) found = resolve_symbol(edge.kind, edge.fallback, scope);
+		return found != nullptr;
+	});
+	return found;
 }
 
 std::vector<const GraphEdge *> AssetGraph::edges_naming(ReferenceKind kind, const std::string &name) const {
@@ -956,7 +989,10 @@ std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, cons
 	for (const Ref ref :
 			index_.edges_targeting(GraphIndex::key_of(kind, symbol_name(kind, name), scope))) {
 		const GraphEdge &edge = index_.edge(ref);
-		if (!record && !scope.empty() && !scope_matches(scope, edge.scope)) continue;
+		// An edge reads the symbol's scope through its own, or one it tries after it.
+		if (!record && !scope.empty() &&
+		    !each_scope(edge, [&](const std::string &tried) { return scope_matches(scope, tried); }))
+			continue;
 		out.push_back(&edge);
 	}
 	return out;

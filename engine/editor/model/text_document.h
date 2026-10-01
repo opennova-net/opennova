@@ -39,6 +39,9 @@ struct TextReference {
 	std::string value;
 	std::string fallback;
 	std::string scope;
+	// The scopes the lookup tries after `scope` where the name finds nothing there, in order
+	// (GraphEdge::scopes_after).
+	std::vector<std::string> scopes_after;
 	TextSpan span;
 	// Whether Rename everywhere rewrites it (GraphEdge::rewritable): false for a use whose lookup the
 	// graph does not model as the game makes it (a script's text key).

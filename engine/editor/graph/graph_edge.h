@@ -43,6 +43,12 @@ struct GraphEdge {
 	// name, then "ammo_" and its name [orig: WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92]); ""
 	// for none. A symbol kind's edge only: it resolves to the first of the two a lookup finds.
 	std::string fallback;
+	// The scopes the lookup tries after `scope`, in order, where the name finds nothing there (a
+	// mission's text key: the mission's own table, then GAMETEXT.BIN [orig:
+	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0]); none for a lookup of one scope. A symbol
+	// kind's edge only: it resolves to the first scope's definition a lookup finds (a fallback is a
+	// second name, this a second place).
+	std::vector<std::string> scopes_after;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on

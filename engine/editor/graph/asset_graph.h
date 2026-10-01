@@ -208,11 +208,15 @@ public:
 	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
 	// texture's rule reads its case), in its scope, by its loader's argument; for a symbol kind's
-	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing.
+	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing; then
+	// each scope the edge tries after its own (GraphEdge::scopes_after), both names in each.
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
 	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
-	// fallback's; null for none.
+	// fallback's, in the first of its scopes a lookup finds either in; null for none.
 	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;
+	// The name of the two a symbol kind's edge reaches (its value, or its fallback where only that
+	// one is defined in the first scope either is found in); the value where neither is.
+	const std::string &reached_name(const GraphEdge &edge) const;
 	// The edges of `kind` with a fallback (GraphEdge::fallback) that name `name` as their value or
 	// their fallback, in the files' order: what a rename to `name` checks (a use it would take over).
 	std::vector<const GraphEdge *> edges_naming(ReferenceKind kind, const std::string &name) const;
