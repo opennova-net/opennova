@@ -13,9 +13,12 @@ class CanvasRequests;
 // (next_edit_gesture), so the text's history (S13 D9's TextHistory) folds them into one undo step,
 // until the burst ends: a pause of kQuietSeconds with no edit, the focus leaving the control, an
 // edit that does not go on where the last one left the text (the caret moved away first: a click,
-// an arrow key), another document, or a change of the document the device did not make (an undo, a
-// reload, another client's edit). Its end is one EndEdit for its document (the Problems wait for
-// it, as for a drag's), raised only when an edit of it went out.
+// an arrow key), another document, or a change of the document the device did not make. Its end is
+// one EndEdit for its document (the Problems wait for it, as for a drag's), raised only when an edit
+// of it went out and nothing ended its step already: an undo, a redo or a reload ends the step itself
+// (the session ends the document's gesture with it), so the device drops the burst then (drop); the
+// focus leaving, the quiet second, an edit elsewhere, another client's edit and the device given up
+// end it with its EndEdit.
 class TextBurst {
 public:
 	// The pause that ends a burst.

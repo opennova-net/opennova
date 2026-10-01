@@ -11,6 +11,7 @@
 #include <editor/preview/viewport_device.h>
 
 #include "authoring/script_highlighter.h"
+#include "authoring/viewport_devices.h"
 
 namespace opennova::editor {
 class DocumentBase;
@@ -26,7 +27,8 @@ class ScriptEdit;
 // texture (preview/viewport_device.h), a Godot CodeEdit (authoring/script_edit) in a CanvasLayer
 // over the ImGui pass's, placed in the rect the script view reserves on each frame it is drawn and
 // hidden on a tick no draw came before, where it owns the pointer and the keys: decision 11's
-// allowed device-side exception for script text. A press outside it lets its focus go.
+// allowed device-side exception for script text. It lets its focus go on a press of the window
+// outside it (the control's own listening to the window's input).
 //
 // It follows its viewport (preview/script_viewport), never changing it: a Rebuild sets the control's
 // text anew; at every pump where the document or the control moved, the control takes the document's
@@ -37,21 +39,24 @@ class ScriptEdit;
 // documents); a reveal's span selected and scrolled to, once.
 //
 // Every change the user makes is a request: when the control's text changes, its viewport plans the
-// span replacement that takes the document to it (ScriptViewport::edit) under the keystroke burst's
-// gesture, and the device hands it to the Shell (`requests`), which serves it at once. The burst ends
-// after a quiet second, when the focus leaves the control, or when the document moved under it: one
-// EndEdit, raised at a deferred call (never inside a pump). A change made while the document moved
-// under the control (the same frame as another client's edit) is not sent: the control takes the
-// document back.
+// span replacements that take the document to it (ScriptViewport::edit) under the keystroke burst's
+// gesture, and the device hands them to the Shell (the sink's `request`), which serves them at once
+// (a change it cannot take, a character the game's code page has no byte for, is a notice the Shell
+// shows on the status line, and the control takes the document back). The burst ends after a quiet
+// second, when the focus leaves the control, or when the document moved under it by another client's
+// edit: one EndEdit, raised at a deferred call (never inside a pump). An undo, a redo or a reload
+// that moved the document ended its step itself and drops the burst, no EndEdit. A device given up
+// with a burst open (the cache's least recently used, a document closed) raises its EndEdit through
+// the sink's `request_later`, which the Shell serves at its next pump: the device goes inside one. A
+// change made while the document moved under the control (the same frame as another client's edit)
+// is not sent: the control takes the document back.
 class ScriptDevice final : public opennova::editor::ViewportDevice {
 public:
-	// What a request the device makes is handed to (the Shell serves it at once, EditorApp).
-	using Requests = std::function<void(const opennova::editor::EditorRequest &)>;
 	// The control's layer, one over the imgui-godot layer's (its ImGuiConfig Layer: 128 by default and
 	// at most), so it is drawn over the windows.
 	static constexpr int kLayer = 129;
 
-	ScriptDevice(Node &owner, Requests requests);
+	ScriptDevice(Node &owner, ViewportDeviceSink sink);
 	~ScriptDevice() override;
 
 	void draw(const opennova::editor::ViewportPicture &picture) override;
@@ -72,6 +77,9 @@ private:
 		}
 	};
 	static Held held_of(const opennova::editor::DocumentBase &document);
+	// Whether the document's move since the control last held it was its history's (an undo, a reload),
+	// which ended the burst's step itself, rather than another client's edit.
+	bool history_moved_(const opennova::editor::DocumentBase &document) const;
 	const opennova::editor::DocumentBase *document_() const;
 	void on_text_changed_();
 	void on_focus_exited_();
@@ -80,7 +88,7 @@ private:
 	// and selection kept): true when it changed.
 	bool take_text_(const std::u32string &shown);
 
-	Requests requests_;
+	ViewportDeviceSink sink_;
 	uint64_t layer_id_ = 0, edit_id_ = 0;
 	Ref<ScriptHighlighter> highlighter_;
 	// The session's view (the session outlives its devices) and the document's path, as the last take
@@ -90,7 +98,6 @@ private:
 	Held held_;
 	bool control_moved_ = false; // the control's text changed since the last take
 	bool drawn_ = false;         // a draw came since the last tick
-	bool pressed_ = false;       // a mouse button was down at the last tick
 	bool ending_ = false;        // the burst's end is deferred
 	opennova::editor::TextBurst burst_;
 	uint64_t marks_serial_ = 0, highlights_serial_ = 0, reveal_seq_ = 0;

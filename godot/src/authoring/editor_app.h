@@ -89,6 +89,10 @@ public:
 	int start_mcp_endpoint(int p_port);
 	int get_mcp_port() const { return mcp_port_; }
 
+	// The newest message on the editor's status line (the menu bar's, which fades it after a few
+	// seconds): what the session's refusals and a device's notices say. For the tests; "" for none.
+	String get_status_text() const;
+
 	// "editor": the variant this library is (the runtime variant has no EditorApp).
 	String get_loaded_variant() const { return "editor"; }
 	// True when Play drives the Godot binary at the source checkout instead of a
@@ -110,6 +114,12 @@ private:
 	void serve(const opennova::editor::EditorRequest &p_request);
 	// A device's request (a Control device's: the script device's edits), served at once.
 	void serve_device_request_(const opennova::editor::EditorRequest &p_request);
+	// A device's request raised inside a pump (a device given up with its burst open: its EndEdit),
+	// kept for the next pump's start, and served there.
+	void queue_device_request_(const opennova::editor::EditorRequest &p_request);
+	void serve_queued_device_requests_();
+	// A device's notice for the person (an edit it refused), on the status line as an error.
+	void post_device_notice_(const std::string &p_text);
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
@@ -137,6 +147,10 @@ private:
 	// frame: the ImGui pass may have drawn one's texture this frame. Before devices_, which retires
 	// into it as it goes.
 	std::vector<uint64_t> retired_;
+	// The requests the devices raised inside a pump, served at the start of the next
+	// (queue_device_request_). Before devices_, which queues one more as it goes (a device given up
+	// with its burst open), which nothing serves.
+	std::vector<opennova::editor::EditorRequest> queued_device_requests_;
 	// The viewports' devices (S13 V5): at most four, by document and kind, made under this node.
 	std::unique_ptr<opennova::editor::ViewportDeviceCache> devices_;
 	String settings_path_ = "user://editor_settings.json";

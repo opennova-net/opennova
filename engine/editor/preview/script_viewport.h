@@ -25,6 +25,12 @@ enum class ScriptViewStatus : uint8_t {
 // "no_text", "ready": its token on the wire.
 const char *script_view_status_token(ScriptViewStatus status);
 
+// Why the text document takes no edit now ("" when it does): what holds it read only (its first
+// blocking issue: a music script's message handler, a credits file its text form cannot carry), else
+// the operation holding the documents (the busy gate). What the viewport's `read_only` says and the
+// script view's toolbar shows.
+std::string script_read_only_reason(const SessionView &view, const DocumentBase &document);
+
 // A finding about a line, one of a gutter mark's (ScriptMark): its code (its row's token), its
 // severity, its column (from 1; 0 for none) and its message.
 struct ScriptMarkFinding {
@@ -76,13 +82,15 @@ struct ScriptReveal {
 // script's message handler or a credits file its text form cannot carry, nor while an operation
 // holds the documents), and the place a RevealText asks it to show (a Go to's span, a Problems
 // row's place: selected where a reference or a word of the language starts there, the caret alone
-// elsewhere). A Rebuild sets the control's text anew (the document read, read again or first
-// shown); an Update brings what changed (an edit, an undo, the findings, the gate, a reveal), the
-// control taking the document's text again where it holds another (the document's text is the
-// truth). Its state is the base's alone (the size its device draws at where no canvas sizes it);
-// it has no options and no camera. Every edit the control makes is a request: `edit` plans the
-// span replacement that takes the document to what the control holds, under the keystroke burst's
-// gesture.
+// elsewhere). A Rebuild sets the control's text anew (the document first shown, or one the follow
+// calls another document); an Update brings what changed (an edit, an undo or a redo, the findings,
+// the gate, a reveal), the control taking the document's text again where it holds another (the
+// document's text is the truth, whatever moved it). Its state is the base's alone (the size its
+// device draws at where no canvas sizes it);
+// it has no options, no camera and no canvas (the viewport kinds' row: `canvas` false), so the wire
+// refuses a hit, a drag and a command on it, and a render of a row. Every edit the control makes is
+// a request: `edit` plans the span replacements that take the document to what the control holds,
+// under the keystroke burst's gesture.
 class ScriptViewport final : public ViewportModel {
 public:
 	explicit ScriptViewport(std::string path);
@@ -103,12 +111,14 @@ public:
 	uint64_t highlights_serial() const { return highlights_serial_; }
 	uint64_t texts_made() const { return texts_made_; }
 
-	// The span replacement that takes the document to `control`, what the control holds after an edit
-	// (its caret at `caret`, shown offset), at `now` (seconds): an EditRecord of one TextSpanEdit raised
-	// into `out`, carrying `burst`'s token; the burst ended first (its EndEdit) when the edit does not
-	// go on from it. Nothing raised when the control holds the document's text. False, with `error`,
-	// and nothing raised, for an edit the document does not take now (no text open, held read only,
-	// an operation holding the documents) or the code page cannot hold.
+	// The span replacements that take the document to `control`, what the control holds after an edit
+	// (its caret at `caret`, shown offset), at `now` (seconds): an EditRecord of the TextSpanEdits
+	// (one a place the edit changes: ShownText::edit) raised into `out`, carrying `burst`'s token.
+	// The burst is ended first (its EndEdit) when the edit does not go on from it, and an edit at
+	// several places is a step of its own: it ends the burst before it and after it. Nothing raised
+	// when the control holds the document's text. False, with `error`, and nothing raised, for an
+	// edit the document does not take now (no text open, held read only, an operation holding the
+	// documents) or the code page cannot hold.
 	bool edit(const ViewportContext &context, std::u32string_view control, size_t caret, double now,
 			TextBurst &burst, CanvasRequests &out, std::string &error) const;
 
@@ -118,9 +128,12 @@ public:
 	const std::string &detail() const override { return detail_; }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
-	// No canvas: the control owns the input in its rect (null).
+	// No canvas: the control owns the input in its rect (null). So no point of it names anything (the
+	// wire refuses a hit before it asks: the kinds' row), and it has no handle and no command to plan.
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	bool command(const ViewportContext &context, const std::string &name,

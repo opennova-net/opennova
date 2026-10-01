@@ -1,10 +1,18 @@
 #include "authoring/script_edit.h"
 
+#include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
+#include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/window.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable_method_pointer.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
@@ -97,6 +105,15 @@ ScriptEdit::ScriptEdit() {
 	set_code_completion_enabled(false);
 	set_indent_using_spaces(false);
 	set_highlight_current_line(true);
+	// One caret and no selection dragged elsewhere in the text: a change at several places is a step of
+	// lines (an indent, planned as one span each: preview/shown_text), never a caret's typing at each
+	// of them or a move of text from one place to another. No indent added after a line's end.
+	set_multiple_carets_enabled(false);
+	set_drag_and_drop_selection_enabled(false);
+	set_auto_indent_prefixes(TypedArray<String>());
+	// Our paste (_paste) cannot reach the state Godot's pastes a line copied with nothing selected above
+	// the current one by, so a copy or a cut with nothing selected takes nothing.
+	set_empty_selection_clipboard_enabled(false);
 	// The findings' gutter, before the line numbers.
 	add_gutter(0);
 	gutter_ = 0;
@@ -109,6 +126,24 @@ ScriptEdit::ScriptEdit() {
 	connect("text_changed", callable_mp(this, &ScriptEdit::on_text_changed_));
 	connect("focus_exited", callable_mp(this, &ScriptEdit::on_focus_exited_));
 	connect("gui_input", callable_mp(this, &ScriptEdit::on_gui_input_));
+}
+
+void ScriptEdit::_notification(int p_what) {
+	if (p_what == NOTIFICATION_ENTER_TREE) {
+		// The press that takes the focus from it is the window's, which sees every one before the GUI
+		// does (its deferred polling would miss a press and its release in one frame).
+		if (Window *window = get_window()) {
+			const Callable call = callable_mp(this, &ScriptEdit::on_window_input_);
+			if (!window->is_connected("window_input", call)) window->connect("window_input", call);
+			window_id_ = window->get_instance_id();
+		}
+	} else if (p_what == NOTIFICATION_EXIT_TREE) {
+		if (Window *window = Object::cast_to<Window>(ObjectDB::get_instance(window_id_))) {
+			const Callable call = callable_mp(this, &ScriptEdit::on_window_input_);
+			if (window->is_connected("window_input", call)) window->disconnect("window_input", call);
+		}
+		window_id_ = 0;
+	}
 }
 
 void ScriptEdit::set_listener(std::function<void()> on_text_changed, std::function<void()> on_focus_exited) {
@@ -147,6 +182,31 @@ void ScriptEdit::on_focus_exited_() {
 	if (focus_exited_) defer(focus_exited_);
 }
 
+void ScriptEdit::_paste(int32_t p_caret_index) {
+	if (!is_editable()) return;
+	// The clipboard's line ends as the text's own, each an LF whether the clipboard's was a CR LF or a
+	// CR alone (Godot drops a CR as it takes text, which would join the lines a CR alone ended).
+	const String text = DisplayServer::get_singleton()->clipboard_get().replace("\r\n", "\n").replace("\r", "\n");
+	if (text.is_empty()) return;
+	const int caret = p_caret_index < 0 ? 0 : p_caret_index;
+	begin_complex_operation();
+	if (has_selection(caret)) delete_selection(caret);
+	insert_text_at_caret(text, caret);
+	end_complex_operation();
+}
+
+void ScriptEdit::on_window_input_(const Ref<InputEvent> &p_event) {
+	// A press of a button outside its rect lets its focus go, where the press lands: on a window of the
+	// pass (which takes it) or on nothing the GUI would give the focus to. The window's input is in the
+	// window's pixels, the rect in its canvas's.
+	const InputEventMouseButton *button = Object::cast_to<InputEventMouseButton>(p_event.ptr());
+	if (!button || !button->is_pressed() || !has_focus()) return;
+	const MouseButton which = button->get_button_index();
+	if (which != MOUSE_BUTTON_LEFT && which != MOUSE_BUTTON_RIGHT && which != MOUSE_BUTTON_MIDDLE) return;
+	const Transform2D to_canvas = get_viewport()->get_final_transform().affine_inverse();
+	if (!get_global_rect().has_point(to_canvas.xform(button->get_position()))) release_focus();
+}
+
 void ScriptEdit::on_gui_input_(const Ref<InputEvent> &p_event) {
 	// Undo and redo are the editor's (its shortcuts, on the active document): the control's own never
 	// runs.
@@ -168,21 +228,29 @@ void ScriptEdit::on_gui_input_(const Ref<InputEvent> &p_event) {
 }
 
 void ScriptEdit::set_marks(const std::vector<opennova::editor::ScriptMark> &marks) {
-	// Every icon shown goes (a line's moves with its text as the control is edited).
+	// Every mark shown goes: its icon and the index it kept in the line's gutter metadata, both of
+	// which move with the line as the control is edited, so a line's mark is the line's own whatever
+	// was inserted or removed above it since the findings were made.
 	for (int line = 0; line < get_line_count(); ++line)
-		if (get_line_gutter_icon(line, gutter_).is_valid()) set_line_gutter_icon(line, gutter_, Ref<Texture2D>());
+		if (get_line_gutter_metadata(line, gutter_).get_type() != Variant::NIL) {
+			set_line_gutter_icon(line, gutter_, Ref<Texture2D>());
+			set_line_gutter_metadata(line, gutter_, Variant());
+		}
 	marks_ = marks;
-	for (const opennova::editor::ScriptMark &mark : marks_) {
-		const int line = int(mark.line) - 1;
+	for (size_t i = 0; i < marks_.size(); ++i) {
+		const int line = int(marks_[i].line) - 1;
 		if (line < 0 || line >= get_line_count()) continue;
-		set_line_gutter_icon(line, gutter_, icons_[severity_index(mark.severity)]);
+		set_line_gutter_icon(line, gutter_, icons_[severity_index(marks_[i].severity)]);
+		set_line_gutter_metadata(line, gutter_, int64_t(i));
 	}
 }
 
 const opennova::editor::ScriptMark *ScriptEdit::mark_at_(int p_line) const {
-	for (const opennova::editor::ScriptMark &mark : marks_)
-		if (int(mark.line) - 1 == p_line) return &mark;
-	return nullptr;
+	if (p_line < 0 || p_line >= get_line_count()) return nullptr;
+	const Variant kept = get_line_gutter_metadata(p_line, gutter_);
+	if (kept.get_type() != Variant::INT) return nullptr;
+	const int64_t index = kept;
+	return index >= 0 && size_t(index) < marks_.size() ? &marks_[size_t(index)] : nullptr;
 }
 
 String ScriptEdit::get_mark_severity(int p_line) const {

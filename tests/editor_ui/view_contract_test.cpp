@@ -23,6 +23,7 @@
 // role's outline view draws its outline beside the viewport, whose canvas fills the rest of the tab
 // through the workspace's device; in the Document window while an operation holds the documents,
 // its outline is held back and its canvas is not (a drag orbits its camera).
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -573,18 +574,37 @@ void test_script_view_device() {
 	              float(device->origin.y + float(device->height)) <= tab->Pos.y + tab->Size.y,
 	      "the device in the rest of the tab below the toolbar");
 	CHECK(device->last.canvas_sized && device->last.clip_right > device->last.clip_left, "its rect, sized by the view, clipped");
-	// One frame of the tab: Dear ImGui's implicit window first brought over it in the display order where
-	// asked, a window drawn after it over its rect where asked.
-	const auto frame = [&](bool implicit_front, bool over) {
+	// One frame of the tab, at `tab_y`: Dear ImGui's implicit window first brought over it in the display
+	// order where asked; another window drawn before it whose item holds the input where asked (made the
+	// active item where asked, kept alive each frame: as a slider held by the keys or a field typed in that
+	// lets nothing overlap it); a window drawn after it over its rect where asked.
+	struct Frame {
+		bool implicit_front = false;
+		bool field = false;
+		bool focus_field = false;
+		bool over = false;
+		float tab_y = 0.0f;
+	};
+
+	const auto frame = [&](const Frame &f) {
 		shell.devices.sync(*shell.viewports, workspace.seeded);
 		ImGui::NewFrame();
-		if (implicit_front) ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("Debug##Default"));
-		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		if (f.implicit_front) ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("Debug##Default"));
+		if (f.field) {
+			ImGui::SetNextWindowPos(ImVec2(700.0f, 0.0f));
+			ImGui::SetNextWindowSize(ImVec2(240.0f, 80.0f));
+			ImGui::Begin("Field", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			const ImGuiID held = ImGui::GetID("##held");
+			if (f.focus_field) ImGui::SetActiveID(held, ImGui::GetCurrentWindow());
+			ImGui::KeepAliveID(held);
+			ImGui::End();
+		}
+		ImGui::SetNextWindowPos(ImVec2(0.0f, f.tab_y));
 		ImGui::SetNextWindowSize(ImVec2(640.0f, 560.0f));
 		ImGui::Begin("Tab", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
 		view->draw(workspace, *document);
 		ImGui::End();
-		if (over) {
+		if (f.over) {
 			ImGui::SetNextWindowPos(ImVec2(100.0f, 200.0f));
 			ImGui::SetNextWindowSize(ImVec2(240.0f, 120.0f));
 			ImGui::Begin("Over", nullptr, ImGuiWindowFlags_NoSavedSettings);
@@ -594,25 +614,72 @@ void test_script_view_device() {
 		ImGui::Render();
 		view->end_frame(workspace);
 	};
+	Frame implicit_front;
+	implicit_front.implicit_front = true;
+	Frame over;
+	over.over = true;
+	const Frame plain;
 	// Dear ImGui's implicit window over the tab (begun every frame, drawn only where something is written
 	// to it, which nothing is): no cover, the device placed.
 	const ImGuiWindow *implicit = ImGui::FindWindowByName("Debug##Default");
 	CHECK(implicit && implicit->IsFallbackWindow && tab && implicit->Rect().Overlaps(tab->Rect()),
 	      "Dear ImGui's implicit window, where the tab is");
 	int placed = device->draws;
-	frame(true, false);
+	frame(implicit_front);
 	CHECK(GImGui->Windows.back() == implicit && device->draws == placed + 1 && script->device_drawn(),
 	      "the implicit window last in the display order: the device placed all the same");
 	// A window over the tab, begun after it: the device not placed from the frame after it first drew;
 	// gone, placed again once a frame has not drawn it.
-	for (int i = 0; i < 3; ++i) frame(false, true);
+	for (int i = 0; i < 3; ++i) frame(over);
 	CHECK(!script->device_drawn() && script->lines().lines_drawn() > 0, "a window over the tab: the lines drawn");
-	frame(false, false);
-	frame(false, false);
+	frame(plain);
+	frame(plain);
 	placed = device->draws;
-	frame(false, false);
+	frame(plain);
 	CHECK(script->device_drawn() && device->draws == placed + 1, "the window gone: the device placed again");
-	// A popup over the tab: the device not placed, the lines in its place.
+	// A window begun after the tab is known only once begun: the frame's end looks again and hides the
+	// device the same frame (a picture with no room), the lines coming the frame after.
+	placed = device->draws;
+	frame(over);
+	CHECK(!script->device_drawn() && device->draws == placed + 2 && device->last.width == 0 && device->last.height == 0,
+	      "a window begun after the tab over its rect: the device hidden the frame it first drew");
+	frame(plain);
+	frame(plain);
+	CHECK(script->device_drawn(), "that window gone: the device placed again");
+	// Another window's item holding the input (the active item, overlapping nothing): the pointer over
+	// the device's rect is let through all the same (the next frame's WantCaptureMouse none), so the
+	// press that ends the other item's hold reaches the control rather than Dear ImGui.
+	Frame field;
+	field.field = true;
+	field.focus_field = true;
+	frame(field);
+	field.focus_field = false;
+	for (int i = 0; i < 3; ++i) frame(field);
+	CHECK(GImGui->ActiveId != 0 && !GImGui->ActiveIdAllowOverlap, "another window's item holds the input");
+	ImGui::GetIO().AddMousePosEvent(float(device->origin.x) + 40.0f, float(device->origin.y) + 40.0f);
+	frame(field);
+	frame(field);
+	CHECK(GImGui->ActiveId != 0 && !ImGui::GetIO().WantCaptureMouse,
+	      "the pointer over the device's rect while another item holds the input: let through to the control");
+	ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+	frame(plain);
+	frame(plain);
+	// The toolbar's tips above their tools, never over the device's rect (a Control draws over every
+	// tip): the tab lower down, the pointer over its first tool (Reload).
+	Frame lower;
+	lower.tab_y = 120.0f;
+	frame(lower);
+	const ImGuiWindow *lowered = ImGui::FindWindowByName("Tab");
+	const ImVec2 reload = lowered ? lowered->DC.CursorStartPos : ImVec2(0.0f, 0.0f);
+	ImGui::GetIO().AddMousePosEvent(reload.x + 6.0f, reload.y + 6.0f);
+	for (int i = 0; i < 3; ++i) frame(lower);
+	const ImGuiWindow *tip = ImGui::FindWindowByName("##Tooltip_00");
+	CHECK(tip && tip->Active && tip->Rect().Max.y <= reload.y + 0.5f && tip->Rect().Max.y <= float(device->origin.y) &&
+	              script->device_drawn(),
+	      "the Reload tool's tip above it, clear of the device placed under it");
+	ImGui::GetIO().AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+	frame(plain);
+	frame(plain);	// A popup over the tab: the device not placed, the lines in its place.
 	const int draws = device->draws;
 	shell.devices.sync(*shell.viewports, workspace.seeded);
 	ImGui::NewFrame();

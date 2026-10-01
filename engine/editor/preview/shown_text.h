@@ -22,14 +22,24 @@ struct ShownDiff {
 	bool empty() const { return removed == 0 && inserted == 0; }
 };
 
-// One edit of a text document planned from what its control holds (ShownText::edit): the span of
-// the document it replaces and the text that takes its place, in the document's characters (its
-// code page, one byte each), and where the change lies in the shown text.
-struct ShownTextEdit {
+// One replacement of a text document planned from what its control holds (ShownText::edit): the span
+// of the document it replaces and the text that takes its place, in the document's characters (its
+// code page, one byte each).
+struct ShownTextSpan {
 	TextSpan span;
 	std::string text;
+};
+
+// The edit of a text document planned from what its control holds (ShownText::edit): the
+// replacements it is made of, and where the whole change lies in the shown text (from its first
+// changed character to its last: what a keystroke burst reads). The spans are one for each place the
+// change reaches, the ones further on in the document first, so a document applying them in order
+// finds each where the plan put it (each is against the text as the spans before it left it, which
+// move nothing that lies before them).
+struct ShownTextEdit {
+	std::vector<ShownTextSpan> spans;
 	ShownDiff shown;
-	bool empty() const { return shown.empty(); }
+	bool empty() const { return spans.empty(); }
 };
 
 // A text document's text as the script device's control shows it (ADR 0046 S13 V10; CONTEXT.md
@@ -38,13 +48,17 @@ struct ShownTextEdit {
 // control cannot hold (a CR alone, which a Godot text control drops as it takes text, and a NUL),
 // which stays in the document where it is. Its lines are the document's, one for one.
 //
-// It plans the one span replacement that takes the document to what the control holds after an
-// edit (edit): the fewest characters, byte-exact against the document, every byte the edit does
-// not reach kept as the document holds it (a CR LF stays a CR LF, a hidden byte stays where it is
-// unless the edit covers what lies on both sides of it); a line end the edit puts in written as the
-// document's lines end (CR LF for a type whose game reader ends a line at a CR or at a CR LF, a
-// script's and a credits text's; else as the document's first line end, an LF in a text with
-// none); a character the code page has no byte for refusing the edit whole.
+// It plans the span replacements that take the document to what the control holds after an edit
+// (edit): the fewest characters, byte-exact against the document, every byte the edit does not reach
+// kept as the document holds it (a CR LF stays a CR LF, an LF alone stays one, a hidden byte stays
+// where it is unless the edit covers what lies on both sides of it). A change at several places that
+// keeps the line count (an indent or a comment of several lines) is one span for each line it
+// changes, so the line ends and the hidden bytes between its places are never rewritten; any other
+// change (a typed line end, a paste of lines, a selection of lines deleted or replaced) is one span.
+// A line end the edit puts in is written as the document's lines end (CR LF for a type whose game
+// reader ends a line at a CR or at a CR LF, a script's and a credits text's; else as the document's
+// first line end, an LF in a text with none); a character the code page has no byte for refuses the
+// edit whole.
 class ShownText {
 public:
 	// An empty text (no document shown yet).
@@ -55,7 +69,7 @@ public:
 	// What a line end the control puts in is written as in the document ("\r\n" or "\n").
 	const std::string &line_end() const { return line_end_; }
 
-	// The replacement that takes the document to `control` (the control's text after an edit, its
+	// The replacements that take the document to `control` (the control's text after an edit, its
 	// caret at `caret`, which picks among runs of one size: ShownDiff). An empty edit when the
 	// control holds the document's text; false, with `error`, for one the code page cannot hold.
 	bool edit(std::u32string_view control, size_t caret, ShownTextEdit &out, std::string &error) const;

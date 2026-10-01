@@ -33,6 +33,29 @@ std::string code_point_name(char32_t cp) {
 	return "U+" + hex;
 }
 
+// `text` cut at its LFs: each line without its line end, at least one (an empty text is one empty
+// line).
+std::vector<std::u32string_view> lines_of(std::u32string_view text) {
+	std::vector<std::u32string_view> lines;
+	size_t at = 0;
+	for (;;) {
+		const size_t lf = text.find(U'\n', at);
+		if (lf == std::u32string_view::npos) {
+			lines.push_back(text.substr(at));
+			return lines;
+		}
+		lines.push_back(text.substr(at, lf - at));
+		at = lf + 1;
+	}
+}
+
+// One change of the shown text: `removed` characters from `from` gave way to `inserted`.
+struct Hunk {
+	size_t from = 0;
+	size_t removed = 0;
+	std::u32string_view inserted;
+};
+
 } // namespace
 
 ShownText::ShownText(const TextDocument &document) : line_end_(line_end_of(document)) {
@@ -100,24 +123,66 @@ ShownDiff ShownText::diff(std::u32string_view from, std::u32string_view to, size
 
 bool ShownText::edit(std::u32string_view control, size_t caret, ShownTextEdit &out, std::string &error) const {
 	out = ShownTextEdit();
-	const ShownDiff diff = ShownText::diff(text_, control, caret);
-	if (diff.empty()) return true;
-	// The text: each character in the code page, an LF as the document's line end; a character it
-	// has no byte for refuses the edit whole.
-	std::string text;
+	const ShownDiff whole = ShownText::diff(text_, control, caret);
+	if (whole.empty()) return true;
+	// The hunks: the whole change as one, or, where it spans lines and keeps their count (an indent or
+	// a comment of several lines: a change at several places), one for each line it changes, the line
+	// ends between them unchanged and so untouched, as are the hidden bytes of the lines it leaves.
+	const std::u32string_view old_mid = std::u32string_view(text_).substr(whole.from, whole.removed);
+	const std::u32string_view new_mid = control.substr(whole.from, whole.inserted);
+	const std::vector<std::u32string_view> old_lines = lines_of(old_mid), new_lines = lines_of(new_mid);
+	std::vector<Hunk> hunks;
+	if (old_lines.size() > 1 && old_lines.size() == new_lines.size()) {
+		size_t old_at = whole.from, new_at = whole.from;
+		for (size_t i = 0; i < old_lines.size(); ++i) {
+			if (old_lines[i] != new_lines[i]) {
+				// Where a keystroke leaves the caret picks among runs of one size, in the line that holds it.
+				const bool caret_here = caret >= new_at && caret <= new_at + new_lines[i].size();
+				const ShownDiff within = ShownText::diff(old_lines[i], new_lines[i], caret_here ? caret - new_at : SIZE_MAX);
+				hunks.push_back({ old_at + within.from, within.removed, new_lines[i].substr(within.from, within.inserted) });
+			}
+			old_at += old_lines[i].size() + 1;
+			new_at += new_lines[i].size() + 1;
+		}
+	} else {
+		hunks.push_back({ whole.from, whole.removed, new_mid });
+	}
+	// Each span: the text each character in the code page, an LF as the document's line end; a
+	// character it has no byte for refuses the edit whole. The bytes it covers run from the first
+	// changed character's to the last's (the bytes not shown between them with them; those at either
+	// edge stay where they are); an insertion goes in after the bytes not shown before the character it
+	// precedes. Its place is the line it starts on (the line ends shown before it, counted along the
+	// text once) and the column within it.
+	std::vector<ShownTextSpan> spans;
 	std::u32string unstorable;
-	for (size_t i = diff.from; i < diff.from + diff.inserted; ++i) {
-		const char32_t cp = control[i];
-		if (cp == U'\n') {
-			text += line_end_;
-			continue;
+	size_t line = 1, line_start = 0, scanned = 0;
+	for (const Hunk &hunk : hunks) {
+		std::string text;
+		for (const char32_t cp : hunk.inserted) {
+			if (cp == U'\n') {
+				text += line_end_;
+				continue;
+			}
+			uint8_t byte = 0;
+			if (cp == U'\r' || cp == 0 || !cp1252_encode_codepoint(cp, byte)) {
+				if (unstorable.find(cp) == std::u32string::npos) unstorable.push_back(cp);
+				continue;
+			}
+			text.push_back(static_cast<char>(byte));
 		}
-		uint8_t byte = 0;
-		if (cp == U'\r' || cp == 0 || !cp1252_encode_codepoint(cp, byte)) {
-			if (unstorable.find(cp) == std::u32string::npos) unstorable.push_back(cp);
-			continue;
-		}
-		text.push_back(static_cast<char>(byte));
+		const size_t begin = document_offset(hunk.from);
+		const size_t end = hunk.removed ? document_end(hunk.from + hunk.removed - 1) : begin;
+		for (; scanned < hunk.from; ++scanned)
+			if (text_[scanned] == U'\n') {
+				++line;
+				line_start = document_end(scanned);
+			}
+		ShownTextSpan span;
+		span.span.line = line;
+		span.span.column = begin - line_start + 1;
+		span.span.length = end - begin;
+		span.text = std::move(text);
+		spans.push_back(std::move(span));
 	}
 	if (!unstorable.empty()) {
 		error = "The game's text encoding (Windows-1252) has no byte for";
@@ -125,23 +190,10 @@ bool ShownText::edit(std::u32string_view control, size_t caret, ShownTextEdit &o
 		error += ": the edit is not taken.";
 		return false;
 	}
-	// The bytes it covers: from the first changed character's to the last's (the bytes not shown
-	// between them with them; those at either edge stay where they are). An insertion goes in after
-	// the bytes not shown before the character it precedes.
-	const size_t begin = document_offset(diff.from);
-	const size_t end = diff.removed ? document_end(diff.from + diff.removed - 1) : begin;
-	// Its place: the line it starts on (the line ends shown before it) and the column within it.
-	size_t line = 1, line_start = 0;
-	for (size_t i = 0; i < diff.from; ++i)
-		if (text_[i] == U'\n') {
-			++line;
-			line_start = document_end(i);
-		}
-	out.span.line = line;
-	out.span.column = begin - line_start + 1;
-	out.span.length = end - begin;
-	out.text = std::move(text);
-	out.shown = diff;
+	// The ones further on first: each is then where the plan put it as the spans before it are done.
+	std::reverse(spans.begin(), spans.end());
+	out.spans = std::move(spans);
+	out.shown = whole;
 	return true;
 }
 

@@ -19,8 +19,8 @@ std::unique_ptr<ViewportApplier> make_menu_applier(SubViewport &viewport) {
 std::unique_ptr<ViewportApplier> make_model_applier(SubViewport &viewport) {
 	return std::make_unique<ModelViewportApplier>(viewport);
 }
-std::unique_ptr<opennova::editor::ViewportDevice> make_script_device(Node &owner, ViewportDeviceRequests requests) {
-	return std::make_unique<ScriptDevice>(owner, std::move(requests));
+std::unique_ptr<opennova::editor::ViewportDevice> make_script_device(Node &owner, ViewportDeviceSink sink) {
+	return std::make_unique<ScriptDevice>(owner, std::move(sink));
 }
 
 constexpr ViewportDeviceRow kDevices[] = {
@@ -48,10 +48,10 @@ const ViewportDeviceRow *viewport_device_row(ViewportKind kind) {
 }
 
 std::unique_ptr<opennova::editor::ViewportDevice> make_viewport_device(Node &owner, ViewportKind kind,
-		std::function<void(SubViewport *)> retire, ViewportDeviceRequests requests) {
+		std::function<void(SubViewport *)> retire, ViewportDeviceSink sink) {
 	const ViewportDeviceRow *row = viewport_device_row(kind);
 	if (!row) return nullptr;
-	if (row->make_control) return row->make_control(owner, std::move(requests));
+	if (row->make_control) return row->make_control(owner, std::move(sink));
 	return std::make_unique<ViewportDevice>(owner, String("Viewport ") + opennova::editor::viewport_kind_token(kind),
 			[row](SubViewport &viewport) { return row->make(viewport); }, std::move(retire));
 }

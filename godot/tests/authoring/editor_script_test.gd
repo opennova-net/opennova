@@ -7,9 +7,13 @@ extends GutTest
 ## compile error is a gutter mark on its line, its message the mark's tip; a rename through the editor
 ## MCP reaches the control's text; a keystroke burst typed into the control is one undo step, the
 ## control's own history kept empty, and the undo takes the control back to the document's text; a
-## Go to's reveal selects its span; a credits file its text form cannot carry shows read only. The
-## control's placement over the reserved rect and the pointer and keys it owns there need the
-## workspace drawn (tests/windowed/editor_script_device_test.gd).
+## Go to's reveal selects its span; a credits file its text form cannot carry shows read only. Its
+## marks stay with their lines as text goes in above them; a burst a quiet second ended is its own
+## undo step, the next keystroke another; a character the game's code page has no byte for is
+## refused with a notice on the status line; a device given up mid-burst still ends its gesture, so
+## the Problems go on; the control alone keeps no undo of its own for Ctrl+Z. The control's placement
+## over the reserved rect and the pointer and keys it owns there need the workspace drawn
+## (tests/windowed/editor_script_device_test.gd).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -64,7 +68,7 @@ func _write(path: String, bytes: PackedByteArray) -> void:
 
 ## A project of the fixture script and the effect and the ammo its operands name (its text key's table
 ## left out: that reference is missing, a mark on line 7), and the minted credits file.
-func _project() -> bool:
+func _project(texts := 0) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor script project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	if not _seam.new_project(dir, "Script Device"):
@@ -75,6 +79,8 @@ func _project() -> bool:
 	_write(dir.path_join("defs/ammo.def"),
 			"ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n".to_utf8_buffer())
 	_write(dir.path_join(CREDITS), _fixture("cbin/synth_nlist.kda"))
+	for i in texts:
+		_write(dir.path_join("notes/note%d.txt" % i), ("note %d\r\n" % i).to_utf8_buffer())
 	_seam.request({"kind": "rescan"})
 	return _seam.settled
 
@@ -102,8 +108,8 @@ func _line(path: String, line: int) -> String:
 
 
 ## The script opened and its control made: the control.
-func _open_script() -> CodeEdit:
-	assert_true(_project(), "the project")
+func _open_script(texts := 0) -> CodeEdit:
+	assert_true(_project(texts), "the project")
 	assert_true(_seam.open_document(SCRIPT), "the script opens")
 	await _frames()
 	var edit := _edit(SCRIPT)
@@ -228,6 +234,109 @@ func test_credits_held_read_only() -> void:
 	assert_false(edit.editable, "a file its text form cannot carry shows read only")
 	assert_true(edit.text.length() > 0)
 
+
+## A mark stays with its line as text goes in above it: the gutter keeps each marked line's mark (its
+## metadata), so the tip and the severity are the line's own while the burst holds the findings.
+func test_a_mark_stays_with_its_line() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	assert_true(String(edit.call("get_mark_tip", 6)).contains("MISSION_START"))
+	edit.set_caret_line(0)
+	edit.set_caret_column(0)
+	edit.insert_text_at_caret("\n")
+	await _frames(2)
+	assert_eq(_line(SCRIPT, 2), edit.get_line(1), "the line end typed reached the document")
+	assert_eq(String(edit.call("get_mark_severity", 6)), "", "the line the mark was on holds none now")
+	assert_ne(String(edit.call("get_mark_severity", 7)), "", "the mark went down with its line")
+	assert_true(String(edit.call("get_mark_tip", 7)).contains("MISSION_START"), String(edit.call("get_mark_tip", 7)))
+
+
+## A burst a quiet second ended is its own undo step: one key, a pause past the second, another key,
+## and one undo takes the second key back alone.
+func test_a_quiet_second_ends_the_burst() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	var first := _line(SCRIPT, 1)
+	edit.set_caret_line(0)
+	edit.set_caret_column(0)
+	edit.insert_text_at_caret("a")
+	await _frames(1)
+	await get_tree().create_timer(1.3).timeout
+	await _frames(2)
+	edit.insert_text_at_caret("b")
+	await _frames(2)
+	assert_eq(_line(SCRIPT, 1), "ab" + first)
+	_seam.undo()
+	await _frames(2)
+	assert_eq(_line(SCRIPT, 1), "a" + first, "the second key undone alone")
+	assert_eq(edit.get_line(0), "a" + first, "the control taken back with it")
+	_seam.undo()
+	assert_eq(_line(SCRIPT, 1), first, "the first key the step before")
+
+
+## A character the game's code page has no byte for is refused, with a notice on the status line
+## naming it, and the control takes the document back.
+func test_an_unstorable_character_is_a_notice() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	var first := _line(SCRIPT, 1)
+	edit.set_caret_line(0)
+	edit.set_caret_column(0)
+	edit.insert_text_at_caret(String.chr(0x2192))
+	await _frames(3)
+	assert_eq(_line(SCRIPT, 1), first, "the document unchanged")
+	assert_eq(edit.get_line(0), first, "the control taken back")
+	var status := String(_app.call("get_status_text"))
+	assert_true(status.contains("U+2192") and status.contains("Windows-1252"), status)
+
+
+## A device given up in the middle of a burst (the cache's least recently used, as four other texts
+## open) still ends the burst's gesture, so the Problems the gesture held go on: the compile error typed
+## shows once the device is gone.
+func test_a_device_given_up_mid_burst_ends_its_gesture() -> void:
+	var edit := await _open_script(4)
+	if edit == null:
+		return
+	edit.set_caret_line(2)
+	edit.set_caret_column(edit.get_line(2).length())
+	edit.insert_text_at_caret(" )")
+	await _frames(2)
+	assert_eq(_line(SCRIPT, 3), "\tfxrain FX_Buildup )", "the keys went out")
+	assert_false(_seam.get_problems_json().contains("Unexpected )"), "the gesture holds the Problems")
+	# Opened without the seam's settle, which would wait on the Problems the gesture holds.
+	for i in 4:
+		var opened: Variant = JSON.parse_string(String(_app.call("request_json",
+				JSON.stringify({"kind": "open_document", "path": "notes/note%d.txt" % i}))))
+		assert_true(opened is Dictionary and bool(opened.get("ok", false)), str(opened))
+		await _frames(2)
+	assert_null(_edit(SCRIPT), "the script's device given up")
+	await _frames(4)
+	assert_true(_seam.get_problems_json().contains("Unexpected )"), "the gesture ended: the Problems went on")
+
+
+## The control alone (no device clearing its history) keeps the history Godot gives it, and Ctrl+Z
+## through the GUI still never undoes in it: the editor's shortcut is the only undo.
+func test_the_control_takes_no_ctrl_z() -> void:
+	var edit: CodeEdit = ClassDB.instantiate("ScriptEdit")
+	add_child_autofree(edit)
+	edit.text = "abc"
+	edit.set_caret_column(3)
+	edit.insert_text_at_caret("d")
+	assert_true(edit.has_undo(), "its own history, with no device to clear it")
+	edit.grab_focus()
+	await _frames(1)
+	for redo in [false, true]:
+		var key := InputEventKey.new()
+		key.keycode = KEY_Y if redo else KEY_Z
+		key.ctrl_pressed = true
+		key.pressed = true
+		get_viewport().push_input(key)
+		await _frames(1)
+	assert_eq(edit.text, "abcd", "Ctrl+Z and Ctrl+Y swallowed")
+	assert_true(edit.has_undo())
 
 ## One tools/call through the editor MCP: the structuredContent, or {"_error": text}.
 func _tool(name: String, args: Dictionary) -> Dictionary:

@@ -1,21 +1,29 @@
 // S13 V10 (ADR 0046 S13, "the script device"): the Control-flavour device's portable half. The kinds'
 // table: ViewportKind::Script, the Main role of every text type, its token and the refusal that lists
-// the kinds. The span diff (preview/shown_text): a control's text taken back to the document as the
-// fewest characters replaced, byte-exact against the TextDocument (an insert, a delete, a replace
-// across lines, a line end joined and typed, a paste of several lines, CR LF kept, a lone CR and a
-// NUL kept where the control cannot show them, the caret picking among equal runs, a code-page
-// character stored as its byte, one it has none for refused), each undone byte for byte. The
-// keystroke burst (preview/text_burst): one token a run of typing, an edit away from where the last
-// left off ending it, a quiet second, one EndEdit only when an edit went out. The gutter marks from
-// the findings at the document's places, column included (a file-wide row's and another file's
+// the kinds, and the row's canvas flag (the script's none, as its viewport makes none). The span diff
+// (preview/shown_text): a control's text taken back to the document as the fewest characters
+// replaced, byte-exact against the TextDocument (an insert, a delete, a replace across lines, a line
+// end joined and typed, a paste of several lines, CR LF kept, a lone CR and a NUL kept where the
+// control cannot show them, the caret picking among equal runs, a code-page character stored as its
+// byte, one it has none for refused), each undone byte for byte; a change at several places that
+// keeps the line count (an indent of lines 3 to 9 over a file whose line 5 ends with an LF alone and
+// holds a NUL) a span for each line it changes, so no line end or hidden byte between is rewritten.
+// The keystroke burst (preview/text_burst): one token a run of typing, an edit away from where the
+// last left off ending it, a quiet second, one EndEdit only when an edit went out. The gutter marks
+// from the findings at the document's places, column included (a file-wide row's and another file's
 // none). The highlights: the WAC compiler's words (keywords, commands, operands) in the control's
 // places. Through a real session over a project: the script's Main viewport made as it opens, its
 // device pinned by a headless cache and rebuilt; a keystroke burst planned from the control's text,
-// served as one undo step; the follow's actions (an edit and an undo an Update, a reload a
-// Rebuild); a compile report a mark once the burst ends; a Go to's span selected (a reference's, a
-// keyword's, a caret alone); a credits file held read only and the busy gate refusing the planner;
-// the envelope; a SetViewport of its device's size. The retail leg (OPENNOVA_JO_DIR): every shipped
-// script's highlights tokens of their lines, its shown text's lines the document's.
+// served as one undo step; an indent of lines a step of its own, its burst ended with it and one
+// open before it ended first; the follow's actions (an edit and an undo an Update, a reload the
+// control's text made again); a compile report a mark once the burst ends; a Go to's span selected
+// (a reference's, a keyword's, a caret alone); a credits file held read only and the busy gate
+// refusing the planner; the envelope; a SetViewport of its device's size; and what the editor MCP's
+// ops say of a viewport with no canvas (a hit refused as such, a render, a drag, a command and a
+// camera refused, its items the marks, its notes none, the clock alone set). The retail leg
+// (OPENNOVA_JO_DIR): every shipped script's highlights tokens of their lines, its shown text's lines
+// the document's.
+#include <algorithm>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -63,6 +71,20 @@ std::string repo_file(const std::string &relative) {
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
+JsonValue parse(const std::string &text) {
+	JsonValue json;
+	std::string error;
+	opennova::io::json_parse(text, json, error);
+	return json;
+}
+
+// The batch a plan makes, its spans in the order the plan gives them (the ones further on first).
+std::vector<Edit> edits_of(const ShownTextEdit &planned, uint64_t gesture = 0) {
+	std::vector<Edit> edits;
+	for (const ShownTextSpan &each : planned.spans) edits.push_back(TextDocument::replace(each.span, each.text, false, gesture));
+	return edits;
+}
+
 TextSpan span(size_t line, size_t column, size_t length) {
 	TextSpan out;
 	out.line = line;
@@ -92,7 +114,12 @@ int test_kind_table() {
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
 	const ViewportKindRow &row = viewport_kind_row(ViewportKind::Script);
 	TEST_EXPECT(row.kind == ViewportKind::Script && row.role == ViewportRole::Main && !row.as_saved && !row.part &&
-	            row.feed_count == 5 && row.make);
+	            row.feed_count == 5 && row.make && !row.canvas);
+	// Whether a kind has a canvas is what its viewport makes of one: the script's none, the others' one.
+	for (size_t i = 0; i < kViewportKindCount; ++i) {
+		const ViewportKindRow &kind_row = viewport_kind_row(static_cast<ViewportKind>(i));
+		TEST_EXPECT((kind_row.make("t")->make_canvas() != nullptr) == kind_row.canvas);
+	}
 	// Every text type shown by it, the Main role's one kind; no record type; no Preview window's kind for
 	// a text.
 	const DocumentTypeId texts[] = {DocumentTypeId::Script, DocumentTypeId::MusicScript, DocumentTypeId::Credits,
@@ -162,8 +189,9 @@ int test_span_diff() {
 		TEST_EXPECT(document != nullptr);
 		ShownTextEdit edit;
 		std::string error;
-		if (!ShownText(*document).edit(c.control, c.caret, edit, error) || !same_span(edit.span, c.span) ||
-		    edit.text != c.inserted) {
+		// One place changed: one span.
+		if (!ShownText(*document).edit(c.control, c.caret, edit, error) || edit.spans.size() != 1 ||
+		    !same_span(edit.spans[0].span, c.span) || edit.spans[0].text != c.inserted) {
 			const auto hex_of = [](const std::string &text) {
 				std::string out;
 				for (const char byte : text) {
@@ -175,15 +203,17 @@ int test_span_diff() {
 			};
 			std::string points;
 			for (const char32_t cp : c.control) points += std::to_string(uint32_t(cp)) + " ";
-			std::fprintf(stderr, "%s: planned %zu:%zu+%zu, bytes %s, wanted %s, control %s(%s)\n", c.name, edit.span.line,
-			             edit.span.column, edit.span.length, hex_of(edit.text).c_str(), hex_of(c.inserted).c_str(),
-			             points.c_str(), error.c_str());
+			const ShownTextSpan none;
+			const ShownTextSpan &first = edit.spans.empty() ? none : edit.spans[0];
+			std::fprintf(stderr, "%s: planned %zu span(s), the first %zu:%zu+%zu, bytes %s, wanted %s, control %s(%s)\n", c.name,
+			             edit.spans.size(), first.span.line, first.span.column, first.span.length, hex_of(first.text).c_str(),
+			             hex_of(c.inserted).c_str(), points.c_str(), error.c_str());
 			return 1;
 		}
 		++planned;
 		// Byte-exact against the document, and undone byte for byte.
 		Diagnostic refused;
-		TEST_EXPECT(document->apply({TextDocument::replace(edit.span, edit.text)}, refused));
+		TEST_EXPECT(document->apply(edits_of(edit), refused));
 		if (document->text() != c.after) {
 			std::fprintf(stderr, "%s: the document holds other bytes\n", c.name);
 			return 1;
@@ -204,6 +234,88 @@ int test_span_diff() {
 	            error.find("U+2260") != std::string::npos);
 	std::printf("span diff: %zu edits planned, applied and undone byte for byte (%zu)\n", planned, undone);
 	TEST_EXPECT(planned == 13 && undone == 13);
+	return 0;
+}
+
+// A change at several places that keeps the line count (an indent of lines) is a span for each line
+// it changes, so the line ends and the hidden bytes of the lines between and around are never
+// rewritten: over ten lines whose fifth ends with an LF alone and holds a NUL, an indent of lines 3 to
+// 9 is seven insertions (the ones further on first), applied one undo step that takes the bytes back
+// whole; lines 3 and 9 alone two spans and nothing between; a change that moves the line count, and
+// one a character of which the code page cannot hold, as one change as before.
+int test_several_places() {
+	std::string original = "alpha\r\nbeta\r\ngamma\r\ndelta\r\n";
+	original += std::string("ep\0silon", 8);
+	original += "\nzeta\r\neta\r\ntheta\r\niota\r\nkappa\r\n";
+	std::unique_ptr<DocumentBase> base = document_of(AssetKind::Text, original, "t.txt");
+	TextDocument *document = text_of(*base);
+	TEST_EXPECT(document && document->text() == original && document->line_count() == 11);
+	const ShownText shown(*document);
+	TEST_EXPECT(shown.text() == U"alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\n");
+	// A tab at the start of each of `lines` of the control's text, and of the document's bytes.
+	const auto indented = [&shown, &original](const std::vector<size_t> &lines, std::u32string &control, std::string &bytes) {
+		control.clear();
+		bytes.clear();
+		size_t line = 1;
+		bool at_start = true;
+		const auto wanted = [&](size_t number) { return std::find(lines.begin(), lines.end(), number) != lines.end(); };
+		for (const char32_t cp : shown.text()) {
+			if (at_start && wanted(line)) control.push_back(U'\t');
+			at_start = false;
+			control.push_back(cp);
+			if (cp == U'\n') {
+				++line;
+				at_start = true;
+			}
+		}
+		line = 1;
+		at_start = true;
+		for (const char byte : original) {
+			if (at_start && wanted(line)) bytes.push_back('\t');
+			at_start = false;
+			bytes.push_back(byte);
+			if (byte == '\n') {
+				++line;
+				at_start = true;
+			}
+		}
+	};
+	std::u32string control;
+	std::string expected;
+	indented({3, 4, 5, 6, 7, 8, 9}, control, expected);
+	ShownTextEdit planned;
+	std::string error;
+	TEST_EXPECT(shown.edit(control, 0, planned, error) && planned.spans.size() == 7);
+	for (size_t i = 0; i < planned.spans.size(); ++i)
+		TEST_EXPECT(planned.spans[i].span.line == 9 - i && planned.spans[i].span.column == 1 && planned.spans[i].span.length == 0 &&
+		            planned.spans[i].text == "\t");
+	// The whole change reaches from its first place to its last.
+	TEST_EXPECT(planned.shown.from == shown.text().find(U"gamma") && planned.shown.removed > 0 && planned.shown.inserted > planned.shown.removed);
+	Diagnostic refused;
+	TEST_EXPECT(document->apply(edits_of(planned), refused) && document->text() == expected);
+	// Line 5's end an LF alone and its NUL as they were; line 4's end and line 9's CR LF too.
+	TEST_EXPECT(document->line(5) == std::string_view("\tep\0silon", 9) &&
+	            document->text().find("silon\n\tzeta") != std::string::npos &&
+	            document->text().find("delta\r\n\tep") != std::string::npos && document->text().find("iota\r\nkappa") != std::string::npos);
+	document->undo();
+	TEST_EXPECT(document->text() == original && !document->can_undo());
+	// Lines 3 and 9 alone: two spans, and nothing is written between them.
+	indented({3, 9}, control, expected);
+	TEST_EXPECT(shown.edit(control, 0, planned, error) && planned.spans.size() == 2 && planned.spans[0].span.line == 9 &&
+	            planned.spans[1].span.line == 3);
+	TEST_EXPECT(document->apply(edits_of(planned), refused) && document->text() == expected);
+	document->undo();
+	TEST_EXPECT(document->text() == original);
+	// A change that moves the line count is one change (lines 3 and 4 joined: the line end between them
+	// goes with the span), as is any change of one place.
+	const std::u32string joined = shown.text().substr(0, shown.text().find(U"gamma") + 5) + shown.text().substr(shown.text().find(U"delta"));
+	TEST_EXPECT(shown.edit(joined, 0, planned, error) && planned.spans.size() == 1 && planned.spans[0].span.line == 3 &&
+	            planned.spans[0].span.column == 6 && planned.spans[0].span.length == 2 && planned.spans[0].text.empty());
+	// A character the code page has no byte for in one of several places refuses the whole edit.
+	indented({3, 4}, control, expected);
+	control.insert(control.find(U"delta") + 5, 1, char32_t(0x2260));
+	TEST_EXPECT(!shown.edit(control, 0, planned, error) && planned.empty() && error.find("U+2260") != std::string::npos);
+	std::printf("several places: seven lines indented as seven spans, line 5's LF alone and NUL untouched\n");
 	return 0;
 }
 
@@ -360,6 +472,41 @@ int test_highlights() {
 	return 0;
 }
 
+// A reveal after a hidden byte on its line: a script whose first line holds a CR alone (the end of its
+// comment for the compiler, hidden from the control) ahead of its If, so the keyword stands one column
+// earlier in the control than in the document, and a Go to's span selects it alone, in the control's
+// places, as its highlight does.
+int test_reveal_after_hidden_byte() {
+	std::unique_ptr<DocumentBase> base = document_of(
+			AssetKind::Script, "; note\rIf true(bluekills) then\r\n\tfxrain FX_Buildup\r\nendif\r\n", "t.wac");
+	SessionView view;
+	view.documents.open = {std::shared_ptr<const DocumentBase>(std::move(base))};
+	const DocumentBase &document = *view.documents.open.front();
+	ScriptViewport viewport("t.wac");
+	PreviewClock clock;
+	viewport.follow(ViewportInput{view, clock, &document, ChangeClass::Loaded}, clock);
+	TEST_EXPECT(viewport.shown_text().text().compare(0, 14, U"; noteIf true(") == 0);
+	size_t keywords = 0;
+	for (const ScriptHighlight &word : viewport.highlights())
+		if (word.line == 0 && word.length == 2 && word.kind == TextHighlightKind::Keyword) {
+			++keywords;
+			TEST_EXPECT(word.column == 6);
+		}
+	TEST_EXPECT(keywords == 1);
+	ViewEvent event;
+	event.kind = ViewEventKind::RevealText;
+	event.path = "t.wac";
+	event.locator = TextDocument::locator(1, 8);
+	event.seq = 7;
+	viewport.receive(event);
+	viewport.follow(ViewportInput{view, clock, &document, ChangeClass::None}, clock);
+	const ScriptReveal &reveal = viewport.reveal();
+	TEST_EXPECT(reveal.seq == 7 && same_span(reveal.span, span(1, 8, 2)) && reveal.line == 0 && reveal.column == 6 &&
+	            reveal.end_line == 0 && reveal.end_column == 8);
+	std::printf("reveal: the keyword after a hidden CR at columns 6 to 8 of the control\n");
+	return 0;
+}
+
 // --- through a session -------------------------------------------------------------------------------
 
 struct ScriptRig {
@@ -436,7 +583,7 @@ int test_session() {
 	editor_test::Gathered out;
 	TextBurst burst;
 	std::string error;
-	TEST_EXPECT(viewport->edit(editor_test::viewport_context(rig.session, *viewport), control, at + 2, 1.0, burst, out, error));
+	TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), control, at + 2, 1.0, burst, out, error));
 	TEST_EXPECT(out.requests.size() == 1 && out.requests[0].kind == EditorRequestKind::EditRecord &&
 	            out.requests[0].edits.size() == 1 && out.requests[0].edits[0].gesture == burst.token());
 	const auto *first = dynamic_cast<const TextSpanEdit *>(out.requests[0].edits[0].payload.get());
@@ -446,14 +593,14 @@ int test_session() {
 	TEST_EXPECT(device->last() == ViewportAction::Update && viewport->shown_text().text() == control);
 	control.insert(at + 2, U" ");
 	out.requests.clear();
-	TEST_EXPECT(viewport->edit(editor_test::viewport_context(rig.session, *viewport), control, at + 3, 1.2, burst, out, error));
+	TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), control, at + 3, 1.2, burst, out, error));
 	TEST_EXPECT(out.requests.size() == 1 && out.requests[0].edits[0].gesture == burst.token() &&
 	            editor_test::serve(rig.session, out.requests));
 	const uint64_t first_token = burst.token();
 	const std::string first_line(document->line(1));
 	control.insert(0, U";");
 	out.requests.clear();
-	TEST_EXPECT(viewport->edit(editor_test::viewport_context(rig.session, *viewport), control, 1, 1.4, burst, out, error));
+	TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), control, 1, 1.4, burst, out, error));
 	TEST_EXPECT(out.requests.size() == 2 && out.requests[0].kind == EditorRequestKind::EndEdit &&
 	            out.requests[1].kind == EditorRequestKind::EditRecord && out.requests[1].edits[0].gesture != first_token);
 	TEST_EXPECT(editor_test::serve(rig.session, out.requests));
@@ -476,13 +623,68 @@ int test_session() {
 	rig.pump();
 	TEST_EXPECT(document->text() == original && viewport->shown_text().text() == ShownText(*document).text());
 	TEST_EXPECT(viewport->marks().empty());
-	// A reload: a Rebuild.
+	// An indent of lines 3 to 5 from the control (a change at three places): one batch of three spans
+	// under one token, its burst ended with it (the EndEdit follows it, an open burst none), served one
+	// undo step that takes the bytes back whole.
+	{
+		const std::string before3(document->line(3)), before4(document->line(4)), before5(document->line(5));
+		std::u32string indented = viewport->shown_text().text();
+		for (const size_t line : {size_t(4), size_t(3), size_t(2)}) indented.insert(ShownText::offset_of(indented, line, 0), 1, U'\t');
+		editor_test::Gathered indent;
+		TextBurst indent_burst;
+		TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), indented,
+		                           ShownText::offset_of(indented, 4, 1), 5.0, indent_burst, indent, error));
+		TEST_EXPECT(indent.requests.size() == 2 && indent.requests[0].kind == EditorRequestKind::EditRecord &&
+		            indent.requests[0].edits.size() == 3 && indent.requests[1].kind == EditorRequestKind::EndEdit &&
+		            !indent_burst.open());
+		const uint64_t indent_token = indent.requests[0].edits[0].gesture;
+		TEST_EXPECT(indent_token != 0 && indent.requests[0].edits[1].gesture == indent_token &&
+		            indent.requests[0].edits[2].gesture == indent_token);
+		TEST_EXPECT(editor_test::serve(rig.session, indent.requests));
+		TEST_EXPECT(document->line(3) == "\t" + before3 && document->line(4) == "\t" + before4 && document->line(5) == "\t" + before5);
+		rig.pump();
+		TEST_EXPECT(viewport->shown_text().text() == indented);
+		editor_test::handle_to_end(rig.session, request::undo(rig.script));
+		rig.pump();
+		TEST_EXPECT(document->text() == original && viewport->shown_text().text() == ShownText(*document).text());
+		// A burst open when the indent comes is ended before it, and the indent's token is its own: two
+		// undo steps, the indent and then the typing.
+		TextBurst open_burst;
+		editor_test::Gathered typed;
+		std::u32string typing = viewport->shown_text().text();
+		typing.insert(0, U";");
+		TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), typing, 1, 6.0, open_burst, typed, error) &&
+		            open_burst.open() && typed.requests.size() == 1 && editor_test::serve(rig.session, typed.requests));
+		const uint64_t typing_token = typed.requests[0].edits[0].gesture;
+		std::u32string both = typing;
+		for (const size_t line : {size_t(4), size_t(3)}) both.insert(ShownText::offset_of(both, line, 0), 1, U'\t');
+		typed.requests.clear();
+		TEST_EXPECT(viewport->edit(viewport_context(rig.view(), *viewport), both, ShownText::offset_of(both, 3, 1), 6.2,
+		                           open_burst, typed, error));
+		TEST_EXPECT(typed.requests.size() == 3 && typed.requests[0].kind == EditorRequestKind::EndEdit &&
+		            typed.requests[1].kind == EditorRequestKind::EditRecord && typed.requests[1].edits.size() == 2 &&
+		            typed.requests[1].edits[0].gesture != typing_token && typed.requests[2].kind == EditorRequestKind::EndEdit &&
+		            !open_burst.open() && editor_test::serve(rig.session, typed.requests));
+		editor_test::handle_to_end(rig.session, request::undo(rig.script));
+		rig.pump();
+		TEST_EXPECT(document->line(1).substr(0, 1) == ";" && document->line(3) == before3 && document->line(4) == before4);
+		editor_test::handle_to_end(rig.session, request::undo(rig.script));
+		rig.pump();
+		TEST_EXPECT(document->text() == original);
+	}
+	// A reload: the control's text made again, whichever way the follow classes a document read again:
+	// a Rebuild (another document at its path) or, from S13 V8, an Update (Unknown) whose take_text_
+	// replaces what differs; the text is made once either way.
 	const size_t before_reload = device->taken.size();
+	const uint64_t made_before = viewport->texts_made();
 	editor_test::handle_to_end(rig.session, request::reload_document(rig.script));
 	rig.pump();
-	TEST_EXPECT(device->since(before_reload) == std::vector<ViewportAction>{ViewportAction::Rebuild});
+	{
+		const std::vector<ViewportAction> reloaded = device->since(before_reload);
+		TEST_EXPECT(reloaded.size() == 1 && (reloaded[0] == ViewportAction::Rebuild || reloaded[0] == ViewportAction::Update));
+	}
 	viewport = rig.viewport(rig.script);
-	TEST_EXPECT(viewport != nullptr);
+	TEST_EXPECT(viewport != nullptr && viewport->texts_made() == made_before + 1);
 	// A Go to's span: the reference at 5:16 selected whole (AT_CONTRACT), in the control's places; a
 	// keyword's at 2:1; the caret alone inside the comment.
 	editor_test::handle_to_end(rig.session, request::open_document(rig.script, "5:16"));
@@ -500,12 +702,12 @@ int test_session() {
 	TEST_EXPECT(same_span(viewport->reveal().span, span(1, 3, 0)) && viewport->reveal().column == 2 &&
 	            viewport->reveal().end_column == 2);
 	// The envelope: its kind, as it stands (not as saved), its body and its marks; the kind's empty one.
-	const JsonValue envelope = viewport_to_json(rig.view(), viewport, ViewportKind::Script, JsonPage());
+	const JsonValue envelope = viewport_to_json(rig.view(), *viewport, JsonPage());
 	TEST_EXPECT(envelope.get_string("kind", "") == "script" && envelope.get_string("status", "") == "ready" &&
 	            !envelope.get_bool("as_saved", true) && envelope.get("body")->get_number("line_count", 0) == 9 &&
 	            envelope.get("body")->get_bool("editable", false) && envelope.get("body")->get("reveal")->is_object() &&
 	            envelope.get("items")->array.empty());
-	const JsonValue empty = viewport_to_json(rig.view(), nullptr, ViewportKind::Script, JsonPage());
+	const JsonValue empty = editor_test::empty_viewport_json(rig.view(), ViewportKind::Script);
 	TEST_EXPECT(empty.get_string("reason", "") == "no_text" && empty.get_string("status", "") == "empty");
 	// A SetViewport of its device's size (no canvas sizes it headless); a kind's member it has not
 	// refused; a kind no row has refused naming the three.
@@ -518,13 +720,54 @@ int test_session() {
 	TEST_EXPECT(opennova::io::json_parse(R"({"kind": "scrpt"})", unknown, parse_error) &&
 	            !rig.session.viewports().set(rig.view(), rig.script, unknown, set_error) &&
 	            set_error.find("menu, model, script") != std::string::npos);
+	// What the wire says of a viewport with no canvas (editor_viewport's ops): a hit refused as a kind
+	// with no canvas, never answered as a hit on nothing; a render of a row refused; its items the marks
+	// and its notes none; a drag (by a pixel's distance or to a point) and a command refused as
+	// viewport.refused; a camera refused as it is no member of its state; the clock alone, set with no
+	// document named, accepted and the script's own state untouched.
+	{
+		std::string query_error;
+		const auto ask = [&](const std::string &args) {
+			query_error.clear();
+			return rig.session.query("viewport", parse(args), query_error);
+		};
+		TEST_EXPECT(ask(R"({"op": "hit", "x": 10, "y": 10})").is_null() && query_error.find("no canvas") != std::string::npos);
+		ask(R"({"op": "render", "row": 1})");
+		TEST_EXPECT(query_error.find("renders no row") != std::string::npos);
+		const JsonValue items = ask(R"({"op": "items"})");
+		TEST_EXPECT(query_error.empty() && items.get("items") && items.get("items")->array.size() == viewport->marks().size() &&
+		            items.get_string("kind", "") == "script");
+		const JsonValue notes = ask(R"({"op": "notes"})");
+		TEST_EXPECT(query_error.empty() && notes.get("notes") && notes.get("notes")->array.empty());
+		const auto refused_no_canvas = [&](const std::string &request_json) {
+			const JsonValue answer = rig.session.handle_json(parse(request_json));
+			const JsonValue *outcome = answer.get("outcome");
+			const JsonValue *findings = outcome ? outcome->get("findings") : nullptr;
+			const bool ok = answer.get_bool("ok", false) && outcome && !outcome->get_bool("done", true) && findings &&
+			                findings->array.size() == 1 && findings->array[0].get_string("code", "") == "viewport.refused" &&
+			                findings->array[0].get_string("message", "").find("no canvas") != std::string::npos;
+			if (!ok) std::fprintf(stderr, "not refused as a kind with no canvas: %s\n", opennova::io::json_write(answer).c_str());
+			return ok;
+		};
+		TEST_EXPECT(refused_no_canvas(R"({"kind": "edit_in_viewport", "drag": {"id": 1, "handle": "move", "by": [8, 0]}})"));
+		TEST_EXPECT(refused_no_canvas(R"({"kind": "edit_in_viewport", "drag": {"id": 1, "handle": "move", "to": [8, 8]}})"));
+		TEST_EXPECT(refused_no_canvas(R"({"kind": "edit_in_viewport", "command": {"name": "align_left", "ids": [1]}})"));
+		rig.session.handle(request::set_viewport(rig.script, R"({"kind": "script", "camera": {"yaw": 1}})"));
+		TEST_EXPECT(!rig.session.outcome().done());
+		const double lines = ask(R"({"op": "state"})").get("body")->get_number("line_count", 0);
+		const JsonValue clocked = rig.session.handle_json(parse(R"({"kind": "set_viewport", "viewport": {"clock": {"time_ms": 120}}})"));
+		const JsonValue after = ask(R"({"op": "state"})");
+		TEST_EXPECT(clocked.get_bool("ok", false) && clocked.get("outcome") && clocked.get("outcome")->get_bool("done", false) &&
+		            after.get("clock")->get_number("time_ms", 0) == 120.0 && after.get("body")->get_number("line_count", -1) == lines &&
+		            after.get_string("status", "") == "ready");
+	}
 	// The busy gate: an operation holding the documents makes it read only (an Update), and the planner
 	// refuses an edit; the operation done, it takes edits again.
 	TEST_EXPECT(rig.session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
 	rig.devices.sync(rig.session);
 	TEST_EXPECT(!viewport->editable() && !viewport->read_only().empty() && device->last() == ViewportAction::Update);
 	out.requests.clear();
-	TEST_EXPECT(!viewport->edit(editor_test::viewport_context(rig.session, *viewport), U"x" + viewport->shown_text().text(), 1, 3.0,
+	TEST_EXPECT(!viewport->edit(viewport_context(rig.view(), *viewport), U"x" + viewport->shown_text().text(), 1, 3.0,
 	                            burst, out, error) &&
 	            out.requests.empty());
 	rig.pump();
@@ -535,7 +778,7 @@ int test_session() {
 	const ScriptViewport *credits = rig.viewport("menus/nlist.kda");
 	TEST_EXPECT(credits && rig.device("menus/nlist.kda") && credits->status() == ViewportStatus::Ready && !credits->editable() &&
 	            !credits->read_only().empty());
-	TEST_EXPECT(!credits->edit(editor_test::viewport_context(rig.session, *credits), U"x" + credits->shown_text().text(), 1, 4.0, burst,
+	TEST_EXPECT(!credits->edit(viewport_context(rig.view(), *credits), U"x" + credits->shown_text().text(), 1, 4.0, burst,
 	                           out, error) &&
 	            out.requests.empty());
 	// Closed: its viewport gone, its device dropped at the next sync.
@@ -622,10 +865,12 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	failures += test_kind_table();
 	failures += test_span_diff();
+	failures += test_several_places();
 	failures += test_shown_text();
 	failures += test_burst();
 	failures += test_marks();
 	failures += test_highlights();
+	failures += test_reveal_after_hidden_byte();
 	failures += test_session();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_script_viewport: all passed\n");

@@ -6,7 +6,7 @@ extends GutTest
 ## reserves, on a layer over the pass's, and the control owns the keys there: a key typed reaches the
 ## control through the input pipeline (the pass's layer first, which wants none of it) and is a span
 ## edit of the document; Ctrl+Z is the editor's undo (its shortcut), never the control's, and takes
-## the control back to the document's text. The pointer's pass-through is not driven here: the
+## the control back to the document's text; a press and its release in one frame outside the control lets its focus go. The pointer's pass-through is not driven here: the
 ## imgui-godot layer reads the OS cursor, which a test does not move. A tests/windowed/ script, run
 ## by `scripts/test_godot.sh --suite core --windowed`.
 
@@ -122,3 +122,19 @@ func test_device_placed_and_owns_the_keys() -> void:
 	assert_eq(_line(SCRIPT, 1), first, "Ctrl+Z undid the document's step once")
 	assert_eq(edit.get_line(0), first, "the control holds the document's text again")
 	assert_false(edit.has_undo(), "the control's own history stays empty")
+	# A press and its release in one frame, outside the control (on the Files window): its focus let
+	# go, as the window's own input sees every press before the GUI and the pass do.
+	edit.grab_focus()
+	await _frames(2)
+	assert_true(edit.has_focus(), "the control focused again")
+	var outside := Vector2(6.0, rect.position.y + 40.0)
+	assert_false(rect.has_point(outside))
+	for pressed: bool in [true, false]:
+		var button := InputEventMouseButton.new()
+		button.button_index = MOUSE_BUTTON_LEFT
+		button.pressed = pressed
+		button.position = outside
+		button.global_position = outside
+		Input.parse_input_event(button)
+	await _frames(2)
+	assert_false(edit.has_focus(), "a press and its release in one frame outside it let its focus go")

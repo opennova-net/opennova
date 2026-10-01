@@ -44,7 +44,7 @@ constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Model, ViewportRole::Preview, true, false, kModelFeeds, std::size(kModelFeeds),
 			ModelViewport::make },
 	{ ViewportKind::Script, ViewportRole::Main, false, false, kScriptFeeds, std::size(kScriptFeeds),
-			ScriptViewport::make },
+			ScriptViewport::make, false },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

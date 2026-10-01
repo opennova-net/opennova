@@ -38,8 +38,9 @@ public:
 	void draw(Workspace &workspace, const std::string &path);
 	// After every frame's windows (the workspace's frame bracket): a canvas that did not draw this
 	// frame (another viewport shown, the window closed or hidden, nothing to show) ends its gesture,
-	// its end raised once for the document it began in.
-	void end_frame(Workspace &workspace);
+	// its end raised once for the document it began in. A kind with no canvas has its own to say (the
+	// script view's: its device hidden where a window begun after it lies over it).
+	virtual void end_frame(Workspace &workspace);
 
 protected:
 	ViewportView(ViewportKind kind);

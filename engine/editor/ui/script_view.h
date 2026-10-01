@@ -19,7 +19,8 @@ class ScriptViewportView;
 // which take the RevealText events its document is sent (the device takes its reveal from its
 // viewport, which the session hands each one). Its toolbar holds back its own tools while an
 // operation holds the documents (each tool by the busy gate), never the device: the control is
-// read only then (the viewport's editable).
+// read only then (the viewport's editable), and the line under the toolbar says why (a file held
+// read only says so in the toolbar's notice).
 class ScriptView final : public DocumentView {
 public:
 	ScriptView();

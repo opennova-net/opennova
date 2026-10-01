@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -19,11 +20,19 @@ namespace godot {
 // device"): a Godot CodeEdit, decision 11's allowed device-side exception for script text, which
 // owns the pointer and the keys in its rect. Its undo is the editor's: its own history is kept
 // empty (so its menu offers none) and Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z are left to the editor's
-// shortcuts, never taken here. The findings show as an icon a line in a gutter of their own (the
-// worst one's severity, the shapes and colours of the windows' marks), their messages its tooltip
-// over the gutter. It tells its device what the user did (its text changed, the focus left it),
-// each outside any pump (a deferred call), and does nothing else with it: the device turns the
-// text into requests.
+// shortcuts, never taken here. One caret, and its selections not dragged and dropped: a change at
+// several places is a step of lines (an indent), never a caret's at each of them. No auto indent
+// after a line's end (the text's own). Its paste is its own (the clipboard's CR LFs and CRs alone
+// each an LF), which cannot reach the state that lets Godot's paste a line copied with nothing
+// selected above the current one, so a copy or a cut with nothing selected takes nothing. The
+// findings show as an icon a line in a gutter of their own (the worst one's severity, the shapes
+// and colours of the windows' marks), their messages its tooltip over the gutter; each marked line
+// keeps its mark's index as its gutter's metadata, so the icon, the tip and what the GUT tests read
+// stay with the line as text is inserted or removed above it. It tells its device what the user did
+// (its text changed, the focus left it), each outside any pump (a deferred call), lets go of its
+// focus on any press of the window outside its rect (the window's own input, a press and its
+// release in one frame included), and does nothing else with it: the device turns the text into
+// requests.
 class ScriptEdit : public CodeEdit {
 	GDCLASS(ScriptEdit, CodeEdit)
 
@@ -43,22 +52,29 @@ public:
 	void set_marks(const std::vector<opennova::editor::ScriptMark> &marks);
 
 	// The document it shows (its project-relative path) and its gutter marks, for the GUT tests: how
-	// many lines are marked, and a line's (from 0) severity ("error", "warning", "info"; "" none) and
-	// tip.
+	// many marks it holds, and a line's (from 0) severity ("error", "warning", "info"; "" none) and
+	// tip, read from the mark its gutter's metadata names, so they are those of the line's text as
+	// the control holds it now.
 	void set_document_path(const String &p_path) { path_ = p_path; }
 	String get_document_path() const { return path_; }
 	int get_mark_count() const { return int(marks_.size()); }
 	String get_mark_severity(int p_line) const;
 	String get_mark_tip(int p_line) const;
 
+	// A paste: the clipboard's text with each CR LF and each CR alone an LF (a Godot text control drops
+	// a CR as it takes text, which would join the lines a CR alone ends), in place of the selection.
+	void _paste(int32_t p_caret_index) override;
+
 protected:
 	static void _bind_methods();
+	void _notification(int p_what);
 
 private:
 	void on_text_changed_();
 	void on_focus_exited_();
 	void run_deferred_();
 	void on_gui_input_(const Ref<InputEvent> &p_event);
+	void on_window_input_(const Ref<InputEvent> &p_event);
 	const opennova::editor::ScriptMark *mark_at_(int p_line) const;
 
 	std::function<void()> text_changed_;
@@ -69,6 +85,7 @@ private:
 	int gutter_ = 0; // the findings' gutter
 	std::array<Ref<ImageTexture>, 3> icons_; // by severity: info, warning, error
 	std::vector<opennova::editor::ScriptMark> marks_;
+	uint64_t window_id_ = 0; // the window whose input it listens to while it is in the tree
 };
 
 } // namespace godot

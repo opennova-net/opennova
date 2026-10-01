@@ -66,11 +66,12 @@ in maturity_baseline.json:
                         Binding methods declared to return Dictionary or
                         TypedArray<Dictionary> in godot/src/**/*.h -- the seams
                         still handing GDScript untyped records instead of a
-                        RefCounted row (ADR 0042 d5). An override of a Godot
-                        virtual is not counted: its return type is the
-                        engine's contract, no seam of ours (the script
-                        device's SyntaxHighlighter::_get_line_syntax_highlighting,
-                        ADR 0046 S13 V10).
+                        RefCounted row (ADR 0042 d5). An `override` of a Godot
+                        virtual named in GODOT_FIXED_DICTIONARY_VIRTUALS is not
+                        counted: its return type is the engine's contract, no
+                        seam of ours (the script device's
+                        SyntaxHighlighter::_get_line_syntax_highlighting, ADR
+                        0046 S13 V10); a comment exempts no line.
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -477,7 +478,15 @@ def count_gd_dict_key_sites() -> int:
 
 
 GODOT_SRC_DICTIONARY_RETURN = re.compile(
-    r"^\s*(static\s+)?(virtual\s+)?(TypedArray<Dictionary>|Dictionary)\s+\w+\s*\(")
+    r"^\s*(static\s+)?(virtual\s+)?(TypedArray<Dictionary>|Dictionary)\s+(\w+)\s*\(")
+
+# The Godot virtuals whose Dictionary return the engine fixes, so that overriding one is no seam we
+# designed: counted nowhere else, named here one by one (a new one is a reviewed addition, never a
+# pattern that a new seam could match).
+GODOT_FIXED_DICTIONARY_VIRTUALS = {"_get_line_syntax_highlighting"}
+# A declaration that takes the `override` specifier (after its parameters and a const), not a word
+# of a comment.
+GODOT_OVERRIDE_SPECIFIER = re.compile(r"\)\s*(const\s*)?override\s*;")
 
 
 def count_godot_src_dictionary_returns() -> int:
@@ -485,9 +494,10 @@ def count_godot_src_dictionary_returns() -> int:
     in godot/src/**/*.h: the seams that still hand GDScript an untyped record
     where ADR 0042 d5 wants a RefCounted row (EntityRow, FeedRow, ...). A
     to_json_value() converter is not counted (it returns to the MCP edge),
-    nor is an override of a Godot virtual (`override`: the engine fixes its
-    return type, a SyntaxHighlighter's line colours); only method
-    declarations whose return TYPE is the Dictionary."""
+    nor is an `override` of a Godot virtual the engine fixes the return type
+    of (GODOT_FIXED_DICTIONARY_VIRTUALS: a SyntaxHighlighter's line colours);
+    only method declarations whose return TYPE is the Dictionary. What a
+    line's comment says exempts nothing."""
     count = 0
     for path in (REPO / "godot" / "src").rglob("*.h"):
         parts = path.relative_to(REPO).parts
@@ -498,9 +508,13 @@ def count_godot_src_dictionary_returns() -> int:
         except OSError:
             continue
         for line in text.splitlines():
-            if (GODOT_SRC_DICTIONARY_RETURN.match(line) and "to_json_value" not in line
-                    and not re.search(r"\boverride\b", line)):
-                count += 1
+            code = line.split("//", 1)[0]
+            declared = GODOT_SRC_DICTIONARY_RETURN.match(code)
+            if not declared or "to_json_value" in code:
+                continue
+            if declared.group(4) in GODOT_FIXED_DICTIONARY_VIRTUALS and GODOT_OVERRIDE_SPECIFIER.search(code):
+                continue
+            count += 1
     return count
 
 

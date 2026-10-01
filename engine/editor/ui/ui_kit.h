@@ -133,11 +133,39 @@ ImVec4 reference_color(ReferenceStatus status);
 // a second saying what to do.
 void empty_state(const char *text, const char *hint = nullptr);
 
-// Whether Dear ImGui draws anything over the rect (left, top, right, bottom, in the pass's pixels)
-// of the current window: a popup or a modal open anywhere (a menu, a dialog), or a window of the
-// same OS window drawn over the current one (one floating over a tab), a tooltip aside. What a Godot
-// Control placed over the rect would hide (the script device, ADR 0046 S13 V10), which is not placed
-// while it is so.
-bool covered(float left, float top, float right, float bottom);
+// A rect (left, top, right, bottom, in the pass's pixels) of a window, and which window's it is (the
+// ID of its root window: a docked or child window's is the host's), kept to ask about again later in
+// the frame, once every window has been begun (covered).
+struct Cover {
+	uint32_t window = 0;
+	float left = 0.0f;
+	float top = 0.0f;
+	float right = 0.0f;
+	float bottom = 0.0f;
+};
+// The rect of the current window, as it is asked about.
+Cover cover_of(float left, float top, float right, float bottom);
+// Whether Dear ImGui draws anything over the rect: a popup or a modal open anywhere (a menu, a
+// dialog), or a window of the same OS window drawn over its window (one floating over a tab; one
+// begun after it this frame counts at once, so ask again in the frame's bracket). A tooltip aside
+// (a Control placed over the rect, the script device of ADR 0046 S13 V10, is not placed while it is
+// covered, and a tooltip comes and goes with every item the pointer crosses: the script view's own
+// sit above their items, TipsAbove; another window's that lies over the rect draws under it).
+bool covered(const Cover &rect);
+
+// While one lives, a tooltip (`tooltip`) shows above its item, its bottom edge on the item's top
+// edge, rather than below the pointer; the pointer's own place where there is no room above. For the
+// items that sit over the rect of a Godot Control placed over the window (a text tab's toolbar over
+// the script device), whose tips below them would draw under it.
+class TipsAbove {
+public:
+	TipsAbove();
+	~TipsAbove();
+	TipsAbove(const TipsAbove &) = delete;
+	TipsAbove &operator=(const TipsAbove &) = delete;
+
+private:
+	bool before_ = false;
+};
 
 } // namespace opennova::editor::ui_kit

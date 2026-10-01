@@ -1,7 +1,6 @@
 #include "authoring/script_device.h"
 
 #include <godot_cpp/classes/canvas_layer.hpp>
-#include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -30,13 +29,15 @@ namespace {
 using opennova::editor::ShownDiff;
 using opennova::editor::ShownText;
 
+using RequestSink = std::function<void(const opennova::editor::EditorRequest &)>;
+
 // What a planner raises, handed to the Shell as it is raised.
 struct Forward final : opennova::editor::CanvasRequests {
-	explicit Forward(const ScriptDevice::Requests &to) : requests(to) {}
+	explicit Forward(const RequestSink &to) : requests(to) {}
 	void request(opennova::editor::EditorRequest request) override {
 		if (requests) requests(request);
 	}
-	const ScriptDevice::Requests &requests;
+	const RequestSink &requests;
 };
 
 std::u32string text_of(const ScriptEdit &edit) {
@@ -62,7 +63,7 @@ size_t moved(size_t offset, const ShownDiff &diff) {
 
 } // namespace
 
-ScriptDevice::ScriptDevice(Node &owner, Requests requests) : requests_(std::move(requests)) {
+ScriptDevice::ScriptDevice(Node &owner, ViewportDeviceSink sink) : sink_(std::move(sink)) {
 	CanvasLayer *layer = memnew(CanvasLayer);
 	layer->set_name("Script device");
 	layer->set_layer(kLayer);
@@ -79,6 +80,12 @@ ScriptDevice::ScriptDevice(Node &owner, Requests requests) : requests_(std::move
 }
 
 ScriptDevice::~ScriptDevice() {
+	// A burst still open ends all the same. The device goes inside a pump (the cache gave it up, its
+	// document closed), where a request is not served: its EndEdit is the Shell's to serve at its next.
+	if (burst_.open()) {
+		Forward later(sink_.request_later);
+		burst_.end(later);
+	}
 	// Nothing told any more: the control and its layer are freed at the frame's end (gone already
 	// where the owner's teardown freed them first).
 	if (ScriptEdit *edit = this->edit()) edit->clear_listener();
@@ -92,6 +99,14 @@ ScriptEdit *ScriptDevice::edit() const {
 
 ScriptDevice::Held ScriptDevice::held_of(const opennova::editor::DocumentBase &document) {
 	return Held{ document.identity(), document.load_generation(), document.revision() };
+}
+
+bool ScriptDevice::history_moved_(const opennova::editor::DocumentBase &document) const {
+	// The document is another instance or load than the control held (a reload: its history is gone), or
+	// has a step to redo, which an edit the burst left open cannot leave (the burst's own edit discards
+	// the redo branch), so an undo took it back. Another client's edit is neither.
+	const Held now = held_of(document);
+	return now.identity != held_.identity || now.load != held_.load || document.can_redo();
 }
 
 const opennova::editor::DocumentBase *ScriptDevice::document_() const {
@@ -114,6 +129,8 @@ void ScriptDevice::draw(const opennova::editor::ViewportPicture &picture) {
 		right = std::min(right, picture.clip_right);
 		bottom = std::min(bottom, picture.clip_bottom);
 	}
+	// A picture with no room (what the script view's second look at the frame's end draws where a
+	// window begun after the tab lies over the rect) hides the control the same frame.
 	if (right <= left || bottom <= top) {
 		edit->hide();
 		return;
@@ -170,10 +187,22 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 	// The size where no canvas drew it this frame (a headless Shell's, its tab hidden): its state's.
 	if (!drawn_) edit->set_size(Vector2(float(model.state().width), float(model.state().height)));
 	const opennova::editor::DocumentBase *document = document_();
+	// A burst going on when the document moved under the control, to a state it did not hold (its own
+	// edits leave it holding the document's): where its history moved it (an undo, a reload) the step
+	// the burst made ended with it and the burst is dropped, no EndEdit; where another client's edit
+	// moved it the burst ends, one EndEdit at a deferred call.
+	if (document && burst_.open() && !(held_of(*document) == held_)) {
+		if (history_moved_(*document)) {
+			burst_.drop();
+		} else if (!ending_) {
+			ending_ = true;
+			edit->defer([this] { end_burst_(); });
+		}
+	}
 	switch (action) {
 	case opennova::editor::ViewportAction::Rebuild: {
-		// The document read, read again or first shown: its text anew, the caret kept on its line where
-		// the text has it (a reload), the marks and the highlights set again.
+		// The document first shown or another one at its path: its text anew, the caret kept on its line
+		// where the text has it, the marks and the highlights set again.
 		const int line = edit->get_caret_line(), column = edit->get_caret_column();
 		edit->set_text(to_string(script.shown_text().text()));
 		edit->clear_undo_history();
@@ -200,12 +229,9 @@ void ScriptDevice::take(opennova::editor::ViewportAction action, const opennova:
 	case opennova::editor::ViewportAction::Keep: break;
 	}
 	// The document's text is the truth: the control takes it again where it holds another (an edit of
-	// another client's, an undo, a refused edit of its own). A burst going on ends with it.
+	// another client's, an undo, a reload, a refused edit of its own).
 	if (action != opennova::editor::ViewportAction::Rebuild && (control_moved_ || action == opennova::editor::ViewportAction::Update))
-		if (take_text_(script.shown_text().text()) && burst_.open() && !ending_) {
-			ending_ = true;
-			edit->defer([this] { end_burst_(); });
-		}
+		take_text_(script.shown_text().text());
 	control_moved_ = false;
 	if (document) held_ = held_of(*document);
 	if (script.marks_serial() != marks_serial_) {
@@ -237,13 +263,6 @@ void ScriptDevice::tick(const opennova::editor::ViewportModel &, const opennova:
 	// Shown only on a frame a canvas drew it.
 	if (!drawn_ && edit->is_visible()) edit->hide();
 	drawn_ = false;
-	// A press outside it (on a window of the pass, which takes it) lets its focus go.
-	Input *input = Input::get_singleton();
-	const bool pressed = input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT) ||
-			input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) || input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE);
-	if (pressed && !pressed_ && edit->has_focus() && !edit->get_global_rect().has_point(edit->get_global_mouse_position()))
-		edit->release_focus();
-	pressed_ = pressed;
 	// A quiet second ends the burst.
 	if (burst_.quiet(now_seconds()) && !ending_) {
 		ending_ = true;
@@ -269,11 +288,14 @@ void ScriptDevice::on_text_changed_() {
 				opennova::editor::ChangeClass::None },
 		int(edit->get_size().x), int(edit->get_size().y), 0.0f, this
 	};
-	Forward out(requests_);
+	Forward out(sink_.request);
 	std::string error;
-	// Refused (held read only, a character the code page has none for): the control takes the
-	// document back at the next pump.
-	if (!script->edit(context, control, caret, now_seconds(), burst_, out, error)) return;
+	// Refused (held read only, a character the code page has none for): the person is told why, and
+	// the control takes the document back at the next pump.
+	if (!script->edit(context, control, caret, now_seconds(), burst_, out, error)) {
+		if (!error.empty() && sink_.notice) sink_.notice(error);
+		return;
+	}
 	// The Shell served it at once: the document holds the control's text where it took the edit.
 	if (const opennova::editor::DocumentBase *after = document_()) held_ = held_of(*after);
 }
@@ -284,7 +306,7 @@ void ScriptDevice::on_focus_exited_() {
 
 void ScriptDevice::end_burst_() {
 	ending_ = false;
-	Forward out(requests_);
+	Forward out(sink_.request);
 	burst_.end(out);
 }
 

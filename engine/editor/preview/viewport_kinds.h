@@ -36,8 +36,11 @@ struct ViewportFeed {
 // selection's (a menu's screen: its target
 // moves only when a row of the document is selected and goes with that row); the document types it
 // shows and those that feed it; and what makes a viewport of it over the document at a path, its
-// state at the kind's defaults. A type is shown by one Main-role kind at most and fed by one
-// Preview-role kind at most (static_asserted).
+// state at the kind's defaults; and whether a canvas draws it, which owns the pointer over its
+// picture (a menu's, a model's: so a point of it names a record, a drag moves one, a command acts on
+// some) or a Control of the Shell's owns it (the script device's, S13 V10: no point of it names
+// anything, nothing is dragged or commanded in it, and the wire refuses a hit on it). A type is shown
+// by one Main-role kind at most and fed by one Preview-role kind at most (static_asserted).
 struct ViewportKindRow {
 	ViewportKind kind = ViewportKind::kCount;
 	ViewportRole role = ViewportRole::Preview;
@@ -46,6 +49,7 @@ struct ViewportKindRow {
 	const ViewportFeed *feeds = nullptr;
 	size_t feed_count = 0;
 	std::unique_ptr<ViewportModel> (*make)(const std::string &path) = nullptr;
+	bool canvas = true;
 };
 
 // A kind's row; Menu's for a value past the last kind.

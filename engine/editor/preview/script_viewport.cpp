@@ -32,10 +32,9 @@ int rank(DiagnosticSeverity severity) {
 // The size its device draws at where no canvas sizes it (a headless Shell's): the model's.
 constexpr ViewportState kHeadlessSize{ 800, 600 };
 
-// Why the document takes no edit now ("" when it does): what holds it read only (its first blocking
-// issue: a music script's message handler, a credits file its text form cannot carry), else the
-// operation holding the documents.
-std::string read_only_reason(const SessionView &view, const DocumentBase &document) {
+} // namespace
+
+std::string script_read_only_reason(const SessionView &view, const DocumentBase &document) {
 	if (document.blocked()) {
 		for (const SourceIssue &issue : document.issues())
 			if (issue.blocks) return issue.message;
@@ -46,8 +45,6 @@ std::string read_only_reason(const SessionView &view, const DocumentBase &docume
 				(view.activity.operation.label.empty() ? std::string() : " (" + view.activity.operation.label + ")") + ".";
 	return std::string();
 }
-
-} // namespace
 
 const char *script_view_status_token(ScriptViewStatus status) {
 	switch (status) {
@@ -183,7 +180,7 @@ ViewportAction ScriptViewport::follow_(const ViewportInput &input, PreviewClock 
 		shown_none();
 		return ViewportAction::Clear;
 	}
-	// The document read, read again or first shown: the control takes its text anew.
+	// The document first shown here, or another one at the path: the control takes its text anew.
 	const bool anew = reason_ != ScriptViewStatus::Ready || input.change == ChangeClass::Loaded;
 	reason_ = ScriptViewStatus::Ready;
 	detail_.clear();
@@ -194,8 +191,11 @@ ViewportAction ScriptViewport::follow_(const ViewportInput &input, PreviewClock 
 	if (anew) {
 		make_text_(*document);
 		action = ViewportAction::Rebuild;
-	} else if (input.change == ChangeClass::Unknown) {
-		// An edit, an undo or a redo: the control takes the text again where it holds another.
+	} else if (input.change != ChangeClass::None) {
+		// The document changed since the last follow, however the follow says it (an edit, an undo or a
+		// redo, the same document read again: Unknown now, and S13 V8's Changed and Unknown): its text is
+		// made again and the control takes it where it holds another. The control shows the whole text, so
+		// it needs no more than that the text moved: every class but a first follow reads alike.
 		make_text_(*document);
 		moved();
 	}
@@ -208,7 +208,7 @@ ViewportAction ScriptViewport::follow_(const ViewportInput &input, PreviewClock 
 	}
 	// Whether it takes an edit now: the document not held read only and no operation holding the
 	// documents (the busy gate).
-	std::string read_only = read_only_reason(input.view, *document);
+	std::string read_only = script_read_only_reason(input.view, *document);
 	if (anew || read_only.empty() != editable_ || read_only != read_only_) {
 		editable_ = read_only.empty();
 		read_only_ = std::move(read_only);
@@ -240,18 +240,26 @@ bool ScriptViewport::edit(const ViewportContext &context, std::u32string_view co
 		return false;
 	}
 	if (!context.editable()) {
-		error = read_only_reason(context.input.view, *document);
+		error = script_read_only_reason(context.input.view, *document);
 		if (error.empty()) error = "The document takes no edit now.";
 		return false;
 	}
 	ShownTextEdit planned;
 	if (!ShownText(*document).edit(control, caret, planned, error)) return false;
 	if (planned.empty()) return true;
-	// One burst a run of typing: an edit away from where the last left the text begins another.
-	if (burst.open() && !burst.continues(path(), planned.shown.from, planned.shown.removed)) burst.end(out);
+	// One burst a run of typing: an edit away from where the last left the text begins another, and so
+	// does one at several places (an indent of lines, a comment of lines), which is a step of its own:
+	// it goes out under a token of its own and ends its burst with it.
+	const bool several = planned.spans.size() > 1;
+	if (burst.open() && (several || !burst.continues(path(), planned.shown.from, planned.shown.removed))) burst.end(out);
 	const uint64_t token = burst.token();
-	out.request(request::edit_record(path(), TextDocument::replace(planned.span, std::move(planned.text), false, token)));
+	std::vector<Edit> edits;
+	edits.reserve(planned.spans.size());
+	for (ShownTextSpan &each : planned.spans)
+		edits.push_back(TextDocument::replace(each.span, std::move(each.text), false, token));
+	out.request(request::edit_record(path(), std::move(edits)));
 	burst.sent(path(), planned.shown.from + planned.shown.inserted, now);
+	if (several) burst.end(out);
 	return true;
 }
 
@@ -260,17 +268,28 @@ std::unique_ptr<CanvasHalf> ScriptViewport::make_canvas() const {
 }
 
 ViewportHit ScriptViewport::hit(const ViewportContext &, float, float) const {
+	// Nothing lies under a point of a control's rect that the session knows (the viewport query refuses
+	// a hit on a kind with no canvas before it asks).
 	return ViewportHit();
 }
 
+bool ScriptViewport::handle_point(const ViewportContext &, NodeId, const std::string &, float &, float &,
+		std::string &error) const {
+	error = "A script viewport has no canvas, so no handle: its device edits its text itself (send its spans "
+			"with edit_record).";
+	return false;
+}
+
 bool ScriptViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
-	error = "A script's device edits its text itself: send its spans with edit_record.";
+	error = "A script viewport has no canvas, so nothing to drag: its device edits its text itself (send its "
+			"spans with edit_record).";
 	return false;
 }
 
 bool ScriptViewport::command(const ViewportContext &, const std::string &name, const std::vector<NodeId> &,
 		CanvasRequests &, std::string &error) const {
-	error = "A script viewport has no command \"" + name + "\".";
+	error = "A script viewport has no canvas and no command \"" + name + "\": its device edits its text itself "
+			"(send its spans with edit_record).";
 	return false;
 }
 

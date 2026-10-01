@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 #include <editor/preview/viewport_kinds.h>
 
@@ -17,9 +18,16 @@ struct EditorRequest;
 
 namespace godot {
 
-// What a device hands the requests it makes to (a Control device's edits: the script device's spans,
-// S13 V10); the Shell serves each at once (EditorApp).
-using ViewportDeviceRequests = std::function<void(const opennova::editor::EditorRequest &)>;
+// What a Control device hands the Shell (EditorApp, which serves each; the script device's, S13 V10):
+// the requests it makes, served at once, from where it raises them (a control's deferred signal,
+// outside any pump); the requests it makes as it goes, which it raises inside a pump (the burst's
+// EndEdit of a device given up mid-burst), served at the Shell's next pump; and the notices it has
+// for the person (an edit it refused), posted on the editor's status line.
+struct ViewportDeviceSink {
+	std::function<void(const opennova::editor::EditorRequest &)> request;
+	std::function<void(const opennova::editor::EditorRequest &)> request_later;
+	std::function<void(const std::string &)> notice;
+};
 
 // A viewport kind's device (ADR 0046 S13 V5, V10): one row per ViewportKind, in its order, in
 // authoring/viewport_devices.cpp, which does not build without it (static_asserts, as the kinds'
@@ -31,16 +39,16 @@ using ViewportDeviceRequests = std::function<void(const opennova::editor::Editor
 struct ViewportDeviceRow {
 	opennova::editor::ViewportKind kind = opennova::editor::ViewportKind::kCount;
 	std::unique_ptr<ViewportApplier> (*make)(SubViewport &viewport) = nullptr;
-	std::unique_ptr<opennova::editor::ViewportDevice> (*make_control)(Node &owner, ViewportDeviceRequests requests) =
-			nullptr;
+	std::unique_ptr<opennova::editor::ViewportDevice> (*make_control)(Node &owner, ViewportDeviceSink sink) = nullptr;
 };
 
 // A kind's row; null past the last kind.
 const ViewportDeviceRow *viewport_device_row(opennova::editor::ViewportKind kind);
 // A new device of `kind` (EditorApp's device cache's factory, ViewportDeviceCache), its nodes children
 // of `owner`: a SubViewport device's SubViewport handed to `retire` when the device goes (the Shell
-// frees it at its next frame), a Control device's requests to `requests`; null past the last kind.
+// frees it at its next frame), a Control device's requests and notices to `sink`; null past the last
+// kind.
 std::unique_ptr<opennova::editor::ViewportDevice> make_viewport_device(Node &owner, opennova::editor::ViewportKind kind,
-		std::function<void(SubViewport *)> retire, ViewportDeviceRequests requests);
+		std::function<void(SubViewport *)> retire, ViewportDeviceSink sink);
 
 } // namespace godot

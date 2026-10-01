@@ -186,7 +186,7 @@ constexpr QueryParam kViewportParams[] = {
 			"An open document by its project-relative path or its logical name; left out, the active "
 			"one." },
 	{ "kind", J::String, false, nullptr,
-			"The viewport's kind (menu, model); left out, the one the document shows in: the "
+			"The viewport's kind (menu, model, script); left out, the one the document shows in: the "
 			"Preview's kind that shows it (a menu's; a model's, over a model, a clip or an animation "
 			"table), else its Main view." },
 	{ "op", J::String, true, nullptr,
@@ -679,7 +679,15 @@ JsonValue viewport_state(const ViewportReadContext &read, std::string &) {
 JsonValue viewport_items(const ViewportReadContext &read, std::string &) {
 	return viewport_items_to_json(read.view, read.model, read.page);
 }
-JsonValue viewport_hit(const ViewportReadContext &read, std::string &) {
+JsonValue viewport_hit(const ViewportReadContext &read, std::string &error) {
+	// A kind with no canvas (the script's: its device is a control that owns the pointer) has no picture
+	// a point of it names anything of: refused, never answered as a hit on nothing.
+	if (!viewport_kind_row(read.model.kind()).canvas) {
+		error = std::string("a ") + viewport_kind_token(read.model.kind()) +
+				" viewport has no canvas: its device is a control that owns the pointer, so no point of it names "
+				"anything (op items reads what it lists).";
+		return JsonValue::make_null();
+	}
 	// The point checked as a number a float holds (check_args).
 	const ViewportHit hit = read.model.hit(viewport_context(read.view, read.model), float(read.args.number("x")),
 			float(read.args.number("y")));
