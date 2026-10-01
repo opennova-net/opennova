@@ -34,6 +34,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -2095,8 +2096,78 @@ static int test_view_events_json() {
 	return 0;
 }
 
+// The batch form's table (record_batch.h, S13 D9): the readers read the ops and members it lists and
+// refuse the rest. In each form, every member the table lists for it is never refused as unknown
+// there and every other one is (a payload over records refused in its own words); each op is read
+// in its own form and refused as an op in the others.
+static int test_batch_table() {
+	const auto read = [](RecordBatchForm form, const std::string &edit, std::string &error) {
+		JsonValue json;
+		std::string unparsed;
+		opennova::io::json_parse("[" + edit + "]", json, unparsed);
+		RecordBatch batch;
+		return record_batch_from_json(json, nullptr, form, batch, error, false);
+	};
+	const auto sample = [](const BatchMember &member) -> std::string {
+		switch (member.json) {
+		case BatchJson::String: return member.only[0] ? std::string("\"") + member.only + "\"" : std::string("\"x\"");
+		case BatchJson::Boolean: return "true";
+		case BatchJson::Records: return "[]";
+		case BatchJson::Integer:
+		case BatchJson::Id:
+		case BatchJson::Value: break;
+		}
+		return "1";
+	};
+	// A form's first op, which its edits name ("" for the fields form, which names none).
+	const auto first_op = [](RecordBatchForm form) {
+		for (const BatchOp &op : batch_ops())
+			if (op.form == form) return std::string(op.token);
+		return std::string();
+	};
+	size_t members = 0, ops = 0;
+	for (size_t f = 0; f < kRecordBatchFormCount; ++f) {
+		const auto form = static_cast<RecordBatchForm>(f);
+		const std::string op = first_op(form);
+		for (const BatchMember &member : batch_members()) {
+			if (std::string(member.name) == "op") continue;
+			const std::string edit = "{" + (op.empty() ? std::string() : "\"op\": \"" + op + "\", ") + "\"" +
+			                         member.name + "\": " + sample(member) + "}";
+			std::string error;
+			read(form, edit, error);
+			const bool unknown = error.find("Unknown edits[0] member") != std::string::npos;
+			const bool listed = (member.forms & batch_form_bit(form)) != 0;
+			const bool payload = std::string(member.name) == "payload" && form == RecordBatchForm::Edits;
+			if (listed ? unknown : !(unknown || payload))
+				std::fprintf(stderr, "batch table: %s in the %s form: %s\n", member.name, batch_form_token(form),
+				             error.c_str());
+			TEST_EXPECT(listed ? !unknown : (unknown || payload));
+			++members;
+		}
+	}
+	for (const BatchOp &op : batch_ops())
+		for (size_t f = 0; f < kRecordBatchFormCount; ++f) {
+			const auto form = static_cast<RecordBatchForm>(f);
+			if (form == RecordBatchForm::Fields) continue; // its edits name no op
+			std::string error;
+			read(form, std::string("{\"op\": \"") + op.token + "\"}", error);
+			const bool refused = error.find("unknown edit op") != std::string::npos ||
+			                     error.find("edits alone") != std::string::npos ||
+			                     error.find("an apply edit carries") != std::string::npos;
+			TEST_EXPECT((op.form == form) != refused);
+			++ops;
+		}
+	// The catalog writes the table.
+	TEST_EXPECT(std::string(batch_form_token(RecordBatchForm::Spans)) == "spans" &&
+	            std::string(batch_json_token(BatchJson::Id)) == "id");
+	std::printf("batch table: %zu ops, %zu members, %zu reads of a member, %zu of an op\n", batch_ops().count,
+	            batch_members().count, members, ops);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_batch_table();
 	failures += test_apply_edit_json();
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();

@@ -6,7 +6,11 @@
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_registry.h>
+#include <editor/documents/document_types.h>
+#include <editor/model/text_document.h>
 #include <editor/preview/viewports.h>
+#include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
@@ -91,15 +95,28 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"settings.game_install or settings.runtime_executable of apply_project_settings, "
 				"files to import as the paths of preview_import.";
 	}
+	// Whether a request's edits are a text document's spans (S13 D9): the document open at the path
+	// (the active one for none), else the file the project's scan lists there, by the kind the scan
+	// read (a music script's .bin by its content, which its name alone does not say).
+	const auto text_at = [this](const std::string &path) {
+		if (const DocumentBase *document = document_base_for(path)) return text_of(*document) != nullptr;
+		const std::shared_ptr<const AssetScan> &scan = view().project.scan;
+		if (path.empty() || !scan) return false;
+		const AssetEntry *entry = scan->at_path(path);
+		if (!entry) entry = scan->find(basename_of(path));
+		const DocumentType *type = entry ? document_type_for(entry->kind) : nullptr;
+		return type && document_content(*type) == DocumentContent::Text;
+	};
 	// The record document a request's edits are named in: the one its path names, else the active
-	// one (an open document of another kind holds no records to name, S13 D6). A kind that takes
-	// open_first, asking it with nothing open at its path (a fix's edit), is read once before the
-	// document opens, so one refused as it is read asks nothing of the session.
+	// one; over a text document they are its spans (S13 D9); an open document of another kind holds
+	// nothing to name (S13 D6). A kind that takes open_first, asking it with nothing open at its path
+	// (a fix's edit), is read once before the document opens, so one refused as it is read asks
+	// nothing of the session; what the edits are is known again once it is open.
 	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
 		const std::string path = json.get_string("path", "");
 		const DocumentBase *open = document_base_for(path);
-		if (open && !records_of(*open)) {
+		if (open && !records_of(*open) && !text_of(*open)) {
 			ok = false;
 			error = open->path() + " holds no records (document.no_records): its edits name none.";
 		} else if (!open && !path.empty() && project_open() &&
@@ -107,12 +124,14 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				json.get_bool("open_first", false)) {
 			RequestNames first;
 			first.unresolved = true;
+			first.text = text_at(path);
 			EditorRequest unread;
 			ok = editor_request_from_json(json, unread, error, &first);
 			if (ok)
 				handle(request::open_document(path));
 		}
 		names.document = document_for(path);
+		names.text = text_at(path);
 	}
 	ok = ok && editor_request_from_json(json, request, error, &names);
 	bool served = false;

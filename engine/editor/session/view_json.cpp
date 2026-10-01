@@ -5,6 +5,7 @@
 #include <deque>
 #include <iterator>
 
+#include <base/io/cp1252.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -240,8 +241,18 @@ JsonValue dialogs_section(const SessionView &view) {
 				entry.set("record", json_string(site.record));
 			if (!site.locator.empty())
 				entry.set("locator", json_string(site.locator));
+			// A text's site (S13 D9): its span, and the name it holds written as its text is, from
+			// the game's code page (as the references query writes an edge's); the new name is as
+			// typed.
+			if (site.span.line) {
+				JsonValue span = JsonValue::make_object();
+				span.set("line", json_number(double(site.span.line)));
+				span.set("column", json_number(double(site.span.column)));
+				span.set("length", json_number(double(site.span.length)));
+				entry.set("span", std::move(span));
+			}
 			entry.set("field", json_string(site.field));
-			entry.set("before", json_string(site.before));
+			entry.set("before", json_string(site.span.line ? cp1252_to_utf8(site.before) : site.before));
 			entry.set("after", json_string(site.after));
 			sites.push(std::move(entry));
 		}
@@ -583,6 +594,8 @@ JsonValue view_event_to_json(const ViewEvent &event) {
 		out.set("address", address_to_json(event.address));
 	if (!event.field.empty())
 		out.set("field", json_string(event.field));
+	if (!event.locator.empty())
+		out.set("locator", json_string(event.locator));
 	if (event.flag)
 		out.set("flag", boolean(true));
 	if (event.tag)

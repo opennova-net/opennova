@@ -54,6 +54,11 @@ bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocume
 	return mount_install(game, retail_root, stock);
 }
 
+bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out) {
+	if (asset_kind_row(classify_asset(name, nullptr)).scr == ScrForm::Shader) return game.read_file_raw(name, out);
+	return game.read_file(name, out);
+}
+
 std::vector<ImportSource> list_retail_import_sources(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportSource> sources;
@@ -236,7 +241,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 				}
 				retail_root = source.path;
 			}
-			if (!retail.read_file(source.entry, bytes)) {
+			if (!read_served(retail, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				continue;
 			}
@@ -255,7 +260,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 				}
 				archive_path = source.path;
 			}
-			if (!archive.read_file(source.entry, bytes)) {
+			if (!read_served(archive, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "Could not read " + name + " from " + source.path, name);
 				continue;
 			}

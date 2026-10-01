@@ -36,6 +36,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/text_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/text_history.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
     # per type that has one, kept between validations
@@ -49,6 +51,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
@@ -211,6 +217,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp

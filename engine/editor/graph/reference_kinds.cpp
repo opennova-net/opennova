@@ -60,7 +60,12 @@ constexpr const char *kEnvironment[] = {".env", nullptr};
 
 // --- what a finding says of a name nothing resolves (ReferenceKindRow::missing_message) ---
 
-std::string project_lacks(const AssetGraph &, const GraphEdge &) { return ", which the project does not have."; }
+std::string project_lacks(const AssetGraph &, const GraphEdge &edge) {
+	if (!edge.fallback.empty())
+		return ", which the project does not have, nor '" + edge.fallback +
+		       "', the name its lookup takes next.";
+	return ", which the project does not have.";
+}
 
 // Defined only where the game does not read it, or not at all.
 std::string style_missing(const AssetGraph &graph, const GraphEdge &edge) {

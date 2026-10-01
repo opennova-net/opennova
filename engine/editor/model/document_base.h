@@ -15,6 +15,7 @@
 namespace opennova::editor {
 
 class Document;
+class TextDocument;
 
 // An editable file (ADR 0046 d9, S13 D6): the lifecycle every document shares, whatever its
 // content. It is read from the project's file (or from a file's bytes, which an import reads
@@ -29,11 +30,12 @@ class Document;
 //
 // What a document holds is its kind's. The record document (Document, model/document.h) holds
 // rows of records that every edit addresses by identity and field (as_records() is it; null for
-// any other kind of document); a raster (a terrain's depth map) or a text (a script) holds its
-// own content and takes its changes as Apply edits whose payload its type made (EditPayload),
-// implementing apply_edits, the history, serialize and read_source. The base keeps the rules
-// every kind obeys: a snapshot and a blocked document take no edit, undo or redo, and a blocked
-// one no save.
+// any other kind of document); the text document (TextDocument, model/text_document.h, S13 D9)
+// holds a text whose spans its edits replace (as_text()); a raster (a terrain's depth map) will
+// hold its own content. A document of another kind than records takes its changes as Apply edits
+// whose payload its type made (EditPayload), implementing apply_edits, the history, serialize and
+// read_source. The base keeps the rules every kind obeys: a snapshot and a blocked document take
+// no edit, undo or redo, and a blocked one no save.
 class DocumentBase {
 public:
 	virtual ~DocumentBase() = default;
@@ -140,6 +142,10 @@ public:
 	// caller that reads rows, records and fields asks first (records_of).
 	virtual const Document *as_records() const { return nullptr; }
 	virtual Document *as_records() { return nullptr; }
+	// The text document this is (model/text_document.h), null for another kind of document: what a
+	// caller that reads lines and spans asks first (text_of).
+	virtual const TextDocument *as_text() const { return nullptr; }
+	virtual TextDocument *as_text() { return nullptr; }
 
 protected:
 	DocumentBase();
@@ -154,8 +160,9 @@ protected:
 	virtual void undo_step() = 0;
 	virtual void redo_step() = 0;
 	// The kind's part of a load and of a save: the source, decoded as the game's loader decodes
-	// a stored file (the base decodes it and keeps the fingerprint of the bytes as stored), read
-	// into the kind's content. `adopt`: a load, whose content becomes the document's, its history
+	// a stored file (the base decodes it and keeps the fingerprint of the bytes as stored; a kind
+	// whose loader takes the SCR form under its own key, a shader, the bytes as stored, which its
+	// type reads), read into the kind's content. `adopt`: a load, whose content becomes the document's, its history
 	// and saved checkpoint starting again; false: the text a save just wrote, read back for its
 	// findings alone, the content staying the document's. `issues` gets the source findings (a
 	// blocking one blocks editing and saving). False, with `error` and nothing adopted, when the

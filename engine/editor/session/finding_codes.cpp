@@ -39,6 +39,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::LocalSettings, "local_settings", "Local settings" },
 	{ G::Operations, "operation", "Operations" },
 	{ G::UnsavedChanges, "unsaved", "Unsaved changes" },
+	{ G::Viewports, "viewport", "Viewports" },
 	{ G::Catalogs, "catalog", "Catalogs" },
 	{ G::StringTables, "strings", "String tables" },
 	{ G::Menus, "menu", "Menus" },
@@ -46,7 +47,10 @@ constexpr GroupRow kGroups[] = {
 	{ G::Models, "model", "Models" },
 	{ G::Animations, "animation", "Animations" },
 	{ G::AnimationMaps, "animation_map", "Animation maps" },
-	{ G::Viewports, "viewport", "Viewports" },
+	{ G::Scripts, "script", "Scripts" },
+	{ G::MusicScripts, "music_script", "Music scripts" },
+	{ G::Credits, "credits", "Credits" },
+	{ G::Shaders, "shader", "Shaders" },
 };
 
 constexpr bool groups_well_formed() {

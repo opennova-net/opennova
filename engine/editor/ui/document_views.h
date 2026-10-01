@@ -23,6 +23,9 @@ enum class DocumentViewRole {
 	// Inspector beside it (the mission's 3D view; ui/main_viewport_view): main_viewport is its hook,
 	// drawing the viewport of the Main-role kind that shows the type (S13 V5); no type has one yet.
 	MainViewport,
+	// The view draws the document's text (S13 D9: its lines, read only, its findings in the
+	// gutter, ui/text_view), until S13 V10's script device (a Godot CodeEdit) fills the tab.
+	Text,
 };
 
 // A document's view in its Document tab (ADR 0046 S13 V3; CONTEXT.md "Document view"): made from
@@ -64,8 +67,8 @@ public:
 	// which its filter box, its sort and its arrows read and write; null for a view of its own.
 	virtual OutlineModel *outline() { return nullptr; }
 
-	// A RevealRecord event for its document (EditorWindows::begin_frame through the Document
-	// window), held until the view draws; how many it holds.
+	// A RevealRecord or RevealText event for its document (EditorWindows::begin_frame through the
+	// Document window), held until the view draws; how many it holds.
 	void receive(const ViewEvent &event) { events_.post(event); }
 	size_t held_events() const { return events_.held(); }
 	// The events held for a document read again go: they name its old records.

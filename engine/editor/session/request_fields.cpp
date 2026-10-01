@@ -58,7 +58,8 @@ constexpr RequestField kFields[] = {
 			"records}: the list of that kind the record holds replaced by records, each {field: "
 			"value}); a record or a row by its identity or by the label (as) an earlier add or "
 			"duplicate of the batch gave it, an add's kind by its token. revert_to_saved's: [{id, "
-			"field}]." },
+			"field}]. Over a text document its spans replaced: [{op: apply, payload: text.span, "
+			"line, column, length, text}]. Every op and member: editor_query catalog's batch." },
 	{ F::Address, "address", J::Object, "A record by its address, {row, kind, child}." },
 	{ F::Records, "records", J::Objects,
 			"Records by their addresses, [{row, kind, child}]: those a selection takes with the "

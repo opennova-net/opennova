@@ -1,10 +1,11 @@
 // The extractors: what one file references and defines, from its bytes through the
-// engine's own parser for its kind (extract_from_bytes). The document types (the def
+// engine's own parser for its kind (extract_from_bytes). The record types (the def
 // catalogs, the string tables, the menus, the stylesheets, the models, the clips and the
 // animation tables) walk their schema: a field's reference, and the symbol a field
 // defines (a weapon's name, a string's key, a menu's screen or window by the NAME its
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
-// model's CTRL registers and MTRX rows, by their index); the native kinds (an environment, the
+// model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
+// makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
 // avatar table, a particle file, a mission) read their parsed structs.
 #include <editor/graph/asset_graph.h>
 
@@ -271,6 +272,24 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 	return true;
 }
 
+void extract_from_text(const TextDocument &document, Extracted &out) {
+	const DocumentType *type = document_type_for(document.kind());
+	if (!type || !type->references) return;
+	std::vector<TextReference> references;
+	type->references(document, references);
+	for (TextReference &reference : references) {
+		// A name its row reads as none (an empty one, NONE, NULL) is no reference, as a field's.
+		const std::string normalized = graph_names::key(reference.value);
+		if (reference.value.empty() || normalized == "NONE" || normalized == "NULL") continue;
+		GraphEdge edge = edge_of(document.path(), std::string(), std::string(), reference.kind,
+				reference.value, reference.scope, reference.rewritable);
+		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
+		edge.span = reference.span;
+		edge.fallback = std::move(reference.fallback);
+		out.edges.push_back(std::move(edge));
+	}
+}
+
 void extract_from_document(const Document &document, Extracted &out) {
 	for (const auto &row : document.rows()) {
 		if (!row) continue;
@@ -299,10 +318,16 @@ void extract_from_document(const Document &document, Extracted &out) {
 }
 
 bool graph_reads_kind(AssetKind kind) {
-	// A record type's documents, whose records the extraction reads, or a native extractor; a type
-	// whose documents hold no records gives the graph nothing yet (S13 D6).
+	// A record type's documents, whose records the extraction reads, a text type's whose text names
+	// references (S13 D9), or a native extractor; any other type's documents give the graph nothing
+	// (S13 D6).
 	const DocumentType *type = document_type_for(kind);
-	return (type && holds_records(*type)) || native_extractor(kind) != nullptr;
+	if (type) {
+		const DocumentContent content = document_content(*type);
+		if (content == DocumentContent::Records) return true;
+		if (content == DocumentContent::Text && type->references) return true;
+	}
+	return native_extractor(kind) != nullptr;
 }
 
 bool graph_reads_file(AssetKind kind, const std::string &name) {
@@ -317,12 +342,17 @@ bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vect
                         const std::string &game, Extracted &out, Diagnostic &error) {
 	if (!graph_reads_file(kind, name))
 		return true;
-	// A record type's document, its records extracted; a type of another kind falls through to a
-	// native extractor, or gives nothing.
+	// A record type's document, its records extracted; a text type's, its text's references; a type
+	// of another kind falls through to a native extractor, or gives nothing.
 	if (const DocumentType *type = document_type_for(kind)) {
-		if (std::unique_ptr<Document> document = records_of(type->make())) {
+		const DocumentContent content = document_content(*type);
+		if (content == DocumentContent::Records || content == DocumentContent::Text) {
+			const std::unique_ptr<DocumentBase> document = type->make();
 			if (!document->load_bytes(bytes, name, kind, game, error)) return false;
-			extract_from_document(*document, out);
+			if (const Document *records = records_of(*document))
+				extract_from_document(*records, out);
+			else
+				extract_from_text(*text_of(*document), out);
 			return true;
 		}
 	}
