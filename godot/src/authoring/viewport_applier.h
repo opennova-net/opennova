@@ -33,8 +33,9 @@ public:
 	virtual ~ViewportApplier() = default;
 	// The picture made again from the viewport: its build begun, the units planned and none run (one
 	// in flight dropped first, its partial work discarded), or the picture made whole here by a kind
-	// that builds in one step (building() then false).
-	virtual void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) = 0;
+	// that builds in one step (building() then false), at `clock` (a menu's frame takes its time).
+	virtual void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
+			const opennova::editor::PreviewClock &clock) = 0;
 	// One unit of the build begun (S13 V6): More, Built once the picture is built (its state applied as
 	// update() applies it, at `clock`), or Failed with `failure` saying why (the last picture kept: the
 	// protocol's, which no applier here produces yet). Never called while building() is false.

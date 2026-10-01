@@ -4,7 +4,8 @@
 // device read that changes builds again; the options (a level, a held register) are an Update; the
 // camera projects its target to the middle and frames the model; Auto walks the model's levels as
 // the camera backs away; the envelope, and what a SetViewport sets (the options, the clock, the
-// camera) and the MCP's drag of a marker.
+// camera) and the MCP's drag of a marker. What the document cannot say (S13 V8: Unknown) builds only
+// where the model draws otherwise; a change set naming nothing is Keep.
 
 #include <cmath>
 #include <cstdio>
@@ -164,7 +165,9 @@ static int test_status_and_builds() {
 	// Nothing moved (ChangeClass None): nothing read again.
 	TEST_EXPECT(rig.pump() == ViewportAction::Keep && model->reads() == reads);
 
-	// A user point moved: the overlays show it, nothing is built.
+	// A user point moved: the overlays show it, nothing is built, and nothing is read (S13 V8: the
+	// change set names the model row alone, alike but for its user points, so the held model is
+	// patched with them).
 	const ModelRow *row = document->model_row();
 	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id};
 	const double x_before = points->array[0].get("position")->array[0].number;
@@ -172,7 +175,8 @@ static int test_status_and_builds() {
 	Value value;
 	TEST_EXPECT(document->get(point, "position.x", value));
 	set(session, document->path(), point, "position.x", std::get<double>(value) + 1.0);
-	TEST_EXPECT(rig.pump() == ViewportAction::Update && rig.builds() == 1 && model->reads() == reads + 1);
+	TEST_EXPECT(rig.pump() == ViewportAction::Update && rig.builds() == 1 && model->reads() == reads &&
+			model->patches() == 1);
 	shown = rig.json();
 	TEST_EXPECT(shown.get_bool("current", false));
 	const JsonValue &moved = shown.get("items")->array[0];
@@ -213,6 +217,69 @@ static int test_status_and_builds() {
 	rig.pump();
 	TEST_EXPECT(session.viewports().size() == 0 && rig.devices.cache.size() == 0);
 	TEST_EXPECT(rig.json().get_string("reason", "") == "no_model");
+	return 0;
+}
+
+// S13 V8 (the review): what the document cannot say (ChangeClass::Unknown: here a state an edit after
+// an undo discarded) reads the model again and builds only where it draws otherwise, its user points
+// aside: a light's colour another builds; a user point's place alone is an Update. A change set that
+// names nothing patches nothing and is Keep.
+static int test_unknown_and_empty_changes() {
+	editor_test::TempProjectDir dir("opennova_editor_model_viewport_unknown");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	Rig rig{session};
+	session.handle(request::new_project(dir.file("project"), "Unknown Changes"));
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
+	TEST_EXPECT(document && rig.pump() == ViewportAction::Rebuild);
+	if (!document) return 1;
+	const ModelViewport *model = rig.viewport();
+	const ModelRow *row = document->model_row();
+	const NodeAddress light{row->id, node_kind(ModelKind::Light), row->ids.lists[2][0].id};
+	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id};
+	Value value;
+	TEST_EXPECT(document->get(point, "position.x", value));
+	const double x = std::get<double>(value);
+
+	// A light's colour followed; undone and another set: the state followed is gone (Unknown), the
+	// model drawn otherwise, built.
+	set(session, document->path(), light, "start.r", int64_t(12));
+	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild);
+	uint64_t builds = rig.builds(), reads = model->reads();
+	session.handle(request::undo(document->path()));
+	set(session, document->path(), light, "start.r", int64_t(40));
+	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && model->followed_change() == ChangeClass::Unknown);
+	TEST_EXPECT(rig.builds() == builds + 1 && model->reads() == reads + 1);
+	// A user point's place followed; undone and another set: Unknown, drawn alike, an Update.
+	set(session, document->path(), point, "position.x", x + 1.0);
+	TEST_EXPECT(rig.pump() == ViewportAction::Update);
+	builds = rig.builds();
+	reads = model->reads();
+	session.handle(request::undo(document->path()));
+	set(session, document->path(), point, "position.x", x + 2.0);
+	TEST_EXPECT(rig.pump() == ViewportAction::Update && model->followed_change() == ChangeClass::Unknown);
+	TEST_EXPECT(rig.builds() == builds && model->reads() == reads + 1);
+
+	// A viewport of its own over the document, followed by hand: a change set naming nothing is Keep,
+	// nothing patched or read.
+	ModelViewport alone(document->path());
+	PreviewClock clock;
+	alone.attach();
+	TEST_EXPECT(alone.follow(ViewportInput{ rig.view(), clock, document, ChangeClass::Loaded }, clock) ==
+			ViewportAction::Rebuild);
+	TEST_EXPECT(alone.take_action() == ViewportAction::Rebuild);
+	const ChangeSet nothing = RowChanges();
+	const uint64_t alone_reads = alone.reads();
+	TEST_EXPECT(alone.follow(ViewportInput{ rig.view(), clock, document, ChangeClass::Changed, &nothing }, clock) ==
+			ViewportAction::Keep);
+	TEST_EXPECT(alone.reads() == alone_reads && alone.patches() == 0 && alone.take_action() == ViewportAction::Keep);
+	std::printf("test_unknown_and_empty_changes passed\n");
 	return 0;
 }
 
@@ -855,6 +922,7 @@ static int test_auto_lod() {
 
 int main() {
 	TEST_EXPECT(test_status_and_builds() == 0);
+	TEST_EXPECT(test_unknown_and_empty_changes() == 0);
 	TEST_EXPECT(test_overlays() == 0);
 	TEST_EXPECT(test_handles() == 0);
 	TEST_EXPECT(test_animation() == 0);

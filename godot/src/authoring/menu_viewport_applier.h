@@ -34,7 +34,8 @@ public:
 	// is freed).
 	~MenuViewportApplier() override;
 
-	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) override;
+	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
+			const opennova::editor::PreviewClock &clock) override;
 	ApplierStep step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			std::string &failure) override;
 	bool building() const override { return build_ != nullptr; }
@@ -43,7 +44,10 @@ public:
 	void clear() override;
 	void apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {}
+	// The menu's clock on the preview clock (menu_frame_clock): a focused edit box's caret, the frame's
+	// time set (and the frame drawn again, never configured again) only as the caret's half of the
+	// blink changes.
+	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
 
 	MenuFrame *frame() const { return frame_; }
@@ -58,9 +62,12 @@ private:
 		size_t next = 0;
 		size_t units() const { return textures.size() + 1; }
 	};
-	// The screen the viewport shows configured on the frame over `assets`, its options held on it.
+	// The screen the viewport shows configured on the frame over `assets`, its options held on it and
+	// its clock the preview clock's at `clock` (S13 V8: a configure that ends frames after its Rebuild
+	// draws the caret's half of the blink of now, not of 0).
 	void configure_(const opennova::editor::ViewportModel &model,
-			const std::shared_ptr<const opennova::editor::ProjectAssetSource> &assets);
+			const std::shared_ptr<const opennova::editor::ProjectAssetSource> &assets,
+			const opennova::editor::PreviewClock &clock);
 	// The viewport's options on the configured screen's frame state.
 	void apply_options_(const opennova::editor::ViewportModel &model);
 

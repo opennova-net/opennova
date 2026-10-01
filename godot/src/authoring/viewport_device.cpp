@@ -96,7 +96,7 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 		build_ = opennova::editor::ViewportBuildReport();
 		build_.generation = model.builds();
 		const int64_t start = now_us();
-		applier_->rebuild(model, view);
+		applier_->rebuild(model, view, clock);
 		build_.progress = applier_->progress();
 		build_.loading = applier_->building();
 		if (!build_.loading) {

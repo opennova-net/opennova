@@ -36,10 +36,16 @@ using opennova::editor::ViewportAction;
 // takes a Rebuild, or (S13 V6) with `units` set builds it over that many steps, one unit a step as the
 // Shell's frames step it, drawing the last picture it built (`shown`, a generation) until the build
 // ends, failing at unit `fail_at` when that is set; a Rebuild drops the one in flight, a Clear drops it
-// with the picture.
+// with the picture. A menu's keeps its frame's clock as the Shell's applier does (S13 V8,
+// MenuViewportApplier::tick): the clock's time at each configure (a Rebuild, as V6's configure_ sets
+// it), set at a tick only where menu_frame_clock says the frame draws otherwise; the times it set, in
+// order, and the ticks it had.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
+	uint32_t frame_ms = 0;
+	std::vector<uint32_t> clock_sets;
+	size_t ticks = 0;
 	int draws = 0;
 	int width = 0;
 	int height = 0;
@@ -82,11 +88,12 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		return true;
 	}
 	void take(ViewportAction action, const opennova::editor::ViewportModel &model,
-			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &,
+			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override {
 		taken.push_back(action);
 		if (built.loading) taken_building.push_back(action);
 		if (action == ViewportAction::Rebuild) {
+			frame_ms = opennova::editor::menu_frame_time(clock);
 			built = opennova::editor::ViewportBuildReport();
 			built.generation = model.builds();
 			if (units != 0) {
@@ -124,7 +131,17 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 			placed.bottom = rect.bottom;
 		}
 	}
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {}
+	void tick(const opennova::editor::ViewportModel &model,
+			const opennova::editor::PreviewClock &clock) override {
+		++ticks;
+		const auto *menu = dynamic_cast<const opennova::editor::MenuViewport *>(&model);
+		uint32_t time = 0;
+		if (!menu || menu->status() != opennova::editor::ViewportStatus::Ready ||
+				!opennova::editor::menu_frame_clock(*menu, frame_ms, clock, time))
+			return;
+		frame_ms = time;
+		clock_sets.push_back(time);
+	}
 	// The last action it took (Keep before any).
 	ViewportAction last() const { return taken.empty() ? ViewportAction::Keep : taken.back(); }
 	// The actions taken since `from`, Keep left out.

@@ -230,7 +230,8 @@ struct MenuFrameState {
 	// mouse to the popup alone]. The runtime keeps it (MenuRuntime).
 	int32_t popup_root = -1;
 	// Milliseconds clock for the caret blink: the caret draws while
-	// (time_ms & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63].
+	// (time_ms & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63]
+	// (menu_caret_shown).
 	uint32_t time_ms = 0;
 	// The mouse cursor pass [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]:
 	// drawn LAST at the raw mouse position, native texture size, UNSCALED.
@@ -249,6 +250,13 @@ struct MenuFrameState {
 	// like CMAP's CHAT_MSGS console), -1 none (MenuDrawList::custom_slot_op).
 	int32_t custom_slot_index = -1;
 };
+
+// The caret blink gate of an edit and a multiline edit: a focused caret draws
+// while the clock's (time_ms & 0x3FF) > 0x200, a 1024 ms cycle
+// [orig: CEditWnd_Render @ 0x661c63, (GetTickCount() & 0x3FF) > 0x200].
+inline bool menu_caret_shown(uint32_t time_ms) {
+	return (time_ms & 0x3FFu) > 0x200u;
+}
 
 // The table's custom-draw event (0x8000002) for a CUSTOM_DRAW column: the
 // header cell (row -1, state 0, value 0) or a body cell (the row index, its

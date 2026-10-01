@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <type_traits>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
@@ -279,6 +280,30 @@ void compose_model(const ModelRow &model, const CollisionRow *collision, Compose
 		out.model.occlusion_objects = out.occlusion.empty() ? nullptr : out.occlusion.data();
 		out.model.occlusion_object_count = out.occlusion.size();
 	}
+}
+
+namespace {
+
+// One record of the format, and a list of them, alike byte for byte.
+template <class T> bool same_bytes(const T &a, const T &b) {
+	static_assert(std::is_trivially_copyable<T>::value, "a format record compares as its bytes");
+	return std::memcmp(&a, &b, sizeof(T)) == 0;
+}
+template <class T> bool same_bytes(const std::vector<T> &a, const std::vector<T> &b) {
+	static_assert(std::is_trivially_copyable<T>::value, "a format record compares as its bytes");
+	return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0);
+}
+
+} // namespace
+
+bool alike_but_user_points(const ModelRow &a, const ModelRow &b) {
+	if (a.base != b.base || !same_bytes(a.header, b.header) || a.lods.size() != b.lods.size() ||
+			!same_bytes(a.materials, b.materials) || !same_bytes(a.lights, b.lights) ||
+			!same_bytes(a.registers, b.registers) || !same_bytes(a.frames, b.frames))
+		return false;
+	for (size_t l = 0; l < a.lods.size(); ++l)
+		if (!same_bytes(a.lods[l].lod, b.lods[l].lod) || !same_bytes(a.lods[l].panm, b.lods[l].panm)) return false;
+	return true;
 }
 
 SerializeResult ModelDocument::serialize() const {

@@ -53,6 +53,7 @@
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/inspector_window.h>
+#include <editor/ui/menu_view.h>
 #include <editor/ui/preview_window.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/problems_window.h>
@@ -2132,6 +2133,23 @@ void test_styles_lines_listed() {
 	session.handle(request::clear_output());
 	ui.frames(2);
 	CHECK(view && made > 0 && view->uses_made() == made, "the value uses kept across frames and a line of Output");
+	// S13 V8: a value's edit follows its change set: A's use made again, B's kept, the uses not
+	// started again; its undo the same.
+	{
+		const size_t used = view ? view->lines_used() : 0;
+		EditorRequest recolour = request::edit_record(path, Edit());
+		recolour.edits[0].address = {a, node_kind(StyleKind::Variable), 0};
+		recolour.edits[0].field = "value";
+		recolour.edits[0].value = std::string("FF00FF00");
+		session.handle(recolour);
+		ui.frames(2);
+		CHECK(view && view->uses_made() == made && view->lines_used() == used + 1,
+		      "a value's edit: its line's use made again alone");
+		session.handle(request::undo(path));
+		ui.frames(2);
+		CHECK(view && view->uses_made() == made && view->lines_used() == used + 2 && text() == original,
+		      "its undo: the line's use made again alone");
+	}
 	const std::string frame = logged_frame(ui);
 	CHECK(frame.find("Add variable") != std::string::npos && frame.find("Add comment") == std::string::npos &&
 	              frame.find("Add blank line") == std::string::npos,
@@ -2371,11 +2389,54 @@ struct Group {
 	const char *name;
 	void (*run)();
 };
+// S13 V8: the menu view's tree of the selected screen follows the menu's change sets: a window of
+// another screen moved keeps it, one of the screen moved makes it again.
+void test_menu_tree_follows_changes() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_menu_tree_changes");
+	std::shared_ptr<MnuDocument> document = load_menu(dir);
+	Diagnostic error;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {0, kScreen, 0};
+	CHECK(document->apply(add, error) && document->rows().size() == 2, "a second screen added");
+	const Node &shown = *document->rows()[0];
+	const Node &other = *document->rows()[1];
+	const std::vector<NodeId> others = document->collections_of({other.id, kScreen, 0}).front().ids;
+	CHECK(!others.empty(), "the second screen holds a window");
+	if (others.empty()) return;
+	SessionView v = menu_view(document);
+	select_in(v, {shown.id, kScreen, 0});
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Document");
+	ui.drain();
+	const MenuView *view = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count() && !view; ++i)
+		if (auto *window = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i)))
+			view = dynamic_cast<const MenuView *>(window->view_of(document->path()));
+	CHECK(view != nullptr && view->trees_made() > 0, "the menu's view, its tree made");
+	if (!view) return;
+	const size_t made = view->trees_made();
+	Edit move;
+	move.address = {other.id, kWindow, others.front()};
+	move.field = "position.left";
+	move.value = int64_t(24);
+	CHECK(document->apply(move, error), "the second screen's window moved");
+	ui.frames(2);
+	CHECK(view->trees_made() == made, "another screen's window moved: the tree kept");
+	move.address = named(*document, "TITLE");
+	CHECK(document->apply(move, error), "the shown screen's window moved");
+	ui.frames(2);
+	CHECK(view->trees_made() == made + 1, "the shown screen's window moved: the tree made again");
+}
+
 void run_menu_tests() {
 	test_requests_round_trip();
 	test_frame_bracket_follows_the_table();
 	test_menu_tree_model();
 	test_menu_window_ui();
+	test_menu_tree_follows_changes();
 	test_actions_after_edits();
 }
 void run_inspector_tests() {

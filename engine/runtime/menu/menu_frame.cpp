@@ -1073,7 +1073,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 	if (w.password) {
 		text.assign(text.size(), '*');
 	}
-	const bool blink_on = (frame.time_ms & 0x3FFu) > 0x200u;
+	const bool blink_on = menu_caret_shown(frame.time_ms);
 	if (text.empty()) {
 		// An empty focused edit still blinks its caret at the text anchor
 		// [orig: the cursor leg of CFontCache_DrawTextWithCursor @ 0x6533b0 runs for

@@ -1,5 +1,6 @@
 #include "styles_view.h"
 
+#include <base/io/strutil.h>
 #include <editor/documents/mns_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/session/view/session_view.h>
@@ -11,7 +12,9 @@
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
+#include <iterator>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <imgui.h>
@@ -99,11 +102,21 @@ void StylesView::rebind(const DocumentBase &) {
 // The lines the table lists: the variables and the lines that decide what the game reads (#if
 // lines and the lines they switch off). Comment and blank lines stay in the file as they are,
 // unlisted: the shipped menu_style.mns has 38 comment lines, its first variable on line 40. Those
-// the filter shows: a name or a value holding it.
+// the filter shows: a name or a value holding it. After an edit, an undo or a redo (the revision
+// alone moved), the lines its change set names changed or added are matched again, the others
+// keeping their match, and the places are made again from the rows' order.
 void StylesView::refresh_lines(const MnsDocument &document) {
-	if (lines_.made && lines_.document == document.identity() && lines_.load == document.load_generation() &&
-	    lines_.revision == document.revision() && lines_.filter == filter_)
-		return;
+	const bool same = lines_.made && lines_.document == document.identity() &&
+	                  lines_.load == document.load_generation() && lines_.filter == filter_;
+	if (same && lines_.revision == document.revision()) return;
+	ChangeSet set;
+	const RowChanges *changes =
+	        same && document.changes_since(lines_.load, lines_.revision, set) ? std::get_if<RowChanges>(&set) : nullptr;
+	if (changes) {
+		for (const NodeId id : changes->removed) lines_.matched.erase(id);
+	} else {
+		lines_.matched.clear();
+	}
 	lines_.made = true;
 	lines_.document = document.identity();
 	lines_.load = document.load_generation();
@@ -112,34 +125,78 @@ void StylesView::refresh_lines(const MnsDocument &document) {
 	lines_.listed.clear();
 	lines_.shown.clear();
 	const auto &rows = document.rows();
-	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->kind != kComment && rows[i]->kind != kBlank) lines_.listed.push_back(i);
-	for (const size_t i : lines_.listed) {
-		Value value;
-		const std::string text = document.get({rows[i]->id, rows[i]->kind, 0}, "value", value) ? std::get<std::string>(value)
-		                                                                                        : std::string();
-		if (!filter_[0] || matches(rows[i]->name(), filter_) || matches(text, filter_)) lines_.shown.push_back(i);
+	for (size_t i = 0; i < rows.size(); ++i) {
+		const Node &row = *rows[i];
+		if (row.kind == kComment || row.kind == kBlank) continue;
+		lines_.listed.push_back(i);
+		if (!filter_[0]) {
+			lines_.shown.push_back(i);
+			continue;
+		}
+		auto kept = lines_.matched.find(row.id);
+		if (kept == lines_.matched.end() || (changes && changes->was_changed(row.id))) {
+			Value value;
+			const std::string text =
+			        document.get({row.id, row.kind, 0}, "value", value) ? std::get<std::string>(value) : std::string();
+			kept = lines_.matched.insert_or_assign(row.id, matches(row.name(), filter_) || matches(text, filter_)).first;
+			++lines_matched_;
+		}
+		if (kept->second) lines_.shown.push_back(i);
 	}
+}
+
+bool StylesView::follow_uses(const MnsDocument &document) {
+	ChangeSet set;
+	if (!document.changes_since(uses_.load, uses_.revision, set)) return false;
+	const RowChanges *changes = std::get_if<RowChanges>(&set);
+	if (!changes || changes->reshapes() || changes->file_state) return false;
+	// A changed variable's use goes, and with it the uses of the lines of the name it had and has now.
+	std::vector<std::string> names;
+	for (const NodeId id : changes->changed) {
+		const Node *row = document.row(id);
+		if (!row || row->kind != kVariable) return false;
+		const auto had = uses_.names.find(id);
+		if (had != uses_.names.end()) names.push_back(had->second);
+		std::string now = strutil::to_upper(row->name());
+		names.push_back(now);
+		uses_.names[id] = std::move(now);
+		uses_.rows.erase(id);
+	}
+	for (auto it = uses_.rows.begin(); it != uses_.rows.end();) {
+		const auto name = uses_.names.find(it->first);
+		const bool shares = name != uses_.names.end() &&
+		                    std::find(names.begin(), names.end(), name->second) != names.end();
+		it = shares ? uses_.rows.erase(it) : std::next(it);
+	}
+	return true;
 }
 
 const StylesView::LineUse &StylesView::use_of(const MnsDocument &document, const NodeAddress &line,
                                               const AssetGraph *graph) {
 	const uint64_t generation = graph ? graph->generation() : 0;
-	if (uses_.document != document.identity() || uses_.load != document.load_generation() ||
-	    uses_.revision != document.revision() || uses_.graph != graph || uses_.generation != generation) {
+	const bool same = uses_.document == document.identity() && uses_.load == document.load_generation() &&
+	                  uses_.graph == graph && uses_.generation == generation;
+	if (!same || uses_.revision != document.revision()) {
+		// The graph or the load moved, or a change set the uses cannot follow: every use again.
+		if (!same || !follow_uses(document)) {
+			uses_.rows.clear();
+			uses_.names.clear();
+			for (const auto &row : document.rows())
+				if (row->kind == kVariable) uses_.names.emplace(row->id, strutil::to_upper(row->name()));
+			++uses_made_;
+		}
 		uses_.document = document.identity();
 		uses_.load = document.load_generation();
 		uses_.revision = document.revision();
 		uses_.graph = graph;
 		uses_.generation = generation;
-		uses_.rows.clear();
-		++uses_made_;
 	}
 	const auto kept = uses_.rows.find(line.row);
 	if (kept != uses_.rows.end()) return kept->second;
 	LineUse &out = uses_.rows[line.row];
 	out.use = style_value_use(document, line, graph);
 	if (out.use.bound) out.users = graph->referrers_of(ReferenceKind::StyleVar, document.row(line.row)->name());
+	++lines_used_;
 	return out;
 }
 

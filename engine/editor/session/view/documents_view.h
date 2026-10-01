@@ -35,7 +35,9 @@ struct PreviewTarget {
 // viewport over the editor MCP, EditInViewport) carries when its last sample came (sampled_ms, the
 // session's ProcessPlatform::now_ms; -1 for a canvas's, which its canvas ends): any other request on
 // its document ends it, and so do 10 s with no sample (SessionCore). Its edits' validation waits for
-// its end. Token 0: none open.
+// its end, and so does the picture a viewport whose kind holds for a gesture makes again of the
+// document (S13 V8: the model's scene, the device keeping the last one meanwhile). Token 0: none
+// open.
 struct OpenGesture {
 	std::string path;
 	uint64_t token = 0;
@@ -72,7 +74,8 @@ struct DocumentsView {
 	// it (Document::copy), which Paste hands back to the same type.
 	std::string clipboard;
 	// The gestures open now, one per document at most (S13 V7): kept by DocumentSet as each gesture's
-	// batches and its end are served (no concern moves with them).
+	// batches and its end are served (no concern moves with them: the viewports read them as they
+	// follow, S13 V8, the Shell's pump each frame).
 	std::vector<OpenGesture> gestures;
 	// The gesture open in the document at `path` (one whose token is 0 for none).
 	const OpenGesture &gesture_in(const std::string &path) const {

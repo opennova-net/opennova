@@ -647,29 +647,33 @@ canvas sizes the picture, the kind's options and camera) changes by a SetViewpor
 change a person or a client makes; three changes alone are derived by its follow instead (a menu's
 held window following the selection, a model framed when another model first shows, the preview
 clock sought when the clip the selection plays changes or a clip event is selected), and nothing
-else moves it between two follows. It follows its document, the files its picture read and its
-state into what its device does next (make the picture again, apply the state again, drop it, or
-nothing), a picture the game could not read kept so until the document changes. Its device is the
-Shell's (an offscreen Godot viewport for one document and kind, four kept, the least recently used
-not drawn since the last pump given up and its viewport keeping its state), drawn only by the
-viewport's canvas, which owns the pointer and the keys and sizes the picture it draws. A device may
-make a picture over several of the Shell's frames, a little each frame (a model: its textures, its
-meshes, then its scene and its pose; a menu's screen shown the first time: its textures, then the
-screen); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
-never a half-made one, and a change that asks for the picture again begins it anew. Headless, it
-answers as its envelope (JSON, the `viewport` query), and a client drags and commands through it as
-its canvas would (`edit_in_viewport`: a drag one batch under one gesture over the selected records
-it moves, a command one request).
+else moves it between two follows. It follows its document (what its change set says changed), the
+files its picture read and its state into what its device does next (make the picture again, apply
+the state again, drop it, or nothing), a picture the game could not read kept so until the document
+changes, and, for a kind that holds for a gesture (the model's scene), a picture made again held
+while a gesture is open in its document over one the device holds. Its device is the Shell's (an
+offscreen Godot viewport for one document and kind, four kept, the least recently used not drawn
+since the last pump given up and its viewport keeping its state), drawn only by the viewport's
+canvas, which owns the pointer and the keys and sizes the picture it draws. A device may make a
+picture over several of the Shell's frames, a little each frame (a model: its textures, its meshes,
+then its scene and its pose; a menu's screen shown the first time: its textures, then the screen);
+the viewport is loading meanwhile, its canvas drawing the last picture the device made, never a
+half-made one, and a change that asks for the picture again begins it anew. Headless, it answers as
+its envelope (JSON, the `viewport` query), and a client drags and commands through it as its canvas
+would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it moves, a
+command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
 
 **Preview clock**:
 The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
-its milliseconds, a clip by its game ticks, and later a particle effect, a menu's animations and an
-environment's time of day. It runs while it plays, at its rate, as the Shell's frames pass; a
-SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it follows (a clip
-newly chosen starts at tick 0, a clip event selected holds the clock on the tick the clip first
-samples it).
+its milliseconds, a clip by its game ticks, and a menu's frame clock by its milliseconds, which a
+focused edit box's caret reads (it blinks as the clock plays, the frame drawn again as the caret's
+half of the blink changes and never configured again); a particle effect and an environment's time
+of day are to read it once they have viewports. It runs while it plays, at its rate, as the Shell's
+frames pass; a SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it
+follows (a clip newly chosen starts at tick 0, a clip event selected holds the clock on the tick the
+clip first samples it).
 _Avoid_: clip clock (the model preview's own, which it replaced), game clock (a running match's),
 tick (the game's 62 Hz step, which it counts)
 
@@ -838,7 +842,16 @@ The edits one continuous action on a canvas makes (a drag of a handle, an arrow 
 over several entities): they carry one token and fold into one undo step over every row they
 change (each row's version before the gesture and its latest after) until it ends (let go, or the
 canvas stops drawing it: one end, for the document it began in); a batch of it that adds, removes
-or moves a row is a step of its own and ends it. The Problems wait for the end.
+or moves a row is a step of its own and ends it. The view keeps the gestures open, one per document
+(its token, and for a client's drag over the wire when its last sample came): one also ends with an
+undo, a redo or a save of its document, its document closed or read again, every edit group ended
+(Build, Play) and another gesture's batch in its document; a canvas ends its own, while one of the
+wire's also ends with any other request on its document and with ten seconds with no sample (a
+client that went away). The Problems wait for every one to end. A viewport whose kind holds for a
+gesture (the model's scene, costly to make) keeps the picture its
+device holds while one is open in its document, its markers following each edit, and makes the
+picture once when it ends; a change only the state shows (a model's user point moved) applies
+meanwhile; a menu's picture is made again each edit.
 _Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
 
 **Batch**:
@@ -858,6 +871,11 @@ in, in the words of its kind: a record document's rows added, removed and change
 moved among one another and whether the file-wide state changed; a text document's spans (each run
 of text that changed, a removal a span of no length); a raster's regions later. When the document
 cannot say (it was read again, or its history no longer holds that state), everything changed.
+What keeps something made of a document follows it: a viewport makes its picture again only for a
+change of what the picture reads (a menu's screen and the screens before it in the file, whose first
+load of a texture fixes the band the screen draws, not a screen after it; a model's drawn tables, not
+its user points, which its markers alone show), an outline makes again only a changed row's lines and
+re-orders the rest, and the selection asks only about the rows that changed.
 _Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
 
 **Text document**:

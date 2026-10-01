@@ -11,7 +11,8 @@ extends GutTest
 ## the options hold a window in a state; a drag of a window's handles writes its POSITION on the grid
 ## as one undo step, several selected windows move and arrange in one step each; a TABLE draws through
 ## the device (its rows' cells, a SUBST image, a clip rect) where the compile places it; a device given
-## up retires its SubViewport, freed at the next frame. The model: drawn as it would save, at the level
+## up retires its SubViewport, freed at the next frame; a focused edit box's caret blinks on the
+## preview clock through the device's own frame (S13 V8). The model: drawn as it would save, at the level
 ## the portable half picks; a user point projects within half a pixel of where the device's camera
 ## puts it; a user point's edit builds nothing, a light's builds the scene again; the options hold a
 ## level and a CTRL register; a part's marker rides the part the device draws at the clock the two
@@ -106,6 +107,14 @@ const TABLE_MENU := ("<SCREEN>\n\t<NAME>TBL</NAME>\n\t<WINDOW type=\"window\" na
 		+ "\t\t\t</COLUMN>\n"
 		+ "\t\t\t<ITEMS><APPEARANCE type=\"color\" state=\"selected\">FF336699</APPEARANCE></ITEMS>\n"
 		+ "\t\t\t<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>\n"
+		+ "\t\t</WINDOW>\n\t</WINDOW>\n</SCREEN>\n")
+
+## A screen with an edit box in the stylesheet's large font (its caret blinks while it is focused).
+const CARET_MENU := ("<SCREEN>\n\t<NAME>CARET</NAME>\n\t<WINDOW type=\"window\" name=\"ROOT\">\n"
+		+ "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\n"
+		+ "\t\t<FONT><NAME>%DEF_FONTNAME_LG%</NAME><DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG></FONT>\n"
+		+ "\t\t<WINDOW type=\"edit\" name=\"NAME_BOX\">\n"
+		+ "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>\n"
 		+ "\t\t</WINDOW>\n\t</WINDOW>\n</SCREEN>\n")
 
 var _dirs: Array[String] = []
@@ -663,6 +672,43 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
 	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
+
+
+## S13 V8: a focused edit box's caret on the preview clock, through the device's own frame (the Shell's
+## MenuViewportApplier and its tick): the clock paused in the blink's hidden half, the frame draws no
+## caret; sought into the shown half, the next frame's tick sets the frame's clock and it draws the
+## caret (a glyph more); sought into the next hidden half, it is gone again. The picture is never made
+## again for it (the viewport's builds stand): the frame is drawn again, not configured again.
+func test_the_caret_blinks_on_the_preview_clock() -> void:
+	if _app == null:
+		return
+	_new_project("Caret Game")
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("caret.mnu"), CARET_MENU.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("caret.mnu"))
+	var box: int = _seam.find_record("NAME_BOX")
+	assert_gt(box, 0)
+	assert_true(_change({"options": {"force_id": box, "focus": true}, "clock": {"playing": false, "time_ms": 256}}))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var builds := int(state.get("builds", 0))
+	var frame: Object = _device_node(state, "MenuFrame")
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	await get_tree().process_frame
+	var hidden: int = frame.get_draw_list_stats().glyphs
+	assert_true(_change({"clock": {"time_ms": 768}}))
+	await get_tree().process_frame
+	var shown: int = frame.get_draw_list_stats().glyphs
+	assert_gt(shown, hidden, "the caret drawn in the blink's shown half")
+	assert_true(_change({"clock": {"time_ms": 1280}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().glyphs, hidden, "and gone in the next hidden half")
+	assert_eq(int(_state().get("builds", -1)), builds, "the frame drawn again, the picture never made again")
 
 
 # --- the model -------------------------------------------------------------------------------------

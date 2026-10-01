@@ -8,9 +8,10 @@
 namespace opennova::editor {
 
 // The viewports' one clock (ADR 0046 S13 V5; CONTEXT.md "Preview clock"): what plays in any
-// viewport reads it, a model's part animations, flipbooks and colour generators by its
-// milliseconds and a clip by its game ticks (io::kTickHz), and later a particle effect, a menu's
-// animations and an environment's time of day. It runs while it plays, `rate` times as fast as the
+// viewport reads it, a model's part animations, flipbooks and colour generators and a menu's caret
+// (S13 V8, menu_frame_time: a focused edit box's blink) by its milliseconds, and a clip by its game
+// ticks (io::kTickHz); a particle effect and an environment's time of day are to read it too once
+// they have viewports. It runs while it plays, `rate` times as fast as the
 // Shell's frames pass (Viewports::advance); a SetViewport's `clock` plays, pauses, sets the rate or
 // seeks it, and a viewport's follow seeks it (a clip newly chosen starts at tick 0, a clip event
 // selected holds the clock on the tick the clip first samples it). Its milliseconds wrap as the

@@ -1,7 +1,10 @@
 #include <editor/preview/menu_screen_render.h>
 
+#include <algorithm>
+
 #include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
+#include <formats/mns/mns.h>
 
 namespace opennova::editor {
 
@@ -53,6 +56,43 @@ void split_unloaded(const menu::MenuFrameAssets &assets, std::vector<std::string
 	for (const std::string &name : assets.unresolved())
 		if (!listed(assets.unreadable(), name)) add_once(missing, name);
 	for (const std::string &name : assets.missing_tables()) add_once(missing, name);
+}
+
+std::vector<std::string> menu_variables_named(const std::string &text) {
+	std::vector<std::string> names;
+	for (size_t at = text.find('%'); at != std::string::npos;) {
+		const size_t length = mns::variable_reference_at(text, at);
+		if (length == 0) {
+			at = text.find('%', at + 1);
+			continue;
+		}
+		names.push_back(strutil::to_upper(text.substr(at + 1, length - 2)));
+		at = text.find('%', at + length);
+	}
+	std::sort(names.begin(), names.end());
+	names.erase(std::unique(names.begin(), names.end()), names.end());
+	return names;
+}
+
+std::vector<std::string> changed_menu_variables(const std::map<std::string, std::string> &before,
+		const std::map<std::string, std::string> &after) {
+	std::vector<std::string> out;
+	auto was = before.begin();
+	auto now = after.begin();
+	while (was != before.end() || now != after.end()) {
+		if (now == after.end() || (was != before.end() && was->first < now->first)) {
+			out.push_back(was->first);
+			++was;
+		} else if (was == before.end() || now->first < was->first) {
+			out.push_back(now->first);
+			++now;
+		} else {
+			if (was->second != now->second) out.push_back(now->first);
+			++was;
+			++now;
+		}
+	}
+	return out;
 }
 
 MenuScreenRender::MenuScreenRender() = default;

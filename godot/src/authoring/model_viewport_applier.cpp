@@ -115,7 +115,8 @@ void ModelViewportApplier::plan_(Build &build) {
 	build.units.push_back(pose);
 }
 
-void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport, const opennova::editor::SessionView &view) {
+void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport, const opennova::editor::SessionView &view,
+		const opennova::editor::PreviewClock &) {
 	// A build in flight dropped: its data and what it decoded go with it.
 	build_.reset();
 	const opennova::editor::ModelViewport &model = model_of(viewport);

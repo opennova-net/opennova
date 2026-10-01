@@ -27,8 +27,12 @@ public:
 	bool note(const std::string &name, uint64_t stamp);
 	// Every file `other` read, as note() takes each; true when one was not read before.
 	bool add(const FileStamps &other);
-	// True when a file read has another stamp in `files` now.
+	// True when a file read has another stamp in `files` now; moved_but: a file other than those
+	// `except` names (in any case).
 	bool moved(const FileSource &files) const;
+	bool moved_but(const FileSource &files, const std::vector<std::string> &except) const;
+	// Each file read takes the stamp it has in `files` now (what moved leaves the picture as it is).
+	void restamp(const FileSource &files);
 	const std::vector<FileStamp> &files() const { return files_; }
 	bool empty() const { return files_.empty(); }
 	void clear() { files_.clear(); }
@@ -93,10 +97,12 @@ public:
 			  // stop()
 	};
 	// The follow of `key` over the document, `moved` when the document changed since the last
-	// follow (its ChangeClass, viewport_model.h, is not None). The stamps of the files its picture
-	// read are compared only when the file source's `generation` moved, which it does whenever a
-	// stamp may have, or when the device read a file since the last comparison (S13 V6: a build runs
-	// its units between two follows, so a file read after one comparison is compared at the next).
+	// follow in what the picture reads of it (its ChangeClass, viewport_model.h, as the kind reads
+	// it: a change set naming only what the picture does not read is no move, S13 V8). The stamps of
+	// the files its picture read are compared only when the file source's `generation` moved, which
+	// it does whenever a stamp may have, or when the device read a file since the last comparison
+	// (S13 V6: a build runs its units between two follows, so a file read after one comparison is
+	// compared at the next).
 	Found follow(const Key &key, bool moved, const FileSource &files, uint64_t generation);
 	// `key` is what it shows now (the files' generation as the caller read them); the files its
 	// picture read stand until built(), failed() or stop() replaces them (a picture that stands, a
@@ -115,6 +121,10 @@ public:
 	// next follow, whatever the generation (it may have moved after it was read and before it was
 	// reported).
 	void read(const FileStamps &files) { unchecked_ = files_.add(files) || unchecked_; }
+	// What moved of the files its picture read leaves the picture as it is (a stylesheet variable
+	// the picture does not name, S13 V8): each takes the stamp it has now, so the move is not found
+	// again.
+	void restamp(const FileSource &files) { files_.restamp(files); }
 	// True when a file its picture read moved its stamp since the files' generation it last read
 	// (`generation` the source's now), or since it was read when it was not compared yet: what a
 	// caller making its state anew over a picture that stands asks before show(), a model's texture

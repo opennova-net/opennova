@@ -66,10 +66,15 @@ io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 // the model's bone table through the game's loader), the clip the selection plays on the preview
 // clock's ticks. Its own camera orbits the model (framed when a model first shows), and the level it
 // draws is the options', else the one the game picks at the camera's distance (Auto). It builds
-// again when its document changes what is drawn (a user point's edit is the overlays' alone: an
-// Update), when a file the device read moves its stamp (a texture), and its rig again when the rig
-// or a file it read moves; a document the game could not read, and a rig model that does not read,
-// keep their reason until they change (no retry every frame).
+// again when its document changes what is drawn, when a file the device read moves its stamp (a
+// texture), and its rig again when the rig or a file it read moves; a document the game could not
+// read, and a rig model that does not read, keep their reason until they change (no retry every
+// frame). What changed is the document's change set (S13 V8): one naming the model row alone, its
+// versions alike but for their user points (alike_but_user_points), is the overlays' alone, the
+// held model patched with the row's user points (no read) and the scene standing (an Update); any
+// other change set the model read again and the scene built again; what the document cannot say
+// (read again, a state its history no longer holds) read again and built again only when the drawn
+// model moved, the user points aside (the written model's hash).
 class ModelViewport final : public ViewportModel {
 public:
 	explicit ModelViewport(std::string path);
@@ -78,11 +83,15 @@ public:
 	ModelViewStatus view_status() const { return reason_; }
 	const ModelViewportOptions &options() const { return options_; }
 	const OrbitCamera &camera() const { return camera_; }
-	// The model the device shows (null unless ready).
+	// The model the device shows and the overlays mark (null unless ready): as read, or patched with
+	// the document's user points since (patches).
 	const assets::Model &model() const { return model_; }
 	// How many times it read its document's bytes (wrote and read back the model, wrote the clip or
-	// the table): a follow over a document that did not change reads none.
+	// the table): a follow over a document that did not change reads none, nor does one whose change
+	// only the overlays show (a patch).
 	uint64_t reads() const { return reads_; }
+	// How many times it patched the held model with its document's user points (S13 V8).
+	uint64_t patches() const { return patches_; }
 	// How many times a clip's or a table's viewport read its rig's model from the project's files:
 	// once per model chosen or file changed, a model that does not read included (the failure latch:
 	// not again each pump until its file changes).
@@ -178,6 +187,18 @@ private:
 			ModelOverlay &marker, std::string &error) const;
 	ViewportAction stop_(ModelViewStatus reason, const std::string &detail, bool failed);
 	ViewportAction follow_model_(const ViewportInput &input, const ModelDocument &document);
+	// Whether what changed since the last follow is the overlays' alone (S13 V8): a change set
+	// naming the model row alone, whose version now is alike but for its user points to the one the
+	// held model holds, or naming nothing.
+	bool overlays_alone_(const ViewportInput &input, const ModelDocument &document) const;
+	// The held model with the document's user points: what was read, everything but its user
+	// points, which are the model row's as it is now. False, nothing patched, when the held model
+	// holds that version of the row already (a change set that names nothing).
+	bool patch_user_points_(const ModelDocument &document);
+	// The hash of the held model as drawn (written without its user points), taken once and kept with
+	// it: what a model read for a change the document cannot say (ChangeClass::Unknown) is compared
+	// with, written once itself. False when the held model does not write.
+	bool held_drawn_hash_();
 	ViewportAction follow_animation_(const ViewportInput &input, const Document &document,
 			PreviewClock &clock);
 	void reset_animation_();
@@ -191,8 +212,14 @@ private:
 	std::string detail_;
 	PreviewFollow picture_;
 	uint64_t reads_ = 0;
-	uint64_t drawn_key_ = 0; // what the device draws, the user points aside (0: no scene of model_)
-	assets::Model model_;
+	uint64_t patches_ = 0;
+	bool scene_ = false; // the device is told to build a scene of model_ (or of the rig's model)
+	assets::Model model_; // what the device draws and the overlays mark: read_, or read_ patched
+	assets::Model read_; // the model as last read (a model document's written and read back)
+	std::shared_ptr<const Node> read_row_; // the model row's version model_ holds
+	// The hash of read_ written without its user points (drawn_hashed_: taken), held_drawn_hash_'s.
+	uint64_t drawn_hash_ = 0;
+	bool drawn_hashed_ = false;
 	std::string framed_; // the model the camera last framed
 	// The animation's.
 	bool animating_ = false;

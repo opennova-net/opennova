@@ -38,7 +38,8 @@ MenuViewportApplier::~MenuViewportApplier() {
 	if (MenuFrame *frame = Object::cast_to<MenuFrame>(ObjectDB::get_instance(frame_id_))) frame->clear_screen();
 }
 
-void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) {
+void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
+		const opennova::editor::PreviewClock &clock) {
 	// A configure in flight dropped (what it loaded ahead stays kept: the next configure finds it).
 	build_.reset();
 	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
@@ -56,7 +57,7 @@ void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 		if (!kept.texture_kept(name, files)) build->textures.push_back(name);
 	if (build->textures.empty()) {
 		// Everything kept: configured now, as it is taken.
-		configure_(model, view.findings.assets);
+		configure_(model, view.findings.assets, clock);
 		done_ = units_done(1);
 		return;
 	}
@@ -65,7 +66,7 @@ void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 }
 
 ApplierStep MenuViewportApplier::step(const opennova::editor::ViewportModel &model,
-		const opennova::editor::PreviewClock &, std::string &) {
+		const opennova::editor::PreviewClock &clock, std::string &) {
 	Build &build = *build_;
 	const size_t unit = build.next++;
 	if (unit < build.textures.size()) {
@@ -76,7 +77,7 @@ ApplierStep MenuViewportApplier::step(const opennova::editor::ViewportModel &mod
 	const std::shared_ptr<const opennova::editor::ProjectAssetSource> assets = build.assets;
 	done_ = units_done(build.units());
 	build_.reset();
-	configure_(model, assets);
+	configure_(model, assets, clock);
 	return ApplierStep::Built;
 }
 
@@ -91,7 +92,8 @@ opennova::editor::OperationProgress MenuViewportApplier::progress() const {
 }
 
 void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &model,
-		const std::shared_ptr<const opennova::editor::ProjectAssetSource> &assets) {
+		const std::shared_ptr<const opennova::editor::ProjectAssetSource> &assets,
+		const opennova::editor::PreviewClock &clock) {
 	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
 	if (!menu.image() || !menu.screen() || !assets) {
 		clear();
@@ -105,6 +107,8 @@ void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &mode
 	image_ = menu.image();
 	assets_ = assets;
 	apply_options_(model);
+	// The frame's clock the preview clock's now (a configure ending frames after its Rebuild included).
+	frame_->set_time_ms(opennova::editor::menu_frame_time(clock));
 }
 
 void MenuViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
@@ -144,6 +148,15 @@ void MenuViewportApplier::apply(const opennova::editor::ViewportModel &, const o
 		placed.right = rect.right;
 		placed.bottom = rect.bottom;
 	}
+}
+
+void MenuViewportApplier::tick(const opennova::editor::ViewportModel &model,
+		const opennova::editor::PreviewClock &clock) {
+	if (!frame_->is_configured()) return;
+	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
+	uint32_t time = 0;
+	if (opennova::editor::menu_frame_clock(menu, frame_->native_state().time_ms, clock, time))
+		frame_->set_time_ms(time);
 }
 
 void MenuViewportApplier::resize(int width, int height) {

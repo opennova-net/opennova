@@ -41,7 +41,8 @@ class ModelViewportApplier final : public ViewportApplier {
 public:
 	explicit ModelViewportApplier(SubViewport &viewport);
 
-	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) override;
+	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
+			const opennova::editor::PreviewClock &clock) override;
 	ApplierStep step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			std::string &failure) override;
 	bool building() const override { return build_ != nullptr; }
