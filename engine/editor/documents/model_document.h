@@ -3,7 +3,6 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
@@ -25,8 +24,11 @@ namespace opennova::editor {
 //   the collision row: the collision sections, volumes and bullet faces, and the
 //     occlusion records (all fixed: their geometry is the base's; their types and flags
 //     are edited).
-// Everything that names another table's entry by index sits in the model row, so a
-// structural edit renumbers within one row. serialize() composes the base and the rows
+// A record is found by its path in its row, which the core's index of the row keeps
+// (Document::path_in, S13 D8). A generator's, a track's or a light's register and a part
+// animation's rotation frame name a CTRL register or an MTRX row of the model row by its index:
+// Record references (ModelRegister, ModelFrame), which the core renumbers through
+// renumber_references when a register or a frame moves. serialize() composes the base and the rows
 // into the struct the writer takes (strips renumbered to the materials' new order) and
 // writes it from scratch (ADR 0003); an untouched model writes its own bytes (ctest
 // threedi_retail_rewrite).
@@ -36,15 +38,6 @@ enum class ModelKind : NodeKind {
 	Face, Occlusion,
 };
 constexpr NodeKind node_kind(ModelKind kind) { return static_cast<NodeKind>(kind); }
-
-// Where an identity sits in its row: the row's collection (the model row's 0..5, or its
-// part animations and texture rows by their owner), and the index there.
-struct ModelPlace {
-	uint8_t collection = 0;
-	uint32_t owner = 0;
-	uint32_t index = 0;
-};
-using ModelPlaces = std::unordered_map<NodeId, ModelPlace>;
 
 struct ModelLod {
 	threedi::ThreediLod lod;                          // the base's LOD (its geometry pointers the base's)
@@ -68,16 +61,13 @@ struct ModelRow : Node {
 	std::vector<threedi::ThreediControlRegister> registers;
 	std::vector<threedi::ThreediMatrix4x4> frames;
 	// collections: 0 LODs, 1 materials, 2 lights, 3 user points, 4 registers, 5 frames.
-	// Every identity's place, made when the row is given its identities and again by each
-	// structural edit of a clone (model_document_detail::index_places), shared by a clone and
-	// never made inside a const query (a committed row never changes).
-	std::shared_ptr<const ModelPlaces> places;
 
 	ModelRow();
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return header.name; }
+	// The collections', then each LOD's part animations', then each material's texture rows'.
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
-	// Its tables, part animations and places (the base is not its own).
+	// Its tables and part animations (the base is not its own).
 	size_t footprint() const override;
 };
 
@@ -86,14 +76,11 @@ struct CollisionRow : Node {
 	std::vector<threedi::ThreediBoundingVolume> volumes;
 	std::vector<threedi::ThreediCollisionFace> faces;
 	std::vector<threedi::ThreediOcclusionObject> occlusion;
-	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records. Its places as a model
-	// row's.
-	std::shared_ptr<const ModelPlaces> places;
+	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records.
 
 	CollisionRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<CollisionRow>(*this); }
 	std::string name() const override { return "Collision"; }
-	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
 	size_t footprint() const override;
 };
 
@@ -125,12 +112,17 @@ public:
 	// kind they hold (model_document_detail::kKinds).
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
+	// One pass over a row's tables (a LOD's part animations after it, a material's texture rows
+	// after it), what the core's index of the row is made by: never through collections(), whose
+	// nested owners it finds by that index.
+	void walk_records(const Node &row, const RecordVisitor &visit) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
 	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
 	// answers, the type's own for the process.
 	static const std::vector<FieldSchema> &schema(NodeKind kind);
-	// What an index field names on this record: the model's CTRL registers by name, LOD 0's
-	// parts, the MTRX rows (any other index typed too).
+	// What a part index names on this record: LOD 0's parts, with the value the table calls none
+	// (any other index typed too). A register's index and a frame's row are Record references,
+	// whose picker offers the model's registers and MTRX rows (S13 D8).
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
 	// A user point past the first 16 is inert.
@@ -148,7 +140,8 @@ public:
 protected:
 	// Whether the game reads the field on this record (a generator's parameter as a
 	// register, a track by its flags, a spot light's axis), what it names there (a texture
-	// row's file, by the row's type; an index: record_choices).
+	// row's file, by the row's type; a CTRL register or an MTRX row by its index, a Record
+	// reference; a part of LOD 0: record_choices).
 	void refine_field(const NodeAddress &address, FieldUse &use) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
@@ -163,13 +156,22 @@ protected:
 	// material to another draw pass (both are geometry: re-export from Blender).
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
-	// Materials, texture rows, lights and user points: add, duplicate, remove, move (a
-	// material a strip draws with is not removed). CTRL registers and MTRX frames: added at
-	// the end, the last removed while nothing names it (an index is what names them). Part
-	// animations: the next part's inert row added at the end, the last removed. LODs and
-	// the collision records are fixed.
+	// Materials, texture rows, lights, user points and CTRL registers: add, duplicate, remove,
+	// move (a material a strip draws with is not removed), each list with its identities through
+	// edit_id_list. MTRX frames likewise, but row 0 (the identity, which no part animation turns
+	// through) stays row 0. What names a register or a frame by its index the core has the type
+	// renumber (renumber_references). Part animations: the next part's inert row added at the end,
+	// the last removed. LODs and the collision records are fixed.
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
+	// The registers or the frames moved: every field that names one by its index (as refine_field
+	// finds it on the record as the batch left it, read by the game there or not, so a field it does
+	// not read yet keeps naming its record) set to the index its register or frame stands at now.
+	// Refused while a field names one the edit removed ("point it at another first"), while the
+	// second RGB generator, which no field sets, names a register that moved, or where a field
+	// cannot hold the new index.
+	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
+	                         std::vector<Edit> &sites, std::string &error) const override;
 	// A model keeps its two rows: a step adding or removing a row is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows,
 	                 std::string &error) const override;

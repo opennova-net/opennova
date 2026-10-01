@@ -35,12 +35,12 @@ struct FieldUse {
 	// Never less than the schema's: the base puts the schema's back after the type's refinement.
 	bool read_only = false;
 	// The record offers choices of its own in place of the schema's (Document::record_choices):
-	// a model's registers, parts and rotation frames by index, a clip's bones, an item's spawn
-	// slots. The widgets, the JSON and the find ask for them; the graph's extraction never does.
+	// a model's LOD 0 parts by index, a clip's bones, an item's spawn slots. The widgets, the JSON
+	// and the find ask for them; the graph's extraction never does. (A model's CTRL registers and
+	// MTRX rows by index are Record references instead, S13 D8: the picker offers them.)
 	bool own_choices = false;
-	// The record holding the records those choices name by their index (a model's registers
-	// and frames: the model row; a clip's bones: the clip row); empty where they name no record
-	// (a part of LOD 0, a spawn slot).
+	// The record holding the records those choices name by their index (a clip's bones: the clip
+	// row); empty where they name no record (a part of LOD 0, a spawn slot).
 	NodeAddress record_owner;
 };
 

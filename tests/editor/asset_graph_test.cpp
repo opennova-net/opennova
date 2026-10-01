@@ -15,10 +15,14 @@
 // changed and equals a graph built fresh over the same files after every scripted step (also as
 // a retail leg over the JO install, OPENNOVA_JO_DIR), resolving again only what a change reaches
 // (GraphStats); references_of by a file's own slot; the base layer's rules (also over the JO
-// install) and its choices after the project's.
+// install) and its choices after the project's. S13 D8: a model's registers and MTRX rows named by
+// index (Record references) resolved within its file, Referenced by, users and the picker over its
+// record sets, and an open model's register removed in the middle, its references renumbered, the
+// graph equal to one built fresh (also as a retail leg over the JO install's models).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -31,10 +35,12 @@
 #include <variant>
 #include <vector>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/texture_candidates.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
+#include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/strings_document.h>
@@ -64,6 +70,7 @@
 #include "editor/graph_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/menu_test_support.h"
+#include "editor/rig_model.h"
 
 using namespace opennova::editor;
 namespace fs = std::filesystem;
@@ -1478,12 +1485,15 @@ static int test_reference_kind_rows() {
 		ReferenceKind back = ReferenceKind::None;
 		TEST_EXPECT(reference_kind_from_token(row.token, back) && back == kind);
 		const bool file = row.resolution == ReferenceResolution::File;
+		const bool record = row.resolution == ReferenceResolution::Record;
 		TEST_EXPECT(file == (row.file != AssetKind::Unknown));
 		TEST_EXPECT(!row.extensions || file);
 		TEST_EXPECT(!row.file_names || file);
 		TEST_EXPECT(!row.scope_names_file || row.resolution == ReferenceResolution::Symbol);
 		TEST_EXPECT(row.defined_in == AssetKind::Unknown || row.names_symbol());
-		TEST_EXPECT((row.missing_message != nullptr) == (file || row.names_symbol()));
+		// A Record reference names its collection, and the graph finds none missing (S13 D8).
+		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
+		TEST_EXPECT((row.missing_message != nullptr) == (file || (row.names_symbol() && !record)));
 		const bool tolerated = kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
@@ -1497,6 +1507,21 @@ static int test_reference_kind_rows() {
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
 	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Unchecked);
 	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
+	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
+	// rule, a signed byte above 0.
+	TEST_EXPECT(reference_row(ReferenceKind::ModelRegister).resolution == ReferenceResolution::Record &&
+	            std::string(reference_row(ReferenceKind::ModelRegister).collection) == "register" &&
+	            std::string(reference_row(ReferenceKind::ModelFrame).collection) == "frame");
+	int64_t index = -1;
+	TEST_EXPECT(record_index(ReferenceKind::ModelRegister, Value(int64_t(0)), index) && index == 0 &&
+	            record_index(ReferenceKind::ModelRegister, Value(int64_t(300)), index) && index == 300);
+	TEST_EXPECT(!record_index(ReferenceKind::ModelRegister, Value(int64_t(-1)), index) &&
+	            !record_index(ReferenceKind::ModelRegister, Value(std::string("2")), index) &&
+	            !record_index(ReferenceKind::Texture, Value(int64_t(2)), index));
+	for (const int64_t byte : {int64_t(0), int64_t(128), int64_t(200), int64_t(255)})
+		TEST_EXPECT(!record_index(ReferenceKind::ModelFrame, Value(byte), index));
+	TEST_EXPECT(record_index(ReferenceKind::ModelFrame, Value(int64_t(1)), index) && index == 1 &&
+	            record_index(ReferenceKind::ModelFrame, Value(int64_t(127)), index) && index == 127);
 	TEST_EXPECT(style_value_reference(AssetKind::Font) == ReferenceKind::Font);
 	TEST_EXPECT(style_value_reference(AssetKind::Texture) == ReferenceKind::MenuTexture);
 	TEST_EXPECT(style_value_reference(AssetKind::Model) == ReferenceKind::None);
@@ -1903,11 +1928,11 @@ std::vector<const GraphSymbol *> symbols_in(const AssetGraph &graph) {
 
 // What a run of updates has met, which every later comparison asks both graphs about again, so an
 // index entry left under a name, a file or a variable nothing holds any more shows: each edge's
-// kind and target and each symbol's kind and name (the keys of the index's lists), each file's
-// path, each style variable an edge's value names and each (kind, scope, loader argument) a
-// reference was made with; and the texts to search for.
+// kind, target and scope and each symbol's kind, name and scope (the keys of the index's lists, a
+// Record kind's in its file), each file's path, each style variable an edge's value names and each
+// (kind, scope, loader argument) a reference was made with; and the texts to search for.
 struct Seen {
-	std::set<std::pair<ReferenceKind, std::string>> names;
+	std::set<std::tuple<ReferenceKind, std::string, std::string>> names;
 	std::set<std::string> paths;
 	std::set<std::string> variables;
 	std::set<std::tuple<ReferenceKind, std::string, int32_t>> lookups;
@@ -1916,13 +1941,14 @@ struct Seen {
 	explicit Seen(std::vector<std::string> texts) : searches(std::move(texts)) {}
 	void add(const AssetGraph &graph, const AssetScan &scan) {
 		graph.for_each_edge([this](const GraphEdge &edge) {
-			names.insert({edge.kind, edge.target});
+			names.insert({edge.kind, edge.target, edge.scope});
 			if (graph_names::is_style_reference(edge.value))
 				variables.insert(graph_names::style_variable(edge.value));
 			lookups.insert({edge.kind, edge.scope, edge.loader_arg});
 		});
-		graph.for_each_symbol(
-				[this](const GraphSymbol &symbol) { names.insert({symbol.kind, symbol.name}); });
+		graph.for_each_symbol([this](const GraphSymbol &symbol) {
+			names.insert({symbol.kind, symbol.name, symbol.scope});
+		});
 		for (const AssetEntry &entry : scan.entries) paths.insert(entry.relative_path);
 	}
 };
@@ -1998,8 +2024,8 @@ std::string difference(
 				place_of(graph.style_binding(symbol.name)) !=
 						place_of(fresh.style_binding(symbol.name)))
 			return "the binding of " + symbol.name;
-		if (!same_symbols(graph.symbols_named(symbol.kind, symbol.name),
-					fresh.symbols_named(symbol.kind, symbol.name)) ||
+		if (!same_symbols(graph.symbols_named(symbol.kind, symbol.name, symbol.scope),
+					fresh.symbols_named(symbol.kind, symbol.name, symbol.scope)) ||
 				!same_symbols(graph.symbols_of(symbol.file, symbol.record),
 						fresh.symbols_of(symbol.file, symbol.record)) ||
 				place_of(graph.symbol_at(symbol.file, symbol.locator, symbol.field)) !=
@@ -2017,15 +2043,20 @@ std::string difference(
 	seen.add(fresh, scan);
 	const GraphIndex &index = graph.index(), &fresh_index = fresh.index();
 	for (const auto &name : seen.names) {
-		const std::string key = GraphIndex::key_of(name.first, name.second);
+		const ReferenceKind kind = std::get<0>(name);
+		const std::string &target = std::get<1>(name);
+		// A Record kind's name is its index in the file its scope names; any other kind's is asked
+		// as before, everywhere.
+		const std::string scope =
+				reference_row(kind).resolution == ReferenceResolution::Record ? std::get<2>(name) : std::string();
+		const std::string key = GraphIndex::key_of(kind, target, scope);
 		if (!same_edges(edges_at(index, index.edges_targeting(key)),
 					edges_at(fresh_index, fresh_index.edges_targeting(key))) ||
-				!same_edges(graph.referrers_of(name.first, name.second),
-						fresh.referrers_of(name.first, name.second)))
-			return "the edges into " + name.second;
+				!same_edges(graph.referrers_of(kind, target, scope), fresh.referrers_of(kind, target, scope)))
+			return "the edges into " + target;
 		if (!same_symbols(symbols_at(index, index.symbols_named(key)),
 					symbols_at(fresh_index, fresh_index.symbols_named(key))))
-			return "the symbols named " + name.second;
+			return "the symbols named " + target;
 	}
 	for (const std::string &path : seen.paths) {
 		if (!same_edges(edges_at(index, index.users_of(path)),
@@ -2766,6 +2797,185 @@ static int test_base_layer_file_set() {
 	return 0;
 }
 
+// S13 D8: a model's registers and MTRX rows named by index (Record references) resolve within the
+// model's own file. Its record sets (every register and row a symbol of its index, scoped to the
+// file); each reference Present at an index its collection holds, Missing past it, never a graph
+// finding (the model's validation reports it); a register's Referenced by (the symbols its record
+// defines and their referrers, its own file's alone where two models hold the same registers), its
+// users, the picker's rows (the file's registers by index); a file's usages and Find in project
+// leaving the record sets out. And an open model's register removed in the middle, its references
+// renumbered in the same step: the update patches that file alone, equal to a graph built fresh,
+// the Referenced by following; its undo the same.
+static int test_record_references() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_records");
+	Project project(dir.file("project"));
+	TEST_EXPECT(project.made);
+	const std::vector<uint8_t> rig = rig_model::bytes();
+	TEST_EXPECT(!rig.empty() && editor_test::write_bytes(project.file("models/rig.3di"), rig) &&
+	            editor_test::write_bytes(project.file("models/twin.3di"), rig));
+	AssetGraph graph;
+	graph.update(project.paths, project.document, project.rescan(), {});
+	const std::string file = "models/rig.3di";
+	// A file's references of a kind, each in that file and found there (none counted otherwise).
+	const auto record_edges = [&](const std::string &of, ReferenceKind kind) {
+		size_t n = 0;
+		for (const GraphEdge *edge : graph.references_of(of))
+			if (edge->kind == kind)
+				n += edge->scope == of && graph.resolve(*edge) == ReferenceStatus::Present ? 1 : 1000;
+		return n;
+	};
+	TEST_EXPECT(record_edges(file, ReferenceKind::ModelRegister) == 4 && record_edges(file, ReferenceKind::ModelFrame) == 1);
+	TEST_EXPECT(graph.symbols_of_kind(ReferenceKind::ModelRegister).size() == 8 &&
+	            graph.symbols_of_kind(ReferenceKind::ModelFrame).size() == 6);
+	for (const GraphEdge *edge : graph.missing())
+		TEST_EXPECT(edge->kind != ReferenceKind::ModelRegister && edge->kind != ReferenceKind::ModelFrame);
+	// Within its file: register 3 is FLICKER, 4 none (no finding), frame 2 a row.
+	const GraphSymbol *flicker = graph.resolve_symbol(ReferenceKind::ModelRegister, "3", file);
+	TEST_EXPECT(flicker && flicker->file == file && flicker->record == "rig/FLICKER" && flicker->field.empty());
+	TEST_EXPECT(graph.resolve(ReferenceKind::ModelRegister, "3", file) == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::ModelRegister, "4", file) == ReferenceStatus::Missing &&
+	            graph.resolve(ReferenceKind::ModelFrame, "2", file) == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::ModelRegister, "3", "models/none.3di") == ReferenceStatus::Missing);
+	// Referenced by FLICKER: its record's symbols, their referrers (the light and the X track, this
+	// file's alone), its users the same.
+	const std::vector<const GraphSymbol *> defined = graph.symbols_of(file, flicker->record);
+	TEST_EXPECT(defined.size() == 1 && defined[0] == flicker);
+	std::vector<const GraphEdge *> users = graph.referrers_of(ReferenceKind::ModelRegister, "3", file);
+	std::set<std::string> fields;
+	for (const GraphEdge *edge : users) {
+		TEST_EXPECT(edge->source == file);
+		fields.insert(edge->field);
+	}
+	TEST_EXPECT(users.size() == 2 && fields == std::set<std::string>({"param", "rotx.param"}) &&
+	            graph.users_of(*flicker).size() == 2);
+	// The picker: the file's registers by index, each with its record.
+	const std::vector<ReferenceChoice> registers = graph.choices(ReferenceKind::ModelRegister, file);
+	TEST_EXPECT(registers.size() == 4 && registers[0].name == "0" && registers[3].name == "3" &&
+	            registers[3].record == "rig/FLICKER" && registers[3].file == file &&
+	            registers[3].status == ReferenceStatus::Present);
+	TEST_EXPECT(graph.choices(ReferenceKind::ModelRegister, "models/none.3di").empty());
+	// A file's own records by index are no use of it, nor a name to find.
+	for (const GraphEdge *edge : graph.usages_of(file))
+		TEST_EXPECT(edge->kind != ReferenceKind::ModelRegister && edge->kind != ReferenceKind::ModelFrame);
+	for (const GraphSearchHit &hit : graph.search("2"))
+		TEST_EXPECT(!hit.symbol || hit.symbol->kind != ReferenceKind::ModelRegister);
+	Seen seen({"rig", "2"});
+	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, {}, seen).empty());
+
+	// The model open, EWEAP_GUNYAW (1) removed: FLICKER is register 2 now, and so its references say.
+	auto model = std::make_shared<ModelDocument>();
+	Diagnostic error;
+	TEST_EXPECT(model->load(project.file(file), file, AssetKind::Model, "jo", error));
+	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
+	graph.update(project.paths, project.document, project.scan, open);
+	const NodeAddress gunyaw{model->model_row()->id, node_kind(ModelKind::Register), model->model_row()->collections[4][1]};
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = gunyaw;
+	TEST_EXPECT(model->apply(remove, error));
+	const GraphUpdate update = graph.update(project.paths, project.document, project.scan, open);
+	TEST_EXPECT(update.changed && update.files == std::vector<std::string>{file} && graph.stats().files_patched == 1);
+	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, open, seen).empty());
+	const GraphSymbol *moved = graph.resolve_symbol(ReferenceKind::ModelRegister, "2", file);
+	TEST_EXPECT(moved && moved->record == "rig/FLICKER" &&
+	            graph.referrers_of(ReferenceKind::ModelRegister, "2", file).size() == 2 &&
+	            graph.referrers_of(ReferenceKind::ModelRegister, "3", file).empty() &&
+	            graph.choices(ReferenceKind::ModelRegister, file).size() == 3);
+	// The other model keeps its four.
+	TEST_EXPECT(graph.choices(ReferenceKind::ModelRegister, "models/twin.3di").size() == 4 &&
+	            graph.referrers_of(ReferenceKind::ModelRegister, "3", "models/twin.3di").size() == 2);
+	model->undo();
+	graph.update(project.paths, project.document, project.scan, open);
+	TEST_EXPECT(fresh_difference(graph, project.paths, project.document, project.scan, open, seen).empty());
+	TEST_EXPECT(graph.referrers_of(ReferenceKind::ModelRegister, "3", file).size() == 2);
+	return 0;
+}
+
+// The retail leg of the Record references (OPENNOVA_JO_DIR): the JO install's models (the base
+// game's and each expansion's, each source's once, as editor_model_document's retail leg reads them)
+// in a project, every register and MTRX row their records name by index an edge into the model's
+// own record set that resolves; one model whose records name a register opened, a register added
+// at its front (every reference to its registers renumbered up in the same step) and removed again
+// (renumbered back down), the graph after each equal to one built fresh.
+static int test_retail_record_references() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (the Record references of the JO install's models)");
+		return 0;
+	}
+	editor_test::TempProjectDir dir("opennova_asset_graph_retail_records");
+	Project project(dir.file("project"));
+	TEST_EXPECT(project.made);
+	std::vector<std::string> expansions = opennova::vfs_list_expansions(install);
+	expansions.insert(expansions.begin(), std::string()); // the base game first
+	std::set<std::string> seen_models;
+	size_t models = 0;
+	for (const std::string &expansion : expansions) {
+		opennova::Vfs game;
+		game.set_scr_policy(opennova::gameprofile::gameprofile_scr_policy_for_code(project.document.target_game.c_str()));
+		TEST_EXPECT(game.mount_game(install, expansion) && game.has_mounted_archive());
+		for (const opennova::VfsFileLocation &location : game.list_files()) {
+			const std::string &name = location.logical_name;
+			if (!opennova::strutil::ends_with_icase(name, ".3di") ||
+			    !seen_models.insert(location.source_path + "|" + normalized_logical_name(name)).second)
+				continue;
+			std::vector<uint8_t> bytes;
+			if (!game.read_file(name, bytes) || bytes.size() < 4 || std::memcmp(bytes.data(), "3DI3", 4) != 0)
+				continue; // not a model the game's loader reads either
+			const std::string folder = expansion.empty() ? std::string("base") : expansion;
+			TEST_EXPECT(editor_test::write_bytes(project.file("model/" + folder + "/" + std::to_string(models) + "/" + name), bytes));
+			++models;
+		}
+	}
+	AssetGraph graph;
+	const auto clock = std::chrono::steady_clock::now();
+	graph.update(project.paths, project.document, project.rescan(), {});
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - clock).count();
+	size_t registers = 0, frames = 0, unresolved = 0;
+	std::string named;
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (edge.kind != ReferenceKind::ModelRegister && edge.kind != ReferenceKind::ModelFrame) return;
+		(edge.kind == ReferenceKind::ModelRegister ? registers : frames) += 1;
+		if (graph.resolve(edge) != ReferenceStatus::Present) ++unresolved;
+		if (named.empty() && edge.kind == ReferenceKind::ModelRegister) named = edge.source;
+	});
+	std::printf("the JO install's models through the graph: %zu models, %zu edges (%zu registers and %zu MTRX rows "
+	            "named by index, %zu not in their collection), %zu symbols (%zu registers, %zu rows), read in %.2f "
+	            "s\n",
+	            models, graph.edge_count(), registers, frames, unresolved, graph.symbol_count(),
+	            graph.symbols_of_kind(ReferenceKind::ModelRegister).size(),
+	            graph.symbols_of_kind(ReferenceKind::ModelFrame).size(), seconds);
+	TEST_EXPECT(models > 900 && registers > 0 && !named.empty());
+	if (named.empty()) return 0;
+	auto model = std::make_shared<ModelDocument>();
+	Diagnostic error;
+	TEST_EXPECT(model->load(project.file(named), named, AssetKind::Model, "jo", error));
+	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
+	graph.update(project.paths, project.document, project.scan, open);
+	Seen seen({"model"});
+	const auto step = [&](const char *what) {
+		const GraphUpdate update = graph.update(project.paths, project.document, project.scan, open);
+		const std::string different = fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
+		std::printf("  %s: %zu files patched, %zu edges resolved of %zu%s%s\n", what, graph.stats().files_patched,
+		            graph.stats().edges_resolved, graph.edge_count(),
+		            different.empty() ? "" : "; FAIL, differs from a fresh graph in ", different.c_str());
+		return different.empty() && update.changed && update.files == std::vector<std::string>{named};
+	};
+	const NodeId row = model->model_row()->id;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {row, node_kind(ModelKind::Register), 0};
+	add.position = 0;
+	TEST_EXPECT(model->apply(add, error));
+	TEST_EXPECT(step(("a register added at the front of " + named).c_str()));
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = {row, node_kind(ModelKind::Register), model->last_added()};
+	TEST_EXPECT(model->apply(remove, error));
+	TEST_EXPECT(step("the register removed again"));
+	return 0;
+}
+
 // The retail leg of the incremental graph (OPENNOVA_JO_DIR): the install's menus, stylesheet,
 // string tables, catalogs, animation tables, environments, avatars, particles and missions
 // (every kind the graph reads but the models and clips) exported into a project, then edited: a
@@ -2968,6 +3178,8 @@ int main(int argc, char **argv) {
 	failures += test_base_layer_file_set();
 	failures += test_retail_incremental();
 	failures += test_retail_base_layer();
+	failures += test_record_references();
+	failures += test_retail_record_references();
 	failures += test_reference_kind_rows();
 	failures += test_reference_file_candidates();
 	failures += test_model_texture_references();

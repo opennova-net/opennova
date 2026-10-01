@@ -33,6 +33,7 @@
 // base to its rules (a snapshot and a blocked document take no edit, undo or redo, a blocked one
 // no save), holding no records.
 #include <algorithm>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -45,6 +46,7 @@
 
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
+#include <editor/model/id_list.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <editor/session/selection.h>
@@ -758,6 +760,166 @@ protected:
 };
 
 std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
+
+// --- a fake type whose records name others of their file by index (S13 D8) ------------------------
+
+constexpr NodeKind kBank = 0, kRegister = 1, kUser = 2;
+
+// A bank: its registers (by name) and its users, each naming a register by its index.
+struct IndexBank : Node {
+	std::string title;
+	std::vector<std::string> registers;
+	std::vector<int64_t> users;
+	IndexBank() {
+		kind = kBank;
+		collections.resize(2);
+	}
+	std::shared_ptr<Node> clone() const override { return std::make_shared<IndexBank>(*this); }
+	std::string name() const override { return title; }
+	size_t footprint() const override {
+		size_t bytes = sizeof(IndexBank) + collections_footprint() + footprint_of(title) + footprint_of(registers) +
+		               footprint_of(users);
+		for (const std::string &name : registers) bytes += footprint_of(name);
+		return bytes;
+	}
+};
+
+// Banks, "B <title>" then "R <name>" per register and "U <index>" per user. Its schema names the
+// ModelRegister reference on a user's "reg" field, so its "register" kind is the collection that
+// reference names (graph/reference_kinds: every register of the file, in the file's order); the
+// type renumbers the users (or, `renumbers` false, keeps the base's renumber_references, which
+// refuses).
+class IndexDocument : public Document {
+public:
+	explicit IndexDocument(bool renumbers = true) : renumbers_(renumbers) {}
+	const std::vector<RecordKindRow> &kinds() const override {
+		static const std::vector<RecordKindRow> table = {
+		        {kBank, "bank", "Bank", "Add bank", true}, {kRegister, "register", "Register"}, {kUser, "user", "User"}};
+		return table;
+	}
+	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override {
+		if (owner.child) return {};
+		return {{{kRegister, "Registers", "name"}, row.collections[0]}, {{kUser, "Users", ""}, row.collections[1]}};
+	}
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
+		static const std::vector<FieldSchema> bank = {{"name", FieldType::Text, 32}};
+		static const std::vector<FieldSchema> reg = {{"name", FieldType::Text, 16}};
+		static const std::vector<FieldSchema> user = [] {
+			FieldSchema field{"reg", FieldType::Integer};
+			field.reference = ReferenceKind::ModelRegister;
+			return std::vector<FieldSchema>{field};
+		}();
+		static const std::vector<FieldSchema> none;
+		return kind == kBank ? bank : kind == kRegister ? reg : kind == kUser ? user : none;
+	}
+	SerializeResult serialize() const override {
+		SerializeResult result;
+		for (const auto &node : rows()) {
+			const auto &bank = static_cast<const IndexBank &>(*node);
+			result.text += "B " + bank.title + "\n";
+			for (const std::string &name : bank.registers) result.text += "R " + name + "\n";
+			for (const int64_t user : bank.users) result.text += "U " + std::to_string(user) + "\n";
+		}
+		return result;
+	}
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<IndexDocument>(*this); }
+
+	mutable size_t renumbered = 0; // renumber_references' calls
+
+protected:
+	bool read(const Node &node, const NodeAddress &address, const std::string &field, Value &out) const override {
+		const auto &bank = static_cast<const IndexBank &>(node);
+		if (!address.child) {
+			if (field != "name") return false;
+			out = bank.title;
+			return true;
+		}
+		const size_t i = index_in(bank, address);
+		if (i == SIZE_MAX) return false;
+		if (address.kind == kRegister && field == "name") out = bank.registers[i];
+		else if (address.kind == kUser && field == "reg") out = bank.users[i];
+		else return false;
+		return true;
+	}
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows, std::shared_ptr<const FileState> &,
+	           std::vector<SourceIssue> &, Diagnostic &error) override {
+		std::istringstream in(std::string(bytes.begin(), bytes.end()));
+		std::string tag, word;
+		std::shared_ptr<IndexBank> bank;
+		while (in >> tag >> word) {
+			if (tag == "B") {
+				bank = std::make_shared<IndexBank>();
+				bank->title = word;
+				rows.push_back(bank);
+			} else if (tag == "R" && bank) {
+				bank->registers.push_back(word);
+				bank->collections[0].push_back(0);
+			} else if (tag == "U" && bank) {
+				bank->users.push_back(std::strtoll(word.c_str(), nullptr, 10));
+				bank->collections[1].push_back(0);
+			} else {
+				error = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "Not a bank.", path());
+				return false;
+			}
+		}
+		return true;
+	}
+	bool set_field(Node &node, const NodeAddress &address, const std::string &field, const Value &value,
+	               std::string &error) override {
+		auto &bank = static_cast<IndexBank &>(node);
+		const auto *text = std::get_if<std::string>(&value);
+		const auto *number = std::get_if<int64_t>(&value);
+		const size_t i = address.child ? index_in(bank, address) : SIZE_MAX;
+		if (!address.child && field == "name" && text) bank.title = *text;
+		else if (i != SIZE_MAX && address.kind == kRegister && field == "name" && text) bank.registers[i] = *text;
+		else if (i != SIZE_MAX && address.kind == kUser && field == "reg" && number) bank.users[i] = *number;
+		else {
+			error = "Unknown field.";
+			return false;
+		}
+		return true;
+	}
+	bool edit_collection(Node &node, const Edit &edit, const IdAllocator &allocate, NodeId &added,
+	                     std::string &error) override {
+		auto &bank = static_cast<IndexBank &>(node);
+		if (edit.address.kind == kRegister)
+			return edit_id_list(bank.registers, bank.collections[0], edit, std::string("NEW"), allocate, added, error);
+		return edit_id_list(bank.users, bank.collections[1], edit, int64_t(0), allocate, added, error);
+	}
+	// Every user naming a register the edit moved names it again; one naming a register it removed
+	// refuses the edit.
+	bool renumber_references(const StagedRows &rows, const RecordShift &shift, std::vector<Edit> &sites,
+	                         std::string &error) const override {
+		++renumbered;
+		if (!renumbers_) return Document::renumber_references(rows, shift, sites, error);
+		for (const auto &node : rows.rows()) {
+			const auto &bank = static_cast<const IndexBank &>(*node);
+			for (size_t u = 0; u < bank.users.size(); ++u) {
+				if (!shift.found(bank.users[u])) continue;
+				const size_t now = shift.now(bank.users[u]);
+				if (now == RecordShift::kRemoved) {
+					error = "A user reads this register.";
+					return false;
+				}
+				if (now == size_t(bank.users[u])) continue;
+				Edit set;
+				set.address = {bank.id, kUser, bank.collections[1][u]};
+				set.field = "reg";
+				set.value = int64_t(now);
+				sites.push_back(set);
+			}
+		}
+		return true;
+	}
+
+private:
+	static size_t index_in(const IndexBank &bank, const NodeAddress &address) {
+		const std::vector<NodeId> &ids = bank.collections[address.kind == kRegister ? 0 : 1];
+		const auto found = std::find(ids.begin(), ids.end(), address.child);
+		return found == ids.end() ? SIZE_MAX : size_t(found - ids.begin());
+	}
+	bool renumbers_;
+};
 
 } // namespace
 
@@ -1738,6 +1900,24 @@ static int test_per_call_costs() {
 // the file loaded again in place (its identities start again, so none met before counts as
 // gone), then a row moved: each record a walk meets is found where it is, and each one met
 // before that is no longer there is found nowhere.
+// S13 D8: the core's index of a row keeps each record's path (Document::path_in), a step per
+// collection from the row down: each step, followed through the collections each owner holds, leads
+// to the record, its last step the record's placement.
+static bool path_leads_to(const Document &document, const Node &row, const NodeAddress &record,
+                          const Document::Placement &at) {
+	const Document::RecordPath path = document.path_in(row, record.child);
+	if (path.empty() || path[path.size() - 1].collection != at.collection ||
+	    path[path.size() - 1].index != at.index)
+		return false;
+	NodeAddress owner{row.id, row.kind, 0};
+	for (const Document::PathStep &step : path) {
+		const std::vector<Document::Collection> held = document.collections_of(owner);
+		if (step.collection >= held.size() || step.index >= held[step.collection].ids.size()) return false;
+		owner = {row.id, held[step.collection].spec.kind, held[step.collection].ids[step.index]};
+	}
+	return owner == record;
+}
+
 static int test_record_index() {
 	Loaded fake;
 	TEST_EXPECT(fake.load());
@@ -1750,11 +1930,13 @@ static int test_record_index() {
 		for (const auto &row : document.rows()) {
 			here.push_back(row->id);
 			found = found && document.address_of(row->id) == NodeAddress{row->id, row->kind, 0};
-			document.walk_records(*row, [&](const NodeAddress &record, const Document::Placement &) {
+			document.walk_records(*row, [&](const NodeAddress &record, const Document::Placement &at) {
 				here.push_back(record.child);
-				found = found && document.address_of(record.child) == record;
+				found = found && document.address_of(record.child) == record &&
+				        path_leads_to(document, *row, record, at);
 				return true;
 			});
+			found = found && document.path_in(*row, row->id).empty() && document.path_in(*row, 0).empty();
 		}
 		for (const NodeId id : here)
 			if (std::find(met.begin(), met.end(), id) == met.end()) met.push_back(id);
@@ -1763,6 +1945,23 @@ static int test_record_index() {
 		return found;
 	};
 	TEST_EXPECT(every_found());
+	// The paths, one by one: the header the row's first collection's, a1's leaves and items under
+	// it, a2 the second item.
+	const Node &alpha = *document.row(fake.alpha.row);
+	const auto path_of = [&](const NodeAddress &record) {
+		std::vector<std::pair<uint32_t, uint32_t>> out;
+		for (const Document::PathStep &step : document.path_in(alpha, record.child)) out.push_back({step.collection, step.index});
+		return out;
+	};
+	using Steps = std::vector<std::pair<uint32_t, uint32_t>>;
+	TEST_EXPECT(path_of(fake.header) == Steps({{0, 0}}) && path_of(fake.a1) == Steps({{1, 0}}) &&
+	            path_of(fake.x) == Steps({{1, 0}, {0, 0}}) && path_of(fake.y) == Steps({{1, 0}, {0, 1}}) &&
+	            path_of(fake.a1b) == Steps({{1, 0}, {1, 0}}) && path_of(fake.a2) == Steps({{1, 1}}));
+	// Of another row's record, none; of a row the document does not hold (a copy), its own walk.
+	TEST_EXPECT(document.path_in(alpha, fake.b1.child).empty());
+	const std::shared_ptr<Node> copy = alpha.clone();
+	const Document::RecordPath walked = document.path_in(*copy, fake.a1b.child);
+	TEST_EXPECT(walked.size() == 2 && walked[1].collection == 1 && walked[1].index == 0);
 	TEST_EXPECT(document.apply(set(fake.x, "name", std::string("xx")), error) && every_found());
 	TEST_EXPECT(document.apply(make(EditOperation::Remove, fake.y), error) && every_found());
 	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, fake.a1, 0, 2), error) && every_found());
@@ -1804,6 +2003,94 @@ static int test_record_index() {
 	met.clear();
 	TEST_EXPECT(every_found() && document.rows().size() == 2);
 	TEST_EXPECT(document.apply(make(EditOperation::Move, last_row(), 0, 0), error) && every_found());
+	return 0;
+}
+
+// S13 D8: a collection whose records others of their file name by index (a Record reference: the
+// fake's registers, the ModelRegister reference's collection, which its users name). An edit that moves the collection's records has the type renumber what names them
+// in the same step: a Remove in the middle shifts the later references, its undo giving both back
+// and its redo both again; a Remove of a register a user names is refused, nothing committed; a
+// Move, a Duplicate and an Add at the front renumber; an Add at the end moves no index and asks the
+// type nothing; a batch's later edit names the registers as the renumbering left them; the index
+// counts every register of the file in its order, across rows, so a row moved renumbers too; a type
+// that keeps the base's renumber_references refuses an edit that moves an index; and a type whose
+// schema names no Record kind has no collection to renumber.
+static int test_record_references() {
+	const std::string text = "B one\nR r0\nR r1\nR r2\nR r3\nU 0\nU 2\nU 3\nU 2\n";
+	IndexDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of(text), "bank.fake", AssetKind::Model, "jo", error));
+	const std::vector<Document::TargetedCollection> targets = document.targeted_collections();
+	TEST_EXPECT(targets.size() == 1 && targets[0].reference == ReferenceKind::ModelRegister &&
+	            targets[0].kind == kRegister);
+	const auto row = [&](size_t index) -> const Node & { return *document.rows()[index]; };
+	const auto reg = [&](size_t i) { return NodeAddress{row(0).id, kRegister, row(0).collections[0][i]}; };
+	const auto user = [&](size_t i) { return NodeAddress{row(0).id, kUser, row(0).collections[1][i]}; };
+	// A Remove in the middle: the users naming a later register shift with it, one step.
+	TEST_EXPECT(document.apply(make(EditOperation::Remove, reg(1)), error));
+	const std::string removed = "B one\nR r0\nR r2\nR r3\nU 0\nU 1\nU 2\nU 1\n";
+	TEST_EXPECT(document.serialize().text == removed && document.renumbered == 1);
+	document.undo();
+	TEST_EXPECT(document.serialize().text == text && !document.can_undo() && !document.dirty());
+	document.redo();
+	TEST_EXPECT(document.serialize().text == removed);
+	document.undo();
+	// A register a user names: refused, nothing committed.
+	const uint64_t revision = document.revision();
+	TEST_EXPECT(!document.apply(make(EditOperation::Remove, reg(2)), error) &&
+	            error.code() == "document.collection" && error.message == "A user reads this register." &&
+	            document.revision() == revision && document.serialize().text == text);
+	// A Move to the front, a Duplicate, an Add at the front: each index follows its register.
+	TEST_EXPECT(document.apply(make(EditOperation::Move, reg(3), 0, 0), error) &&
+	            document.serialize().text == "B one\nR r3\nR r0\nR r1\nR r2\nU 1\nU 3\nU 0\nU 3\n");
+	document.undo();
+	TEST_EXPECT(document.apply(make(EditOperation::Duplicate, reg(1)), error) &&
+	            document.serialize().text == "B one\nR r0\nR r1\nR r1\nR r2\nR r3\nU 0\nU 3\nU 4\nU 3\n");
+	document.undo();
+	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}, 0, 0), error) &&
+	            document.serialize().text == "B one\nR NEW\nR r0\nR r1\nR r2\nR r3\nU 1\nU 3\nU 4\nU 3\n");
+	document.undo();
+	// An Add at the end moves no index: the type is not asked.
+	const size_t asked = document.renumbered;
+	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}), error) &&
+	            document.renumbered == asked &&
+	            document.serialize().text == "B one\nR r0\nR r1\nR r2\nR r3\nR NEW\nU 0\nU 2\nU 3\nU 2\n");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == text && !document.can_undo());
+	// A batch: the Remove, then a Set naming register 2 as the Remove left them (r3); one step.
+	TEST_EXPECT(document.apply({make(EditOperation::Remove, reg(1)), set(user(0), "reg", int64_t(2))}, error) &&
+	            document.serialize().text == "B one\nR r0\nR r2\nR r3\nU 2\nU 1\nU 2\nU 1\n");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == text && !document.can_undo());
+
+	// Every register of the file in its order: a row's users name the registers of the rows before it
+	// too, and a row moved moves its registers' indexes.
+	const std::string two_banks = "B a\nR a0\nR a1\nU 1\nB b\nR b0\nR b1\nU 3\nU 2\n";
+	IndexDocument two;
+	TEST_EXPECT(two.load_bytes(bytes_of(two_banks), "two.fake", AssetKind::Model, "jo", error));
+	const Node &first = *two.rows()[0];
+	TEST_EXPECT(two.apply(make(EditOperation::Remove, {first.id, kRegister, first.collections[0][0]}), error) &&
+	            two.serialize().text == "B a\nR a1\nU 0\nB b\nR b0\nR b1\nU 2\nU 1\n");
+	two.undo();
+	const Node &second = *two.rows()[1];
+	TEST_EXPECT(two.apply(make(EditOperation::Move, {second.id, kBank, 0}, 0, 0), error) &&
+	            two.serialize().text == "B b\nR b0\nR b1\nU 1\nU 0\nB a\nR a0\nR a1\nU 3\n");
+	two.undo();
+	TEST_EXPECT(two.serialize().text == two_banks && !two.can_undo());
+
+	// The base's renumber_references refuses what moves an index; an Add at the end is taken.
+	IndexDocument plain(false);
+	TEST_EXPECT(plain.load_bytes(bytes_of(text), "bank.fake", AssetKind::Model, "jo", error));
+	const Node &bank = *plain.rows()[0];
+	TEST_EXPECT(!plain.apply(make(EditOperation::Remove, {bank.id, kRegister, bank.collections[0][1]}), error) &&
+	            error.code() == "document.collection" &&
+	            error.message == "Other records name each CTRL register by its index, which this document does "
+	                             "not renumber." &&
+	            plain.serialize().text == text);
+	TEST_EXPECT(plain.apply(make(EditOperation::Add, {bank.id, kRegister, 0}), error));
+	// A type whose schema names no Record kind has no collection to renumber.
+	Loaded fake;
+	TEST_EXPECT(fake.load() && fake.document.targeted_collections().empty());
 	return 0;
 }
 
@@ -2701,6 +2988,7 @@ int main() {
 	failures += test_per_call_costs();
 	failures += test_moved_rows();
 	failures += test_record_index();
+	failures += test_record_references();
 	failures += test_snapshot();
 	failures += test_changes_since_save();
 	failures += test_structure();

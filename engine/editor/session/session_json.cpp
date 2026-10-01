@@ -1003,7 +1003,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 				entry.set("saved", JsonValue::make_null());
 			}
 		}
-		// The choices it offers here: the schema's, or the record's own (a model's registers).
+		// The choices it offers here: the schema's, or the record's own (a model's LOD 0 parts).
 		const std::vector<FieldChoice> &offered = document.choices_on(address, field, own);
 		if (!offered.empty()) {
 			JsonValue choices = JsonValue::make_array();

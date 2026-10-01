@@ -21,7 +21,7 @@ std::vector<DocumentHit> find_in_document(const Document &document, const std::s
 	std::vector<DocumentHit> hits;
 	if (text.empty()) return hits;
 	// A value naming one of its record's own choices is found by that choice's name, as the
-	// Inspector shows it (Document::choices_on: a register by its name, a spawn slot by its
+	// Inspector shows it (Document::choices_on: a model's part by its label, a spawn slot by its
 	// vehicle's id), the choices made into one list reused field after field.
 	std::vector<FieldChoice> own;
 	const auto search = [&](const NodeAddress &address) {

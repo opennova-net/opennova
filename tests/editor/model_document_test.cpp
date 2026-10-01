@@ -12,6 +12,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -32,6 +33,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/rig_model.h"
 
 using namespace opennova::editor;
 using namespace opennova::threedi;
@@ -427,6 +429,134 @@ int frames_and_registers() {
 	return 0;
 }
 
+// S13 D8: what names a model's CTRL register or MTRX row by its index is a Record reference
+// (ModelRegister, ModelFrame), each an edge of the model's extraction into its record sets (every
+// register and every row, a symbol of its index). A register nothing names removed from the
+// middle moves every later register's references down in the same step, read back from the
+// written model too; its undo gives both back, the model's own bytes; a register a field names is
+// refused, nothing committed; one moved to the front and one added there renumber; a batch's later
+// edit names the registers as the renumbering left them. A frame nothing names removed moves the
+// arm's frame; one a part animation turns through is refused; frame 0 stays the identity. The
+// second RGB generator, which no field sets, keeps a register it names where it is.
+int record_references() {
+	const std::vector<uint8_t> original = rig_model::bytes();
+	TEST_EXPECT(!original.empty());
+	ModelDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(original, "rig.3di", AssetKind::Model, "jo", error));
+	TEST_EXPECT(serialized(document) == original);
+	const ModelRow *row = document.model_row();
+	TEST_EXPECT(row && row->registers.size() == 4 && row->frames.size() == 3 && row->lods[0].panm.size() == 2 &&
+	            row->materials.size() == 2 && row->lights.size() == 1);
+	if (!row || row->registers.size() != 4 || row->frames.size() != 3 || row->lods[0].panm.size() != 2) return 1;
+	const NodeId model = row->id;
+	const NodeAddress light{model, kLight, row->collections[2][0]};
+	// What the validator finds of a register or a frame the model lacks: nothing, renumbered or not.
+	const auto lacking = [&]() {
+		size_t found = 0;
+		for (const Diagnostic &d : document_type(DocumentTypeId::Model)->validate_file(document))
+			found += d.code() == "model.register_missing" || d.code() == "model.frame_missing";
+		return found;
+	};
+	TEST_EXPECT(lacking() == 0);
+	const auto reg = [&](size_t i) { return NodeAddress{model, kRegister, document.model_row()->collections[4][i]}; };
+	const auto frame = [&](size_t i) { return NodeAddress{model, kFrame, document.model_row()->collections[5][i]}; };
+	// The collections a Record reference names, and the edges and record sets the extraction makes.
+	const std::vector<Document::TargetedCollection> targets = document.targeted_collections();
+	TEST_EXPECT(targets.size() == 2 && targets[0].reference == ReferenceKind::ModelRegister &&
+	            targets[0].kind == kRegister && targets[1].reference == ReferenceKind::ModelFrame &&
+	            targets[1].kind == kFrame);
+	Extracted extracted;
+	extract_from_document(document, extracted);
+	std::map<std::string, std::string> named; // "record field" -> the index it names
+	for (const GraphEdge &edge : extracted.edges)
+		if (edge.kind == ReferenceKind::ModelRegister || edge.kind == ReferenceKind::ModelFrame) {
+			TEST_EXPECT(edge.scope == "rig.3di" && edge.source == "rig.3di");
+			named[std::string(edge.kind == ReferenceKind::ModelFrame ? "frame " : "") + document.kind_token(edge.address.kind) +
+			      " " + edge.field] = edge.value;
+		}
+	TEST_EXPECT(named == (std::map<std::string, std::string>{{"material rgbgen.param", "2"},
+	                                                         {"light param", "3"},
+	                                                         {"part_animation rotx.param", "3"},
+	                                                         {"part_animation roty.param", "2"},
+	                                                         {"frame part_animation matrix", "2"}}));
+	size_t registers = 0, frames = 0;
+	for (const GraphSymbol &symbol : extracted.symbols) {
+		if (symbol.kind == ReferenceKind::ModelRegister)
+			TEST_EXPECT(symbol.name == std::to_string(registers++) && symbol.scope == "rig.3di" && symbol.field.empty());
+		if (symbol.kind == ReferenceKind::ModelFrame) TEST_EXPECT(symbol.name == std::to_string(frames++));
+	}
+	TEST_EXPECT(registers == 4 && frames == 3);
+	// What the written model holds: the generator's, the light's and the tracks' registers.
+	const auto written = [&](int rgb, int light_reg, int rotx, int roty, int matrix) {
+		const std::vector<uint8_t> bytes = serialized(document);
+		Threedi3di3 read{};
+		bool same = threedi_3di3_read_memory(bytes.data(), bytes.size(), &read) == 0 && read.material_count == 2 &&
+		            read.light_count == 1 && read.lod_count == 1 && read.lods[0].part_animation_count == 2;
+		if (same) {
+			const ThreediPartAnimation &arm = read.lods[0].part_animations[1];
+			same = read.materials[1].rgb_gen.reg == rgb && read.lights[0].phase == light_reg &&
+			       arm.rotation_x.control_param == rotx && arm.rotation_y.control_param == roty &&
+			       arm.matrix_index == matrix;
+		}
+		threedi_3di3_free(&read);
+		return same;
+	};
+	TEST_EXPECT(written(2, 3, 3, 2, 2));
+
+	// A register nothing names removed from the middle: the later ones' references move down, one step.
+	TEST_EXPECT(document.apply(op(EditOperation::Remove, reg(1)), error));
+	TEST_EXPECT(written(1, 2, 2, 1, 2) && document.model_row()->registers.size() == 3 &&
+	            std::strcmp(document.model_row()->registers[1].name, "EWEAP_GUNPITCH") == 0);
+	Value value;
+	TEST_EXPECT(document.get(light, "param", value) && std::get<int64_t>(value) == 2);
+	TEST_EXPECT(lacking() == 0);
+	document.undo();
+	TEST_EXPECT(serialized(document) == original && !document.can_undo() && !document.dirty());
+	document.redo();
+	TEST_EXPECT(written(1, 2, 2, 1, 2));
+	document.undo();
+	// A register a field names: refused, nothing committed.
+	const uint64_t revision = document.revision();
+	TEST_EXPECT(!document.apply(op(EditOperation::Remove, reg(2)), error) && error.code() == "document.collection" &&
+	            error.message == "Something reads this register: point it at another first." &&
+	            document.revision() == revision && serialized(document) == original);
+	// FLICKER moved to the front; a register added there.
+	TEST_EXPECT(document.apply(op(EditOperation::Move, reg(3), 0), error) && written(3, 0, 0, 3, 2));
+	document.undo();
+	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kRegister, 0}, 0), error) && written(3, 4, 4, 3, 2));
+	document.undo();
+	// A batch: the Remove, then the light pointed at register 0 as the Remove left them; one step.
+	TEST_EXPECT(document.apply({op(EditOperation::Remove, reg(1)), set(light, "param", int64_t(0))}, error) &&
+	            written(1, 0, 2, 1, 2));
+	document.undo();
+	TEST_EXPECT(serialized(document) == original && !document.can_undo());
+
+	// Frames: one nothing names removed moves the arm's frame; the one it turns through stays.
+	TEST_EXPECT(document.apply(op(EditOperation::Remove, frame(1)), error) && written(2, 3, 3, 2, 1));
+	document.undo();
+	TEST_EXPECT(!document.apply(op(EditOperation::Remove, frame(2)), error) &&
+	            error.message == "A part animation turns through this frame: point it at another first.");
+	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kFrame, 0}, 1), error) && written(2, 3, 3, 2, 3));
+	document.undo();
+	// Frame 0, the identity, stays row 0: not removed, moved, nor taken by another.
+	TEST_EXPECT(!document.apply(op(EditOperation::Remove, frame(0)), error) &&
+	            !document.apply(op(EditOperation::Move, frame(2), 0), error) &&
+	            !document.apply(op(EditOperation::Add, {model, kFrame, 0}, 0), error) &&
+	            serialized(document) == original);
+
+	// The second RGB generator, which no field sets, keeps the register it names where it is.
+	ModelDocument second;
+	TEST_EXPECT(second.load_bytes(rig_model::bytes(true), "rig.3di", AssetKind::Model, "jo", error));
+	const NodeAddress gunyaw{second.model_row()->id, kRegister, second.model_row()->collections[4][1]};
+	TEST_EXPECT(!second.apply(op(EditOperation::Remove, gunyaw), error) &&
+	            error.message == "A material's second RGB generator names register 3, which the editor shows and "
+	                             "never sets: that register stays where it is.");
+	TEST_EXPECT(second.apply(op(EditOperation::Add, {second.model_row()->id, kRegister, 0}), error));
+	std::printf("record references: registers and frames renumbered with the edit that moves them\n");
+	return 0;
+}
+
 int retail_models() {
 	const std::string root = retail::assets();
 	if (!retail::dir_exists(root)) return retail::skip_leg("OPENNOVA_JO_ASSETS (the retail models at its root)");
@@ -513,10 +643,11 @@ int retail_validation() {
 
 // S12 D6: what the table says of a field reaches the Inspector: a unit apart from the name,
 // each component of a group named apart (a light's Position X / Y / Z, one row; its colour's
-// three channels, one row with a swatch; a frame's rows), an integer's range; an index field
-// offers what it names on this model (a register by its name, LOD 0's parts, the MTRX rows,
-// with the value the table calls none), any other typed; the words the reader keeps and no
-// witness explains (the second channel's material words, a light's byte 34, the header's
+// three channels, one row with a swatch; a frame's rows), an integer's range; a part index
+// offers LOD 0's parts with the value the table calls none, any other typed; a register's index
+// and a frame's row name records of the model (S13 D8: Record references, whose picker offers the
+// model's registers and MTRX rows, only those the field can hold); the words the reader keeps and
+// no witness explains (the second channel's material words, a light's byte 34, the header's
 // derived radius) are shown, never set, the unwitnessed ones marked so.
 int field_metadata() {
 	auto document = std::make_shared<ModelDocument>();
@@ -526,6 +657,26 @@ int field_metadata() {
 	if (!row || row->lods.empty() || row->lods[0].panm.empty() || row->materials.empty()) return 1;
 	const NodeId model = row->id;
 	Diagnostic error;
+	// A field's use on a record, and what its picker offers there: the graph over the document as it
+	// stands (its snapshot, the one file of a project).
+	const auto use_of = [&](const NodeAddress &at, const char *id) {
+		for (const FieldSchema &field : document->fields(at.kind))
+			if (field.id == id) return document->field_on(at, field);
+		return FieldUse();
+	};
+	const auto picker = [&](const NodeAddress &at, const char *id) {
+		AssetScan scan;
+		AssetEntry entry;
+		entry.logical_name = "house.3di";
+		entry.relative_path = document->path();
+		entry.kind = AssetKind::Model;
+		scan.entries.push_back(entry);
+		scan.index();
+		AssetGraph graph;
+		graph.update(ProjectPaths::for_root("."), ProjectDocument(), scan,
+		             {std::shared_ptr<const DocumentBase>(document->snapshot())});
+		return reference_choices(graph, use_of(at, id));
+	};
 	// A field as the Inspector shows it on a record: its table's words, what the record makes of
 	// it (FieldUse) and the choices it offers there (Document::choices_on: an index's own), in one.
 	auto schema = [&](const NodeAddress &at, const char *id) {
@@ -547,10 +698,10 @@ int field_metadata() {
 	};
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kLight, 0}), error));
 	const NodeAddress light{model, kLight, document->last_added()};
-	// Every identity's place is made with the row, never inside a query (the thread confinement,
-	// model/document.h): the committed row holds its new light's, the collision row its own.
-	TEST_EXPECT(document->model_row()->places && document->model_row()->places->count(light.child) == 1 &&
-	            document->collision_row()->places);
+	// Where a record sits is the core's index of its row (Document::path_in, S13 D8): the new light
+	// the model row's third table's last record.
+	const Document::RecordPath at = document->path_in(*document->model_row(), light.child);
+	TEST_EXPECT(at.size() == 1 && at[0].collection == 2 && at[0].index + 1 == document->model_row()->lights.size());
 	const FieldSchema x = schema(light, "position.x"), y = schema(light, "position.y");
 	TEST_EXPECT(x.label == "Position X" && y.label == "Position Y" && x.unit == "m" && x.group == "Position" &&
 	            y.group == "Position");
@@ -566,47 +717,62 @@ int field_metadata() {
 	const FieldSchema part = schema(light, "part");
 	const size_t parts = row->base->lods[0].render_object_count;
 	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "Part 0");
-	// A part animation's parent: none (255) and the parts; its frame byte the MTRX rows once
-	// its rotation turns through one.
+	// A part animation's parent: none (255) and the parts, its record's own choices.
 	const NodeAddress panm{model, kPanm, row->lods[0].panm_ids[0]};
 	const FieldSchema parent = schema(panm, "parent");
 	TEST_EXPECT(parent.choices.size() == parts + 1 && parent.choices[0].value == 255 && parent.choices[0].label == "None");
 	while (document->model_row()->frames.size() < 3)
 		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kFrame, 0}), error));
 	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
-	// Offered whatever the byte names now: from none (0, or 255) a row is one pick away; a row
-	// that turns through no frame (a billboard) offers none.
+	// Its frame byte names an MTRX row once its rotation turns through one, whatever the byte names
+	// now: the picker offers the rows above 0 (0 names none); a row that turns through no frame (a
+	// billboard) names none.
 	for (const int64_t from : {int64_t(0), int64_t(255), int64_t(1)}) {
 		TEST_EXPECT(document->apply(set(panm, "matrix", from), error));
-		const FieldSchema matrix = schema(panm, "matrix");
-		TEST_EXPECT(matrix.open_choices && matrix.choices.size() == 3 && matrix.choices[0].label == "None" &&
-		            matrix.choices[2].name == "2");
-		TEST_EXPECT(document->apply(set(panm, "matrix", matrix.choices[2].value), error));
+		const FieldUse matrix = use_of(panm, "matrix");
+		const std::vector<ReferenceChoice> rows = picker(panm, "matrix");
+		TEST_EXPECT(matrix.reference == ReferenceKind::ModelFrame && !matrix.own_choices && !matrix.schema->open_choices &&
+		            schema(panm, "matrix").choices.empty());
+		TEST_EXPECT(rows.size() == 2 && rows[0].name == "1" && rows[1].name == "2" &&
+		            rows[1].status == ReferenceStatus::Present && rows[1].file == "house.3di");
+		TEST_EXPECT(document->apply(set(panm, "matrix", int64_t(2)), error));
 	}
 	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(3)), error));
-	TEST_EXPECT(schema(panm, "matrix").choices.empty());
+	TEST_EXPECT(use_of(panm, "matrix").reference == ReferenceKind::None && picker(panm, "matrix").empty());
 	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
-	// A generator's parameter names a register above style 0x70: the model's registers by name.
+	// With no CTRL table the load leaves a material's and a track's register bytes as the global
+	// registers they number (no record of the model); a light's it swaps through the table it lacks.
+	TEST_EXPECT(document->model_row()->registers.empty());
+	const NodeAddress first_material{model, kMaterial, document->model_row()->collections[1][0]};
+	TEST_EXPECT(document->apply({set(first_material, "rgbgen.style", int64_t(0x71)), set(light, "style", int64_t(0x71))}, error));
+	TEST_EXPECT(use_of(first_material, "rgbgen.param").reference == ReferenceKind::None &&
+	            use_of(light, "param").reference == ReferenceKind::ModelRegister);
+	document->undo();
+	// A generator's parameter names a register above style 0x70: the picker offers the model's
+	// registers by index, each with its name in its record.
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
 	const NodeAddress reg{model, kRegister, document->last_added()};
 	TEST_EXPECT(document->apply(set(reg, "name", std::string("ENGINE_RPM")), error));
 	const NodeAddress material{model, kMaterial, document->model_row()->collections[1][0]};
 	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0x71)), error));
-	const FieldSchema param = schema(material, "rgbgen.param");
-	TEST_EXPECT(param.open_choices && param.choices.size() == 1 && param.choices[0].label == "ENGINE_RPM");
+	const std::vector<ReferenceChoice> named = picker(material, "rgbgen.param");
+	TEST_EXPECT(use_of(material, "rgbgen.param").reference == ReferenceKind::ModelRegister &&
+	            schema(material, "rgbgen.param").choices.empty());
+	TEST_EXPECT(named.size() == 1 && named[0].name == "0" && named[0].kind == ReferenceKind::ModelRegister &&
+	            named[0].record.size() >= 11 && named[0].record.substr(named[0].record.size() - 11) == "/ENGINE_RPM");
 	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0)), error));
-	TEST_EXPECT(schema(material, "rgbgen.param").choices.empty());
+	TEST_EXPECT(use_of(material, "rgbgen.param").reference == ReferenceKind::None);
 	// Only a register the field can hold is offered: with 257 of them, the byte-sized
 	// generator parameter takes registers 0..255, the 16-bit flipbook time all 257.
 	while (document->model_row()->registers.size() < 257)
 		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
 	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0x71)), error));
-	const FieldSchema byte_param = schema(material, "rgbgen.param");
-	TEST_EXPECT(byte_param.choices.size() == 256 && byte_param.choices.back().value == 255);
-	TEST_EXPECT(document->apply(set(material, "rgbgen.param", byte_param.choices.back().value), error));
+	const std::vector<ReferenceChoice> byte_param = picker(material, "rgbgen.param");
+	TEST_EXPECT(byte_param.size() == 256 && byte_param.back().name == "255");
+	TEST_EXPECT(document->apply(set(material, "rgbgen.param", int64_t(255)), error));
 	TEST_EXPECT(document->apply({set(material, "texanim.frames", int64_t(4)), set(material, "texanim.type", int64_t(1))}, error));
-	const FieldSchema time = schema(material, "texanim.time");
-	TEST_EXPECT(time.choices.size() == 257 && time.choices.back().value == 256);
+	const std::vector<ReferenceChoice> time = picker(material, "texanim.time");
+	TEST_EXPECT(time.size() == 257 && time.back().name == "256");
 	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0)), error));
 	// The material's words: a range, the reflection one row, the second channel shown only.
 	TEST_EXPECT(schema(material, "alpha_test").ranged && schema(material, "alpha_test").max == 255.0);
@@ -637,6 +803,7 @@ int main(int argc, char **argv) {
 	if (changes_since_save() != 0) return 1;
 	if (validation() != 0) return 1;
 	if (frames_and_registers() != 0) return 1;
+	if (record_references() != 0) return 1;
 	if (field_metadata() != 0) return 1;
 	if (retail_models() != 0) return 1;
 	return retail_validation();

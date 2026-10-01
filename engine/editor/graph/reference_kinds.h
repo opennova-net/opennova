@@ -18,13 +18,21 @@ struct GraphEdge;
 // What each reference kind is to the asset graph, the resolver, the Problems rows and the
 // windows (ADR 0046 S12): one row per ReferenceKind, which everything that asks about a kind
 // reads instead of switching on it. A new namespace (a mission's, a sound's) is one
-// ReferenceKind value and one row here.
+// ReferenceKind value and one row here; so is an index into a collection of the same file (S13
+// D8: a mission's entity, waypoint, group, layer or area index, a sound bank's chain tables, a
+// dialog's def id index), a Record row naming the collection by its record kind's token (and the
+// values naming none), which the document core renumbers on an edit that moves the collection's
+// records (Document::renumber_references).
 
 // Where a name of the kind resolves.
 enum class ReferenceResolution {
 	File,          // a project file, by the names the kind's loader reads (reference_file_candidates)
 	Symbol,        // a name a project file defines (GraphSymbol), in the reference's scope
 	StyleVariable, // a %NAME% the stylesheets the game reads define (AssetGraph::style_binding)
+	// A record of the reference's own file (S13 D8), by its index among the file's records of the
+	// kind the row's `collection` names (a model's CTRL registers, its MTRX rows): the file's
+	// record set, whose records the graph keys by their index in that file (the reference's scope).
+	Record,
 	Unchecked,     // the editor cannot check it yet (ReferenceStatus::Unverified)
 };
 
@@ -51,6 +59,9 @@ using ReferenceFileNames = std::vector<std::string> (*)(const std::string &name,
 // What a finding about a reference nothing resolves says after "<who> names <phrase> '<value>'":
 // why, and what the game does instead.
 using ReferenceMissingMessage = std::string (*)(const AssetGraph &graph, const GraphEdge &edge);
+// The values of a Record reference that name no record, whatever the collection holds (a frame
+// byte the pose reads none from).
+using RecordNone = bool (*)(int64_t value);
 
 struct ReferenceKindRow {
 	ReferenceKind kind = ReferenceKind::None;
@@ -59,13 +70,26 @@ struct ReferenceKindRow {
 	const char *label = "";  // a list's and a picker's words: "font"
 	ReferenceResolution resolution = ReferenceResolution::Unchecked;
 	AssetKind file = AssetKind::Unknown;     // the kind of file a File reference loads
+	// A Record reference's collection: the token of the record kind its records are
+	// (RecordKindRow::token: "register"), every record of that kind in the file, in the file's
+	// order, numbered from 0. A document type whose schema names the kind on a field
+	// (FieldSchema::reference) and that holds records of that token makes such references
+	// (Document::targeted_collections). "" for any other resolution.
+	const char *collection = "";
+	// A Record reference's values that name no record (null: every whole number from 0 names one,
+	// the index past the collection's end naming one it lacks).
+	RecordNone none = nullptr;
 	const char *const *extensions = nullptr; // what its loader appends to the name as written (null-ended)
 	ReferenceFileNames file_names = nullptr; // its loader's own rule, in place of the extensions
 	NameCase name_case = NameCase::FileName;
 	NameSpelling spell = NameSpelling::Name;
 	// A Warning where the game tolerates the name missing, an Error where it does not.
 	DiagnosticSeverity severity_when_missing = DiagnosticSeverity::Error;
-	ReferenceMissingMessage missing_message = nullptr; // null for a kind the graph never finds missing
+	// Null for a kind the graph never finds missing: one it cannot check, and a Record reference,
+	// whose index past its collection its file's own validation reports with what the game makes
+	// of it (a model's register_missing, frame_missing), the graph answering Missing for its badge
+	// alone.
+	ReferenceMissingMessage missing_message = nullptr;
 	// The message reads which files the project has (AssetGraph::has_file: a string id's table,
 	// the failsafe clip), so the graph words the kind's findings again when the file set changes.
 	bool message_reads_files = false;
@@ -81,14 +105,23 @@ struct ReferenceKindRow {
 	// Problems row's Open fix); Unknown for one the file its scope names holds.
 	AssetKind defined_in = AssetKind::Unknown;
 
-	// A name some file defines, as a symbol or a style variable.
+	// A name some file defines, as a symbol or a style variable, or a record of a file's record set
+	// (a symbol of the kind named by its index).
 	bool names_symbol() const {
-		return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::StyleVariable;
+		return resolution == ReferenceResolution::Symbol ||
+		       resolution == ReferenceResolution::StyleVariable ||
+		       resolution == ReferenceResolution::Record;
 	}
 };
 
 // The number of reference kinds: UserPoint is the last.
 inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::UserPoint) + 1;
+
+// The record a Record reference's value names, by its index in the kind's collection: a whole
+// number from 0 that the kind's none does not take (a negative one names none: an index from 0 is
+// what the collection holds its records by). False for a value naming no record and for a kind
+// that is no Record reference.
+bool record_index(ReferenceKind kind, const Value &value, int64_t &index);
 
 // A kind's row (reference_kinds.cpp holds one per kind, in the enum's order; a static_assert
 // there checks that and that the tokens are unique).

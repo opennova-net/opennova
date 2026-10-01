@@ -56,8 +56,11 @@
     forms)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
-    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), the `ChangeSet` a
+    over it, whose index of each row keeps every record's path there, `path_in`, S13 D8, and
+    which has a type renumber what names a collection's records by index when an edit moves them,
+    `RecordShift`), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
+    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), `id_list` (the one list
+    edit of a type's records and their identities, S13 D8), the `ChangeSet` a
     document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
     `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
     or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
@@ -70,7 +73,9 @@
     across the project's files that keeps state between validations (the menu type's render
     check), which the row makes and whoever validates keeps, one per type (`project_checks`)),
     `graph` (the asset graph: typed edges from the engine's own
-    parsed records in a slot per file that an update patches, the one resolver behind the badges, the
+    parsed records in a slot per file that an update patches, a file's record sets (the records of a
+    collection its own references name by index, S13 D8's Record references, resolved within the
+    file), the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
     (a read-only dependency mount's), and the rename transaction; what other files make of what one
     defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
