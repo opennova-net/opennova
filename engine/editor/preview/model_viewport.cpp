@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <variant>
 
-#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
@@ -33,16 +33,44 @@ JsonValue vec3(const PreviewVec3 &v) {
 	return out;
 }
 
-// What the device draws, the user points aside: a hash of the model written without them
-// (a user point's edit shows in the overlays alone, so it builds nothing).
-uint64_t drawn_key(const threedi::Threedi3di3 &model) {
-	threedi::Threedi3di3 drawn = model;
-	drawn.user_points = nullptr;
-	drawn.user_point_count = 0;
-	std::vector<uint8_t> bytes;
-	if (threedi::threedi_3di3_write_memory(&drawn, bytes) != 0) return 1;
-	// Never 0: 0 is no scene.
-	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size()) | 1u;
+// Whether two models draw the same, their user points aside: each written without them (a user
+// point's edit shows in the overlays alone, so it builds nothing), the bytes compared; false when
+// either does not write. Asked only where the document cannot say what changed (ChangeClass::Unknown,
+// S13 V8): a change set says it without writing anything.
+bool draws_alike(const threedi::Threedi3di3 &a, const threedi::Threedi3di3 &b) {
+	std::vector<uint8_t> written[2];
+	const threedi::Threedi3di3 *models[2] = { &a, &b };
+	for (int i = 0; i < 2; ++i) {
+		threedi::Threedi3di3 drawn = *models[i];
+		drawn.user_points = nullptr;
+		drawn.user_point_count = 0;
+		if (threedi::threedi_3di3_write_memory(&drawn, written[i]) != 0) return false;
+	}
+	return written[0] == written[1];
+}
+
+// The model row of a model document, as the document holds it (null: none).
+std::shared_ptr<const Node> model_row_of(const ModelDocument &document) {
+	for (const auto &row : document.rows())
+		if (row && row->kind == node_kind(ModelKind::Model)) return row;
+	return nullptr;
+}
+
+// `read` with `points` for its user points (S13 V8): its other tables and the geometry the model it
+// was read as, kept alive with it.
+assets::Model with_user_points(const assets::Model &read, const std::vector<threedi::ThreediUserPoint> &points) {
+	struct Patched {
+		assets::Model read;
+		threedi::Threedi3di3 model;
+		std::vector<threedi::ThreediUserPoint> points;
+	};
+	auto patched = std::make_shared<Patched>();
+	patched->read = read;
+	patched->model = *read; // shallow: every table but the user points is the read model's
+	patched->points = points;
+	patched->model.user_points = patched->points.empty() ? nullptr : patched->points.data();
+	patched->model.user_point_count = patched->points.size();
+	return assets::Model(patched, &patched->model);
 }
 
 bool same_rig(const PreviewRig &a, const PreviewRig &b) {
@@ -357,7 +385,9 @@ ViewportAction ModelViewport::stop_(ModelViewStatus reason, const std::string &d
 	reason_ = reason;
 	detail_ = detail;
 	model_.reset();
-	drawn_key_ = 0;
+	read_.reset();
+	read_row_.reset();
+	scene_ = false;
 	shown_none();
 	return failed ? picture_.failed() : picture_.stop();
 }
@@ -401,14 +431,26 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	const FileSource &files = *input.view.findings.assets;
 	const uint64_t generation = input.view.findings.assets->generation();
 	const PreviewFollow::Key key;
-	switch (picture_.follow(key, input.change != ChangeClass::None, files, generation)) {
+	// A change only the overlays show: the held model patched, the scene standing (S13 V8).
+	const bool overlays = input.change == ChangeClass::Changed && overlays_alone_(input, document);
+	switch (picture_.follow(key, input.change != ChangeClass::None && !overlays, files, generation)) {
 	case PreviewFollow::Found::Same: {
+		if (overlays) {
+			patch_user_points_(document);
+			shown(document);
+			options_moved_ = false;
+			return ViewportAction::Update;
+		}
 		if (!options_moved_ || picture_.is_failed()) return ViewportAction::Keep;
 		options_moved_ = false;
 		return ViewportAction::Update;
 	}
 	case PreviewFollow::Found::Files:
 		// A texture the device read moved: the scene is built again over the model read before.
+		if (overlays) {
+			patch_user_points_(document);
+			shown(document);
+		}
 		options_moved_ = false;
 		return picture_.built(FileStamps());
 	case PreviewFollow::Found::Anew: break;
@@ -422,10 +464,13 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	assets::Model model =
 			assets::parse_model(reinterpret_cast<const uint8_t *>(written.text.data()), written.text.size());
 	if (!model) return stop_(ModelViewStatus::Unreadable, std::string(), true);
-	const uint64_t key_drawn = drawn_key(*model);
-	const bool rebuild = key_drawn != drawn_key_;
+	// A change set that reached here names something the scene draws; what the document cannot say
+	// builds again only when the drawn model moved, the user points aside.
+	const bool rebuild = !scene_ || !model_ || textures || input.change != ChangeClass::Unknown ||
+			!draws_alike(*model, *model_);
+	read_ = model;
 	model_ = std::move(model);
-	drawn_key_ = key_drawn;
+	read_row_ = model_row_of(document);
 	reason_ = ModelViewStatus::Ready;
 	detail_.clear();
 	shown(document);
@@ -436,8 +481,28 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	}
 	options_moved_ = false;
 	// A drawn model the same as before, the user points aside: the overlays alone show the change.
-	if (!rebuild && !textures) return ViewportAction::Update;
+	if (!rebuild) return ViewportAction::Update;
+	scene_ = true;
 	return picture_.built(FileStamps());
+}
+
+bool ModelViewport::overlays_alone_(const ViewportInput &input, const ModelDocument &document) const {
+	const auto *rows = input.changes ? std::get_if<RowChanges>(input.changes) : nullptr;
+	if (!rows || rows->reshapes() || rows->file_state || !model_ || !read_ || !read_row_ || picture_.is_failed())
+		return false;
+	const std::shared_ptr<const Node> now = model_row_of(document);
+	if (!now || rows->changed.size() > 1 || (rows->changed.size() == 1 && rows->changed.front() != now->id))
+		return false;
+	return now == read_row_ ||
+			alike_but_user_points(static_cast<const ModelRow &>(*read_row_), static_cast<const ModelRow &>(*now));
+}
+
+void ModelViewport::patch_user_points_(const ModelDocument &document) {
+	const std::shared_ptr<const Node> now = model_row_of(document);
+	if (!now || now == read_row_) return;
+	read_row_ = now;
+	model_ = with_user_points(read_, static_cast<const ModelRow &>(*now).user_points);
+	++patches_;
 }
 
 // A clip or a table plays on its rig's model (as the project's files hold it): the model is read
@@ -449,7 +514,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	if (!animating_) {
 		// From a model document: its drawn model is not the rig's.
 		model_.reset();
-		drawn_key_ = 0;
+		read_.reset();
+		read_row_.reset();
+		scene_ = false;
 		picture_.stop();
 	}
 	animating_ = true;
@@ -511,7 +578,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		}
 		model_failed_ = false;
 		model_ = std::move(model);
-		drawn_key_ = 0;
+		scene_ = false;
 		rebuild = true;
 	} else if (files_moved && picture_.files().moved(files)) {
 		rebuild = true; // a texture the device read
@@ -569,9 +636,9 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	}
 	const bool options = options_moved_;
 	options_moved_ = false;
-	if (rebuild || drawn_key_ == 0) {
-		// The scene of the rig's model, built: any key but 0 says the device has one.
-		drawn_key_ = 1;
+	if (rebuild || !scene_) {
+		// The scene of the rig's model, built.
+		scene_ = true;
 		picture_.show(PreviewFollow::Key(), generation);
 		return picture_.built(FileStamps());
 	}

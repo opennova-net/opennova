@@ -314,6 +314,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			if ((*it)->path() == asset.relative_path) { documents_.erase(it); break; }
 		remembered_.erase(asset.relative_path); // read again: its records have new identities
 		forget_file_state(asset.relative_path);
+		drop_gesture_of(asset.relative_path); // and a gesture open in it is over
 		documents_.push_back(document);
 		activate(document->path());
 		select_named(*document);
@@ -347,6 +348,7 @@ void DocumentSet::close_document(const std::string &requested) {
 		if ((*it)->path() == path) { documents_.erase(it); break; }
 	remembered_.erase(path);
 	forget_file_state(path);
+	drop_gesture_of(path);
 	if (view_.documents.active == path) {
 		activate(documents_.empty() ? "" : documents_.back()->path());
 		core_.touch(ViewConcern::Selection);
@@ -452,14 +454,16 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);
 	update_view();
 	// An undo or a redo ends a gesture: the validation its edits left waiting runs now.
-	if (document->revision() != before || gesture_validation_due_) core_.problems().validate_later();
-	gesture_validation_due_ = false;
+	if (document->revision() != before) core_.problems().validate_later();
+	end_gesture(true);
 }
 
+// The coalesced group, or the gesture, of the document at `path` ends; a gesture open in another
+// document stays open (its canvas ends it as it lets go).
 void DocumentSet::end_edit(const std::string &path) {
-	if (auto *document = document_for(path)) document->end_edit_group();
-	if (gesture_validation_due_) core_.problems().validate_later();
-	gesture_validation_due_ = false;
+	DocumentBase *document = document_for(path);
+	if (document) document->end_edit_group();
+	if (document && view_.documents.gesture.in(document->path())) end_gesture(true);
 }
 
 void DocumentSet::save(const std::string &path) {
@@ -513,7 +517,9 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		written.push_back(document->path());
 		core_.note("Saved " + document->path());
 	}
-	gesture_validation_due_ = false;
+	// A Save ends the gesture (its save's checkpoint ended its group); the files written are
+	// validated as the scan reads them, and with none written the validation is due now.
+	end_gesture(written.empty());
 	update_view();
 	core_.update_files(written);
 	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
@@ -558,8 +564,28 @@ void DocumentSet::rewrite_file(const std::string &path) {
 // and the validation a gesture's edits left waiting is due.
 void DocumentSet::end_edit_groups() {
 	for (const auto &document : documents_) document->end_edit_group();
-	if (gesture_validation_due_) core_.problems().validate_later();
-	gesture_validation_due_ = false;
+	end_gesture(true);
+}
+
+bool DocumentSet::gesture_open() const {
+	return view_.documents.gesture.open();
+}
+
+void DocumentSet::open_gesture(const std::string &path, uint64_t token) {
+	OpenGesture &gesture = view_.documents.gesture;
+	if (gesture.open() && (gesture.path != path || gesture.token != token)) end_gesture(true);
+	gesture.path = path;
+	gesture.token = token;
+}
+
+void DocumentSet::end_gesture(bool validate) {
+	if (!view_.documents.gesture.open()) return;
+	view_.documents.gesture = OpenGesture();
+	if (validate) core_.problems().validate_later();
+}
+
+void DocumentSet::drop_gesture_of(const std::string &path) {
+	if (view_.documents.gesture.in(path)) end_gesture(true);
 }
 
 void DocumentSet::discard(const std::string &path) {
@@ -567,6 +593,7 @@ void DocumentSet::discard(const std::string &path) {
 		if ((*it)->path() == path) { documents_.erase(it); break; }
 	remembered_.erase(path);
 	forget_file_state(path);
+	drop_gesture_of(path);
 	update_view();
 }
 
@@ -580,6 +607,7 @@ void DocumentSet::close_all() {
 	remembered_.clear();
 	stale_.clear();
 	conflicts_.clear();
+	view_.documents.gesture = OpenGesture();
 }
 
 bool DocumentSet::position_after(const Document &document, const NodeAddress &record, NodeId &parent, size_t &position) {
@@ -633,11 +661,12 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 		return false;
 	}
 	last_edit_ok_ = true;
-	bool adds = false, gesture = false;
+	bool adds = false;
+	uint64_t gesture = 0;
 	for (const Edit &edit : edits) {
 		adds = adds || edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate ||
 		       edit.operation == EditOperation::Paste;
-		gesture = gesture || edit.gesture != 0;
+		if (!gesture) gesture = edit.gesture;
 	}
 	// What the batch made and kept is selected, in its own document; a batch that kept nothing it
 	// made repairs the selection as any other edit does.
@@ -654,9 +683,10 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &e
 		core_.touch(ViewConcern::Selection);
 	update_view();
 	// A Move that leaves a record where it is changes nothing to validate; a gesture's
-	// edits validate once it ends (EndEdit, Undo, Redo, Save).
+	// edits validate once it ends (EndEdit, Undo, Redo, Save), the gesture the view's open one
+	// meanwhile (S13 V8: a viewport's picture of the document made again waits for it too).
 	if (document.revision() != before) {
-		if (gesture) gesture_validation_due_ = true;
+		if (gesture) open_gesture(document.path(), gesture);
 		else core_.problems().validate_later();
 	}
 	view_.activity.status = "Edited " + document.path() + ".";

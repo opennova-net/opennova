@@ -26,8 +26,12 @@ public:
 	void note(const std::string &name, uint64_t stamp);
 	// Every file `other` read, as note() takes each.
 	void add(const FileStamps &other);
-	// True when a file read has another stamp in `files` now.
+	// True when a file read has another stamp in `files` now; moved_but: a file other than those
+	// `except` names (in any case).
 	bool moved(const FileSource &files) const;
+	bool moved_but(const FileSource &files, const std::vector<std::string> &except) const;
+	// Each file read takes the stamp it has in `files` now (what moved leaves the picture as it is).
+	void restamp(const FileSource &files);
 	const std::vector<FileStamp> &files() const { return files_; }
 	bool empty() const { return files_.empty(); }
 	void clear() { files_.clear(); }
@@ -92,9 +96,10 @@ public:
 			  // stop()
 	};
 	// The follow of `key` over the document, `moved` when the document changed since the last
-	// follow (its ChangeClass, viewport_model.h, is not None). The stamps of the files its picture
-	// read are compared only when the file source's `generation` moved, which it does whenever a
-	// stamp may have.
+	// follow in what the picture reads of it (its ChangeClass, viewport_model.h, as the kind reads
+	// it: a change set naming only what the picture does not read is no move, S13 V8). The stamps of
+	// the files its picture read are compared only when the file source's `generation` moved, which
+	// it does whenever a stamp may have.
 	Found follow(const Key &key, bool moved, const FileSource &files, uint64_t generation);
 	// `key` is what it shows now (the files' generation as the caller read them); the files its
 	// picture read stand until built(), failed() or stop() replaces them (a picture that stands, a
@@ -110,6 +115,10 @@ public:
 	ViewportAction stop();
 	// The device read `files` as it made the picture (its report: a model's textures).
 	void read(const FileStamps &files) { files_.add(files); }
+	// What moved of the files its picture read leaves the picture as it is (a stylesheet variable
+	// the picture does not name, S13 V8): each takes the stamp it has now, so the move is not found
+	// again.
+	void restamp(const FileSource &files) { files_.restamp(files); }
 	// True when a file its picture read moved its stamp since the files' generation it last read
 	// (`generation` the source's now): what a caller making its state anew over a picture that
 	// stands asks before show(), a model's texture moved in the same follow as an edit of it.

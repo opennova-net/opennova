@@ -5,12 +5,10 @@
 #include <iterator>
 #include <variant>
 
-#include <base/io/strutil.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
-#include <formats/mns/mns.h>
 
 namespace opennova::editor {
 
@@ -25,52 +23,6 @@ bool same_stamps(const std::vector<menu::MenuDependency> &a, const std::vector<m
 	for (size_t i = 0; i < a.size(); ++i)
 		if (a[i].name != b[i].name || a[i].stamp != b[i].stamp) return false;
 	return true;
-}
-
-// The variables of two readings of the shell's list that one has and the other lacks, or that
-// hold another value (both keyed as the list keys them, upper case).
-std::vector<std::string> changed_variables(const std::map<std::string, std::string> &before,
-		const std::map<std::string, std::string> &after) {
-	std::vector<std::string> out;
-	auto was = before.begin();
-	auto now = after.begin();
-	while (was != before.end() || now != after.end()) {
-		if (now == after.end() || (was != before.end() && was->first < now->first)) {
-			out.push_back(was->first);
-			++was;
-		} else if (was == before.end() || now->first < was->first) {
-			out.push_back(now->first);
-			++now;
-		} else {
-			if (was->second != now->second)
-				out.push_back(now->first);
-			++was;
-			++now;
-		}
-	}
-	return out;
-}
-
-// The variables a menu names: every %NAME% the game's expansion finds in the text its Save would
-// write (mns::variable_reference_at, the scan the game runs over a menu's whole text before its
-// parse), upper case as the shell's list keys them. Every value the frame compiler resolves
-// through the list is one of them, and so is a %NAME% inside a longer text, which the game
-// expands too though no StyleVar edge reads it (a whole value is an edge).
-std::vector<std::string> variables_named(const MnuDocument &document) {
-	const std::string &text = document.saved_serialization().text;
-	std::vector<std::string> names;
-	for (size_t at = text.find('%'); at != std::string::npos;) {
-		const size_t length = mns::variable_reference_at(text, at);
-		if (length == 0) {
-			at = text.find('%', at + 1);
-			continue;
-		}
-		names.push_back(strutil::to_upper(text.substr(at + 1, length - 2)));
-		at = text.find('%', at + length);
-	}
-	std::sort(names.begin(), names.end());
-	names.erase(std::unique(names.begin(), names.end()), names.end());
-	return names;
 }
 
 // A closed menu as the game would read it now, for its renders: null when it does not load or a
@@ -300,7 +252,7 @@ bool MenuRenderCheck::step(const ProjectCheckInput &input, uint64_t budget, bool
 		style_.dependencies(stamps);
 		if (!same_stamps(stamps, style_stamps_)) {
 			style_stamps_ = std::move(stamps);
-			for (const std::string &name : changed_variables(vars_, cursor_.vars)) changed_.push_back(name);
+			for (const std::string &name : changed_menu_variables(vars_, cursor_.vars)) changed_.push_back(name);
 			std::sort(changed_.begin(), changed_.end());
 			changed_.erase(std::unique(changed_.begin(), changed_.end()), changed_.end());
 			vars_ = cursor_.vars;
@@ -398,7 +350,8 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 	menu.screens.clear();
 	menu.dependencies.clear();
 	menu.findings.clear();
-	menu.variables = variables_named(document);
+	// The variables the menu names: every %NAME% in the text its Save would write.
+	menu.variables = menu_variables_named(document.saved_serialization().text);
 	for (const auto &row : document.rows()) {
 		Screen screen;
 		screen.row = row->id;

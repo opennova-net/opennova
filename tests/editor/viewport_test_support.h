@@ -29,10 +29,12 @@ using opennova::editor::ViewportAction;
 // (and whether that was a size of the canvas's own), else its viewport's state's. A menu's reports
 // where its picture placed each widget: where the viewport's own compile did (the Shell's MenuFrame
 // draws the same screen alike). It reads `reads` through the project's files as it makes its
-// picture, as a model's device reads its textures, and reports them.
+// picture, as a model's device reads its textures, and reports them. Each tick notes the preview
+// clock's milliseconds it was ticked at (what a menu's frame sets its clock to, menu_frame_time).
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
+	std::vector<uint32_t> ticked;
 	int draws = 0;
 	int width = 0;
 	int height = 0;
@@ -73,7 +75,9 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 			placed.bottom = rect.bottom;
 		}
 	}
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {}
+	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) override {
+		ticked.push_back(clock.ms());
+	}
 	// The last action it took (Keep before any).
 	ViewportAction last() const { return taken.empty() ? ViewportAction::Keep : taken.back(); }
 	// The actions taken since `from`, Keep left out.

@@ -146,14 +146,32 @@ void ViewportModel::shown_none() {
 }
 
 ViewportAction ViewportModel::follow(const ViewportInput &input, PreviewClock &clock) {
+	followed_change_ = input.change;
+	const OpenGesture &gesture = input.view.documents.gesture;
+	const bool gesture_here = gesture.in(path_);
+	// A Rebuild held for a gesture that ended since (or gave way to another) is due now.
+	if (held_ && (!gesture_here || gesture.token != held_for_)) {
+		held_ = false;
+		pending_ = ViewportAction::Rebuild;
+	}
 	switch (follow_(input, clock)) {
 	case ViewportAction::Keep: break;
 	case ViewportAction::Update:
 		if (pending_ == ViewportAction::Keep) pending_ = ViewportAction::Update;
 		break;
-	case ViewportAction::Rebuild: pending_ = ViewportAction::Rebuild; break;
+	case ViewportAction::Rebuild:
+		// The device keeps its last picture while a gesture is open in the document: the picture is
+		// made again at the gesture's end (one already pending makes the state as it is now).
+		if (gesture_here && pending_ != ViewportAction::Rebuild) {
+			held_ = true;
+			held_for_ = gesture.token;
+		} else {
+			pending_ = ViewportAction::Rebuild;
+		}
+		break;
 	case ViewportAction::Clear:
-		// A picture the device holds is dropped; one it was about to make is not made.
+		// A picture the device holds is dropped; one it was about to make, or held, is not made.
+		held_ = false;
 		pending_ = holds_ ? ViewportAction::Clear : ViewportAction::Keep;
 		break;
 	}
@@ -218,13 +236,16 @@ ViewportAction ViewportModel::take_action() {
 void ViewportModel::attach() {
 	attached_ = true;
 	holds_ = false;
-	// The device holds nothing yet: its first action makes the picture, if there is one.
+	held_ = false;
+	// The device holds nothing yet: its first action makes the picture, if there is one (a gesture
+	// open or not: there is no last picture to keep).
 	pending_ = status() == ViewportStatus::Ready ? ViewportAction::Rebuild : ViewportAction::Keep;
 }
 
 void ViewportModel::detach() {
 	attached_ = false;
 	holds_ = false;
+	held_ = false;
 	pending_ = ViewportAction::Keep;
 	shown_size_ = ViewportState();
 	canvas_sized_ = false;

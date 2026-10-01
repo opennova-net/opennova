@@ -28,9 +28,9 @@ struct SessionView;
 // them, saving them and rewriting a file that is not open, the clipboard, the edits (a Set, an
 // Add, a batch over any rows, a Revert to saved), Copy, Cut, Paste and Duplicate by one position
 // rule (position_after), and the edit groups (a coalesced burst of typing, a gesture) with the
-// validation a gesture's edits wait on. It keeps the view's documents, active document, selection
-// and clipboard, and moves DocumentSet when which documents are open, or which of them have unsaved
-// edits, changes (S13 D1).
+// validation a gesture's edits wait on. It keeps the view's documents, active document, selection,
+// clipboard and open gesture (S13 V8), and moves DocumentSet when which documents are open, or which
+// of them have unsaved edits, changes (S13 D1).
 class DocumentSet {
 public:
 	explicit DocumentSet(SessionCore &core);
@@ -105,9 +105,10 @@ public:
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();
-	// True while a gesture's edits wait for it to end (their validation with them): the poll steps
-	// no validation meanwhile.
-	bool gesture_open() const { return gesture_validation_due_; }
+	// True while a gesture's edits wait for it to end (their validation with them, and a viewport's
+	// picture of its document made again: the view's documents.gesture, S13 V8): the poll steps no
+	// validation meanwhile.
+	bool gesture_open() const;
 
 	// The unsaved-changes prompt's Discard: the document at `path` dropped unsaved (a Close or a
 	// Reload waited on it), or every document (a project switch, Quit).
@@ -139,6 +140,13 @@ private:
 	void rewrite_file(const std::string &path);
 	// The open document at exactly `path` (activate's), or null.
 	const DocumentBase *open_at(const std::string &path) const;
+	// A batch of the gesture `token` changed the document at `path`: the gesture is the view's open
+	// one (another open before it ends first). The open gesture ends: the validation its edits left
+	// waiting is due (`validate`), the view's gesture none.
+	void open_gesture(const std::string &path, uint64_t token);
+	void end_gesture(bool validate);
+	// The document at `path` closed or was discarded: a gesture open in it goes with it.
+	void drop_gesture_of(const std::string &path);
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -156,7 +164,6 @@ private:
 	// the document closes.
 	std::map<std::string, Diagnostic> stale_;
 	std::set<std::string> conflicts_;
-	bool gesture_validation_due_ = false; // a gesture's edits wait for it to end
 	bool last_edit_ok_ = false;
 };
 

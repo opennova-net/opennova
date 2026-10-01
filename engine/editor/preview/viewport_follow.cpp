@@ -20,6 +20,19 @@ bool FileStamps::moved(const FileSource &files) const {
 	return false;
 }
 
+bool FileStamps::moved_but(const FileSource &files, const std::vector<std::string> &except) const {
+	for (const FileStamp &file : files_) {
+		bool excepted = false;
+		for (const std::string &name : except) excepted = excepted || strutil::iequals(name, file.name);
+		if (!excepted && files.stamp(file.name) != file.stamp) return true;
+	}
+	return false;
+}
+
+void FileStamps::restamp(const FileSource &files) {
+	for (FileStamp &file : files_) file.stamp = files.stamp(file.name);
+}
+
 bool StampedFiles::read(const std::string &name, std::vector<uint8_t> &out) const {
 	const bool found = files_ && files_->read(name, out);
 	stamps_.note(name, files_ ? files_->stamp(name) : 0);

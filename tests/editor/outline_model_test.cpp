@@ -72,16 +72,18 @@ int test_list() {
 	TEST_EXPECT(list.lines_made() == 3);
 	TEST_EXPECT(list.line_of({items.rows()[0]->id, items.rows()[0]->kind, 0}) == 0);
 	TEST_EXPECT(list.line_of({items.rows()[1]->id, items.rows()[1]->kind, 0}) == SIZE_MAX);
-	// An edit (the document's revision) makes them again: the renamed row matches no more.
+	// An edit (the document's revision alone) follows its change set (S13 V8): the renamed row's
+	// line made again alone, which the filter drops now; its undo the same.
 	Edit rename;
 	rename.address = {items.rows()[0]->id, items.rows()[0]->kind, 0};
 	rename.field = "display_name";
 	rename.value = std::string("Zulu Car");
 	Diagnostic error;
 	TEST_EXPECT(items.apply(rename, error));
-	TEST_EXPECT(list.lines(items).empty() && list.lines_made() == 4);
+	const size_t rows_made = list.rows_made();
+	TEST_EXPECT(list.lines(items).empty() && list.lines_made() == 3 && list.rows_made() == rows_made + 1);
 	items.undo();
-	TEST_EXPECT(list.lines(items).size() == 1 && list.lines_made() == 5);
+	TEST_EXPECT(list.lines(items).size() == 1 && list.lines_made() == 3 && list.rows_made() == rows_made + 2);
 	// A filter of blanks alone keeps every row.
 	list.set_filter("   ");
 	TEST_EXPECT(!list.filtered() && list.lines(items).size() == 3);
@@ -298,6 +300,111 @@ int test_instances() {
 	return 0;
 }
 
+// S13 V8: the lines follow the document's change sets, the rows made again counted (rows_made). A
+// list of five: an edit of one row makes its line alone; the rows moved re-ordered with none made;
+// a row added makes it alone, a row removed none; in name order, a renamed row's line made alone and
+// the list sorted again. A tree (a model): a user point's edit makes the model row's lines alone,
+// the collision row's kept. Master and detail (a string table): a string's edit makes its section's
+// lines alone. Everything made anew when the document cannot say (read again in place).
+int test_change_sets() {
+	DefCatalogDocument items;
+	TEST_EXPECT(load(items,
+	                 bytes_of("begin \"Echo\"\nid 100300\ntype vehicle\nend\n"
+	                          "begin \"Delta\"\nid 100301\ntype vehicle\nend\n"
+	                          "begin \"Charlie\"\nid 100302\ntype vehicle\nend\n"
+	                          "begin \"Bravo\"\nid 100303\ntype vehicle\nend\n"
+	                          "begin \"Alpha\"\nid 100304\ntype vehicle\nend\n"),
+	                 "items.def", AssetKind::ItemDefs));
+	OutlineModel list(OutlineMode::List);
+	TEST_EXPECT(texts(list.lines(items)) == std::vector<std::string>({"Echo", "Delta", "Charlie", "Bravo", "Alpha"}));
+	TEST_EXPECT(list.lines_made() == 1 && list.rows_made() == 5);
+	Diagnostic error;
+	const auto row_at = [&](size_t i) { return NodeAddress{items.rows()[i]->id, items.rows()[i]->kind, 0}; };
+	Edit rename;
+	rename.address = row_at(1);
+	rename.field = "display_name";
+	rename.value = std::string("Delta Two");
+	TEST_EXPECT(items.apply(rename, error));
+	TEST_EXPECT(texts(list.lines(items)) == std::vector<std::string>({"Echo", "Delta Two", "Charlie", "Bravo", "Alpha"}));
+	TEST_EXPECT(list.lines_made() == 1 && list.rows_made() == 6);
+	// The last row moved first: the lines re-ordered, each row its place, none made again.
+	Edit move;
+	move.operation = EditOperation::Move;
+	move.address = row_at(4);
+	move.position = 0;
+	TEST_EXPECT(items.apply(move, error));
+	const std::vector<OutlineLine> &moved = list.lines(items);
+	TEST_EXPECT(texts(moved) == std::vector<std::string>({"Alpha", "Echo", "Delta Two", "Charlie", "Bravo"}));
+	TEST_EXPECT(moved[0].index == 0 && moved[4].index == 4 && list.lines_made() == 1 && list.rows_made() == 6);
+	// A row added: its line made alone; a row removed: none made.
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = {0, items.rows()[0]->kind, 0};
+	TEST_EXPECT(items.apply(add, error));
+	TEST_EXPECT(list.lines(items).size() == 6 && list.lines_made() == 1 && list.rows_made() == 7);
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = row_at(0);
+	TEST_EXPECT(items.apply(remove, error));
+	TEST_EXPECT(list.lines(items).size() == 5 && list.lines(items)[0].text == "Echo" && list.lines_made() == 1 &&
+	            list.rows_made() == 7);
+	// In name order (a new order: made anew), a renamed row's line made alone and sorted again.
+	list.set_sort(true);
+	TEST_EXPECT(list.lines(items).front().text == "Bravo" && list.lines_made() == 2);
+	const size_t sorted_made = list.rows_made();
+	rename.address = row_at(0);
+	rename.value = std::string("Zulu");
+	TEST_EXPECT(items.apply(rename, error));
+	const std::vector<OutlineLine> &renamed = list.lines(items);
+	TEST_EXPECT(renamed.back().text == "Zulu" && renamed.back().index == 0 && list.lines_made() == 2 &&
+	            list.rows_made() == sorted_made + 1);
+	// Read again in place (another load: the document cannot say): every row made anew.
+	TEST_EXPECT(load(items, bytes_of("begin \"Solo\"\nid 100300\ntype vehicle\nend\n"), "items.def", AssetKind::ItemDefs));
+	TEST_EXPECT(texts(list.lines(items)) == std::vector<std::string>({"Solo"}) && list.lines_made() == 3);
+
+	// A tree: a user point's edit makes the model row's lines alone.
+	const std::string repo = test_paths_repo_root(__FILE__);
+	ModelDocument model;
+	TEST_EXPECT(load(model, test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model));
+	OutlineModel tree(OutlineMode::Tree);
+	const std::vector<OutlineLine> first = tree.lines(model);
+	tree.set_open(first.front(), true);
+	const size_t opened = tree.lines(model).size();
+	TEST_EXPECT(model.rows().size() == 2 && tree.lines_made() == 2 && tree.rows_made() == 4);
+	const ModelRow *row = model.model_row();
+	TEST_EXPECT(row && !row->ids.lists[kModelUserPoints].empty());
+	if (!row || row->ids.lists[kModelUserPoints].empty()) return 1;
+	Edit point;
+	point.address = {row->id, node_kind(ModelKind::UserPoint), row->ids.lists[kModelUserPoints][0].id};
+	point.field = "name";
+	point.value = std::string("moved");
+	TEST_EXPECT(model.apply(point, error));
+	TEST_EXPECT(tree.lines(model).size() == opened && tree.lines_made() == 2 && tree.rows_made() == 5);
+
+	// Master and detail: a string's edit makes its section's lines alone.
+	opennova::rtxt::File table;
+	table.sections = {{"Menu", 2}, {"Help", 1}};
+	table.entries = {{"MM_Play", "Play", {}, 0}, {"MM_Quit", "Quit", {}, 0}, {"HLP_Play", "How to play", {}, 1}};
+	std::vector<uint8_t> bytes;
+	std::string io_error;
+	TEST_EXPECT(opennova::rtxt::write(table, bytes, io_error));
+	StringsDocument strings;
+	TEST_EXPECT(load(strings, bytes, "strings.bin", AssetKind::Strings));
+	OutlineModel outline(OutlineMode::MasterDetail);
+	const NodeId menu = strings.rows()[0]->id;
+	const std::vector<OutlineLine> &detail = outline.lines(strings, menu);
+	TEST_EXPECT(detail.size() == 2 && outline.lines_made() == 1 && outline.rows_made() == 2);
+	Edit text;
+	text.address = detail[1].address;
+	text.field = "text";
+	text.value = std::string("Leave");
+	TEST_EXPECT(strings.apply(text, error));
+	TEST_EXPECT(outline.lines(strings, menu).size() == 2 && outline.masters().size() == 2 && outline.lines_made() == 1 &&
+	            outline.rows_made() == 3);
+	std::printf("test_change_sets passed\n");
+	return 0;
+}
+
 // The file-wide values are the type's hook's: none without one.
 bool two_values(const Document &, OutlineFileValues &out) {
 	out.title = "Values";
@@ -329,6 +436,7 @@ int main() {
 	failures += test_tree();
 	failures += test_master_detail();
 	failures += test_instances();
+	failures += test_change_sets();
 	failures += test_file_values();
 	return failures ? 1 : 0;
 }

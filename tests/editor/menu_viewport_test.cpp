@@ -364,13 +364,17 @@ static int test_headless_viewport() {
 		TEST_EXPECT(row_of(index) && row_of(index)->show && !row_of(index)->hide);
 	const int forced = rig.viewport()->forced_index();
 	TEST_EXPECT(row_of(forced)->hovered && !row_of(forced)->pressed && !row_of(forced)->focused);
-	// Pressed, checked, its list open and focused (the caret in its shown phase): each held.
+	// Pressed, checked, its list open and focused (its caret blinking on the preview clock, S13 V8:
+	// the frame's clock is the preview clock's milliseconds): each held.
 	session.handle(request::set_viewport(menu->path(),
 			R"({"options": {"force_state": "selected", "checked": true, "popup_open": true, "focus": true}})"));
 	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild);
 	TEST_EXPECT(row_of(forced)->hovered && row_of(forced)->pressed && row_of(forced)->has_checked &&
 	            row_of(forced)->checked && row_of(forced)->popup_open && row_of(forced)->focused);
-	TEST_EXPECT((rig.viewport()->render().state().time_ms & 0x3FFu) > 0x200u);
+	const uint32_t was = menu_frame_time(session.viewports().clock());
+	session.advance(0.75);
+	TEST_EXPECT(menu_frame_time(session.viewports().clock()) == session.viewports().clock().ms() &&
+			menu_frame_time(session.viewports().clock()) == was + 750);
 	const JsonValue held = rig.json();
 	TEST_EXPECT(held.get("options")->get_string("force_state", "") == "selected" &&
 	            held.get("options")->get_bool("checked", false) && held.get("options")->get_bool("popup_open", false) &&

@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <variant>
+
 #include <imgui.h>
 
 namespace opennova::editor {
@@ -151,9 +153,19 @@ void MenuView::draw_modals(Workspace &workspace) {
 }
 
 void MenuView::refresh_tree(const MnuDocument &document, const Node &screen) {
-	if (tree_document_ == document.identity() && tree_load_ == document.load_generation() &&
-	    tree_revision_ == document.revision() && tree_.row == screen.id)
-		return;
+	const bool same = tree_document_ == document.identity() && tree_load_ == document.load_generation() &&
+	                  tree_.row == screen.id;
+	if (same && tree_revision_ == document.revision()) return;
+	if (same) {
+		ChangeSet set;
+		const RowChanges *changes =
+		        document.changes_since(tree_load_, tree_revision_, set) ? std::get_if<RowChanges>(&set) : nullptr;
+		if (changes && !changes->was_changed(screen.id) && !changes->was_removed(screen.id)) {
+			tree_revision_ = document.revision();
+			return;
+		}
+	}
+	++trees_made_;
 	// Ids start again in every document and every load of it: a range starts from a row of this
 	// screen of this load of this document only (an edit keeps it).
 	if (tree_document_ != document.identity() || tree_load_ != document.load_generation() || tree_.row != screen.id)

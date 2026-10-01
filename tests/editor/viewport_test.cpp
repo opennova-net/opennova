@@ -3,24 +3,34 @@
 // a device attaches, then Keep while nothing moves; Rebuild for an edit of a menu, a file its picture
 // read moving its stamp, a menu's options; Update for a model's options and an edit only its overlays
 // show; Clear for a document the game could not read, kept so until it changes (the failure latch);
-// what changed in the document (ChangeClass None, Unknown, Loaded) read once a follow. The one
+// what changed in the document (ChangeClass None, Changed, Unknown) read once a follow. The one
 // preview clock. Two menus keep their own options; the device cache gives up its least recently used
 // device (four held), its viewport keeping its state (a camera) for the next, which makes the picture
 // again. The envelope and its pages. A SetViewport, a drag and a command through a real session, the
 // refused answering false. One undo step per gesture through a real session: a menu drag of four
 // samples, a drag of three selected windows moving all three, a gesture its canvas ends by not
 // drawing, a model marker's drag (two selected markers moving as one).
+//
+// S13 V8, change sets: a menu's edit of another screen is Keep (no configure), of the shown screen's
+// window a Rebuild; a stylesheet variable the screen names a Rebuild, one only another screen names a
+// Keep; the menu read again "all" (Unknown); a user point moved an Update over the scene that stands
+// (a patch, no read); a drag of four samples no Rebuild until its end and one after, the viewport's
+// own compile following each sample; a model marker's drag an Update a sample, never a Rebuild; the
+// menu's animations on the preview clock with no configure (and, with OPENNOVA_JO_DIR, a shipped
+// screen's edit box blinking its caret on it).
 
 #include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <variant>
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
@@ -39,6 +49,7 @@
 #include <editor/session/view/session_view.h>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -76,6 +87,39 @@ const char *const kLayoutMenu = "<SCREEN>\r\n"
 								"\t\t<WINDOW type=\"checkbox\" name=\"TINY\">\r\n"
 								"\t\t\t<POSITION><LEFT>600</LEFT><TOP>104</TOP>"
 								"<RIGHT>612</RIGHT><BOTTOM>116</BOTTOM></POSITION>\r\n"
+								"\t\t</WINDOW>\r\n"
+								"\t</WINDOW>\r\n"
+								"</SCREEN>\r\n";
+
+// Two screens, each naming its own stylesheet variables: FIRST's labels DEF_TEXT_FG (MAIN's font),
+// SECOND's TRIM_COLOR; FIRST holds an edit box, EDIT, whose caret blinks once it is focused.
+const char *const kTwoScreens = "<SCREEN>\r\n"
+								"\t<NAME>FIRST</NAME>\r\n"
+								"\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+								"\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP>"
+								"<RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+								"\t\t<FONT><NAME>%DEF_FONTNAME_LG%</NAME><DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG></FONT>\r\n"
+								"\t\t<WINDOW type=\"static\" name=\"LABEL\">\r\n"
+								"\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP>"
+								"<RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>\r\n"
+								"\t\t\t<STRING>First</STRING>\r\n"
+								"\t\t</WINDOW>\r\n"
+								"\t\t<WINDOW type=\"edit\" name=\"EDIT\">\r\n"
+								"\t\t\t<POSITION><LEFT>100</LEFT><TOP>200</TOP>"
+								"<RIGHT>400</RIGHT><BOTTOM>240</BOTTOM></POSITION>\r\n"
+								"\t\t</WINDOW>\r\n"
+								"\t</WINDOW>\r\n"
+								"</SCREEN>\r\n"
+								"<SCREEN>\r\n"
+								"\t<NAME>SECOND</NAME>\r\n"
+								"\t<WINDOW type=\"window\" name=\"MAIN\">\r\n"
+								"\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP>"
+								"<RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\r\n"
+								"\t\t<FONT><NAME>%DEF_FONTNAME%</NAME><DEFAULT_FG>%TRIM_COLOR%</DEFAULT_FG></FONT>\r\n"
+								"\t\t<WINDOW type=\"static\" name=\"NOTE\">\r\n"
+								"\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP>"
+								"<RIGHT>300</RIGHT><BOTTOM>140</BOTTOM></POSITION>\r\n"
+								"\t\t\t<STRING>Second</STRING>\r\n"
 								"\t\t</WINDOW>\r\n"
 								"\t</WINDOW>\r\n"
 								"</SCREEN>\r\n";
@@ -293,7 +337,8 @@ static int test_actions() {
 	TEST_EXPECT(device->since(from).empty() && shown->configures() == 3);
 
 	// A file its picture read moved its stamp (the stylesheet, not open, written outside the
-	// editor): the screen configured again.
+	// editor): a line added that changes no variable leaves the picture as it is (S13 V8); a variable
+	// the screen names (DEF_TEXT_FG, its labels' colour) of another value configures the screen again.
 	const AssetEntry *style_file = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style_file != nullptr);
 	if (!style_file) return 1;
@@ -303,6 +348,17 @@ static int test_actions() {
 	bytes.push_back('\r');
 	bytes.push_back('\n');
 	TEST_EXPECT(editor_test::write_bytes(style, bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(device->since(from).empty() && shown->configures() == 3);
+	std::string sheet(bytes.begin(), bytes.end());
+	const size_t white = sheet.find("FFFFFFFF");
+	TEST_EXPECT(white != std::string::npos && sheet.find("DEF_TEXT_FG") < white);
+	sheet.replace(white, 8, "FF00FF00");
+	sheet += "\r\n"; // another size: the scan reads the file again whatever its clock's tick
+	TEST_EXPECT(editor_test::write_text(style, sheet));
 	session.handle(request::rescan());
 	session.run_operations();
 	from = device->taken.size();
@@ -340,12 +396,14 @@ static int test_actions() {
 	devices.sync(session);
 	TEST_EXPECT(model_device->since(1) == (Actions{ ViewportAction::Update }) && model->lod() == 0);
 
-	// What changed in the document, read once a follow (the model's reads of its bytes): nothing
-	// (None) reads nothing; an edit (Unknown), its undo and the document read again from its file
-	// (Loaded) read it once each.
+	// What changed in the document, read once a follow (S13 V8: the model's change set): nothing
+	// (None) reads nothing; a user point's edit and its undo (Changed, the model row alike but for its
+	// user points) patch the held model and read nothing, an Update each; a light's edit (Changed,
+	// something drawn) reads it and builds; the document read again from its file (Unknown: it
+	// cannot say what changed) reads it, and builds only when the drawn model moved.
 	const uint64_t reads = model->reads();
 	devices.sync(session);
-	TEST_EXPECT(model->reads() == reads);
+	TEST_EXPECT(model->reads() == reads && model->followed_change() == ChangeClass::None);
 	const ModelRow *row = document->model_row();
 	const NodeAddress point{ row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id };
 	Value value;
@@ -353,16 +411,31 @@ static int test_actions() {
 	set(session, *document, point, "position.x", std::get<double>(value) + 1.0);
 	from = model_device->taken.size();
 	devices.sync(session);
+	TEST_EXPECT(model->followed_change() == ChangeClass::Changed);
 	devices.sync(session);
-	TEST_EXPECT(model->reads() == reads + 1 && model_device->since(from) == (Actions{ ViewportAction::Update }));
+	TEST_EXPECT(model->reads() == reads && model->patches() == 1 &&
+			model_device->since(from) == (Actions{ ViewportAction::Update }));
+	session.handle(request::undo(document->path()));
+	from = model_device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(model->reads() == reads && model->patches() == 2 && !document->dirty() &&
+			model_device->since(from) == (Actions{ ViewportAction::Update }));
+	const NodeAddress light{ row->id, node_kind(ModelKind::Light), document->model_row()->ids.lists[2][0].id };
+	set(session, *document, light, "start.r", int64_t(12));
+	from = model_device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(model->reads() == reads + 1 && model_device->since(from) == (Actions{ ViewportAction::Rebuild }));
 	session.handle(request::undo(document->path()));
 	devices.sync(session);
 	TEST_EXPECT(model->reads() == reads + 2 && !document->dirty());
 	session.handle(request::reload_document("models/armory.3di"));
 	session.run_operations();
 	TEST_EXPECT(session.outcome().done());
+	from = model_device->taken.size();
 	devices.sync(session);
-	TEST_EXPECT(model->reads() == reads + 3 && model->status() == ViewportStatus::Ready);
+	TEST_EXPECT(model->reads() == reads + 3 && model->status() == ViewportStatus::Ready &&
+			model->followed_change() == ChangeClass::Unknown &&
+			model_device->since(from) == (Actions{ ViewportAction::Update }));
 	std::printf("test_actions passed\n");
 	return 0;
 }
@@ -1086,7 +1159,357 @@ static int test_gestures() {
 	return 0;
 }
 
-int main() {
+// S13 V8: what reaches a menu's picture, from its change set and the files it read. A menu of two
+// screens, FIRST shown: an edit of SECOND's window, and a screen added after it, leave the picture as
+// it is (no configure, the picture current); an edit of FIRST's window configures again; a stylesheet
+// variable SECOND alone names leaves it, one FIRST names (its labels' colour) configures again; the
+// menu read again is everything (Unknown), configured again.
+static int test_menu_change_sets() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_change_sets");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Change Sets"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/two.mnu", kTwoScreens));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("two.mnu"));
+	Document *menu = session.document_for("two.mnu");
+	TEST_EXPECT(menu && menu->rows().size() == 2);
+	if (!menu || menu->rows().size() != 2) return 1;
+	const std::string path = menu->path();
+	devices.sync(session);
+	const auto *shown = viewport_of<MenuViewport>(session, path, ViewportKind::Menu);
+	FakeDevice *device = devices.held(path, ViewportKind::Menu);
+	TEST_EXPECT(shown && device && shown->status() == ViewportStatus::Ready &&
+			shown->screen_row() == menu->rows()[0]->id && shown->configures() == 1);
+	if (!shown || !device) return 1;
+	const NodeAddress label = named(*menu, "LABEL"), note = named(*menu, "NOTE");
+	TEST_EXPECT(label.child && note.child && note.row == menu->rows()[1]->id);
+	const auto current = [&]() {
+		return shown->current(ViewportInput{ view, session.viewports().clock(), session.document_for(path) });
+	};
+
+	// Another screen's window moved: its change set names SECOND's row alone (Keep).
+	size_t from = device->taken.size();
+	set(session, *menu, note, "position.left", int64_t(120));
+	devices.sync(session);
+	TEST_EXPECT(device->since(from).empty() && shown->configures() == 1 &&
+			shown->followed_change() == ChangeClass::Changed && current());
+	// A screen added after it (the session selects it; FIRST's label selected again before the pump,
+	// the Preview stays on FIRST): Keep.
+	EditorRequest add = request::edit_record(path, Edit());
+	add.edits[0].operation = EditOperation::Add;
+	add.edits[0].address = NodeAddress{ 0, node_kind(MenuKind::Screen), 0 };
+	session.handle(add);
+	TEST_EXPECT(session.outcome().done() && menu->rows().size() == 3);
+	session.handle(request::select_record(path, label));
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(shown->screen_row() == menu->rows()[0]->id && device->since(from).empty() &&
+			shown->configures() == 1 && current());
+	// The shown screen's window moved: Rebuild.
+	set(session, *menu, label, "position.left", int64_t(120));
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(device->since(from) == (Actions{ ViewportAction::Rebuild }) && shown->configures() == 2 && current());
+
+	// The stylesheet (open, standing in for its file): TRIM_COLOR, which SECOND alone names, leaves
+	// the picture; DEF_TEXT_FG, FIRST's labels' colour, configures it again.
+	session.handle(request::open_document("menu_style.mns"));
+	Document *style = session.document_for("menu_style.mns");
+	TEST_EXPECT(style && view.documents.previews[ViewportKind::Menu].path == path);
+	if (!style) return 1;
+	set(session, *style, named(*style, "TRIM_COLOR"), "value", std::string("FF102030"));
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(style->dirty() && device->since(from).empty() && shown->configures() == 2);
+	set(session, *style, named(*style, "DEF_TEXT_FG"), "value", std::string("FFFF0000"));
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(device->since(from) == (Actions{ ViewportAction::Rebuild }) && shown->configures() == 3);
+	TEST_EXPECT(shown->style_vars().count("DEF_TEXT_FG") && shown->style_vars().at("DEF_TEXT_FG") == "FFFF0000");
+
+	// The menu read again from its file (another instance at the path: the document cannot say what
+	// changed): everything, configured again.
+	session.handle(request::save(path));
+	session.handle(request::reload_document(path));
+	session.run_operations();
+	TEST_EXPECT(session.outcome().done());
+	from = device->taken.size();
+	devices.sync(session);
+	TEST_EXPECT(shown == viewport_of<MenuViewport>(session, path, ViewportKind::Menu) &&
+			shown->followed_change() == ChangeClass::Unknown && shown->configures() == 4 &&
+			device->since(from) == (Actions{ ViewportAction::Rebuild }));
+	std::printf("test_menu_change_sets passed\n");
+	return 0;
+}
+
+// S13 V8: a scene made again waits for the gesture open in its document. A drag of BOX of four
+// samples: the viewport's own compile follows every sample (its handles and the next sample read it,
+// the picture current), its device keeping the last picture (no Rebuild, the viewport held), and the
+// gesture's end makes the picture once. A model marker's drag (a user point's place) is an Update a
+// sample, never a Rebuild: the overlays follow the live rows over the scene that stands.
+static int test_gesture_holds_rebuild() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_gesture_hold");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Gesture Hold"));
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("layout.mnu"));
+	Document *menu = session.document_for("layout.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string path = menu->path();
+	const NodeAddress box = named(*menu, "BOX");
+	CanvasRig rig{ session, devices, path, ViewportKind::Menu, 1.0f };
+	devices.sync(session);
+	const auto *shown = viewport_of<MenuViewport>(session, path, ViewportKind::Menu);
+	FakeDevice *device = devices.held(path, ViewportKind::Menu);
+	TEST_EXPECT(shown && device && shown->status() == ViewportStatus::Ready);
+	if (!shown || !device) return 1;
+	session.handle(request::select_record(path, box));
+	const auto rebuilds = [&](size_t from) {
+		size_t n = 0;
+		for (size_t i = from; i < device->taken.size(); ++i) n += device->taken[i] == ViewportAction::Rebuild ? 1 : 0;
+		return n;
+	};
+	// BOX's left edge as the viewport's own compile places it.
+	const auto compiled_left = [&]() {
+		opennova::mnu::RectEdges rect{};
+		const int index = static_cast<const MnuDocument *>(menu)->window_index(box);
+		return shown->render().compiler().widget_rect(index, shown->render().state(), &rect) ? rect.left : -1;
+	};
+	const size_t from = device->taken.size();
+	const size_t configures = shown->configures();
+	const int left = compiled_left();
+	CanvasInput in = rig.at(200.0f, 150.0f);
+	in.pressed = in.down = true;
+	rig.frame(in);
+	bool held = false;
+	for (int i = 1; i <= 4; ++i) {
+		in = rig.at(200.0f + 10.0f * float(i), 150.0f);
+		in.down = true;
+		rig.frame(in);
+		held = held || shown->held();
+	}
+	// The next frame's pump, the button still down: the compile has every sample, the picture
+	// current, the device's picture held.
+	devices.sync(session);
+	const bool current = shown->current(editor_test::viewport_context(session, *shown).input);
+	TEST_EXPECT(view.documents.gesture.in(path) && rig.out.count(EditorRequestKind::EditRecord) >= 3);
+	TEST_EXPECT(held && shown->held() && current && compiled_left() > left && rebuilds(from) == 0 &&
+			shown->configures() >= configures + 3);
+	in.down = false;
+	rig.frame(in); // let go: the gesture's end
+	TEST_EXPECT(!view.documents.gesture.open() && rig.out.count(EditorRequestKind::EndEdit) == 1 &&
+			rebuilds(from) == 0);
+	devices.sync(session);
+	TEST_EXPECT(rebuilds(from) == 1 && !shown->held() && compiled_left() == field_of(*menu, box, "position.left"));
+	devices.sync(session);
+	TEST_EXPECT(rebuilds(from) == 1);
+	session.handle(request::undo(path));
+	TEST_EXPECT(!menu->dirty() && !menu->can_undo());
+
+	// A user point's drag: each sample an Update (the overlays' alone), no Rebuild, held or not.
+	session.handle(request::open_document("models/armory.3di"));
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
+	TEST_EXPECT(document && document->model_row());
+	if (!document || !document->model_row()) return 1;
+	const ModelRow &row = *document->model_row();
+	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
+	session.handle(request::select_record(document->path(), point));
+	devices.sync(session);
+	const auto *model = viewport_of<ModelViewport>(session, "models/armory.3di", ViewportKind::Model);
+	FakeDevice *model_device = devices.held("models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(model && model_device);
+	if (!model || !model_device) return 1;
+	float x = 0.0f, y = 0.0f;
+	bool projected = false;
+	for (const ModelOverlay &overlay : model->overlays(session.viewports().clock()))
+		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0)
+			projected = model->camera().project(overlay.at, model->size().width, model->size().height, x, y);
+	TEST_EXPECT(projected);
+	const size_t model_from = model_device->taken.size();
+	const uint64_t reads = model->reads(), builds = model->builds();
+	CanvasRig model_rig{ session, devices, "models/armory.3di", ViewportKind::Model };
+	CanvasKeys alt;
+	alt.alt = true;
+	model_rig.drag(x, y, 24.0f, -12.0f, alt);
+	devices.sync(session);
+	size_t updates = 0, model_rebuilds = 0;
+	for (size_t i = model_from; i < model_device->taken.size(); ++i) {
+		updates += model_device->taken[i] == ViewportAction::Update ? 1 : 0;
+		model_rebuilds += model_device->taken[i] == ViewportAction::Rebuild ? 1 : 0;
+	}
+	TEST_EXPECT(!model_rig.out.refused && model_rig.out.count(EditorRequestKind::EditRecord) >= 2);
+	TEST_EXPECT(updates >= 2 && model_rebuilds == 0 && model->builds() == builds && model->reads() == reads &&
+			model->patches() >= 2 && document->dirty());
+	std::printf("test_gesture_holds_rebuild passed\n");
+	return 0;
+}
+
+// S13 V8: a menu's animations run on the preview clock with no configure: the frame's clock is the
+// preview clock's milliseconds (menu_frame_time), so a focused edit box's caret is drawn while the
+// clock's (milliseconds & 0x3FF) are past 0x200 and not before; the device ticked as the clock runs
+// takes no action (nothing is configured or made again).
+static int test_menu_clock() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_menu_clock");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Menu Clock"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/two.mnu", kTwoScreens));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("two.mnu"));
+	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("two.mnu"));
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const std::string path = menu->path();
+	const NodeAddress edit = named(*menu, "EDIT");
+	session.handle(request::set_viewport(path, R"({"options": {"force_id": )" + std::to_string(edit.child) +
+			R"(, "focus": true}})"));
+	TEST_EXPECT(session.outcome().done());
+	devices.sync(session);
+	const auto *shown = viewport_of<MenuViewport>(session, path, ViewportKind::Menu);
+	FakeDevice *device = devices.held(path, ViewportKind::Menu);
+	TEST_EXPECT(shown && device && shown->status() == ViewportStatus::Ready && shown->forced_index() >= 0);
+	if (!shown || !device) return 1;
+
+	// The device's frame at two clocks: its caret drawn in the blink's shown half alone, with no
+	// configure between (one compile of the screen, its state's clock set).
+	MenuScreenRender render;
+	TEST_EXPECT(render.configure(*menu, shown->screen_row(), *view.findings.assets, shown->style_vars()) ==
+			MenuScreenStatus::Ready);
+	opennova::menu::MenuFrameState state = render.state();
+	apply_menu_options(shown->options(), shown->forced_index(), render.compiler(), state);
+	const auto glyphs_at = [&](uint32_t ms) {
+		PreviewClock clock;
+		clock.seek_ms(ms);
+		state.time_ms = menu_frame_time(clock);
+		render.set_state(state);
+		return render.compile(1.0f, 1.0f).glyphs.size();
+	};
+	const size_t hidden = glyphs_at(0x100), drawn = glyphs_at(0x300), hidden_again = glyphs_at(0x500);
+	TEST_EXPECT(drawn > hidden && hidden_again == hidden);
+
+	// The session's clock runs, its devices ticked each frame as the Shell's are: nothing taken.
+	const size_t from = device->taken.size();
+	const size_t configures = shown->configures();
+	const uint32_t was = menu_frame_time(session.viewports().clock());
+	for (int frame = 0; frame < 30; ++frame) {
+		session.advance(1.0 / 30.0);
+		devices.sync(session);
+		devices.cache.tick(session.viewports());
+	}
+	TEST_EXPECT(device->since(from).empty() && shown->configures() == configures);
+	TEST_EXPECT(menu_frame_time(session.viewports().clock()) - was >= 990 &&
+			device->ticked.size() >= 30 && device->ticked.back() == menu_frame_time(session.viewports().clock()));
+	std::printf("test_menu_clock passed\n");
+	return 0;
+}
+
+namespace {
+
+// The files one mount of the packed install serves, decoded.
+class MountedFiles : public opennova::FileSource {
+public:
+	explicit MountedFiles(const opennova::Vfs &vfs) : vfs_(vfs) {}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override { return vfs_.read_file(name, out); }
+	uint64_t stamp(const std::string &name) const override { return vfs_.has_file(name) ? 1 : 0; }
+
+private:
+	const opennova::Vfs &vfs_;
+};
+
+} // namespace
+
+// The retail leg (OPENNOVA_JO_DIR): a shipped screen's edit box blinks its caret on the preview
+// clock. The .mnu files the packed install serves, read with the files that mount serves, until a
+// screen holding an edit box whose caret draws (a font that loads, not read only): held focused as a
+// viewport's options hold it, its frame configured once and compiled at the clock's every quarter
+// of the blink, the caret drawn in its shown half alone.
+static int test_retail_animated_menu() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (a shipped screen's edit box blinking its caret on the preview clock)");
+		return 0;
+	}
+	opennova::Vfs vfs;
+	if (!vfs.mount_game(install, "", opennova::VfsMountMode::Packed)) {
+		std::printf("  FAIL mount_game: %s\n", vfs.last_error().c_str());
+		return 1;
+	}
+	const MountedFiles files(vfs);
+	opennova::menu::MenuStyleSource style;
+	const std::map<std::string, std::string> &vars = style.vars(files);
+	editor_test::TempProjectDir scratch("opennova_viewport_retail_clock");
+	size_t menus = 0, screens = 0;
+	for (const auto &location : vfs.list_files()) {
+		const std::string &name = location.logical_name;
+		if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".mnu") continue;
+		std::vector<uint8_t> stored;
+		const std::string at = scratch.file(name.c_str());
+		if (!vfs.read_file_raw(name, stored) || !editor_test::write_bytes(at, stored)) continue;
+		MnuDocument document;
+		Diagnostic error;
+		if (!document.load(at, name, AssetKind::Menu, "jo", error) || document.blocked()) continue;
+		++menus;
+		for (const auto &row : document.rows()) {
+			++screens;
+			MenuScreenRender render;
+			if (render.configure(document, row->id, files, vars) != MenuScreenStatus::Ready) continue;
+			const opennova::menu::MenuFrameCompiler &compiler = render.compiler();
+			for (int index = 0; index < compiler.widget_count(); ++index) {
+				const int type = compiler.widget_kind(index);
+				if (type != int(opennova::mnu::WindowType::Edit) && type != int(opennova::mnu::WindowType::MultilineEdit))
+					continue;
+				MenuViewportOptions options;
+				options.force_window = document.window_at(*row, size_t(index));
+				options.focused = true;
+				opennova::menu::MenuFrameState state = render.state();
+				apply_menu_options(options, index, compiler, state);
+				// The glyphs drawn at each quarter of the blink's 1,024 milliseconds.
+				size_t glyphs[4] = {};
+				for (uint32_t quarter = 0; quarter < 4; ++quarter) {
+					PreviewClock clock;
+					clock.seek_ms(quarter * 0x100u + 0x80u);
+					state.time_ms = menu_frame_time(clock);
+					render.set_state(state);
+					glyphs[quarter] = render.compile(1.0f, 1.0f).glyphs.size();
+				}
+				if (!(glyphs[2] > glyphs[0])) continue; // no caret drawn (no font, read only)
+				TEST_EXPECT(glyphs[0] == glyphs[1] && glyphs[2] == glyphs[3]);
+				std::printf("  %s %s %s: an edit box's caret on the preview clock, %zu glyphs in the blink's hidden "
+				            "half and %zu in its shown half, one configure (%zu menus, %zu screens read)\n",
+						name.c_str(), row->name().c_str(), compiler.widget_name(index).c_str(), glyphs[0], glyphs[2], menus,
+						screens);
+				return glyphs[0] == glyphs[1] && glyphs[2] == glyphs[3] ? 0 : 1;
+			}
+		}
+	}
+	std::printf("  FAIL no shipped screen holds an edit box whose caret draws (%zu menus, %zu screens)\n", menus, screens);
+	return 1;
+}
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);
 	TEST_EXPECT(test_two_menus() == 0);
@@ -1096,6 +1519,10 @@ int main() {
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_requests() == 0);
 	TEST_EXPECT(test_gestures() == 0);
+	TEST_EXPECT(test_menu_change_sets() == 0);
+	TEST_EXPECT(test_gesture_holds_rebuild() == 0);
+	TEST_EXPECT(test_menu_clock() == 0);
+	TEST_EXPECT(test_retail_animated_menu() == 0);
 	std::printf("editor_viewport: all tests passed\n");
 	return 0;
 }

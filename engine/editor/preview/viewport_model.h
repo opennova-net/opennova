@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/model/change_set.h>
 #include <editor/model/node.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/preview_clock.h>
@@ -33,13 +34,17 @@ const char *viewport_status_token(ViewportStatus status);
 // token, member: value} (a canvas's camera, a toolbar's options, the clock, the device's size).
 std::string viewport_change(ViewportKind kind, const char *member, io::JsonValue value);
 
-// What changed in a viewport's document since the viewport last followed it (Viewports::follow,
-// from the document's identity, load and revision; S13 V8 reads the document's changes_since to say
-// more).
+// What changed in a viewport's document since the viewport last followed it (Viewports::follow: the
+// document's identity and load, and what it answers changed since the revision followed,
+// DocumentBase::changes_since; ADR 0046 S13 V8). A kind classifies a change set by what its picture
+// reads of the document (a menu's screen, a model's drawn rows); Unknown and Loaded are everything.
 enum class ChangeClass : uint8_t {
 	None, // the document is as it was
-	Unknown, // edited, undone or redone: what changed is not said
-	Loaded, // another document at the path, the same one read again, or followed the first time
+	Changed, // edited, undone or redone, and it says what changed (ViewportInput::changes)
+	Unknown, // it changed and cannot say what (the "all" answer): another document at the path or
+			 // the same one read again, a state its history no longer holds (given up to its
+			 // budget, or a branch an edit after an undo discarded), a kind that does not say
+	Loaded, // followed the first time, or no document is open at the path
 };
 
 // A viewport's own state beside its kind's (a menu's options, a model's options and camera): the
@@ -59,13 +64,14 @@ struct ViewportState {
 
 // What a viewport reads of the session (Viewports::follow, a canvas's planning, the wire): the view,
 // the preview clock (Viewports'), the document at its path (null: none open there), and what changed
-// in it since the viewport last followed (a canvas's planning and the wire read None: they read the
-// viewport as it followed).
+// in it since the viewport last followed, with the change set when the class is Changed (null
+// otherwise; a canvas's planning and the wire read None: they read the viewport as it followed).
 struct ViewportInput {
 	const SessionView &view;
 	const PreviewClock &clock;
 	const DocumentBase *document = nullptr;
 	ChangeClass change = ChangeClass::None;
+	const ChangeSet *changes = nullptr;
 };
 
 // What a viewport's planners read (a canvas's gestures, the MCP's drag and command): the input, the
@@ -203,13 +209,23 @@ public:
 	// How many times its device was told to make its picture again (an edit that changes only what
 	// the overlays show is not one).
 	uint64_t builds() const { return builds_; }
+	// A picture made again waits for the gesture open in its document to end (S13 V8): the device
+	// keeps the last picture meanwhile, while what the viewport shows (its compile, its overlays)
+	// follows the live rows.
+	bool held() const { return held_; }
 
 	// --- the session's (Viewports) ------------------------------------------------------------------
 
 	// Follow `input`: what it shows now, and the action its device takes next, merged into the one
 	// its device has not taken yet (Rebuild over Update, a Clear that drops a picture the device
-	// holds; a Clear of nothing is nothing). The action pending.
+	// holds; a Clear of nothing is nothing). A Rebuild due while a gesture is open in its document
+	// (the view's documents.gesture) is held, and issued at the first follow after that gesture ends
+	// (another gesture begun since included); an Update applies meanwhile (the state applied again
+	// over the picture that stands: cheap), as does a Clear, which drops what is held. The action
+	// pending.
 	ViewportAction follow(const ViewportInput &input, PreviewClock &clock);
+	// What changed in its document as its last follow read it.
+	ChangeClass followed_change() const { return followed_change_; }
 	// A SetViewport's change (`json` an object: kind, device {width, height}, clock {playing, rate,
 	// time_ms, ticks}, and the kind's own members): every member checked before any applies; false,
 	// nothing changed, with `error` naming the member and what it takes. The device's size is refused
@@ -258,6 +274,10 @@ private:
 	uint64_t shown_revision_ = 0;
 	bool shows_document_ = false;
 	ViewportAction pending_ = ViewportAction::Keep;
+	// A Rebuild held for the gesture `held_for_` (its token) to end.
+	bool held_ = false;
+	uint64_t held_for_ = 0;
+	ChangeClass followed_change_ = ChangeClass::None;
 	bool attached_ = false;
 	bool holds_ = false; // the attached device holds a picture
 	uint64_t builds_ = 0;

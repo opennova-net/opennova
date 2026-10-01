@@ -95,9 +95,11 @@
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
     Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
     changed by a SetViewport request and the three changes its follow derives; what follows from
-    its document, the files its picture
+    its document (S13 V8: the change set it answers since the state followed, which the kind reads
+    for what its picture shows), the files its picture
     read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
-    Clear), its envelope on the wire (`viewport_json`), what a drag or a command plans as requests,
+    Clear; a Rebuild held while a gesture is open in its document), its envelope on the wire
+    (`viewport_json`), what a drag or a command plans as requests,
     and the device seam (`viewport_device`) with its least-recently-used cache of four
     (`viewport_device_cache`); the Shell's devices are `godot/src/authoring`'s over the runtime's
     `MenuFrame` and `ObjectModel`. The menu's viewport (`menu_viewport`): its screen compiled

@@ -30,7 +30,9 @@ public:
 	void clear() override;
 	void step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {}
+	// The menu's animations on the preview clock (menu_frame_time): the frame drawn again as the
+	// clock moves, never configured again.
+	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void resize(int width, int height) override;
 
 	MenuFrame *frame() const { return frame_; }

@@ -80,17 +80,21 @@ void Viewports::track(const SessionView &view) {
 
 void Viewports::follow_(const SessionView &view, Slot &slot) {
 	const DocumentBase *document = open_at(view, slot.model->path());
-	// What changed in the document since the viewport last followed it.
+	// What changed in the document since the viewport last followed it: what the document says
+	// changed since that state (S13 V8), everything when it cannot say.
 	ChangeClass change = ChangeClass::None;
+	ChangeSet changes;
 	if (!document) {
 		change = ChangeClass::Loaded;
 		slot.followed = false;
 	} else {
-		if (!slot.followed || document->identity() != slot.identity ||
-				document->load_generation() != slot.load)
+		if (!slot.followed)
 			change = ChangeClass::Loaded;
-		else if (document->revision() != slot.revision)
+		else if (document->identity() != slot.identity || document->load_generation() != slot.load)
 			change = ChangeClass::Unknown;
+		else if (document->revision() != slot.revision)
+			change = document->changes_since(slot.load, slot.revision, changes) ? ChangeClass::Changed
+																				 : ChangeClass::Unknown;
 		slot.followed = true;
 		slot.identity = document->identity();
 		slot.load = document->load_generation();
@@ -99,7 +103,9 @@ void Viewports::follow_(const SessionView &view, Slot &slot) {
 	// What the follow derives (its held window, a framing, the clock sought) said once it has.
 	const uint64_t serial = slot.model->state_serial();
 	const PreviewClock clock = clock_;
-	slot.model->follow(ViewportInput{ view, clock_, document, change }, clock_);
+	slot.model->follow(ViewportInput{ view, clock_, document, change,
+							   change == ChangeClass::Changed ? &changes : nullptr },
+			clock_);
 	const bool clock_moved = clock.playing() != clock_.playing() || clock.ms() != clock_.ms() ||
 			clock.ticks() != clock_.ticks() || clock.rate() != clock_.rate();
 	if ((slot.model->state_serial() != serial || clock_moved) && on_derived_change_) on_derived_change_();

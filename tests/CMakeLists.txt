@@ -3960,11 +3960,15 @@ add_test(NAME editor_project_asset_source COMMAND editor_project_asset_source_te
 # Clear) from the document's change, the files its picture read and the viewport's options; the
 # failure latch; the preview clock; two menus' own options; the device cache's four, its least
 # recently used given up and its viewport's camera kept; the envelope and its pages; a SetViewport,
-# a drag and a command through the session; one undo step per gesture.
+# a drag and a command through the session; one undo step per gesture. S13 V8: the change sets a
+# viewport follows (another screen's edit and a variable the screen does not name Keep, a user
+# point's move an Update over the scene that stands, the menu read again everything), a Rebuild held
+# until the gesture's end, the menu's animations on the preview clock; its retail leg a shipped
+# screen's edit box blinking its caret on the clock (OPENNOVA_JO_DIR).
 add_executable(editor_viewport_test editor/viewport_test.cpp)
 target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_viewport COMMAND editor_viewport_test)
+opennova_add_mixed_test(editor_viewport COMMAND editor_viewport_test)
 
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.

@@ -13,10 +13,6 @@ namespace {
 
 std::atomic<uint64_t> g_next_serial{ 0 };
 
-bool among(const std::vector<NodeId> &sorted, NodeId id) {
-	return std::binary_search(sorted.begin(), sorted.end(), id);
-}
-
 // The order holds() searches the records in.
 bool before(const NodeAddress &a, const NodeAddress &b) {
 	return std::tie(a.row, a.child, a.kind) < std::tie(b.row, b.child, b.kind);
@@ -135,9 +131,9 @@ size_t Selection::repair(
 		bool keep = true;
 		if (!rows)
 			keep = exists(address);
-		else if (among(rows->removed, address.row))
+		else if (rows->was_removed(address.row))
 			keep = false;
-		else if (among(rows->changed, address.row))
+		else if (rows->was_changed(address.row))
 			keep = exists(address);
 		if (keep)
 			kept.push_back(address);

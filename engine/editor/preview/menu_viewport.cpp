@@ -1,5 +1,6 @@
 #include <editor/preview/menu_viewport.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <variant>
 
@@ -87,6 +88,22 @@ NodeAddress shown_window(const MenuCanvasFrame &frame, NodeId id) {
 	return shown ? window : NodeAddress();
 }
 
+// Whether what changed in the menu (S13 V8) reaches the picture of the screen `row`: the screen's own
+// row changed (its fields, a window of it, what they hold) or went, or the file-wide state did (the
+// encoding the game reads the text in). A screen added, moved or changed elsewhere does not: the game
+// compiles each screen by itself.
+bool feeds_screen(const ChangeSet &changes, NodeId row) {
+	const auto *rows = std::get_if<RowChanges>(&changes);
+	return !rows || rows->file_state || rows->was_changed(row) || rows->was_removed(row);
+}
+
+// The text of one screen as the menu's writer writes it.
+std::string screen_text(const mnu::Screen &screen) {
+	mnu::Document alone;
+	alone.screens.push_back(screen);
+	return mnu::serialize(alone);
+}
+
 } // namespace
 
 io::JsonValue menu_options_to_json(const MenuViewportOptions &held) {
@@ -139,11 +156,12 @@ void apply_menu_options(const MenuViewportOptions &options, int forced_index,
 	}
 	if (options.checked) row.has_checked = row.checked = true;
 	if (options.popup_open) row.popup_open = true;
-	if (options.focused) {
-		row.focused = true;
-		// A clock in the caret's shown half-second (MenuFrameState::time_ms).
-		state.time_ms = 0x300;
-	}
+	// Focused, its caret blinks on the preview clock (menu_frame_time).
+	if (options.focused) row.focused = true;
+}
+
+uint32_t menu_frame_time(const PreviewClock &clock) {
+	return clock.ms();
 }
 
 mnu::WindowType menu_window_type(const MnuDocument &document, const NodeAddress &window) {
@@ -259,15 +277,21 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	const FileSource &files = *view.findings.assets;
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key{ row->id, options_serial_ };
-	switch (picture_.follow(key, input.change != ChangeClass::None, files, generation)) {
-	case PreviewFollow::Found::Same: return ViewportAction::Keep;
+	switch (picture_.follow(key, moves_(input, *document, row->id), files, generation)) {
+	case PreviewFollow::Found::Same: return kept_(*document);
 	case PreviewFollow::Found::Files:
+		if (styles_alone_(files)) {
+			picture_.restamp(files);
+			return kept_(*document);
+		}
+		break;
 	case PreviewFollow::Found::Anew: break;
 	}
 	picture_.show(key, generation);
 	// The screen compiled headless from the menu the game would read were it saved now.
 	style_vars_ = style_.vars(files);
 	++configures_;
+	screen_variables_made_ = false;
 	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_);
 	if (compiled != MenuScreenStatus::Ready) return stop_(compiled, render_.detail());
 	forced_index_ = -1;
@@ -292,6 +316,41 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	FileStamps read;
 	for (const menu::MenuDependency &dependency : dependencies) read.note(dependency.name, dependency.stamp);
 	return picture_.built(std::move(read));
+}
+
+bool MenuViewport::moves_(const ViewportInput &input, const MnuDocument &document, NodeId row) const {
+	switch (input.change) {
+	case ChangeClass::None: return false;
+	case ChangeClass::Unknown:
+	case ChangeClass::Loaded: return true;
+	case ChangeClass::Changed: break;
+	}
+	if (reason_ != MenuScreenStatus::Ready || !input.changes || feeds_screen(*input.changes, row)) return true;
+	// A change elsewhere that leaves the menu unwritable reaches every screen. The text is the one
+	// the menu's validation reads too, made once per state.
+	return !document.saved_serialization().ok();
+}
+
+bool MenuViewport::styles_alone_(const FileSource &files) {
+	std::vector<menu::MenuDependency> sheets;
+	style_.dependencies(sheets);
+	std::vector<std::string> names;
+	for (const menu::MenuDependency &sheet : sheets) names.push_back(sheet.name);
+	if (picture_.files().moved_but(files, names) || !render_.screen()) return false;
+	const std::map<std::string, std::string> vars = style_.vars(files);
+	if (!screen_variables_made_) {
+		screen_variables_ = menu_variables_named(screen_text(*render_.screen()));
+		screen_variables_made_ = true;
+	}
+	for (const std::string &name : changed_menu_variables(style_vars_, vars))
+		if (std::binary_search(screen_variables_.begin(), screen_variables_.end(), name)) return false;
+	style_vars_ = vars;
+	return true;
+}
+
+ViewportAction MenuViewport::kept_(const MnuDocument &document) {
+	if (reason_ == MenuScreenStatus::Ready) shown(document);
+	return ViewportAction::Keep;
 }
 
 bool MenuViewport::takes_(const std::string &member) const {

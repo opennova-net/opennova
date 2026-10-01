@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,6 +24,21 @@ class Viewports;
 struct PreviewTarget {
 	std::string path;
 	NodeId part = 0;
+};
+
+// The gesture open in a document (ADR 0046 S13 V8; CONTEXT.md "Gesture"): the document its batches
+// changed and the token they carry (Edit::gesture), from its first batch that changes the document
+// until it ends: an EndEdit of that document (let go, or its canvas not drawn), an Undo or a Redo, a
+// Save, every edit group ended (Build, Play, the unsaved-changes prompt), its document closed or
+// another gesture changing a document. Its edits' validation waits for its end, and so does a
+// viewport's picture of the document made again (the last picture kept meanwhile). Token 0: none
+// open.
+struct OpenGesture {
+	std::string path;
+	uint64_t token = 0;
+	bool open() const { return token != 0; }
+	// Open in the document at `document` (its project-relative path).
+	bool in(const std::string &document) const { return open() && path == document; }
 };
 
 // One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's).
@@ -49,6 +65,10 @@ struct DocumentsView {
 	// What Copy and Cut put on the clipboard: the payload of the document type that made
 	// it (Document::copy), which Paste hands back to the same type.
 	std::string clipboard;
+	// The gesture open now, if any (S13 V8): kept by DocumentSet as the gesture's batches and its
+	// end are served, read by the viewports as they follow (no concern moves with it: the Shell's
+	// pump reads it each frame).
+	OpenGesture gesture;
 	// What the Preview window follows of each viewport kind (S13 V5): the last document of a type
 	// the kind shows made active (a model, a clip or an animation table for the model's), and for a
 	// kind that shows one row of it the row the selection last landed in there (a menu's screen: set

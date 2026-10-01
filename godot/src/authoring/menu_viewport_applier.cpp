@@ -78,6 +78,11 @@ void MenuViewportApplier::step(const opennova::editor::ViewportModel &, const op
 	}
 }
 
+void MenuViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
+	const uint32_t time = opennova::editor::menu_frame_time(clock);
+	if (frame_->is_configured() && frame_->native_state().time_ms != time) frame_->set_time_ms(time);
+}
+
 void MenuViewportApplier::resize(int width, int height) {
 	frame_->set_size(Vector2(float(width), float(height)));
 }

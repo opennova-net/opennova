@@ -49,8 +49,9 @@ public:
 	const ViewportModel &at(size_t index) const;
 
 	// Every viewport a device is attached to follows the view (the Shell's pump): what changed in
-	// its document since its last follow (ChangeClass), then the kind's follow. A viewport with no
-	// device follows when one attaches, or when it is read (follow_one).
+	// its document since its last follow (ChangeClass, with the change set the document answers
+	// since that state: S13 V8), then the kind's follow. A viewport with no device follows when one
+	// attaches, or when it is read (follow_one).
 	void follow(const SessionView &view);
 	// The viewport of `kind` over `path` followed now (a reader of its envelope, a test), null when
 	// none is kept.

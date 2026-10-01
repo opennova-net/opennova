@@ -160,7 +160,9 @@ static int test_status_and_builds() {
 	// Nothing moved (ChangeClass None): nothing read again.
 	TEST_EXPECT(rig.pump() == ViewportAction::Keep && model->reads() == reads);
 
-	// A user point moved: the overlays show it, nothing is built.
+	// A user point moved: the overlays show it, nothing is built, and nothing is read (S13 V8: the
+	// change set names the model row alone, alike but for its user points, so the held model is
+	// patched with them).
 	const ModelRow *row = document->model_row();
 	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id};
 	const double x_before = points->array[0].get("position")->array[0].number;
@@ -168,7 +170,8 @@ static int test_status_and_builds() {
 	Value value;
 	TEST_EXPECT(document->get(point, "position.x", value));
 	set(session, document->path(), point, "position.x", std::get<double>(value) + 1.0);
-	TEST_EXPECT(rig.pump() == ViewportAction::Update && rig.builds() == 1 && model->reads() == reads + 1);
+	TEST_EXPECT(rig.pump() == ViewportAction::Update && rig.builds() == 1 && model->reads() == reads &&
+			model->patches() == 1);
 	shown = rig.json();
 	TEST_EXPECT(shown.get_bool("current", false));
 	const JsonValue &moved = shown.get("items")->array[0];
