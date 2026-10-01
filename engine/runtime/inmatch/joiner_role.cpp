@@ -1059,8 +1059,23 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
 	if (can_offer_uplink) {
+		// The interest list scores the decoded entities against L; the HUD
+		// target cursor is the aim acquisition's combat target, else its
+		// aim-ray entity, named by its wire handle (a materialized pool-1..3
+		// row sits at its own; L answers to its self handle).
+		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
+		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
+		replication::UplinkClientInputs interest;
+		interest.replica = &rt.state();
+		interest.self_wire_handle = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+		const world::EntityHandle cursor = ae->inf.combat_target.valid()
+				? ae->inf.combat_target : ae->inf.head_look_target;
+		if (cursor == world.cached.local_player)
+			interest.hud_target_wire_handle = interest.self_wire_handle;
+		else if (cursor.valid() && cursor.pool() >= 1 && cursor.pool() <= 3)
+			interest.hud_target_wire_handle = cursor.packed;
 		const PlayerExtendedUplink up =
-				replication::build_player_uplink(world, *e, *ae);
+				replication::build_player_uplink(world, *e, *ae, interest);
 		outs = rt.Client_ProcessNetworkFrame(up, now);
 	} else {
 		outs = rt.Client_ProcessNetworkFrame(now);

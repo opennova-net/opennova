@@ -1,9 +1,13 @@
 #include <runtime/replication/entity_wire_bridge.h>
 
+#include <algorithm>  // std::min / std::sort (the uplink interest list)
+#include <climits>    // INT32_MIN (the _ftol2_sse indefinite)
 #include <cmath>      // std::lround
 
 #include <net/npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <net/npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
+#include <runtime/replication/client_state.h>  // the decoded rows the uplink interest list scores
+#include <runtime/replication/connection_fan.h> // view_distance_units (word_26C681E)
 #include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
 #include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <runtime/world/angle.h>       // spawn_angle_bam (the placement angle)
@@ -902,9 +906,192 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	return true;
 }
 
-PlayerExtendedUplink build_player_uplink(const world::World &world,
+namespace {
+
+// _ftol2_sse: the x87 top is stored as a double and converted with cvttsd2si,
+// a truncation whose out-of-range result is the integer indefinite 0x80000000.
+int32_t retail_ftol(double v) {
+	if (!(v > -2147483649.0 && v < 2147483648.0)) return INT32_MIN;
+	return static_cast<int32_t>(v);
+}
+
+// The `cdq; xor; sub` absolute value: abs(INT32_MIN) stays INT32_MIN.
+int32_t retail_abs32(int32_t v) {
+	const uint32_t sign = static_cast<uint32_t>(v >> 31);
+	return static_cast<int32_t>((static_cast<uint32_t>(v) ^ sign) - sign);
+}
+
+struct InterestPair {
+	int32_t key = 0;
+	uint16_t handle = 0xFFFF;
+};
+
+// [orig: CPairList_ShellSortByValue @0x526CF0 -- the Knuth gap sequence and the
+//  signed `cmp; jge` that stops the insertion at an equal key, so the sort is
+//  descending and NOT stable]
+void retail_shell_sort_descending(std::vector<InterestPair> &rows) {
+	size_t gap = 1;
+	while (gap <= rows.size() / 9)
+		gap = 3 * gap + 1;
+	do {
+		for (size_t i = gap; i < rows.size(); ++i) {
+			const InterestPair insert = rows[i];
+			size_t j = i;
+			while (j >= gap && rows[j - gap].key < insert.key) {
+				rows[j] = rows[j - gap];
+				j -= gap;
+			}
+			rows[j] = insert;
+		}
+		gap /= 3;
+	} while (gap != 0);
+}
+
+// The client's own top-N interest list, scored against the uplinking player.
+// Pool 0 then pool 1, each in slot order, admitting a live entity with an
+// items.def network callback, Flags bit 0 clear, that is not the player.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20]
+void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
+		const world::AiEntity &ae, const UplinkClientInputs &interest,
+		uint16_t out_handles[4], uint16_t out_scores[4]) {
+	// The caller's pre-fill and the builder's tail: an unused pair is
+	// (0xFFFF, 0). [orig: @0x4C1BC7..0x4C1BD8; @0x50E546..0x50E563]
+	for (int i = 0; i < 4; ++i) {
+		out_handles[i] = 0xFFFF;
+		out_scores[i] = 0;
+	}
+	if (interest.replica == nullptr) return;
+	// The player's carrier: groundEntity (+0x28), overridden by parentEntity
+	// (+0x16C). [orig: @0x50DF88..0x50DF99]
+	const world::EntityHandle player_target =
+			e.mounted && e.mount_target.valid() ? e.mount_target : e.ground_target;
+	const int32_t player_yaw = ae.heading;   // +0x10 [orig: @0x50DFA6]
+	const int32_t player_pitch = ae.pitch;   // +0x14 [orig: @0x50DF9D]
+	const int view_distance = static_cast<int16_t>(view_distance_units()); // movsx word_26C681E
+	constexpr double kMaxDistance = 2147418112.0;        // flt_7C19E0
+	constexpr double kRadiansToBam = -683565275.5764316; // dbl_7C57B8 (-2^31 / pi)
+
+	// The walk order: pool 0 then pool 1, each by slot. [orig: @0x50DFAF / @0x50E231]
+	std::vector<const ClientEntityState *> rows;
+	rows.reserve(interest.replica->entities.size());
+	for (const ClientEntityState &row : interest.replica->entities) {
+		const int pool = row.handle >> 12;
+		if (pool == 0 || pool == 1) rows.push_back(&row);
+	}
+	std::sort(rows.begin(), rows.end(),
+			[](const ClientEntityState *a, const ClientEntityState *b) {
+				return a->handle < b->handle;
+			});
+
+	std::vector<InterestPair> list;
+	list.reserve(rows.size());
+	for (const ClientEntityState *row : rows) {
+		const int pool = row->handle >> 12;
+		// The admission: a callback-bearing items.def class, Flags bit 0
+		// clear (a carried/attached body), not the player itself.
+		// [orig: @0x50DFED ItemTypeIndex, @0x50DFF7 Flags & 1, @0x50DFFD
+		//  itemDef, @0x50E004 entity != player, @0x50E008 itemDef+0x164]
+		if (row->cls != EntityClass::Player && row->cls != EntityClass::Infantry &&
+				row->cls != EntityClass::Vehicle && row->cls != EntityClass::Guided)
+			continue;
+		const uint32_t flags = row->state_flags_known ? row->state_flags : row->spawn_entity_flags;
+		if ((flags & 1u) != 0) continue;
+		if (row->handle == interest.self_wire_handle) continue;
+		// A pool-1 row is materialized at its own wire handle; a pool-0
+		// person lives only in the replica.
+		const world::Entity *native =
+				pool == 1 ? world.registry.get(world::EntityHandle{row->handle}) : nullptr;
+
+		// Distance in tiles: |d| with z halved, less the entity's boundRadius.
+		// [orig: @0x50E033..0x50E0B3]
+		const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(row->x) -
+				static_cast<uint32_t>(ae.pos[0]));
+		const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(row->y) -
+				static_cast<uint32_t>(ae.pos[1]));
+		const int32_t dz = static_cast<int32_t>(static_cast<uint32_t>(row->z) -
+				static_cast<uint32_t>(ae.pos[2]));
+		const int32_t dz_half = dz >> 1;
+		const double dxd = dx, dyd = dy, dzhd = dz_half;
+		const double dist3 = std::min(std::sqrt(dzhd * dzhd + dxd * dxd + dyd * dyd), kMaxDistance);
+		const int32_t bound_q16 = native != nullptr ? world::to_fixed(native->bound_radius) : 0;
+		int32_t distance = static_cast<int32_t>(static_cast<uint32_t>(retail_ftol(dist3)) -
+				static_cast<uint32_t>(bound_q16)) >> 16;
+		if (distance > 2048) continue;
+		if (distance < 0) distance = 0;
+		int32_t distance_score = 1124 - distance;
+		if (distance_score < 0) distance_score = 0;
+
+		// The view angle: bearing and elevation against Yaw/Pitch.
+		// [orig: @0x50E0BB..0x50E13A]
+		const double planar = std::min(std::sqrt(dyd * dyd + dxd * dxd), kMaxDistance);
+		const int32_t planar_int = retail_ftol(planar);
+		const int32_t bearing = retail_ftol(std::atan2(dyd, dxd) * kRadiansToBam);
+		int32_t yaw_term = retail_abs32(static_cast<int32_t>(
+				0u - static_cast<uint32_t>(player_yaw) - static_cast<uint32_t>(bearing))) >> 24;
+		if (yaw_term > 64) yaw_term += 64;
+		const int32_t elevation = retail_ftol(
+				std::atan2(static_cast<double>(dz), static_cast<double>(planar_int)) * kRadiansToBam);
+		const int32_t pitch_term = retail_abs32(static_cast<int32_t>(
+				0u - static_cast<uint32_t>(player_pitch) - static_cast<uint32_t>(elevation))) >> 25;
+		const int32_t angle = 256 - pitch_term - yaw_term;
+
+		const uint8_t team = row->team_known ? row->team : 0;
+		const int32_t enemy = team != 0 && team != e.team ? 1 : 0;
+		int32_t los = 0;
+		if (angle > 128 && distance < view_distance) {
+			// [orig: Entity_CheckLineOfSightTerrainAndEntities(player, entity,
+			//  player+4, entity+4, 0, 0) @0x50E179]
+			const int32_t end[3] = {row->x, row->y, row->z};
+			los = world.collision == nullptr ||
+					world.collision->entity_los_clear(world, e.handle,
+							native != nullptr ? native->handle : world::EntityHandle{},
+							ae.pos, end, 0, false)
+					? 1 : 0;
+		}
+		const int32_t target = row->handle == player_target.packed ? 1 : 0;
+		const int32_t cursor = row->handle == interest.hud_target_wire_handle ? 1 : 0;
+		int32_t key = 0;
+		if (pool == 0) {
+			// Standing or riding an EWeap: parentEntity null, else the parent
+			// def's attrib bit 0x20 (no def: 0). [orig: @0x50E187..0x50E1B0]
+			int32_t visible = 1;
+			if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0) {
+				const world::Entity *parent =
+						world.registry.get(world::EntityHandle{row->carrier_handle});
+				visible = parent != nullptr && parent->has_item_def &&
+						(parent->item_attrib & world::kItemAttribEweap) != 0 ? 1 : 0;
+			}
+			// The player-class bit, Flags 0x100 -- the Player class row
+			// (present_rows.cpp's same mapping). [orig: @0x50E1CF]
+			const int32_t is_player = row->cls == EntityClass::Player ? 1 : 0;
+			key = distance_score + 2 * (angle + 25 * (enemy + 15 * cursor +
+					2 * (los + visible + 10 * target) + is_player));
+		} else {
+			// occupantEntity (+0x170). [orig: @0x50E40A]
+			const int32_t occupied =
+					native != nullptr && native->primary_occupant.valid() ? 1 : 0;
+			key = distance_score + 2 * (angle + 25 * (enemy + 15 * cursor +
+					2 * (los + 2 * (target + occupied + 4 * target))));
+		}
+		if (distance < view_distance) key += 200; // [orig: @0x50E1F9 / @0x50E457]
+		if ((flags & 1u) != 0) key >>= 4;         // [orig: @0x50E208] (unreachable past the filter)
+		list.push_back({key, row->handle});
+	}
+	retail_shell_sort_descending(list);
+	// The top entries: a key above 0xFFFF saturates. [orig: @0x50E4C0..0x50E53C]
+	const size_t count = std::min<size_t>(list.size(), 4);
+	for (size_t i = 0; i < count; ++i) {
+		out_handles[i] = list[i].handle;
+		out_scores[i] = list[i].key > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(list[i].key);
+	}
+}
+
+} // namespace
+
+PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::Entity &e,
-                                         const world::AiEntity &ae) {
+                                         const world::AiEntity &ae,
+                                         const UplinkClientInputs &interest) {
 	PlayerExtendedUplink up; // wire defaults include the no-carrier handle 0xFFFF
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
@@ -915,12 +1102,17 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	up.pos_z = ae.pos[2];
 	up.heading = static_cast<int16_t>(ae.heading >> 16);
 	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
-	// Retail's op-3 builder uses the mounted parent first, else groundEntity. A
-	// resolved carrier changes both position and heading into its local frame;
-	// pitch passes through unchanged. A stale relationship cannot exist as a raw
-	// pointer in retail, so the handle port safely falls back to FFFF/world pose.
-	// [orig: Player_BuildTag0CInputBody @0x42A550 ->
-	// Entity_TransformWorldToLocal @0x43BB50; heading subtraction @0x43bb7b]
+	// Retail's op-3 builder reads groundEntity (+0x28) alone, which the player
+	// body points at parentEntity on every update while mounted; the native
+	// player body keeps no such store, so the mount is taken first here -- the
+	// same entity in steady state. A resolved carrier changes both position and
+	// heading into its local frame; pitch passes through unchanged. A stale
+	// relationship cannot exist as a raw pointer in retail, so the handle port
+	// safely falls back to FFFF/world pose.
+	// [orig: NetPacket_SerializePlayerState case 3 `mov ecx, [edi+28h]` @0x4C141D;
+	//  Entity_UpdateInfantryPlayerBody @0x4B41A2..0x4B41B4 `groundEntity =
+	//  parentEntity`; Entity_TransformWorldToLocal @0x43BB50; heading
+	//  subtraction @0x43bb7b]
 	world::EntityHandle carrier_handle;
 	if (e.mounted && e.mount_target.valid())
 		carrier_handle = e.mount_target;
@@ -976,6 +1168,19 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def.
 	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
 	up.equipped_adm_index = e.equipped_adm_index;
+	// The four interest pairs: the client's own top-4 list, handle then score
+	// per pair [orig: case 3 @0x4C1BC7..0x4C1C9B -- Server_BuildEntityPriorityListForPlayer
+	// (entity, handles, scores, 4) @0x4C1BE9].
+	uint16_t handles[4], scores[4];
+	build_uplink_interest_pairs(world, e, ae, interest, handles, scores);
+	up.priority_handle_0 = handles[0];
+	up.priority_score_0 = scores[0];
+	up.priority_handle_1 = handles[1];
+	up.priority_score_1 = scores[1];
+	up.priority_handle_2 = handles[2];
+	up.priority_score_2 = scores[2];
+	up.priority_handle_3 = handles[3];
+	up.priority_score_3 = scores[3];
 	return up;
 }
 

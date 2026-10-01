@@ -1198,7 +1198,7 @@ std::vector<uint8_t> make_0c_uplink(uint16_t handle, int32_t x, int32_t y, int32
 // Production local-player source: build the exact uplink from the split Entity /
 // AiEntity stores, then wrap it in the real 0x0C entity sub-packet.
 std::vector<uint8_t> make_built_0c_uplink(
-		const w::World &world, uint16_t handle,
+		w::World &world, uint16_t handle,
 		const w::Entity &local_entity, const w::AiEntity &local_ai,
 		nw::PlayerExtendedUplink *built = nullptr) {
 	nw::EntityPacketSubHeader hdr;

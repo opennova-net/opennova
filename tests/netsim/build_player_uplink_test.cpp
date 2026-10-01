@@ -6,6 +6,7 @@
 // moves on the host). [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
 // NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
 
+#include <runtime/replication/client_state.h>
 #include <runtime/replication/connection_fan.h>
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -110,8 +111,114 @@ bool run_field_mapping() {
 	if (!expect(up.state_flags_byte == 0x38u,
 	            "state flags = the RAW entity+0x24 low byte, unmasked on the write side"))
 		return false;
-	if (!expect(up.priority_handle_0 == 0 && up.priority_score_0 == 0,
-	            "requested-interest feedback is not yet supplied by this builder")) return false;
+	// No decoded entities: retail's list builder fills every unused pair with
+	// (0xFFFF, 0) -- handle 0 would name pool-0 slot 0 to the host's
+	// tracked-slot walk. [orig: Server_BuildEntityPriorityListForPlayer
+	// @0x50E546..0x50E563; the caller's pre-fill @0x4C1BC7..0x4C1BD8]
+	if (!expect(up.priority_handle_0 == 0xFFFF && up.priority_score_0 == 0 &&
+	                    up.priority_handle_1 == 0xFFFF && up.priority_score_1 == 0 &&
+	                    up.priority_handle_2 == 0xFFFF && up.priority_score_2 == 0 &&
+	                    up.priority_handle_3 == 0xFFFF && up.priority_score_3 == 0,
+	            "an empty interest list is four (0xFFFF, 0) pairs")) return false;
+	return true;
+}
+
+// The client's own interest list: the decoded pool-0 then pool-1 entities,
+// scored against the uplinking player's pose and sorted descending; the top
+// four ride the 0x0C. Hand-derived from the witnessed integer pipeline
+// (distance tiles, the x87 view-angle terms truncated by _ftol2_sse, the
+// pool-0 and pool-1 key compositions):
+//   H 0x1004 vehicle, enemy, the HUD cursor, (200,-100,10): 2177
+//   D 0x1001 vehicle, the player's carrier (ground link), (500,0,0): 2136
+//   A 0x0000 enemy Player, (100,0,0): 1736
+//   B 0x1000 neutral vehicle, (30,40,0): 1512
+//   C 0x0001 friendly infantry behind, (-20,5,2): 1350 (fifth -- dropped)
+// Excluded: the uplinking player's own row, a row whose Flags bit 0 is set
+// (carried), a row with no network class, and a row past 2048 tiles.
+// With the view distance at 600 the in-view rows gain +200 and the facing
+// ones the LOS +100 (no collision world: nothing blocks the ray).
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20 -- filter
+//  @0x50DFED..0x50E00F, distance @0x50E033..0x50E0B3, angles
+//  @0x50E0BB..0x50E13A, LOS gate @0x50E158..0x50E183, pool-0 key
+//  @0x50E185..0x50E213, pool-1 key @0x50E405..0x50E46F, sort @0x50E493,
+//  output @0x50E4C0..0x50E563]
+bool run_interest_pairs_top4() {
+	auto row = [](uint16_t handle, nw::EntityClass cls, uint8_t team, double x, double y,
+			double z) {
+		ns::ClientEntityState r;
+		r.handle = handle;
+		r.cls = cls;
+		r.team = team;
+		r.team_known = true;
+		r.x = w::to_fixed(x);
+		r.y = w::to_fixed(y);
+		r.z = w::to_fixed(z);
+		return r;
+	};
+	ns::ClientState replica;
+	replica.entities.push_back(row(0x1004, nw::EntityClass::Vehicle, 2, 200, -100, 10));
+	replica.entities.push_back(row(0x0002, nw::EntityClass::Player, 1, 0, 0, 0)); // self
+	replica.entities.push_back(row(0x0000, nw::EntityClass::Player, 2, 100, 0, 0));
+	replica.entities.push_back(row(0x0001, nw::EntityClass::Infantry, 1, -20, 5, 2));
+	ns::ClientEntityState carried = row(0x0003, nw::EntityClass::Player, 2, 10, 0, 0);
+	carried.state_flags = 0x01;
+	carried.state_flags_known = true;
+	replica.entities.push_back(carried);
+	replica.entities.push_back(row(0x0004, nw::EntityClass::Unknown, 2, 5, 0, 0));
+	replica.entities.push_back(row(0x1000, nw::EntityClass::Vehicle, 0, 30, 40, 0));
+	replica.entities.push_back(row(0x1001, nw::EntityClass::Vehicle, 1, 500, 0, 0));
+	replica.entities.push_back(row(0x1002, nw::EntityClass::Vehicle, 0, 3000, 0, 0));
+
+	w::World world;
+	w::Entity self{};
+	self.team = 1;
+	self.ground_target = w::EntityHandle{0x1001}; // not in the registry: world pose stays
+	w::AiEntity body{};
+	ns::UplinkClientInputs source;
+	source.replica = &replica;
+	source.self_wire_handle = 0x0002;
+	source.hud_target_wire_handle = 0x1004;
+
+	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, self, body, source);
+	if (!expect(up.priority_handle_0 == 0x1004 && up.priority_score_0 == 2177 &&
+	                    up.priority_handle_1 == 0x1001 && up.priority_score_1 == 2136 &&
+	                    up.priority_handle_2 == 0x0000 && up.priority_score_2 == 1736 &&
+	                    up.priority_handle_3 == 0x1000 && up.priority_score_3 == 1512,
+	            "top-4 interest pairs in descending score order")) {
+		std::fprintf(stderr, "  got %04x/%u %04x/%u %04x/%u %04x/%u\n",
+				up.priority_handle_0, up.priority_score_0, up.priority_handle_1,
+				up.priority_score_1, up.priority_handle_2, up.priority_score_2,
+				up.priority_handle_3, up.priority_score_3);
+		return false;
+	}
+
+	ns::set_view_distance_units(600);
+	const nw::PlayerExtendedUplink in_view = ns::build_player_uplink(world, self, body, source);
+	ns::set_view_distance_units(0); // process-global: restore for the sibling tests
+	if (!expect(in_view.priority_handle_0 == 0x1004 && in_view.priority_score_0 == 2477 &&
+	                    in_view.priority_handle_1 == 0x1001 && in_view.priority_score_1 == 2436 &&
+	                    in_view.priority_handle_2 == 0x0000 && in_view.priority_score_2 == 2036 &&
+	                    in_view.priority_handle_3 == 0x1000 && in_view.priority_score_3 == 1812,
+	            "the view-distance terms (+200 in view, +100 LOS) raise the in-view rows")) {
+		std::fprintf(stderr, "  got %04x/%u %04x/%u %04x/%u %04x/%u\n",
+				in_view.priority_handle_0, in_view.priority_score_0,
+				in_view.priority_handle_1, in_view.priority_score_1,
+				in_view.priority_handle_2, in_view.priority_score_2,
+				in_view.priority_handle_3, in_view.priority_score_3);
+		return false;
+	}
+
+	// Fewer than four candidates: the tail is (0xFFFF, 0).
+	ns::ClientState two;
+	two.entities.push_back(row(0x1000, nw::EntityClass::Vehicle, 0, 30, 40, 0));
+	two.entities.push_back(row(0x0000, nw::EntityClass::Player, 2, 100, 0, 0));
+	source.replica = &two;
+	const nw::PlayerExtendedUplink short_list = ns::build_player_uplink(world, self, body, source);
+	if (!expect(short_list.priority_handle_0 == 0x0000 && short_list.priority_score_0 == 1736 &&
+	                    short_list.priority_handle_1 == 0x1000 && short_list.priority_score_1 == 1512 &&
+	                    short_list.priority_handle_2 == 0xFFFF && short_list.priority_score_2 == 0 &&
+	                    short_list.priority_handle_3 == 0xFFFF && short_list.priority_score_3 == 0,
+	            "a two-entry list pads its tail with (0xFFFF, 0)")) return false;
 	return true;
 }
 
@@ -592,6 +699,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 int main() {
 	bool ok = true;
 	ok = run_field_mapping() && ok;
+	ok = run_interest_pairs_top4() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;

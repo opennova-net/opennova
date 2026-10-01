@@ -12,6 +12,8 @@
 
 namespace opennova::replication {
 
+struct ClientState; // runtime/replication/client_state.h
+
 // The single deliberate bridge between the engine/runtime/world runtime entity model
 // (world::Entity / EntityRegistry) and the engine/net/novaworld wire model
 // (GameEntitySnapshot / the §5.x compact records). This is the ONLY place the two
@@ -103,6 +105,19 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 // (Entity.flags bit1) is set.
 bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 
+// What the client-side interest list reads beyond the uplinking player itself: the
+// decoded pool-0/1 entities (a joiner's remote persons live only there; its pool-1
+// rows are also materialized into the World at the same handle), the uplinking
+// player's own wire handle (its row is skipped like retail's `entity != player`
+// test), and the HUD target cursor entity (g_HUDTargetCursorEntity) as a wire
+// handle. No replica = no candidates: the list is retail's empty form.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20]
+struct UplinkClientInputs {
+	const ClientState *replica = nullptr;
+	uint16_t self_wire_handle = 0xFFFF;
+	uint16_t hud_target_wire_handle = 0xFFFF;
+};
+
 // The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended
 // (type-10) player-uplink BODY (the 43-byte PlayerExtendedUplink) from the joiner's own
 // live local-player state, sent each frame so the HOST SNAPs it via apply_player_intent.
@@ -110,14 +125,17 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent);
 // writes back); heading/pitch are the BAM32 high half (the inverse of apply_player_intent's
 // `intent.heading << 16`). A live mount_target wins over ground_target; when the selected
 // carrier resolves in `world`, the handle plus carrier-local position/heading are emitted.
-// Otherwise the existing FFFF/world-pose form is retained. The anti-cheat weapon/fire
-// counters are left 0 — the §5.38a
-// receive path has NO counter gate, so the host read-apply ignores them. The 5-byte
-// sub-header (handle = the host-assigned wire handle H, item_type_id = e.item_id, sub_op =
-// 0x0A) is built by the caller. [orig: Player_BuildTag0CInputBody @0x42A550; inverse of
-// NetPacket_SerializePlayerState case 4 @0x4c2042-0x4c20a9.]
-PlayerExtendedUplink build_player_uplink(const world::World &world,
+// Otherwise the existing FFFF/world-pose form is retained. The trailing four
+// (handle, score) pairs are the client's own top-4 interest list over `interest`
+// (Server_BuildEntityPriorityListForPlayer, called from the serializer's case 3);
+// a retail host floors those rows' 0x0A scores and sends them past its distance gate.
+// The 5-byte sub-header (handle = the host-assigned wire handle H, item_type_id =
+// e.item_id, sub_op = 0x0A) is built by the caller. [orig: Player_BuildTag0CInputBody
+// @0x42A550 -> NetPacket_SerializePlayerState case 3 @0x4C1413..0x4C1C9B, the pair
+// list call @0x4C1BE9; inverse of case 4 @0x4c2042-0x4c20a9.]
+PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::Entity &e,
-                                         const world::AiEntity &ae);
+                                         const world::AiEntity &ae,
+                                         const UplinkClientInputs &interest = {});
 
 } // namespace opennova::replication
