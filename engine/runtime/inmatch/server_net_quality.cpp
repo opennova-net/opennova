@@ -7,6 +7,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/replication_model.h>
 #include <net/npwire/session_hello.h>   // DisconnectEvent
+#include <runtime/inmatch/novaworld_link.h> // the NovaWorld exit
 #include <runtime/inmatch/server_tick.h> // Server_StageHostDisconnect, CONTROL_REQUEST_LIVE_GATE_TICKS
 #include <runtime/replication/net_quality.h>
 #include <runtime/world/world.h>
@@ -125,6 +126,11 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	if (ctx.net_quality_sample_countdown > 0) return;
 	ctx.net_quality_sample_countdown = kNetQualitySampleFrames;
 	if (!ctx.is_in_session) return;
+	// The NovaWorld exit leads the block [orig: @0x52655d..0x52657c].
+	if (novaworld_session_ended(ctx.transport_mode == NetworkType::NovaWorld, ctx.nwu_in_use,
+				ctx.nwu_session_role)) {
+		ctx.mission_exit_reason = kMissionExitNovaWorld;
+	}
 	// The pre-round hold clears the send window instead of sampling it
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0 — `g_NetSpawnSuspended ||
 	//  g_SpawnSuccessGate || g_PreRoundDelayTimer` -> CNetStats_ClearSendCounters

@@ -44,10 +44,6 @@ void MissionSetupOptions::_bind_methods() {
 	SETUP_OPTION(Variant::STRING, player_name)
 	SETUP_OPTION(Variant::INT, max_players)
 	SETUP_OPTION(Variant::STRING, channel)
-	SETUP_OPTION(Variant::STRING, nw_gate_host)
-	SETUP_OPTION(Variant::INT, nw_gate_port)
-	SETUP_OPTION(Variant::INT, region_index)
-	SETUP_OPTION(Variant::STRING, advertise)
 #undef SETUP_OBJECT
 #undef SETUP_OPTION
 }

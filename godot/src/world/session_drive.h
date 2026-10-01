@@ -11,6 +11,7 @@
 #include "network/net_session_policy.h"
 #include "object/character_join_profile.h"
 #include "player/player_spawn_loadout.h"
+#include "world/post_mission_route.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
 
@@ -21,7 +22,8 @@ namespace godot {
 
 class GameWorld;
 class MissionRoot;
-class NovaWorldHost;
+class NovaWorldClient;
+class NwuHostRole;
 
 // The drive between a typed session request and an admitted world -- the
 // engine side of a net-session load (the former net_session_drive.gd, ADR
@@ -49,20 +51,12 @@ class NovaWorldHost;
 // pre-load admission, and the world tick steps post-load admission.
 class SessionDrive {
 public:
-	// Arms the NovaWorld gate registration for a LAN listen host. No producer
-	// arms it today (the old opts["listen_server"] flag lost its producer in
-	// the #426 restructure, and the typed MissionSetupOptions record dropped
-	// the field nothing wrote), so gate registration stays latent; this drive
-	// keeps the latch -- the typed translation of that guard, not a silent
-	// revival.
-	static constexpr bool GATE_REGISTRATION_ARMED = false;
-
 	explicit SessionDrive(GameWorld *p_world);
 
 	// Load a mission as a LAN co-op HOST. Same load path as the world's
 	// load_mission, but the runtime starts the in-process listen server (ADR
 	// 0011) bound to a real socket transport and, on the NovaWorld channel,
-	// registered with the gate. `options` is the sim-shaped session request
+	// hosted by the NovaWorld session the shell handed over. `options` is the sim-shaped session request
 	// every host producer projects (ADR 0017): the mp.mnu host screen, the
 	// NovaWorld panel, and the --lan-host launch flag. Returns the same codes
 	// as load_mission.
@@ -112,7 +106,7 @@ public:
 	// by the world's start_runtime; opts must already carry resource_root.
 	void stage_runtime_options(const Ref<MissionSetupOptions> &p_opts);
 	// Post-runtime-start hook, called by the world once its runtime is live:
-	// the NovaWorld gate registration for a browsable listen host. (The
+	// a hosting NovaWorld session meets its match (bind_nw_host). (The
 	// joiner's admission watchdog arms inside this drive's own load entries,
 	// not here.)
 	void on_runtime_started(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name);
@@ -122,16 +116,26 @@ public:
 	void observe_tick(MissionRoot *p_runtime);
 	// One teardown for everything this drive staged or stood up, called from
 	// the world's unload(): the preload sim/root, the policy's windows +
-	// notification latches, the typed request staging, and the gate
-	// registration.
+	// notification latches, the typed request staging, and the NovaWorld
+	// session unless the shell took it back first.
 	void reset();
+	// The NovaWorld session (a NovaWorldClient), handed over by the shell with a
+	// joiner or host load: retail keeps the NWU session playing or hosting
+	// through the match (the N icon's input, the NovaWorld exit, the hosted
+	// match's registration), so the node moves under the world and lives until
+	// the shell takes it back (release_nw_client) or reset() stops it.
+	void adopt_nw_client(NovaWorldClient *p_client);
+	// The shell's normal exit back to the NovaWorld menu takes the session back
+	// out of the world, still connected (null when none was adopted).
+	NovaWorldClient *release_nw_client();
+	// The post-mission router's verdict for an exit reason (inmatch::route_mission_exit) on
+	// this world's session; a NovaWorld network type rides an adopted NovaWorld session.
+	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
 
-	// The bound signal targets of the gate registration (the world forwards).
-	void on_nw_host_registered();
-	void on_nw_host_error(const String &p_message);
+	// The bound signal targets of the hosting session (the world forwards).
 	// A ServerCommand from the NovaWorld service: run it on the in-match host,
-	// then the two shell legs of its outcome -- drop the gate registration when
-	// the service punted the host's own slot, republish the changed server name /
+	// then the two shell legs of its outcome -- leave the hosting when the
+	// service punted the host's own slot, republish the changed server name /
 	// message columns on the next refresh.
 	void on_nw_host_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
@@ -155,29 +159,34 @@ private:
 	void update_joiner_admission_signals();
 	void fail_join_preload(const String &p_reason);
 	void cancel_join_preload();
-	void maybe_start_nw_host(const Ref<MissionSetupOptions> &p_opts, const String &p_bms_name);
-	NovaWorldHost *nw_host() const;
-	// Mirror the admitted joiners onto the gate registration's per-slot roster
+	// Bind a hosting session to the live hosted match: the GSID/AppId, the
+	// join-ticket arm and the host's own roster slot. unbind_nw_host undoes the
+	// in-match half (the GSID, the join-ticket hook, the roster mirror).
+	void bind_nw_host(const Ref<MissionSetupOptions> &p_opts);
+	void unbind_nw_host();
+	// Mirror the admitted joiners onto the hosting session's per-slot roster
 	// (the PlayerList + ClientHostPlayerAdded/Removed).
-	void sync_nw_host_roster(NovaWorldHost *p_host, const Ref<Simulation> &p_sim);
-	// The gate registration's teardown (ClientStopHosting + the node), with the
-	// in-match host's NovaWorld state -- the GSID it advertises, the join-ticket
-	// arm and its request hook -- cleared first. reset() and a service punt of
-	// the host's own slot both end here; the match itself keeps running.
-	// `p_from_host_signal` defers the node's stop when the caller is one of the
-	// registration node's own signal handlers.
-	void stop_nw_host(bool p_from_host_signal);
+	void sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation> &p_sim);
+	NovaWorldClient *nw_client() const;
+	void stop_nw_client();
+	// Hand the match the NovaWorld session's facts once a tick. The feed starts
+	// at the session's first hosting/playing word: the joiner is already
+	// playing at the handoff and the host already hosting, both before the
+	// mission starts. A node gone mid-match reads as a reset session (the word
+	// 0, the gate's NWU address still known), which the 62-frame block exits on.
+	void sync_nwu_session(const Ref<Simulation> &p_sim);
 
 	GameWorld *world_ = nullptr;
 	// The native session policy: windows, latches, edge ordering, reason text.
 	Ref<NetSessionPolicy> policy_;
-	// NovaWorldHost: registers a LAN/co-op listen host with the NovaWorld gate
-	// so a retail client can browse + join it (F1). Only created when a gate
-	// was supplied (MissionSetupOptions.nw_gate_host); absent for pure-LAN
-	// play. Fed the admitted-joiner roster from observe_tick(), torn down in
-	// reset(). A child node of the world, held by identity.
-	ObjectID nw_host_id_;
-	// The roster slots last mirrored onto the gate registration: slot -> the
+	// The adopted NovaWorldClient (the joiner's or host's NWU session), held by
+	// identity.
+	ObjectID nw_client_id_;
+	// Set while a hosting session is bound to the live hosted match.
+	bool nw_host_bound_ = false;
+	// Set once the feed starts (sync_nwu_session); cleared by reset().
+	bool nwu_feed_live_ = false;
+	// The roster slots last mirrored onto the hosting session: slot -> the
 	// per-slot signature (name|ip:port|team), so only a changed slot re-sends.
 	std::map<int, std::string> nw_roster_sent_;
 	// The typed session request at the shell seam (ADR 0017): exactly one is

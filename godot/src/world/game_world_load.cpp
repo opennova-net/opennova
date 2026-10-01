@@ -321,7 +321,12 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	timeline->end_span();
 	if (runtime_error != OK) {
 		timeline->finish();
+		// A load abort leaves the mission the way the player's own quit does: the
+		// shell's post-mission route decides the NovaWorld session, so it outlives
+		// this unload.
+		NovaWorldClient *session = drive_.release_nw_client();
 		unload();
+		drive_.adopt_nw_client(session);
 		return runtime_error;
 	}
 	// The non-foliage loaded-.3DI page freezes once here (the load plan's

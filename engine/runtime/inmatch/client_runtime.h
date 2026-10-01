@@ -286,13 +286,19 @@ public:
 	// this client frame, as retail's server tick runs after the indicators'
 	// update.
 	void raise_net_quality_link_errors(uint32_t mask);
-	// What the NovaWorld N icon reads (hud::NovaWorldLinkFacts): the network
-	// type, the NWU session in use and its state flags. Nothing feeds it yet:
-	// the NovaWorld joiner closes its NWU session at the in-match handoff and
-	// the NovaWorld listen host keeps the Lan network type (D-NET-220), so the
-	// icon stays hidden.
+	// The NovaWorld link (hud::NovaWorldLinkFacts): the network type, the NWU
+	// session in use, its state flags and its hosting/playing word, as the
+	// shell's NovaWorld session reports them each tick. The N icon reads the
+	// first three, the joiner's 62-frame block the exit below.
 	void set_novaworld_link(const hud::NovaWorldLinkFacts &facts) { novaworld_link_ = facts; }
 	const hud::NovaWorldLinkFacts &novaworld_link() const { return novaworld_link_; }
+	// g_MissionExitReason as the client's legs store it: the joiner's main-frame
+	// NovaWorld check, the NWU session's own stop-playing / punt handlers
+	// (inmatch/novaworld_link.h), else what the in-match connection's latched
+	// disconnect record maps to (inmatch/mission_exit.h); nonzero exits the
+	// mission, and the post-mission router reads it.
+	void set_mission_exit_reason(int32_t reason) { mission_exit_reason_ = reason; }
+	int32_t mission_exit_reason() const;
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;
@@ -760,6 +766,7 @@ private:
 	// every 62 frames (0 = no measurement) and the connection indicators.
 	hud::NetQualityIndicators net_indicators_;
 	hud::NovaWorldLinkFacts novaworld_link_;
+	int32_t mission_exit_reason_ = 0;                    // [orig: g_MissionExitReason]
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.

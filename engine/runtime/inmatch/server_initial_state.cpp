@@ -71,13 +71,13 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 	if ((r.mp_attributes & GameConfig::kMpAttribTeamChoose) != 0)
 		flags = server_flag::kTeamChoice;
 	switch (static_cast<uint32_t>(ctx.transport_mode)) {
-	case 1: flags |= 0x400u; break;           // single-player host
+	case 1: flags |= 0x400u; break;           // NovaWorld
 	case 2: flags |= 0x100u; break;           // LAN
 	case 3: flags |= 0x200u; break;           // (mode 3)
 	default: break;
 	}
 	flags |= 0x800u;
-	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // SP clears it
+	if (static_cast<uint32_t>(ctx.transport_mode) == 1) flags &= ~0x800u; // NovaWorld clears it
 	if (!gs.server_password.empty()) flags |= server_flag::kServerPassword;
 	// The password bit is NESTED under spectators-enabled: a configured
 	// password with spectating off advertises neither bit.

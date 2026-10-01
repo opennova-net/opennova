@@ -39,6 +39,9 @@ std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg) {
 	set_or_create(setup, "PLoad", "");
 	set_or_create(setup, "Exp", cfg.expansion);
 	set_or_create(setup, "LAN", std::to_string(cfg.lan_only));
+	// [orig: CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 — sprintf("%ld",
+	//  session+0x500) -> SetOrCreate "ReconnectCounter" @0x4ce36d, called last @0x4d0e08]
+	set_or_create(setup, "ReconnectCounter", std::to_string(cfg.reconnect_counter));
 	return setup;
 }
 

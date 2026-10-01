@@ -581,6 +581,11 @@ struct NapiNPConnection {
 	                               // leg compares a repeat 0x42 against [orig: session_keys.client_id
 	                               // == CI && session_keys.remote_key == CK @ HandleClientJoin 0x62b750]
 	uint32_t server_sk = 0;        // our ServerAuth.SK
+	// The reconnect counters a 0x42 hands the node: DCNT as sent, RCNT = the 0x42's RCNT + 1
+	// when it counted a disconnect; the 0x82 echoes RCNT. [orig: NapiNPProtocol_HandleClientJoin
+	//  @0x62c28d..0x62c2a3 (conn+0x734 / +0x738); SendSessionInit @0x62125d]
+	uint32_t dcnt = 0;
+	uint32_t rcnt = 0;
 	SessionSequencing seq = make_jo_game_session_sequencing();
 	                               // outbound seq (from 1) + last inbound ack [ADR 0013 shared framing]
 	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
