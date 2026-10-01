@@ -1401,9 +1401,12 @@ bool run_never_template_disables_reap_and_is_advertised() {
 	              "the silent peer survives ten minutes under a NEVER template");
 }
 
-// The host's configured `mpmaxpacketsize` rides CS field 13 of both 0x82 blocks.
-// [orig: CNapiNetwork_Init @0x4ca4a0 — field 13 @0x4caa53..0x4caa76; SendSessionInit
-//  @0x620ef0 emits the live blocks]
+// The host's configured `mpmaxpacketsize` is the template's CS field 13, and the new-connection
+// callback negotiates it down to the joiner's MPS before SendSessionInit emits the live blocks:
+// a 2000 host and a 1300 joiner advertise 1300 in both 0x82 blocks (D-NET-234).
+// [orig: CNapiNetwork_Init @0x4ca4a0 — field 13 @0x4caa53..0x4caa76; NapiNPServer_
+//  HandleNewConnection @0x4c81a9 (`> field 13 -> field 13` keeps the smaller); OnStateChange
+//  @0x6261cd runs it before SendSessionInit @0x6261fc]
 bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig config;
@@ -1428,10 +1431,92 @@ bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	int field13_blocks = 0;
 	for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
 		for (const CsField &field : *block)
-			if (field.field_index == 13 && field.value == 2000u) ++field13_blocks;
+			if (field.field_index == 13 && field.value == 1300u) ++field13_blocks;
 	}
 	return expect(field13_blocks == 2,
-	              "a configured mpmaxpacketsize of 2000 lands in CS field 13 of both 0x82 blocks");
+	              "a 2000 host negotiates the 1300 MPS joiner down to 1300 in both 0x82 blocks");
+}
+
+// D-NET-234: the joiner's MPS tag negotiates the connection's packet ceiling: clamped to
+// [100, the host's field 13], stored, advertised in the 0x82 and installed by the first sequenced
+// packet's two CS updates (mask 0x2000); an absent MPS negotiates nothing and sends no update.
+// [orig: NapiNPServer_HandleNewConnection @0x4c818d..0x4c81e4; LoadFromConnTags "MPS" @0x7ca070]
+bool run_mps_negotiates_the_connection_ceiling() {
+	struct Case {
+		const char *mps; // nullptr = no MPS tag
+		uint32_t expected;
+		bool settings;
+	};
+	const Case cases[] = {{"576", 576u, true}, {"50", 100u, true}, {"5000", 1300u, true},
+			{nullptr, 1300u, false}};
+	uint16_t port = 30750;
+	for (const Case &c : cases) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		const PeerAddr peer{0x0100007Fu, port++};
+		const std::string client_scrk =
+				"MPSNCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
+		ClientHello hello = make_jointoperations_client_hello(1);
+		auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+		(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
+		ClientAuth auth = make_jointoperations_client_auth(1, 0xC0FFEE60u, kHostKey,
+				"TestJoiner", client_scrk);
+		for (const auto &field : {std::pair{"BT", "0"}, std::pair{"VN", "2"},
+				std::pair{"BN", "1"}, std::pair{"DB", "0"}, std::pair{"MBN", "20042002"},
+				std::pair{"SOPD", "180"}}) {
+			auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
+		}
+		if (c.mps != nullptr) auth.cu.push_back(make_client_cu_chunk(2, "MPS", c.mps));
+		auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto ra = inmatch::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!ra.outbound.empty() &&
+		                    nw_decode_inbound(ra.outbound[0].data(), ra.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH &&
+		                    parse_server_auth(body.data(), body.size(), sa),
+		            "the MPS host admits the join"))
+			return false;
+		int field13_blocks = 0;
+		for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
+			for (const CsField &field : *block)
+				if (field.field_index == 13 && field.value == c.expected) ++field13_blocks;
+		}
+		const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.back();
+		if (!expect(field13_blocks == 2 &&
+		                    conn.timeouts.max_packet_bytes == static_cast<int32_t>(c.expected),
+		            "the negotiated ceiling is stored and advertised in both 0x82 blocks"))
+			return false;
+		if (!c.settings) {
+			if (!expect(ra.outbound.size() == 1, "an absent MPS queues no CS update packet"))
+				return false;
+			continue;
+		}
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> settings;
+		std::vector<uint8_t> session_body;
+		if (!expect(ra.outbound.size() == 2 &&
+		                    nw_decode_inbound(ra.outbound[1].data(), ra.outbound[1].size(), op,
+		                            session_body) &&
+		                    op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+		                    decode_protocol_packet_plaintext(session_body.data(), session_body.size(),
+		                            conn.server_scrk, header, settings) &&
+		                    header.seq_num == 1 && settings.size() == 2,
+		            "the first sequenced packet carries the two CS updates"))
+			return false;
+		for (std::size_t i = 0; i < settings.size(); ++i) {
+			const CsConfigUpdate update =
+					decode_cs_config_update(settings[i].payload.data(), settings[i].payload.size());
+			if (!expect(settings[i].flags.raw == 0xA0 && update.mask == 0x2000u &&
+			                    update.to_dir0 == (i == 1) &&
+			                    update.value[13] == static_cast<int32_t>(c.expected),
+			            "each CS update installs the negotiated field 13, direction byte 0 then 1"))
+				return false;
+		}
+	}
+	return true;
 }
 
 bool run_game_environment_and_admission_fsm_are_enforced() {
@@ -1453,7 +1538,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		const PeerAddr peer{0x0100007Fu, 31300};
 		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 		auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
-		if (!expect(result.outbound.size() == 2 && inmatch::connection_count(ctx) == 1,
+		// A CU block without MPS negotiates no packet ceiling, so no CS update packet follows
+		// the 0x82 (D-NET-234) [orig: NapiNPServer_HandleNewConnection @0x4c8195].
+		const std::size_t expected_outbound = *bad.name ? 2u : 1u;
+		if (!expect(result.outbound.size() == expected_outbound && inmatch::connection_count(ctx) == 1,
 				"CU compatibility values do not reject the 0x42 handshake")) return false;
 		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 		auto &conn = ctx.np_protocol.connection_list.front();
@@ -3697,6 +3785,7 @@ int main(int argc, char **argv) {
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;
 	ok = run_integrity_replies_validate_registered_profile() && ok;
 	ok = run_periodic_scoreboard_repairs_pre_sync_dropped_row() && ok;

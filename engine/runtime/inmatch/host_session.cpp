@@ -116,6 +116,12 @@ std::vector<ProtocolMessage> send_session_batches(
 	std::size_t admitted_nodes = 0;
 	bool ordinary_tail_rejected = false;
 	std::size_t planned_packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
+	// The connection's packet ceiling: cs_dir0 field 13, the host's mpmaxpacketsize as the
+	// new-connection callback negotiated it against the joiner's MPS (D-NET-234), floored at 26.
+	// [orig: BuildOutgoingPackets @0x628436, floor @0x628446; HandleNewConnection @0x4c81ca]
+	const std::size_t max_packet_bytes = connection.timeouts.max_packet_bytes < 26
+			? std::size_t{26}
+			: static_cast<std::size_t>(connection.timeouts.max_packet_bytes);
 	for (ProtocolMessage &message : messages) {
 		// A staged H:0x03 connection description is retail's SendChatMessage: the
 		// record is stored on the connection (only while none is latched) and THEN
@@ -137,7 +143,7 @@ std::vector<ProtocolMessage> send_session_batches(
 		}
 		std::size_t message_packet_bytes = planned_packet_bytes;
 		std::vector<ProtocolMessage> pieces = split_protocol_message_to_fill(
-				message, kGameSessionMaxPacketBytes, message_packet_bytes);
+				message, max_packet_bytes, message_packet_bytes);
 		bool piece_rejected = false;
 		for (ProtocolMessage &piece : pieces) {
 			if (!piece.capacity_exempt) {
@@ -172,8 +178,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			}
 			return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
 		}
-		if (PROTOCOL_DATAGRAM_OVERHEAD + candidate.size() >
-				kGameSessionMaxPacketBytes) {
+		if (PROTOCOL_DATAGRAM_OVERHEAD + candidate.size() > max_packet_bytes) {
 			if (!flush()) {
 				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
 				return batch;

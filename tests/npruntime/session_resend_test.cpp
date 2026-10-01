@@ -551,6 +551,26 @@ bool check_host_owes_an_ack_for_c2s_records() {
 	return expect(sock.sent.empty(), "the ACK is owed once, not every boundary");
 }
 
+// D-NET-234: the host frames a connection's S2C under that connection's negotiated packet ceiling
+// (cs_dir0 field 13), not a fixed 1300. [orig: BuildOutgoingPackets @0x628436; NapiNPServer_
+// HandleNewConnection @0x4c81ca]
+bool check_host_frames_under_the_negotiated_ceiling() {
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::admit_peer(owner, kPeer);
+	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.timeouts.max_packet_bytes = 576;
+	ScriptedDatagramSocket sock;
+	for (uint8_t i = 0; i < 3; ++i)
+		conn.link.transport->host_send(0x49, std::vector<uint8_t>(300, i));
+	inmatch::host_session_pump(owner, sock);
+	bool within = !sock.sent.empty();
+	for (const auto &datagram : sock.sent) within = within && datagram.second.size() <= 576;
+	return expect(sock.sent.size() == 2 && within,
+	              "three 300-byte records leave in two packets of at most 576 bytes");
+}
+
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
@@ -842,6 +862,7 @@ int main() {
 	ok = check_host_receive_pump_sends_ignore_the_s2c_boundary() && ok;
 	ok = check_host_flush_counter_ages_finite_records_per_tick() && ok;
 	ok = check_host_owes_an_ack_for_c2s_records() && ok;
+	ok = check_host_frames_under_the_negotiated_ceiling() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

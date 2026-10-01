@@ -16,6 +16,7 @@
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
+#include <base/io/le.h>       // append_u32_le (the CS update dword)
 #include <base/io/strutil.h> // iequals (Napi_StrCaseEqual)
 
 #include <runtime/world/ai.h>
@@ -154,6 +155,10 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
 	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
 	node.timeouts = ctx.np_protocol.connection_template;
+	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
+	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
+	node.timeouts.max_packet_bytes = static_cast<int32_t>(
+			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
 	node.seq = make_jo_game_session_sequencing(1, 0, node.timeouts.msg_out_max);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
@@ -344,23 +349,25 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// A GAME host advertises the JOINTOPERATIONS session template (120 s reap,
 	// 30 s idle keepalive, 10 s active probe, 512/256 pools, 1200 msg cap), not
 	// the NOVAWORLDUDP service block build_server_auth defaults to for the
-	// service, with CS field 13 from the host's configured `mpmaxpacketsize`
-	// [orig: CNapiNetwork_Init @0x4ca4a0 (field 13 @0x4CAA53) ->
-	// CNapiNPConnection_Create @0x62acb0 -> SendSessionInit @0x620ef0].
-	reply.client_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
-	reply.server_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
-	// SendSessionInit emits the host's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
+	// service [orig: CNapiNetwork_Init @0x4ca4a0 -> CNapiNPConnection_Create
+	// @0x62acb0 -> SendSessionInit @0x620ef0].
+	reply.client_cs = jointoperations_cs_fields();
+	reply.server_cs = jointoperations_cs_fields();
+	// SendSessionInit emits the connection's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
 	// override of timeout_ms (field 0) / msg_out_max (field 11) reaches the joiner here —
-	// its HandleServerJoinResponse overlays these onto its own template. -1 rides as
+	// its HandleServerJoinResponse overlays these onto its own template — and field 13 is the
+	// ceiling the new-connection callback already negotiated (D-NET-234). -1 rides as
 	// 0xFFFFFFFF. [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init
-	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0]
-	const SessionTimeoutConfig &tmpl = ctx.np_protocol.connection_template;
+	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0; NapiNPServer_HandleNewConnection
+	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange @0x6261cd]
 	for (std::vector<CsField> *block : {&reply.client_cs, &reply.server_cs}) {
 		for (CsField &field : *block) {
 			if (field.field_index == 0)
-				field.value = static_cast<uint32_t>(tmpl.timeout_ms);
+				field.value = static_cast<uint32_t>(conn.timeouts.timeout_ms);
 			else if (field.field_index == 11)
-				field.value = static_cast<uint32_t>(tmpl.msg_out_max);
+				field.value = static_cast<uint32_t>(conn.timeouts.msg_out_max);
+			else if (field.field_index == 13)
+				field.value = static_cast<uint32_t>(conn.timeouts.max_packet_bytes);
 		}
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
@@ -420,18 +427,39 @@ std::vector<uint8_t> frame_retained_session_reply(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
-// Retail follows ServerAuth with one sequenced packet that installs the 1300-byte packet ceiling
-// in both control-setting directions. The joiner ACKs this as C2S sequence 1 before sending JOIN.
+// The new-connection callback's MTU negotiation: a joiner that uploaded a nonzero MPS CU tag gets
+// the ceiling clamped to [100, the connection's own field 13] stored into both of the node's
+// direction blocks, then one CS update per direction (mask 0x2000) queued — the first sequenced
+// packet after the 0x82, which the joiner ACKs as C2S sequence 1 before sending JOIN. It runs
+// before SendSessionInit, so the 0x82 already carries the negotiated value. A zero (absent) MPS
+// negotiates nothing and queues no update.
+// [orig: NapiNPServer_HandleNewConnection @0x4c8040 — the MPS read @0x4c818d, `< 100 -> 100`
+//  @0x4c8197, `> field 13 -> field 13` @0x4c81a9, `> 0x4000 -> 0x4000` @0x4c81b1, the stores
+//  @0x4c81ca/@0x4c81d0, SendConfigUpdateIfEnabled(conn, 1, 0x2000) @0x4c81d6 then (conn, 0)
+//  @0x4c81e4 (the wire direction byte is `direction == 0`, so 0 then 1); installed as cb_server_1
+//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange @0x6261cd before SendSessionInit
+//  @0x6261fc; the MPS tag NapiNetConfig_LoadFromConnTags @0x4c7260 ("MPS" @0x7ca070)]
 // [wire: host_and_join_lan frames 6-8; flags 0xA0 = settings update + u8 length]
-std::vector<ProtocolMessage> make_game_session_initial_settings() {
-	return {
-			make_protocol_message(
-					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
-					0xA0),
-			make_protocol_message(
-					0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
-					0xA0),
-	};
+bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
+	if (mps == 0) return false;
+	int32_t value = static_cast<int32_t>(mps);
+	if (value < 100) value = 100;
+	else if (value > conn.timeouts.max_packet_bytes) value = conn.timeouts.max_packet_bytes;
+	else if (value > 0x4000) value = 0x4000;
+	conn.timeouts.max_packet_bytes = value;
+	return true;
+}
+
+std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes) {
+	std::vector<ProtocolMessage> settings;
+	for (const uint8_t direction : {uint8_t{0}, uint8_t{1}}) {
+		std::vector<uint8_t> body{direction, 0x00, 0x20, 0x00, 0x00};
+		io::append_u32_le(body, static_cast<uint32_t>(max_packet_bytes));
+		settings.push_back(make_protocol_message(
+				hightag::CS_CONFIG_UPDATE, std::move(body),
+				PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
+	}
+	return settings;
 }
 
 // ---------------------------------------------------------------------------
@@ -780,6 +808,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
 	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
 	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
 	for (const auto &blob : auth.cu) {
 		uint8_t cu_type = 0;
 		std::string cu_name, cu_value;
@@ -803,6 +832,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
 		} else if (strutil::iequals(cu_name, "VCB")) {
 			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "MPS")) {
+			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
 		}
 		// The environment tags (DB included) were parsed and validated before allocation.
 		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
@@ -838,10 +869,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
 	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
+	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
+	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
+	// then SendSessionInit @0x6261fc].
+	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
-	std::vector<uint8_t> initial_settings =
-			frame_session_replies(conn, make_game_session_initial_settings());
-	if (!initial_settings.empty()) out.outbound.push_back(std::move(initial_settings));
+	if (negotiated) {
+		std::vector<uint8_t> initial_settings = frame_session_replies(
+				conn, make_game_session_initial_settings(conn.timeouts.max_packet_bytes));
+		if (!initial_settings.empty()) out.outbound.push_back(std::move(initial_settings));
+	}
 
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;

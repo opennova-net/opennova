@@ -221,11 +221,12 @@ struct GameConfig {
 	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
 	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]
 	int32_t multiplayer_reset = 0;
-	// game.cfg `mpmaxpacketsize`: the datagram ceiling this host advertises as
-	// CS field 13 of both connection templates in its 0x82 (the SIGNED ladder
-	// of cs_max_packet_bytes: 0 -> 1300, below 100 -> 100, above 0x4000 ->
-	// 0x4000). The host's own packet builder keeps the fixed
-	// kGameSessionMaxPacketBytes above; nothing configures a non-stock value.
+	// game.cfg `mpmaxpacketsize`: the datagram ceiling of both connection
+	// templates, CS field 13 (the SIGNED ladder of cs_max_packet_bytes: 0 ->
+	// 1300, below 100 -> 100, above 0x4000 -> 0x4000). Each connection then
+	// negotiates it down to the joiner's MPS tag before its 0x82, and that
+	// negotiated value is the connection's S2C packet ceiling (D-NET-234);
+	// nothing configures a non-stock value yet.
 	// [orig: g_GameConfigState.maxPacketSize_338, cfg var "mpmaxpacketsize" row
 	//  @0x833380, default "1300" @0x7D268C; Config_SetDefaults clamp
 	//  @0x54D060..0x54D090; read by CNapiNetwork_Init @0x4CAA53]

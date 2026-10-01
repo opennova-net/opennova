@@ -254,6 +254,9 @@ void add_retail_game_environment(opennova::ClientAuth &auth) {
 			std::pair{"DB", "0"},
 			std::pair{"MBN", "20042002"},
 			std::pair{"SOPD", "180"},
+			// A retail joiner's own packet ceiling, which the host negotiates
+			// against (D-NET-234).
+			std::pair{"MPS", "1300"},
 	}) {
 		auth.cu.push_back(opennova::make_client_cu_chunk(
 				2, field.first, field.second));
