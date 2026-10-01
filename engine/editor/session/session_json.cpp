@@ -11,7 +11,9 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
+#include <base/io/cp1252.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
@@ -325,10 +327,18 @@ bool field_of(const Document &document, const NodeAddress &address, const std::s
 }
 
 // What a kind's edits are (S13 A5): revert_to_saved's the fields to give back, every other's
-// changes.
-RecordBatchForm batch_form(EditorRequestKind kind) {
-	return kind == EditorRequestKind::RevertToSaved ? RecordBatchForm::Fields
-													: RecordBatchForm::Edits;
+// changes, over a text document its spans (S13 D9).
+RecordBatchForm batch_form(EditorRequestKind kind, bool text) {
+	if (kind == EditorRequestKind::RevertToSaved) return RecordBatchForm::Fields;
+	return text ? RecordBatchForm::Spans : RecordBatchForm::Edits;
+}
+
+// Whether the type that opens `path` makes text documents (S13 D9): a request's edits over a
+// closed file of it are spans.
+bool text_path(const std::string &path) {
+	if (path.empty()) return false;
+	const DocumentType *type = document_type_for(classify_asset(basename_of(path), nullptr));
+	return type && document_content(*type) == DocumentContent::Text;
 }
 
 // A blank record document of the type that opens `path` (its kinds' tokens, no records): what a
@@ -478,7 +488,7 @@ bool import_source_from_json(const JsonValue &json, ImportSource &out, std::stri
 // records not looked for when `unresolved`, RequestNames', their labels into `labels`); false with
 // `error` for a value of another type, an unknown token or a malformed object.
 bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &request,
-		const Document *names, bool unresolved, std::vector<std::string> &labels,
+		const Document *names, bool unresolved, bool text, std::vector<std::string> &labels,
 		std::string &error) {
 	using F = RequestFieldId;
 	const char *token = request_field(id).token;
@@ -515,7 +525,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Edits: {
 		RecordBatch batch;
 		if (!record_batch_from_json(
-					json, names, batch_form(request.kind), batch, error, !unresolved))
+					json, names, batch_form(request.kind, text), batch, error, !unresolved))
 			return false;
 		request.edits = std::move(batch.edits);
 		labels = std::move(batch.labels);
@@ -588,7 +598,7 @@ bool field_to_json(
 		for (const ImportSource &source : request.imports) out.push(import_source_to_json(source));
 		return !request.imports.empty();
 	case F::Edits:
-		out = record_batch_to_json(request.edits, names, batch_form(request.kind));
+		out = record_batch_to_json(request.edits, names, batch_form(request.kind, false));
 		return !request.edits.empty();
 	case F::Address:
 		out = address_to_json(request.address);
@@ -725,9 +735,12 @@ bool editor_request_from_json(
 	RequestFieldSet carried = 0;
 	std::unique_ptr<Document> blank;
 	const Document *document = names ? names->document : nullptr;
-	if (!document && params.has(RequestFieldId::Edits)) {
-		blank = blank_names(json.get_string("path", ""));
+	bool text = names && names->text;
+	if (!document && !text && params.has(RequestFieldId::Edits)) {
+		const std::string path = json.get_string("path", "");
+		blank = blank_names(path);
 		document = blank.get();
+		text = !document && text_path(path);
 	}
 	std::vector<std::string> labels;
 	for (const io::JsonMember &member : json.object) {
@@ -744,7 +757,7 @@ bool editor_request_from_json(
 			return false;
 		}
 		if (!field_from_json(id, member.value, request, document, names && names->unresolved,
-					labels, error))
+					text, labels, error))
 			return false;
 		carried |= field_bit(id);
 	}
@@ -790,6 +803,7 @@ JsonValue diagnostic_to_json(const Diagnostic &d) {
 	if (!d.field.empty()) out.set("field", json_string(d.field));
 	if (!d.record.empty()) out.set("record", json_string(d.record));
 	if (d.line) out.set("line", json_number(double(d.line)));
+	if (d.column) out.set("column", json_number(double(d.column)));
 	if (d.row_id) {
 		out.set("row", json_number(double(d.row_id)));
 		out.set("child", json_number(double(d.child_id)));
@@ -878,8 +892,10 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 }
 
 JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
-	// The record document's rows and records where it is one; the lifecycle alone for another kind.
+	// The record document's rows and records where it is one; a text document's lines (S13 D9); the
+	// lifecycle alone for another kind.
 	const Document *records = records_of(base);
+	const TextDocument *text = text_of(base);
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(base.path()));
 	out.set("kind", json_string(asset_kind_token(base.kind())));
@@ -894,6 +910,7 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 		out.set("row_count", json_number(double(records->rows().size())));
 		out.set("last_added", json_number(double(records->last_added())));
 	}
+	if (text) out.set("line_count", json_number(double(text->line_count())));
 	JsonValue issues = JsonValue::make_array();
 	for (const SourceIssue &issue : base.issues()) {
 		JsonValue entry = JsonValue::make_object();
@@ -905,6 +922,19 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 		issues.push(std::move(entry));
 	}
 	out.set("issues", std::move(issues));
+	if (text && page) {
+		// A page of its lines, each its number and its text (in the game's code page, as UTF-8).
+		const size_t total = text->line_count();
+		set_page(out, *page, total);
+		JsonValue lines = JsonValue::make_array();
+		for (size_t i = page->first(total); i < page->last(total); ++i) {
+			JsonValue line = JsonValue::make_object();
+			line.set("line", json_number(double(i + 1)));
+			line.set("text", json_string(cp1252_to_utf8(text->line(i + 1))));
+			lines.push(std::move(line));
+		}
+		out.set("lines", std::move(lines));
+	}
 	if (!records) return out;
 	const Document &document = *records;
 	JsonValue kinds = JsonValue::make_array();
@@ -1044,14 +1074,25 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 
 JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	JsonValue out = JsonValue::make_object();
+	// A text's reference (S13 D9) is written as its text is, in the game's code page: as UTF-8 here.
+	const bool text = edge.span.line != 0;
+	const auto written = [text](const std::string &value) { return text ? cp1252_to_utf8(value) : value; };
 	out.set("source", json_string(edge.source));
 	if (!edge.record.empty()) out.set("record", json_string(edge.record));
 	if (!edge.locator.empty()) out.set("locator", json_string(edge.locator));
 	if (edge.address.row) out.set("address", address_to_json(edge.address));
+	if (text) {
+		JsonValue span = JsonValue::make_object();
+		span.set("line", json_number(double(edge.span.line)));
+		span.set("column", json_number(double(edge.span.column)));
+		span.set("length", json_number(double(edge.span.length)));
+		out.set("span", std::move(span));
+	}
 	out.set("field", json_string(edge.field));
 	out.set("kind", json_string(reference_row(edge.kind).token));
-	out.set("value", json_string(edge.value));
-	out.set("target", json_string(edge.target));
+	out.set("value", json_string(written(edge.value)));
+	if (!edge.fallback.empty()) out.set("fallback", json_string(written(edge.fallback)));
+	out.set("target", json_string(written(edge.target)));
 	if (!edge.scope.empty()) out.set("scope", json_string(edge.scope));
 	out.set("rewritable", boolean(edge.rewritable));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));

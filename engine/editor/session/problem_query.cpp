@@ -146,11 +146,17 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 		location.record = {diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
 		location.field = diagnostic.field;
 	}
+	// A finding inside a text document names its place by its line and column.
+	const DocumentType *type = document_type_for(entry->kind);
+	if (!location.in_files && diagnostic.line && type &&
+			document_content(*type) == DocumentContent::Text)
+		location.locator = TextDocument::locator(diagnostic.line, diagnostic.column ? diagnostic.column : 1);
 	return location;
 }
 
 EditorRequest ProblemLocation::request() const {
 	if (in_files) return request::show_in_files(path);
+	if (!locator.empty()) return request::open_document(path, locator);
 	return request::open_record(path, record, field);
 }
 

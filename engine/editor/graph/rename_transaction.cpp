@@ -4,11 +4,15 @@
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
+#include <string_view>
 #include <system_error>
 #include <variant>
 
+#include <base/io/cp1252.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
@@ -85,7 +89,7 @@ Diagnostic refusal(CoreFinding code, const std::string &message, const std::stri
 }
 
 // Why a file's sites cannot be rewritten: its kind has no editor, or its editor's documents hold
-// no records a rename sets (a document of another kind, S13 D6).
+// neither records a rename sets nor a text whose spans it replaces (S13 D6, D9).
 Diagnostic cannot_rewrite(const DocumentType *type, const std::string &file) {
 	if (!type) return refusal(CoreFinding::RenameSite, file + " has no editor to rewrite it.", file);
 	return refusal(CoreFinding::RenameSite, file + " holds no records for a rename to rewrite.", file);
@@ -327,6 +331,25 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 				                                other->file, other->field));
 				break;
 			}
+	// A use that names the new name first and reaches another definition now through its lookup's
+	// second name (a script's AMMO_satchel reaching ammo_satchel while nothing defines satchel): the
+	// renamed definition would take it over, its lookup finding the first name first [orig:
+	// WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92], a change no site rewrites.
+	for (const GraphEdge *edge : graph.edges_naming(symbol.kind, new_name)) {
+		if (graph_names::symbol_name(edge->kind, edge->value) != wanted || !scope_matches(symbol.scope, edge->scope))
+			continue;
+		const GraphSymbol *reached = graph.symbol_reached(*edge);
+		if (!reached || reached == &symbol) continue;
+		const std::string where = edge->record.empty() ? edge->source + (edge->locator.empty() ? "" : " at " + edge->locator)
+		                                               : "'" + edge->record + "' in " + edge->source;
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+		                                where + " names '" + edge->value + "', which reaches " + row.phrase + " '" +
+		                                        reached->display + "' of " + reached->file + " through '" + edge->fallback +
+		                                        "' now: renamed '" + new_name + "', " + what +
+		                                        " would take that use over, its lookup finding the first name first.",
+		                                edge->source, edge->field));
+		break;
+	}
 	// The definition, then every use that reaches it.
 	RenameSite definition;
 	definition.file = symbol.file;
@@ -347,7 +370,12 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
 		if (!edge->rewritable || !source) {
-			plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + what + " and the editor cannot rewrite that file yet.",
+			// A text's use is at its span; the file is the editor's to write, that use not yet (a
+			// script's text key, whose lookup the graph does not order as the game does).
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
+			                                edge->span.line ? where + " names " + what + " at " + edge->locator +
+			                                                          ", a use the editor cannot rewrite yet."
+			                                                : where + " names " + what + " and the editor cannot rewrite that file yet.",
 			                                edge->source, edge->field));
 			continue;
 		}
@@ -357,13 +385,44 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		site.record = edge->record;
 		site.locator = edge->locator;
 		site.field = edge->field;
+		site.span = edge->span;
 		site.before = edge->value;
 		site.after = spelled;
 		site.target = symbol.file;
+		// A use whose lookup takes a second name (its fallback: a script's AMMO_X, then "ammo_X"):
+		// where the new name begins with the prefix that second name puts before the value, the span
+		// takes the rest, the prefix kept once ("ammo_satchel" renamed "ammo_charge" reads
+		// AMMO_charge), when nothing else defines the rest (its lookup's first name then finds
+		// nothing, its second the renamed definition); else the whole new name, which its first name
+		// finds.
+		if (!edge->fallback.empty() && edge->fallback.size() > edge->value.size() &&
+		    strutil::iequals(std::string_view(edge->fallback).substr(edge->fallback.size() - edge->value.size()),
+		                     edge->value)) {
+			const std::string prefix = edge->fallback.substr(0, edge->fallback.size() - edge->value.size());
+			if (new_name.size() > prefix.size() && strutil::starts_with_icase(new_name, prefix)) {
+				const std::string rest = new_name.substr(prefix.size());
+				bool defined = false;
+				for (const GraphSymbol *other : graph.symbols_named(symbol.kind, rest))
+					defined = defined || other != &symbol;
+				if (!defined) site.after = rest;
+			}
+		}
 		sites.push_back({std::move(site), edge->address.kind});
 	}
-	// Every site's field can hold the new value: within its width, a number where it is one.
+	// Every site's field can hold the new value: within its width, a number where it is one. A
+	// text's span takes any name the game's code page holds; what its text reads back is checked
+	// as it is rewritten (check_symbol_rename).
 	for (const auto &[site, kind] : sites) {
+		if (site.span.line) {
+			std::string stored;
+			std::u32string unstorable;
+			if (!utf8_to_cp1252(site.after, stored, &unstorable))
+				plan.refusals.push_back(refusal(CoreFinding::RenameName,
+				                                site.file + " is written in the game's code page (Windows-1252), "
+				                                "which has no character of '" + site.after + "' there.",
+				                                site.file));
+			continue;
+		}
 		const FieldSchema *field = site_field(site.kind, kind, site.field);
 		Value value;
 		if (!field) {
@@ -387,55 +446,156 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 
 namespace {
 
-// One file of a name's rename read (an open document among `open` as it stands, else the file on
-// disk) and its sites set through its type, nothing written: the document as it would be saved
-// (null when it did not read), and false with the findings when a site did not take (a file that
-// does not read, a site its record or its field refuses, a site no longer there or no longer
-// reaching the definition, a file that would not write). Every site is tried, so the findings name
-// each.
-bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                       const AssetGraph &graph, const SymbolRenamePlan &plan,
-                       const std::vector<std::shared_ptr<const DocumentBase>> &open, const std::string &file,
-                       const std::vector<const RenameSite *> &sites, std::unique_ptr<Document> &staged,
-                       std::vector<Diagnostic> &findings) {
-	// A use still reaches the renamed definition: the one the graph's lookup returns for it.
-	const auto reaches = [&](const GraphEdge &edge) {
-		const GraphSymbol *found = graph.resolve_symbol(edge.kind, edge.value, edge.scope);
-		return found && found->file == plan.file && found->locator == plan.locator && found->field == plan.field;
-	};
-	const AssetEntry *asset = find_asset(scan, file);
-	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
-	std::unique_ptr<Document> document = type ? records_of(type->make()) : nullptr;
-	if (!document) {
-		findings.push_back(cannot_rewrite(type, file));
-		return false;
-	}
-	Diagnostic error;
-	const Document *as_open = nullptr;
+// A document of one of a plan's files, read as the rename meets it: an open one as it stands in the
+// editor (its unsaved edits must be saved first, and that Save would have to succeed), else the file
+// on disk. Null with the finding when it does not read, or the open one would not write.
+std::unique_ptr<DocumentBase> read_site_file(const ProjectPaths &paths, const ProjectDocument &project,
+                                             const AssetEntry &asset, const DocumentType &type,
+                                             const std::vector<std::shared_ptr<const DocumentBase>> &open,
+                                             const std::string &file, std::vector<Diagnostic> &findings) {
+	std::unique_ptr<DocumentBase> document = type.make();
+	const DocumentBase *as_open = nullptr;
 	for (const auto &candidate : open)
-		if (candidate && candidate->path() == asset->relative_path)
-			as_open = records_of(*candidate);
+		if (candidate && candidate->path() == asset.relative_path) as_open = candidate.get();
 	const SerializeResult current = as_open ? as_open->serialize() : SerializeResult();
 	// An open document that would not write as it stands is the file the rename meets (its
 	// unsaved edits must be saved first, and that Save would fail): never the older file
 	// on disk in its place.
 	if (as_open && !current.ok()) {
 		findings.push_back(refusal(CoreFinding::RenameSite,
-		                           file + " as it stands in the editor would not write: " +
-		                                   current.issues.front().message,
+		                           file + " as it stands in the editor would not write: " + current.issues.front().message,
 		                           file, current.issues.front().field));
-		return false;
+		return nullptr;
 	}
+	Diagnostic error;
 	const bool loaded = as_open
 	                            ? document->load_bytes(std::vector<uint8_t>(current.text.begin(), current.text.end()),
-	                                                   asset->relative_path, asset->kind, project.target_game, error)
-	                            : document->load((fs::path(paths.root) / asset->relative_path).generic_string(),
-	                                             asset->relative_path, asset->kind, project.target_game, error);
+	                                                   asset.relative_path, asset.kind, project.target_game, error)
+	                            : document->load((fs::path(paths.root) / asset.relative_path).generic_string(),
+	                                             asset.relative_path, asset.kind, project.target_game, error);
 	if (!loaded) {
 		findings.push_back(error);
+		return nullptr;
+	}
+	return document;
+}
+
+// A text document's sites (S13 D9): each span found by its place and the name it held (a use still
+// reaching the renamed definition), all replaced in one batch from the last to the first (each
+// replacement then leaves the places before it where they were), and each read back from the text
+// as the new name at its place. False with the findings.
+bool stage_text_sites(TextDocument &document, const std::vector<const RenameSite *> &sites,
+                      const std::function<bool(const GraphEdge &)> &reaches, const std::string &old_name,
+                      std::vector<Diagnostic> &findings) {
+	const std::string &file = document.path();
+	Extracted extracted;
+	extract_from_text(document, extracted);
+	struct Found {
+		const RenameSite *site;
+		size_t offset;
+		std::string after; // in the document's code page
+	};
+	std::vector<Found> found;
+	std::vector<bool> taken(extracted.edges.size(), false);
+	bool ok = true;
+	for (const RenameSite *site : sites) {
+		size_t match = extracted.edges.size();
+		for (size_t i = 0; i < extracted.edges.size() && match == extracted.edges.size(); ++i) {
+			const GraphEdge &edge = extracted.edges[i];
+			if (!taken[i] && edge.locator == site->locator && edge.value == site->before && reaches(edge)) match = i;
+		}
+		std::string after;
+		size_t offset = 0;
+		if (match == extracted.edges.size() || !utf8_to_cp1252(site->after, after) ||
+		    !document.offset_of(extracted.edges[match].span.line, extracted.edges[match].span.column, offset))
+			continue;
+		taken[match] = true;
+		found.push_back({site, offset, std::move(after)});
+	}
+	std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.offset > b.offset; });
+	std::vector<Edit> edits;
+	for (const Found &place : found) {
+		const TextSpan span = document.span_at(place.offset, place.site->before.size());
+		edits.push_back(TextDocument::replace(span, place.after));
+	}
+	Diagnostic error;
+	if (!edits.empty() && !document.apply(edits, error)) {
+		findings.push_back(refusal(CoreFinding::RenameSite, file + " cannot take the new name: " + error.message, file));
 		return false;
 	}
+	// Each read back at its place: the places before it moved by what the replacements before it
+	// changed.
+	Extracted again;
+	extract_from_text(document, again);
+	std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.offset < b.offset; });
+	std::ptrdiff_t moved = 0;
+	for (const Found &place : found) {
+		const TextSpan at = document.span_at(size_t(std::ptrdiff_t(place.offset) + moved), place.after.size());
+		const std::string locator = TextDocument::locator(at.line, at.column);
+		const bool read = std::any_of(again.edges.begin(), again.edges.end(), [&](const GraphEdge &edge) {
+			return edge.locator == locator && edge.value == place.after;
+		});
+		if (!read) {
+			findings.push_back(refusal(CoreFinding::RenameName,
+			                           file + " at " + place.site->locator + " would not read '" + place.site->after +
+			                                   "' as one name there: give a name its text reads whole.",
+			                           file));
+			ok = false;
+		}
+		moved += std::ptrdiff_t(place.after.size()) - std::ptrdiff_t(place.site->before.size());
+	}
+	if (found.size() < sites.size()) {
+		findings.push_back(make_finding(CoreFinding::RenamePartial, DiagnosticSeverity::Error,
+		                                file + " would still name '" + old_name + "' in " +
+		                                        std::to_string(sites.size() - found.size()) + " of its " +
+		                                        std::to_string(sites.size()) + " planned place(s).",
+		                                file));
+		ok = false;
+	}
+	return ok;
+}
+
+// One file of a name's rename read (an open document among `open` as it stands, else the file on
+// disk) and its sites set through its type, nothing written: the document as it would be saved
+// (null when it did not read), and false with the findings when a site did not take (a file that
+// does not read, a site its record or its field refuses, a site no longer there or no longer
+// reaching the definition, a file that would not write). A text document's sites are its spans
+// (S13 D9: stage_text_sites). Every site is tried, so the findings name each.
+bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
+                       const AssetGraph &graph, const SymbolRenamePlan &plan,
+                       const std::vector<std::shared_ptr<const DocumentBase>> &open, const std::string &file,
+                       const std::vector<const RenameSite *> &sites, std::unique_ptr<DocumentBase> &staged,
+                       std::vector<Diagnostic> &findings) {
+	// A use still reaches the renamed definition: the one the graph's lookup returns for it (through
+	// its fallback where its value finds nothing).
+	const auto reaches = [&](const GraphEdge &edge) {
+		const GraphSymbol *found = graph.symbol_reached(edge);
+		return found && found->file == plan.file && found->locator == plan.locator && found->field == plan.field;
+	};
+	const AssetEntry *asset = find_asset(scan, file);
+	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;
+	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
+	if (content == DocumentContent::Other) {
+		findings.push_back(cannot_rewrite(type, file));
+		return false;
+	}
+	std::unique_ptr<DocumentBase> read = read_site_file(paths, project, *asset, *type, open, file, findings);
+	if (!read) return false;
 	bool ok = true;
+	if (content == DocumentContent::Text) {
+		ok = stage_text_sites(*text_of(*read), sites, reaches, plan.old_name, findings);
+		const SerializeResult written = read->serialize();
+		if (!written.ok()) {
+			findings.push_back(refusal(CoreFinding::RenameSite, file + " would not write with the new name: " +
+			                                                  written.issues.front().message,
+			                           file, written.issues.front().field));
+			ok = false;
+		}
+		staged = std::move(read);
+		return ok;
+	}
+	std::unique_ptr<Document> document = records_of(std::move(read));
+	Diagnostic error;
 	// Every site found on the rows as read, before any is set (a set keeps the records'
 	// identities, so the addresses hold).
 	Extracted extracted;
@@ -529,7 +689,7 @@ bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 	if (!plan.ok()) return false;
 	bool ok = true;
 	for (const auto &[file, sites] : sites_by_file(plan.sites)) {
-		std::unique_ptr<Document> staged;
+		std::unique_ptr<DocumentBase> staged;
 		ok = stage_symbol_file(paths, project, scan, graph, plan, open, file, sites, staged, findings) && ok;
 	}
 	return ok;
@@ -545,12 +705,13 @@ bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 	return transaction.ok();
 }
 
-// A file staged for the commit: its document with the sites set (null when it did not read), how
+// A file staged for the commit: its document with the sites set (a record document, or a text
+// document's spans), null when it did not read; how
 // many it took, and (a file's rename) the findings staging it made, which its commit reports in
 // the file's turn.
 struct RenameTransaction::Staged {
 	std::string file;
-	std::unique_ptr<Document> document;
+	std::unique_ptr<DocumentBase> document; // a record document, or a text's (S13 D9)
 	size_t rewritten = 0;
 	std::vector<Diagnostic> findings;
 };

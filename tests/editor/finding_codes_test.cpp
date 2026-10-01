@@ -83,7 +83,9 @@ static int test_tokens_unique() {
 	std::map<std::string, std::string> owners; // a token -> the table declaring it
 	size_t rows = 0;
 	for (const Table &table : tables()) {
-		TEST_EXPECT(table.rows.count > 0);
+		// Every table has rows but the text type's (S13 D9): the game reads its files through readers
+		// the editor does not model, so it makes no finding of its own.
+		TEST_EXPECT(table.rows.count > 0 || table.owner == "text");
 		for (const FindingCodeRow &row : table.rows) {
 			++rows;
 			const std::string token = row.token ? row.token : "";
@@ -183,6 +185,7 @@ static int test_type_tables() {
 		TEST_EXPECT(type && type->findings);
 		if (!type || !type->findings) continue;
 		const FindingTable table = type->findings();
+		if (table.count == 0) continue; // the text type's
 		const FindingGroup group = table.rows[0].group;
 		for (const FindingCodeRow &row : table)
 			TEST_EXPECT(row.group == group && starts_with(row.token, std::string(finding_group_key(group)) + "."));
@@ -265,12 +268,16 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Reload) == Tokens({ "document.conflict" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "menu.ignored_input",
-	                     "strings.regrouped", "style.line_ending" }));
+	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "credits.line_ending",
+	                     "menu.ignored_input", "script.line_ending", "shader.form", "strings.regrouped",
+	                     "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "catalog.ignored_input", "without the input the game ignores" },
+		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "script.line_ending", "with every line ending CR LF" },
+		{ "shader.form", "in the SCR form the game's shader loader takes" },
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
 		{ "style.line_ending", "with every line ending CR LF" },
 	};
@@ -280,8 +287,9 @@ static int test_columns() {
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
-	                     "document.unserializable", "menu.invalid_input", "menu.unserializable",
-	                     "strings.invalid_input" }));
+	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
+	                     "menu.invalid_input", "menu.unserializable", "music_script.invalid_input",
+	                     "music_script.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.name_unstorable" }));

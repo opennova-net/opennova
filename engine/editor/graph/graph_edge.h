@@ -5,17 +5,20 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/change_set.h>
 #include <editor/model/value.h>
 
 namespace opennova::editor {
 
 // A reference one file makes (ADR 0046 d10, S7), extracted from the engine's own parsed records:
-// from a source file (and the record and field inside it) to a target name in a namespace, the
-// ReferenceKind.
+// from a source file (and the record and field inside it, or the span of its text) to a target
+// name in a namespace, the ReferenceKind.
 struct GraphEdge {
 	std::string source;   // the referencing file, project-relative
 	std::string record;   // the record inside it, every name from the row down ("" = the file itself)
-	std::string locator;  // a document record's place, stable across a reload (Document::locator)
+	// A document record's place, stable across a reload (Document::locator); a text's span's,
+	// "line:column" (TextDocument::locator).
+	std::string locator;
 	NodeAddress address;  // the record's address in the document the edge was read from
 	std::string field;    // the field id, or a native format's slot ("material[2].texture[0]")
 	ReferenceKind kind = ReferenceKind::None;
@@ -32,6 +35,14 @@ struct GraphEdge {
 	// it (FieldUse::loader_arg, reference_file_candidates: a model's texture row's type); -1 for
 	// none.
 	int32_t loader_arg = -1;
+	// In a text document (ADR 0046 S13 D9), where the name is written: its line and column
+	// (1-based) and its length, which a rename rewrites and a Go to opens the document at; a line
+	// of 0 for a reference of a record (TextDocument, TextReference).
+	TextSpan span;
+	// A second name the lookup takes when the value finds nothing (a script's AMMO operand: its
+	// name, then "ammo_" and its name [orig: WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92]); ""
+	// for none. A symbol kind's edge only: it resolves to the first of the two a lookup finds.
+	std::string fallback;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on

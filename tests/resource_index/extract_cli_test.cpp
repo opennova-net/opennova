@@ -3,7 +3,9 @@
 // /d the loose one; the tool's own options keep their values (`--out /d` names a
 // directory, not the loose-override flag); a repeated /exp takes its last value, as the
 // game's command line does [orig: Game_ParseCommandLineAndInit @ 0x4a7310, "/exp"
-// @ 0x4a76a6 -> g_ExpansionName @ 0x4a76cf].
+// @ 0x4a76a6 -> g_ExpansionName @ 0x4a76cf]. A shader is written as stored: its loader
+// takes the SCR form under a key of its own and unwraps it itself [orig:
+// ScriptFile_LoadAndDecrypt @ 0x5AE060], where the text readers' decode would make it noise.
 //
 //   extract_cli_test <opennova-extract> <scratch dir>
 #include <chrono>
@@ -16,6 +18,7 @@
 #include <system_error>
 
 #include <formats/pff/pff.h>
+#include <formats/scr/scr.h>
 
 #include "common/run_command.h"
 #include "common/test_expect.h"
@@ -31,11 +34,19 @@ std::string text_of(const fs::path &path) {
 	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
-bool archive(const fs::path &path, const char *text) {
+bool archive(const fs::path &path, const char *text, const std::string &shader = std::string()) {
 	const opennova::pff::PffWriteEntry entries[] = {
-	    {"note.txt", reinterpret_cast<const uint8_t *>(text), uint32_t(std::char_traits<char>::length(text)), 0, 0, 0}};
-	return opennova::pff::pff_write_archive(path.string().c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
-	       opennova::pff::PFF_WRITE_OK;
+	    {"note.txt", reinterpret_cast<const uint8_t *>(text), uint32_t(std::char_traits<char>::length(text)), 0, 0, 0},
+	    {"glass.fx", reinterpret_cast<const uint8_t *>(shader.data()), uint32_t(shader.size()), 0, 0, 0}};
+	return opennova::pff::pff_write_archive(path.string().c_str(), opennova::pff::PFF_FORMAT_PFF3, entries,
+	                                        shader.empty() ? 1 : 2) == opennova::pff::PFF_WRITE_OK;
+}
+
+// A shader in its loader's form: "SCR", version 1, the text and a NUL under the shaders' key.
+std::string scr_shader(const std::string &text) {
+	std::string payload = text + std::string(1, '\0');
+	opennova::scr::scr_encrypt(reinterpret_cast<uint8_t *>(&payload[0]), payload.size(), opennova::scr::SCR_KEY_SHADERS);
+	return std::string("SCR\x01", 4) + payload;
 }
 
 } // namespace
@@ -59,7 +70,8 @@ int main(int argc, char **argv) {
 	std::error_code ec;
 	fs::create_directories(install / "expansion" / "xp1", ec);
 	fs::create_directories(out, ec);
-	TEST_EXPECT(archive(install / "resource.pff", "packed"));
+	const std::string shader = scr_shader("float4 main() : COLOR { return 0; }\r\n");
+	TEST_EXPECT(archive(install / "resource.pff", "packed", shader));
 	TEST_EXPECT(archive(install / "expansion" / "xp1" / "xp1.pff", "expansion"));
 	std::ofstream((install / "note.txt").string(), std::ios::binary) << "loose";
 
@@ -79,6 +91,8 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(extract("/exp xp1 /exp none" + to_out) == 0 && text_of(out / "note.txt") == "packed");
 	TEST_EXPECT(extract("/exp none /exp xp1" + to_out) == 0 && text_of(out / "note.txt") == "expansion" &&
 	            text_of(log).find("expansion: xp1") != std::string::npos);
+	// A shader as stored, its loader's own SCR form.
+	TEST_EXPECT(extract(" --out " + quoted(out.string()) + " glass.fx") == 0 && text_of(out / "glass.fx") == shader);
 	std::printf("extract_cli: OK\n");
 	return 0;
 }

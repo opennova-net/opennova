@@ -30,6 +30,11 @@ std::vector<ImportSource> list_import_sources(const std::vector<std::string> &pa
 // one mount behind the retail listings, a retail source's import and the import plan.
 // False when the folder holds none of the game's archives.
 bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocument &document);
+// A file of a mounted install or archive as its game loader is served it (S13 D9): decoded as the
+// game's text readers decode a stored file (Vfs::read_file), or, for a kind whose loader takes the
+// SCR form under a key of its own and unwraps it itself (a shader: AssetKindRow::scr, ScrForm::Shader),
+// the bytes as stored. What an import copies into the project and what its plan reads.
+bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out);
 // Every effective file of a game install, mounted as a stock launch mounts it
 // (mount_retail): the "Import from game data" list.
 std::vector<ImportSource> list_retail_import_sources(const std::string &retail_root, const ProjectDocument &document,

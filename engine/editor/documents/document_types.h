@@ -8,6 +8,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/model/text_document.h>
 
 namespace opennova::editor {
 
@@ -15,12 +16,12 @@ class ProjectCheck;
 
 // The registry of editable file kinds (ADR 0046 d9): one row per document type, one per
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
-// document (a DocumentBase: a record type's is its Document, as_records), how to validate one
-// file of the kinds it opens, which are the asset kinds whose row names its id
-// (AssetKindRow::document), what its records' fields are, its own finding codes, and the check of
-// its own it runs across the project's files, if any. The session, the windows and the shell reach
-// a document type only through this table (its view through ui/document_views, keyed by the same
-// id).
+// document (a DocumentBase: a record type's is its Document, as_records; a text type's a
+// TextDocument, as_text), how to validate one file of the kinds it opens, which are the asset kinds
+// whose row names its id (AssetKindRow::document), what its records' fields are, its own finding
+// codes, the check of its own it runs across the project's files, if any, and for a text type the
+// names its text references. The session, the windows and the shell reach a document type only
+// through this table (its view through ui/document_views, keyed by the same id).
 struct DocumentType {
 	DocumentTypeId id = DocumentTypeId::None;
 	const char *name = "";
@@ -34,9 +35,10 @@ struct DocumentType {
 	std::vector<Diagnostic> (*validate_file)(const DocumentBase &document) = nullptr;
 	// A kind of record's fields without a document (S13 V3): the table the type's documents'
 	// Document::fields(kind) answer, in storage that outlives every document (the type's static
-	// table), none for a kind it does not hold. What a field of a file of the type is called and
-	// what it takes, asked where no document of the file is open (a graph edge's field in Files
-	// and the Inspector, a rename's site); a test's stand-in type may leave it null.
+	// table), none for a kind it does not hold (a text type's: none for any kind, its documents
+	// holding no records). What a field of a file of the type is called and what it takes, asked
+	// where no document of the file is open (a graph edge's field in Files and the Inspector, a
+	// rename's site); a test's stand-in type may leave it null.
 	const std::vector<FieldSchema> &(*fields)(NodeKind kind) = nullptr;
 	// The type's own finding codes (ADR 0046 S13 A6): its table, in the order of its enum, every
 	// code its validator, its parse and the checks it answers for (a use check of the files it
@@ -50,6 +52,12 @@ struct DocumentType {
 	// with whoever validates, keyed by the type's id (documents/project_checks.h), since the row
 	// is constexpr.
 	std::unique_ptr<ProjectCheck> (*project_check)() = nullptr;
+	// A text type's references (ADR 0046 S13 D9): the names its document's text makes, each at its
+	// span (a script's operands naming an effect, a sound set, an ammo or a text key), which the
+	// asset graph makes edges of; null for a type whose text names nothing, and for a record type
+	// (the graph reads a record document's references through its schema). Read from the document
+	// alone, as validate_file is.
+	void (*references)(const TextDocument &document, std::vector<TextReference> &out) = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a
@@ -60,14 +68,15 @@ const DocumentType *document_type(DocumentTypeId id);
 const DocumentType *registered_document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
-// Whether the documents a type makes are record documents (DocumentBase::as_records): what the
-// graph's extraction, the validators and the rename read. A type of another kind (a raster, a
-// text) contributes nothing to them until its own hooks (S13 D9). Asked of a document the type
-// makes, once per registered type.
-bool holds_records(const DocumentType &type);
+// What the documents a type makes hold: records (DocumentBase::as_records), a text
+// (DocumentBase::as_text, S13 D9), or content of another kind, which the graph's extraction, the
+// validation and the rename read nothing of until it has hooks of its own (a test's blob; a raster
+// to come). Asked of a document the type makes, once per registered type.
+enum class DocumentContent { Records, Text, Other };
+DocumentContent document_content(const DocumentType &type);
 
-// A test's document type in a registered one's place (S13 D6: a type of another kind than
-// records, before one ships): while it lives, document_type answers it for its id, and so
+// A test's document type in a registered one's place (S13 D6: a type whose documents hold
+// neither records nor a text): while it lives, document_type answers it for its id, and so
 // document_type_for for every asset kind whose row names that id. The registry's one seam:
 // nothing but a test makes one, one at a time.
 class DocumentTypeStandIn {

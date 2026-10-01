@@ -3,6 +3,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/hash.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/project/project_files.h>
 
 #include <atomic>
@@ -69,7 +70,10 @@ size_t DocumentBase::ignored_lines() const {
 
 bool DocumentBase::decode_and_read(std::vector<uint8_t> bytes, bool adopt,
                                    std::vector<SourceIssue> &issues, Diagnostic &error) {
-	if (!opennova::vfs_decode_payload(bytes, gameprofile::gameprofile_scr_policy_for_code(game_.c_str())))
+	// A kind whose loader takes the SCR form under its own key (a shader) is read by its type from
+	// the bytes as stored (assets/asset_kinds.h, ScrForm).
+	if (asset_kind_row(kind_).scr == ScrForm::Optional &&
+			!opennova::vfs_decode_payload(bytes, gameprofile::gameprofile_scr_policy_for_code(game_.c_str())))
 		return fail(error, relative_path_, CoreFinding::DocumentDecode, "The file could not be decoded.");
 	return read_source(bytes, adopt, issues, error);
 }
