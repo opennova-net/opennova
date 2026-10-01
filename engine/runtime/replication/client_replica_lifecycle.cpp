@@ -223,4 +223,19 @@ void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	state_.mark_changed();
 }
 
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — entity->animSlot = the
+//  fourth field @0x431b3a, entity->NetId = the third @0x431b46, then the
+//  avatar rebind MinimapSlot_FindOrAllocByEntityId @0x431b8c into
+//  CharacterEntity @0x431b91]
+void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_id,
+		uint8_t anim_slot) {
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
+	ClientEntityState &entity = state_.upsert(handle);
+	if (entity.net_id == net_id && entity.spawn_anim_slot == anim_slot) return;
+	entity.net_id = net_id;
+	entity.spawn_anim_slot = anim_slot;
+	state_.mark_changed();
+}
+
 } // namespace opennova::replication

@@ -1458,6 +1458,13 @@ target_link_libraries(script_remote_command_test PRIVATE opennova_net opennova_r
 target_include_directories(script_remote_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME script_remote_command COMMAND script_remote_command_test)
 
+# The joiner's folds of the retail S2C messages the dispatch audit found without
+# a faithful consumer (docs/net/retail-message-dispatch-audit.md).
+add_executable(client_message_folds_test netsim/client_message_folds_test.cpp)
+target_link_libraries(client_message_folds_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_message_folds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_message_folds COMMAND client_message_folds_test)
+
 # The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
 # and a synthetic document: the id tree, navigation, the state store and its replay,
 # ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.

@@ -153,6 +153,10 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// pool-0 index) [orig: NapiNPClientMsg_TeamAssign @0x431a15 (the
 			// player bit), @0x431ab2..0x431b05].
 			if (is_player_entity(assign.entity_handle)) {
+				// A player's identity pair rebinds its avatar on every 0x50,
+				// own row included [orig: @0x431b3a..0x431b91].
+				apply_player_identity(assign.entity_handle, assign.net_id,
+						assign.anim_slot);
 				ClientVisiblePlayersRefresh refresh;
 				refresh.slot = static_cast<uint8_t>(assign.entity_handle & 0xFFu);
 				refresh.fields = kTeamAssignSyncFields;

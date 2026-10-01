@@ -244,6 +244,15 @@ public:
 	// and collision passes both skip).
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the team store @0x4319ee]
 	void apply_team_assign(uint16_t handle, uint8_t team);
+	// A player's identity pair (Flags & 0x100 rows): the NetId word the
+	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
+	// 0x50 and 0x51 rebind them. An id the character registry does not hold
+	// stays raw here; the presentation resolves it to the per-side default the
+	// same way it resolves a 0x0C record's.
+	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
+	//  (NetId), the MinimapSlot_HasEntity fallback @0x431b4d..0x431b77, the
+	//  CharacterEntity rebind @0x431b8c..0x431b91]
+	void apply_player_identity(uint16_t handle, uint16_t net_id, uint8_t anim_slot);
 
 	const ClientState &state() const { return state_; }
 	ClientState &state() { return state_; }
