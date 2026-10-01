@@ -17,6 +17,7 @@ inline constexpr const char *kProjectCacheDirName = ".opennova";
 inline constexpr const char *kLocalSettingsFileName = "local.json";
 inline constexpr const char *kImportSidecarSuffix = ".import";
 inline constexpr const char *kImportCacheFileName = "import_cache.json";
+inline constexpr const char *kBuildCacheFileName = "build_cache.json";
 inline constexpr const char *kDefaultTargetGame = "jo";
 inline constexpr const char *kDefaultExportOutput = "build/export";
 
@@ -53,6 +54,8 @@ struct ProjectPaths {
 	std::string import_cache_file; // what this machine last saw of each import source
 	std::string index_dir;
 	std::string build_dir;
+	std::string build_cache_file; // each file's content hash by its size and last write (BuildRun)
+	std::string run_dir;     // where Play runs the game: a numbered directory a run (run/run_directory.h)
 	std::string staging_dir; // an import's files before they are published (import_assets)
 
 	static ProjectPaths for_root(const std::string &root);

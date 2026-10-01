@@ -47,9 +47,10 @@ void stale_index(size_t entries, size_t indexed) {
 }
 
 // The findings of the names, over the indexed entries in their order: the archive's name rules
-// bind only a file the build packs (check_file_name's rule: a loose kind, a video, a music bank, a
-// config, is copied beside the archives under any name); two files of one name; a kind the game
-// does not use.
+// bind only a file the build packs into an archive and an import source, whose outputs take its
+// name (check_file_name's rule: a loose kind, a video, a music bank, a config, is copied beside the
+// archives under any name, and a file of no kind the game knows is left out); two files of one
+// name; a kind the game does not use.
 void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnostic> &out) {
 	for (size_t i = 0; i < entries.size(); ++i) {
 		const AssetEntry &asset = entries[i];
@@ -68,7 +69,9 @@ void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnosti
 			        asset.relative_path));
 		}
 		if (asset.kind == AssetKind::Unknown) {
-			out.push_back(make_finding(CoreFinding::AssetKindUnknown, DiagnosticSeverity::Warning, "The game does not use files of this type.", asset.relative_path));
+			out.push_back(make_finding(CoreFinding::AssetKindUnknown, DiagnosticSeverity::Warning,
+			                           "The editor does not know this file type: the build leaves it out.",
+			                           asset.relative_path));
 		}
 	}
 }

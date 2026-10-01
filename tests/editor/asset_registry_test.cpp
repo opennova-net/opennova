@@ -88,18 +88,23 @@ static int test_classification() {
 	TEST_EXPECT(classify_asset("readme.docx", nullptr) == AssetKind::Unknown);
 	TEST_EXPECT(asset_classification_needs_bytes("a.bin") && !asset_classification_needs_bytes("a.mnu"));
 	// A model's .mdt normal map is a texture the TGA reader decodes; a file named by no
-	// extension is one when its bytes hold a material chunk (an 8-byte header, then an NQ8B
-	// chunk of a 2 x 2 image), and fits a texture by its name, which cannot tell (S11f).
+	// extension is a material chunk when its bytes hold one (an 8-byte header, then an NQ8B
+	// chunk of a 2 x 2 image: S11f's texture by its bytes, S13 A8's kind of its own), and fits
+	// one by its name, which cannot tell. A PNG is a texture by its name (S13 A8), and fits an
+	// import source too, which its record makes it.
 	TEST_EXPECT(classify_asset("bump.MDT", nullptr) == AssetKind::Texture && asset_name_fits_kind("bump.mdt", AssetKind::Texture));
 	std::vector<uint8_t> chunk(8 + 8 + 28 + 2 * 2 * 4, 0);
 	chunk[8] = 'N', chunk[9] = 'Q', chunk[10] = '8', chunk[11] = 'B';
 	chunk[12] = uint8_t(chunk.size() - 16);
 	chunk[28] = 2, chunk[32] = 2;
-	TEST_EXPECT(is_material_chunk_container(chunk) && classify_asset("field.nq8", &chunk) == AssetKind::Texture);
+	TEST_EXPECT(is_material_chunk_container(chunk) && classify_asset("field.nq8", &chunk) == AssetKind::MaterialChunk);
 	TEST_EXPECT(!is_material_chunk_container(raw) && classify_asset("field.nq8", &raw) == AssetKind::Unknown);
 	TEST_EXPECT(classify_asset("field.nq8", nullptr) == AssetKind::Unknown && !asset_classification_needs_bytes("field.nq8"));
-	TEST_EXPECT(asset_name_fits_kind("field.nq8", AssetKind::Texture) && !asset_name_fits_kind("field.nq8", AssetKind::Model));
+	TEST_EXPECT(asset_name_fits_kind("field.nq8", AssetKind::MaterialChunk) && !asset_name_fits_kind("field.nq8", AssetKind::Texture) &&
+	            !asset_name_fits_kind("field.nq8", AssetKind::Model));
 	TEST_EXPECT(classify_asset("main.mnu", &chunk) == AssetKind::Menu); // a typed name keeps its kind
+	TEST_EXPECT(classify_asset("logo.png", nullptr) == AssetKind::Texture && asset_name_fits_kind("logo.png", AssetKind::Texture) &&
+	            asset_name_fits_kind("logo.png", AssetKind::ImportSource) && !asset_name_fits_kind("logo.tga", AssetKind::ImportSource));
 
 	TEST_EXPECT(expected_asset_kind_for_required_name("gametext.bin") == AssetKind::Strings);
 	TEST_EXPECT(expected_asset_kind_for_required_name("menutxt.bin") == AssetKind::Strings);
@@ -190,7 +195,7 @@ static int test_scan_exclusions_and_diagnostics() {
 	TEST_EXPECT(scan.find("items.def")->kind == AssetKind::ItemDefs);
 	TEST_EXPECT(scan.find("gametext.bin")->kind == AssetKind::Strings);
 	TEST_EXPECT(scan.find("menumus.bin")->kind == AssetKind::MusicScript);
-	TEST_EXPECT(scan.find("logo.png")->kind == AssetKind::ImageSource);
+	TEST_EXPECT(scan.find("logo.png")->kind == AssetKind::ImportSource);
 	TEST_EXPECT(scan.find("logo.png.import") == nullptr);
 	TEST_EXPECT(scan.find("logo.pcx") == nullptr && scan.find("gone.pcx") == nullptr);
 	TEST_EXPECT(scan.find("x.mnu") == nullptr);

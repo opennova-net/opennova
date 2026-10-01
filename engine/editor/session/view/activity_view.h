@@ -50,6 +50,10 @@ struct ActivityView {
 	// The port the running game's MCP endpoint answers on (0: no game, or none).
 	int play_mcp_port = 0;
 	std::string play_command_line;
+	// Where the running (or last) game runs, its run directory (run/run_directory.h), and the log
+	// Play tails there ("" before the first Play): never the build directory it runs from.
+	std::string play_run_dir;
+	std::string play_log_file;
 	bool play_exited_on_its_own = false;
 	// The code the last game exited with on its own (PlaySession::exit_code; -1: none, or it
 	// was stopped). Nonzero, it is a Problems row (play.crashed) until Play starts again or

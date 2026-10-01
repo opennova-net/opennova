@@ -93,12 +93,12 @@ inline bool has_error(const std::vector<Diagnostic> &diagnostics) {
 
 // What an import of the plan takes: each selected row's source, once (a converter's outputs
 // share theirs).
-inline std::vector<ImportSource> selected_sources(const ImportPlan &plan) {
-	std::vector<ImportSource> sources;
+inline std::vector<ImportChoice> selected_sources(const ImportPlan &plan) {
+	std::vector<ImportChoice> sources;
 	for (const ImportPlanRow &row : plan.rows) {
 		if (!row.selected) continue;
 		bool known = false;
-		for (const ImportSource &source : sources)
+		for (const ImportChoice &source : sources)
 			known = known || (source.path == row.source.path && source.entry == row.source.entry);
 		if (!known) sources.push_back(row.source);
 	}
@@ -116,7 +116,7 @@ struct Project {
 	}
 	const SessionView &view() const { return session.view(); }
 	std::string root() const { return session.view().project.root; }
-	ImportPlan plan(const std::vector<ImportSource> &sources, bool with_dependencies = true,
+	ImportPlan plan(const std::vector<ImportChoice> &sources, bool with_dependencies = true,
 	                const std::string &retail = std::string(), size_t cap = kImportPlanFileCap) const {
 		const SessionView &v = session.view();
 		return plan_import(sources, with_dependencies, ProjectPaths::for_root(v.project.root), *v.project.document, *v.project.scan, *v.findings.graph,

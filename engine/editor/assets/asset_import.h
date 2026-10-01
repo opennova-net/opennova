@@ -6,7 +6,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
-#include <editor/assets/import_source.h>
+#include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 
@@ -22,7 +22,7 @@ struct ImportResult {
 };
 
 // Expand selected PFFs into selectable members; loose files stay single choices.
-std::vector<ImportSource> list_import_sources(const std::vector<std::string> &paths,
+std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
                                              std::vector<Diagnostic> &diagnostics);
 // A game install mounted into `game` as a stock launch of the project's game mounts it
 // (mount_install with no /d and no expansion: the witnessed archive table, read alone
@@ -37,7 +37,7 @@ bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocume
 bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out);
 // Every effective file of a game install, mounted as a stock launch mounts it
 // (mount_retail): the "Import from game data" list.
-std::vector<ImportSource> list_retail_import_sources(const std::string &retail_root, const ProjectDocument &document,
+std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics);
 // The logical names a game install resolves, sorted by their normalized form (the
 // Problems Import fixes).
@@ -61,7 +61,7 @@ std::string import_destination(const AssetScan &existing, const std::string &nam
 // was. Then each file is renamed over its destination in order, after its record; a failure
 // there stops it (a record written for a file that did not publish goes with it), the files
 // published before it `imported`, it and the rest `not_imported`, each one a finding.
-ImportResult import_assets(const std::vector<ImportSource> &sources, const ProjectPaths &paths,
+ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
                            const ProjectDocument &document, bool replace_existing);
 
 } // namespace opennova::editor

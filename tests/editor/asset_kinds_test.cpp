@@ -8,9 +8,11 @@
 // names its catalog token, and no row names a token the runtime does not give. The table's own
 // shape (one row per kind, in order; a token, a runtime token, a file name or an extension named
 // once) is its static_asserts'; here, what they cannot say: every document type is a row's, an
-// import source packs nowhere and is no runtime format, and Unknown is no runtime format (it packs
-// into resource.pff until S13 A8 stops packing it). A slot is pinned where the game reads a file
-// apart from the archives: game.cfg, assets.cd, CC.BIN and filter.txt loose, fgn2.bin packed.
+// import source and a material chunk are no runtime format and no name gives them (the scan does),
+// the first packing nowhere, and Unknown is no runtime format and packs nowhere (S13 A8: the build
+// leaves a file of no kind the game knows out, its name bound by no archive limit). A slot is
+// pinned where the game reads a file apart from the archives: game.cfg, assets.cd, CC.BIN and
+// filter.txt loose, fgn2.bin packed.
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -181,11 +183,21 @@ static int test_boot_files() {
 	}
 	TEST_EXPECT(expected_asset_kind_for_required_name("CC.BIN") == AssetKind::CountryCode);
 	TEST_EXPECT(expected_asset_kind_for_required_name("fgn2.bin") == AssetKind::RawBin);
+	// The NovaWorld screens retail ships loose in its folder and reads from there, the error page
+	// [orig: "nw_error.mnx" @ 0x558449] and the login's start page (D-NET-31): a kind of their own,
+	// loose (S13 A8: no kind before, so no build carried them).
+	for (const char *name : {"nw_error.mnx", "nw_startup.mnx", "JOP_2_MAIN.MNX"}) {
+		const AssetKind kind = classify_asset(name, nullptr);
+		TEST_EXPECT(kind == AssetKind::NovaWorldScreen && asset_kind_row(kind).archive_slot == ArchiveSlot::Loose);
+	}
 	return 0;
 }
 
-// What the static_asserts cannot say: every document type is a row's (and opens it), an import
-// source packs nowhere and no runtime format is one, and Unknown is no runtime format.
+// What the static_asserts cannot say: every document type is a row's (and opens it); an import
+// source packs nowhere and binds the archives' name limit (its outputs take its name), a material
+// chunk packs with the art, and neither is a runtime format or a name's; Unknown is no runtime
+// format and packs nowhere, its name bound by nothing (S13 A8), as an archive's; a PNG is a
+// texture by its name.
 static int test_the_table() {
 	std::set<DocumentTypeId> edited;
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
@@ -199,7 +211,8 @@ static int test_the_table() {
 		} else {
 			TEST_EXPECT(document_type_for(kind) == nullptr);
 		}
-		if (row.import_source) TEST_EXPECT(!asset_kind_packed(kind) && !*row.runtime);
+		const bool left_out = kind == AssetKind::Unknown || kind == AssetKind::Archive || kind == AssetKind::ImportSource;
+		TEST_EXPECT(asset_kind_packed(kind) == !left_out);
 	}
 	TEST_EXPECT(edited.size() == kDocumentTypeCount);
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id) {
@@ -207,11 +220,17 @@ static int test_the_table() {
 		TEST_EXPECT(type && type->id == DocumentTypeId(id));
 	}
 	TEST_EXPECT(document_type(DocumentTypeId::None) == nullptr);
+	for (const AssetKind kind : {AssetKind::ImportSource, AssetKind::MaterialChunk}) {
+		const AssetKindRow &row = asset_kind_row(kind);
+		TEST_EXPECT(!*row.runtime && !row.file_name && !row.extensions);
+	}
+	TEST_EXPECT(archive_name_limit_binds(AssetKind::ImportSource) &&
+	            asset_kind_row(AssetKind::MaterialChunk).archive_slot == ArchiveSlot::Resource);
 	const AssetKindRow &unknown = asset_kind_row(AssetKind::Unknown);
 	TEST_EXPECT(!*unknown.runtime && !unknown.file_name && !unknown.extensions);
-	// Until S13 A8 stops packing it.
-	TEST_EXPECT(asset_kind_packed(AssetKind::Unknown));
-	TEST_EXPECT(unknown.archive_slot == ArchiveSlot::Resource);
+	TEST_EXPECT(!asset_kind_packed(AssetKind::Unknown) && unknown.archive_slot == ArchiveSlot::None);
+	TEST_EXPECT(!archive_name_limit_binds(AssetKind::Unknown) && !archive_name_limit_binds(AssetKind::Archive));
+	TEST_EXPECT(asset_kind_for_name("logo.png") == AssetKind::Texture && asset_kind_for_name("LOGO.PNG") == AssetKind::Texture);
 	TEST_EXPECT(&asset_kind_row(AssetKind::kCount) == &unknown);
 	return 0;
 }

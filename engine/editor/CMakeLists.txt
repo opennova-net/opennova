@@ -12,7 +12,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_import.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
@@ -79,9 +79,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
-    # import — the importers (a PNG to the game's PCX), the sidecars, the import pass, and
-    # the plan of an import with the files it needs
+    # import — the importers (a PNG to the game's PCX or TGA) and what they read (the import
+    # context), the sidecars, the import pass, and the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/import_context.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
@@ -138,10 +139,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
     # requirements — the manifest rows evaluated against the project
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
-    # run — the Play launch plan and the one managed child over the platform seam
+    # run — the Play launch plan, the run directory the game runs in, and the one managed child
+    # over the platform seam
     ${CMAKE_CURRENT_SOURCE_DIR}/run/launch_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_lease.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
     # session — the one open project and everything the editor does to it (ADR 0046 d10):
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
     # imports, renames, the unsaved guard, the preferences over their store), what Problems

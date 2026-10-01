@@ -11,6 +11,8 @@
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_document.h>
+#include <editor/run/run_directory.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
@@ -101,33 +103,48 @@ void PlayController::start() {
 	// which has no endpoint); the view's runtime follows it.
 	const PlayLauncher launcher = source_ ? source_(!in_install) : launcher_;
 	follow_launcher(launcher);
+	const std::string executable = in_install ? std::string() : resolve_runtime_executable();
+	if (!in_install && (executable.empty() || !fs::is_regular_file(executable, ec))) {
+		core_.report(make_finding(CoreFinding::PlayRuntimeMissing, DiagnosticSeverity::Error,
+		                          executable.empty()
+		                                  ? "No game runtime is set; choose opennova.exe in File > Project settings..."
+		                                  : "The game runtime was not found: " + executable));
+		view_.activity.status = "The game runtime was not found.";
+		core_.touch(ViewConcern::Output);
+		return;
+	}
+	// The run directory the game runs in (run/run_directory.h, S13 A8): its working directory and its
+	// log, emptied, never the build directory it runs from, which stays as the build wrote it. One
+	// whose game may still run (one an earlier editor left running) is passed over. It lives under
+	// the cache, which comes with its self-ignore file.
+	std::string run_dir, run_error, cache_error;
+	ensure_project_cache_dir(core_.paths(), cache_error);
+	const LeaseLiveness liveness = [this](int64_t pid, const std::string &created) {
+		return core_.platform().process_liveness(pid, created);
+	};
+	if (!take_run_directory(core_.paths().run_dir, liveness, run_dir, run_error)) {
+		core_.report(make_finding(CoreFinding::PlayRunDirectory, DiagnosticSeverity::Error,
+		                          "The game's run directory could not be made: " + run_error));
+		view_.activity.status = "The game's run directory could not be made; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return;
+	}
 	if (in_install) {
-		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, plan, error)) {
+		if (!prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error)) {
 			core_.report(error);
 			view_.activity.status = "The game install could not be prepared; see Problems.";
 			core_.touch(ViewConcern::Output);
 			return;
 		}
 	} else {
-		const std::string executable = resolve_runtime_executable();
-		if (executable.empty() || !fs::is_regular_file(executable, ec)) {
-			core_.report(make_finding(CoreFinding::PlayRuntimeMissing, DiagnosticSeverity::Error,
-			                          executable.empty()
-			                                  ? "No game runtime is set; choose opennova.exe in File > Project settings..."
-			                                  : "The game runtime was not found: " + executable));
-			view_.activity.status = "The game runtime was not found.";
-			core_.touch(ViewConcern::Output);
-			return;
-		}
 		plan = launcher.source_run
-				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir,
+				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir, run_dir,
 						  view_.project.document->target_game, launcher.mcp_port, std::string(),
 						  launcher.engine_args)
-				: make_play_launch_plan(executable, build_dir, view_.project.document->target_game,
+				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
 						  launcher.mcp_port, std::string(), launcher.engine_args);
 	}
-	// The game rewrites its log; drop the previous run's so the tail starts clean.
-	fs::remove(plan.log_file, ec);
+	// The run directory is new (emptied), so the tail starts clean.
 	game_log_file_ = plan.log_file;
 	game_log_offset_ = 0;
 	game_log_partial_.clear();
@@ -150,6 +167,16 @@ void PlayController::start() {
 	else
 		core_.note("The game's lease could not be written (" + lease_error +
 		           "): a build after the editor restarts may remove its files while it runs.");
+	// The run directory records its game the same way, so a later Play passes it over while the game
+	// may run, after the editor restarts too.
+	std::string claim_error;
+	if (claim_run_directory(plan.working_dir, play_.pid(), identity, claim_error))
+		run_dir_ = plan.working_dir;
+	else
+		core_.note("The game's run directory could not record it (" + claim_error +
+		           "): a later Play may take that directory while the game runs.");
+	view_.activity.play_run_dir = plan.working_dir;
+	view_.activity.play_log_file = plan.log_file;
 	view_.activity.play_state = play_.state();
 	view_.activity.play_pid = play_.pid();
 	view_.activity.play_mcp_port = plan.mcp_port;
@@ -263,6 +290,8 @@ void PlayController::absorb_exit() {
 	// build), and its directory is a build like any.
 	if (play_lease_.pid >= 0) remove_play_lease(play_lease_.build_dir, play_lease_.pid);
 	play_lease_ = PlayLease();
+	release_run_directory(run_dir_); // its log stays until a Play takes the directory again
+	run_dir_.clear();
 	view_.activity.play_exited_on_its_own = play_.exited_on_its_own();
 	view_.activity.play_exit_code = play_.exit_code();
 	std::string line =
