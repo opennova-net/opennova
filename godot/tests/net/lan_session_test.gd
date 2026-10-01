@@ -24,13 +24,15 @@ func test_browse_defaults_pin_the_retail_game_port_range() -> void:
 			continue
 		found = true
 		var defaults: Array = m.get("default_args", [])
-		assert_eq(defaults.size(), 3,
-				"destination/port_min/port_max all carry registered defaults")
-		if defaults.size() == 3:
+		assert_eq(defaults.size(), 4,
+				"destination/port_min/port_max/connect_type all carry registered defaults")
+		if defaults.size() == 4:
 			assert_eq(String(defaults[0]), "255.255.255.255",
 					"the default discovery target is the local broadcast address")
 			assert_eq(int(defaults[1]), 32768, "retail range start")
 			assert_eq(int(defaults[2]), 32787, "retail range end")
+			assert_eq(int(defaults[3]), JoinTarget.NETWORK_LAN,
+					"the menu browse runs as the LAN screen's network connect type")
 	assert_true(found, "start_browsing is registered")
 
 
@@ -85,6 +87,46 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 				"retail discovery does not invent pre-auth mission metadata")
 	browser.stop()
 	assert_false(browser.is_browsing())
+
+
+# A browse lists only the sessions whose ServerHello.P2 admits its network
+# connect type: a LAN host's P2 carries the LAN transport bit, so a NovaWorld
+# browse (the NovaWorld preflight's type) never lists it, as the LAN screen never
+# lists a NovaWorld host (the engine's lan_session_admits_connect_type; ctest
+# lan_discovery pins the full matrix).
+func test_novaworld_browse_does_not_list_a_lan_host() -> void:
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Typed LAN"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(_mission()))
+	var port := host.get_host_listen_port()
+	assert_gt(port, 0)
+
+	var nw_browser := LanSession.new()
+	add_child_autofree(nw_browser)
+	assert_eq(nw_browser.start_browsing("127.0.0.1", port, port, JoinTarget.NETWORK_NOVAWORLD), OK)
+	var lan_browser := LanSession.new()
+	add_child_autofree(lan_browser)
+	assert_eq(lan_browser.start_browsing("127.0.0.1", port, port, JoinTarget.NETWORK_LAN), OK)
+	for _i in range(180):
+		host.step()
+		await get_tree().process_frame
+		if not lan_browser.get_servers().is_empty():
+			break
+		OS.delay_msec(2)
+	# Give the NovaWorld browse the same replies a few more frames.
+	for _i in range(10):
+		host.step()
+		await get_tree().process_frame
+		OS.delay_msec(2)
+	assert_eq(lan_browser.get_servers().size(), 1, "the LAN browse lists the LAN host")
+	assert_eq(nw_browser.get_servers().size(), 0, "a NovaWorld browse does not list a LAN host")
+	nw_browser.stop()
+	lan_browser.stop()
 
 
 func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:

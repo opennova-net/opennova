@@ -32,7 +32,7 @@ constexpr uint32_t kBrowseCi = 0x00C0FFEEu;
 // A game-server 0x81 carrying the retail JO identity, as a whole datagram.
 std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
                                   uint32_t max_players, uint32_t gametype = 2,
-                                  uint32_t ci = kBrowseCi) {
+                                  uint32_t ci = kBrowseCi, uint32_t flags = 0x904u) {
     const ClientHello retail = make_jointoperations_client_hello(0);
     ServerHello hello;
     hello.is_game_server = true;
@@ -45,6 +45,7 @@ std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
     hello.sus1 = "session-" + name;
     hello.sus2 = "revx02";
     hello.p1 = gametype;
+    hello.p2 = flags;
     hello.np = players;
     hello.mp = max_players;
     return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(hello));
@@ -52,12 +53,12 @@ std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
 
 void test_begin_validates_the_range_and_fixes_one_identity() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(!b.begin(7, 0, 100));
-    CHECK(!b.begin(7, 32768, 32760));
-    CHECK(!b.begin(7, 1, 70000));
-    CHECK(!b.begin(0, kRetailLanPortMin, kRetailLanPortMax)); // a zero CI is omitted on the wire
+    CHECK(!b.begin(7, 0, 100, kLanConnectTypeLan));
+    CHECK(!b.begin(7, 32768, 32760, kLanConnectTypeLan));
+    CHECK(!b.begin(7, 1, 70000, kLanConnectTypeLan));
+    CHECK(!b.begin(0, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan)); // a zero CI is omitted on the wire
     CHECK(!b.browsing());
-    CHECK(b.begin(7, kRetailLanPortMin, kRetailLanPortMax));
+    CHECK(b.begin(7, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     CHECK(b.browsing());
     CHECK(b.client_index() == 7);
     CHECK(!b.probe().empty());
@@ -70,7 +71,7 @@ void test_begin_validates_the_range_and_fixes_one_identity() {
 
 void test_window_and_announce_cadence() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax));
+    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     int announces = 0;
     int frames = 0;
@@ -93,7 +94,7 @@ void test_window_and_announce_cadence() {
 
 void test_window_boundary_is_strictly_greater_than_thirty_seconds() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax));
+    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     CHECK(b.advance(30.0, due)); // exactly 30000 ms: `> 0x7530` is false, still browsing
     CHECK(b.browsing());
@@ -103,7 +104,7 @@ void test_window_boundary_is_strictly_greater_than_thirty_seconds() {
 
 void test_announce_clock_restarts_from_zero_not_the_overshoot() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax));
+    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     CHECK(b.advance(2.9, due));
     CHECK(!due);
@@ -151,7 +152,7 @@ void test_reply_filter_matches_retail_admission() {
 
 void test_replies_are_filtered_and_listed_at_first_sighting() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(kBrowseCi, 32768, 32775));
+    CHECK(b.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
     const std::vector<uint8_t> alpha = server_reply("Alpha", 3, 32);
     // Outside the browsed range, an unusable source, or a foreign packet: no row.
     CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32776) == opennova::LanRowChange::kNone);
@@ -191,13 +192,13 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
     // A stopped browser accepts nothing; a new window starts empty.
     b.stop();
     CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kNone);
-    CHECK(b.begin(2, 32768, 32775));
+    CHECK(b.begin(2, 32768, 32775, kLanConnectTypeLan));
     CHECK(b.servers().empty());
 }
 
 void test_window_lists_at_most_thirty_two_hosts() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(kBrowseCi, 32768, 32768));
+    CHECK(b.begin(kBrowseCi, 32768, 32768, kLanConnectTypeLan));
     const std::vector<uint8_t> reply = server_reply("Many", 1, 8);
     for (int i = 1; i <= 40; ++i) {
         const std::string ip = "10.0.0." + std::to_string(i);
@@ -205,6 +206,40 @@ void test_window_lists_at_most_thirty_two_hosts() {
         CHECK(change == (i <= 32 ? LanRowChange::kAdded : LanRowChange::kNone));
     }
     CHECK(b.servers().size() == kLanBrowseMaxSessions);
+}
+
+// The browse admits a session only when its P2 flag word allows the browser's network
+// connect type: 0x400 (a NovaWorld-transport host) needs type 1, 0x100 (LAN) type 2,
+// 0x200 (the internet type) type 3, and a word with none of the three passes any. The
+// LAN screen browses as type 2, so a NovaWorld-registered host never lists there, and a
+// filtered session takes no slot under the 32 cap.
+// [orig: NetPacket_ValidateChannelType @0x4c49b0, the gate in
+//  CNapiNetwork_OnSessionDiscovered @0x4c84b0; the LAN screen's type 2 @0x5569e1;
+//  CNapiServerConfig_BuildFlags @0x4c4de4/@0x4c4df1/@0x4c4dfe]
+void test_browse_admits_only_its_network_type() {
+    const std::vector<uint8_t> lan_host = server_reply("Lan", 1, 8, 2, kBrowseCi, 0x904u);
+    const std::vector<uint8_t> nw_host = server_reply("Nw", 1, 8, 2, kBrowseCi, 0x404u);
+    const std::vector<uint8_t> net_host = server_reply("Net", 1, 8, 2, kBrowseCi, 0xA04u);
+    const std::vector<uint8_t> bare_host = server_reply("Bare", 1, 8, 2, kBrowseCi, 0x0u);
+    opennova::LanDiscoveryBrowser lan;
+    CHECK(lan.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
+    CHECK(lan.accept_reply(nw_host.data(), nw_host.size(), "10.0.0.1", 32768) == LanRowChange::kNone);
+    CHECK(lan.accept_reply(net_host.data(), net_host.size(), "10.0.0.2", 32768) == LanRowChange::kNone);
+    CHECK(lan.accept_reply(lan_host.data(), lan_host.size(), "10.0.0.3", 32768) == LanRowChange::kAdded);
+    CHECK(lan.accept_reply(bare_host.data(), bare_host.size(), "10.0.0.4", 32768) == LanRowChange::kAdded);
+    CHECK(lan.servers().size() == 2);
+    opennova::LanDiscoveryBrowser nw;
+    CHECK(nw.begin(kBrowseCi, 32768, 32775, kLanConnectTypeNovaWorld));
+    CHECK(nw.accept_reply(lan_host.data(), lan_host.size(), "10.0.0.3", 32768) == LanRowChange::kNone);
+    CHECK(nw.accept_reply(nw_host.data(), nw_host.size(), "10.0.0.1", 32768) == LanRowChange::kAdded);
+    // A filtered session takes no slot: 32 NovaWorld hosts on the LAN screen leave room.
+    opennova::LanDiscoveryBrowser capped;
+    CHECK(capped.begin(kBrowseCi, 32768, 32768, kLanConnectTypeLan));
+    for (int i = 1; i <= 40; ++i) {
+        capped.accept_reply(nw_host.data(), nw_host.size(), "10.1.0." + std::to_string(i), 32768);
+    }
+    CHECK(capped.accept_reply(lan_host.data(), lan_host.size(), "10.2.0.1", 32768) == LanRowChange::kAdded);
+    CHECK(capped.servers().size() == 1);
 }
 
 } // namespace
@@ -217,6 +252,7 @@ int main() {
     test_reply_filter_matches_retail_admission();
     test_replies_are_filtered_and_listed_at_first_sighting();
     test_window_lists_at_most_thirty_two_hosts();
+    test_browse_admits_only_its_network_type();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

@@ -44,9 +44,10 @@ LanSession::~LanSession() {
 
 void LanSession::_bind_methods() {
 	ClassDB::bind_method(
-			D_METHOD("start_browsing", "destination", "port_min", "port_max"),
+			D_METHOD("start_browsing", "destination", "port_min", "port_max", "connect_type"),
 			&LanSession::start_browsing,
-			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)));
+			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
+			DEFVAL(int(opennova::kLanConnectTypeLan)));
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
@@ -62,13 +63,15 @@ void LanSession::_ready() {
 	set_process(browser_.browsing());
 }
 
-int LanSession::start_browsing(const String &destination, int port_min, int port_max) {
+int LanSession::start_browsing(const String &destination, int port_min, int port_max,
+		int connect_type) {
 	stop();
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
 	const String target = destination.strip_edges();
-	if (target.is_empty() || !browser_.begin(pick_random_uint32(), port_min, port_max)) {
+	if (target.is_empty() ||
+			!browser_.begin(pick_random_uint32(), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}

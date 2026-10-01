@@ -213,8 +213,11 @@ func _begin_spectator_preflight(target: JoinTarget) -> void:
 	add_child(_spectator_probe)
 	_spectator_probe.servers_changed.connect(
 			_on_spectator_preflight_rows.bind(_spectator_probe, target, serial))
+	# The enumeration runs under the target's network connect type: a NovaWorld
+	# host's P2 admits only a NovaWorld browse, a LAN host's only a LAN one
+	# (the engine's lan_session_admits_connect_type).
 	var err := int(_spectator_probe.start_browsing(
-			target.host_ip, target.port, target.port))
+			target.host_ip, target.port, target.port, target.network_type))
 	if err != OK:
 		_finish_spectator_preflight(_spectator_probe, target, serial, null)
 		return

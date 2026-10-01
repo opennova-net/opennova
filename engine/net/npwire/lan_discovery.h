@@ -64,6 +64,21 @@ inline constexpr double kLanAnnounceIntervalSeconds = 3.0;
 // break @0x5593b5]
 inline constexpr size_t kLanBrowseMaxSessions = 32;
 
+// The network connect type a browse runs under (g_GameConfigState.networkConnectType):
+// the NovaWorld menu is 1, the LAN screen 2 [orig: UI_InitLANMultiplayerScreen
+// @0x5569e1], the internet (direct-address) type 3.
+inline constexpr int kLanConnectTypeNovaWorld = 1;
+inline constexpr int kLanConnectTypeLan = 2;
+inline constexpr int kLanConnectTypeInternet = 3;
+
+// Whether a discovered session's P2 flag word (CNapiServerConfig_BuildFlags) admits a
+// browse of `connect_type`: 0x400 (a NovaWorld-transport host) needs type 1, else 0x100
+// (LAN) type 2, else 0x200 (internet) type 3; a word with none of the three admits any
+// type. The word is read as the 16-bit value the original takes.
+// [orig: NetPacket_ValidateChannelType @0x4c49b0; BuildFlags' transport bits
+//  @0x4c4de4 / @0x4c4df1 / @0x4c4dfe]
+bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags);
+
 // One discovered host: the reply's source endpoint plus its projected hello.
 struct LanDiscoveryRow {
 	std::string host_ip;
@@ -91,9 +106,10 @@ enum class LanRowChange : uint8_t {
 //  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521]
 class LanDiscoveryBrowser {
 public:
-	// Begins a window; false (nothing changes) on an invalid port range or a
-	// zero client index.
-	bool begin(uint32_t client_index, int port_min, int port_max);
+	// Begins a window under `connect_type` (kLanConnectType*): only a session whose
+	// P2 admits it lists (lan_session_admits_connect_type). False (nothing changes)
+	// on an invalid port range or a zero client index.
+	bool begin(uint32_t client_index, int port_min, int port_max, int connect_type);
 	void stop();
 	bool browsing() const { return browsing_; }
 	int port_min() const { return port_min_; }
@@ -118,6 +134,7 @@ private:
 	std::vector<LanDiscoveryRow> servers_;
 	std::unordered_map<std::string, size_t> index_by_endpoint_;
 	uint32_t client_index_ = 0;
+	int connect_type_ = kLanConnectTypeLan;
 	int port_min_ = 0;
 	int port_max_ = 0;
 	double browse_elapsed_s_ = 0.0;
