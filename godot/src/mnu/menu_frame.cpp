@@ -218,6 +218,10 @@ bool MenuFrame::texture_loads(const String &p_name) {
 			assets_.texture_loads(opennova::to_std(p_name), *files_, texture_store_);
 }
 
+bool MenuFrame::load_texture_ahead(const std::string &p_name, const opennova::FileSource &p_files) {
+	return assets_.texture_loads(p_name, p_files, texture_store_);
+}
+
 bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		const String &p_screen_name, const Ref<ResourceRoot> &p_root,
 		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text) {

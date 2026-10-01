@@ -106,6 +106,7 @@ const char *viewport_status_token(ViewportStatus status) {
 	case ViewportStatus::Empty: return "empty";
 	case ViewportStatus::Failed: return "failed";
 	case ViewportStatus::Ready: return "ready";
+	case ViewportStatus::Loading: return "loading";
 	}
 	return "empty";
 }
@@ -168,6 +169,38 @@ bool ViewportModel::current(const ViewportInput &input) const {
 			input.document->revision() == shown_revision_;
 }
 
+ViewportStatus ViewportModel::picture_status() const {
+	const ViewportStatus shown = status();
+	if (shown != ViewportStatus::Ready || !attached_) return shown;
+	if (build_.loading) return ViewportStatus::Loading;
+	return build_.failed ? ViewportStatus::Failed : ViewportStatus::Ready;
+}
+
+const char *ViewportModel::picture_reason() const {
+	if (status() != ViewportStatus::Ready) return reason();
+	switch (picture_status()) {
+	case ViewportStatus::Loading: return "loading";
+	case ViewportStatus::Failed: return "build_failed";
+	default: return reason();
+	}
+}
+
+std::string ViewportModel::picture_message() const {
+	if (status() != ViewportStatus::Ready) return message();
+	switch (picture_status()) {
+	case ViewportStatus::Loading: {
+		const OperationProgress &progress = build_.progress;
+		std::string line = "Building the picture: " + std::to_string(progress.done) + " of " +
+				std::to_string(progress.total);
+		if (!progress.label.empty()) line += " (" + progress.label + ")";
+		return line + ".";
+	}
+	case ViewportStatus::Failed:
+		return build_.message.empty() ? std::string("The picture did not build.") : build_.message;
+	default: return message();
+	}
+}
+
 io::JsonValue ViewportModel::notes_json(const ViewportInput &) const {
 	return JsonValue::make_array();
 }
@@ -192,14 +225,34 @@ void ViewportModel::shown_none() {
 }
 
 ViewportAction ViewportModel::follow(const ViewportInput &input, PreviewClock &clock) {
+	followed_change_ = input.change;
+	// The token of the gesture open in its document (0: none), where its kind's picture made again
+	// waits for one.
+	const uint64_t gesture = row().holds_for_gesture ? input.view.documents.gesture_in(path_).token : 0;
+	// A Rebuild held for a gesture that ended since (or gave way to another) is due now.
+	if (held_ && gesture != held_for_) {
+		held_ = false;
+		pending_ = ViewportAction::Rebuild;
+	}
 	switch (follow_(input, clock)) {
 	case ViewportAction::Keep: break;
 	case ViewportAction::Update:
 		if (pending_ == ViewportAction::Keep) pending_ = ViewportAction::Update;
 		break;
-	case ViewportAction::Rebuild: pending_ = ViewportAction::Rebuild; break;
+	case ViewportAction::Rebuild:
+		// The device keeps the picture it holds while a gesture is open in the document: it is made
+		// again at the gesture's end. A device holding none (never made, or cleared), or with a Rebuild
+		// or a Clear to take, makes it now.
+		if (gesture && holds_ && (pending_ == ViewportAction::Keep || pending_ == ViewportAction::Update)) {
+			held_ = true;
+			held_for_ = gesture;
+		} else {
+			pending_ = ViewportAction::Rebuild;
+		}
+		break;
 	case ViewportAction::Clear:
-		// A picture the device holds is dropped; one it was about to make is not made.
+		// A picture the device holds is dropped; one it was about to make, or held, is not made.
+		held_ = false;
 		pending_ = holds_ ? ViewportAction::Clear : ViewportAction::Keep;
 		break;
 	}
@@ -247,8 +300,11 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 
 ViewportAction ViewportModel::take_action() {
 	if (!attached_) return ViewportAction::Keep;
-	const ViewportAction action = pending_;
+	ViewportAction action = pending_;
 	pending_ = ViewportAction::Keep;
+	// An Update applies to a picture the device built: one it builds applies the state as its build
+	// ends (folded), and a failed build left no picture of the newest generation to apply it to.
+	if (action == ViewportAction::Update && (build_.loading || build_.failed)) action = ViewportAction::Keep;
 	if (action == ViewportAction::Rebuild) {
 		++builds_;
 		holds_ = true;
@@ -261,22 +317,34 @@ ViewportAction ViewportModel::take_action() {
 void ViewportModel::attach() {
 	attached_ = true;
 	holds_ = false;
-	// The device holds nothing yet: its first action makes the picture, if there is one.
+	held_ = false;
+	build_ = ViewportBuildReport();
+	// The device holds nothing yet: its first action makes the picture, if there is one (a gesture
+	// open or not: there is no last picture to keep).
 	pending_ = status() == ViewportStatus::Ready ? ViewportAction::Rebuild : ViewportAction::Keep;
 }
 
 void ViewportModel::detach() {
 	attached_ = false;
 	holds_ = false;
+	held_ = false;
+	build_ = ViewportBuildReport();
 	pending_ = ViewportAction::Keep;
 	shown_size_ = ViewportState();
 	canvas_sized_ = false;
 }
 
-void ViewportModel::device_report(const ViewportDeviceReport &report) {
+bool ViewportModel::device_report(const ViewportDeviceReport &report) {
 	shown_size_ = ViewportState{ report.width, report.height };
 	canvas_sized_ = report.canvas_sized;
 	report_(report);
+	return device_build(report.build);
+}
+
+bool ViewportModel::device_build(const ViewportBuildReport &build) {
+	const bool moved = !build_.reads_same(build);
+	build_ = build;
+	return moved;
 }
 
 } // namespace opennova::editor

@@ -49,10 +49,16 @@ public:
 	// to its viewport, the least recently used not used this round given up past the capacity
 	// (detached; none such: the device waits); then every viewport with a device follows the view, and
 	// each device takes what its viewport asks (a rebuild, an update, a clear) and reports what its
-	// picture read and placed and its size.
+	// picture read and placed, its size and its build.
 	void sync(Viewports &viewports, const SessionView &view);
 	// Every frame, after the clock ran (Viewports::advance): what the clock drives in each device.
 	void tick(const Viewports &viewports);
+	// Every frame after the tick (S13 V6): the devices' builds in flight a unit further, the most
+	// recently used device's first: one unit a frame in all whatever the budget (the first build
+	// that has one), then units while `more`, asked after each, says the frame's budget lasts (the
+	// Shell's: the milliseconds it gives the builds, shared by every build; a test's, a count), and
+	// what each build came to given to its viewport (Viewports::device_build).
+	void step(Viewports &viewports, const std::function<bool()> &more);
 	// The device drawing the viewport of `kind` over `path`, now the most recently used and kept
 	// through the next sync; null while none is made, which the next sync makes.
 	ViewportDevice *device(const std::string &path, ViewportKind kind) override;

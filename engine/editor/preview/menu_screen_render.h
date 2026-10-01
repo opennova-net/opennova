@@ -39,6 +39,17 @@ std::string menu_screen_status_message(MenuScreenStatus status, const std::strin
 void split_unloaded(const menu::MenuFrameAssets &assets, std::vector<std::string> &missing,
 		std::vector<std::string> &unreadable);
 
+// The variables a menu's text names: every %NAME% the game's expansion finds in it
+// (mns::variable_reference_at, the scan the game runs over a menu's whole text before its parse),
+// upper case as the shell's list keys them, sorted, each once. Every value the frame compiler
+// resolves through the list is one of them, and so is a %NAME% inside a longer text, which the game
+// expands too though no StyleVar edge reads it (a whole value is an edge).
+std::vector<std::string> menu_variables_named(const std::string &text);
+// The variables of two readings of the shell's list that one has and the other lacks, or that hold
+// another value (both keyed as the list keys them, upper case), sorted.
+std::vector<std::string> changed_menu_variables(const std::map<std::string, std::string> &before,
+		const std::map<std::string, std::string> &after);
+
 // One screen of a menu compiled headless the way the game's frame compiles it (ADR 0046
 // S9j2): the menu the game would read were it saved now (MnuDocument::saved_image, the
 // screen by its row's position), the shell's %VAR% list, and the screen's string tables,

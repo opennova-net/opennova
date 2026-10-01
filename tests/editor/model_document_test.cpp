@@ -5,7 +5,8 @@
 // validator's findings, a part animation's frame and a record's register read as the runtime
 // reads them (S11h); (a SKIP-LEG without OPENNOVA_JO_ASSETS) every retail model saved
 // untouched is its own bytes; and (a SKIP-LEG without OPENNOVA_JO_DIR) every model of the game
-// install validated with no error (S11h).
+// install validated with no error (S11h). Two versions of the model row alike but for their user
+// points only when every other table is the same (S13 V8).
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
@@ -939,10 +940,59 @@ int field_metadata() {
 	return 0;
 }
 
+// S13 V8: two versions of the model row draw alike, their user points aside, only when every other
+// table holds the same records (alike_but_user_points: the model's viewport patches its held model with
+// the user points where they are alike, and reads the document again where not). A user point moved or
+// added is alike; the base, the header, a LOD, a part animation, a material, a light, a register or a
+// frame of another value or of another count is not.
+int alike_but_user_points_tables() {
+	ModelDocument document;
+	TEST_EXPECT(load(document, synth_dir() + "/armory.3di", "armory.3di"));
+	const ModelRow *row = document.model_row();
+	TEST_EXPECT(row && !row->lods.empty() && !row->lods[0].panm.empty() && !row->materials.empty() &&
+	            !row->lights.empty() && !row->user_points.empty() && !row->registers.empty());
+	if (!row || row->lods.empty() || row->lods[0].panm.empty() || row->materials.empty() || row->lights.empty() ||
+	    row->user_points.empty() || row->registers.empty())
+		return 1;
+	const auto alike_after = [&](auto change) {
+		const std::shared_ptr<ModelRow> other = std::static_pointer_cast<ModelRow>(row->clone());
+		change(*other);
+		return alike_but_user_points(*row, *other);
+	};
+	TEST_EXPECT(alike_after([](ModelRow &) {}));
+	TEST_EXPECT(alike_after([](ModelRow &r) { r.user_points[0].x += 65536; }));
+	TEST_EXPECT(alike_after([](ModelRow &r) { r.user_points.push_back(r.user_points[0]); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.base = opennova::assets::Model(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.header.max_radius_fp16 += 1; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lods[0].lod.lod_threshold += 1; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lods.pop_back(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lods[0].panm[0].flags ^= 1u; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lods[0].panm.pop_back(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.materials[0].material.alpha_test_value_byte ^= 1u; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.materials.pop_back(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lights[0].atten_start += 1.0f; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.lights.pop_back(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.registers[0].name[0] ^= 1; }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.registers.pop_back(); }));
+	TEST_EXPECT(!alike_after([](ModelRow &r) { r.frames.push_back(ThreediMatrix4x4{}); }));
+	// A frame of another value: two rows given one frame each.
+	const std::shared_ptr<ModelRow> framed = std::static_pointer_cast<ModelRow>(row->clone());
+	ThreediMatrix4x4 frame{};
+	threedi_mat4_identity(&frame);
+	framed->frames.push_back(frame);
+	const std::shared_ptr<ModelRow> moved = std::static_pointer_cast<ModelRow>(framed->clone());
+	TEST_EXPECT(alike_but_user_points(*framed, *moved));
+	moved->frames.back().m[12] += 1.0f;
+	TEST_EXPECT(!alike_but_user_points(*framed, *moved));
+	std::printf("alike_but_user_points: the user points alone alike; every other table compared\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (untouched_saves() != 0) return 1;
 	if (edits() != 0) return 1;
+	if (alike_but_user_points_tables() != 0) return 1;
 	if (part_animations() != 0) return 1;
 	if (changes_since_save() != 0) return 1;
 	if (validation() != 0) return 1;

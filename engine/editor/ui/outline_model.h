@@ -72,10 +72,14 @@ struct OutlineSpec {
 // The portable half of a document's outline (S13 V3; ImGui-free, as ui/problems_list and
 // ui/find_cursor are): the lines it shows, what is open (the file-wide values' heading too), the
 // filter, the order, and in master and detail the columns; the view's filter box, sort and Every
-// read and write the model's. The lines are made again only when what they read moves (lines_made
-// counts it): the document (its identity, load and revision), what is open, the filter, the
-// order, the "every row" switch, and in master and detail the master row; drawing reads them as
-// they stand.
+// read and write the model's. The lines are made again only when what they read moves: the
+// document (its identity, load and revision), what is open, the filter, the order, the "every row"
+// switch, and in master and detail the master row; drawing reads them as they stand. Each row's
+// lines are kept apart (S13 V8), so when the document's revision alone moved (an edit, an undo, a
+// redo) the lines follow its change set: a changed or added row's lines made again, a removed row's
+// dropped, the rows put in the document's order again where they moved (a list in name order sorted
+// again), every other row's kept; everything is made anew when the document cannot say
+// (lines_made counts those, rows_made every row's lines made).
 class OutlineModel {
 public:
 	explicit OutlineModel(OutlineMode mode = OutlineMode::Tree,
@@ -116,8 +120,9 @@ public:
 	size_t reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master = 0);
 
 	// The lines of `document` as they stand (a tree's, a list's, master and detail's detail
-	// records), and in master and detail the rows (every one, in the file's order): made anew
-	// only when what they read moved. `master`: master and detail's master row (0: none).
+	// records), and in master and detail the rows (every one, in the file's order): made again only
+	// when what they read moved, after an edit the rows its change set names alone. `master`: master
+	// and detail's master row (0: none).
 	const std::vector<OutlineLine> &lines(const Document &document, NodeId master = 0);
 	const std::vector<OutlineLine> &masters() const { return masters_; }
 	// Master and detail: the detail records' kind, their collection's label, and the columns, the
@@ -130,8 +135,10 @@ public:
 	// The document's file-wide values (the hook's); false for none.
 	bool file_values(const Document &document, OutlineFileValues &out) const;
 
-	// How many times the lines were made.
+	// How many times the lines were made anew (every row's), and how many rows' lines were made: every
+	// row's each time the lines are made anew, else the rows a change set names changed or added.
 	size_t lines_made() const { return lines_made_; }
+	size_t rows_made() const { return rows_made_; }
 
 private:
 	// A tree's open line by what it is: a record, or a record's collection of a kind.
@@ -152,22 +159,44 @@ private:
 		std::string filter;
 		bool sort = false, every = false;
 		NodeId master = 0;
-		bool operator==(const Key &other) const {
+		// Everything but the revision the same: the lines may follow the document's change set.
+		bool same_but_revision(const Key &other) const {
 			return made == other.made && document == other.document && load == other.load &&
-			       revision == other.revision && open == other.open && filter == other.filter &&
-			       sort == other.sort && every == other.every && master == other.master;
+			       open == other.open && filter == other.filter && sort == other.sort &&
+			       every == other.every && master == other.master;
 		}
+		bool operator==(const Key &other) const { return same_but_revision(other) && revision == other.revision; }
 	};
-	void make_tree(const Document &document);
-	void make_list(const Document &document);
-	void make_master_detail(const Document &document, NodeId master);
-	// A tree's record and collection lines, and under a filter whether they were kept.
-	void add_record(const Document &document, const NodeAddress &record, int depth, size_t index);
+	// One row's lines, a slot per row in the document's row order: a tree's (the row and what is
+	// listed under it), a list's (its line, none where the filter drops it; in name order its name as
+	// names compare), master and detail's (the row as a master, and its detail records where they are
+	// listed).
+	struct RowLines {
+		NodeId row = 0;
+		OutlineLine master;
+		std::vector<OutlineLine> lines;
+		std::string order;
+	};
+	// Master and detail: the detail records' kind, their label and the columns, from the first
+	// collection a row holds.
+	void make_detail_columns(const Document &document);
+	// The lines of the row at `index` among the document's rows.
+	void make_row(const Document &document, size_t index, NodeId master, RowLines &out);
+	// A row's lines at its place `index` among the rows (its own line's index).
+	void place_row(RowLines &row, size_t index);
+	// The rows' lines after a change set (lines()); false when everything is made anew.
+	bool follow_changes(const Document &document, const RowChanges &changes, NodeId master);
+	// The lines (and in master and detail the masters) from the rows' lines.
+	void join_rows();
+	// A tree's record and collection lines into `out`, and under a filter whether they were kept.
+	void add_record(const Document &document, const NodeAddress &record, int depth, size_t index,
+			std::vector<OutlineLine> &out) const;
 	void add_collection(const Document &document, const NodeAddress &owner,
-			const Document::Collection &collection, int depth);
-	bool add_filtered_record(const Document &document, const NodeAddress &record, int depth, size_t index);
+			const Document::Collection &collection, int depth, std::vector<OutlineLine> &out) const;
+	bool add_filtered_record(const Document &document, const NodeAddress &record, int depth, size_t index,
+			std::vector<OutlineLine> &out) const;
 	bool add_filtered_collection(const Document &document, const NodeAddress &owner,
-			const Document::Collection &collection, int depth);
+			const Document::Collection &collection, int depth, std::vector<OutlineLine> &out) const;
 	OutlineLine record_line(const Document &document, const NodeAddress &record, int depth, size_t index,
 			bool branch) const;
 	bool matches(const std::string &text) const;
@@ -182,12 +211,15 @@ private:
 	uint64_t open_version_ = 0;
 	bool values_open_ = false;
 	Key key_;
+	std::vector<RowLines> rows_;
 	std::vector<OutlineLine> lines_;
 	std::vector<OutlineLine> masters_;
+	bool has_detail_ = false; // master and detail: a row holds a collection, the detail's kind
 	NodeKind detail_kind_ = 0;
 	const char *detail_label_ = "";
 	std::vector<const FieldSchema *> columns_;
 	size_t lines_made_ = 0;
+	size_t rows_made_ = 0;
 };
 
 } // namespace opennova::editor

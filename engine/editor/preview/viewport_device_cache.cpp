@@ -82,7 +82,8 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 	for (const Want &want : wanted_)
 		if (viewports.find(want.path, want.kind)) use_(viewports, want.path, want.kind);
 	wanted_.clear();
-	// Every viewport with a device follows, and each device takes what its viewport asks.
+	// Every viewport with a device follows, and each device takes what its viewport asks, then says
+	// where its build stands.
 	viewports.follow(view);
 	for (Slot &slot : slots_) {
 		const ViewportModel *model = viewports.find(slot.path, slot.kind);
@@ -90,6 +91,7 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 		const ViewportAction action = viewports.take_action(slot.path, slot.kind);
 		ViewportDeviceReport report;
 		slot.device->take(action, *model, view, viewports.clock(), report);
+		report.build = slot.device->build();
 		viewports.device_report(slot.path, slot.kind, report);
 	}
 }
@@ -98,6 +100,30 @@ void ViewportDeviceCache::tick(const Viewports &viewports) {
 	for (Slot &slot : slots_)
 		if (const ViewportModel *model = viewports.find(slot.path, slot.kind))
 			slot.device->tick(*model, viewports.clock());
+}
+
+void ViewportDeviceCache::step(Viewports &viewports, const std::function<bool()> &more) {
+	// The most recently used first: the viewport a canvas drew or a view asked for last is the one
+	// looked at, and the frame's budget goes to it before an older (perhaps hidden) one.
+	std::vector<Slot *> order;
+	order.reserve(slots_.size());
+	for (Slot &slot : slots_) order.push_back(&slot);
+	std::sort(order.begin(), order.end(), [](const Slot *a, const Slot *b) { return a->used > b->used; });
+	// One unit a frame in all, whatever the budget: the first build that has one runs it; each unit
+	// after it, of that build or a later one, runs only while `more` says the budget lasts (asked once
+	// after each unit, so a budget of N units is N units however many builds share them).
+	bool may = true;
+	for (Slot *slot : order) {
+		if (!may) break;
+		const ViewportModel *model = viewports.find(slot->path, slot->kind);
+		if (!model) continue;
+		bool stepped = false;
+		while (may && slot->device->step(*model, viewports.clock())) {
+			stepped = true;
+			may = more && more();
+		}
+		if (stepped) viewports.device_build(slot->path, slot->kind, slot->device->build());
+	}
 }
 
 ViewportDevice *ViewportDeviceCache::device(const std::string &path, ViewportKind kind) {

@@ -78,6 +78,16 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 					else ImGui::Dummy(ImVec2(float(picture.width), float(picture.height))); // made at the next pump
 				},
 				[&] { return half_->hover_tip(context, in); });
+		// The last picture shows while its device builds the next (S13 V6), or after that build failed.
+		switch (model.picture_status()) {
+		case ViewportStatus::Loading: {
+			const OperationProgress &units = model.build().progress;
+			ui.badge("Loading " + std::to_string(units.done) + "/" + std::to_string(units.total));
+			break;
+		}
+		case ViewportStatus::Failed: ui.badge(model.picture_message()); break;
+		default: break;
+		}
 		if (inside) inside(in);
 		half_->input(context, in, requests);
 		ui.draw(half_->shapes(context, in), half_->cursor(context, in));

@@ -101,6 +101,14 @@ struct ComposedModel;
 // copy a caller edited through the table).
 void compose_model(const ModelRow &row, const CollisionRow *collision, ComposedModel &out);
 
+// Whether two versions of the model row compose the same model but for their user points (ADR 0046
+// S13 V8): the same base, header, LODs with their part animations, materials, lights, CTRL registers
+// and MTRX rows, which is everything the model viewport's scene draws of the row; a user point is
+// its overlays' alone. The format's records compare byte for byte: a version is a copy of the other
+// but for what an edit set, so alike versions compare equal, and a padding byte apart counts as a
+// change (a scene built again, never a change missed).
+bool alike_but_user_points(const ModelRow &a, const ModelRow &b);
+
 // The model as the writer takes it, composed from a document's rows: `model` points into
 // the vectors here and into the base, which this keeps alive.
 struct ComposedModel {

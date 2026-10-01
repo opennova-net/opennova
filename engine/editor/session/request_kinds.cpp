@@ -446,7 +446,8 @@ constexpr RequestKindRow kRows[] = {
 			.names_active()
 			.row,
 	Request(K::EndEdit, "end_edit", serve_end_edit,
-			"The coalesced edit group, or the gesture, of the document at path ends.")
+			"The coalesced edit group, or the gesture, of the document at path (left out, the active "
+			"document) ends; a gesture open in another document stays open.")
 			.takes(request_params({}, { F::Path }))
 			.names_active()
 			.row,

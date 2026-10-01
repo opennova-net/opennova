@@ -32,12 +32,17 @@ public:
 	void draw_modals(Workspace &workspace) override;
 	void rebind(const DocumentBase &document) override;
 
+	// How many times the screen's tree was made.
+	size_t trees_made() const { return trees_made_; }
+
 private:
 	const Node *draw_screens(Workspace &workspace, const MnuDocument &document);
 	void draw_windows(Workspace &workspace, const MnuDocument &document, const Node &screen);
 	void draw_window_node(Workspace &workspace, const MnuDocument &document, size_t index);
 	void click_window(Workspace &workspace, const MnuDocument &document, size_t index);
-	// The tree and each window's line, rebuilt only when the document or the screen changes.
+	// The tree and each window's line, made again only when the document or the screen changes: an
+	// edit, an undo or a redo (the revision alone) whose change set leaves the screen's row as it
+	// was (another screen's, S13 V8) keeps it.
 	void refresh_tree(const MnuDocument &document, const Node &screen);
 
 	std::string add_type_ = "static"; // the type a new window takes
@@ -52,6 +57,7 @@ private:
 	NodeId removing_screen_ = 0;
 	bool ask_remove_ = false;    // the prompt opens on its next draw
 	NodeId anchor_ = 0;          // the window a Shift+click selects from (the last one clicked)
+	size_t trees_made_ = 0;
 };
 
 } // namespace opennova::editor

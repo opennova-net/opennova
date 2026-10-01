@@ -33,19 +33,23 @@ struct ViewportFeed {
 // read it were it saved now (its bytes written and read back, so a document that cannot be written
 // shows nothing: the menu's and the model's) or the document as it stands (a text's in the script
 // device, S13 V10; the mission's rows, to come); whether it shows one row of its document, the
-// selection's (a menu's screen: its target
-// moves only when a row of the document is selected and goes with that row); the document types it
-// shows and those that feed it; and what makes a viewport of it over the document at a path, its
-// state at the kind's defaults; and whether a canvas draws it, which owns the pointer over its
-// picture (a menu's, a model's: so a point of it names a record, a drag moves one, a command acts on
-// some) or a Control of the Shell's owns it (the script device's, S13 V10: no point of it names
-// anything, nothing is dragged or commanded in it, and the wire refuses a hit on it). A type is shown
-// by one Main-role kind at most and fed by one Preview-role kind at most (static_asserted).
+// selection's (a menu's screen: its target moves only when a row of the document is selected and goes
+// with that row); whether its picture made again waits for a gesture open in its document to end (S13
+// V8: a scene built anew, the model's, which the device keeps while the overlays follow the drag; a
+// menu's screen is configured again as the drag goes, its frame redrawn live; a text's control takes
+// every edit live, the script device's); the document types it shows and those that feed it; what
+// makes a viewport of it over the document at a path, its state at the kind's defaults; and whether a
+// canvas draws it, which owns the pointer over its picture (a menu's, a model's: so a point of it
+// names a record, a drag moves one, a command acts on some) or a Control of the Shell's owns it (the
+// script device's, S13 V10: no point of it names anything, nothing is dragged or commanded in it, and
+// the wire refuses a hit on it). A type is shown by one Main-role kind at most and fed by one
+// Preview-role kind at most (static_asserted).
 struct ViewportKindRow {
 	ViewportKind kind = ViewportKind::kCount;
 	ViewportRole role = ViewportRole::Preview;
 	bool as_saved = true;
 	bool part = false;
+	bool holds_for_gesture = false;
 	const ViewportFeed *feeds = nullptr;
 	size_t feed_count = 0;
 	std::unique_ptr<ViewportModel> (*make)(const std::string &path) = nullptr;

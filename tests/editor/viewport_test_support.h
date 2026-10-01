@@ -13,6 +13,7 @@
 
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/menu_viewport.h>
+#include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewport_json.h>
@@ -31,15 +32,37 @@ using opennova::editor::ViewportAction;
 // (and whether that was a size of the canvas's own), else its viewport's state's. A menu's reports
 // where its picture placed each widget: where the viewport's own compile did (the Shell's MenuFrame
 // draws the same screen alike). It reads `reads` through the project's files as it makes its
-// picture, as a model's device reads its textures, and reports them.
+// picture, as a model's device reads its textures, and reports them. It makes its picture whole as it
+// takes a Rebuild, or (S13 V6) with `units` set builds it over that many steps, one unit a step as the
+// Shell's frames step it, drawing the last picture it built (`shown`, a generation) until the build
+// ends, failing at unit `fail_at` when that is set; a Rebuild drops the one in flight, a Clear drops it
+// with the picture. A menu's keeps its frame's clock as the Shell's applier does (S13 V8,
+// MenuViewportApplier::tick): the clock's time at each configure (a Rebuild, as V6's configure_ sets
+// it), set at a tick only where menu_frame_clock says the frame draws otherwise; the times it set, in
+// order, and the ticks it had.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
+	uint32_t frame_ms = 0;
+	std::vector<uint32_t> clock_sets;
+	size_t ticks = 0;
 	int draws = 0;
 	int width = 0;
 	int height = 0;
 	bool drawn = false; // a canvas drew it since the last pump
 	bool canvas_sized = false;
+	// A build over steps (S13 V6): its units (0: made whole as it is taken) and the unit it fails at
+	// (0: none); its build as build() says, the generation of the picture it draws (0: none), the
+	// units it ran, and the Actions it took while a build ran.
+	uint64_t units = 0;
+	uint64_t fail_at = 0;
+	opennova::editor::ViewportBuildReport built;
+	uint64_t shown = 0;
+	int steps = 0;
+	std::vector<ViewportAction> taken_building;
+	// What a model viewport's level option was as its last build ended (-2: none ended): the state
+	// the build applied.
+	int ended_lod = -2;
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
 		width = picture.width;
@@ -47,10 +70,43 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		drawn = true;
 		canvas_sized = picture.canvas_sized;
 	}
+	opennova::editor::ViewportBuildReport build() const override { return built; }
+	bool step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) override {
+		if (!built.loading) return false;
+		++steps;
+		++built.progress.done;
+		if (fail_at != 0 && built.progress.done == fail_at) {
+			built.loading = false;
+			built.failed = true;
+			built.message = "Unit " + std::to_string(fail_at) + " failed.";
+		} else if (built.progress.done == built.progress.total) {
+			built.loading = false;
+			shown = built.generation;
+			const auto *shown_model = dynamic_cast<const opennova::editor::ModelViewport *>(&model);
+			ended_lod = shown_model ? shown_model->options().lod : -1;
+		}
+		return true;
+	}
 	void take(ViewportAction action, const opennova::editor::ViewportModel &model,
-			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &,
+			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override {
 		taken.push_back(action);
+		if (built.loading) taken_building.push_back(action);
+		if (action == ViewportAction::Rebuild) {
+			frame_ms = opennova::editor::menu_frame_time(clock);
+			built = opennova::editor::ViewportBuildReport();
+			built.generation = model.builds();
+			if (units != 0) {
+				built.loading = true;
+				built.progress.total = units;
+				built.progress.label = "units";
+			} else {
+				shown = built.generation;
+			}
+		} else if (action == ViewportAction::Clear) {
+			built.loading = built.failed = false;
+			shown = 0;
+		}
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && canvas_sized;
@@ -75,7 +131,17 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 			placed.bottom = rect.bottom;
 		}
 	}
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {}
+	void tick(const opennova::editor::ViewportModel &model,
+			const opennova::editor::PreviewClock &clock) override {
+		++ticks;
+		const auto *menu = dynamic_cast<const opennova::editor::MenuViewport *>(&model);
+		uint32_t time = 0;
+		if (!menu || menu->status() != opennova::editor::ViewportStatus::Ready ||
+				!opennova::editor::menu_frame_clock(*menu, frame_ms, clock, time))
+			return;
+		frame_ms = time;
+		clock_sets.push_back(time);
+	}
 	// The last action it took (Keep before any).
 	ViewportAction last() const { return taken.empty() ? ViewportAction::Keep : taken.back(); }
 	// The actions taken since `from`, Keep left out.
@@ -88,16 +154,25 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 };
 
 // The Shell's devices over fakes: every device it made, still held or given up, and how many it
-// made.
+// made; the units each one it makes builds its picture over (S13 V6; 0: made whole as it is taken).
 struct FakeDevices {
 	std::vector<FakeDevice *> made;
+	uint64_t units = 0;
 	opennova::editor::ViewportDeviceCache cache{ [this](opennova::editor::ViewportKind) {
 		auto device = std::make_unique<FakeDevice>();
+		device->units = units;
 		made.push_back(device.get());
 		return std::unique_ptr<opennova::editor::ViewportDevice>(std::move(device));
 	} };
 	// The Shell's pump after the session's poll.
 	void sync(opennova::editor::ProjectSession &session) { cache.sync(session.viewports(), session.view()); }
+	// A frame of the Shell's (S13 V6): its pump, then the builds stepped, `units` units a frame in all
+	// (the budget's, one at least, shared by the builds in flight, the most recently used first).
+	void frame(opennova::editor::ProjectSession &session, int units = 1) {
+		sync(session);
+		int left = units;
+		cache.step(session.viewports(), [&left] { return --left > 0; });
+	}
 	FakeDevice *held(const std::string &path, opennova::editor::ViewportKind kind) const {
 		return static_cast<FakeDevice *>(cache.held(path, kind));
 	}

@@ -78,6 +78,12 @@ public:
 	// Whether a texture name loads (retail's dispatch, then a decode), kept like the
 	// screen's own.
 	bool texture_loads(const std::string &name, const FileSource &files, MenuTextureDecoder &decoder);
+	// Whether a configure naming a texture would decode nothing for it now: its file is kept at
+	// its stamp now, or there is nothing to decode (the source lacks the file, or the name's
+	// extension reads nothing). An embedder that loads what is not kept ahead of a configure
+	// (texture_loads) spreads a screen's first configure over its own steps (the editor's menu
+	// device, ADR 0046 S13 V6).
+	bool texture_kept(const std::string &name, const FileSource &files) const;
 	// Everything let go: the compiler configured over nothing, its fonts unregistered.
 	void clear(MenuFrameCompiler &compiler, MenuTextureDecoder &decoder);
 

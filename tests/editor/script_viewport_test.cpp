@@ -15,8 +15,7 @@
 // places. Through a real session over a project: the script's Main viewport made as it opens, its
 // device pinned by a headless cache and rebuilt; a keystroke burst planned from the control's text,
 // served as one undo step; an indent of lines a step of its own, its burst ended with it and one
-// open before it ended first; the follow's actions (an edit and an undo an Update, a reload the
-// control's text made again); a compile report a mark once the burst ends; a Go to's span selected
+// open before it ended first; the follow's actions (an edit, an undo and a reload an Update); a compile report a mark once the burst ends; a Go to's span selected
 // (a reference's, a keyword's, a caret alone); a credits file held read only and the busy gate
 // refusing the planner; the envelope; a SetViewport of its device's size; and what the editor MCP's
 // ops say of a viewport with no canvas (a hit refused as such, a render, a drag, a command and a
@@ -672,16 +671,15 @@ int test_session() {
 		rig.pump();
 		TEST_EXPECT(document->text() == original);
 	}
-	// A reload: the control's text made again, whichever way the follow classes a document read again:
-	// a Rebuild (another document at its path) or, from S13 V8, an Update (Unknown) whose take_text_
-	// replaces what differs; the text is made once either way.
+	// A reload: the control's text made again, an Update (S13 V8 classes a document read again Unknown),
+	// the device's take_text_ replacing what differs; the text made once.
 	const size_t before_reload = device->taken.size();
 	const uint64_t made_before = viewport->texts_made();
 	editor_test::handle_to_end(rig.session, request::reload_document(rig.script));
 	rig.pump();
 	{
 		const std::vector<ViewportAction> reloaded = device->since(before_reload);
-		TEST_EXPECT(reloaded.size() == 1 && (reloaded[0] == ViewportAction::Rebuild || reloaded[0] == ViewportAction::Update));
+		TEST_EXPECT(reloaded == std::vector<ViewportAction>{ViewportAction::Update});
 	}
 	viewport = rig.viewport(rig.script);
 	TEST_EXPECT(viewport != nullptr && viewport->texts_made() == made_before + 1);

@@ -39,11 +39,14 @@ constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Text, true },
 };
 
+// The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
+// over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8).
 constexpr ViewportKindRow kRows[] = {
-	{ ViewportKind::Menu, ViewportRole::Preview, true, true, kMenuFeeds, std::size(kMenuFeeds), MenuViewport::make },
-	{ ViewportKind::Model, ViewportRole::Preview, true, false, kModelFeeds, std::size(kModelFeeds),
+	{ ViewportKind::Menu, ViewportRole::Preview, true, true, false, kMenuFeeds, std::size(kMenuFeeds),
+			MenuViewport::make },
+	{ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
 			ModelViewport::make },
-	{ ViewportKind::Script, ViewportRole::Main, false, false, kScriptFeeds, std::size(kScriptFeeds),
+	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
 			ScriptViewport::make, false },
 };
 
