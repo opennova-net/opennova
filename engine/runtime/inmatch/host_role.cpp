@@ -274,7 +274,11 @@ void HostRole::run_tick(const TickInput &input) {
 		kernel.world.profile->add(devtools::Slot::SIM_HOST_PREP,
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
-	kernel.local.apply_player_input_pre_tick();
+	// The host dictates send holdoffs but receives none, so its own client
+	// frame's send block -- and the input pack inside it -- opens every frame
+	// [orig: Client_ProcessNetworkFrame @0x42C3DD -> @0x42C3E9; the period
+	//  arrives only as a CS field-3 update, HandleCSConfigUpdate @0x621940].
+	kernel.local.apply_player_input_pre_tick(/*pack_input=*/true);
 	// The pending fire-sound slots count down ahead of the server tick's
 	// receive, so a slot this frame's C2S queues starts on the next frame.
 	// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call

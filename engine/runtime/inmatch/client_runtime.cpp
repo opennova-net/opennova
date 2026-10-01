@@ -1191,8 +1191,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// NovaWorld host dictates 12 → ~5.2 Hz; LAN lanmode 2/3/4 → 6/4/3; an
 	// unconfigured connection stays 0 = per-tick). A joiner that forgot the
 	// period after one skip flooded retail hosts at 12x their expected rate.
+	const bool send_block_open = send_block_opens_this_frame();
 	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
-	if (send_holdoff_countdown_ == 0) {
+	if (send_block_open) {
 		// These packets already own the connection's earliest allocated
 		// sequences. Preserve wire/retention fidelity by releasing them unchanged
 		// and before framing any later semantic work below.

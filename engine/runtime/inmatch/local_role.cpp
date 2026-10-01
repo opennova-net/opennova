@@ -12,7 +12,10 @@ void LocalRole::run_tick(const TickInput &) {
 	mission::MissionKernel &kernel = *kernel_;
 	kernel.local.view_session_inputs = view_session_inputs_for(nullptr, /*joiner=*/false,
 			kernel.local.local_player_dead(), kernel.world.rules.mp_session);
-	kernel.local.apply_player_input_pre_tick();
+	// Single player sends every tick, so the input pack runs every frame
+	// [orig: NapiNPServer_GetSendHoldoffTicks @0x4C4AB0 -- transport mode 0
+	//  returns 1; Client_ProcessNetworkFrame @0x42C3DD -> @0x42C3E9].
+	kernel.local.apply_player_input_pre_tick(/*pack_input=*/true);
 	// The single-player authority runs the server tick too, so its WAC 'humans'
 	// count is rebuilt ahead of the script pass as a host's is: the local player
 	// keeps the world-run gate open.

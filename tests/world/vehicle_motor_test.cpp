@@ -2720,7 +2720,7 @@ static void test_rider_below_its_carrier_follows_the_same_pass() {
     ctx.is_authority = true;
     float travelled = 0.0f;
     for (uint32_t t = 1; t <= 40; ++t) {
-        local.apply_player_input_pre_tick();
+        local.apply_player_input_pre_tick(/*pack_input=*/true);
         const Vec3 c0 = r.veh().position;
         const Vec3 p0 = r.w.registry.get(rider_h)->position;
         ctx.logic_tick = t;
@@ -2753,7 +2753,7 @@ static void test_local_controls_reach_first_carrier_tick() {
     constexpr int32_t heading = 0x23456789;
     local.input.forward = true;
     local.input.look_heading = heading;
-    local.apply_player_input_pre_tick();
+    local.apply_player_input_pre_tick(/*pack_input=*/true);
     TickContext ctx{};
     ctx.world = &r.w;
     ctx.is_authority = true;
@@ -2762,7 +2762,7 @@ static void test_local_controls_reach_first_carrier_tick() {
     CHECK(r.veh().veh.cmd_speed == traits.player_speed);
     CHECK(r.veh().veh.steer_target_bam == heading);
     local.input.forward = false;
-    local.apply_player_input_pre_tick();
+    local.apply_player_input_pre_tick(/*pack_input=*/true);
     ++ctx.logic_tick;
     r.w.update_all_entities(ctx);
     CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too

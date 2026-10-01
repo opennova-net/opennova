@@ -1211,6 +1211,137 @@ bool run_uplink_carries_same_frame_input() {
 			"the forward key held THIS frame rides this frame's uplink");
 }
 
+// Every C2S 0x0C body the role shipped from datagram `from` on, decoded.
+std::vector<PlayerExtendedUplink> uplinks_since(const CountingSocket &socket, std::size_t from) {
+	std::vector<PlayerExtendedUplink> out;
+	for (std::size_t i = from; i < socket.datagrams.size(); ++i) {
+		const std::vector<uint8_t> &packet = socket.datagrams[i];
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!nw_decode_inbound(packet.data(), packet.size(), opcode, body) ||
+				opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+				!decode_protocol_packet_plaintext(body.data(), body.size(), kClientScrk,
+						header, messages)) continue;
+		for (const ProtocolMessage &message : messages) {
+			if (message.tag != 0x0C) continue;
+			EntityPacketSubHeader sub;
+			PlayerExtendedUplink uplink;
+			size_t header_bytes = 0, body_bytes = 0;
+			if (decode_entity_packet_sub_header(message.payload.data(), message.payload.size(),
+						sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+						message.payload.size() - header_bytes, uplink, body_bytes))
+				out.push_back(uplink);
+		}
+	}
+	return out;
+}
+
+// Under a dictated send holdoff the input pack rides the uplink's send block:
+// the keys held on any frame of a 12-tick window fold into the input-flag word
+// and pack once, at the boundary. A jump, a lean and a forward tap between two
+// boundaries therefore all reach the boundary 0x0C, and only that one: the next
+// window's pack clears what the last one reported. The local MoveOrder is the
+// same packed word, so L's own body sees the taps at the boundary too and keeps
+// that word until the next pack.
+// [orig: Input_ProcessFrame @0x49d541; Client_ProcessNetworkFrame @0x42C3DD ->
+//  Player_PackInputStateToEntity @0x42C3E9 (the clear @0x4DF904/@0x4DF909) ->
+//  Player_BuildTag0CInputBody @0x42C482]
+bool run_holdoff_window_taps_reach_the_boundary_uplink() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	if (!expect(h.role.local_spawned(), "holdoff taps: L spawned")) return false;
+	// The host dictates the NovaWorld period: CS dir-0 field 3 = 12.
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> framed;
+	if (!expect(frame_session_packet(server_tx, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(0x00, {0x01, 0x08, 0x00, 0x00, 0x00, 12, 0x00, 0x00, 0x00},
+						0xA0)}, framed), "holdoff taps: the CS update frames")) return false;
+	const std::vector<uint8_t> settings =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(framed));
+	h.role.runtime->receive(settings.data(), settings.size());
+
+	const auto local_move = [&h]() -> uint8_t {
+		const w::Entity *local = h.kernel->local.player();
+		return local != nullptr ? local->net_move_input : 0xFFu;
+	};
+	struct Keys { bool forward, lean_left, jump; };
+	// One frame: the keys, the role tick, and the 0x0C bodies it shipped.
+	const auto frame = [&h](Keys k) {
+		h.kernel->local.set_movement_keys(k.forward, false, false, false, k.lean_left, false,
+				k.jump);
+		const std::size_t before = h.socket.datagrams.size();
+		h.role.run_tick(h.input);
+		return uplinks_since(h.socket, before);
+	};
+	constexpr Keys kNone{false, false, false};
+	// B0: the reset counter keeps this first boundary open; it then re-arms
+	// from the dictated period.
+	std::vector<PlayerExtendedUplink> shipped = frame(kNone);
+	if (!expect(shipped.size() == 1 && h.role.runtime->send_holdoff_ticks() == 12,
+			"holdoff taps: the first boundary ships one 0x0C under a 12-tick period"))
+		return false;
+	if (!expect(shipped[0].move_input_byte == 0, "holdoff taps: B0 carries no input"))
+		return false;
+	// Window 1: jump held on ticks 2..4, lean-left on 6..7, forward on 9 only.
+	for (int tick = 1; tick <= 11; ++tick) {
+		const Keys keys{tick == 9, tick == 6 || tick == 7, tick >= 2 && tick <= 4};
+		shipped = frame(keys);
+		if (!expect(shipped.empty(), "holdoff taps: no 0x0C between boundaries")) {
+			std::fprintf(stderr, "  window tick %d shipped %zu\n", tick, shipped.size());
+			return false;
+		}
+		if (!expect(local_move() == 0,
+				"holdoff taps: the local MoveOrder waits for the boundary pack")) {
+			std::fprintf(stderr, "  window tick %d move %02x\n", tick, local_move());
+			return false;
+		}
+	}
+	// B1 (tick 12): no key is held on the boundary frame itself.
+	shipped = frame(kNone);
+	if (!expect(shipped.size() == 1, "holdoff taps: B1 ships one 0x0C")) return false;
+	std::printf("holdoff taps: B1 move=%02x local=%02x\n", shipped[0].move_input_byte,
+			local_move());
+	if (!expect((shipped[0].move_input_byte & w::Entity::kMoveOrderJump) != 0,
+			"holdoff taps: the jump tapped on window ticks 2..4 rides the B1 0x0C"))
+		return false;
+	if (!expect((shipped[0].move_input_byte & w::Entity::kMoveOrderLeanLeft) != 0,
+			"holdoff taps: the lean tapped on window ticks 6..7 rides the B1 0x0C"))
+		return false;
+	if (!expect((shipped[0].move_input_byte & 0x0Fu) == w::Entity::kMoveOrderMoving,
+			"holdoff taps: the forward tap on window tick 9 rides B1 as moving, dir 0"))
+		return false;
+	if (!expect(local_move() == shipped[0].move_input_byte,
+			"holdoff taps: L's own MoveOrder is the packed boundary word"))
+		return false;
+	const uint8_t packed = shipped[0].move_input_byte;
+	// Window 2: nothing held. L keeps the B1 word until the next pack.
+	for (int tick = 1; tick <= 11; ++tick) {
+		shipped = frame(kNone);
+		if (!expect(shipped.empty() && local_move() == packed,
+				"holdoff taps: the packed word persists through the next window")) {
+			std::fprintf(stderr, "  window 2 tick %d shipped %zu move %02x\n", tick,
+					shipped.size(), local_move());
+			return false;
+		}
+	}
+	shipped = frame(kNone);
+	if (!expect(shipped.size() == 1, "holdoff taps: B2 ships one 0x0C")) return false;
+	if (!expect((shipped[0].move_input_byte &
+						(w::Entity::kMoveOrderJump | w::Entity::kMoveOrderLeanLeft |
+								w::Entity::kMoveOrderMoving)) == 0,
+			"holdoff taps: B2 no longer carries the window-1 taps"))
+		return false;
+	return expect(local_move() == shipped[0].move_input_byte,
+			"holdoff taps: L's MoveOrder follows the B2 pack");
+}
+
 // S2C 0x0F re-snaps L to the authoritative pose it carries (position, yaw,
 // pitch, roll and the look yaw) once per decoded 0x0F, and the un-hide runs
 // while no death screen is up [orig: NapiNPClientMsg_0x00F @0x42E200 — the
@@ -1338,6 +1469,7 @@ int main() {
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	ok &= run_uplink_carries_same_frame_input();
+	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_proxy_rendezvous_pump();

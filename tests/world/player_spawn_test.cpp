@@ -20,7 +20,7 @@ static int failures = 0;
     do { if (!(c)) { std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++failures; } } while (0)
 
 static void submit_player_input(AiEntity &ae, const PlayerInput &in) {
-    apply_player_body_input(ae, pack_player_body_input(in));
+    apply_player_body_input(ae, pack_player_body_input(player_input_flags(in, false), in));
 }
 
 // Test root source: directional states expose distinct local root axes, so the player motor must
@@ -286,7 +286,7 @@ int main() {
             in.left = c.l;
             in.right = c.r;
             in.look_heading = 0x10000000;
-            const PlayerBodyInput body = pack_player_body_input(in);
+            const PlayerBodyInput body = pack_player_body_input(player_input_flags(in, false), in);
             CHECK(body.moving == c.moving);
             CHECK(body.move_dir_index == c.index);
             apply_player_body_input(ae, body);
@@ -425,6 +425,61 @@ int main() {
         w.update_all_entities(ctx);
         CHECK(ae.heading == 0x20000000); // instant look yaw, not quarter-stepped toward target
         CHECK(ae.pitch == 0x08000000);   // look pitch applied (slope lean overridden)
+    }
+
+    // --- the input-flag word between packs [orig: Input_ProcessFrame @0x49d541
+    //     `g_InputFlags &= ~g_InputFlagsPrev` ahead of the handlers;
+    //     Player_PackInputStateToEntity @0x4df904/@0x4df909 save-and-clear]. A bit the
+    //     last pack did not report is sticky until the next pack; a bit it did report
+    //     survives only on a frame it is still held; packing every frame reduces to the
+    //     frame's own keys.
+    {
+        PlayerInput none;
+        PlayerInput jump;
+        jump.jump = true;
+        PlayerInput lean;
+        lean.lean_right = true;
+        // The handler bits [orig: Input_HandleActionBinding_0 @0x4e0c6e..0x4e10f1].
+        PlayerInput all;
+        all.forward = all.back = all.left = all.right = true;
+        all.look_up = all.look_down = all.turn_left = all.turn_right = true;
+        all.jump = all.lean_left = all.lean_right = all.free_look = true;
+        CHECK(player_input_flags(all, false) == 0xF37Eu);
+        CHECK(player_input_flags(all, true) == 0xF31Eu); // AbsorbPitch refuses 0x20/0x40
+
+        PlayerInputFlags f;
+        // Window 1 (a 12-frame holdoff): jump on frames 2..4, lean on frame 7.
+        for (int frame = 1; frame <= 12; ++frame) {
+            const PlayerInput &held = frame >= 2 && frame <= 4 ? jump : (frame == 7 ? lean : none);
+            f.fold(player_input_flags(held, false));
+        }
+        CHECK(f.flags == (kInputFlagJump | kInputFlagLeanRight));
+        PlayerBodyInput packed = pack_player_body_input(f.flags, none);
+        CHECK(packed.jump && packed.lean_right && !packed.lean_left && !packed.moving);
+        f.clear_after_pack();
+        CHECK(f.flags == 0u && f.prev == (kInputFlagJump | kInputFlagLeanRight));
+        // Window 2: nothing held -> the boundary pack reports neither tap.
+        for (int frame = 1; frame <= 12; ++frame) f.fold(player_input_flags(none, false));
+        packed = pack_player_body_input(f.flags, none);
+        CHECK(!packed.jump && !packed.lean_right);
+        f.clear_after_pack();
+        // Window 3: jump held throughout -> reported.
+        for (int frame = 1; frame <= 12; ++frame) f.fold(player_input_flags(jump, false));
+        CHECK(pack_player_body_input(f.flags, none).jump);
+        f.clear_after_pack();
+        // Window 4: the reported jump stays held into frames 1..5, then releases:
+        // the previous-pack mask clears it every frame, so it is not re-reported.
+        for (int frame = 1; frame <= 12; ++frame)
+            f.fold(player_input_flags(frame <= 5 ? jump : none, false));
+        CHECK(!pack_player_body_input(f.flags, none).jump);
+        f.clear_after_pack();
+        // Packing every frame: the word is exactly the frame's keys.
+        const PlayerInput *frames[] = {&jump, &none, &lean, &jump, &jump, &none};
+        for (const PlayerInput *held : frames) {
+            f.fold(player_input_flags(*held, false));
+            CHECK(f.flags == player_input_flags(*held, false));
+            f.clear_after_pack();
+        }
     }
 
     std::printf("player_spawn: %s\n", failures == 0 ? "OK" : "FAILED");

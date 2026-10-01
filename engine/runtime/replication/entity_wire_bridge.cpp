@@ -946,8 +946,10 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 		up.heading = static_cast<int16_t>(local_heading >> 16);
 	}
 	// The +0x12C movement-INPUT byte for our own player (the host ingests + echoes it in our
-	// 0x0A record so OTHER clients motor-drive our avatar). The local motor publishes
-	// this byte after applying the held controls. [witness 2026-07-02:
+	// 0x0A record so OTHER clients motor-drive our avatar). The local player mirrors
+	// this byte from its last pack's MoveOrder, which under a send holdoff packs at
+	// the uplink boundary from every key held during the window [orig:
+	// Client_ProcessNetworkFrame @0x42C3E9 precedes @0x42C482]. [witness 2026-07-02:
 	// corrected from the anim_slot misnomer — this byte is locomotion input, not an anim slot.]
 	up.move_input_byte = e.net_move_input;
 	// The RAW entity+0x24 (Flags) low byte, written verbatim and unmasked — the byte the

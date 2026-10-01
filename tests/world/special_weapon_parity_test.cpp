@@ -121,7 +121,7 @@ void mortar_elevation_survives_rebake_and_ignores_look_keys() {
     CHECK(after[4] == before[4]);
     r.local.set_view_keys(false, true, false, false, false);
     r.world.logic_tick = 1;
-    r.local.apply_player_input_pre_tick();
+    r.local.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(r.local.input.look_pitch == 0);
     local_weapon_fire_pose(r.world, r.local.weapon, 4, true, after);
     CHECK(after[4] == before[4]);

@@ -660,6 +660,14 @@ public:
 	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
 	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
+	// Whether the next Client_ProcessNetworkFrame opens its send block: the
+	// receive pump decrements a nonzero countdown before the gate tests it for
+	// zero, so the block opens when the countdown reads 0 or 1 here. The local
+	// input pack keys on it, since retail packs only inside that block.
+	// [orig: PumpFlags 0x10 decrement @0x62979a..0x6297ac via
+	//  PumpClientProtocolRecv @0x42c228; the gate `cmp [conn+648h], 0; ja`
+	//  @0x42c3dd..0x42c3e3 ahead of Player_PackInputStateToEntity @0x42c3e9]
+	bool send_block_opens_this_frame() const { return send_holdoff_countdown_ <= 1; }
 
 	const replication::ClientState &state() const { return view_.state(); }
 	replication::ClientState &state() { return view_.state(); }

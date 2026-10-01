@@ -2263,7 +2263,7 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
     f.w.tables.weapons.entries[1].ammo_index = 1;
     f.w.tables.ammo.entries.resize(2);
     f.w.tables.ammo.entries[1].valid = true;
-    f.player.apply_player_input_pre_tick();
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     TickContext ctx;
     ctx.world = &f.w;
     ctx.is_authority = true;
@@ -2273,7 +2273,7 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
     CHECK(f.body().heading == -408 && f.body().pitch == -396);
     CHECK(f.player.input.look_heading == -408 && f.player.input.look_pitch == -396);
     // The next pre-tick input copy must not erase the body's aim additions.
-    f.player.apply_player_input_pre_tick();
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(f.body().inf.target_heading == -408 && f.body().inf.look_pitch == -396);
     LocalPlayerViewFrame frame = f.player.present_view_frame();
     CHECK(frame.camera_pose_valid);
@@ -2293,7 +2293,7 @@ void test_scoped_aim_body_input_camera_and_fired_round() {
 // Exercise the real motor; a direct oscillator call cannot expose re-clamping.
 void test_scoped_aim_follows_local_view_clamps_and_leg_chase() {
     const auto tick = [](ScopedAimFixture &f) {
-        f.player.apply_player_input_pre_tick();
+        f.player.apply_player_input_pre_tick(/*pack_input=*/true);
         TickContext ctx;
         ctx.world = &f.w;
         ctx.is_authority = true;
