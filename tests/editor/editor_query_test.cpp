@@ -28,6 +28,8 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/viewport_model.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/preferences_store.h>
@@ -41,7 +43,9 @@
 #include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -1378,6 +1382,170 @@ static int test_rows_on_the_wire() {
 	return 0;
 }
 
+// The viewport query (S13 V7): a document's viewport read by op, followed first. Refused, naming the
+// query, with no document open, an op it has not, a param its op does not take, the point or the row
+// its op needs left out, a point that is no number, a document not open and one that shows in no
+// viewport (a stylesheet, which feeds the menu's). The envelope with every member, stamped with the
+// row's concerns; the pages of its items and of its notes concatenating to the whole; a hit through
+// the viewport's own headless compile (what the planner's hit finds); a screen rendered as the render
+// check compiled it (the menu_render query's answer); a document by its logical name; a model's
+// marker hit at its picture pixel, and its render refused.
+static int test_viewport_query() {
+	editor_test::TempProjectDir dir("opennova_editor_query_viewport");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const auto says = [&](const std::string &args, const char *text) {
+		const std::string error = refusal(session, "viewport", args);
+		if (error.find(text) == std::string::npos)
+			std::printf("  viewport %s refused with: %s\n", args.c_str(), error.c_str());
+		return error.rfind("query viewport: ", 0) == 0 && error.find(text) != std::string::npos;
+	};
+	TEST_EXPECT(says(R"({"op": "state"})", "no document is open."));
+	TEST_EXPECT(says("{}", "it needs \"op\""));
+	session.handle(request::new_project(dir.file("project"), "Viewport Query"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	session.run_operations();
+	const Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr && !menu->rows().empty());
+	if (!menu || menu->rows().empty())
+		return 1;
+	NodeAddress title;
+	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && title.child);
+
+	// The refusals by the op and its params: an op or a kind no choice of theirs, a param the op does
+	// not take, one it needs, a point no number a float holds.
+	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, notes, render, not \"zoom\"."));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})", "\"kind\" is one of menu, model, not \"map\"."));
+	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
+	TEST_EXPECT(says(R"({"op": "hit", "x": 1, "y": 2, "limit": 3})",
+			"op hit takes no \"limit\" (it takes path, kind, op, x, y)."));
+	TEST_EXPECT(says(R"({"op": "items", "row": 3})", "op items takes no \"row\""));
+	TEST_EXPECT(says(R"({"op": "hit", "x": 1})", "op hit needs \"x\" and \"y\""));
+	TEST_EXPECT(says(R"({"op": "render"})", "op render needs \"row\""));
+	TEST_EXPECT(says(R"({"op": "hit", "x": "1", "y": 2})", "\"x\" must be a number."));
+	TEST_EXPECT(says(R"({"op": "hit", "x": 1e300, "y": 2})", "\"x\" must be a number."));
+	TEST_EXPECT(says(R"({"op": "state", "path": "nope.mnu"})", "no open document nope.mnu."));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "model"})", "does not show in a model viewport."));
+	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "kind": "menu"})").get_string("kind", "") == "menu");
+
+	// The catalog's op and kind are the query's choices: every op it lists answers (none refused by
+	// its op), and the kinds are the viewport kinds' tokens.
+	const JsonValue catalog = ask(session, "catalog", "{}");
+	std::vector<std::string> ops, kinds;
+	for (const JsonValue &query : catalog.get("queries")->array) {
+		if (query.get_string("name", "") != "viewport") continue;
+		for (const JsonValue &param : query.get("params")->array) {
+			const JsonValue *tokens = param.get("enum");
+			for (size_t i = 0; tokens && i < tokens->array.size(); ++i)
+				(param.get_string("name", "") == "op" ? ops : kinds).push_back(tokens->array[i].string);
+		}
+	}
+	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "notes", "render" }));
+	TEST_EXPECT(kinds == (std::vector<std::string>{ "menu", "model" }));
+	for (const std::string &op : ops) {
+		std::string args = R"({"op": ")" + op + "\"";
+		if (op == "hit") args += R"(, "x": 1, "y": 1)";
+		if (op == "render") args += R"(, "row": )" + std::to_string(menu->rows()[0]->id);
+		const std::string error = refusal(session, "viewport", args + "}");
+		TEST_EXPECT(error.empty());
+		if (!error.empty()) std::printf("  op %s: %s\n", op.c_str(), error.c_str());
+	}
+
+	// The envelope, every member, stamped with the concerns its row reads.
+	const JsonValue state = ask(session, "viewport", R"({"op": "state"})");
+	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "revision",
+				 "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock", "body",
+				 "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
+		TEST_EXPECT(state.get(key) != nullptr);
+	TEST_EXPECT(state.get_string("kind", "") == "menu" && state.get_string("path", "") == menu->path() &&
+			state.get_string("status", "") == "ready" && state.get_bool("current", false) &&
+			state.get_string("units", "") == "design");
+	TEST_EXPECT(state.get("body")->get("screen")->get_string("name", "") == "STARTUP");
+	TEST_EXPECT(view_revision_of(state) ==
+			session.view().revisions.stamp_of(editor_query_row(EditorQueryKind::Viewport).reads));
+	// By its logical name, the same viewport.
+	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "path": "MAIN.MNU"})").get_string("path", "") ==
+			menu->path());
+
+	// The pages of the items and of the notes make the whole list; the state's page is the items'.
+	TEST_EXPECT(pages_concatenate(session, "viewport", R"({"op": "items"})", "items", 2, 3));
+	TEST_EXPECT(pages_concatenate(session, "viewport", R"({"op": "notes"})", "notes", 1, 1));
+	const JsonValue items = ask(session, "viewport", R"({"op": "items", "limit": 200})");
+	const JsonValue state_page = ask(session, "viewport", R"({"op": "state", "offset": 1, "limit": 2})");
+	TEST_EXPECT(state_page.get("items")->array.size() == 2 &&
+			opennova::io::json_write(state_page.get("items")->array[0]) ==
+					opennova::io::json_write(items.get("items")->array[1]));
+	TEST_EXPECT(items.get_number("count", 0) == double(items.get("items")->array.size()) &&
+			items.get_bool("current", false) && items.get_string("kind", "") == "menu");
+
+	// A hit at TITLE's centre: the game's hit test over the viewport's own compile, as its planner
+	// finds it; above MAIN nothing.
+	const JsonValue *title_item = nullptr;
+	for (const JsonValue &item : items.get("items")->array)
+		if (item.get_string("name", "") == "TITLE")
+			title_item = &item;
+	TEST_EXPECT(title_item != nullptr);
+	if (!title_item)
+		return 1;
+	const double cx = (rect_edge(*title_item, 0) + rect_edge(*title_item, 2)) / 2.0;
+	const double cy = (rect_edge(*title_item, 1) + rect_edge(*title_item, 3)) / 2.0;
+	const JsonValue hit = ask(session, "viewport",
+			R"({"op": "hit", "x": )" + std::to_string(cx) + R"(, "y": )" + std::to_string(cy) + "}");
+	TEST_EXPECT(id_of(hit, "id") == title.child && hit.get_string("name", "") == "TITLE" &&
+			hit.get_bool("current", false) && hit.get_string("kind", "") == "static");
+	TEST_EXPECT(hit.get_string("viewport", "") == "menu" && hit.get_string("path", "") == menu->path());
+	const ViewportModel *viewport = session.viewports().find(menu->path(), ViewportKind::Menu);
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport)
+		return 1;
+	const ViewportHit direct = viewport->hit(viewport_context(session.view(), *viewport), float(cx), float(cy));
+	TEST_EXPECT(direct.id == title.child && double(direct.index) == hit.get_number("index", -2));
+	TEST_EXPECT(ask(session, "viewport", R"({"op": "hit", "x": 5, "y": 5})").get_number("index", 0) == -1.0);
+
+	// A screen rendered apart: the render check's compile, the menu_render query's answer.
+	const std::string screen = std::to_string(menu->rows()[0]->id);
+	JsonValue rendered = ask(session, "viewport", R"({"op": "render", "limit": 200, "row": )" + screen + "}");
+	JsonValue menu_render = ask(session, "menu_render",
+			R"({"limit": 200, "path": ")" + menu->path() + R"(", "screen": )" + screen + "}");
+	TEST_EXPECT(rendered.get_string("status", "") == "ready" && !rendered.get("widgets")->array.empty());
+	rendered.set("view_revision", JsonValue::make_null());
+	menu_render.set("view_revision", JsonValue::make_null());
+	TEST_EXPECT(opennova::io::json_write(rendered) == opennova::io::json_write(menu_render));
+
+	// A stylesheet active: it shows in no viewport; the menu named, its viewport answers.
+	session.handle(request::open_document("menu_style.mns"));
+	TEST_EXPECT(says(R"({"op": "state"})", "shows in no viewport"));
+	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "path": "main.mnu"})").get_string("status", "") == "ready");
+
+	// A model: a marker hit at the pixel its item says; its render refused.
+	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/models/armory.3di",
+			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di")));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	const JsonValue markers = ask(session, "viewport", R"({"op": "items", "limit": 200})");
+	TEST_EXPECT(markers.get_string("kind", "") == "model" && markers.get_string("status", "") == "ready");
+	const JsonValue *point = nullptr;
+	for (const JsonValue &item : markers.get("items")->array)
+		if (item.get_string("kind", "") == "user_point" && item.get("screen") && item.get("screen")->is_array())
+			point = &item;
+	TEST_EXPECT(point != nullptr);
+	if (point) {
+		const JsonValue &pixel = *point->get("screen");
+		const JsonValue marker = ask(session, "viewport",
+				R"({"op": "hit", "x": )" + std::to_string(pixel.array[0].number) + R"(, "y": )" +
+						std::to_string(pixel.array[1].number) + "}");
+		TEST_EXPECT(marker.get_string("kind", "") == "user_point" && id_of(marker, "id") == id_of(*point, "id") &&
+				id_of(marker, "id") != 0);
+	}
+	TEST_EXPECT(says(R"({"op": "render", "row": 1})", "renders no row apart"));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paging();
@@ -1389,6 +1557,7 @@ int main() {
 	failures += test_menu_reads_and_batches();
 	failures += test_wire_edits();
 	failures += test_rows_on_the_wire();
+	failures += test_viewport_query();
 	if (failures == 0)
 		std::printf("editor_query: all tests passed\n");
 	return failures == 0 ? 0 : 1;

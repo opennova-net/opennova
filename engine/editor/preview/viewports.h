@@ -62,17 +62,28 @@ public:
 	ViewportAction take_action(const std::string &path, ViewportKind kind);
 	void device_report(const std::string &path, ViewportKind kind, const ViewportDeviceReport &report);
 
-	// A SetViewport (request_kinds.cpp): the viewport of the kind `json` names ("kind", optional
-	// where one kind shows the document) over the document open at `path` (""; the kind's Preview
-	// target), made when there is none, changed as ViewportModel::apply says. False, nothing
-	// changed, with `error` naming what is wrong: the change, the kind, a document not open, a kind
-	// that does not show it.
+	// A SetViewport (request_kinds.cpp): the viewport of the kind `json` names ("kind"; left out, the
+	// kind the document shows in, default_viewport_kind) over the document open at `path` (its own
+	// path, as the session found it; "" the active document), made when there is none, changed as
+	// ViewportModel::apply says. False, nothing changed, with `error` naming what is wrong: the
+	// change, the kind, a document not open, a kind that does not show it.
 	bool set(const SessionView &view, const std::string &path, const io::JsonValue &json,
 			std::string &error);
+	// The viewport a read of the document open at `path` (its own path; "" the active document)
+	// addresses, and an edit in a viewport plans over (S13 V7: the viewport query, EditInViewport): of
+	// the kind `named` (kCount: the kind its type shows in, default_viewport_kind), kept, or made at
+	// the kind's defaults as a SetViewport makes one, then followed now (follow_one), so a first read
+	// of a document makes its viewport and its follow may derive a change (the Viewports concern
+	// moving). Null, with `error` naming why, for no document open there, a type that shows in no
+	// viewport, or a kind that does not show it.
+	ViewportModel *resolve(const SessionView &view, const std::string &path, ViewportKind named, std::string &error);
 
 	// `seconds` of the Shell's frames pass (the clock's while it plays).
 	void advance(double seconds) { clock_.advance(seconds); }
 	const PreviewClock &clock() const { return clock_; }
+	// A SetViewport's clock alone, named by no document (S13 V7: the editor MCP's seek): the preview
+	// clock set as set_preview_clock says; false, nothing changed, with `error`.
+	bool set_clock(const io::JsonValue &json, std::string &error);
 	// Told when a follow derived a change of a viewport's state or the clock (viewport_model.h
 	// ViewportState: a held window, a framing, a clip's clock sought): the session moves its
 	// Viewports concern.
@@ -89,6 +100,10 @@ private:
 	};
 	Slot *slot_(const std::string &path, ViewportKind kind);
 	void follow_(const SessionView &view, Slot &slot);
+	// The document a set or a resolve names (`path`, "" the active one; open, else `error`) and the
+	// kind it addresses (`named`, else default_viewport_kind; one that shows it, else `error`).
+	bool addressed_(const SessionView &view, const std::string &path, ViewportKind named, std::string &at,
+			ViewportKind &kind, std::string &error) const;
 
 	std::vector<Slot> slots_;
 	PreviewClock clock_;

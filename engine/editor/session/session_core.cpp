@@ -9,7 +9,9 @@
 #include <base/io/json.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
+#include <editor/model/edit.h>
 #include <editor/project/project_files.h>
+#include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
@@ -22,6 +24,7 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace fs = std::filesystem;
@@ -564,12 +567,167 @@ void SessionCore::clear_output() {
 	touch(ViewConcern::Output);
 }
 
+std::string SessionCore::viewport_document(const std::string &path) {
+	const DocumentBase *document = documents().document_for(path);
+	return document ? document->path() : path;
+}
+
 void SessionCore::set_viewport(const std::string &path, const std::string &change) {
 	io::JsonValue json;
 	std::string error;
-	if (!io::json_parse(change, json, error)) error = "The viewport's change is not JSON: " + error;
-	else if (viewports_->set(view_, path, json, error)) touch(ViewConcern::Viewports);
-	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, path));
+	const std::string at = viewport_document(path);
+	if (!io::json_parse(change, json, error)) {
+		error = "The viewport's change is not JSON: " + error;
+	} else if (path.empty() && json.is_object() && json.object.size() == 1 && json.get("clock")) {
+		// The clock alone, named by no document: the one preview clock every viewport reads, whatever
+		// document is active (none, or one that shows in no viewport).
+		if (viewports_->set_clock(*json.get("clock"), error)) touch(ViewConcern::Viewports);
+	} else if (viewports_->set(view_, at, json, error)) {
+		touch(ViewConcern::Viewports);
+	}
+	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+}
+
+SessionCore::WireDrag *SessionCore::wire_drag(const std::string &path) {
+	const auto held = wire_drags_.find(path);
+	if (held == wire_drags_.end()) return nullptr;
+	const OpenGesture &open = open_gesture(path);
+	if (open.wire() && open.token == held->second.token) return &held->second;
+	wire_drags_.erase(held); // its gesture ended another way (an Undo, a Save, another gesture)
+	return nullptr;
+}
+
+void SessionCore::end_wire_gesture(const std::string &path) {
+	wire_drags_.erase(path);
+	documents().end_edit(path);
+}
+
+void SessionCore::edit_in_viewport(const EditorRequest &request) {
+	// What the viewport plans, as its canvas would raise it.
+	struct Planned final : CanvasRequests {
+		std::vector<EditorRequest> requests;
+		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+	} planned;
+	const ViewportDrag &asked = request.drag;
+	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand();
+	const std::string at = request.path.empty() ? view_.documents.active : viewport_document(request.path);
+	// The gesture a drag names, its answer's whether the drag is refused or not.
+	if (drag) outcome_.gesture = asked.gesture;
+	std::string error;
+	// A sample naming a gesture goes on with one the wire opened in the document, of the same record's
+	// handle.
+	const WireDrag *going = nullptr;
+	if (drag == command) {
+		error = "edit_in_viewport names a drag or a command, one of them.";
+	} else if (drag && asked.gesture && documents().document_for(at)) {
+		going = wire_drag(at);
+		if (!going || going->token != asked.gesture) {
+			going = nullptr;
+			error = "No open gesture " + std::to_string(asked.gesture) + " on " + at +
+					": a gesture's samples are consecutive drags of one handle on its document (any other "
+					"request on it, another gesture, or 10 s with no sample ends it).";
+		} else if (asked.id != going->id || asked.handle != going->handle ||
+				(asked.kind != ViewportKind::kCount && asked.kind != going->kind)) {
+			error = "Gesture " + std::to_string(asked.gesture) + " drags record " + std::to_string(going->id) +
+					"'s " + going->handle + " handle in the " + viewport_kind_token(going->kind) + " viewport.";
+		}
+	}
+	// What the sample plans. A gesture's sample goes from the point its samples took the handle to, as
+	// a canvas drags from its press, so a snapped gesture lands where the canvas's would; one that stays
+	// open takes its token now, so it is open even where its first sample plans nothing.
+	ViewportDrag sample = asked;
+	float x = asked.x, y = asked.y; // the point this sample takes the handle to
+	ViewportKind shown = ViewportKind::kCount;
+	if (error.empty()) {
+		const ViewportKind named = !drag ? request.command.kind : going ? going->kind : asked.kind;
+		if (const ViewportModel *viewport = viewports_->resolve(view_, at, named, error)) {
+			shown = viewport->kind();
+			const ViewportContext context = viewport_context(view_, *viewport, drag ? asked.snap : 0.0f);
+			if (!drag) {
+				viewport->command(context, request.command.name, request.command.ids, planned, error);
+			} else {
+				if (going && asked.by) {
+					x = going->x + asked.x;
+					y = going->y + asked.y;
+				} else if (!going && !asked.end) {
+					sample.gesture = next_edit_gesture();
+					float hx = 0.0f, hy = 0.0f;
+					if (asked.by && viewport->handle_point(context, asked.id, asked.handle, hx, hy, error)) {
+						x = hx + asked.x;
+						y = hy + asked.y;
+					}
+				}
+				// A step that moves nothing keeps its `by` (it plans nothing); a gesture's other samples go
+				// to the point they take the handle to.
+				if (going && !(asked.by && asked.x == 0.0f && asked.y == 0.0f)) {
+					sample.by = false;
+					sample.x = x;
+					sample.y = y;
+				}
+				if (error.empty()) viewport->drag(context, sample, planned, error);
+			}
+		}
+	}
+	if (!error.empty()) {
+		report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+		// A refused last sample of an open gesture ends it all the same.
+		if (going && asked.end) end_wire_gesture(at);
+		return;
+	}
+	// The gesture the drag's batch carries (the one it went on with, the session's for one kept open,
+	// or the new one its planner took), which the gesture's next sample names.
+	if (drag) {
+		outcome_.gesture = sample.gesture;
+		for (const EditorRequest &each : planned.requests)
+			if (each.kind == EditorRequestKind::EditRecord && !each.edits.empty()) outcome_.gesture = each.edits.front().gesture;
+	}
+	// Served in order, as the parts serve what they compose (never through handle()): each meets its
+	// own row's gate, and its findings are this request's outcome.
+	for (const EditorRequest &each : planned.requests) serve_request(*this, each);
+	if (!drag) return;
+	// The gesture ends with this sample (its EndEdit served), or stays open for the next: the
+	// document's open one, its last sample's time kept, and the point this sample took the handle to
+	// where the next goes from once its batch went through (a first sample that did not go through
+	// opens none).
+	if (asked.end) {
+		wire_drags_.erase(at);
+		return;
+	}
+	if (!going && outcome_.refused) {
+		outcome_.gesture = 0;
+		return;
+	}
+	WireDrag &kept = wire_drags_[at];
+	if (!going) {
+		kept = WireDrag{ sample.gesture, shown, asked.id, asked.handle, x, y };
+	} else if (!outcome_.refused) {
+		kept.x = x;
+		kept.y = y;
+	}
+	documents().open_gesture(at, kept.token, platform_.now_ms());
+}
+
+void SessionCore::request_arrives(const EditorRequest &request) {
+	const std::string on = !request.path.empty() ? viewport_document(request.path)
+			: request_kind_row(request.kind).names_active ? view_.documents.active
+			: std::string();
+	if (on.empty() || !open_gesture(on).wire()) return;
+	const bool goes_on = request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag() &&
+			request.drag.gesture == open_gesture(on).token;
+	if (!goes_on) end_wire_gesture(on);
+}
+
+void SessionCore::lapse_wire_gestures() {
+	const int64_t now = platform_.now_ms();
+	std::vector<std::string> lapsed;
+	for (const OpenGesture &gesture : view_.documents.gestures)
+		if (gesture.wire() && now - gesture.sampled_ms >= kWireGestureLapseMs) lapsed.push_back(gesture.path);
+	for (const std::string &path : lapsed) end_wire_gesture(path);
+	// The drags whose gestures ended another way.
+	for (auto it = wire_drags_.begin(); it != wire_drags_.end();) {
+		const OpenGesture &open = open_gesture(it->first);
+		it = open.wire() && open.token == it->second.token ? std::next(it) : wire_drags_.erase(it);
+	}
 }
 
 // The running operation goes first (a build's staging directory with it); one that cannot be

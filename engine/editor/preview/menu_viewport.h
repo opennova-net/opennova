@@ -118,6 +118,8 @@ public:
 	ViewportLayout layout() const override;
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	bool command(const ViewportContext &context, const std::string &name,
@@ -126,6 +128,9 @@ public:
 	io::JsonValue body_json(const ViewportInput &input) const override;
 	io::JsonValue items_json(const ViewportInput &input) const override;
 	io::JsonValue notes_json(const ViewportInput &input) const override;
+	// A screen of the menu by its row, as the render check compiled it (menu_render_to_json).
+	io::JsonValue render_json(
+			const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const override;
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
