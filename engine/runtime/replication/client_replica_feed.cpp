@@ -24,41 +24,59 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 #include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/strutil.h>
 #include <base/io/byte_reader.h>
 #include <algorithm>
 #include <cstdlib>
-#include <iomanip>
-#include <sstream>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace opennova::replication {
 
-// [orig: NapiNPClientMsg_HandleTextCommand @ 0x429E70, SETCEASEFIRE branch @ 0x429F1F]
+// The C string splits with the retail quote-aware tokenizer (whitespace outside
+// quotes, quotes dropped, a backslash copied verbatim), and the first token
+// selects the command, case-insensitively; every argument is an atol.
+// [orig: NapiNPClientMsg_HandleTextCommand @ 0x429E70 — the empty-string
+//  return @0x429e9a, String_TokenizeQuotedToArray @0x429eb2, tokenCount >= 1
+//  @0x429ebf; SETFLASH1 @0x429ecf, SETCEASEFIRE @0x429F1F, SU @0x429f52, GOTO
+//  @0x429f85, SPECTATORTARGET @0x429fee]
 void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body) {
     const auto end = std::find(body.begin(), body.end(), uint8_t{0});
-    std::istringstream input(std::string(body.begin(), end));
-    std::string command, value;
-    if (!(input >> std::quoted(command) >> std::quoted(value))) return;
-    if (strutil::iequals(command, "SETCEASEFIRE")) {
-        state_.cease_fire = std::strtol(value.c_str(), nullptr, 10) != 0;
+    const std::string text(body.begin(), end);
+    const std::vector<std::string> tokens = tokenize_quoted(text);
+    if (tokens.empty()) return;
+    const std::string &command = tokens[0];
+    const auto atol_arg = [&tokens](std::size_t i) {
+        return static_cast<int32_t>(std::strtol(tokens[i].c_str(), nullptr, 10));
+    };
+    if (strutil::iequals(command, "SETFLASH1")) {
+        // Timer A = atol(n), or 16 with no argument [orig: @0x429ee5 /
+        // @0x429ef5]; the authority runs it too.
+        LightningTimerCommand flash;
+        flash.timer_a = tokens.size() > 1 ? atol_arg(1) : 16;
+        pending_effect_commands_.push_back(flash);
+    } else if (tokens.size() < 2) {
+        // SETCEASEFIRE, SU and SPECTATORTARGET each need their argument
+        // [orig: @0x429f2e / @0x429f61 / @0x429ffd]; GOTO needs exactly three
+        // and has no producer in retail JO (no S2C 0x24 GOTO is ever built).
+        return;
+    } else if (strutil::iequals(command, "SETCEASEFIRE")) {
+        state_.cease_fire = atol_arg(1) != 0;
         state_.mark_changed();
     } else if (strutil::iequals(command, "SU")) {
         // The scoreboard status-suffix gate, the byte of atol(n)
         // [orig: `mov g_ScoreboardStatusSuffixEnabled, al` @0x429f71].
-        state_.scoreboard_status_suffix =
-                static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+        state_.scoreboard_status_suffix = static_cast<uint8_t>(atol_arg(1));
         state_.mark_changed();
     } else if (strutil::iequals(command, "SPECTATORTARGET")) {
         // atol(n) as a packed handle, bounded to pools 0..4 and the pool's
         // capacity, then the track [orig: @0x429fe8..0x42a04e ->
         // Entity_TrySetMinimapTrackTarget @0x52abc0].
-        const long handle = std::strtol(value.c_str(), nullptr, 10);
-        const uint16_t packed = static_cast<uint16_t>(handle);
+        const uint16_t packed = static_cast<uint16_t>(atol_arg(1));
         if ((packed & 0xF000u) < 0x5000u &&
                 static_cast<std::size_t>(packed & 0xFFFu) < world::retail_pool_capacity(packed >> 12))
             spectate_track(packed);

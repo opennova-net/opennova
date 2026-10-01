@@ -5,9 +5,12 @@
 //   * S2C 0x51 folds one team-change list entry and walks the list with C2S
 //     0x29 {index + 1} [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0];
 //   * S2C 0x4E kills a join-window kill-list page silently and walks the list
-//     with C2S 0x28 [orig: NapiNPClientMsg_HandleBatchKill @0x431870].
+//     with C2S 0x28 [orig: NapiNPClientMsg_HandleBatchKill @0x431870];
+//   * S2C 0x24 splits with the retail quote-aware tokenizer and SETFLASH1 arms
+//     the lightning timer [orig: NapiNPClientMsg_HandleTextCommand @0x429E70].
 #include <cstdio>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <variant>
 #include <vector>
@@ -22,6 +25,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/world.h>
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -281,6 +285,51 @@ void test_batch_kill_walks_the_list() {
 	CHECK(sent.empty());
 }
 
+std::vector<uint8_t> text_body(const std::string &text) {
+	std::vector<uint8_t> body(text.begin(), text.end());
+	body.push_back(0);
+	return body;
+}
+
+std::vector<int32_t> flash_timers(ClientReplicaPipeline &view) {
+	std::vector<int32_t> out;
+	for (const ClientEffectCommand &c : view.drain_effect_commands())
+		if (const auto *f = std::get_if<LightningTimerCommand>(&c)) out.push_back(f->timer_a);
+	return out;
+}
+
+// S2C 0x24: the first token selects the command case-insensitively, quotes are
+// dropped by the tokenizer, SETFLASH1 alone arms timer A at 16 and with an
+// argument at atol(n); the argument commands ignore a bare token.
+// [orig: NapiNPClientMsg_HandleTextCommand @0x429E70 — String_TokenizeQuotedToArray
+//  @0x429eb2, SETFLASH1 @0x429ecf..0x429ef5, SETCEASEFIRE's argument gate
+//  @0x429f2e]
+void test_text_command_setflash_and_tokenizer() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 16")); // the host's Lightning verb
+	view.apply(s2c::TEXT_COMMAND, text_body("setflash1"));
+	view.apply(s2c::TEXT_COMMAND, text_body("\"SETFLASH1\" \"5\""));
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 7 extra"));
+	CHECK(flash_timers(view) == std::vector<int32_t>({16, 16, 5, 7}));
+
+	CHECK(!view.state().cease_fire);
+	view.apply(s2c::TEXT_COMMAND, text_body("SETCEASEFIRE"));
+	CHECK(!view.state().cease_fire);
+	view.apply(s2c::TEXT_COMMAND, text_body("  setceasefire   \"1\"  "));
+	CHECK(view.state().cease_fire);
+	view.apply(s2c::TEXT_COMMAND, text_body("SETCEASEFIRE 0 trailing"));
+	CHECK(!view.state().cease_fire);
+	view.apply(s2c::TEXT_COMMAND, text_body(""));
+	CHECK(flash_timers(view).empty());
+
+	// The effect pass stores the timer on the world's weather.
+	auto world = std::make_unique<world::World>();
+	inmatch::ClientRuntime runtime("LaneDFlash");
+	runtime.view().apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 9"));
+	runtime.apply_received_effects(*world);
+	CHECK(world->weather.core.lightning.timer_a == 9);
+}
+
 } // namespace
 
 int main() {
@@ -289,6 +338,7 @@ int main() {
 	test_team_change_confirm_walks_the_list();
 	test_batch_kill_page_kills_silently();
 	test_batch_kill_walks_the_list();
+	test_text_command_setflash_and_tokenizer();
 	std::printf("client_message_folds: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

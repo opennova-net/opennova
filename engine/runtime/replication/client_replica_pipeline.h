@@ -50,6 +50,12 @@ struct EntityDeathEvent {
 // pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
 // 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
 // HUD_SetTrackedEntityTarget @0x59D050]
+// S2C 0x24 "SETFLASH1 [n]": the lightning sequencer's timer A. The effect
+// pass applies it to the world's weather. [orig: NapiNPClientMsg_HandleTextCommand
+// @0x429ecf..0x429ef5 -> g_EnvLightningTimerA]
+struct LightningTimerCommand {
+    int32_t timer_a = 16;
+};
 struct LocalChatSpeaker {
     uint8_t slot = 0;
 };
@@ -63,7 +69,8 @@ struct TipEventCommand {
 };
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand>;
+        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
+        LightningTimerCommand>;
 
 class ClientReplicaPipeline {
 public:

@@ -325,6 +325,13 @@ void WeatherState::command_flash() {
     bump_command();
 }
 
+void WeatherState::command_set_flash_timer(int32_t timer_a) {
+    // [orig: NapiNPClientMsg_HandleTextCommand @0x429eea / @0x429ef5] the
+    // raw store; the sequencer tick reads whatever value lands.
+    core.lightning.timer_a = timer_a;
+    bump_command();
+}
+
 void WeatherState::command_far_flash() {
     // [orig: Env_TriggerLightningFlashB @ 0x4ed510] timer B = 32.
     core.lightning.trigger_long();

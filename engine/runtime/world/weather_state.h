@@ -221,6 +221,10 @@ struct WeatherState {
     void command_lightning_color(uint32_t rgb);                 // [orig: Script_SetLightningColor @ 0x4ede20]
     void command_flash();                                       // [orig: Env_TriggerLightningFlashA @ 0x4ed500]
     void command_far_flash();                                   // [orig: Env_TriggerLightningFlashB @ 0x4ed510]
+    // The S2C 0x24 "SETFLASH1 [n]" text command: timer A takes atol(n), or 16
+    // with no argument. [orig: NapiNPClientMsg_HandleTextCommand @0x429ee5 /
+    // @0x429ef5 -> g_EnvLightningTimerA]
+    void command_set_flash_timer(int32_t timer_a);
     void command_block_color(WeatherColorTarget target, uint32_t rgb); // [orig: WacCmd_Sun.. @ 0x4edcd0..]
     // g_EnvWindScale (the `wind` named value; retail's only writer is
     // Environment_InitDefaults @ 0x57c1d1).

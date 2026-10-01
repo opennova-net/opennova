@@ -194,6 +194,10 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->last_attacker = world::EntityHandle{};
                 world::destruction_notify_item_damage(world, *victim, 4);
             }
+        } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
+            // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
+            //  @0x429ef5 -> g_EnvLightningTimerA]
+            world.weather.command_set_flash_timer(flash->timer_a);
         } else if (const auto *effect=std::get_if<ExplosionEffectRecord>(&request)) {
             if (!world.rules.logic_authority && effect->type==0) {
                 world::Entity snapshot;
