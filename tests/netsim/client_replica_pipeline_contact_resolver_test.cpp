@@ -34,6 +34,16 @@ bool expect(bool cond, const char *msg) {
 	return false;
 }
 
+// One mover tick for rows whose records keep arriving: these legs pin the
+// body pass's tail over hundreds of ticks with no staged motion, and a client
+// body pass stops after its chase once a row has gone 512 ticks without a
+// record (D-NET-248) [orig: @0x4b4669..0x4b4670; @0x4b9c09..0x4b9c39].
+void tick_fresh(ns::ClientReplicaPipeline &view) {
+	for (ns::ClientEntityState &es : view.state().entities)
+		if (es.net_interp_progress >= 512) es.net_interp_progress = 511;
+	view.tick_remote_motion(0xFFFF);
+}
+
 // A minimal root source: zero planar root, live capsule extents — the settle
 // leg is the subject, not the walk.
 struct StillSource final : public opennova::world::IRootMotionSource {
@@ -184,7 +194,7 @@ int main() {
 	cap.return_clearance = -0x1200;
 	cap.ground = 0x1006;
 	const int32_t z_pre_land = row_a->z;
-	view.tick_remote_motion(0xFFFF);
+	tick_fresh(view);
 	ok &= expect(row_a->rm_vel_z == 0, "landing zeroes the vertical velocity");
 	// This tick integrated one more step (-416 cumulative -> pos -416), then
 	// lifted by +0x1200.
@@ -202,13 +212,13 @@ int main() {
 	cap.return_clearance = 1000;
 	cap.ground = 0xFFFF;
 	cap.or_flags = 0x100000u;
-	view.tick_remote_motion(0xFFFF); // this tick latches; gravity already ran
+	tick_fresh(view); // this tick latches; gravity already ran
 	ok &= expect((row_a->rm_entity_flags & 0x100000u) != 0,
 	             "the resolver echo persists into rm_entity_flags");
 	cap.or_flags = 0;
 	const int32_t vel_before_gate = row_a->rm_vel_z;
 	const int32_t x_before_gate = row_a->x;
-	view.tick_remote_motion(0xFFFF);
+	tick_fresh(view);
 	ok &= expect((cap.last_flags_in & 0x100000u) != 0,
 	             "the next resolve sees the persisted flags word");
 	ok &= expect(row_a->rm_vel_z == vel_before_gate,
@@ -222,18 +232,18 @@ int main() {
 	row_a->rm_entity_flags = 0; // the real resolver's start-clear analog
 	row_b->rm_entity_flags = 0;
 	cap.return_clearance = 0x10000;
-	view.tick_remote_motion(0xFFFF);
+	tick_fresh(view);
 	ok &= expect((row_a->rm_entity_flags & 0x2000u) != 0,
 	             "clearance > 0xF000 latches the airborne bit");
 	cap.return_clearance = -0x100;
-	view.tick_remote_motion(0xFFFF);
+	tick_fresh(view);
 	ok &= expect((row_a->rm_entity_flags & 0x2000u) == 0,
 	             "a grounded clearance clears the airborne bit");
 	ok &= expect(row_a->rm_vel_z == 0, "the landing zeroes the velocity");
 	// The suppressed edge: a pre-set CL contact keeps the ledge edge closed.
 	row_a->rm_entity_flags = 0x100000u;
 	cap.return_clearance = 0x10000;
-	view.tick_remote_motion(0xFFFF);
+	tick_fresh(view);
 	ok &= expect((row_a->rm_entity_flags & 0x2000u) == 0,
 	             "the 0x10A002 gate suppresses the edge under CL contact");
 	row_a->rm_entity_flags = 0;
@@ -248,7 +258,7 @@ int main() {
 		const int32_t z0 = row_a->z;
 		const int32_t water = z0 + 0x18000;
 		view.set_water_z(water, true);
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect((row_a->rm_entity_flags & 0x8000u) != 0,
 		             "a submerged row latches the float bit");
 		ok &= expect((row_a->rm_entity_flags & 0x200000u) != 0,
@@ -259,7 +269,7 @@ int main() {
 		int32_t last_z = row_a->z;
 		bool rising = true;
 		for (int i = 0; i < 480; ++i) {
-			view.tick_remote_motion(0xFFFF);
+			tick_fresh(view);
 			if (i >= 150 && row_a->z < last_z) rising = false;
 			last_z = row_a->z;
 		}
@@ -271,7 +281,7 @@ int main() {
 		             "surfacing clears the dive bit");
 		// Leaving the water (row above the plane) clears float + dive.
 		view.set_water_z(row_a->z - 0x20000, true);
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect((row_a->rm_entity_flags & 0x208000u) == 0,
 		             "the not-submerged exit clears the float and dive bits");
 	}
@@ -283,7 +293,7 @@ int main() {
 		row_b->cls = nw::EntityClass::Infantry;
 		const int32_t water = row_b->z + 0x18000;
 		view.set_water_z(water, true);
-		for (int i = 0; i < 80; ++i) view.tick_remote_motion(0xFFFF);
+		for (int i = 0; i < 80; ++i) tick_fresh(view);
 		const int32_t line = water - (0xD000 >> 1) - 0x4C9;
 		const int32_t err = row_b->z - line;
 		ok &= expect((row_b->rm_entity_flags & 0x8000u) != 0,
@@ -291,7 +301,7 @@ int main() {
 		ok &= expect(err > -(1224 + 620) && err < (1224 + 620),
 		             "the org1 quarter-chase holds the bob band");
 		view.set_water_z(0, false);
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect((row_b->rm_entity_flags & 0x208000u) == 0,
 		             "no water plane clears the float and dive bits");
 		row_b->rm_entity_flags = 0;
@@ -307,7 +317,7 @@ int main() {
 	{
 		view.set_water_z(0, false);
 		cap.return_clearance = -0x100; // ground the row first
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		row_a->rm_entity_flags = 0;
 		row_b->rm_entity_flags = 0;
 		row_a->rm_vel_xy[0] = 0;
@@ -315,7 +325,7 @@ int main() {
 		still.dx = 1024; // heading 0x40000000 (90 deg): root lands on +y
 		cap.return_clearance = 0x10000;
 		const int32_t y_before_edge = row_a->y;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->anim_state_id == 31,
 		             "the ledge edge stamps anim 31 straight");
 		ok &= expect(row_a->rm_vel_xy[1] == 768,
@@ -326,7 +336,7 @@ int main() {
 		// ftol(sin*-64.0) truncates to -63 exactly as retail's _ftol2), then
 		// the 63/64 damp: (768 + 63) * 63 >> 6 = 818.
 		const int32_t y_before_air = row_a->y;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->rm_vel_xy[1] == 818,
 		             "in-air: nudge then the 63/64 damp");
 		ok &= expect(row_a->y == y_before_air + 818,
@@ -335,18 +345,18 @@ int main() {
 		// lands post-resolve): nudge 63 then damp -> (818+63)*63>>6 = 867.
 		still.dx = 0;
 		cap.return_clearance = -0x100;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect((row_a->rm_entity_flags & 0x2000u) == 0,
 		             "landing clears the airborne bit after the carry flight");
 		ok &= expect(row_a->rm_vel_xy[1] == 867,
 		             "the landing tick's maintenance was still airborne");
 		// First grounded tick: the witnessed (7v+4)>>3 decay resumes.
 		cap.return_clearance = 1000;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->rm_vel_xy[1] == ((867 * 7 + 4) >> 3),
 		             "grounded decay is the witnessed (7v+4)>>3");
 		cap.return_clearance = 1000;
-		for (int i = 0; i < 40; ++i) view.tick_remote_motion(0xFFFF);
+		for (int i = 0; i < 40; ++i) tick_fresh(view);
 		ok &= expect(row_a->rm_vel_xy[1] == 0,
 		             "the |v| <= 8 snap parks the grounded decay at zero");
 		row_a->anim_state_id = 62;
@@ -392,13 +402,13 @@ int main() {
 		cap.ground = 0x2009; // keep the probe echoing the carrier
 		// A parked carrier (saved == live) contributes zero delta.
 		const int32_t x_static = row_a->x;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->x == x_static,
 		             "a parked carrier contributes zero rider delta");
 		// Translation follow: the carrier mover moved it +2u since its stamp.
 		carrier.pos[0] += 2 << 16;
 		const int32_t x_before = row_a->x;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->x == x_before + (2 << 16),
 		             "the rider follows the carrier translation delta");
 		restamp();
@@ -407,7 +417,7 @@ int main() {
 		const int32_t rel_x0 = row_a->x - carrier.pos[0];
 		const int32_t heading0 = row_a->heading_bam;
 		carrier.yaw = 0x40000000;
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		const int32_t rel_x1 = row_a->x - carrier.pos[0];
 		const int32_t rel_y1 = row_a->y - carrier.pos[1];
 		ok &= expect(rel_x1 > -0x400 && rel_x1 < 0x400,
@@ -423,7 +433,7 @@ int main() {
 		carrier.bound_radius = 1 << 14;
 		const int32_t x_before_drop = row_a->x;
 		carrier.pos[0] += 2 << 16; // a delta the dropped ride must NOT apply
-		view.tick_remote_motion(0xFFFF);
+		tick_fresh(view);
 		ok &= expect(row_a->x == x_before_drop,
 		             "straying beyond the bound radius drops the ride");
 	}

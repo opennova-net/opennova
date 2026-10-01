@@ -615,7 +615,7 @@ void row_water_channel(ClientEntityState &es, int32_t z_post_integrate,
 
 void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const terrain::TerrainHeightField *terrain,
-                          uint32_t key, bool is_self,
+                          uint32_t key, bool is_self, bool starved,
                           const ClientReplicaPipeline::ReplicaContactResolver *resolver,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
@@ -721,11 +721,15 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// The legs keep chasing whatever the clip coverage is — the body heading
 	// is presentation state, not clip state (a clipless wire state must not
 	// freeze the torso mid-twist).
-	if (es.cls == EntityClass::Player) row_leg_chase(es, key);
+	// A starved row (the chase capped at 512) advances its channel only: the
+	// body pass returns right after the chase, and the AnimMap update ran at
+	// its top [orig: org2 @0x4b4669..0x4b4670 -> @0x4b83a8; org1 @0x4b9c39;
+	// AnimMap_UpdateDualChannels @0x4B41C9 / @0x4b9a26].
+	if (es.cls == EntityClass::Player && !starved) row_leg_chase(es, key);
 	// The org2 dead tail: a latched-dead body's view yaw follows the leg-chased
 	// body heading every tick (the local player's look is its own motor's)
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d30..0x4b4d4c].
-	if (es.cls == EntityClass::Player && !is_self &&
+	if (es.cls == EntityClass::Player && !is_self && !starved &&
 			(es.rm_entity_flags & world::kEntityFlagDead) != 0)
 		es.heading_bam = es.rm_body_heading;
 	world::RootMotionFrame frame;
@@ -780,7 +784,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// is a named, caller-side deferral because rows carry no velocity state
 	// [orig: Entity_UpdateInfantryPlayerBody root+velocity stores
 	// @0x4B7CBF..0x4B7CEF, before resolver call @0x4B7CF4].
-	if (is_self) return;
+	if (is_self || starved) return;
 	const double rad = static_cast<double>(move_heading) *
 	                   io::kRadiansPerBam;
 	const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
@@ -1075,12 +1079,13 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	// root motion — for every armed org row with a grounded carrier, clip or no
 	// clip [orig: org2 ride @0x4b52a0 between the chase @0x4b4470 and the
 	// integrate @0x4b7cbf].
-	auto organic_chase_tail = [&](ClientEntityState &es, bool is_self) {
-		if (!is_self && carrier_pose_provider_)
+	auto organic_chase_tail = [&](ClientEntityState &es, bool is_self,
+	                              bool starved = false) {
+		if (!is_self && !starved && carrier_pose_provider_)
 			row_deck_ride(es, carrier_pose_provider_);
 		if (root_motion_ != nullptr)
 			row_root_motion_tick(es, *root_motion_, remote_motion_terrain_,
-			                     rm_key, is_self, &replica_contact_resolver_,
+			                     rm_key, is_self, starved, &replica_contact_resolver_,
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),
 			                     static_cast<int32_t>(contact_peers.size()),
@@ -1218,10 +1223,17 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			// [orig: @0x4b464f/@0x4b465f] (row_chase_step_and_cap), then the
 			// deck-ride/root-motion tail (organic_chase_tail).
 			row_chase_step_and_cap(es, progress);
-			// The radio-request latch ages on the 64-tick window unless the
-			// row starved (retail's non-authority starved return precedes it).
-			// [orig: @0x4b4431..0x4b4445 -> @0x4b467a..0x4b469d]
-			if (progress < 512 && (rm_key & 0x3Fu) == 0u) {
+			// A starved row returns here on a client: no radio aging, no leg
+			// chase, death edge, deck ride, integrate or resolve; only the
+			// channel the pass's top advanced [orig: the non-authority branch
+			// @0x4b4669..0x4b4670 to the function end @0x4b83a8].
+			if (progress >= 512) {
+				organic_chase_tail(es, is_self, /*starved=*/true);
+				break;
+			}
+			// The radio-request latch ages on the 64-tick window
+			// [orig: @0x4b4431..0x4b4445 -> @0x4b467a..0x4b469d].
+			if ((rm_key & 0x3Fu) == 0u) {
 				if (es.radio_request_seconds != 0) --es.radio_request_seconds;
 				else es.radio_request = 0;
 			}
@@ -1262,6 +1274,13 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			// +0x2BC read/write [orig: §5.38a cap 512 -> idle 43;
 			// @0x4b464f/@0x4b465f shape] (row_chase_step_and_cap).
 			row_chase_step_and_cap(es, progress);
+			// A starved org1 row returns right after its idle force on a
+			// client: no body-yaw chase, death edge, deck ride or integrate
+			// [orig: Entity_UpdateInfantryAI @0x4b9c09..0x4b9c39].
+			if (progress >= 512) {
+				organic_chase_tail(es, is_self, /*starved=*/true);
+				break;
+			}
 			// Heading: the promoted target chased with the org1 body
 			// quarter-step — the witnessed (d + 2) >> 2 rounding, clamped
 			// [orig: the body chase @0x4be8fd — (target - body + 2) >> 2 then

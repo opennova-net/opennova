@@ -1119,6 +1119,50 @@ bool run_starved_row_forces_idle() {
 	return ok;
 }
 
+// A starved row (512 ticks without a record) holds its pose on a client: the
+// body pass returns right after the chase's idle force, so an org1 body stops
+// turning toward its heading target and an org2 body stops riding its deck
+// [orig: Entity_UpdateInfantryPlayerBody non-authority branch
+// @0x4b4669..0x4b4670 -> @0x4b83a8; Entity_UpdateInfantryAI @0x4b9c09..0x4b9c39].
+bool run_starved_rows_hold_their_pose() {
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		if (type_id == kPlayerType) return nw::EntityClass::Player;
+		return type_id == 0x0777 ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	const uint16_t deck = 0x1003;
+	int32_t deck_x = 0;
+	view.set_carrier_pose_provider(
+			[&](uint16_t handle, ns::ClientReplicaPipeline::CarrierPose &out) {
+				if (handle != deck) return false;
+				out = ns::ClientReplicaPipeline::CarrierPose{};
+				out.saved_pos[0] = deck_x;
+				deck_x += 4096; // the deck moves 1/16 u per tick
+				out.pos[0] = deck_x;
+				out.bound_radius = 100 << 16;
+				return true;
+			});
+	ns::ClientEntityState &ai = view.state().upsert(0x0021);
+	ai.type_id = 0x0777;
+	ai.cls = nw::EntityClass::Infantry;
+	ai.net_has_compact = true;
+	ai.net_interp_progress = 512;
+	ai.net_target_heading_bam = 0x40000000;
+	ns::ClientEntityState &rider = view.state().upsert(0x0022);
+	rider.type_id = kPlayerType;
+	rider.cls = nw::EntityClass::Player;
+	rider.net_has_compact = true;
+	rider.net_interp_progress = 512;
+	rider.resolved_ground = deck;
+	for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *a = view.state().find(0x0021);
+	const ns::ClientEntityState *r = view.state().find(0x0022);
+	std::fprintf(stderr, "[starved] org1 heading=%d org2 x=%d\n", a->heading_bam, r->x);
+	bool ok = expect(a->heading_bam == 0, "a starved org1 body stops turning");
+	ok &= expect(r->x == 0, "a starved org2 body stops riding its deck");
+	return ok;
+}
+
 // The own-player row gets NO root add (its motion is world-side prediction;
 // the row chase is the 48/512 soft reconciliation only).
 bool run_self_row_gets_no_root_add() {
@@ -1434,6 +1478,7 @@ int main() {
 	ok &= run_player_root_motion_dead_reckons();
 	ok &= run_player_on_ground_carrier_keeps_chasing();
 	ok &= run_starved_row_forces_idle();
+	ok &= run_starved_rows_hold_their_pose();
 	ok &= run_self_row_gets_no_root_add();
 	ok &= run_root_rotation_follows_heading();
 	ok &= run_infantry_root_motion_dead_reckons();
