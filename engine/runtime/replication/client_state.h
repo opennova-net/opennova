@@ -1005,6 +1005,13 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// The 0x0A header tail's state byte: the authority's copy of this client's
+	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
+	// client re-latches its stance from it on every frame that carries the tail
+	// (each such frame also advances health_updates_applied).
+	// [orig: NapiNPClientMsg_0x00A -- the tail read @0x4303e5 (`mov dh, al`),
+	//  the latches @0x430562 / @0x430570, MoveOrder bits 8/9 @0x430576..0x43058f]
+	uint8_t local_stance_bits = 0;
 	// Latest phase-0 0x0A projection of the authority's whole-second
 	// pre-round timer. It is the client's Entity_UpdateAllEntities freeze gate;
 	// networking and maintenance remain live while nonzero.

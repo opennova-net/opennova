@@ -128,8 +128,7 @@ void LocalPlayer::set_view_keys(bool free_look, bool up, bool down, bool left, b
     input.turn_right = right;
 }
 
-bool LocalPlayer::request_stance(int stance) {
-	if (stance < 0 || stance > 2) return false;
+bool LocalPlayer::stance_request_allowed() const {
 	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172
 	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a].
 	if (weapon.active && weapon.force_crouch) return false;
@@ -139,6 +138,26 @@ bool LocalPlayer::request_stance(int stance) {
 	if (const w::Entity *p = player();
 			p != nullptr && p->mounted && p->mount_type == w::SeatType::Gunner)
 		return false;
+	return true;
+}
+
+void LocalPlayer::latch_stance_from_echo(uint8_t bits) {
+	// [orig: NapiNPClientMsg_0x00A @0x430549..0x43058f -- prone latch = bit 8,
+	//  crouch latch = bit 9 of (tail byte << 8), and MoveOrder's 0x300 replaced
+	//  from the same word; the body tests prone ahead of crouch @0x4b59ce]
+	const bool prone = (bits & 0x01u) != 0;
+	const bool crouch = (bits & 0x02u) != 0;
+	stance_latch_ = prone ? 2 : (crouch ? 1 : 0);
+	input.prone = prone;
+	input.crouch = crouch;
+	move_order.stance = prone ? w::InfantryState::Stance::kProne
+			: (crouch ? w::InfantryState::Stance::kCrouch : w::InfantryState::Stance::kStand);
+	if (w::AiEntity *p = player_ai()) p->inf.stance = move_order.stance;
+}
+
+bool LocalPlayer::request_stance(int stance) {
+	if (stance < 0 || stance > 2) return false;
+	if (!stance_request_allowed()) return false;
 	if (stance_latch_ == stance) return false;
 	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and
 	// clears the other [orig: NapiNPServerMsg_HandleStanceChange @0x501c60:

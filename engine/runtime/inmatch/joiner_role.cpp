@@ -371,6 +371,13 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
+bool JoinerRole::request_stance(int stance) {
+	if (!kernel_ || stance < 0 || stance > 2) return false;
+	if (!kernel_->local.stance_request_allowed()) return false;
+	static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
+	return queue_stance_change(kStanceActionIds[stance]);
+}
+
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
 // type once per row; -1 = no adm (the row stays chase-only, truthful). The
 // kernel resolves and caches per type (adm_id_for_runtime_type).
@@ -729,6 +736,16 @@ void JoinerRole::pump() {
 	//  NapiNPClientMsg_GameReset @0x422843; Game_InitNewRound @0x422790]
 	world::screen_flash_track_revive(kernel.local.view.flash,
 			rt.state().local_medic_reviving);
+	// Every 0x0A header carrying the recipient tail re-latches L's stance from
+	// the authority's copy, ahead of that frame's records (the mount echo
+	// below). Before L exists there is nothing to latch. [orig:
+	// NapiNPClientMsg_0x00A @0x430549 `test g_LocalPlayerEntity` ->
+	// @0x430562..0x43058f, ahead of the record loop]
+	if (rt.state().health_updates_applied != stance_echo_seen_) {
+		stance_echo_seen_ = rt.state().health_updates_applied;
+		if (local_spawned_ && world.cached.local_player.valid())
+			kernel.local.latch_stance_from_echo(rt.state().local_stance_bits);
+	}
 	sync_authoritative_mount();
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);

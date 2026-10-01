@@ -1870,6 +1870,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	if (fu.local_tail_present) {
 		state_.local_health = fu.health;
 		++state_.health_updates_applied;
+		state_.local_stance_bits = static_cast<uint8_t>(fu.state_flag_byte & 0x03u); // [orig: @0x4303e5]
 	}
 	if (fu.weapon.present) {
 		// Phase 0 is the sole retail mirror of g_PreRoundDelayTimer.
