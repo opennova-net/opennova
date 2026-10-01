@@ -75,7 +75,7 @@ constexpr RequestField kFields[] = {
 			"runtime_executable?, play_in_install?}, each left out as it is." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
-			"(menu, model; left out, the kind the document shows in: the Preview's kind that shows "
+			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
 			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
 			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
