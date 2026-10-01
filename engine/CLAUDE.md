@@ -56,15 +56,21 @@
     lookup (S13 A6, `finding_codes`: a token's row over every table, the tables, the columns' wire
     forms)), `model` (the
     neutral editing core, ADR 0046 d9:
-    `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
+    `DocumentBase` (every document's lifecycle, S13 D6), `Document` (the record document
+    over it) and `TextDocument` (a text whose spans its edits replace, its `TextHistory` of
+    replacements under the same budget, S13 D9), `Node`, `Edit`, `EditHistory` (steps of row
+    swaps under a byte budget),
     `StagedRows` (a batch's rows over any rows before it commits, S13 D7), the `ChangeSet` a
     document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
     `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
     or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
-    over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
+    over an immutable parsed base, ADR 0046 S10); and the text types, a `TextDocument` each, a
+    row per behaviour (S13 D9: a script through the WAC compiler, its operands' names as
+    references with spans; a music script as its MUS text; credits as a CBIN file's ConfigFile
+    text; a shader in the shader loader's SCR form; a configuration or a text);
+    `document_types` is the registry the
     session and the windows reach a type through, each type's `validate_file` its file's own
     findings from its document alone, which `validation_cache` keeps per file until the file
     changes, never keeping a closed file's document, and its `project_check`, a check of its own

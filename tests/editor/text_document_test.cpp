@@ -476,6 +476,12 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(users.size() == 1 && users.front()->source == script && users.front()->span.column == 12);
 	const ReferenceTarget target = usage_target(*project.view().project.scan, *users.front());
 	TEST_EXPECT(target.file == script && target.locator == "3:12" && target.editable);
+	// On the wire: the edge's span, and the fallback of the second ammo.
+	const JsonValue fx_json = graph_edge_to_json(graph, *fx);
+	const JsonValue *fx_span = fx_json.get("span");
+	TEST_EXPECT(fx_span && fx_span->get_number("line", 0) == 3 && fx_span->get_number("column", 0) == 12 &&
+	            fx_span->get_number("length", 0) == 7 && fx_json.get_string("status", "") == "present");
+	TEST_EXPECT(graph_edge_to_json(graph, *fallback).get_string("fallback", "") == "ammo_satchel");
 	// The script's references have no missing one; the project's validation is clean of the script.
 	for (const GraphEdge *missing : graph.missing()) TEST_EXPECT(missing->source != script);
 	// The open script stands in for its file: a span renamed to a name nothing defines is a missing

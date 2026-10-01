@@ -30,12 +30,14 @@ const MODEL_PREVIEW_OPS: Array[String] = ["state", "options", "camera", "hit", "
 const MODEL_PREVIEW_HANDLES: Array[String] = ["place", "axis"]
 
 ## One edit of editor_request's `edits`, the batch form (engine/editor/session/record_batch.h):
-## records by identity or by the label an earlier add or duplicate of the batch gave with `as`.
+## records by identity or by the label an earlier add or duplicate of the batch gave with `as`;
+## over a text document (S13 D9) a span of its text replaced, op apply with payload text.span.
 const EDIT_SCHEMA := {
 	"type": "object",
 	"properties": {
 		"op": {"type": "string",
-				"enum": ["set", "clear", "write", "add", "duplicate", "remove", "move", "set_file_value", "replace_list"]},
+				"enum": ["set", "clear", "write", "add", "duplicate", "remove", "move", "set_file_value", "replace_list",
+						"apply"]},
 		"id": {"type": ["integer", "string"], "description": "the record: its identity, or a label an earlier edit gave"},
 		"parent": {"type": ["integer", "string"], "description": "an add's owner (a row's identity for a record in it; none adds a row), a move's destination"},
 		"kind": {"type": "string", "description": "an add's record kind token (window, action, sound, items.item, ...)"},
@@ -47,6 +49,11 @@ const EDIT_SCHEMA := {
 		"gesture": {"type": "integer", "minimum": 0},
 		"list": {"type": "string", "description": "a replace_list's collection kind token"},
 		"records": {"type": "array", "items": {"type": "object"}, "description": "a replace_list's records, each {field: value, ...}"},
+		"payload": {"type": "string", "enum": ["text.span"], "description": "an apply's change: a text document's span replaced"},
+		"line": {"type": "integer", "minimum": 1, "description": "an apply's span: its line, from 1"},
+		"column": {"type": "integer", "minimum": 1, "description": "an apply's span: its column, from 1"},
+		"length": {"type": "integer", "minimum": 0, "description": "an apply's span: the characters it replaces (a line end counts its own), 0 by default"},
+		"text": {"type": "string", "description": "an apply's span: what takes its place (Windows-1252 characters)"},
 	},
 }
 
@@ -58,7 +65,10 @@ const REQUEST_PROSE := (
 		+ "batch form: [{op, id, parent, kind, field, value, position, as, coalesce, gesture}] over any rows, one "
 		+ "undo step, a record by its identity (as editor_query document and record give it) or by the label "
 		+ "(as) an earlier add or duplicate of the batch gave, an add's kind by its token (op replace_list "
-		+ "{id, list, records}: the list replaced by these records); revert_to_saved's edits are [{id, field}]. "
+		+ "{id, list, records}: the list replaced by these records); revert_to_saved's edits are [{id, field}]; "
+		+ "over a text document (a script, a music script, credits, a shader, a configuration) the edits are its "
+		+ "spans replaced, [{op: apply, payload: text.span, line, column, length, text}], each against the text as "
+		+ "the ones before left it (editor_query document pages its lines). "
 		+ "The answer: ok (it read), served, and outcome: done (false when it was refused, did not finish, or "
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
 		+ "unsaved_prompt, operation (the one it started or joined, 0 for none; build and play return at once "

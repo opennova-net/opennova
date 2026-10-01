@@ -600,9 +600,10 @@ A file open in the editor: read as the game's loader reads it, changed through i
 history, and written back over the file only while the file still holds what it was read from.
 That lifecycle is every document's (the base); what a document holds is its kind's. A record
 document holds rows of records, each edit naming a record and one of its fields (the def
-catalogs, string tables, menus, stylesheets, models, clips and animation tables); a document of
-another kind (a terrain's raster, a script's text) holds its own content and takes the changes
-its type makes (an Apply edit's payload).
+catalogs, string tables, menus, stylesheets, models, clips and animation tables); a text document
+holds a text whose spans its edits replace (a script, a music script, a credits file, a shader, a
+configuration); a document of another kind (a terrain's raster) will hold its own content and take
+the changes its type makes (an Apply edit's payload).
 _Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
 project file by its logical name)
 
@@ -771,10 +772,30 @@ follow (the same-file rename S13 D5 removed)
 **Change set**:
 What changed in a document between a state a window or a preview last read and the state it is
 in, in the words of its kind: a record document's rows added, removed and changed, whether rows
-moved among one another and whether the file-wide state changed (a text's spans and a raster's
-regions later). When the document cannot say (it was read again, or its history no longer holds
-that state), everything changed.
+moved among one another and whether the file-wide state changed; a text document's spans (each run
+of text that changed, a removal a span of no length); a raster's regions later. When the document
+cannot say (it was read again, or its history no longer holds that state), everything changed.
 _Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
+
+**Text document**:
+A document of text (a script, a music script, a credits file, a shader, a configuration or a text),
+held as the game reads it, in its code page (one byte a character, which is what a column counts),
+as lines, its places `line:column`. Its one change is a span replaced. Its type reads and writes
+the form its file is stored in (a music script's bytecode, a credits file's CBIN form and a shader's
+SCR form are held as their text and written back in the form, byte for byte while the text is left
+as it is), checks it through the game's own reader where the editor has one (the WAC and MUS
+compilers) and names the references its text makes (a script's operands), each at its span. A file
+its text cannot carry as it is (a music script's message handler) opens read only.
+_Avoid_: source (an import's input), code (the bytecode a compiler makes), script (one kind of text
+document)
+
+**Span**:
+A run of a text document's text: the line and the column it starts at (both from 1) and how many
+characters it covers (a line end counting its own). An edit replaces a span; a reference a text
+makes is at a span, which Rename everywhere rewrites and a Go to opens the document at; what changed
+in a text is its spans.
+_Avoid_: range, selection (the records a document's selection holds), offset (the byte a span's
+place maps to)
 
 **Build**:
 The one operation behind Play and Export: validate the project, route every asset into

@@ -1,9 +1,9 @@
 #include "text_document.h"
 
 #include <algorithm>
-#include <charconv>
 #include <utility>
 
+#include <base/io/strutil.h>
 #include <editor/model/diagnostic.h>
 
 namespace opennova::editor {
@@ -15,11 +15,15 @@ bool refuse(Diagnostic &error, const std::string &path, CoreFinding code, const 
 	return false;
 }
 
-// A whole number that is all of `text`.
+// A whole number that is all of `text`: digits alone.
 bool whole(std::string_view text, size_t &out) {
 	if (text.empty()) return false;
-	const auto read = std::from_chars(text.data(), text.data() + text.size(), out);
-	return read.ec == std::errc() && read.ptr == text.data() + text.size();
+	for (const char c : text)
+		if (c < '0' || c > '9') return false;
+	const auto value = strutil::parse_ulong(std::string(text));
+	if (!value) return false;
+	out = size_t(*value);
+	return true;
 }
 
 // The group a batch folds in: its gesture's, else a typing burst's (its edits coalesced), else none.

@@ -1074,14 +1074,25 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 
 JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	JsonValue out = JsonValue::make_object();
+	// A text's reference (S13 D9) is written as its text is, in the game's code page: as UTF-8 here.
+	const bool text = edge.span.line != 0;
+	const auto written = [text](const std::string &value) { return text ? cp1252_to_utf8(value) : value; };
 	out.set("source", json_string(edge.source));
 	if (!edge.record.empty()) out.set("record", json_string(edge.record));
 	if (!edge.locator.empty()) out.set("locator", json_string(edge.locator));
 	if (edge.address.row) out.set("address", address_to_json(edge.address));
+	if (text) {
+		JsonValue span = JsonValue::make_object();
+		span.set("line", json_number(double(edge.span.line)));
+		span.set("column", json_number(double(edge.span.column)));
+		span.set("length", json_number(double(edge.span.length)));
+		out.set("span", std::move(span));
+	}
 	out.set("field", json_string(edge.field));
 	out.set("kind", json_string(reference_row(edge.kind).token));
-	out.set("value", json_string(edge.value));
-	out.set("target", json_string(edge.target));
+	out.set("value", json_string(written(edge.value)));
+	if (!edge.fallback.empty()) out.set("fallback", json_string(written(edge.fallback)));
+	out.set("target", json_string(written(edge.target)));
 	if (!edge.scope.empty()) out.set("scope", json_string(edge.scope));
 	out.set("rewritable", boolean(edge.rewritable));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
