@@ -1450,3 +1450,94 @@ func test_static_and_live_placement_share_initialized_entity_light_radius() -> v
 			assert_eq(float((surfaces[0] as GeometryInstance3D).get_instance_shader_parameter(
 					"u_point_light_count")), 1.0,
 					"the live query has the same padded radius as its static source")
+
+
+# ADR 0046 S14: the editor moves a retained static in place (move_static_instance).
+# Its rows stay where they are in their populations (the packing and the
+# swap-remove order stand), its transform reads back (get_static_instance_transform),
+# its level's sphere moves with it (the next LOD walk evaluates it where it is now)
+# and the population's bounds grow to hold it; a bms id that is no retained static
+# is refused; a carved instance moves too and shows again where it went.
+func test_move_static_instance_rewrites_rows_in_place() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var fixture := _dense_fixture(parent, false)
+	var placer: MissionObjectPlacer = fixture.placer
+	var bms: Array[int] = fixture.bms
+	var container: Node3D = fixture.container
+	assert_not_null(container)
+	if container == null:
+		return
+	var level0 := _lod_population(container, "Batch_StaticCrate1_0")
+	var level1 := _lod_population(container, "Batch_StaticCrate1_1")
+	if level0 == null or level1 == null:
+		return
+	var placed: Variant = placer.get_static_instance_transform(bms[1])
+	assert_eq(placed, MissionObjectPlacer.entity_transform(Vector3(10, -100, 0), Vector3.ZERO),
+			"the read-back is the entity transform the placement made")
+	assert_null(placer.get_static_instance_transform(999999), "no retained static: null")
+	assert_false(placer.move_static_instance(999999, Transform3D.IDENTITY), "no retained static: refused")
+
+	# The second building moved beside the third (BMS y -100 to -200, turned 90):
+	# the same rows in the same order, the transform the new one, the bounds grown.
+	var moved := MissionObjectPlacer.entity_transform(Vector3(10, -200, 3), Vector3(0, 90, 0))
+	var before := level0.custom_aabb
+	var level1_before := level1.custom_aabb
+	assert_true(placer.move_static_instance(bms[1], moved))
+	assert_eq(placer.get_static_instance_transform(bms[1]), moved)
+	assert_eq(_live_bms(placer, level0), [bms[0], bms[1], bms[2]], "the rows stand as packed")
+	assert_eq(_live_bms(placer, level1), [])
+	assert_eq(_live_populations(placer, bms[1]), ["Batch_StaticCrate1_0"])
+	assert_eq(placer.get_static_instance_binding_count(bms[1]), 2, "its bindings stand")
+	assert_true(level0.custom_aabb.encloses(before), "the bounds only grow")
+	assert_true(level0.custom_aabb.has_point(moved.origin), "and hold the row where it is now")
+	assert_eq(level1.custom_aabb, level1_before, "a population with no live row of it is left as it was")
+
+	# The LOD walk evaluates it where it is now: at the near camera the third
+	# building (z 200) stays at level 0, and so does the second one beside it;
+	# only the first switches.
+	assert_eq(_dense_lod_switches(placer, DENSE_NEAR_CAMERA), 1)
+	assert_eq(_live_bms(placer, level1), [bms[0]])
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[1]],
+			"swap-remove: the third filled the first one's hole; the moved one stayed last")
+	assert_eq(_live_populations(placer, bms[1]), ["Batch_StaticCrate1_0"])
+	# A move while a row sits after a swap-remove: still in place, still right.
+	var nudged := MissionObjectPlacer.entity_transform(Vector3(11, -200, 3), Vector3(0, 90, 0))
+	assert_true(placer.move_static_instance(bms[1], nudged))
+	assert_eq(placer.get_static_instance_transform(bms[1]), nudged)
+	assert_eq(_live_bms(placer, level0), [bms[2], bms[1]])
+	assert_eq(placer.get_static_instance_transform(bms[2]),
+			MissionObjectPlacer.entity_transform(Vector3(10, -200, 0), Vector3.ZERO),
+			"the other rows keep their transforms")
+
+	# A carved instance moves with no live row, and shows again where it went.
+	placer.hide_static_instance(bms[2])
+	assert_eq(_live_bms(placer, level0), [bms[1]])
+	var far := MissionObjectPlacer.entity_transform(Vector3(10, -150, 0), Vector3.ZERO)
+	assert_true(placer.move_static_instance(bms[2], far))
+	assert_eq(placer.get_static_instance_transform(bms[2]), far)
+	assert_eq(_live_bms(placer, level0), [bms[1]], "carved: no row to rewrite")
+	assert_true(placer.show_static_instance(bms[2]))
+	assert_eq(_live_bms(placer, level0), [bms[1], bms[2]])
+	assert_eq(placer.get_static_instance_transform(bms[2]), far)
+
+
+# ADR 0046 S14: a graphic's static batches warmed before a placement names it
+# (warm_static_graphic): a graphic whose batches are registered or resolve is
+# warm, one that resolves to nothing is not, and an empty name never.
+func test_warm_static_graphic_caches_the_batches() -> void:
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	assert_false(placer.warm_static_graphic("", parent), "no name")
+	assert_false(placer.warm_static_graphic("NoSuchGraphic", parent), "nothing resolves")
+	var mesh := BoxMesh.new()
+	assert_true(placer.register_resolved_static_graphic("StaticCrate1", ObjectData.new(), [{
+		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+	assert_true(placer.warm_static_graphic("StaticCrate1", parent), "registered: warm")
+	assert_eq(parent.get_child_count(), 0, "a warm graphic harvests nothing under the parent")

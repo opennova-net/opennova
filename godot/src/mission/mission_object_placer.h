@@ -287,6 +287,26 @@ public:
 			bool p_active);
 	bool clear_static_terrain_shadow_replacement(int p_bms_id);
 
+	// --- the editor's moves (ADR 0046 S14) --------------------------------
+	// A retained static entity moved to `p_xform` (its entity transform, as
+	// entity_transform makes it): every row it occupies rewritten in place
+	// across its populations (the level's, the shadow twin's, the view twins'),
+	// its level's bound sphere moved with it, each touched population's bounds
+	// grown to hold it. It keeps the 512-unit bin it was placed in: the cull
+	// stays right, the batching degrades for a far move until the next
+	// placement. The static source rows (its terrain shadow, its effects) do
+	// not follow here: the editor moves them at the gesture's end
+	// (update_static_terrain_shadow_source_transform). False for a bms id
+	// that is no retained static.
+	bool move_static_instance(int p_bms_id, const Transform3D &p_xform);
+	// The entity transform a retained static's rows draw at now (null for a
+	// bms id that is no retained static): the move's read-back.
+	Variant get_static_instance_transform(int p_bms_id) const;
+	// The graphic's static batches harvested and cached (the template model's
+	// one-off harvest under `p_tree_parent`), so a placement that names it
+	// later finds them warm; true when the graphic resolves to batches.
+	bool warm_static_graphic(const String &p_graphic, Node *p_tree_parent);
+
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
 	// (including asset-free tests). Each batch row may carry "lod_index"
@@ -371,6 +391,7 @@ private:
 		int row = -1;
 		int lod_index = 0;
 		Transform3D live_xform; // the row's transform while the level is live
+		Transform3D offset; // the batch's own, which live_xform composes after the entity's
 		Color custom_data; // the light-atlas row (visible populations)
 		bool shadow_only = false; // the filtered shadow twin
 		bool casts = true; // whether the slot is ever live in a shadow twin
@@ -381,6 +402,7 @@ private:
 	struct StaticLodInstance {
 		int profile = -1;
 		int bms_id = 0;
+		Transform3D xform; // the entity transform its rows draw at
 		Vector3 origin;
 		int32_t radius_q16 = 0;
 		opennova::renderer::ObjectProjectionSphere local_projection_sphere;

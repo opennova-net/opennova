@@ -1,7 +1,9 @@
 #include "mission/mission_object_placer.h"
+#include "mission/static_population_instance.h"
 #include "mission/static_source_convert.h"
 #include "util/string_convert.h"
 
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <runtime/world/model_geometry.h>
 #include <base/io/fixed.h>
@@ -209,6 +211,66 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 	static_sources_.show_instance(p_bms_id);
 	return true;
 }
+
+// --- the editor's moves (ADR 0046 S14) --------------------------------------
+
+bool MissionObjectPlacer::move_static_instance(int p_bms_id, const Transform3D &p_xform) {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return false;
+	}
+	StaticLodInstance &instance = static_lod_instances_.write[rec->lod_instance];
+	instance.xform = p_xform;
+	instance.origin = ObjectLodFrame::projection_center(p_xform,
+			instance.local_projection_sphere, instance.entity_scale_q16);
+	HashSet<int> touched;
+	for (int binding_index = 0; binding_index < instance.bindings.size(); ++binding_index) {
+		StaticLodBinding &binding = instance.bindings.write[binding_index];
+		binding.live_xform = p_xform * binding.offset;
+		if (binding.row < 0 || binding.population < 0 ||
+				binding.population >= static_populations_.size()) {
+			continue;
+		}
+		StaticPopulation &population = static_populations_.write[binding.population];
+		if (population.multimesh.is_null()) {
+			continue;
+		}
+		population.multimesh->set_instance_transform(binding.row, binding.live_xform);
+		touched.insert(binding.population);
+		// The population's advertised bounds grown to hold the row where it is now.
+		StaticPopulationInstance *node = Object::cast_to<StaticPopulationInstance>(
+				ObjectDB::get_instance(population.instance_node));
+		const Ref<Mesh> mesh = population.multimesh->get_mesh();
+		if (node != nullptr && mesh.is_valid()) {
+			const AABB bounds = binding.live_xform.xform(mesh->get_aabb());
+			const AABB held = node->get_custom_aabb();
+			node->set_custom_aabb(held.size == Vector3() ? bounds : held.merge(bounds));
+		}
+	}
+	// The rows the Q3 pass read are stale: the touched populations publish again (their
+	// visibility and shadow row maps stand).
+	_flush_static_population_changes(touched);
+	return true;
+}
+
+Variant MissionObjectPlacer::get_static_instance_transform(int p_bms_id) const {
+	const auto *rec = static_sources_.instance(p_bms_id);
+	if (rec == nullptr || rec->lod_instance < 0 ||
+			rec->lod_instance >= static_lod_instances_.size()) {
+		return Variant();
+	}
+	return static_lod_instances_[rec->lod_instance].xform;
+}
+
+bool MissionObjectPlacer::warm_static_graphic(const String &p_graphic, Node *p_tree_parent) {
+	_check_epoch();
+	if (p_graphic.is_empty()) {
+		return false;
+	}
+	return !_get_static_batches(p_graphic, p_tree_parent).is_empty();
+}
+
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
 		MissionData::EntityKind p_kind, int p_index, const Transform3D &p_xform) {
 	_check_epoch();

@@ -183,6 +183,12 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::hide_static_instance);
 	ClassDB::bind_method(D_METHOD("show_static_instance", "bms_id"),
 			&MissionObjectPlacer::show_static_instance);
+	ClassDB::bind_method(D_METHOD("move_static_instance", "bms_id", "xform"),
+			&MissionObjectPlacer::move_static_instance);
+	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_transform);
+	ClassDB::bind_method(D_METHOD("warm_static_graphic", "graphic", "tree_parent"),
+			&MissionObjectPlacer::warm_static_graphic);
 	ClassDB::bind_method(
 			D_METHOD("register_resolved_static_graphic", "graphic", "data",
 					"batches", "lod_profile"),
@@ -705,6 +711,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				StaticLodInstance retained;
 				retained.profile = profile_row;
 				retained.bms_id = i < group.bms_ids.size() ? group.bms_ids[i] : 0;
+				retained.xform = group.xforms[i];
 				const int item_id = i < group.item_ids.size() ? group.item_ids[i] : 0;
 				const int32_t scale_q16 = _item_model_scale_q16(item_id);
 				// An eweap powerup takes the zero-centered form its entity
@@ -821,6 +828,7 @@ Ref<MissionPlacementStats> MissionObjectPlacer::place_rows(const std::vector<Pla
 				binding.population = population_index;
 				binding.slot = local_index;
 				binding.lod_index = p_batch.lod_index;
+				binding.offset = p_batch.offset;
 				binding.live_xform = group.xforms[slot] * p_batch.offset;
 				const int *row = light_draw_rows.getptr(
 						static_light_draw_key(slot, p_batch.robj_index));
