@@ -16,8 +16,17 @@
 // file through the CBIN codec byte for byte and an edit written back in the form, one the text form
 // cannot carry held read only; a music script through its MUS text byte for byte, one with a message
 // handler held read only, a text that does not compile refused at its line and column; a shader in
-// the shader loader's SCR form byte for byte, a plain one a finding Save fixes. The retail leg
-// (OPENNOVA_JO_DIR): the install's scripts, music scripts, credits and shaders read and validated.
+// the shader loader's SCR form byte for byte, a plain one a finding Save fixes. After the review: a
+// line end a type's reader reads otherwise (a script's LF alone and CR alone, a credits text's LF
+// alone) a finding a Rewrite fixes, Save writing every line CR LF as a step of the text; a credits
+// text's line the reader does not read whole refused, never saved short; a declared name no
+// reference; a text key's use one Rename everywhere leaves alone (refused); a rename that would take
+// over a use reaching another ammo through its fallback refused, and one of a definition reached
+// through it keeping the prefix once; a stale text site partial; the rename preview's text sites; a
+// closed music script's spans read by its scan's kind; a shader imported as stored; one compile of
+// a text for its findings and its references; a snapshot copying the text alone. The retail leg
+// (OPENNOVA_JO_DIR): the install's scripts, music scripts, credits and shaders read and validated,
+// its counts pinned.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +39,7 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/credits_type.h>
@@ -38,6 +48,7 @@
 #include <editor/documents/script_type.h>
 #include <editor/documents/text_types.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/graph_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_plan.h>
@@ -49,9 +60,11 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/view_json.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/cbin.h>
 #include <formats/mus/mus.h>
+#include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
 #include <runtime/wac/compiler.h>
@@ -293,11 +306,42 @@ static int test_folding_and_changes() {
 	Diagnostic error;
 	TEST_EXPECT(document->load_bytes(bytes_of("abc\r\n"), "t.wac", AssetKind::Script, "jo", error));
 	TEST_EXPECT(!document->changes_since(load, 0, changes));
-	// The saved checkpoint is never folded over: a gesture across a save is two steps.
-	const auto saved = text_document("one\r\n");
+	// The saved checkpoint is never folded over: a gesture's batch after a save is a step of its own,
+	// whose undo gives the saved text back, clean; one more undo the text before, unsaved.
+	editor_test::TempProjectDir dir("opennova_editor_text_checkpoint");
+	const std::string file = dir.file("checkpoint.cfg");
+	TEST_EXPECT(editor_test::write_text(file, "one\r\n"));
+	TextDocument saved;
+	TEST_EXPECT(saved.load(file, "checkpoint.cfg", AssetKind::Config, "jo", error));
 	const uint64_t drag = next_edit_gesture();
-	TEST_EXPECT(apply(*saved, {TextDocument::replace(span(1, 1, 0), "a", false, drag)}));
-	saved->end_edit_group();
+	TEST_EXPECT(apply(saved, {TextDocument::replace(span(1, 1, 0), "a", false, drag)}));
+	TEST_EXPECT(saved.save(error) && !saved.dirty());
+	TEST_EXPECT(apply(saved, {TextDocument::replace(span(1, 2, 0), "b", false, drag)}));
+	TEST_EXPECT(saved.line(1) == "abone" && saved.dirty());
+	saved.undo();
+	TEST_EXPECT(saved.line(1) == "aone" && !saved.dirty() && saved.can_undo());
+	saved.undo();
+	TEST_EXPECT(saved.line(1) == "one" && saved.dirty() && !saved.can_undo());
+	return 0;
+}
+
+// What changed since a state, where a later edit changed the length of the text before a range it
+// tracks: the range moves with the text, the insert a span of its own.
+static int test_changes_moved() {
+	const auto document = text_document("abc\r\ndef\r\n");
+	const uint64_t load = document->load_generation();
+	TEST_EXPECT(apply(*document, {TextDocument::replace(span(2, 1, 3), "DEF")}));
+	const uint64_t middle = document->revision();
+	TEST_EXPECT(apply(*document, {TextDocument::replace(span(1, 1, 0), "XYZW")}));
+	TEST_EXPECT(document->text() == "XYZWabc\r\nDEF\r\n");
+	ChangeSet changes;
+	TEST_EXPECT(document->changes_since(load, 0, changes) && spans_of(changes) && spans_of(changes)->spans.size() == 2);
+	if (!spans_of(changes) || spans_of(changes)->spans.size() != 2) return 1;
+	const TextSpan &insert = spans_of(changes)->spans[0], &moved = spans_of(changes)->spans[1];
+	TEST_EXPECT(insert.line == 1 && insert.column == 1 && insert.length == 4);
+	TEST_EXPECT(moved.line == 2 && moved.column == 1 && moved.length == 3);
+	TEST_EXPECT(document->changes_since(load, middle, changes) && spans_of(changes)->spans.size() == 1 &&
+	            spans_of(changes)->spans[0].length == 4);
 	return 0;
 }
 
@@ -346,6 +390,13 @@ static int test_snapshot_and_save() {
 	            snapshot->revision() == document->revision() && snapshot->serialize().text == "name = two\r\n");
 	TEST_EXPECT(!snapshot->apply(TextDocument::replace(span(1, 1, 0), "x"), error) &&
 	            error.code() == "document.snapshot");
+	// The text alone is copied: the history's state (dirty as its document), none of its steps.
+	ChangeSet changes;
+	TEST_EXPECT(snapshot->dirty() == document->dirty() && !snapshot->can_undo() && !snapshot->can_redo() &&
+	            snapshot->history_bytes() == 0 && document->history_bytes() > 0);
+	TEST_EXPECT(snapshot->changes_since(document->load_generation(), document->revision(), changes) &&
+	            spans_of(changes) && spans_of(changes)->spans.empty() &&
+	            !snapshot->changes_since(document->load_generation(), 0, changes));
 	TEST_EXPECT(document->save(error) && !document->dirty() && document->rewrite_need() == DocumentBase::RewriteNeed::None);
 	TEST_EXPECT(test_io::read_file_text(file) == "name = two\r\n");
 	// A file changed outside the editor: the save is refused.
@@ -372,7 +423,15 @@ static int test_script_type() {
 	const opennova::wac::Program program = compile_script(script);
 	size_t table = 0;
 	for (const opennova::wac::Diagnostic &d : program.diagnostics) table += d.table ? 1 : 0;
+	// One compile of the text for its findings and its references.
+	const size_t compiles = opennova::editor::script_compile_count();
 	const std::vector<Diagnostic> findings = type->validate_file(*made);
+	const size_t validated = opennova::editor::script_compile_count();
+	std::vector<TextReference> once;
+	type->references(script, once);
+	TEST_EXPECT(validated <= compiles + 1 && opennova::editor::script_compile_count() == validated);
+	TEST_EXPECT(type->validate_file(*made).size() == findings.size() &&
+	            opennova::editor::script_compile_count() == validated);
 	std::printf("script: %zu compiler reports, %zu of names other files hold, %zu findings\n",
 	            program.diagnostics.size(), table, findings.size());
 	TEST_EXPECT(table >= 4 && findings.empty());
@@ -393,6 +452,19 @@ static int test_script_type() {
 	TEST_EXPECT(is(2, ReferenceKind::Ammo, "AT_CONTRACT", 5, 16) && references[2].fallback == "ammo_AT_CONTRACT");
 	TEST_EXPECT(is(3, ReferenceKind::Ammo, "satchel", 6, 16) && references[3].fallback == "ammo_satchel");
 	TEST_EXPECT(is(4, ReferenceKind::TextId, "MISSION_START", 7, 15) && references[4].fallback.empty());
+	// A text key's use is not one Rename everywhere rewrites (its lookup is the game's own order of
+	// tables); the others are.
+	TEST_EXPECT(!references[4].rewritable && references[0].rewritable && references[3].rewritable);
+	// A declared name is a name the script gives, never one it looks up: no reference (a VAR's, a
+	// CHEAT's; each refused as a name in use, the pool answering its leg).
+	for (const char *text : {"VAR AMMO_COUNT\r\n", "CHEAT FX_GLOW\r\n"}) {
+		const auto declared = text_document(text, "declared.wac");
+		std::vector<TextReference> none;
+		script_references(*declared, none);
+		const opennova::wac::Program declaring = compile_script(*declared);
+		TEST_EXPECT(none.empty() && declaring.catalog_lookups.size() == 1 &&
+		            declaring.catalog_lookups[0].declaration);
+	}
 	// A compile error: a finding at its line and column, a Warning (the game runs the script as it
 	// compiled). A RUN names a file it does not read: no report.
 	const auto flawed = text_document("RUN other\r\nfxrain FX_Buildup )\r\n", "flawed.wac");
@@ -404,6 +476,71 @@ static int test_script_type() {
 	TEST_EXPECT(reported[0].code() == "script.compile" && reported[0].severity == DiagnosticSeverity::Warning &&
 	            reported[0].line == 2 && reported[0].column == 19 && reported[0].asset == "flawed.wac" &&
 	            reported[0].message.find("Unexpected )") != std::string::npos);
+	return 0;
+}
+
+// A line end a type's reader reads otherwise: a script's LF alone (its reader ends a line at a CR and
+// reads an LF as a blank) lets a comment run on into the lines after it; a finding a Rewrite fixes,
+// Save writing every line CR LF and the document taking that as a step (its undo the old line ends,
+// unsaved). A CR alone in a script, an LF alone in a credits text; a text's file written as it holds
+// it.
+static int test_line_ends() {
+	editor_test::TempProjectDir dir("opennova_editor_text_line_ends");
+	const std::string file = dir.file("ends.wac");
+	const std::string original = "If true(bluekills) then\r\n\tfxrain FX_Buildup\r\nendif\r\n";
+	TEST_EXPECT(editor_test::write_text(file, original));
+	const DocumentType *type = document_type_for(AssetKind::Script);
+	std::unique_ptr<DocumentBase> made = type->make();
+	Diagnostic error;
+	TEST_EXPECT(made->load(file, "ends.wac", AssetKind::Script, "jo", error));
+	TextDocument &script = *text_of(*made);
+	TEST_EXPECT(script.line_ends() == TextLineEnds::Cr && type->validate_file(*made).empty());
+	const auto effects = [&] {
+		std::vector<TextReference> named;
+		type->references(script, named);
+		return size_t(std::count_if(named.begin(), named.end(),
+		                            [](const TextReference &r) { return r.kind == ReferenceKind::Particle; }));
+	};
+	TEST_EXPECT(effects() == 1);
+	// A comment and a line put in with LFs alone: the editor shows them as lines; the reader runs the
+	// comment on to the next CR, over both effect lines.
+	TEST_EXPECT(apply(*made, {TextDocument::replace(span(2, 1, 0), "; note\n\tfxrain FX_Smoke\n")}));
+	TEST_EXPECT(script.line_count() == 6 && script.line(3) == "\tfxrain FX_Smoke" && effects() == 0);
+	const std::vector<Diagnostic> findings = type->validate_file(*made);
+	const auto ending = std::find_if(findings.begin(), findings.end(),
+	                                 [](const Diagnostic &d) { return d.code() == "script.line_ending"; });
+	TEST_EXPECT(ending != findings.end() && ending->line == 2 && ending->column == 7 && ending->row() &&
+	            ending->row()->fixes == FindingFix::Rewrite && ending->severity == DiagnosticSeverity::Warning &&
+	            ending->message.find("2 line ends") != std::string::npos);
+	TEST_EXPECT(made->rewrite_need() == DocumentBase::RewriteNeed::Rewrite);
+	// Save: every line CR LF, the document holding what it wrote as a step, clean; its effects read.
+	const uint64_t before_save = made->revision();
+	TEST_EXPECT(made->save(error) && !made->dirty() && made->revision() != before_save);
+	TEST_EXPECT(test_io::read_file_text(file) ==
+	            "If true(bluekills) then\r\n; note\r\n\tfxrain FX_Smoke\r\n\tfxrain FX_Buildup\r\nendif\r\n");
+	TEST_EXPECT(script.text() == test_io::read_file_text(file) && effects() == 2 &&
+	            type->validate_file(*made).empty() && made->rewrite_need() == DocumentBase::RewriteNeed::None);
+	// Its undo gives the old line ends back, unsaved; the next the text before the insert.
+	made->undo();
+	TEST_EXPECT(script.line(2) == "; note" && made->dirty() && script.odd_line_end() != std::string::npos);
+	made->undo();
+	TEST_EXPECT(script.text() == original && made->dirty());
+	// A CR alone in a script: the reader ends a line there.
+	std::unique_ptr<DocumentBase> lone = type->make();
+	TEST_EXPECT(lone->load_bytes(bytes_of("a\rb\r\n"), "lone.wac", AssetKind::Script, "jo", error));
+	const std::vector<Diagnostic> crs = type->validate_file(*lone);
+	TEST_EXPECT(has_code(crs, "script.line_ending") && lone->serialize().text == "a\r\nb\r\n");
+	// A credits text's LF alone: the ConfigFile reader ends a line at CR LF.
+	const DocumentType *credits = document_type_for(AssetKind::Credits);
+	std::unique_ptr<DocumentBase> listed = credits->make();
+	TEST_EXPECT(listed->load_bytes(bytes_of("[ENV]\nscroll_rate = 0.5\n"), "lf.kda", AssetKind::Credits, "jo", error));
+	const std::vector<Diagnostic> lfs = credits->validate_file(*listed);
+	TEST_EXPECT(has_code(lfs, "credits.line_ending") && lfs[0].line == 1 && lfs[0].column == 6 &&
+	            listed->serialize().text == "[ENV]\r\nscroll_rate = 0.5\r\n");
+	// A text's file is written as it holds it.
+	std::unique_ptr<DocumentBase> plain = document_type_for(AssetKind::Text)->make();
+	TEST_EXPECT(plain->load_bytes(bytes_of("a\nb\r"), "notes.txt", AssetKind::Text, "jo", error) &&
+	            plain->serialize().text == "a\nb\r" && text_of(*plain)->odd_line_end() == std::string::npos);
 	return 0;
 }
 
@@ -432,7 +569,8 @@ bool make_script_project(ScriptProject &project) {
 	        editor_test::write_text(root + "/scripts/text_document.wac", repo_file("wac/text_document.wac")) &&
 	        editor_test::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
 	        editor_test::write_text(root + "/defs/ammo.def",
-	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n") &&
+	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n"
+	                                "ammo bomb\nmax_age 3\nend\n") &&
 	        editor_test::write_bytes(root + "/strings/missiontext.bin", strings);
 	project.session.handle(request::rescan());
 	return written && project.view().findings.graph;
@@ -451,8 +589,9 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(make_script_project(project));
 	const std::string script = "scripts/text_document.wac";
 	const AssetGraph &graph = project.graph();
+	// The graph reads a script's operands' names; an import still lists its RUN as not followed.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Script) && !graph_reads_kind(AssetKind::Text) &&
-	            !references_unread(AssetKind::Script, "x.wac"));
+	            references_unread(AssetKind::Script, "x.wac"));
 	const std::vector<const GraphEdge *> edges = graph.references_of(script);
 	TEST_EXPECT(edges.size() == 5);
 	const GraphEdge *fx = edge_at(graph, script, "3:12");
@@ -509,6 +648,45 @@ static int test_graph_and_rename() {
 	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *contract.front(), "AT_RENAMED");
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 2 && plan.sites[1].file == script &&
 	            plan.sites[1].span.line == 5 && plan.sites[1].field.empty());
+	// The preview's text site: its span, the name it holds as UTF-8.
+	project.session.handle(request::preview_rename(definition.file, definition.locator, definition.field, "AT_RENAMED"));
+	const JsonValue dialogs = view_section_to_json(project.view(), ViewSection::Dialogs);
+	const JsonValue *preview = dialogs.get("rename_preview");
+	const JsonValue *sites = preview ? preview->get("sites") : nullptr;
+	TEST_EXPECT(sites && sites->array.size() == 2);
+	if (!sites || sites->array.size() != 2) return 1;
+	const JsonValue *site_span = sites->array[1].get("span");
+	TEST_EXPECT(site_span && site_span->get_number("line", 0) == 5 && site_span->get_number("column", 0) == 16 &&
+	            site_span->get_number("length", 0) == 11 && sites->array[1].get_string("before", "") == "AT_CONTRACT" &&
+	            sites->array[1].get_string("after", "") == "AT_RENAMED" && !sites->array[0].get("span"));
+	// A stale site: the open script changed at its place since the plan, the staging finds it no
+	// more (rename.partial), nothing written.
+	project.session.handle(request::edit_record(script, {TextDocument::replace(span(5, 16, 11), "AT_ELSEWHERE")}));
+	std::vector<Diagnostic> stale;
+	TEST_EXPECT(!check_symbol_rename(ProjectPaths::for_root(project.root()), *project.view().project.document,
+	                                 *project.view().project.scan, project.graph(), plan, project.view().documents.open,
+	                                 stale) &&
+	            has_code(stale, "rename.partial"));
+	project.session.handle(request::undo(script));
+	TEST_EXPECT(open->line(5) == "\tammoarea AMMO_AT_CONTRACT 8");
+	// A text key's use is not rewritten: its definition's rename is refused at the script's span.
+	const std::vector<const GraphSymbol *> start = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
+	const GraphEdge *key_now = edge_at(project.graph(), script, "7:15");
+	TEST_EXPECT(start.size() == 1 && key_now && !key_now->rewritable);
+	if (start.empty()) return 1;
+	const SymbolRenamePlan keyed =
+	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *start.front(), "MISSION_GO");
+	TEST_EXPECT(!keyed.ok() && has_code(keyed.refusals, "rename.site") &&
+	            keyed.refusals[0].message.find("at 7:15") != std::string::npos);
+	// A rename that would take over a use reaching another ammo through its fallback: bomb renamed
+	// satchel would catch the script's ammo_satchel (its lookup's first name), refused.
+	const std::vector<const GraphSymbol *> bomb = project.graph().symbols_named(ReferenceKind::Ammo, "bomb");
+	TEST_EXPECT(bomb.size() == 1);
+	if (bomb.empty()) return 1;
+	const SymbolRenamePlan captures =
+	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *bomb.front(), "satchel");
+	TEST_EXPECT(!captures.ok() && has_code(captures.refusals, "rename.exists") &&
+	            captures.refusals[0].message.find("ammo_satchel") != std::string::npos);
 	project.session.handle(request::rename_symbol(definition.file, definition.locator, definition.field, "AT_RENAMED"));
 	TEST_EXPECT(project.session.outcome().done());
 	const std::string written = test_io::read_file_text(project.root() + "/" + script);
@@ -525,8 +703,26 @@ static int test_graph_and_rename() {
 	project.session.handle(request::rename_symbol(satchel_definition.file, satchel_definition.locator,
 	                                              satchel_definition.field, "ammo_charge"));
 	TEST_EXPECT(project.session.outcome().done());
+	// The prefix kept once: the span reads "charge", its lookup's second name the renamed ammo.
+	TEST_EXPECT(test_io::read_file_text(project.root() + "/" + script).find("\tammo2tgt(ammo_charge, 3)\r\n") !=
+	            std::string::npos);
 	const GraphEdge *charged = edge_at(project.graph(), script, "6:16");
-	TEST_EXPECT(charged && charged->value == "ammo_charge" && project.graph().resolve(*charged) == ReferenceStatus::Present);
+	TEST_EXPECT(charged && charged->value == "charge" && charged->fallback == "ammo_charge" &&
+	            project.graph().resolve(*charged) == ReferenceStatus::Present && project.graph().symbol_reached(*charged) &&
+	            project.graph().symbol_reached(*charged)->name == graph_names::symbol_name(ReferenceKind::Ammo, "ammo_charge"));
+	// Where the rest names another definition (bomb), the whole new name, which its first name finds.
+	const std::vector<const GraphSymbol *> charge_now = project.graph().symbols_named(ReferenceKind::Ammo, "ammo_charge");
+	TEST_EXPECT(charge_now.size() == 1);
+	if (charge_now.empty()) return 1;
+	const GraphSymbol charge_definition = *charge_now.front();
+	project.session.handle(request::rename_symbol(charge_definition.file, charge_definition.locator,
+	                                              charge_definition.field, "ammo_bomb"));
+	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(test_io::read_file_text(project.root() + "/" + script).find("\tammo2tgt(ammo_ammo_bomb, 3)\r\n") !=
+	            std::string::npos);
+	const GraphEdge *whole = edge_at(project.graph(), script, "6:16");
+	TEST_EXPECT(whole && whole->value == "ammo_bomb" && project.graph().symbol_reached(*whole) &&
+	            project.graph().symbol_reached(*whole)->name == graph_names::symbol_name(ReferenceKind::Ammo, "ammo_bomb"));
 	// A name the script's text would not read whole is refused, nothing written.
 	const std::vector<const GraphSymbol *> renamed_now = project.graph().symbols_named(ReferenceKind::Ammo, "AT_RENAMED");
 	TEST_EXPECT(renamed_now.size() == 1);
@@ -623,6 +819,14 @@ static int test_wire() {
 	                         closed, error);
 	EditorRequest closed_read;
 	TEST_EXPECT(editor_request_from_json(closed, closed_read, error) && closed_read.edits.size() == 1);
+	// A closed music script, a .bin its name alone does not type: its spans read by the kind the scan
+	// read (its content), the document open after its first read.
+	TEST_EXPECT(editor_test::write_text(project.root() + "/gamemus.bin", repo_file("mus/synth_gamemus.bin")));
+	project.session.handle(request::rescan());
+	answer = send(R"({"kind": "edit_record", "path": "gamemus.bin", "open_first": true, "edits": [{"op": "apply", "payload": "text.span", "line": 6, "column": 1, "text": "// note\n"}]})");
+	const DocumentBase *music = project.session.document_base_for("gamemus.bin");
+	TEST_EXPECT(answer.get_bool("ok", false) && music && text_of(*music) && text_of(*music)->line(6) == "// note");
+	if (!answer.get_bool("ok", false)) std::fprintf(stderr, "music: %s\n", answer.get_string("error", "").c_str());
 	// The document query: its lifecycle, its line count and a page of its lines.
 	JsonValue args = JsonValue::make_object();
 	args.set("path", opennova::io::json_string(script));
@@ -687,6 +891,61 @@ static int test_credits() {
 	return 0;
 }
 
+// The CBIN form keeps what the reader reads and nothing else: a line it reads none of or only part of
+// is refused at its line (never saved short); an LF alone put into a line is written CR LF, the two
+// lines both kept.
+static int test_credits_unread() {
+	const std::vector<uint8_t> minted = minted_credits();
+	const DocumentType *type = document_type_for(AssetKind::Credits);
+	Diagnostic error;
+	const auto loaded = [&] {
+		std::unique_ptr<DocumentBase> made = type->make();
+		made->load_bytes(minted, "nlist.kda", AssetKind::Credits, "jo", error);
+		return made;
+	};
+	size_t text_line = 0;
+	{
+		const std::unique_ptr<DocumentBase> probe = loaded();
+		const TextDocument &credits = *text_of(*probe);
+		for (size_t i = 1; i <= credits.line_count() && !text_line; ++i)
+			if (opennova::strutil::starts_with_icase(std::string(credits.line(i)), "text =")) text_line = i;
+	}
+	TEST_EXPECT(text_line > 0);
+	// An LF alone put into an existing line: two lines, both written.
+	std::unique_ptr<DocumentBase> extra = loaded();
+	TEST_EXPECT(apply(*extra, {TextDocument::replace(span(text_line, 1, 0), "text = Extra\n")}));
+	const std::vector<Diagnostic> ended = type->validate_file(*extra);
+	TEST_EXPECT(has_code(ended, "credits.line_ending") && !has_code(ended, "credits.unserializable"));
+	const SerializeResult written = extra->serialize();
+	std::unique_ptr<DocumentBase> back = type->make();
+	TEST_EXPECT(written.ok() && back->load_bytes(bytes_of(written.text), "nlist.kda", AssetKind::Credits, "jo", error));
+	TEST_EXPECT(text_of(*back)->line(text_line) == "text = Extra" &&
+	            text_of(*back)->line(text_line + 1) == text_of(*loaded())->line(text_line));
+	// What the reader does not read whole: refused at its line, nothing written.
+	const auto refused_at = [&](const std::string &inserted, size_t line, const char *says) {
+		std::unique_ptr<DocumentBase> made = loaded();
+		if (!apply(*made, {TextDocument::replace(span(line, 1, 0), inserted)})) return false;
+		const std::vector<Diagnostic> found = type->validate_file(*made);
+		for (const Diagnostic &d : found)
+			if (d.code() == "credits.unserializable" && d.line == line && d.message.find(says) != std::string::npos)
+				return !made->serialize().ok() && made->rewrite_need() == DocumentBase::RewriteNeed::Unserializable;
+		for (const Diagnostic &d : found) std::fprintf(stderr, "credits: %s at %zu\n", d.message.c_str(), d.line);
+		return false;
+	};
+	TEST_EXPECT(refused_at("; a comment\r\n", text_line, "comment"));
+	TEST_EXPECT(refused_at("text = kept ; and a comment\r\n", text_line, "';' comment"));
+	TEST_EXPECT(refused_at("[text]\r\n", text_line, "opens no section"));
+	TEST_EXPECT(refused_at("before = 1\r\n", 1, "outside any section"));
+	TEST_EXPECT(refused_at("text =\r\n", text_line, "no value"));
+	TEST_EXPECT(refused_at("no equals here\r\n", text_line, "no '='"));
+	TEST_EXPECT(refused_at("text = a, b, c\r\n", text_line, "3 values"));
+	TEST_EXPECT(refused_at("text = a\rb\r\n", text_line, "CR alone"));
+	std::vector<SourceIssue> issues;
+	TEST_EXPECT(!credits_text_readable("[ENV]\r\nrate = 1\nmore = 2\r\n", issues) && issues.size() == 1 &&
+	            issues[0].line == 2 && issues[0].message.find("LF alone") != std::string::npos);
+	return 0;
+}
+
 // The music script type: its MUS text byte for byte; a script with a message handler held read only;
 // a text that does not compile refused at its line and column.
 static int test_music_script() {
@@ -743,6 +1002,16 @@ static int test_shader_and_text() {
 	std::unique_ptr<DocumentBase> other = type->make();
 	TEST_EXPECT(!other->load_bytes(bytes_of(std::string("SCR\x02", 4) + "xyz"), "two.fx", AssetKind::Shader, "jo", error) &&
 	            error.code() == "document.parse");
+	// The plain form is a fact of the stored file, no line Save drops; its Rewrite writes the form and
+	// the finding goes with the file it was about.
+	TEST_EXPECT(plain->ignored_lines() == 0 && plain->issues().empty() && !plain->blocked());
+	editor_test::TempProjectDir dir("opennova_editor_text_shader");
+	const std::string file = dir.file("plain.fx");
+	TEST_EXPECT(editor_test::write_text(file, source));
+	std::unique_ptr<DocumentBase> rewritten = type->make();
+	TEST_EXPECT(rewritten->load(file, "plain.fx", AssetKind::Shader, "jo", error) && type->validate_file(*rewritten).size() == 1);
+	TEST_EXPECT(rewritten->save(error) && type->validate_file(*rewritten).empty() &&
+	            test_io::read_file(file) == stored && !rewritten->dirty());
 	// The text type: its file its text, no finding.
 	const DocumentType *text = document_type_for(AssetKind::Config);
 	TEST_EXPECT(text && text->id == DocumentTypeId::Text && document_type_for(AssetKind::Text) == text);
@@ -750,6 +1019,44 @@ static int test_shader_and_text() {
 	TEST_EXPECT(config->load_bytes(bytes_of("a = 1\nb = 2\n"), "game.cfg", AssetKind::Config, "jo", error) &&
 	            config->serialize().text == "a = 1\nb = 2\n" && text->validate_file(*config).empty() &&
 	            text->findings().count == 0);
+	return 0;
+}
+
+// A shader imported from an archive: copied as stored, its loader's own SCR form (the text readers'
+// decode would make it noise), the project's file opening with no finding; the import plan's origin
+// reads it so.
+static int test_import_shader() {
+	editor_test::TempProjectDir dir("opennova_editor_text_import");
+	const std::string root = dir.file("project");
+	ProjectDocument project;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Import", "jo", project, error));
+	const std::vector<uint8_t> stored = scr_shader("float4 main() : COLOR { return 0; }\r\n");
+	const std::string archive = dir.file("shaders.pff");
+	const opennova::pff::PffWriteEntry entries[] = {{"glass.fx", stored.data(), uint32_t(stored.size()), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive(archive.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	ImportSource source;
+	source.path = archive;
+	source.entry = "glass.fx";
+	const ImportResult result = import_assets({source}, ProjectPaths::for_root(root), project, false);
+	TEST_EXPECT(result.imported.size() == 1);
+	if (result.imported.size() != 1) return 1;
+	const std::string imported = root + "/" + result.imported[0];
+	TEST_EXPECT(test_io::read_file(imported) == stored);
+	const DocumentType *type = document_type_for(AssetKind::Shader);
+	std::unique_ptr<DocumentBase> made = type->make();
+	TEST_EXPECT(made->load(imported, result.imported[0], AssetKind::Shader, "jo", error) &&
+	            type->validate_file(*made).empty() && text_of(*made)->text() == "float4 main() : COLOR { return 0; }\r\n");
+	ImportOrigin origin;
+	std::string why;
+	std::vector<uint8_t> read;
+	TEST_EXPECT(origin.open(ImportOrigin::Kind::Archive, archive, project, why) && origin.read("glass.fx", read) &&
+	            read == stored);
+	// The extract and the editor agree on which files their loader takes as stored.
+	TEST_EXPECT(opennova::vfs_loader_takes_stored("x.fx") && !opennova::vfs_loader_takes_stored("x.wac") &&
+	            asset_kind_row(classify_asset("x.fx", nullptr)).scr == ScrForm::Shader &&
+	            asset_kind_row(classify_asset("x.wac", nullptr)).scr == ScrForm::Optional);
 	return 0;
 }
 
@@ -811,15 +1118,19 @@ static int test_retail() {
 				++witnessed;
 				TEST_EXPECT(sha256(wac_listing::document(corpus)) == vector->listing_sha256);
 			}
-			// The editor's findings: the reports of the text alone but the names other files hold.
+			// The editor's findings: the reports of the text alone but the names other files hold, each
+			// on the line the compiler counted (its CRs: every shipped script ends its lines CR LF, so
+			// the editor's lines are the compiler's).
 			const opennova::wac::Program program = compile_script(*text_of(*document));
-			std::vector<size_t> own;
+			std::vector<const opennova::wac::Diagnostic *> own;
 			for (const opennova::wac::Diagnostic &d : program.diagnostics)
-				if (!d.table && d.source == 0) own.push_back(d.offset);
-			TEST_EXPECT(found.size() == own.size());
+				if (!d.table && d.source == 0) own.push_back(&d);
+			TEST_EXPECT(found.size() == own.size() && text_of(*document)->odd_line_end() == std::string::npos);
 			for (size_t i = 0; i < found.size() && i < own.size(); ++i) {
-				const TextSpan at = text_of(*document)->span_at(own[i], 0);
-				TEST_EXPECT(found[i].line == at.line && found[i].column == at.column);
+				if (found[i].line != size_t(own[i]->line))
+					std::fprintf(stderr, "retail: %s: \"%s\" at line %zu, the compiler's %d\n", name.c_str(),
+					             own[i]->message.c_str(), found[i].line, own[i]->line);
+				TEST_EXPECT(found[i].line == size_t(own[i]->line) && found[i].column >= 1);
 			}
 			// One that RUNs nothing reports what the corpus compile reports of it.
 			if (corpus.source_names.size() == 1) {
@@ -856,7 +1167,9 @@ static int test_retail() {
 	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files, "
 	            "%zu shaders\n",
 	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders);
-	TEST_EXPECT(scripts > 0 && witnessed > 0 && music == 2 && credits == 1 && shaders > 0);
+	// The install's counts, pinned (Joint Operations: Combined Arms).
+	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
+	            references == 36 && music == 2 && credits == 1 && shaders == 44);
 	return 0;
 }
 
@@ -866,15 +1179,19 @@ int main(int argc, char **argv) {
 	failures += test_lines_and_places();
 	failures += test_span_edits();
 	failures += test_folding_and_changes();
+	failures += test_changes_moved();
 	failures += test_history_budget();
 	failures += test_snapshot_and_save();
 	failures += test_script_type();
+	failures += test_line_ends();
 	failures += test_graph_and_rename();
 	failures += test_go_to_and_problems();
 	failures += test_wire();
 	failures += test_credits();
+	failures += test_credits_unread();
 	failures += test_music_script();
 	failures += test_shader_and_text();
+	failures += test_import_shader();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_text_document: all passed\n");
 	return failures == 0 ? 0 : 1;

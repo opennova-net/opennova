@@ -29,7 +29,8 @@ using graph_names::key;
 using graph_names::style_variable;
 
 bool references_unread(AssetKind kind, const std::string &file) {
-	return asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+	const AssetKindRow &row = asset_kind_row(kind);
+	return row.names_files && (row.names_unfollowed || !graph_reads_file(kind, file));
 }
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
@@ -80,7 +81,7 @@ std::string ImportOrigin::find(const std::string &name) const {
 }
 
 bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) const {
-	if (kind_ != Kind::Folder) return vfs_.read_file(name, out);
+	if (kind_ != Kind::Folder) return read_served(vfs_, name, out);
 	std::string error;
 	return read_file_bytes((fs::path(path_) / name).generic_string(), out, error);
 }

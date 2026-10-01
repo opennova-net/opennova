@@ -93,6 +93,11 @@ struct Kind {
 		out.row.scr = form;
 		return out;
 	}
+	constexpr Kind names_unfollowed() const {
+		Kind out = *this;
+		out.row.names_unfollowed = true;
+		return out;
+	}
 };
 
 constexpr AssetKindRow kRows[] = {
@@ -224,10 +229,13 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("particle")
 	        .names_files()
 	        .row,
+	// A RUN names another script [orig: Script_LoadAndCompileFile @ 0x4EE660], which the graph
+	// makes no edge of yet (S13 D9): an import does not follow it.
 	Kind(AssetKind::Script, "script", "Script", ArchiveSlot::Localres)
 	        .extensions(kScript)
 	        .edited_by(DocumentTypeId::Script)
 	        .names_files()
+	        .names_unfollowed()
 	        .row,
 	// The .def family by name: the runtime consumes each by its exact name, and browses only
 	// Avatars.def and hudpos.def.

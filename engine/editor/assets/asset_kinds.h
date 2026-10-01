@@ -76,6 +76,9 @@ struct AssetKindRow {
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
+	// Its files name files through a reference the graph reads no edge of yet though it reads the
+	// files' other references (a script's RUN, S13 D9): an import lists them as not followed.
+	bool names_unfollowed = false;
 	// Where a file of the kind the editor makes goes inside the project tree, created or imported
 	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name.
 	const char *folder = "";

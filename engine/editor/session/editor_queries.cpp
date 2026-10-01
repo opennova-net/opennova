@@ -22,6 +22,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
@@ -747,7 +748,7 @@ constexpr EditorQueryRow kRows[] = {
 			"save (unchanged, changed, added) and the collections it holds, their records at "
 			"every depth; for a text document, by the same offset and limit, a page of its lines "
 			"(each its line, from 1, and its text).")
-			.pages("rows")
+			.pages("rows, or a text document's lines")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,
 			"One record of an open record document, by its id or by the symbol it defines: its id, "
@@ -875,14 +876,18 @@ constexpr EditorQueryRow kRows[] = {
 			concern_set({ C::Selection, C::Dialogs }),
 			"A page of the view events by seq (the one-shot asks a request makes of a window): "
 			"first, next, cursor, next_cursor and the items, each its seq, kind (reveal_record, "
-			"reveal_file, ask_rename, settings_applied, import_planned) and the fields its kind "
-			"sets. The last 64 are held: a client more than 64 behind misses the events dropped, "
-			"the cursor coming back larger than it asked.")
+			"reveal_text, reveal_file, ask_rename, settings_applied, import_planned) and the fields "
+			"its kind sets (a reveal_text's locator, line:column). The last 64 are held: a client "
+			"more than 64 behind misses the events dropped, the cursor coming back larger than it "
+			"asked.")
 			.pages("items")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "
-			"needs, who serves it and what it does; every request field; every query with its "
+			"needs, who serves it and what it does; every request field; the batch form of a "
+			"request's edits (batch: its forms, its ops, each with the form it is read in, and the "
+			"members an edit takes, each with its JSON type, the forms that read it, its least "
+			"value or the one string it takes); every query with its "
 			"params, the list it pages and the concerns it reads; the state's sections; the view's "
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
@@ -1084,6 +1089,44 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		fields.push(std::move(entry));
 	}
 	out.set("fields", std::move(fields));
+	// The batch form of a request's edits (record_batch.h): its forms, ops and members, from which
+	// the editor MCP makes its edit schema.
+	JsonValue batch = JsonValue::make_object();
+	JsonValue forms = JsonValue::make_array();
+	for (size_t i = 0; i < kRecordBatchFormCount; ++i) {
+		const auto form = static_cast<RecordBatchForm>(i);
+		JsonValue entry = JsonValue::make_object();
+		entry.set("form", json_string(batch_form_token(form)));
+		entry.set("doc", json_string(batch_form_doc(form)));
+		forms.push(std::move(entry));
+	}
+	batch.set("forms", std::move(forms));
+	JsonValue ops = JsonValue::make_array();
+	for (const BatchOp &row : batch_ops()) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("op", json_string(row.token));
+		entry.set("form", json_string(batch_form_token(row.form)));
+		entry.set("doc", json_string(row.doc));
+		ops.push(std::move(entry));
+	}
+	batch.set("ops", std::move(ops));
+	JsonValue members = JsonValue::make_array();
+	for (const BatchMember &row : batch_members()) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(row.name));
+		entry.set("type", json_string(batch_json_token(row.json)));
+		JsonValue read_by = JsonValue::make_array();
+		for (size_t i = 0; i < kRecordBatchFormCount; ++i)
+			if (row.forms & batch_form_bit(static_cast<RecordBatchForm>(i)))
+				read_by.push(json_string(batch_form_token(static_cast<RecordBatchForm>(i))));
+		entry.set("forms", std::move(read_by));
+		if (row.minimum >= 0) entry.set("minimum", json_number(double(row.minimum)));
+		if (row.only[0]) entry.set("only", json_string(row.only));
+		entry.set("doc", json_string(row.doc));
+		members.push(std::move(entry));
+	}
+	batch.set("members", std::move(members));
+	out.set("batch", std::move(batch));
 	JsonValue queries = JsonValue::make_array();
 	for (const EditorQueryRow &row : kRows) {
 		JsonValue entry = JsonValue::make_object();

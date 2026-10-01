@@ -706,6 +706,13 @@ const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
 	return edge.fallback.empty() ? nullptr : resolve_symbol(edge.kind, edge.fallback, edge.scope);
 }
 
+std::vector<const GraphEdge *> AssetGraph::edges_naming(ReferenceKind kind, const std::string &name) const {
+	std::vector<const GraphEdge *> out;
+	for (const Ref ref : index_.edges_naming(GraphIndex::key_of(kind, graph_names::symbol_name(kind, name))))
+		out.push_back(&index_.edge(ref));
+	return out;
+}
+
 ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name, const std::string &scope,
                                     std::string *file_out, int32_t loader_arg) const {
 	if (file_out) file_out->clear();

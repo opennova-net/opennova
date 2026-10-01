@@ -327,11 +327,12 @@ private:
 	}
 
 	// A catalog lookup of the current token's name past a prefix of `prefix` bytes, and whether it
-	// found the name (tooling metadata: Program::catalog_lookups).
+	// found the name (tooling metadata: Program::catalog_lookups); one a declaration's check of its
+	// name as new made (a declaration mode set) marked so.
 	void note_lookup(const File &f, ParamType kind, size_t prefix, bool found) {
 		const size_t skipped = prefix < f.token_length ? prefix : f.token_length;
 		prog_.catalog_lookups.push_back({kind, std::string(token_view(f).substr(skipped)), f.source,
-				f.token_start + skipped, f.token_length - skipped, found});
+				f.token_start + skipped, f.token_length - skipped, found, f.decl_mode != 0});
 	}
 
 	// [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".

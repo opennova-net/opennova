@@ -404,6 +404,8 @@ void test_long_text() {
 	CHECK(text_view->marked_line() == 4000 && lines->Scroll.y <= top && lines->Scroll.y + lines->Size.y >= top + step,
 	      "the revealed line scrolled into sight");
 	CHECK(text_view->markers_made() == 1 && workspace.requests.empty(), "its markers made once, nothing raised");
+	// Clipped: the frame drew the lines in sight (a 560-pixel tab), never the 5,000.
+	CHECK(text_view->lines_drawn() > 0 && text_view->lines_drawn() < 100, "the lines in sight drawn alone");
 }
 
 } // namespace

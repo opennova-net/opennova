@@ -29,6 +29,8 @@ public:
 	// made (once per change of the findings or the document, never for a frame).
 	size_t marked_line() const { return marked_; }
 	size_t markers_made() const { return markers_made_; }
+	// How many lines the last frame drew (the clipper's: those in sight, never the whole text).
+	size_t lines_drawn() const { return lines_drawn_; }
 
 private:
 	struct Marker {
@@ -44,6 +46,7 @@ private:
 	uint64_t markers_document_ = 0, markers_load_ = 0, markers_revision_ = 0;
 	bool markers_valid_ = false;
 	size_t markers_made_ = 0;
+	size_t lines_drawn_ = 0;
 	size_t marked_ = 0;   // the line a reveal marked
 	bool scroll_ = false; // scroll to it as the lines draw next
 };

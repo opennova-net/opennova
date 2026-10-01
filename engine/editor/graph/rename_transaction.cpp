@@ -7,10 +7,12 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <string_view>
 #include <system_error>
 #include <variant>
 
 #include <base/io/cp1252.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
@@ -455,6 +457,25 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 				                                other->file, other->field));
 				break;
 			}
+	// A use that names the new name first and reaches another definition now through its lookup's
+	// second name (a script's AMMO_satchel reaching ammo_satchel while nothing defines satchel): the
+	// renamed definition would take it over, its lookup finding the first name first [orig:
+	// WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92], a change no site rewrites.
+	for (const GraphEdge *edge : graph.edges_naming(symbol.kind, new_name)) {
+		if (graph_names::symbol_name(edge->kind, edge->value) != wanted || !scope_matches(symbol.scope, edge->scope))
+			continue;
+		const GraphSymbol *reached = graph.symbol_reached(*edge);
+		if (!reached || reached == &symbol) continue;
+		const std::string where = edge->record.empty() ? edge->source + (edge->locator.empty() ? "" : " at " + edge->locator)
+		                                               : "'" + edge->record + "' in " + edge->source;
+		plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+		                                where + " names '" + edge->value + "', which reaches " + row.phrase + " '" +
+		                                        reached->display + "' of " + reached->file + " through '" + edge->fallback +
+		                                        "' now: renamed '" + new_name + "', " + what +
+		                                        " would take that use over, its lookup finding the first name first.",
+		                                edge->source, edge->field));
+		break;
+	}
 	// The definition, then every use that reaches it.
 	RenameSite definition;
 	definition.file = symbol.file;
@@ -475,7 +496,12 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
 		if (!edge->rewritable || !source) {
-			plan.refusals.push_back(refusal(CoreFinding::RenameSite, where + " names " + what + " and the editor cannot rewrite that file yet.",
+			// A text's use is at its span; the file is the editor's to write, that use not yet (a
+			// script's text key, whose lookup the graph does not order as the game does).
+			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
+			                                edge->span.line ? where + " names " + what + " at " + edge->locator +
+			                                                          ", a use the editor cannot rewrite yet."
+			                                                : where + " names " + what + " and the editor cannot rewrite that file yet.",
 			                                edge->source, edge->field));
 			continue;
 		}
@@ -489,6 +515,24 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		site.before = edge->value;
 		site.after = spelled;
 		site.target = symbol.file;
+		// A use whose lookup takes a second name (its fallback: a script's AMMO_X, then "ammo_X"):
+		// where the new name begins with the prefix that second name puts before the value, the span
+		// takes the rest, the prefix kept once ("ammo_satchel" renamed "ammo_charge" reads
+		// AMMO_charge), when nothing else defines the rest (its lookup's first name then finds
+		// nothing, its second the renamed definition); else the whole new name, which its first name
+		// finds.
+		if (!edge->fallback.empty() && edge->fallback.size() > edge->value.size() &&
+		    strutil::iequals(std::string_view(edge->fallback).substr(edge->fallback.size() - edge->value.size()),
+		                     edge->value)) {
+			const std::string prefix = edge->fallback.substr(0, edge->fallback.size() - edge->value.size());
+			if (new_name.size() > prefix.size() && strutil::starts_with_icase(new_name, prefix)) {
+				const std::string rest = new_name.substr(prefix.size());
+				bool defined = false;
+				for (const GraphSymbol *other : graph.symbols_named(symbol.kind, rest))
+					defined = defined || other != &symbol;
+				if (!defined) site.after = rest;
+			}
+		}
 		sites.push_back({std::move(site), edge->address.kind});
 	}
 	// Every site's field can hold the new value: within its width, a number where it is one. A

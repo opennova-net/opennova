@@ -69,7 +69,10 @@ void TextView::draw(Workspace &workspace, const DocumentBase &base) {
 	if (!document) return ui_kit::empty_state("This file holds no text to show.");
 	const SessionView &view = workspace.view();
 	follow_markers(view, *document);
-	draw_document_toolbar(workspace, *document);
+	// A text held read only is a file its text form cannot carry as it is (a shipped music script's
+	// message handler), nothing to correct: each issue says what.
+	draw_document_toolbar(workspace, *document,
+			"Read only: the editor shows this file's text and cannot write the file back as it is.");
 	for (const SourceIssue &issue : document->issues())
 		if (issue.blocks) ImGui::TextWrapped("%s", issue.message.c_str());
 	const std::string lines = std::to_string(document->line_count()) +
@@ -91,9 +94,11 @@ void TextView::draw(Workspace &workspace, const DocumentBase &base) {
 	}
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(count), row_step);
+	lines_drawn_ = 0;
 	while (clipper.Step())
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
 			const size_t number = size_t(i) + 1;
+			++lines_drawn_;
 			ImGui::PushID(i);
 			// The marked line (a reveal's) lit across the row.
 			if (number == marked_) {

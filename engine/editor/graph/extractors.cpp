@@ -272,7 +272,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		const std::string normalized = graph_names::key(reference.value);
 		if (reference.value.empty() || normalized == "NONE" || normalized == "NULL") continue;
 		GraphEdge edge = edge_of(document.path(), std::string(), std::string(), reference.kind,
-				reference.value, reference.scope, true);
+				reference.value, reference.scope, reference.rewritable);
 		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
 		edge.span = reference.span;
 		edge.fallback = std::move(reference.fallback);

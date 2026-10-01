@@ -14,6 +14,15 @@ namespace opennova::menu {
 
 namespace {
 
+// strtol over retail's 32-bit long, saturating at its range whatever this platform's long is (a
+// 64-bit long would let a value past it wrap in the cast).
+int32_t strtol32(const char *text) {
+	const long long v = std::strtoll(text, nullptr, 10);
+	if (v > INT32_MAX) return INT32_MAX;
+	if (v < INT32_MIN) return INT32_MIN;
+	return static_cast<int32_t>(v);
+}
+
 // sscanf "%[^<stop>]": one or more characters not in `stop`.
 size_t scan_run(const std::string &line, size_t at, const char *stop) {
 	size_t end = at;
@@ -111,7 +120,7 @@ std::vector<ConfigSection> parse_config_text(const uint8_t *data, size_t size) {
 			v.text = value.substr(start, p - start);
 			v.type = classify_numeric(v.text);
 			if (v.type == 1) {
-				v.integer = static_cast<int32_t>(std::strtol(v.text.c_str(), nullptr, 10));
+				v.integer = strtol32(v.text.c_str());
 			} else if (v.type == 2) {
 				v.real = static_cast<float>(std::atof(v.text.c_str()));
 			} else {

@@ -33,6 +33,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -692,6 +693,31 @@ static int test_catalog() {
 		TEST_EXPECT(fields->array[i].get_string("field", "") == field.token &&
 				fields->array[i].get_string("type", "") == request_json_token(field.json) &&
 				fields->array[i].get_string("doc", "") == field.doc);
+	}
+	// The batch form's table (S13 D9): its forms, its ops with their form, its members with their
+	// type, the forms that read them, a least value and the one string an apply's payload takes.
+	const JsonValue *batch = catalog.get("batch");
+	const JsonValue *batch_forms = batch ? batch->get("forms") : nullptr;
+	const JsonValue *batch_ops_json = batch ? batch->get("ops") : nullptr;
+	const JsonValue *batch_members_json = batch ? batch->get("members") : nullptr;
+	TEST_EXPECT(batch_forms && batch_forms->array.size() == kRecordBatchFormCount && batch_ops_json &&
+	            batch_ops_json->array.size() == batch_ops().count && batch_members_json &&
+	            batch_members_json->array.size() == batch_members().count);
+	for (size_t i = 0; batch_ops_json && i < batch_ops_json->array.size(); ++i)
+		TEST_EXPECT(batch_ops_json->array[i].get_string("op", "") == batch_ops().rows[i].token &&
+		            batch_ops_json->array[i].get_string("form", "") == batch_form_token(batch_ops().rows[i].form));
+	for (size_t i = 0; batch_members_json && i < batch_members_json->array.size(); ++i) {
+		const BatchMember &member = batch_members().rows[i];
+		const JsonValue &entry = batch_members_json->array[i];
+		TEST_EXPECT(entry.get_string("name", "") == member.name &&
+		            entry.get_string("type", "") == batch_json_token(member.json) &&
+		            entry.get_number("minimum", -1) == double(member.minimum) &&
+		            entry.get_string("only", "") == member.only && entry.get_string("doc", "") == member.doc);
+		const JsonValue *forms = entry.get("forms");
+		size_t read_by = 0;
+		for (size_t f = 0; f < kRecordBatchFormCount; ++f)
+			read_by += (member.forms & batch_form_bit(static_cast<RecordBatchForm>(f))) ? 1 : 0;
+		TEST_EXPECT(forms && forms->array.size() == read_by && read_by > 0);
 	}
 	const JsonValue *queries = catalog.get("queries");
 	TEST_EXPECT(queries && queries->array.size() == kEditorQueryKindCount);

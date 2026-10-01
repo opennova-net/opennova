@@ -268,12 +268,15 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Reload) == Tokens({ "document.conflict" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
-	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "menu.ignored_input",
-	                     "shader.form", "strings.regrouped", "style.line_ending" }));
+	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "credits.line_ending",
+	                     "menu.ignored_input", "script.line_ending", "shader.form", "strings.regrouped",
+	                     "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "catalog.ignored_input", "without the input the game ignores" },
+		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "script.line_ending", "with every line ending CR LF" },
 		{ "shader.form", "in the SCR form the game's shader loader takes" },
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
 		{ "style.line_ending", "with every line ending CR LF" },

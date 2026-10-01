@@ -36,7 +36,16 @@ std::string group_of(const Edit &edit) {
 
 const char *TextSpanEdit::token() const { return kTextSpanToken; }
 
-TextDocument::TextDocument(TextDecode decode) : decode_(decode) {}
+TextDocument::TextDocument(TextDecode decode, TextLineEnds ends) : decode_(decode), ends_(ends) {}
+
+TextDocument::TextDocument(const TextDocument &other) :
+		DocumentBase(other),
+		decode_(other.decode_),
+		ends_(other.ends_),
+		encoding_(other.encoding_),
+		text_(other.text_),
+		line_starts_(other.line_starts_),
+		history_(other.history_.frozen()) {}
 
 std::string_view TextDocument::line(size_t number) const {
 	if (number < 1 || number > line_starts_.size()) return {};
@@ -74,6 +83,38 @@ bool TextDocument::span_text(const TextSpan &span, std::string &out) const {
 	if (!offset_of(span.line, span.column, offset) || span.length > text_.size() - offset) return false;
 	out = text_.substr(offset, span.length);
 	return true;
+}
+
+bool TextDocument::odd_at(size_t offset) const {
+	if (ends_ == TextLineEnds::AsWritten || offset >= text_.size()) return false;
+	if (text_[offset] == '\n') return offset == 0 || text_[offset - 1] != '\r';
+	return ends_ == TextLineEnds::Cr && text_[offset] == '\r' &&
+			(offset + 1 >= text_.size() || text_[offset + 1] != '\n');
+}
+
+size_t TextDocument::odd_line_end(size_t *count) const {
+	size_t first = std::string::npos, found = 0;
+	if (ends_ != TextLineEnds::AsWritten)
+		for (size_t i = 0; i < text_.size(); ++i)
+			if (odd_at(i)) {
+				if (!found++) first = i;
+			}
+	if (count) *count = found;
+	return first;
+}
+
+std::string TextDocument::written_text() const {
+	if (odd_line_end() == std::string::npos) return text_;
+	std::string out;
+	out.reserve(text_.size() + 16);
+	for (size_t i = 0; i < text_.size(); ++i) {
+		if (odd_at(i)) {
+			out += "\r\n";
+			continue;
+		}
+		out += text_[i];
+	}
+	return out;
 }
 
 std::string TextDocument::locator(size_t line_number, size_t column) {
@@ -180,11 +221,13 @@ bool TextDocument::changes_since(uint64_t load_generation, uint64_t revision, Ch
 
 SerializeResult TextDocument::serialize() const {
 	SerializeResult result;
+	// Every line end written as its game reader ends a line (TextLineEnds).
+	const std::string written = written_text();
 	if (!encoding_) {
-		result.text = text_;
+		result.text = written;
 		return result;
 	}
-	if (!encoding_->encode(text_, result.text, result.issues) && result.issues.empty())
+	if (!encoding_->encode(written, result.text, result.issues) && result.issues.empty())
 		result.issues.push_back({true, 0, std::string(), std::string(),
 				"The text does not go in the form the file is stored in."});
 	return result;
@@ -192,6 +235,26 @@ SerializeResult TextDocument::serialize() const {
 
 std::unique_ptr<DocumentBase> TextDocument::snapshot() const {
 	return std::unique_ptr<DocumentBase>(new TextDocument(*this));
+}
+
+void TextDocument::on_saved() {
+	// Save wrote every odd line end CR LF (serialize): the text takes that as a step of its own, the
+	// last first so each offset before it stays where it was, and the checkpoint is the text written.
+	std::vector<size_t> odd;
+	for (size_t i = 0; i < text_.size(); ++i)
+		if (odd_at(i)) odd.push_back(i);
+	if (!odd.empty()) {
+		std::vector<TextReplacement> batch;
+		for (auto it = odd.rbegin(); it != odd.rend(); ++it) {
+			TextReplacement replacement{*it, text_.substr(*it, 1), "\r\n"};
+			replace_at(replacement.offset, replacement.removed.size(), replacement.inserted);
+			batch.push_back(std::move(replacement));
+		}
+		history_.end_edit_group();
+		history_.commit(std::move(batch), std::string());
+	}
+	history_.mark_saved();
+	history_.end_edit_group();
 }
 
 bool TextDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -206,7 +269,12 @@ bool TextDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt,
 	} else {
 		text.assign(decoded.begin(), decoded.end());
 	}
-	if (!adopt) return true;
+	// A save's read-back: the stored form is now what the save wrote (a shader written plain is now
+	// in its form), the text the document's.
+	if (!adopt) {
+		encoding_ = std::move(encoding);
+		return true;
+	}
 	text_ = std::move(text);
 	encoding_ = std::move(encoding);
 	index_lines();

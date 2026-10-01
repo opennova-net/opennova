@@ -43,13 +43,18 @@ void TextHistory::reset() {
 	bytes_ = 0;
 }
 
-size_t TextHistory::bytes_of(const Step &step) {
-	size_t bytes = sizeof(Step);
-	for (const Batch &batch : step.batches) {
-		bytes += sizeof(Batch);
-		for (const TextReplacement &replacement : batch.replacements)
-			bytes += sizeof(TextReplacement) + replacement.removed.size() + replacement.inserted.size();
-	}
+TextHistory TextHistory::frozen() const {
+	TextHistory out(budget_);
+	out.revision_ = revision_;
+	out.saved_revision_ = saved_revision_;
+	out.next_revision_ = next_revision_;
+	return out;
+}
+
+size_t TextHistory::bytes_of(const std::vector<TextReplacement> &batch) {
+	size_t bytes = sizeof(Batch);
+	for (const TextReplacement &replacement : batch)
+		bytes += sizeof(TextReplacement) + replacement.removed.size() + replacement.inserted.size();
 	return bytes;
 }
 
@@ -79,17 +84,18 @@ void TextHistory::commit(std::vector<TextReplacement> batch, const std::string &
 	forget_redo();
 	const uint64_t before = revision_;
 	revision_ = next_revision_++;
+	// The step's bytes grow by the batch's alone: a typing burst folds in linear time.
+	const size_t added = bytes_of(batch);
 	if (fold) {
 		Step &last = steps_.back();
-		bytes_ -= last.bytes;
 		last.batches.push_back({std::move(batch), revision_});
-		last.bytes = bytes_of(last);
-		bytes_ += last.bytes;
+		last.bytes += added;
+		bytes_ += added;
 	} else {
 		Step step;
 		step.before_revision = before;
 		step.batches.push_back({std::move(batch), revision_});
-		step.bytes = bytes_of(step);
+		step.bytes = sizeof(Step) + added;
 		bytes_ += step.bytes;
 		steps_.push_back(std::move(step));
 		++cursor_;

@@ -40,6 +40,10 @@ public:
 	explicit TextHistory(HistoryBudget budget = {}) : budget_(budget) {}
 
 	void reset();
+	// The history's state with none of its steps (a snapshot's, S13 D9): its revision, its saved
+	// revision and its budget; it has nothing to undo or redo, and changes_since answers its own
+	// revision alone.
+	TextHistory frozen() const;
 	// A batch the document did (its replacements in the order it did them) recorded, the redo
 	// branch discarded; it folds into the last step while the group `key` is open ("" is none).
 	void commit(std::vector<TextReplacement> batch, const std::string &key);
@@ -78,7 +82,9 @@ private:
 	bool folds(const std::string &key) const;
 	void forget_redo();
 	void trim();
-	static size_t bytes_of(const Step &step);
+	// What a batch adds to its step's bytes: its own object, and each replacement's object and two
+	// texts (a step's bytes are its own object's and its batches').
+	static size_t bytes_of(const std::vector<TextReplacement> &batch);
 	// One batch done forward, or undone, through `apply`.
 	static void forward(const Batch &batch, const Apply &apply);
 	static void backward(const Batch &batch, const Apply &apply);

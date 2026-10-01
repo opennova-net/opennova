@@ -40,12 +40,26 @@ struct TextReference {
 	std::string fallback;
 	std::string scope;
 	TextSpan span;
+	// Whether Rename everywhere rewrites it (GraphEdge::rewritable): false for a use whose lookup the
+	// graph does not model as the game makes it (a script's text key).
+	bool rewritable = true;
 };
 
+// How a type's game reader ends a line, which is how Save writes a line's end (ADR 0046 S13 D9).
+// AsWritten: the file is written as its text holds it. CrLf: the reader ends a line at CR LF alone
+// (a credits file's ConfigFile reader), so an LF alone, which the editor's lines end at, is written
+// CR LF. Cr: the reader ends a line at a CR and reads an LF as a blank (a script's reader [orig:
+// Script_Compile @ 0x4F32E0..0x4F3321, its comment run to the next CR @ 0x4F54BA..0x4F54D9]), so
+// an LF alone and a CR alone are each written CR LF. Either way, the editor's lines and the game's
+// are then one.
+enum class TextLineEnds { AsWritten, CrLf, Cr };
+
 // How a text type's file is stored when the file is not its text (a credits file's CBIN form, a
-// music script's bytecode): made by the type's decode as it reads the file, it writes a text back in
-// that form (serialize), keeping what the form holds beside the text (the cipher's key, the string
-// table's order), so the text as it was read writes the bytes it was read from.
+// music script's bytecode, a shader's SCR form): made by the type's decode as it reads the file, it
+// writes a text back in that form (serialize), keeping what the form holds beside the text (the
+// cipher's key, the string table's order), so the text as it was read writes the bytes it was read
+// from; and it carries what its type says of the stored file (a shader stored plain, which its
+// loader rejects). A save's read-back makes it again from what the save wrote.
 class TextEncoding {
 public:
 	virtual ~TextEncoding() = default;
@@ -74,10 +88,13 @@ using TextDecode = bool (*)(const std::vector<uint8_t> &stored, std::string &tex
 // (coalesced batches). changes_since answers the spans that changed (TextChanges). Its places are
 // "line:column" (locator), what a finding, a graph edge's span, a Go to and a Problems row name.
 // Its type (the registry's row by its kind: documents/text_types.h) reads and validates it; the
-// document itself names no format.
+// document itself names no format. A type whose game reader ends its lines otherwise than at an LF
+// (TextLineEnds) has every line written CR LF by Save, the document taking that as a step of its
+// text, so it holds the file it wrote (Undo gives the old line ends back, unsaved). A snapshot copies
+// the text alone: its history's state, none of its steps.
 class TextDocument : public DocumentBase {
 public:
-	explicit TextDocument(TextDecode decode = nullptr);
+	explicit TextDocument(TextDecode decode = nullptr, TextLineEnds ends = TextLineEnds::AsWritten);
 
 	// --- the text ---------------------------------------------------------------------------------
 	const std::string &text() const { return text_; }
@@ -93,6 +110,13 @@ public:
 	TextSpan span_at(size_t offset, size_t length) const;
 	// The characters a span covers; false for one that runs outside the text.
 	bool span_text(const TextSpan &span, std::string &out) const;
+	// The first line end its game reader reads otherwise than its lines say (TextLineEnds: an LF
+	// alone; for Cr a CR alone too), which Save writes CR LF: its offset, and how many there are;
+	// npos and 0 for none (always for AsWritten).
+	size_t odd_line_end(size_t *count = nullptr) const;
+	TextLineEnds line_ends() const { return ends_; }
+	// The stored form's encoding its type's decode made (null for a file that is its text).
+	const TextEncoding *encoding() const { return encoding_.get(); }
 
 	// A place's locator ("12:5") and back (false for anything else).
 	static std::string locator(size_t line, size_t column);
@@ -118,21 +142,28 @@ public:
 	TextDocument *as_text() override { return this; }
 
 protected:
-	TextDocument(const TextDocument &other) = default;
+	// A snapshot's copy: the text, its line index and its encoding, and its history frozen
+	// (TextHistory::frozen): the steps are never copied.
+	TextDocument(const TextDocument &other);
 
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
 	void undo_step() override;
 	void redo_step() override;
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
 			std::vector<SourceIssue> &issues, Diagnostic &error) override;
-	void on_saved() override { history_.mark_saved(); history_.end_edit_group(); }
+	void on_saved() override;
 
 private:
 	// `count` characters at `offset` replaced by `with`, the line starts following.
 	void replace_at(size_t offset, size_t count, const std::string &with);
 	void index_lines();
+	// Whether the character at `offset` is a line end its reader reads otherwise (odd_line_end).
+	bool odd_at(size_t offset) const;
+	// The text with every odd line end written CR LF.
+	std::string written_text() const;
 
 	TextDecode decode_ = nullptr;
+	TextLineEnds ends_ = TextLineEnds::AsWritten;
 	std::shared_ptr<const TextEncoding> encoding_;
 	std::string text_;
 	std::vector<size_t> line_starts_{0};

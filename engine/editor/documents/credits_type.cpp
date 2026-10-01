@@ -1,5 +1,6 @@
 #include "credits_type.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -8,6 +9,8 @@
 #include <string>
 #include <utility>
 
+#include <base/io/strutil.h>
+#include <editor/documents/text_types.h>
 #include <editor/model/text_document.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/cbin.h>
@@ -22,6 +25,7 @@ using cbin::BinaryConfig;
 constexpr FindingCodeEntry<CreditsFinding> kFindingEntries[] = {
 	{ CreditsFinding::InvalidInput, { "credits.invalid_input", FindingFix::None, nullptr, true } },
 	{ CreditsFinding::Unserializable, { "credits.unserializable", FindingFix::None, nullptr, true } },
+	{ CreditsFinding::LineEnding, { "credits.line_ending", FindingFix::Rewrite, "with every line ending CR LF" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CreditsFinding::kCount),
 		"every CreditsFinding has exactly one row");
@@ -129,6 +133,37 @@ bool render(const BinaryConfig &config, std::string &text, std::string &why) {
 	return true;
 }
 
+bool blank(const std::string &text) {
+	return text.find_first_not_of(" \t") == std::string::npos;
+}
+
+// What the reader reads of an entry line (in a section): its name up to the first ';', CR, LF or
+// '=', which must be the '='; its value up to the first ';', CR or LF; its values the runs between
+// ',' and ' ' [orig: ConfigFile_ParseText @ 0x7608a0; runtime/menu/config_text.cpp]. "" when it
+// reads the line whole, else why not.
+std::string entry_unread(const std::string &line) {
+	const size_t key_end = line.find_first_of(";\r\n=");
+	if (key_end == std::string::npos)
+		return "holds no '=', so the reader reads no entry of it";
+	if (line[key_end] == ';')
+		return key_end == line.find_first_not_of(" \t") ? "is a comment (';'), which the reader reads none of"
+		                                                : "holds a ';' before its '=', so the reader reads no entry of it";
+	if (line[key_end] != '=')
+		return std::string("holds ") + (line[key_end] == '\r' ? "a CR" : "an LF") +
+		       " alone before its '=', so the reader reads no entry of it (it ends a line at CR LF)";
+	if (blank(line.substr(0, key_end))) return "names no entry before its '='";
+	const size_t value_end = std::min(line.size(), line.find_first_of(";\r\n", key_end + 1));
+	const std::string value = line.substr(key_end + 1, value_end - key_end - 1);
+	if (value.find_first_not_of(" ,\t") == std::string::npos) return "holds no value after its '='";
+	if (value_end < line.size()) {
+		if (line[value_end] == ';')
+			return "goes on after its values with a ';' comment, which the reader does not read";
+		return std::string("holds ") + (line[value_end] == '\r' ? "a CR" : "an LF") +
+		       " alone, where the reader stops reading the line (it ends a line at CR LF)";
+	}
+	return std::string();
+}
+
 // The 1-based index of a string in the table: its first place, else a place at the end.
 uint32_t string_index(std::vector<std::string> &strings, const std::string &text) {
 	for (size_t i = 0; i < strings.size(); ++i)
@@ -146,6 +181,8 @@ public:
 
 	bool encode(const std::string &text, std::string &stored,
 			std::vector<SourceIssue> &issues) const override {
+		// What the reader does not read whole is no part of the form: refused, never written short.
+		if (!credits_text_readable(text, issues)) return false;
 		BinaryConfig config;
 		config.strings = strings_;
 		config.xor_key = key_;
@@ -155,13 +192,6 @@ public:
 			BinaryConfig::Label label;
 			label.name = string_index(config.strings, section.label);
 			for (const menu::ConfigEntry &read : section.entries) {
-				if (read.values.size() > 2) {
-					issues.push_back({true, 0, std::string(), std::string(),
-							"The CBIN form holds one or two values an entry: \"" + read.key +
-									"\" in [" + section.label + "] holds " +
-									std::to_string(read.values.size()) + "."});
-					return false;
-				}
 				BinaryConfig::Entry entry;
 				entry.name = string_index(config.strings, read.key);
 				for (const menu::ConfigValue &value : read.values) {
@@ -228,21 +258,92 @@ bool decode_credits(const std::vector<uint8_t> &stored, std::string &text,
 
 } // namespace
 
+bool credits_text_readable(const std::string &text, std::vector<SourceIssue> &issues) {
+	const auto refuse = [&issues](size_t line, const std::string &why) {
+		issues.push_back({true, line, std::string(), std::string(),
+				"Line " + std::to_string(line) + " " + why +
+						": the CBIN form keeps what the game's reader reads, so Save is refused until the "
+						"line reads whole."});
+		return false;
+	};
+	bool in_section = false;
+	size_t number = 0;
+	// The lines as the reader splits them, at CR LF.
+	for (size_t start = 0; start <= text.size();) {
+		const size_t found = text.find("\r\n", start);
+		const size_t end = found == std::string::npos ? text.size() : found;
+		const std::string line = text.substr(start, end - start);
+		++number;
+		start = found == std::string::npos ? text.size() + 1 : found + 2;
+		const size_t nul = line.find('\0');
+		if (nul != std::string::npos && !blank(line.substr(nul + 1)))
+			return refuse(number, "holds a NUL, after which the reader reads nothing of it");
+		const std::string read = line.substr(0, nul);
+		if (blank(read)) continue;
+		if (read[0] == '[') {
+			size_t label = 1;
+			while (label < read.size() && ((read[label] >= 'A' && read[label] <= 'Z') ||
+			                               (read[label] >= '0' && read[label] <= '9') || read[label] == '_'))
+				++label;
+			if (label == 1)
+				return refuse(number, "opens no section: the reader takes a label in capitals, digits and '_', "
+				                      "and reads none of the entries after it");
+			const size_t rest = label < read.size() && read[label] == ']' ? label + 1 : label;
+			if (!blank(read.substr(rest)))
+				return refuse(number, "holds more than its section's label, which the reader does not read");
+			in_section = true;
+			continue;
+		}
+		if (strutil::trim_view(read).front() == '[')
+			return refuse(number, "starts its section after a blank: the reader looks for '[' in a line's "
+			                      "first column, and reads none of it");
+		if (!in_section) return refuse(number, "is outside any section, where the reader reads nothing");
+		const std::string unread = entry_unread(read);
+		if (!unread.empty()) return refuse(number, unread);
+		// Its values, as the reader splits them: one or two go in the form.
+		const std::vector<menu::ConfigSection> parsed =
+				menu::parse_config_text(reinterpret_cast<const uint8_t *>(("[X]\r\n" + read).data()), read.size() + 5);
+		const size_t values = parsed.empty() || parsed[0].entries.empty() ? 0 : parsed[0].entries[0].values.size();
+		if (values > 2)
+			return refuse(number, "holds " + std::to_string(values) +
+			                              " values, where an entry of the CBIN form holds one or two");
+	}
+	return true;
+}
+
 std::unique_ptr<DocumentBase> make_credits_document() {
-	return std::make_unique<TextDocument>(decode_credits);
+	return std::make_unique<TextDocument>(decode_credits, TextLineEnds::CrLf);
 }
 
 std::vector<Diagnostic> validate_credits_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	if (!text_of(document)) return findings;
+	const TextDocument *text = text_of(document);
+	if (!text) return findings;
 	for (const SourceIssue &issue : document.issues())
 		findings.push_back(make_finding(CreditsFinding::InvalidInput, DiagnosticSeverity::Warning,
 				issue.message, document.path()));
 	if (document.blocked()) return findings;
+	// An LF alone, which the reader does not end a line at: Save writes it CR LF.
+	size_t odd_count = 0;
+	const size_t odd = text->odd_line_end(&odd_count);
+	if (odd != std::string::npos)
+		findings.push_back(text_finding(finding_code(CreditsFinding::LineEnding), DiagnosticSeverity::Warning,
+				"This line ends with an LF alone" +
+						(odd_count > 1 ? " (" + std::to_string(odd_count) + " line ends in the file are so)"
+						               : std::string()) +
+						": the game's ConfigFile reader ends a line at CR LF, so it reads the next line as "
+						"part of this one. Save ends every line CR LF.",
+				*text, odd));
 	const SerializeResult written = document.serialize();
-	for (const SourceIssue &issue : written.issues)
-		findings.push_back(make_finding(CreditsFinding::Unserializable, DiagnosticSeverity::Error,
-				issue.message, document.path()));
+	for (const SourceIssue &issue : written.issues) {
+		size_t offset = 0;
+		if (issue.line && text->offset_of(issue.line, 1, offset))
+			findings.push_back(text_finding(finding_code(CreditsFinding::Unserializable), DiagnosticSeverity::Error,
+					issue.message, *text, offset));
+		else
+			findings.push_back(make_finding(CreditsFinding::Unserializable, DiagnosticSeverity::Error,
+					issue.message, document.path()));
+	}
 	return findings;
 }
 

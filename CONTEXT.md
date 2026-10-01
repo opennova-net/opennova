@@ -783,9 +783,11 @@ held as the game reads it, in its code page (one byte a character, which is what
 as lines, its places `line:column`. Its one change is a span replaced. Its type reads and writes
 the form its file is stored in (a music script's bytecode, a credits file's CBIN form and a shader's
 SCR form are held as their text and written back in the form, byte for byte while the text is left
-as it is), checks it through the game's own reader where the editor has one (the WAC and MUS
-compilers) and names the references its text makes (a script's operands), each at its span. A file
-its text cannot carry as it is (a music script's message handler) opens read only.
+as it is), checks it through the game's own reader where the editor has a port of it (the WAC
+compiler, the ConfigFile text reader) or else the toolchain that writes the form (the MUS compiler,
+which is ours, not the game's), writes each line end as its game reader ends a line (CR LF for a
+script and a credits text), and names the references its text makes (a script's operands), each at
+its span. A file its text cannot carry as it is (a music script's message handler) opens read only.
 _Avoid_: source (an import's input), code (the bytecode a compiler makes), script (one kind of text
 document)
 

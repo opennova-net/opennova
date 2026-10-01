@@ -180,6 +180,9 @@ public:
 	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
 	// fallback's; null for none.
 	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;
+	// The edges of `kind` with a fallback (GraphEdge::fallback) that name `name` as their value or
+	// their fallback, in the files' order: what a rename to `name` checks (a use it would take over).
+	std::vector<const GraphEdge *> edges_naming(ReferenceKind kind, const std::string &name) const;
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
 	// compares names, that `scope` matches (scope_matches: a string id in its table and

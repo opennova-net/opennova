@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <set>
 #include <string>
@@ -51,12 +52,90 @@ bool whole(const JsonValue &json, uint64_t &out) {
 	return true;
 }
 
-bool members_known(const JsonValue &object, std::initializer_list<const char *> known,
-		const std::string &place, std::string &error) {
+using F = RecordBatchForm;
+constexpr uint8_t kEdits = batch_form_bit(F::Edits), kFields = batch_form_bit(F::Fields),
+		kSpans = batch_form_bit(F::Spans);
+
+constexpr BatchOp kOps[] = {
+	{ "set", F::Edits,
+			"A field of the record id set to value; with coalesce it folds into the set before it on its "
+			"field (typing)." },
+	{ "clear", F::Edits, "An optional field of the record id left out of the file (its value kept)." },
+	{ "write", F::Edits, "An optional field of the record id the file leaves out written again." },
+	{ "add", F::Edits,
+			"A record of kind added into parent (a record; a row's identity: straight into that row; none: "
+			"a new row) at position, the end by default; with field, its value set in the same step; as "
+			"labels it for later edits." },
+	{ "duplicate", F::Edits,
+			"The record id copied, right after it or at position; as labels the copy." },
+	{ "remove", F::Edits, "The record id removed." },
+	{ "move", F::Edits, "The record id moved into parent at position." },
+	{ "set_file_value", F::Edits, "A file-wide field set to value (position: where in a file-wide list)." },
+	{ "replace_list", F::Edits,
+			"The records of list the record id holds replaced by records, each {field: value}, added at "
+			"the end in order." },
+	{ "apply", F::Spans,
+			"A text document's span replaced (payload text.span): the length characters from line and "
+			"column replaced by text, against the text as the edits before it left it." },
+};
+
+constexpr BatchMember kMembers[] = {
+	{ "op", BatchJson::String, kEdits | kSpans, -1, "", "What the edit does: an op of its form." },
+	{ "id", BatchJson::Id, kEdits | kFields, -1, "",
+			"The record: its identity, or the label an earlier add or duplicate of the batch gave." },
+	{ "parent", BatchJson::Id, kEdits, -1, "",
+			"An add's owner (a row's identity: straight into that row; none: a new row), a move's "
+			"destination." },
+	{ "kind", BatchJson::String, kEdits, -1, "", "An add's record kind token (window, action, sound, items.item, ...)." },
+	{ "field", BatchJson::String, kEdits | kFields, -1, "",
+			"The field a set, clear, write, set_file_value or add names; revert_to_saved's field." },
+	{ "value", BatchJson::Value, kEdits, -1, "",
+			"A set's, a set_file_value's and an add's (with its field) value: a number, a string or a bool." },
+	{ "position", BatchJson::Integer, kEdits, 0, "",
+			"An index in the owner's collection (add, duplicate, move, set_file_value)." },
+	{ "as", BatchJson::String, kEdits, -1, "", "The label an add or a duplicate gives what it makes." },
+	{ "coalesce", BatchJson::Boolean, kEdits | kSpans, -1, "",
+			"A set, or a span, that folds into the one before (typing)." },
+	{ "gesture", BatchJson::Integer, kEdits | kSpans, 0, "",
+			"Edits that fold into one undo step until end_edit (a drag)." },
+	{ "list", BatchJson::String, kEdits, -1, "", "A replace_list's collection kind token." },
+	{ "records", BatchJson::Records, kEdits, -1, "", "A replace_list's records, each {field: value}." },
+	{ "payload", BatchJson::String, kSpans, -1, kTextSpanToken,
+			"An apply's change: text.span, a span of a text document's text replaced." },
+	{ "line", BatchJson::Integer, kSpans, 1, "", "An apply's span: its line, from 1." },
+	{ "column", BatchJson::Integer, kSpans, 1, "",
+			"An apply's span: its column, from 1 (a character a byte of the game's code page)." },
+	{ "length", BatchJson::Integer, kSpans, 0, "",
+			"An apply's span: how many characters it replaces (a line end counts its own), 0 by default." },
+	{ "text", BatchJson::String, kSpans, -1, "",
+			"An apply's span: what takes its place, UTF-8 stored in the game's code page (Windows-1252), "
+			"\"\" by default." },
+};
+
+// A row's op by its token, of any form; null for none.
+const BatchOp *op_row(const std::string &token) {
+	for (const BatchOp &row : kOps)
+		if (token == row.token) return &row;
+	return nullptr;
+}
+
+// A form's ops as a sentence lists them: "set, clear, ... or replace_list".
+std::string ops_of(RecordBatchForm form) {
+	std::vector<const char *> tokens;
+	for (const BatchOp &row : kOps)
+		if (row.form == form) tokens.push_back(row.token);
+	std::string out;
+	for (size_t i = 0; i < tokens.size(); ++i)
+		out += std::string(i == 0 ? "" : i + 1 == tokens.size() ? " or " : ", ") + tokens[i];
+	return out;
+}
+
+// Every member of an edit one its form reads (the table's), else refused as unknown.
+bool members_known(const JsonValue &object, RecordBatchForm form, const std::string &place, std::string &error) {
 	for (const io::JsonMember &member : object.object) {
 		bool found = false;
-		for (const char *key : known)
-			found = found || member.key == key;
+		for (const BatchMember &row : kMembers)
+			found = found || (member.key == row.name && (row.forms & batch_form_bit(form)));
 		if (!found) {
 			error = "Unknown " + place + " member \"" + member.key + "\".";
 			return false;
@@ -105,9 +184,6 @@ NodeId owner_identity(const NodeAddress &owner) {
 NodeId identity_of(const NodeAddress &address) {
 	return address.child ? address.child : address.row;
 }
-
-const char *const kOps =
-		"set, clear, write, add, duplicate, remove, move, set_file_value or replace_list";
 
 // {op: replace_list, id, list, records}: the records of `list` that `id` holds removed, then each
 // of `records` added at the end with its fields set in the order written.
@@ -176,31 +252,33 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		reader.error = "\"" + reader.place + "\" must be an object.";
 		return false;
 	}
-	if (!members_known(json,
-				{ "op", "id", "parent", "kind", "field", "value", "position", "as", "coalesce",
-						"gesture", "list", "records", "payload" },
-				reader.place, reader.error))
-		return false;
-	const JsonValue *op_json = json.get("op");
-	if (!op_json || !op_json->is_string())
-		return reader.refuse(std::string("\"op\" names what the edit does: ") + kOps + ".");
-	const std::string op = op_json->string;
-	const bool replaces_list = op == "replace_list";
-	Edit edit;
-	if (!replaces_list && !edit_operation_from_token(op, edit.operation))
-		return reader.refuse("unknown edit op \"" + op + "\" (" + kOps + ").");
-	// Operations the core knows that a batch does not send: an apply's change is made in C++ by its
-	// document type (Edit::payload, S13 D6), which JSON cannot carry; a paste pastes the clipboard
+	// Operations and members the core knows that a batch does not send over records: an apply's
+	// change, and any payload, is made in C++ by its document type (Edit::payload, S13 D6), which
+	// JSON cannot carry (a text document's span is the Spans form's); a paste pastes the clipboard
 	// (the paste request).
-	if (!replaces_list && edit.operation == EditOperation::Apply)
+	const std::string ops = ops_of(RecordBatchForm::Edits);
+	const JsonValue *op_json = json.get("op");
+	const std::string op = op_json && op_json->is_string() ? op_json->string : std::string();
+	const BatchOp *row = op_row(op);
+	if (row && row->form == RecordBatchForm::Spans)
 		return reader.refuse("an apply edit carries a change its document type makes in C++: a "
 							 "batch cannot send one.");
-	if (!replaces_list && edit.operation == EditOperation::Paste)
-		return reader.refuse(std::string("a batch takes no \"paste\" edit (") + kOps +
-				"): the paste request pastes the clipboard.");
 	if (json.get("payload"))
 		return reader.refuse("\"payload\" names a change a document type makes in C++; the "
 							 "editor's JSON cannot carry one.");
+	if (!members_known(json, RecordBatchForm::Edits, reader.place, reader.error))
+		return false;
+	if (!op_json || !op_json->is_string())
+		return reader.refuse("\"op\" names what the edit does: " + ops + ".");
+	if (op == edit_operation_token(EditOperation::Paste))
+		return reader.refuse("a batch takes no \"paste\" edit (" + ops +
+				"): the paste request pastes the clipboard.");
+	if (!row || row->form != RecordBatchForm::Edits)
+		return reader.refuse("unknown edit op \"" + op + "\" (" + ops + ").");
+	const bool replaces_list = op == "replace_list";
+	Edit edit;
+	if (!replaces_list && !edit_operation_from_token(op, edit.operation))
+		return reader.refuse("unknown edit op \"" + op + "\" (" + ops + ").");
 	const bool adds = !replaces_list && edit.operation == EditOperation::Add;
 	const bool file_wide = !replaces_list && edit.operation == EditOperation::SetFileValue;
 	const bool makes = adds || (!replaces_list && edit.operation == EditOperation::Duplicate);
@@ -317,11 +395,11 @@ bool read_span(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		return false;
 	}
 	const JsonValue *op = json.get("op");
-	if (!op || !op->is_string() || op->string != "apply")
-		return reader.refuse("a text document takes \"apply\" edits alone: a span of its text replaced "
-							 "(payload \"text.span\").");
-	if (!members_known(json, { "op", "payload", "line", "column", "length", "text", "coalesce", "gesture" },
-				reader.place, reader.error))
+	const BatchOp *row = op && op->is_string() ? op_row(op->string) : nullptr;
+	if (!row || row->form != RecordBatchForm::Spans)
+		return reader.refuse("a text document takes \"" + ops_of(RecordBatchForm::Spans) +
+				"\" edits alone: a span of its text replaced (payload \"text.span\").");
+	if (!members_known(json, RecordBatchForm::Spans, reader.place, reader.error))
 		return false;
 	const JsonValue *payload = json.get("payload");
 	if (!payload || !payload->is_string() || payload->string != kTextSpanToken)
@@ -367,7 +445,7 @@ bool read_field(const JsonValue &json, Reader &reader, RecordBatch &out) {
 		reader.error = "\"" + reader.place + "\" must be an object.";
 		return false;
 	}
-	if (!members_known(json, { "id", "field" }, reader.place, reader.error))
+	if (!members_known(json, RecordBatchForm::Fields, reader.place, reader.error))
 		return false;
 	const JsonValue *id = json.get("id");
 	const JsonValue *field = json.get("field");
@@ -386,6 +464,54 @@ bool read_field(const JsonValue &json, Reader &reader, RecordBatch &out) {
 }
 
 } // namespace
+
+BatchRows<BatchOp> batch_ops() {
+	return { kOps, std::size(kOps) };
+}
+
+BatchRows<BatchMember> batch_members() {
+	return { kMembers, std::size(kMembers) };
+}
+
+const char *batch_form_token(RecordBatchForm form) {
+	switch (form) {
+	case RecordBatchForm::Edits: return "edits";
+	case RecordBatchForm::Fields: return "fields";
+	case RecordBatchForm::Spans: return "spans";
+	case RecordBatchForm::kCount: break;
+	}
+	return "";
+}
+
+const char *batch_form_doc(RecordBatchForm form) {
+	switch (form) {
+	case RecordBatchForm::Edits:
+		return "edit_record over a record document: changes of its records, rows and file-wide values, "
+		       "a record by its identity or by the label (as) an earlier add or duplicate of the batch "
+		       "gave, an add's kind by its token.";
+	case RecordBatchForm::Fields:
+		return "revert_to_saved: the fields whose saved value comes back, each {id, field}.";
+	case RecordBatchForm::Spans:
+		return "edit_record over a text document (a script, a music script, credits, a shader, a "
+		       "configuration, a text: one open at the path, or one its path's file opens as): its "
+		       "spans replaced, each against the text as the ones before left it (editor_query document "
+		       "pages its lines).";
+	case RecordBatchForm::kCount: break;
+	}
+	return "";
+}
+
+const char *batch_json_token(BatchJson json) {
+	switch (json) {
+	case BatchJson::String: return "string";
+	case BatchJson::Integer: return "integer";
+	case BatchJson::Id: return "id";
+	case BatchJson::Boolean: return "boolean";
+	case BatchJson::Value: return "value";
+	case BatchJson::Records: return "records";
+	}
+	return "string";
+}
 
 bool record_batch_from_json(const io::JsonValue &edits, const Document *names, RecordBatchForm form,
 		RecordBatch &out, std::string &error, bool resolve) {

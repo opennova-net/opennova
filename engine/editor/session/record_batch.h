@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -27,7 +29,58 @@ struct RecordBatch {
 // What a batch's edits are: changes of records (edit_record), the fields whose saved value comes
 // back (revert_to_saved: each edit {id, field}), or a text document's spans replaced (edit_record
 // over one, S13 D9: each edit {op: apply, payload: "text.span", line, column, length, text}).
-enum class RecordBatchForm { Edits, Fields, Spans };
+enum class RecordBatchForm { Edits, Fields, Spans, kCount };
+
+inline constexpr size_t kRecordBatchFormCount = static_cast<size_t>(RecordBatchForm::kCount);
+
+// The batch form's vocabulary, one table (ADR 0046 S13 A5, S13 D9): every op an edit names, the
+// form it is read in and what it does; every member an edit takes, its JSON type, the forms that
+// read it and what it carries. The readers (record_batch_from_json) take their ops and members from
+// these rows, anything else refused as unknown, and editor_query catalog writes them as its `batch`
+// section, from which the editor MCP makes its edit schema (editor_mcp_catalog.gd).
+enum class BatchJson : uint8_t {
+	String,  // a string
+	Integer, // a whole number, BatchMember::minimum or more
+	Id,      // a record: its identity (a whole number) or a label an earlier edit gave (a string)
+	Boolean, // true or false
+	Value,   // a field's value: a number, a string or a bool
+	Records, // a list of records, each {field: value}
+};
+
+struct BatchOp {
+	const char *token;
+	RecordBatchForm form;
+	const char *doc;
+};
+
+struct BatchMember {
+	const char *name;
+	BatchJson json;
+	uint8_t forms;     // the forms that read it, by batch_form_bit
+	int64_t minimum;   // an Integer's least value (-1 for none)
+	const char *only;  // the one string it takes ("" for any): an apply's payload token
+	const char *doc;
+};
+
+constexpr uint8_t batch_form_bit(RecordBatchForm form) {
+	return static_cast<uint8_t>(1u << static_cast<unsigned>(form));
+}
+
+template <typename Row> struct BatchRows {
+	const Row *rows = nullptr;
+	size_t count = 0;
+	const Row *begin() const { return rows; }
+	const Row *end() const { return rows + count; }
+};
+
+// The ops, in the order the forms list them; the members, in the order an edit's schema lists them.
+BatchRows<BatchOp> batch_ops();
+BatchRows<BatchMember> batch_members();
+// A form's token ("edits", "fields", "spans") and what an edit of it is; a JSON type's word
+// ("string", "integer", "id", "boolean", "value", "records").
+const char *batch_form_token(RecordBatchForm form);
+const char *batch_form_doc(RecordBatchForm form);
+const char *batch_json_token(BatchJson json);
 
 // A batch from its wire form, `edits` a list of one edit or more, each refused by its place
 // ("edits[1]: ..."). Edits: {op, id, parent, kind, field, value, position, as, coalesce, gesture,

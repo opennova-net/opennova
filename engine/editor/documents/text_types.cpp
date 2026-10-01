@@ -20,10 +20,12 @@ bool scr_header(const std::vector<uint8_t> &stored) {
 }
 
 // The text written back in the shader loader's form, its NUL after it where the file had one (a new
-// file's as every shipped shader has it).
+// file's as every shipped shader has it). `plain`: the file as stored is not in the form (the loader
+// rejects it), a fact of the stored file, not a line of it that Save drops.
 class ShaderEncoding : public TextEncoding {
 public:
-	explicit ShaderEncoding(bool nul) : nul_(nul) {}
+	ShaderEncoding(bool nul, bool plain) : nul_(nul), plain_(plain) {}
+	bool plain() const { return plain_; }
 	bool encode(const std::string &text, std::string &stored,
 			std::vector<SourceIssue> &issues) const override {
 		(void)issues;
@@ -37,19 +39,18 @@ public:
 
 private:
 	bool nul_;
+	bool plain_;
 };
 
 bool decode_shader(const std::vector<uint8_t> &stored, std::string &text,
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
+	(void)issues;
 	if (!scr_header(stored) || stored[3] > 2) {
 		// Not in the form: the loader rejects it; the document holds it as its text, and Save
-		// writes the form.
+		// writes the form (the fact the encoding's: validate_file reads it).
 		text.assign(stored.begin(), stored.end());
-		encoding = std::make_shared<ShaderEncoding>(true);
-		issues.push_back({false, 0, std::string(), std::string(),
-				"The game's shader loader takes a shader in the SCR form alone and rejects this "
-				"one, a plain text: Save writes it in that form."});
+		encoding = std::make_shared<ShaderEncoding>(true, true);
 		return true;
 	}
 	if (stored[3] != kShaderScrVersion) {
@@ -63,7 +64,7 @@ bool decode_shader(const std::vector<uint8_t> &stored, std::string &text,
 	const bool nul = !payload.empty() && payload.back() == '\0';
 	if (nul) payload.pop_back();
 	text = std::move(payload);
-	encoding = std::make_shared<ShaderEncoding>(nul);
+	encoding = std::make_shared<ShaderEncoding>(nul, false);
 	return true;
 }
 
@@ -114,10 +115,15 @@ std::unique_ptr<DocumentBase> make_shader_document() {
 
 std::vector<Diagnostic> validate_shader_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
-	if (!text_of(document)) return findings;
-	for (const SourceIssue &issue : document.issues())
+	const TextDocument *text = text_of(document);
+	if (!text) return findings;
+	// The file as stored (a save's read-back makes the encoding again from what it wrote).
+	const auto *encoding = dynamic_cast<const ShaderEncoding *>(text->encoding());
+	if (encoding && encoding->plain())
 		findings.push_back(make_finding(ShaderFinding::Form, DiagnosticSeverity::Error,
-				issue.message, document.path()));
+				"The game's shader loader takes a shader in the SCR form alone and rejects this one, a "
+				"plain text: Save writes it in that form.",
+				document.path()));
 	return findings;
 }
 

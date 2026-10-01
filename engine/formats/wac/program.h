@@ -43,12 +43,16 @@ struct Diagnostic {
 // or not, at the name's place in its source: tooling metadata the VM and the listing never read
 // (the editor's references read it). `name` is the token past its prefix as the tokenizer holds
 // it (upper-cased); `offset` and `length` are the same bytes in the source, as written.
+// `declaration`: made while a declared name (a VAR's, a CHEAT's, an IF's) was checked as new,
+// which resolves the name through the same legs [orig: Script_Compile @ 0x4F3812..0x4F3964,
+// @ 0x4F36C0..0x4F380D]: a name the script gives, never one it looks up.
 struct CatalogLookup {
     ParamType kind = ParamType::Null; // Fx, SoundSet, Ammo or TextToken
     std::string name;
     uint32_t source = 0; // Program::source_names index
     size_t offset = 0, length = 0;
     bool found = false;
+    bool declaration = false;
 };
 
 struct InstructionSource {
