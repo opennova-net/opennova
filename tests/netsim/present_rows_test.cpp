@@ -178,6 +178,57 @@ bool test_full_spawn_parachute_state_reaches_player_and_infantry_rows() {
 	return true;
 }
 
+// The 0x0C record rebuilds its slot from scratch and its Flags word IS
+// entity+36: a player still on the deploy screen (or spectating) streams bit0
+// and the visible-entity collector skips it until a record clears the bit; a
+// body-less record empties the slot.
+// [orig: NapiNPClientMsg_0x00C memsets @0x42E7E9/@0x42E7F6, has-body byte
+//  @0x42E803, Flags = minimapFlags @0x42E917, animSlot @0x42E9A6; the
+//  collector's bit0 skip Terrain_CollectVisibleEntitiesForTerrain @0x5C8CF4]
+bool test_organic_spawn_lands_the_flags_word() {
+	opennova::mission::MissionKernel kernel;
+	im::ClientRuntime runtime("OrganicFlags");
+	opennova::replication::ClientReplicaPipeline pipeline;
+	nw::OrganicSpawnBatch batch;
+	nw::OrganicSpawnRecord undeployed = organic_record(0x0010u, 0x1410u);
+	undeployed.minimap_flags = 0x0101u;
+	undeployed.anim_slot = 4;
+	nw::OrganicSpawnRecord deployed = organic_record(0x0011u, 0x1411u);
+	deployed.minimap_flags = 0x0100u;
+	batch.records = {undeployed, deployed};
+	batch.entity_count = 2;
+	// A stale lifetime on the first slot: the record must not inherit it.
+	pipeline.state().upsert(0x0010u).net_has_compact = true;
+	pipeline.state().upsert(0x0010u).type_id = 0x1410u;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(batch));
+	runtime.state() = pipeline.state();
+	const auto *row = runtime.state().find(0x0010u);
+	bool ok = expect(row != nullptr && row->state_flags_known && row->state_flags == 0x01 &&
+					row->rm_entity_flags == 0x0101u && row->spawn_anim_slot == 4 &&
+					!row->net_has_compact,
+			"the 0x0C Flags word lands and the slot starts a fresh lifetime");
+	const im::PresentRowsContext context{kernel, &runtime, true};
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::PoolPresentLifecycleMap lifecycle;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(rows.size() == 2 * w::PF_STRIDE &&
+					row_at(rows, 0)[w::PF_HIDDEN] == 1.0f &&
+					row_at(rows, 1)[w::PF_HIDDEN] == 0.0f,
+			"an undeployed player arrives hidden, a deployed one visible") && ok;
+	nw::OrganicSpawnBatch empty;
+	nw::OrganicSpawnRecord cleared;
+	cleared.slot_id = 0x0011u;
+	cleared.has_body = false;
+	empty.records = {cleared};
+	empty.entity_count = 1;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH, nw::encode_organic_spawn_batch(empty));
+	ok = expect(pipeline.state().find(0x0011u) == nullptr &&
+					pipeline.state().find(0x0010u) != nullptr,
+			"a body-less 0x0C record empties its slot") && ok;
+	return ok;
+}
+
 bool test_replica_rows_project_the_decoded_state_and_keep_the_pulses() {
 	opennova::mission::MissionKernel kernel;
 	im::ClientRuntime runtime("PresentRows");
@@ -1119,6 +1170,7 @@ int main() {
 	ok = test_world_rows_carry_the_authoritative_record() && ok;
 	ok = test_full_spawn_parachute_state_reaches_player_and_infantry_rows() && ok;
 	ok = test_replica_rows_project_the_decoded_state_and_keep_the_pulses() && ok;
+	ok = test_organic_spawn_lands_the_flags_word() && ok;
 	ok = test_death_ctrl_register_reaches_present_rows() && ok;
 	ok = test_joiner_vehicle_motion_controls_reach_present_rows() && ok;
 	ok = test_joiner_hull_gun_words_follow_the_turret_child() && ok;

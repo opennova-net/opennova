@@ -97,13 +97,44 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		if (batch.records.empty()) return;
 	}
 	bool changed = false;
+	const auto in_pool_tables = [](uint16_t packed) {
+		const world::EntityHandle h{packed};
+		return packed != wire_handle::kInvalid && h.pool() < world::kEntityPoolCount &&
+				static_cast<std::size_t>(h.slot()) < world::retail_pool_capacity(h.pool());
+	};
 	for (const OrganicSpawnRecord &rec : batch.records) {
-		if (!rec.has_body) continue;
+		// The page stops at the first handle outside the pool tables
+		// [orig: NapiNPClientMsg_0x00C @0x42E7A5..0x42E7CE].
+		if (!in_pool_tables(rec.slot_id)) break;
+		// Every record clears the whole slot before its body byte is read: a
+		// body-less record leaves the slot empty, a body rebuilds it from
+		// scratch, the same type included [orig: the memsets @0x42E7E9 /
+		// @0x42E7F6; the has-body byte @0x42E803 -> LABEL_107].
 		ClientEntityState *existing = state_.find(rec.slot_id);
 		const bool type_changed = existing != nullptr &&
 				existing->type_id != rec.item_type_id;
+		const uint32_t next_spawn_revision = begin_entity_lifetime(rec.slot_id);
+		if (!rec.has_body) {
+			const std::size_t before = state_.entities.size();
+			state_.entities.erase(
+					std::remove_if(state_.entities.begin(), state_.entities.end(),
+							[&rec](const ClientEntityState &row) {
+								return row.handle == rec.slot_id;
+							}),
+					state_.entities.end());
+			if (state_.entities.size() != before) {
+				state_.mark_topology_changed();
+				++state_.world_stream_revision;
+				changed = true;
+			}
+			continue;
+		}
 		ClientEntityState &es = state_.upsert(rec.slot_id);
 		if (type_changed) state_.mark_topology_changed();
+		es = ClientEntityState{};
+		es.handle = rec.slot_id;
+		es.spawn_revision = next_spawn_revision;
+		++state_.world_stream_revision;
 		es.type_id = rec.item_type_id;
 		es.cls = classify(rec.item_type_id);
 		// The Name copy is bounded: at most 15 characters, then the NUL.
@@ -130,6 +161,26 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		es.recoil_pitch = 0;
 		es.team = rec.team;
 		es.team_known = true;
+		// Flags (entity+36) is the record's word, zero-extended: an
+		// undeployed or spectating player arrives hidden (bit0) and a dead
+		// one dead (0x02, the local latch the respawn edge reads)
+		// [orig: Flags = minimapFlags @0x42E917].
+		es.spawn_entity_flags = rec.minimap_flags;
+		es.rm_entity_flags = rec.minimap_flags;
+		es.state_flags = static_cast<uint8_t>(rec.minimap_flags & 0xFFu);
+		es.state_flags_known = true;
+		// The rest of the record's entity fields [orig: aiState @0x42E989,
+		// animSlot @0x42E9A6, playerClass @0x42E9CD, entity+0x154 @0x42EA06,
+		// refNum @0x42EA20, subType @0x42EA35, attachBoneId @0x42EA4A,
+		// parentEntity (+0x16C) @0x42EAB5].
+		es.spawn_ai_state = rec.ai_state;
+		es.spawn_anim_slot = rec.anim_slot;
+		es.spawn_player_class = rec.player_class;
+		es.spawn_byte_154 = rec.player_slot_id;
+		es.spawn_ref_num = rec.alert_level;
+		es.spawn_sub_type = rec.sub_type;
+		es.mount_bone = rec.weapon_type;
+		if (in_pool_tables(rec.parent_handle)) es.carrier_handle = rec.parent_handle;
 		changed = true;
 	}
 	if (changed) state_.mark_changed();
