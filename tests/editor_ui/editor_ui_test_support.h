@@ -422,18 +422,23 @@ using editor_test::NoProcess;
 
 // A viewport's device as the Shell's stands in a test: its picture an invisible button where the
 // Shell's SubViewport image goes (what ImGuiGD draws), at the size the canvas draws it, the origin
-// kept (where a design unit or a marker's pixel is); what its viewport asked of it, in order.
+// kept (where a design unit or a marker's pixel is: the picture's corner the canvas hands it, which
+// is where the canvas's cursor stands) and the canvas's clip; what its viewport asked of it, in order.
 struct DrawnDevice final : ViewportDevice {
 	ImVec2 origin;
 	int width = 0, height = 0;
 	int draws = 0;
+	ViewportPicture last;
 	std::vector<ViewportAction> taken;
-	void draw(int device_width, int device_height) override {
-		origin = ImGui::GetCursorScreenPos();
-		width = device_width;
-		height = device_height;
+	void draw(const ViewportPicture &picture) override {
+		const ImVec2 cursor = ImGui::GetCursorScreenPos();
+		origin = ImVec2(picture.x, picture.y);
+		CHECK(cursor.x == picture.x && cursor.y == picture.y, "the picture where the canvas's cursor stands");
+		width = picture.width;
+		height = picture.height;
+		last = picture;
 		++draws;
-		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(device_width), float(device_height)));
+		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(picture.width), float(picture.height)));
 	}
 	void take(ViewportAction action, const ViewportModel &, const SessionView &, const PreviewClock &,
 			ViewportDeviceReport &) override {

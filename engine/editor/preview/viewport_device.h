@@ -29,20 +29,38 @@ struct ViewportDeviceReport {
 	std::vector<Rect> rects;
 };
 
+// Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas
+// reads the pointer in (the OS window's): the picture's top left corner and its size, and the part of
+// the window the canvas shows it in (a picture zoomed or scrolled past the canvas is clipped to it).
+// A device that draws through the ImGui pass (the SubViewport's texture, as the canvas's current
+// item) reads the size alone; one that places a Godot Control over the canvas (S13 V10's CodeEdit)
+// reads where, and what of it shows.
+struct ViewportPicture {
+	float x = 0.0f;
+	float y = 0.0f;
+	int width = 0;
+	int height = 0;
+	float clip_left = 0.0f;
+	float clip_top = 0.0f;
+	float clip_right = 0.0f;
+	float clip_bottom = 0.0f;
+};
+
 // A device (ADR 0046 S13 V5): what draws one viewport's picture, the Shell's (an offscreen
 // SubViewport with the kind's applier: the runtime's MenuFrame, ObjectModel, its rig and its part
 // clock) or a test's. It follows its viewport, never changing it: it takes the action the
-// viewport's follow came to and reports what it read; it draws only when a canvas draws it, as the
-// canvas's item, and keeps its last picture between. Beside the SubViewport's texture the base
-// admits a device that draws otherwise in the rect the canvas reserves (an audio device auditioning
-// a sound bank, a Godot Control such as S13 V10's CodeEdit).
+// viewport's follow came to and reports what it read; it draws only when a canvas draws it, and
+// keeps its last picture between. Beside the SubViewport's texture the base admits a device that
+// draws otherwise in the rect the canvas reserves (a Godot Control such as S13 V10's CodeEdit,
+// placed at the picture on each frame it is drawn and hidden on a tick no draw came before) and one
+// with no picture at all (an audio device auditioning a sound bank: taken and ticked, never drawn).
 class ViewportDevice {
 public:
 	virtual ~ViewportDevice() = default;
-	// The picture, `width` x `height` pixels, as the current item of the canvas drawing it (the
-	// Shell draws its SubViewport's texture through the ImGui pass); it renders on the frames it is
-	// drawn.
-	virtual void draw(int width, int height) = 0;
+	// The picture this frame, where `picture` says (the Shell's SubViewport draws its texture
+	// through the ImGui pass as the canvas's current item, at the picture's size); it renders on the
+	// frames it is drawn.
+	virtual void draw(const ViewportPicture &picture) = 0;
 	// The surface under the picture's point (x, y), in the viewport's space: what a drop lands on (a
 	// mission's terrain). False where the device has none (no kind drops yet).
 	virtual bool surface_at(float x, float y, float point[3]) const {

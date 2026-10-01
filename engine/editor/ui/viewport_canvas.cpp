@@ -297,7 +297,16 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	if (tip)
 		ui_kit::tooltip_lazy(tip);
 	ImGui::SetCursorScreenPos(ImVec2(origin_.x, origin_.y));
-	device(input_.width, input_.height);
+	ViewportPicture shown;
+	shown.x = origin_.x;
+	shown.y = origin_.y;
+	shown.width = input_.width;
+	shown.height = input_.height;
+	shown.clip_left = surface_min_.x;
+	shown.clip_top = surface_min_.y;
+	shown.clip_right = surface_max_.x;
+	shown.clip_bottom = surface_max_.y;
+	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
 	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),

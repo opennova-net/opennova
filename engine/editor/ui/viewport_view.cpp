@@ -79,9 +79,9 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 			requests.request(request::set_viewport(path_, viewport_change(kind_, "device", std::move(size))));
 		}
 		ui.picture(
-				[device](int width, int tall) {
-					if (device) device->draw(width, tall);
-					else ImGui::Dummy(ImVec2(float(width), float(tall))); // made at the next pump
+				[device](const ViewportPicture &picture) {
+					if (device) device->draw(picture);
+					else ImGui::Dummy(ImVec2(float(picture.width), float(picture.height))); // made at the next pump
 				},
 				[&] { return half_->hover_tip(context, in); });
 		if (inside) inside(in);

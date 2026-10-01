@@ -26,7 +26,7 @@ public:
 			const std::function<std::unique_ptr<ViewportApplier>(SubViewport &)> &make);
 	~ViewportDevice() override;
 
-	void draw(int width, int height) override;
+	void draw(const opennova::editor::ViewportPicture &picture) override;
 	bool surface_at(float x, float y, float point[3]) const override;
 	void take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,

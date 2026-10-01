@@ -34,10 +34,10 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	int draws = 0;
 	int width = 0;
 	int height = 0;
-	void draw(int w, int h) override {
+	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
-		width = w;
-		height = h;
+		width = picture.width;
+		height = picture.height;
 	}
 	void take(ViewportAction action, const opennova::editor::ViewportModel &model,
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &,

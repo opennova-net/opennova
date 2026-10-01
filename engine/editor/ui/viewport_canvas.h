@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/preview/canvas_gesture.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_overlay.h>
 
 namespace opennova::editor {
@@ -43,7 +44,7 @@ public:
 	enum class Zoom : uint8_t { Fill, Fit, Scale, Device };
 	// A design picture's zoom steps (Ctrl+wheel, and the menu pane's Zoom list).
 	static constexpr float kZoomLevels[] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
-	using Device = std::function<void(int width, int height)>;
+	using Device = std::function<void(const ViewportPicture &picture)>;
 	using Tip = std::function<std::string()>;
 
 	// A picture that fills the canvas (no design size), or a design picture `design_width` x
@@ -61,8 +62,8 @@ public:
 	bool begin(float height, int device_width, int device_height);
 	const CanvasInput &input() const { return input_; }
 	// After begin(), when it shows: the kind's hover tip on the surface (`tip` made only while it
-	// shows), then the device's picture (`device` draws it at a size as the current item) and its
-	// edge.
+	// shows), then the device's picture (`device` draws it where the picture lies, at its size, as the
+	// current item; the canvas's surface its clip) and its edge.
 	void picture(const Device &device, const Tip &tip);
 	// The right button clicked on the canvas this frame (not while it pans).
 	bool right_clicked() const { return right_clicked_; }

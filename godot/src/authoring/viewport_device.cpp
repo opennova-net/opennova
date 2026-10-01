@@ -33,9 +33,10 @@ void ViewportDevice::size_(int width, int height) {
 	applier_->resize(size.x, size.y);
 }
 
-void ViewportDevice::draw(int width, int height) {
+void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
+	// Its texture drawn through the ImGui pass as the canvas's current item: the size alone.
 	drawn_ = true;
-	size_(width, height);
+	size_(picture.width, picture.height);
 	viewport_->set_update_mode(SubViewport::UPDATE_ONCE);
 	Engine *engine = Engine::get_singleton();
 	if (engine->has_singleton("ImGuiGD")) {
