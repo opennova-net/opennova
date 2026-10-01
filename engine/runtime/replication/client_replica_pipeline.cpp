@@ -1884,6 +1884,21 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// [orig: player @0x4c10d4; vehicle Entity_TransformLocalToWorld
 		// @0x4608ce -> the entity+576 store @0x4607f5].
 		int32_t local_heading_bam;
+		// An organic record whose carrier is its groundEntity, not a seat:
+		// the seat bone is 0, so Entity_TryAttachOrDetach attaches nothing and
+		// the lifted world sample STAGES like a free-standing record's — the
+		// row keeps its own chase [orig: player LABEL_123 stores +0x234..0x23C
+		// / +0x240 @0x4c10d4, then Entity_TryAttachOrDetach(bone) @0x4c1329;
+		// infantry @0x4C0320 stages +0x234 after the same attach call;
+		// Entity_TryAttachOrDetach @0x436610 detaches on bone 0].
+		bool ground = false;
+		// The free-standing landing gates a ground form shares: the wire-dead
+		// position skip and the respawn live snap.
+		bool skip_land = false;
+		bool force_live_snap = false;
+		// The child's compact revision after this record: a later record for
+		// the same child in this fold supersedes the sample.
+		uint32_t compact_revision = 0;
 	};
 	std::vector<PendingCarrierPose> pending_carrier_poses;
 	pending_carrier_poses.reserve(fu.records.size());
@@ -2043,12 +2058,19 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// wire precision each class actually has (§5.38e).
 		int32_t heading_target = 0;
 		bool has_heading_target = false;
+		// An organic record's carrier with seat bone 0 is its groundEntity (a
+		// roof, a bridge, a deck it stands on), not a seat: the row stays
+		// free-standing and only its sample is carrier-local (PendingCarrierPose
+		// ::ground). carrier_handle keeps the seat relation alone.
+		uint16_t ground_carrier = wire_handle::kInvalid;
+		int32_t ground_local_heading = 0;
 		switch (rec.cls) {
 		case EntityClass::Player:
 			cx = rec.player.pos_x_compressed;
 			cy = rec.player.pos_y_compressed;
 			cz = rec.player.pos_z_compressed;
-			es.carrier_handle = rec.player.carrier_handle;
+			es.carrier_handle = rec.player.vehicle_bone != 0
+					? rec.player.carrier_handle : wire_handle::kInvalid;
 			es.mount_bone = rec.player.vehicle_bone;
 			es.seat_type = rec.player.seat_type;
 			es.pitch_byte = rec.player.pitch_byte;
@@ -2058,12 +2080,17 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			es.state_flags = rec.player.state_flags;
 			es.move_input = rec.player.move_input_byte;
 			es.health_class_byte = rec.player.health_class_byte;
-			if (rec.player.carrier_handle != wire_handle::kInvalid) {
+			if (es.carrier_handle != wire_handle::kInvalid) {
 				es.pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(es.pitch_byte) << 24);
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.player.carrier_handle, cx, cy, cz,
 						static_cast<int32_t>(
 								static_cast<uint32_t>(rec.player.yaw_byte) << 24)});
+				skip_pos = true;
+			} else if (rec.player.carrier_handle != wire_handle::kInvalid) {
+				ground_carrier = rec.player.carrier_handle;
+				ground_local_heading = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.player.yaw_byte) << 24);
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.player.yaw_byte;
@@ -2147,7 +2174,8 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			cx = rec.infantry.pos_x_compressed;
 			cy = rec.infantry.pos_y_compressed;
 			cz = rec.infantry.pos_z_compressed;
-			es.carrier_handle = rec.infantry.vehicle_slot_handle;
+			es.carrier_handle = rec.infantry.seat_bone_idx != 0
+					? rec.infantry.vehicle_slot_handle : wire_handle::kInvalid;
 			es.mount_bone = rec.infantry.seat_bone_idx;
 			es.pitch_byte = rec.infantry.pitch_byte;
 			es.aim_yaw_byte = rec.infantry.aim_yaw_byte;
@@ -2157,16 +2185,20 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 			// entity+0x14. Retail's remote gunner rebuilds the latter locally
 			// with the same wrapped one-eighth chase as authoritative AI.
 			// [orig: chase @0x4bef7b..0x4bef97]
-			if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid &&
-					rec.infantry.seat_bone_idx != 0) {
+			if (es.carrier_handle != wire_handle::kInvalid) {
 				es.pitch_bam = chase_infantry_pitch(
 						es.pitch_bam, rec.infantry.aim_yaw_byte);
 			}
-			if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
+			if (es.carrier_handle != wire_handle::kInvalid) {
 				pending_carrier_poses.push_back(PendingCarrierPose{
 						rec.handle, rec.infantry.vehicle_slot_handle, cx, cy, cz,
 						static_cast<int32_t>(
 								static_cast<uint32_t>(rec.infantry.yaw_byte) << 24)});
+				skip_pos = true;
+			} else if (rec.infantry.vehicle_slot_handle != wire_handle::kInvalid) {
+				ground_carrier = rec.infantry.vehicle_slot_handle;
+				ground_local_heading = static_cast<int32_t>(
+						static_cast<uint32_t>(rec.infantry.yaw_byte) << 24);
 				skip_pos = true;
 			} else {
 				es.yaw_byte = rec.infantry.yaw_byte;
@@ -2239,6 +2271,26 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		// live stores @0x460930..0x460A50].
 		const bool force_live_snap = respawned_this_record ||
 				(rec.cls == EntityClass::Vehicle && rec.vehicle.is_dead_pose);
+		// The compact apply's ground-link store, every organic record, nulled
+		// included: an attached row takes its seat's ground link, any other
+		// the record's carrier [orig: player @0x4c1353 — mount(+0x16C) ?
+		// mount->groundEntity : carrier; infantry the same pair at the tail of
+		// @0x4C0320]. The mover's ground probe re-stores it within the tick.
+		if (rec.cls == EntityClass::Player || rec.cls == EntityClass::Infantry) {
+			if (es.carrier_handle != wire_handle::kInvalid) {
+				const ClientEntityState *mount = state_.find(es.carrier_handle);
+				es.resolved_ground = mount != nullptr ? mount->resolved_ground
+				                                      : wire_handle::kInvalid;
+			} else {
+				es.resolved_ground = ground_carrier;
+			}
+		}
+		if (ground_carrier != wire_handle::kInvalid) {
+			pending_carrier_poses.push_back(PendingCarrierPose{
+					rec.handle, ground_carrier, cx, cy, cz, ground_local_heading,
+					true, remote_motion_mode_ && wire_dead, force_live_snap,
+					es.compact_revision});
+		}
 		if (!skip_pos && !(remote_motion_mode_ && wire_dead)) {
 			// Retail's client read skips the position path entirely for a
 			// wire-dead record [orig: the case-2 dead branch -> LABEL_151, no
@@ -2258,6 +2310,27 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	for (const PendingCarrierPose &pending : pending_carrier_poses) {
 		ClientEntityState *child = state_.find(pending.child_handle);
 		const ClientEntityState *carrier = state_.find(pending.carrier_handle);
+		if (pending.ground) {
+			// A ground-linked record lands like a free-standing one: the lifted
+			// world sample (heading = carrier + local, the transform's out[3])
+			// is staged and the row's own mover chases it; the deck ride
+			// follows the ground link between records.
+			if (child == nullptr || carrier == nullptr || pending.skip_land ||
+					child->compact_revision != pending.compact_revision)
+				continue;
+			const WorldPose w = network_transform_local_to_world(
+					network_decompress_fixedpoint(pending.cx),
+					network_decompress_fixedpoint(pending.cy),
+					network_decompress_fixedpoint(pending.cz), carrier->x, carrier->y,
+					carrier->z, uint32_t(carrier->heading_bam),
+					uint32_t(carrier->pitch_bam), uint32_t(carrier->roll_bam));
+			const int32_t heading =
+					io::bam_add(carrier->heading_bam, pending.local_heading_bam);
+			child->yaw_byte = yaw_byte_from_bam(heading);
+			land_compact_pose(*child, w.x, w.y, w.z, true, heading,
+			                  pending.force_live_snap);
+			continue;
+		}
 		// A fold may contain several records for one child. An earlier resolved
 		// carrier must not overwrite a later unresolved switch/dismount.
 		if (child == nullptr || carrier == nullptr ||
